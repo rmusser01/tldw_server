@@ -6,6 +6,7 @@ import inspect
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -113,11 +114,121 @@ def test_postgres_v60_uses_effective_schema_owner_and_exact_table_owner() -> Non
         assert "table_row.relowner=current_user::regroleASis_table_owner" in source
 
 
+def _canonical_postgres_v59_source_authority() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    relation_rows = [
+        {
+            "table_name": table,
+            "rls_enabled": table == "notes",
+            "rls_forced": table == "notes",
+            "is_table_owner": True,
+            "is_schema_owner": True,
+        }
+        for table in ("notes", *CharactersRAGDB._NOTE_TASK_V60_TABLES[:-1])
+    ]
+    policy_rows = [
+        {
+            "table_name": "notes",
+            "policy_name": "notes_tenant_isolation",
+            "permissive": "PERMISSIVE",
+            "roles": "{public}",
+            "command": "ALL",
+            "using_expression": "(client_id = current_setting('app.current_user_id'::text, true))",
+            "check_expression": "(client_id = current_setting('app.current_user_id'::text, true))",
+        }
+    ]
+    return relation_rows, policy_rows
+
+
+def test_postgres_v59_source_authority_accepts_only_reviewed_catalog() -> None:
+    relation_rows, policy_rows = _canonical_postgres_v59_source_authority()
+
+    assert CharactersRAGDB._verify_note_task_v59_authority_catalog(
+        relation_rows, policy_rows
+    ) == ("notes",)
+
+    source = inspect.getsource(CharactersRAGDB._migrate_from_v59_to_v60_postgres)
+    authority_pos = source.index("_verify_note_task_v59_authority_catalog")
+    assert authority_pos < source.index("collision_names")
+    assert source.index("for table in forced_relations") < source.index(
+        "_validate_note_task_source_postgres"
+    )
+
+
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "missing_relation",
+        "extra_relation",
+        "table_owner",
+        "schema_owner",
+        "notes_rls_disabled",
+        "notes_unforced",
+        "task_rls_enabled",
+        "task_forced",
+        "missing_policy",
+        "extra_task_policy",
+        "policy_name",
+        "policy_permissiveness",
+        "policy_roles",
+        "policy_command",
+        "policy_using",
+        "policy_check",
+    ),
+)
+def test_postgres_v59_source_authority_drift_matrix_fails_closed(drift: str) -> None:
+    relation_rows, policy_rows = _canonical_postgres_v59_source_authority()
+    relation_rows = deepcopy(relation_rows)
+    policy_rows = deepcopy(policy_rows)
+    relations = {str(row["table_name"]): row for row in relation_rows}
+
+    if drift == "missing_relation":
+        relation_rows.pop()
+    elif drift == "extra_relation":
+        relation_rows.append({**relation_rows[-1], "table_name": "unexpected_tasks"})
+    elif drift == "table_owner":
+        relations["note_tasks"]["is_table_owner"] = False
+    elif drift == "schema_owner":
+        relations["notes"]["is_schema_owner"] = False
+    elif drift == "notes_rls_disabled":
+        relations["notes"]["rls_enabled"] = False
+    elif drift == "notes_unforced":
+        relations["notes"]["rls_forced"] = False
+    elif drift == "task_rls_enabled":
+        relations["note_tasks"]["rls_enabled"] = True
+    elif drift == "task_forced":
+        relations["note_tasks"]["rls_forced"] = True
+    elif drift == "missing_policy":
+        policy_rows.clear()
+    elif drift == "extra_task_policy":
+        policy_rows.append({**policy_rows[0], "table_name": "note_tasks"})
+    elif drift == "policy_name":
+        policy_rows[0]["policy_name"] = "notes_open"
+    elif drift == "policy_permissiveness":
+        policy_rows[0]["permissive"] = "RESTRICTIVE"
+    elif drift == "policy_roles":
+        policy_rows[0]["roles"] = "{postgres}"
+    elif drift == "policy_command":
+        policy_rows[0]["command"] = "SELECT"
+    elif drift == "policy_using":
+        policy_rows[0]["using_expression"] = "true"
+    elif drift == "policy_check":
+        policy_rows[0]["check_expression"] = "true"
+
+    with pytest.raises(SchemaError, match="v59 PostgreSQL source authority"):
+        CharactersRAGDB._verify_note_task_v59_authority_catalog(relation_rows, policy_rows)
+
+
 def test_postgres_v60_verifier_enumerates_full_catalog_and_pg18_not_null_rows() -> None:
     source = inspect.getsource(CharactersRAGDB._verify_note_task_schema_postgres)
 
     for catalog in ("pg_class", "pg_attribute", "pg_constraint", "pg_index", "pg_policies"):
         assert catalog in source
+    for exact_index_field in (
+        "indnatts", "indnkeyatts", "indclass", "indcollation", "indoption", "attnum",
+    ):
+        assert exact_index_field in source
+    for exact_index_catalog in ("pg_am", "pg_opclass", "pg_collation", "pg_get_indexdef"):
+        assert exact_index_catalog in source
     assert "constraint_row.contype <> 'n'" in source
     assert "constraint_row.convalidated" in source
     assert "referenced_namespace.nspname=current_schema()" in source.replace(" ", "")

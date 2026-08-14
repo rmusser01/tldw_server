@@ -36,6 +36,14 @@ class TaskStore:
     _MIN_LIMIT = 1
     _MAX_LIMIT = 500
     _LOCAL_UNBOUND = "local-unbound"
+    _BIND_TABLE_ORDER = (
+        ("note_tasks", "id"),
+        ("task_note_projections", "task_id"),
+        ("task_events", "id"),
+        ("task_event_read_state", "event_id,user_id"),
+        ("note_task_reconciliation_state", "note_id"),
+        ("task_projection_drifts", "id"),
+    )
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
@@ -1831,39 +1839,189 @@ class TaskStore:
         target = str(target_dataset_id).strip()
         if not owner or not target or target == self._LOCAL_UNBOUND:
             raise InputError("A non-sentinel owner and target dataset are required.")  # noqa: TRY003
-        if self._db.backend_type != BackendType.SQLITE:
-            raise InputError("Local task graph binding is only supported by SQLite storage.")  # noqa: TRY003
+        postgres = self._db.backend_type == BackendType.POSTGRESQL
+        if postgres and owner != str(self._db.client_id):
+            raise ConflictError(
+                "Task owner does not match the authenticated PostgreSQL client.",
+                entity="tasks",
+                entity_id=owner,
+            )  # noqa: TRY003
 
-        tables = (
-            "note_tasks",
-            "task_note_projections",
-            "task_events",
-            "task_event_read_state",
-            "note_task_reconciliation_state",
-            "task_projection_drifts",
-        )
-
-        def _counts(transaction_conn: TaskConnection, dataset: str) -> dict[str, int]:
-            result: dict[str, int] = {}
-            for table in tables:
-                row = self._read(
-                    f"SELECT COUNT(*) AS count FROM {table} "  # nosec B608
-                    "WHERE owner_user_id = ? AND dataset_id = ?",
+        def _snapshot(
+            transaction_conn: TaskConnection,
+            dataset: str,
+        ) -> dict[str, tuple[int, str]]:
+            snapshot: dict[str, tuple[int, str]] = {}
+            for table, ordering in self._BIND_TABLE_ORDER:
+                lock_clause = " FOR UPDATE" if postgres else ""
+                rows = self._read(
+                    f"SELECT * FROM {table} WHERE owner_user_id = ? AND dataset_id = ? "  # nosec B608
+                    f"ORDER BY {ordering}{lock_clause}",  # nosec B608
                     (owner, dataset),
                     conn=transaction_conn,
-                ).fetchone()
-                result[table] = int(row["count"])
-            return result
+                ).fetchall()
+                canonical_rows = [
+                    {
+                        key: value
+                        for key, value in dict(row).items()
+                        if key != "dataset_id"
+                    }
+                    for row in rows
+                ]
+                snapshot[table] = (
+                    len(canonical_rows),
+                    self._db._note_task_v60_hash(
+                        self._db._note_task_v60_json_safe(canonical_rows)
+                    ),
+                )
+            return snapshot
+
+        def _counts(snapshot: dict[str, tuple[int, str]]) -> dict[str, int]:
+            return {table: count for table, (count, _hash) in snapshot.items()}
+
+        def _prove_parents(transaction_conn: TaskConnection) -> None:
+            invalid = self._read(
+                """
+                SELECT 1 FROM (
+                  SELECT t.id
+                    FROM note_tasks t
+                   WHERE t.owner_user_id = ? AND t.dataset_id = ?
+                     AND NOT EXISTS(
+                       SELECT 1 FROM notes n
+                        WHERE n.client_id = t.owner_user_id AND n.id = t.note_id
+                     )
+                  UNION ALL
+                  SELECT p.task_id
+                    FROM task_note_projections p
+                   WHERE p.owner_user_id = ? AND p.dataset_id = ? AND (
+                     NOT EXISTS(
+                       SELECT 1 FROM note_tasks t
+                        WHERE t.owner_user_id = p.owner_user_id
+                          AND t.dataset_id = p.dataset_id AND t.id = p.task_id
+                          AND t.note_id = p.note_id
+                     ) OR NOT EXISTS(
+                       SELECT 1 FROM notes n
+                        WHERE n.client_id = p.owner_user_id AND n.id = p.note_id
+                     )
+                   )
+                  UNION ALL
+                  SELECT e.id
+                    FROM task_events e
+                   WHERE e.owner_user_id = ? AND e.dataset_id = ? AND (
+                     NOT EXISTS(
+                       SELECT 1 FROM notes n
+                        WHERE n.client_id = e.owner_user_id AND n.id = e.note_id
+                     ) OR (e.task_id IS NOT NULL AND NOT EXISTS(
+                       SELECT 1 FROM note_tasks t
+                        WHERE t.owner_user_id = e.owner_user_id
+                          AND t.dataset_id = e.dataset_id AND t.id = e.task_id
+                          AND t.note_id = e.note_id
+                     )) OR (e.corrects_activity_id IS NOT NULL AND NOT EXISTS(
+                       SELECT 1 FROM task_events corrected
+                        WHERE corrected.owner_user_id = e.owner_user_id
+                          AND corrected.dataset_id = e.dataset_id
+                          AND corrected.id = e.corrects_activity_id
+                     ))
+                   )
+                  UNION ALL
+                  SELECT r.event_id
+                    FROM task_event_read_state r
+                   WHERE r.owner_user_id = ? AND r.dataset_id = ? AND (
+                     r.user_id <> r.owner_user_id OR NOT EXISTS(
+                       SELECT 1 FROM task_events e
+                        WHERE e.owner_user_id = r.owner_user_id
+                          AND e.dataset_id = r.dataset_id AND e.id = r.event_id
+                     )
+                   )
+                  UNION ALL
+                  SELECT r.note_id
+                    FROM note_task_reconciliation_state r
+                   WHERE r.owner_user_id = ? AND r.dataset_id = ?
+                     AND NOT EXISTS(
+                       SELECT 1 FROM notes n
+                        WHERE n.client_id = r.owner_user_id AND n.id = r.note_id
+                     )
+                  UNION ALL
+                  SELECT d.id
+                    FROM task_projection_drifts d
+                   WHERE d.owner_user_id = ? AND d.dataset_id = ? AND (
+                     NOT EXISTS(
+                       SELECT 1 FROM note_tasks t
+                        WHERE t.owner_user_id = d.owner_user_id
+                          AND t.dataset_id = d.dataset_id AND t.id = d.task_id
+                          AND t.note_id = d.note_id
+                     ) OR NOT EXISTS(
+                       SELECT 1 FROM notes n
+                        WHERE n.client_id = d.owner_user_id AND n.id = d.note_id
+                     )
+                   )
+                ) invalid_parents
+                LIMIT 1
+                """,
+                (
+                    owner, self._LOCAL_UNBOUND,
+                    owner, self._LOCAL_UNBOUND,
+                    owner, self._LOCAL_UNBOUND,
+                    owner, self._LOCAL_UNBOUND,
+                    owner, self._LOCAL_UNBOUND,
+                    owner, self._LOCAL_UNBOUND,
+                ),
+                conn=transaction_conn,
+            ).fetchone()
+            if invalid is not None:
+                raise ConflictError(
+                    "Task dataset binding failed parent proof.",
+                    entity="tasks",
+                    entity_id=target,
+                )  # noqa: TRY003
+
+        def _prepare_postgres(transaction_conn: TaskConnection) -> None:
+            if not postgres:
+                return
+            version = self._db._get_schema_version_postgres(transaction_conn, lock=True)
+            if version != self._db._POSTGRES_SCHEMA_VERSION:
+                raise ConflictError(
+                    "Task dataset binding requires the current PostgreSQL schema.",
+                    entity="tasks",
+                    entity_id=target,
+                )  # noqa: TRY003
+            self._execute(
+                transaction_conn,
+                "LOCK TABLE notes, note_tasks, task_note_projections, task_events, "
+                "task_event_read_state, note_task_reconciliation_state, task_projection_drifts "
+                "IN ACCESS EXCLUSIVE MODE",
+            )
+            self._db._verify_note_task_schema_postgres(transaction_conn)
+            for table, _ordering in self._BIND_TABLE_ORDER:
+                self._execute(
+                    transaction_conn,
+                    f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY",  # nosec B608
+                )
+
+        def _finish_postgres(transaction_conn: TaskConnection) -> None:
+            if not postgres:
+                return
+            for table, _ordering in self._BIND_TABLE_ORDER:
+                self._execute(
+                    transaction_conn,
+                    f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",  # nosec B608
+                )
+            self._db._verify_note_task_schema_postgres(transaction_conn)
 
         def _execute_bind(transaction_conn: TaskConnection) -> dict[str, int]:
-            source_counts = _counts(transaction_conn, self._LOCAL_UNBOUND)
-            target_counts = _counts(transaction_conn, target)
+            _prepare_postgres(transaction_conn)
+            source_snapshot = _snapshot(transaction_conn, self._LOCAL_UNBOUND)
+            target_snapshot = _snapshot(transaction_conn, target)
+            source_counts = _counts(source_snapshot)
+            target_counts = _counts(target_snapshot)
             if any(target_counts.values()):
                 raise ConflictError(
                     "Task dataset binding target collision.", entity="tasks", entity_id=target
                 )  # noqa: TRY003
             if not any(source_counts.values()):
+                _finish_postgres(transaction_conn)
                 return source_counts
+            _prove_parents(transaction_conn)
 
             # Rekey roots only. Composite ON UPDATE CASCADE relationships carry
             # projections, task-linked events, read-state, and drift rows.
@@ -1884,15 +2042,16 @@ class TaskStore:
                 (target, owner, self._LOCAL_UNBOUND),
             )
 
-            remaining = _counts(transaction_conn, self._LOCAL_UNBOUND)
-            rebound = _counts(transaction_conn, target)
-            if any(remaining.values()) or rebound != source_counts:
+            remaining = _snapshot(transaction_conn, self._LOCAL_UNBOUND)
+            rebound = _snapshot(transaction_conn, target)
+            if any(_counts(remaining).values()) or rebound != source_snapshot:
                 raise ConflictError(
                     "Task dataset binding failed complete-set verification.",
                     entity="tasks",
                     entity_id=target,
                 )  # noqa: TRY003
-            return rebound
+            _finish_postgres(transaction_conn)
+            return _counts(rebound)
 
         return self._with_transaction(_execute_bind, conn)
 

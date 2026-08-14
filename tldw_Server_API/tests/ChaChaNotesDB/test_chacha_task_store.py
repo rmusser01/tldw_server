@@ -43,6 +43,22 @@ def test_task_store_has_no_postgres_v59_sql_bridge() -> None:
         assert legacy_sql not in source
 
 
+def test_bind_local_task_graph_has_one_strict_postgres_and_sqlite_contract() -> None:
+    source = inspect.getsource(TaskStore)
+    bind_source = inspect.getsource(TaskStore.bind_local_task_graph_to_dataset)
+
+    assert "only supported by SQLite" not in bind_source
+    assert "LOCK TABLE notes, note_tasks, task_note_projections, task_events" in source
+    assert "IN ACCESS EXCLUSIVE MODE" in source
+    assert "_get_schema_version_postgres" in source
+    assert "_verify_note_task_schema_postgres" in source
+    assert "FOR UPDATE" in source
+    assert "NO FORCE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "_note_task_v60_hash" in source
+    assert "complete-set verification" in source
+
+
 def test_canonical_task_store_methods_are_keyword_only_scope_first() -> None:
     methods = (
         "get_task_projection",

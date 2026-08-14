@@ -12461,80 +12461,99 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ):
                 raise SchemaError("Notes task v60 PostgreSQL foreign-key catalog drifted.")  # noqa: TRY003
 
-        expected_indexes: dict[str, tuple[str, bool, str]] = {}
+        expected_indexes: dict[str, tuple[str, bool, tuple[str, ...]]] = {}
         for statement in self._note_task_v60_postgres_indexes():
             match = re.fullmatch(r"CREATE (UNIQUE )?INDEX (\w+) ON (\w+)\(([^)]+)\)", statement)
             if match is None:
                 raise SchemaError("Notes task v60 PostgreSQL index definition is not fixed.")  # noqa: TRY003
             expected_indexes[match.group(2)] = (
-                match.group(3), bool(match.group(1)), match.group(4).replace(" ", ""),
+                match.group(3), bool(match.group(1)),
+                tuple(column.strip() for column in match.group(4).split(",")),
             )
+        expected_indexes["uq_notes_owner_id"] = ("notes", True, ("client_id", "id"))
         index_rows = backend.execute(
             """
             SELECT table_row.relname AS table_name, index_table.relname AS index_name,
                    index_row.indisunique AS is_unique, index_row.indisvalid AS is_valid,
-                   index_row.indisready AS is_ready,
-                   string_agg(column_row.attname,',' ORDER BY index_key.ordinality) AS column_names,
-                   pg_get_expr(index_row.indpred,index_row.indrelid,false) AS predicate
+                   index_row.indisready AS is_ready, index_row.indisprimary AS is_primary,
+                   index_row.indisexclusion AS is_exclusion,
+                   index_row.indnatts AS num_attributes,
+                   index_row.indnkeyatts AS num_key_attributes,
+                   access_method.amname AS access_method,
+                   pg_get_indexdef(index_row.indexrelid,0,true) AS index_definition,
+                   pg_get_expr(index_row.indpred,index_row.indrelid,false) AS predicate,
+                   index_key.ordinality AS key_ordinality, index_key.attnum,
+                   column_row.attname AS column_name,
+                   opclass_row.opcdefault AS is_default_opclass,
+                   index_row.indcollation[index_key.ordinality - 1]
+                     = column_row.attcollation AS collation_matches_column,
+                   index_row.indoption[index_key.ordinality - 1] AS key_options,
+                   collation_row.collname AS collation_name,
+                   opclass_row.opcname AS opclass_name
               FROM pg_index AS index_row
               JOIN pg_class AS table_row ON table_row.oid=index_row.indrelid
               JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
               JOIN pg_class AS index_table ON index_table.oid=index_row.indexrelid
+              JOIN pg_am AS access_method ON access_method.oid=index_table.relam
               CROSS JOIN LATERAL unnest(index_row.indkey) WITH ORDINALITY index_key(attnum,ordinality)
-              JOIN pg_attribute AS column_row
+              LEFT JOIN pg_attribute AS column_row
                 ON column_row.attrelid=table_row.oid AND column_row.attnum=index_key.attnum
+              LEFT JOIN pg_opclass AS opclass_row
+                ON opclass_row.oid=index_row.indclass[index_key.ordinality - 1]
+              LEFT JOIN pg_collation AS collation_row
+                ON collation_row.oid=index_row.indcollation[index_key.ordinality - 1]
              WHERE namespace_row.nspname=current_schema()
-               AND table_row.relname = ANY(%s)
-               AND index_key.ordinality<=index_row.indnkeyatts
-               AND NOT EXISTS(SELECT 1 FROM pg_constraint c WHERE c.conindid=index_row.indexrelid)
-             GROUP BY table_row.relname,index_table.relname,index_row.indisunique,
-                      index_row.indisvalid,index_row.indisready,index_row.indpred,index_row.indrelid
+               AND (
+                 (table_row.relname = ANY(%s)
+                  AND NOT EXISTS(
+                    SELECT 1 FROM pg_constraint c WHERE c.conindid=index_row.indexrelid
+                  ))
+                 OR (table_row.relname='notes' AND index_table.relname='uq_notes_owner_id')
+               )
+             ORDER BY index_table.relname,index_key.ordinality
             """,
             (list(self._NOTE_TASK_V60_TABLES),),
             connection=conn,
         ).rows
-        indexes = {str(row.get("index_name")): row for row in index_rows}
+        indexes: dict[str, dict[str, Any]] = {}
+        for row in index_rows:
+            name = str(row.get("index_name"))
+            index = indexes.setdefault(name, {**dict(row), "keys": []})
+            index["keys"].append(
+                (
+                    int(row.get("key_ordinality") or 0), int(row.get("attnum") or 0),
+                    str(row.get("column_name") or ""), bool(row.get("is_default_opclass")),
+                    bool(row.get("collation_matches_column")), int(row.get("key_options") or 0),
+                )
+            )
         if set(indexes) != set(expected_indexes):
             raise SchemaError("Notes task v60 PostgreSQL index catalog drifted.")  # noqa: TRY003
         for name, (table, unique, columns) in expected_indexes.items():
             row = indexes[name]
+            actual_keys = tuple(row.get("keys") or ())
+            keys_match = all(key[1] > 0 for key in actual_keys) and tuple(
+                (key[0], key[2], key[3], key[4], key[5]) for key in actual_keys
+            ) == tuple(
+                (ordinality, column, True, True, 0)
+                for ordinality, column in enumerate(columns, start=1)
+            )
+            expected_definition = (
+                f"CREATE {'UNIQUE ' if unique else ''}INDEX {name} ON {table} USING btree "
+                f"({', '.join(columns)})"
+            )
             if (
                 str(row.get("table_name")) != table
                 or bool(row.get("is_unique")) is not unique
                 or not bool(row.get("is_valid")) or not bool(row.get("is_ready"))
-                or str(row.get("column_names")) != columns
+                or bool(row.get("is_primary")) or bool(row.get("is_exclusion"))
+                or int(row.get("num_attributes") or 0) != len(columns)
+                or int(row.get("num_key_attributes") or 0) != len(columns)
+                or str(row.get("access_method")) != "btree"
+                or str(row.get("index_definition")) != expected_definition
                 or row.get("predicate") is not None
+                or not keys_match
             ):
                 raise SchemaError("Notes task v60 PostgreSQL index catalog drifted.")  # noqa: TRY003
-        notes_index = backend.execute(
-            """
-            SELECT index_row.indisunique AS is_unique, index_row.indisvalid AS is_valid,
-                   index_row.indisready AS is_ready,
-                   string_agg(column_row.attname,',' ORDER BY index_key.ordinality) AS column_names,
-                   pg_get_expr(index_row.indpred,index_row.indrelid,false) AS predicate
-              FROM pg_index AS index_row
-              JOIN pg_class AS table_row ON table_row.oid=index_row.indrelid
-              JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
-              JOIN pg_class AS index_table ON index_table.oid=index_row.indexrelid
-              CROSS JOIN LATERAL unnest(index_row.indkey) WITH ORDINALITY index_key(attnum,ordinality)
-              JOIN pg_attribute column_row
-                ON column_row.attrelid=table_row.oid AND column_row.attnum=index_key.attnum
-             WHERE namespace_row.nspname=current_schema() AND table_row.relname='notes'
-               AND index_table.relname='uq_notes_owner_id'
-               AND index_key.ordinality<=index_row.indnkeyatts
-             GROUP BY index_row.indisunique,index_row.indisvalid,index_row.indisready,
-                      index_row.indpred,index_row.indrelid
-            """,
-            connection=conn,
-        ).rows
-        if len(notes_index) != 1 or (
-            not bool(notes_index[0].get("is_unique"))
-            or not bool(notes_index[0].get("is_valid"))
-            or not bool(notes_index[0].get("is_ready"))
-            or str(notes_index[0].get("column_names")) != "client_id,id"
-            or notes_index[0].get("predicate") is not None
-        ):
-            raise SchemaError("Notes task v60 PostgreSQL notes-owner index drifted.")  # noqa: TRY003
 
         policy_rows = backend.execute(
             """
@@ -12621,17 +12640,72 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         if notes_rls_forced:
             backend.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY", connection=conn)
+        chacha_rls = build_chacha_rls_sql()
+        notes_rls = [
+            statement
+            for statement in chacha_rls
+            if "ALTER TABLE IF EXISTS notes " in statement
+            or "DROP POLICY IF EXISTS notes_tenant_isolation ON notes" in statement
+            or "CREATE POLICY notes_tenant_isolation ON notes" in statement
+        ]
         attachment_rls = [
             statement
-            for statement in build_chacha_rls_sql()
+            for statement in chacha_rls
             if "note_attachments" in statement
         ]
-        if len(attachment_rls) != 4:
+        if len(notes_rls) != 4 or len(attachment_rls) != 4:
             raise SchemaError("Notes attachment v59 RLS definition is not canonical.")  # noqa: TRY003
-        for statement in attachment_rls:
+        for statement in (*notes_rls, *attachment_rls):
             backend.execute(statement, connection=conn)
         self._verify_note_attachment_schema_postgres(conn)
         self._set_schema_version_postgres(conn, 59)
+
+    @classmethod
+    def _verify_note_task_v59_authority_catalog(
+        cls,
+        relation_rows: list[Mapping[str, Any]],
+        policy_rows: list[Mapping[str, Any]],
+    ) -> tuple[str, ...]:
+        """Verify the sole reviewed v59 authority/RLS state before migration DDL."""
+        expected_relations = ("notes", *cls._NOTE_TASK_V60_TABLES[:-1])
+        states = {str(row.get("table_name")): row for row in relation_rows}
+        if (
+            len(relation_rows) != len(expected_relations)
+            or set(states) != set(expected_relations)
+            or any(
+                not bool(row.get("is_table_owner"))
+                or not bool(row.get("is_schema_owner"))
+                for row in states.values()
+            )
+            or not bool(states["notes"].get("rls_enabled"))
+            or not bool(states["notes"].get("rls_forced"))
+            or any(
+                bool(states[table].get("rls_enabled"))
+                or bool(states[table].get("rls_forced"))
+                for table in cls._NOTE_TASK_V60_TABLES[:-1]
+            )
+        ):
+            raise SchemaError("Notes task v59 PostgreSQL source authority catalog drifted.")  # noqa: TRY003
+
+        expected_expression = cls._normalize_postgres_catalog_expression(
+            "client_id = current_setting('app.current_user_id', true)"
+        )
+        if len(policy_rows) != 1:
+            raise SchemaError("Notes task v59 PostgreSQL source authority catalog drifted.")  # noqa: TRY003
+        policy = policy_rows[0]
+        if (
+            str(policy.get("table_name")) != "notes"
+            or str(policy.get("policy_name")) != "notes_tenant_isolation"
+            or str(policy.get("permissive")) != "PERMISSIVE"
+            or str(policy.get("roles")) != "{public}"
+            or str(policy.get("command")) != "ALL"
+            or cls._normalize_postgres_catalog_expression(policy.get("using_expression"))
+            != expected_expression
+            or cls._normalize_postgres_catalog_expression(policy.get("check_expression"))
+            != expected_expression
+        ):
+            raise SchemaError("Notes task v59 PostgreSQL source authority catalog drifted.")  # noqa: TRY003
+        return ("notes",)
 
     def _validate_note_task_source_postgres(self, conn: Any) -> dict[str, Any]:
         """Read and owner-prove the complete locked v59 source before any v60 DDL."""
@@ -12731,15 +12805,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (list(source_relations),),
             connection=conn,
         ).rows
-        states = {str(row.get("table_name")): row for row in relation_rows}
-        if set(states) != set(source_relations) or any(
-            not bool(row.get("is_table_owner")) or not bool(row.get("is_schema_owner"))
-            or (bool(row.get("rls_forced")) and not bool(row.get("rls_enabled")))
-            for row in states.values()
-        ):
-            raise SchemaError("Notes task v60 requires the verified PostgreSQL schema-owner path.")  # noqa: TRY003
-        forced_relations = tuple(
-            table for table in source_relations if bool(states[table].get("rls_forced"))
+        policy_rows = backend.execute(
+            """
+            SELECT tablename AS table_name, policyname AS policy_name, permissive,
+                   roles::text AS roles, cmd AS command, qual AS using_expression,
+                   with_check AS check_expression
+              FROM pg_policies
+             WHERE schemaname=current_schema() AND tablename = ANY(%s)
+             ORDER BY tablename,policyname
+            """,
+            (list(source_relations),),
+            connection=conn,
+        ).rows
+        forced_relations = self._verify_note_task_v59_authority_catalog(
+            relation_rows, policy_rows
         )
         collision_names = ("task_projection_drifts", *(f"{table}_v60" for table in self._NOTE_TASK_V60_TABLES))
         collisions = backend.execute(
