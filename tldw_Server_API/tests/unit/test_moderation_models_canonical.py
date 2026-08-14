@@ -28,11 +28,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _MODELS_PATH = Path(__file__).resolve().parents[2] / "app" / "core" / "Moderation" / "models.py"
 
 
-def test_service_facade_exports_exact_canonical_classes():
-    for name in _MODEL_NAMES:
-        canonical = getattr(models, name)
-        assert getattr(moderation_service, name) is canonical
-        assert canonical.__module__ == models.__name__
+@pytest.mark.parametrize("name", _MODEL_NAMES)
+def test_service_facade_exports_exact_canonical_class(name):
+    assert getattr(moderation_service, name) is getattr(models, name)
+
+
+@pytest.mark.parametrize("name", _MODEL_NAMES)
+def test_canonical_class_uses_models_module_metadata(name):
+    assert getattr(models, name).__module__ == models.__name__
 
 
 def test_models_module_owns_exactly_three_dataclass_types():
@@ -45,11 +48,11 @@ def test_models_module_owns_exactly_three_dataclass_types():
     assert owned_dataclasses == set(_MODEL_NAMES)
 
 
-def test_legacy_qualified_names_resolve_to_canonical_classes():
+@pytest.mark.parametrize("name", _MODEL_NAMES)
+def test_legacy_qualified_name_resolves_to_canonical_class(name):
     legacy = importlib.import_module("tldw_Server_API.app.core.Moderation.moderation_service")
 
-    for name in _MODEL_NAMES:
-        assert getattr(legacy, name) is getattr(models, name)
+    assert getattr(legacy, name) is getattr(models, name)
 
 
 def test_models_source_imports_only_approved_standard_library_modules():

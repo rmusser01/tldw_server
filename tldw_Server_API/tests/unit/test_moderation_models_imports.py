@@ -105,23 +105,39 @@ for name in ("ModerationPolicy", "PatternRule", "ModerationEvaluationResult"):
     assert completed.returncode == 0, completed.stderr
 
 
-def test_policy_type_descriptors_and_public_namespaces_remain_literal():
+def test_compiler_policy_types_remains_staticmethod():
     assert isinstance(
         inspect.getattr_static(policy_compiler.PolicyCompiler, "policy_types"),
         staticmethod,
     )
+
+
+def test_evaluator_policy_types_remains_staticmethod():
     assert isinstance(
         inspect.getattr_static(policy_evaluator.PolicyEvaluator, "policy_types"),
         staticmethod,
     )
-    assert not hasattr(policy_compiler, "ModerationPolicy")
-    assert not hasattr(policy_compiler, "PatternRule")
-    assert not hasattr(policy_evaluator, "ModerationPolicy")
-    assert not hasattr(policy_evaluator, "PatternRule")
-    assert not hasattr(policy_evaluator, "ModerationEvaluationResult")
 
+
+@pytest.mark.parametrize("name", ("ModerationPolicy", "PatternRule"))
+def test_compiler_public_namespace_excludes_canonical_model(name):
+    assert not hasattr(policy_compiler, name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("ModerationPolicy", "PatternRule", "ModerationEvaluationResult"),
+)
+def test_evaluator_public_namespace_excludes_canonical_model(name):
+    assert not hasattr(policy_evaluator, name)
+
+
+def test_compiler_runtime_type_hints_remain_unresolved():
     with pytest.raises(NameError):
         typing.get_type_hints(policy_compiler.PolicyCompiler.compile_user_policy)
+
+
+def test_evaluator_runtime_type_hints_remain_unresolved():
     with pytest.raises(NameError):
         typing.get_type_hints(policy_evaluator.PolicyEvaluator.evaluate_text)
 

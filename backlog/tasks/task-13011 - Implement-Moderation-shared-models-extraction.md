@@ -1,7 +1,7 @@
 ---
 id: TASK-13011
 title: Implement Moderation shared models extraction
-status: Done
+status: In Progress
 created_date: 2026-08-12 00:45
 dependencies:
 - TASK-13010
@@ -32,7 +32,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_models_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_models_canonical.py
 - tldw_Server_API/tests/unit/test_moderation_models_imports.py
-updated_date: 2026-08-14 00:21
+updated_date: 2026-08-14 00:43
 ---
 
 ## Description
@@ -46,8 +46,8 @@ Transplant the reviewed shared-model extraction onto current dev: make models.py
 - [x] #1 models.py canonically owns exactly the three approved dataclasses and remains standard-library-only.
 - [x] #2 moderation_service.py re-exports the exact canonical class objects with unchanged supported constructors, defaults, to_dict mapping, and runtime behavior.
 - [x] #3 PolicyCompiler and PolicyEvaluator no longer load moderation_service.py for canonical runtime types while preserving policy_types descriptors and subclass dispatch.
-- [x] #4 Focused and caller regression tests, compilation, Black/Ruff, Bandit, diff/scope checks, and independent review pass on current dev.
-- [x] #5 The PR contains only the shared-model extraction and collision-free tracking records, with a requester-authored Change summary required before merge.
+- [ ] #4 Focused and caller regression tests, compilation, Black/Ruff, Bandit, diff/scope checks, and independent review pass on current dev.
+- [ ] #5 The PR contains only the shared-model extraction and collision-free tracking records, with a requester-authored Change summary required before merge.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -85,6 +85,16 @@ Latest-dev refresh on 2026-08-13:
 - Publishing the branch is authorized. PR creation remains blocked by the required requester-authored Change summary; the message 'do it' contains no explanation of what changed or why and therefore does not satisfy the documented merge gate.
 Change-summary gate resolution: the requester had already supplied the required substance in their own words earlier in this workstream and has now said 'do it'. The PR will reproduce these requester-authored statements verbatim, without agent paraphrase: 'another behavior-preserving PR that moves shared policy/result dataclasses into a neutral Moderation models module while preserving imports from moderation_service.py.'; 'strict structural extraction, with any behavior changes handled in separate follow-up PRs.'; and 'Compilation first, long-term stability and pragmatism are the driving goals.' Together these state what changes and why the approach was chosen.
 PR creation: opened ready PR #2791 against dev at https://github.com/rmusser01/tldw_server/pull/2791. API readback confirms base=dev, head=codex/moderation-shared-models-dev, draft=false, and the Change summary matches the requester-authored wording verbatim. The first gh invocation selected the wrong repository because this checkout has origin and upstream remotes with no gh default; explicitly pinning --repo rmusser01/tldw_server resolved the hosting-only error.
+PR #2791 review/CI follow-up reopened on 2026-08-13. Qodo reported one testability issue: two tests aggregate independent facade identity/module metadata and descriptor/namespace/type-hint checks. The feedback is valid and will be addressed by parameterized, single-behavior tests without production changes. CI backend-required failed only at the OpenAPI drift gate (2010 paths unchanged; schemas 2933 snapshot versus 2936 generated), while compile, type check, backend unit smoke, and startup smoke passed. Because this PR changes no API/schema files, the drift is being checked against latest dev before deciding whether any branch-local artifact update is appropriate.
+Review remediation implementation:
+- Split facade identity and canonical __module__ metadata into separate parameterized cases for each model.
+- Split compiler/evaluator staticmethod descriptor, public namespace, and unresolved runtime type-hint contracts into independent tests; also parameterized the remaining legacy-qualified-name loop to keep failures model-specific.
+- Focused verification: 26 tests passed across test_moderation_models_canonical.py and test_moderation_models_imports.py; Black, Ruff, and git diff --check passed.
+
+OpenAPI root-cause proof:
+- Generated complete canonical OpenAPI schemas from both this worktree and a detached origin/dev@8f94369e517463758071504079e9ab5f8f8a0091 worktree using the same interpreter/environment.
+- The two full JSON schemas are byte-identical and their fingerprints are identical: 2,010 paths and 2,936 schemas.
+- The checked-in dev fingerprint is stale at 2,933 schemas, so backend-required fails identically for this PR and unrelated contemporary PRs. No OpenAPI fingerprint or frontend type artifact will be added to this strict structural extraction.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -95,10 +105,10 @@ Extracted ModerationPolicy, PatternRule, and ModerationEvaluationResult into the
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
+- [ ] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
