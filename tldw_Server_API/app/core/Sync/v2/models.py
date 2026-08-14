@@ -36,6 +36,8 @@ SyncDomain = Literal[
     "notes.folder",
     "notes.folder_link",
     "notes.link",
+    "notes.task",
+    "notes.task_activity",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -435,6 +437,38 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
             },
         },
     }
+
+
+def _sync_v2_internal_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
+    """Return private known-domain contracts without advertising dormant domains."""
+
+    from .notes_task_contract import (
+        NotesTaskActivityTombstoneV1,
+        NotesTaskActivityV1,
+        NotesTaskV1Payload,
+    )
+
+    schemas = sync_v2_domain_schemas()
+    task_schema = NotesTaskV1Payload.model_json_schema()
+    activity_schema = NotesTaskActivityV1.model_json_schema()
+    activity_tombstone_schema = NotesTaskActivityTombstoneV1.model_json_schema()
+    schemas.update(
+        {
+            "notes.task": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": task_schema,
+                "tombstone": task_schema,
+            },
+            "notes.task_activity": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": activity_schema,
+                "tombstone": activity_tombstone_schema,
+            },
+        }
+    )
+    return schemas
 
 
 def sync_v2_server_supported_adapter_versions() -> dict[SyncDomain, list[int]]:

@@ -194,6 +194,27 @@ def test_notes_link_schema_is_server_trusted_v1_and_separate_from_organization()
     assert SyncCapabilitiesResponse().domain_schemas["notes.link"] == schema
 
 
+def test_notes_task_domains_are_known_internally_but_not_supported_or_public() -> None:
+    dormant = {"notes.task", "notes.task_activity"}
+
+    assert dormant.issubset(set(core_sync_models.SyncDomain.__args__))
+    assert dormant.isdisjoint(core_sync_models.SYNC_V2_SUPPORTED_DOMAINS)
+    assert dormant.isdisjoint(core_sync_models.SYNC_V2_SUPPORTED_OPERATIONS)
+    assert dormant.isdisjoint(core_sync_models.sync_v2_domain_schemas())
+    assert dormant.isdisjoint(core_sync_models.sync_v2_server_supported_adapter_versions())
+    assert dormant.isdisjoint(core_sync_models.sync_v2_dataset_writable_adapter_versions())
+
+    private_schemas = core_sync_models._sync_v2_internal_domain_schemas()
+    assert set(private_schemas) >= dormant
+    assert private_schemas["notes.task"]["schema_version"] == 1
+    assert private_schemas["notes.task"]["operations"] == ["upsert", "tombstone"]
+    assert private_schemas["notes.task_activity"]["schema_version"] == 1
+    assert private_schemas["notes.task_activity"]["operations"] == [
+        "upsert",
+        "tombstone",
+    ]
+
+
 @pytest.mark.parametrize(
     ("domain", "payload"),
     [
