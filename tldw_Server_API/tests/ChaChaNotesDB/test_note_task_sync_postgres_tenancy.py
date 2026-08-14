@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -150,6 +151,16 @@ def _create_complete_postgres_local_task_graph(
     }
 
 
+def _postgres_task_force_flags(conn: Any) -> dict[str, bool]:
+    rows = conn.execute(
+        "SELECT relname,relforcerowsecurity FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname=current_schema() AND c.relname=ANY(?)",
+        (list(CharactersRAGDB._NOTE_TASK_V60_TABLES),),
+    ).fetchall()
+    return {str(row["relname"]): bool(row["relforcerowsecurity"]) for row in rows}
+
+
 def test_postgres_bind_local_task_graph_rekeys_complete_six_table_scope(
     pg_database_config: DatabaseConfig,
 ) -> None:
@@ -237,6 +248,87 @@ def test_postgres_bind_local_task_graph_rejects_inconsistent_parent_scope(
         assert db.get_task(
             owner_user_id=owner, dataset_id="local-unbound", task_id=task_id
         )["id"] == task_id
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_bind_caught_collision_restores_force_in_caller_transaction(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner = "950024"
+    target = f"dataset-{uuid4()}"
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id=owner, backend=backend)
+
+    try:
+        note_id, task_id, _counts = _create_complete_postgres_local_task_graph(db)
+        db.create_task(
+            owner_user_id=owner,
+            dataset_id=target,
+            task_id=str(uuid4()),
+            note_id=note_id,
+            text="Occupied target",
+            actor_type=None,
+        )
+        with db.transaction() as conn:
+            with pytest.raises(ConflictError, match="target collision"):
+                db.bind_local_task_graph_to_dataset(
+                    owner_user_id=owner,
+                    target_dataset_id=target,
+                    conn=conn,
+                )
+            assert _postgres_task_force_flags(conn) == dict.fromkeys(
+                CharactersRAGDB._NOTE_TASK_V60_TABLES, True
+            )
+
+        assert db.get_task(
+            owner_user_id=owner, dataset_id="local-unbound", task_id=task_id
+        )["id"] == task_id
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_bind_caught_hash_failure_rolls_back_rekey_and_restores_force(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "950025"
+    target = f"dataset-{uuid4()}"
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id=owner, backend=backend)
+
+    try:
+        _note_id, task_id, _counts = _create_complete_postgres_local_task_graph(db)
+        original_hash = db._note_task_v60_hash
+        hash_calls = 0
+
+        def drift_rebound_hash(value: object) -> str:
+            nonlocal hash_calls
+            hash_calls += 1
+            digest = original_hash(value)
+            rebound_start = 3 * len(CharactersRAGDB._NOTE_TASK_V60_TABLES)
+            return f"{digest}-drift" if hash_calls > rebound_start else digest
+
+        monkeypatch.setattr(db, "_note_task_v60_hash", drift_rebound_hash)
+        with db.transaction() as conn:
+            with pytest.raises(ConflictError, match="complete-set verification"):
+                db.bind_local_task_graph_to_dataset(
+                    owner_user_id=owner,
+                    target_dataset_id=target,
+                    conn=conn,
+                )
+            assert _postgres_task_force_flags(conn) == dict.fromkeys(
+                CharactersRAGDB._NOTE_TASK_V60_TABLES, True
+            )
+
+        assert db.get_task(
+            owner_user_id=owner, dataset_id="local-unbound", task_id=task_id
+        )["id"] == task_id
+        assert db.get_task(
+            owner_user_id=owner, dataset_id=target, task_id=task_id
+        ) is None
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()

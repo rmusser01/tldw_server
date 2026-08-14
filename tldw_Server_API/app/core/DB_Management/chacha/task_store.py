@@ -2008,7 +2008,7 @@ class TaskStore:
                 )
             self._db._verify_note_task_schema_postgres(transaction_conn)
 
-        def _execute_bind(transaction_conn: TaskConnection) -> dict[str, int]:
+        def _execute_bind_body(transaction_conn: TaskConnection) -> dict[str, int]:
             _prepare_postgres(transaction_conn)
             source_snapshot = _snapshot(transaction_conn, self._LOCAL_UNBOUND)
             target_snapshot = _snapshot(transaction_conn, target)
@@ -2052,6 +2052,19 @@ class TaskStore:
                 )  # noqa: TRY003
             _finish_postgres(transaction_conn)
             return _counts(rebound)
+
+        def _execute_bind(transaction_conn: TaskConnection) -> dict[str, int]:
+            if not postgres:
+                return _execute_bind_body(transaction_conn)
+            self._execute(transaction_conn, "SAVEPOINT bind_local_task_graph")
+            try:
+                result = _execute_bind_body(transaction_conn)
+            except Exception:  # noqa: BLE001 - rollback must cover every failed bind
+                self._execute(transaction_conn, "ROLLBACK TO SAVEPOINT bind_local_task_graph")
+                self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_task_graph")
+                raise
+            self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_task_graph")
+            return result
 
         return self._with_transaction(_execute_bind, conn)
 
