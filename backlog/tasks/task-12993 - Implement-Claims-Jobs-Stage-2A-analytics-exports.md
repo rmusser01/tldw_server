@@ -1,10 +1,10 @@
 ---
 id: TASK-12993
 title: Implement Claims Jobs Stage 2A analytics exports
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-08-08 21:36
-updated_date: 2026-08-14 01:05
+updated_date: 2026-08-14 01:12
 labels:
 - claims
 - jobs
@@ -153,4 +153,5 @@ Superseding final self-review evidence: the ordinary list and exact-artifact pat
 PR integration update (2026-08-13): rebased all 73 feature commits without conflicts onto current origin/dev, whose tip was 242 commits ahead of the prior base. Rebased verification passed 402 tests with 3 fixture-declared PostgreSQL skips; Ruff, compileall, Bandit (0 findings/0 errors over 23,602 changed production lines), and diff checks passed. Pushed codex/claims-jobs-stage2a-analytics-exports and opened draft PR #2789 against dev. The PR remains draft pending the repository-required human-written Change summary.
 2026-08-13 PR #2789 review/CI follow-up reopened. Validated fixes: add explicit legacy ingress rate limiting to analytics export creation; centralize ClaimsAnalyticsExportError per repository exception policy; bind sanitized structured worker-failure context without logging the raw exception/stack; catch psycopg.Error only for the post-verification best-effort PostgreSQL hot-path index phase; add four new Claims test files to CI shards; refresh the OpenAPI fingerprint and run frontend type generation. Rejected the raw-SQL warning: app/core/Jobs/manager.py is the Jobs persistence owner and already contains the module's backend-specific SQL. Required archive batch-read index verification remains fail-fast by design.
 2026-08-13 PR #2789 review-fix verification: the validated limiter fix now delegates through a typed Claims wrapper so the shared ingress guard is enforced without exposing the legacy rate_limiter hook as a public query parameter. Focused Stage 2A verification passed 630 tests with 5 fixture/environment skips. Ruff check, py_compile, CI shard coverage (0 new uncovered), git diff --check, and Bandit (0 findings/0 errors across 4,996 touched production lines) passed. Frontend API types were regenerated; the checked-in 2,936-schema OpenAPI fingerprint uses the required Python 3.12 CI value (39141ca5480d...).
+Final independent review of 9bc0a680..3c4900d0 reported no actionable P0-P3 findings. origin/dev is already an ancestor of the branch; the explicit rebase check completed with the branch up to date.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
