@@ -4,7 +4,6 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -15,6 +14,7 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
 
     with sqlite3.connect(db_path) as conn:
         for table in (
+            "note_attachments",
             "task_event_read_state",
             "task_note_projections",
             "task_events",
