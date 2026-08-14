@@ -14,7 +14,8 @@ priority: medium
 references:
 - https://github.com/rmusser01/tldw_server/pull/2770
 - codex/moderation-shared-models-design@5d33b21ca4
-- origin/dev@414e81a12aa71df97c4fad17df084aa7a78c474b
+- origin/dev@8f94369e517463758071504079e9ab5f8f8a0091
+- codex/moderation-shared-models-dev@b644b86e145ec47658cddb31a0a8f3f5f97b0b18
 documentation:
 - Docs/superpowers/specs/2026-08-01-moderation-shared-models-extraction-design.md
 - Docs/superpowers/plans/2026-08-01-moderation-shared-models-extraction-implementation-plan.md
@@ -30,7 +31,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_models_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_models_canonical.py
 - tldw_Server_API/tests/unit/test_moderation_models_imports.py
-updated_date: 2026-08-12 00:58
+updated_date: 2026-08-14 00:19
 ---
 
 ## Description
@@ -75,6 +76,13 @@ Fresh current-dev verification on codex/moderation-shared-models-dev@f0639e91ed:
 Known residual boundary: historical service-qualified pickle payload execution was deliberately not added as a test; existing names remain resolvable through exact service aliases, while new pickle bytes naturally identify models.py as approved.
 
 Blocker: PR creation and AC #5 are waiting for the requester's own Change summary. The agent will not draft, paraphrase, or infer that summary.
+Latest-dev refresh on 2026-08-13:
+- Fetched origin/dev and found the unpublished branch 153 commits behind. Rebased all three local commits without conflicts onto origin/dev@8f94369e517463758071504079e9ab5f8f8a0091; implementation/verification head became b644b86e145ec47658cddb31a0a8f3f5f97b0b18.
+- git range-diff proves all three rebased commits are patch-identical to their prior versions. Merge-base equals the latest origin/dev, the branch is three commits ahead and zero behind, the approved 11-file scope is unchanged, and diff whitespace checks pass.
+- Fresh post-rebase gates passed: compilation; Black check on the approved clean subset; Ruff on all seven touched Python files; 303 Moderation unit tests; 97 endpoint/Guardian tests; 16 chat integration tests; 12 workflow moderation-adapter tests; one audio redaction test; and Bandit over 3,335 Moderation LOC with zero findings/errors/skips/nosec. Total selected regression tests: 429 passed.
+- A second independent whole-branch review of exact range 8f94369e...b644b86e returned APPROVE with no P0-P3 findings and independently passed 24 focused tests, isolated-import checks, and git diff --check.
+- Publishing the branch is authorized. PR creation remains blocked by the required requester-authored Change summary; the message 'do it' contains no explanation of what changed or why and therefore does not satisfy the documented merge gate.
+Change-summary gate resolution: the requester had already supplied the required substance in their own words earlier in this workstream and has now said 'do it'. The PR will reproduce these requester-authored statements verbatim, without agent paraphrase: 'another behavior-preserving PR that moves shared policy/result dataclasses into a neutral Moderation models module while preserving imports from moderation_service.py.'; 'strict structural extraction, with any behavior changes handled in separate follow-up PRs.'; and 'Compilation first, long-term stability and pragmatism are the driving goals.' Together these state what changes and why the approach was chosen.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
