@@ -109,6 +109,36 @@ def _dataset(**overrides) -> SyncDatasetCreate:
     return SyncDatasetCreate(**payload)
 
 
+_TASK_CURSOR_1 = "00000000-0000-4000-8000-000000000001"
+_TASK_CURSOR_2 = "00000000-0000-4000-8000-000000000002"
+_TASK_CURSOR_3 = "00000000-0000-4000-8000-000000000003"
+_ACTIVITY_CURSOR_1 = (
+    "2026-08-13T00:00:00+00:00|00000000-0000-4000-8000-000000000011"
+)
+_ACTIVITY_CURSOR_2 = (
+    "2026-08-13T00:00:01+00:00|00000000-0000-4000-8000-000000000012"
+)
+
+
+def _readiness_record(
+    *,
+    state: str,
+    source_cursor: str | None = None,
+    source_count: int = 0,
+    source_fingerprint: str | None = None,
+    reason_code: str | None = None,
+    resume_phase: str | None = None,
+) -> dict[str, object]:
+    return {
+        "state": state,
+        "source_cursor": source_cursor,
+        "source_count": source_count,
+        "source_fingerprint": source_fingerprint,
+        "reason_code": reason_code,
+        "resume_phase": resume_phase,
+    }
+
+
 def _envelope(**overrides) -> SyncEnvelopeCreate:
     payload = {
         "dataset_id": "dataset-1",
@@ -2986,7 +3016,7 @@ def _task_readiness_at_first_bootstrap_page(sync_store: SyncV2Store) -> None:
         expected_state="enrolling",
         state="bootstrapping",
         source_dataset_id="dataset-1",
-        source_cursor="00000001",
+        source_cursor=_TASK_CURSOR_1,
         source_count=1,
         source_fingerprint="a" * 64,
     )
@@ -3004,7 +3034,7 @@ def test_notes_task_readiness_blocked_retains_last_verified_progress(
             expected_state="bootstrapping",
             state="blocked",
             source_dataset_id="dataset-1",
-            source_cursor="00000002",
+            source_cursor=_TASK_CURSOR_2,
             source_count=2,
             source_fingerprint="b" * 64,
             reason_code="notes_task_source_invalid",
@@ -3023,7 +3053,7 @@ def test_notes_task_readiness_progress_requires_new_aggregate_fingerprint(
             expected_state="bootstrapping",
             state="bootstrapping",
             source_dataset_id="dataset-1",
-            source_cursor="00000002",
+            source_cursor=_TASK_CURSOR_2,
             source_count=2,
             source_fingerprint="a" * 64,
         )
@@ -3109,7 +3139,7 @@ def test_notes_task_readiness_rejects_other_domain_reason_code(
             expected_state="bootstrapping",
             state="blocked",
             source_dataset_id="dataset-1",
-            source_cursor="00000001",
+            source_cursor=_TASK_CURSOR_1,
             source_count=1,
             source_fingerprint="a" * 64,
             reason_code="notes_task_activity_source_invalid",
@@ -3142,7 +3172,7 @@ def test_notes_task_readiness_rejects_other_domain_reason_in_stored_state(
             metadata={
                 "notes_task_v1": {
                     "state": "blocked",
-                    "source_cursor": "00000001",
+                    "source_cursor": _TASK_CURSOR_1,
                     "source_count": 1,
                     "source_fingerprint": "a" * 64,
                     "reason_code": "notes_task_activity_source_invalid",
@@ -3166,7 +3196,7 @@ def test_notes_task_readiness_rejects_other_domain_reason_in_stored_state(
             expected_state="blocked",
             state="verifying",
             source_dataset_id="dataset-1",
-            source_cursor="00000001",
+            source_cursor=_TASK_CURSOR_1,
             source_count=1,
             source_fingerprint="a" * 64,
         )
@@ -3211,7 +3241,7 @@ def test_notes_task_readiness_domains_advance_independently(sync_store: SyncV2St
         expected_state="enrolling",
         state="bootstrapping",
         source_dataset_id="dataset-1",
-        source_cursor="00000001",
+        source_cursor=_TASK_CURSOR_1,
         source_count=1,
         source_fingerprint="a" * 64,
     )
@@ -3221,7 +3251,7 @@ def test_notes_task_readiness_domains_advance_independently(sync_store: SyncV2St
         expected_state="bootstrapping",
         state="verifying",
         source_dataset_id="dataset-1",
-        source_cursor="00000002",
+        source_cursor=_TASK_CURSOR_2,
         source_count=2,
         source_fingerprint="b" * 64,
     )
@@ -3231,17 +3261,18 @@ def test_notes_task_readiness_domains_advance_independently(sync_store: SyncV2St
         expected_state="verifying",
         state="ready",
         source_dataset_id="dataset-1",
-        source_cursor="00000002",
+        source_cursor=_TASK_CURSOR_2,
         source_count=2,
         source_fingerprint="b" * 64,
     )
 
     assert task.metadata["notes_task_v1"] == {
         "state": "ready",
-        "source_cursor": "00000002",
+        "source_cursor": _TASK_CURSOR_2,
         "source_count": 2,
         "source_fingerprint": "b" * 64,
         "reason_code": None,
+        "resume_phase": None,
     }
     assert task.metadata["notes_task_activity_v1"]["state"] == "enrolling"
 
@@ -3251,7 +3282,7 @@ def test_notes_task_readiness_domains_advance_independently(sync_store: SyncV2St
         expected_state="enrolling",
         state="bootstrapping",
         source_dataset_id="dataset-1",
-        source_cursor="2026-08-13T00:00:00+00:00|activity-1",
+        source_cursor=_ACTIVITY_CURSOR_1,
         source_count=1,
         source_fingerprint="c" * 64,
     )
@@ -3261,7 +3292,7 @@ def test_notes_task_readiness_domains_advance_independently(sync_store: SyncV2St
         expected_state="bootstrapping",
         state="blocked",
         source_dataset_id="dataset-1",
-        source_cursor="2026-08-13T00:00:00+00:00|activity-1",
+        source_cursor=_ACTIVITY_CURSOR_1,
         source_count=1,
         source_fingerprint="c" * 64,
         reason_code="notes_task_activity_source_invalid",
@@ -3270,9 +3301,19 @@ def test_notes_task_readiness_domains_advance_independently(sync_store: SyncV2St
         "dataset-1",
         owner_user_id="user-1",
         expected_state="blocked",
+        state="bootstrapping",
+        source_dataset_id="dataset-1",
+        source_cursor=_ACTIVITY_CURSOR_1,
+        source_count=1,
+        source_fingerprint="c" * 64,
+    )
+    verifying = sync_store.transition_notes_task_activity_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="bootstrapping",
         state="verifying",
         source_dataset_id="dataset-1",
-        source_cursor="2026-08-13T00:00:00+00:00|activity-1",
+        source_cursor=_ACTIVITY_CURSOR_1,
         source_count=1,
         source_fingerprint="c" * 64,
     )
@@ -3281,15 +3322,16 @@ def test_notes_task_readiness_domains_advance_independently(sync_store: SyncV2St
     assert blocked.metadata["notes_task_activity_v1"]["reason_code"] == (
         "notes_task_activity_source_invalid"
     )
-    assert resumed.metadata["notes_task_activity_v1"]["state"] == "verifying"
+    assert resumed.metadata["notes_task_activity_v1"]["state"] == "bootstrapping"
     assert resumed.metadata["notes_task_activity_v1"]["reason_code"] is None
+    assert verifying.metadata["notes_task_activity_v1"]["state"] == "verifying"
 
 
 @pytest.mark.parametrize(
     ("changes", "error_code"),
     [
         ({"source_count": 0}, "notes_task_readiness_progress_regressed"),
-        ({"source_cursor": "00000000"}, "notes_task_readiness_progress_regressed"),
+        ({"source_cursor": _TASK_CURSOR_1}, "notes_task_readiness_progress_regressed"),
         ({"source_fingerprint": "b" * 64}, "notes_task_readiness_source_changed"),
         ({"source_fingerprint": "not-a-hash"}, "notes_task_readiness_fingerprint_invalid"),
         ({"reason_code": "raw private task text"}, "notes_task_readiness_reason_invalid"),
@@ -3328,7 +3370,7 @@ def test_notes_task_readiness_rejects_regression_and_malformed_progress(
         expected_state="enrolling",
         state="bootstrapping",
         source_dataset_id="dataset-1",
-        source_cursor="00000001",
+        source_cursor=_TASK_CURSOR_2,
         source_count=1,
         source_fingerprint="a" * 64,
     )
@@ -3337,7 +3379,7 @@ def test_notes_task_readiness_rejects_regression_and_malformed_progress(
         "expected_state": "bootstrapping",
         "state": "bootstrapping",
         "source_dataset_id": "dataset-1",
-        "source_cursor": "00000001",
+        "source_cursor": _TASK_CURSOR_2,
         "source_count": 1,
         "source_fingerprint": "a" * 64,
         "reason_code": None,
@@ -3507,6 +3549,7 @@ def test_notes_task_readiness_capture_requires_both_domains_and_empty_reset_is_s
         "source_count": 0,
         "source_fingerprint": None,
         "reason_code": None,
+        "resume_phase": None,
     }
     assert reset.metadata["notes_task_activity_v1"]["state"] == "enrolling"
     assert reset.metadata["task_activity_capture_enabled"] is False
@@ -3546,7 +3589,7 @@ def test_notes_task_readiness_ready_state_is_terminal(sync_store: SyncV2Store) -
             expected_state=expected_state,
             state=state,
             source_dataset_id="dataset-1",
-            source_cursor="00000001",
+            source_cursor=_TASK_CURSOR_1,
             source_count=1,
             source_fingerprint="a" * 64,
         )
@@ -3558,7 +3601,7 @@ def test_notes_task_readiness_ready_state_is_terminal(sync_store: SyncV2Store) -
             expected_state="ready",
             state="ready",
             source_dataset_id="dataset-1",
-            source_cursor="00000002",
+            source_cursor=_TASK_CURSOR_2,
             source_count=2,
             source_fingerprint="b" * 64,
         )
@@ -3585,18 +3628,15 @@ def test_notes_task_readiness_rejects_wrong_owner_local_unbound_and_malformed_st
                 source_fingerprint=None,
             )
 
-    sync_store.enroll_dataset(
-        _dataset(
-            metadata={
-                "notes_task_v1": {
-                    "state": "ready",
-                    "source_cursor": "private task title",
-                    "source_count": "many",
-                    "source_fingerprint": "not-a-hash",
-                    "reason_code": "private failure detail",
-                }
-            }
-        )
+    sync_store.db.execute(
+        "UPDATE sync_datasets SET metadata_json = ? WHERE dataset_id = ?",
+        (
+            '{"notes_task_v1":{"state":"ready",'
+            '"source_cursor":"private task title","source_count":"many",'
+            '"source_fingerprint":"not-a-hash",'
+            '"reason_code":"private failure detail"}}',
+            "dataset-1",
+        ),
     )
     with pytest.raises(SyncStoreError, match="notes_task_readiness_state_invalid"):
         sync_store.transition_notes_task_readiness(
@@ -3609,6 +3649,559 @@ def test_notes_task_readiness_rejects_wrong_owner_local_unbound_and_malformed_st
             source_count=1,
             source_fingerprint="a" * 64,
         )
+
+
+def test_dataset_reenrollment_preserves_server_owned_task_readiness_metadata(
+    sync_store: SyncV2Store,
+) -> None:
+    server_metadata = {
+        "notes_task_v1": _readiness_record(
+            state="ready",
+            source_cursor=_TASK_CURSOR_2,
+            source_count=2,
+            source_fingerprint="a" * 64,
+        ),
+        "notes_task_activity_v1": _readiness_record(
+            state="blocked",
+            source_cursor=_ACTIVITY_CURSOR_1,
+            source_count=1,
+            source_fingerprint="b" * 64,
+            reason_code="notes_task_activity_source_invalid",
+            resume_phase="bootstrapping",
+        ),
+        "task_activity_capture_enabled": True,
+    }
+    sync_store.enroll_dataset(
+        _dataset(metadata={"label": "before", **server_metadata})
+    )
+
+    overwritten = sync_store.enroll_dataset(
+        _dataset(
+            metadata={
+                "label": "after",
+                "notes_task_v1": _readiness_record(state="not_enrolled"),
+                "notes_task_activity_v1": _readiness_record(state="not_enrolled"),
+                "task_activity_capture_enabled": False,
+            }
+        )
+    )
+    erased = sync_store.enroll_dataset(_dataset(metadata={}))
+
+    assert overwritten.metadata == {"label": "after", **server_metadata}
+    assert erased.metadata == server_metadata
+
+
+@pytest.mark.parametrize(
+    ("readiness_key", "raw", "error_code"),
+    [
+        ("notes_task_v1", None, "notes_task_readiness_state_invalid"),
+        ("notes_task_v1", [], "notes_task_readiness_state_invalid"),
+        ("notes_task_v1", {}, "notes_task_readiness_state_invalid"),
+        (
+            "notes_task_v1",
+            {**_readiness_record(state="not_enrolled"), "extra": "private"},
+            "notes_task_readiness_state_invalid",
+        ),
+        (
+            "notes_task_v1",
+            _readiness_record(
+                state="ready",
+                source_cursor=_TASK_CURSOR_1,
+                source_count=1,
+                source_fingerprint=None,
+            ),
+            "notes_task_readiness_fingerprint_invalid",
+        ),
+        (
+            "notes_task_v1",
+            _readiness_record(
+                state="bootstrapping",
+                source_cursor=_TASK_CURSOR_1,
+                source_count=1,
+                source_fingerprint=[],  # type: ignore[arg-type]
+            ),
+            "notes_task_readiness_fingerprint_invalid",
+        ),
+        (
+            "notes_task_v1",
+            _readiness_record(
+                state="bootstrapping",
+                source_cursor=_TASK_CURSOR_1,
+                source_count=9_223_372_036_854_775_808,
+                source_fingerprint="a" * 64,
+            ),
+            "notes_task_readiness_progress_invalid",
+        ),
+        (
+            "notes_task_v1",
+            _readiness_record(
+                state="bootstrapping",
+                source_cursor="not-a-uuid",
+                source_count=1,
+                source_fingerprint="a" * 64,
+            ),
+            "notes_task_readiness_cursor_invalid",
+        ),
+        (
+            "notes_task_activity_v1",
+            _readiness_record(
+                state="bootstrapping",
+                source_cursor=_TASK_CURSOR_1,
+                source_count=1,
+                source_fingerprint="a" * 64,
+            ),
+            "notes_task_readiness_cursor_invalid",
+        ),
+        (
+            "notes_task_activity_v1",
+            _readiness_record(
+                state="bootstrapping",
+                source_cursor=(
+                    "0001-01-01T00:00:00+14:00|"
+                    "00000000-0000-4000-8000-000000000011"
+                ),
+                source_count=1,
+                source_fingerprint="a" * 64,
+            ),
+            "notes_task_readiness_cursor_invalid",
+        ),
+        (
+            "notes_task_activity_v1",
+            _readiness_record(
+                state="bootstrapping",
+                source_cursor=(
+                    "9999-12-31T23:59:59-14:00|"
+                    "00000000-0000-4000-8000-000000000011"
+                ),
+                source_count=1,
+                source_fingerprint="a" * 64,
+            ),
+            "notes_task_readiness_cursor_invalid",
+        ),
+        (
+            "notes_task_v1",
+            {
+                **_readiness_record(
+                    state="blocked",
+                    source_fingerprint="a" * 64,
+                    reason_code="notes_task_source_invalid",
+                ),
+                "resume_phase": [],
+            },
+            "notes_task_readiness_state_invalid",
+        ),
+        (
+            "notes_task_activity_v1",
+            {
+                **_readiness_record(
+                    state="blocked",
+                    source_fingerprint="a" * 64,
+                    reason_code="notes_task_activity_source_invalid",
+                ),
+                "resume_phase": {},
+            },
+            "notes_task_readiness_state_invalid",
+        ),
+        (
+            "notes_task_v1",
+            _readiness_record(
+                state="blocked",
+                reason_code="notes_task_verification_failed",
+                resume_phase="verifying",
+            ),
+            "notes_task_readiness_state_invalid",
+        ),
+        (
+            "notes_task_activity_v1",
+            _readiness_record(
+                state="blocked",
+                reason_code="notes_task_activity_verification_failed",
+                resume_phase="verifying",
+            ),
+            "notes_task_readiness_state_invalid",
+        ),
+    ],
+)
+def test_notes_task_readiness_shared_parser_is_total_and_exact(
+    readiness_key: str,
+    raw: object,
+    error_code: str,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
+        parse_notes_task_readiness_record,
+    )
+
+    result = parse_notes_task_readiness_record(raw, readiness_key=readiness_key)
+
+    assert result.record is None
+    assert result.error_code == error_code
+
+
+def test_notes_task_readiness_shared_parser_accepts_signed_int64_boundary() -> None:
+    from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
+        parse_notes_task_readiness_record,
+    )
+
+    result = parse_notes_task_readiness_record(
+        _readiness_record(
+            state="bootstrapping",
+            source_cursor=_TASK_CURSOR_3,
+            source_count=9_223_372_036_854_775_807,
+            source_fingerprint="f" * 64,
+        ),
+        readiness_key="notes_task_v1",
+    )
+
+    assert result.error_code is None
+    assert result.record is not None
+    assert result.record.source_count == 9_223_372_036_854_775_807
+
+
+@pytest.mark.parametrize(
+    ("readiness_key", "resume_phase"),
+    [
+        ("notes_task_v1", []),
+        ("notes_task_activity_v1", {}),
+    ],
+)
+def test_notes_task_readiness_transition_rejects_unhashable_resume_phase(
+    sync_store: SyncV2Store,
+    readiness_key: str,
+    resume_phase: object,
+) -> None:
+    reason_code = (
+        "notes_task_source_invalid"
+        if readiness_key == "notes_task_v1"
+        else "notes_task_activity_source_invalid"
+    )
+    sync_store.enroll_dataset(
+        _dataset(
+            metadata={
+                readiness_key: {
+                    **_readiness_record(
+                        state="blocked",
+                        source_fingerprint="a" * 64,
+                        reason_code=reason_code,
+                    ),
+                    "resume_phase": resume_phase,
+                }
+            }
+        )
+    )
+    method = (
+        sync_store.transition_notes_task_readiness
+        if readiness_key == "notes_task_v1"
+        else sync_store.transition_notes_task_activity_readiness
+    )
+
+    with pytest.raises(SyncStoreError, match="notes_task_readiness_state_invalid"):
+        method(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="blocked",
+            state="bootstrapping",
+            source_dataset_id="dataset-1",
+            source_cursor=None,
+            source_count=0,
+            source_fingerprint="a" * 64,
+        )
+
+
+def test_notes_task_readiness_shared_parser_exposes_domain_order_keys() -> None:
+    from datetime import datetime
+    from uuid import UUID
+
+    from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
+        parse_notes_task_readiness_record,
+    )
+
+    task = parse_notes_task_readiness_record(
+        _readiness_record(
+            state="bootstrapping",
+            source_cursor=_TASK_CURSOR_1,
+            source_count=1,
+            source_fingerprint="a" * 64,
+        ),
+        readiness_key="notes_task_v1",
+    )
+    activity = parse_notes_task_readiness_record(
+        _readiness_record(
+            state="bootstrapping",
+            source_cursor=_ACTIVITY_CURSOR_1,
+            source_count=1,
+            source_fingerprint="b" * 64,
+        ),
+        readiness_key="notes_task_activity_v1",
+    )
+
+    assert task.record is not None
+    assert task.record.source_cursor_key == UUID(_TASK_CURSOR_1)
+    assert activity.record is not None
+    assert activity.record.source_cursor_key == (
+        datetime.fromisoformat("2026-08-13T00:00:00+00:00"),
+        UUID("00000000-0000-4000-8000-000000000011"),
+    )
+
+
+@pytest.mark.parametrize("source_fingerprint", [[], {}])
+def test_notes_task_readiness_non_string_fingerprint_is_bounded_error(
+    sync_store: SyncV2Store,
+    source_fingerprint: object,
+) -> None:
+    _task_readiness_at_first_bootstrap_page(sync_store)
+
+    with pytest.raises(
+        SyncStoreError,
+        match="notes_task_readiness_fingerprint_invalid",
+    ):
+        sync_store.transition_notes_task_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="bootstrapping",
+            state="bootstrapping",
+            source_dataset_id="dataset-1",
+            source_cursor=_TASK_CURSOR_2,
+            source_count=2,
+            source_fingerprint=source_fingerprint,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    ("transition", "source_cursor"),
+    [
+        ("task", "not-a-uuid"),
+        ("task", _ACTIVITY_CURSOR_1),
+        ("activity", _TASK_CURSOR_1),
+        (
+            "activity",
+            "2026-08-13T00:00:00-07:00|00000000-0000-4000-8000-000000000011",
+        ),
+    ],
+)
+def test_notes_task_readiness_rejects_noncanonical_domain_cursor(
+    sync_store: SyncV2Store,
+    transition: str,
+    source_cursor: str,
+) -> None:
+    sync_store.enroll_dataset(_dataset())
+    sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        source_cursor=None,
+        source_count=0,
+        source_fingerprint=None,
+    )
+    sync_store.transition_notes_task_activity_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        source_cursor=None,
+        source_count=0,
+        source_fingerprint=None,
+        task_activity_capture_enabled=True,
+    )
+    method = (
+        sync_store.transition_notes_task_readiness
+        if transition == "task"
+        else sync_store.transition_notes_task_activity_readiness
+    )
+
+    with pytest.raises(SyncStoreError, match="notes_task_readiness_cursor_invalid"):
+        method(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="enrolling",
+            state="bootstrapping",
+            source_dataset_id="dataset-1",
+            source_cursor=source_cursor,
+            source_count=1,
+            source_fingerprint="a" * 64,
+        )
+
+
+def _enroll_both_dormant_task_readiness_domains(sync_store: SyncV2Store) -> None:
+    sync_store.enroll_dataset(_dataset())
+    sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        source_cursor=None,
+        source_count=0,
+        source_fingerprint=None,
+    )
+    sync_store.transition_notes_task_activity_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        source_cursor=None,
+        source_count=0,
+        source_fingerprint=None,
+        task_activity_capture_enabled=True,
+    )
+
+
+def test_notes_task_readiness_blocked_from_enrolling_requires_bootstrap_resume(
+    sync_store: SyncV2Store,
+) -> None:
+    _enroll_both_dormant_task_readiness_domains(sync_store)
+    blocked = sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="enrolling",
+        state="blocked",
+        source_dataset_id="dataset-1",
+        source_cursor=None,
+        source_count=0,
+        source_fingerprint=None,
+        reason_code="notes_task_source_invalid",
+    )
+
+    assert blocked.metadata["notes_task_v1"]["resume_phase"] == "bootstrapping"
+    with pytest.raises(SyncStoreError, match="notes_task_readiness_transition_invalid"):
+        sync_store.transition_notes_task_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="blocked",
+            state="verifying",
+            source_dataset_id="dataset-1",
+            source_cursor=None,
+            source_count=0,
+            source_fingerprint=hashlib.sha256(b"").hexdigest(),
+        )
+    resumed = sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="blocked",
+        state="bootstrapping",
+        source_dataset_id="dataset-1",
+        source_cursor=None,
+        source_count=0,
+        source_fingerprint=None,
+    )
+    assert resumed.metadata["notes_task_v1"]["resume_phase"] is None
+
+
+def test_notes_task_readiness_blocked_from_bootstrap_resumes_without_advancing(
+    sync_store: SyncV2Store,
+) -> None:
+    _task_readiness_at_first_bootstrap_page(sync_store)
+    blocked = sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="bootstrapping",
+        state="blocked",
+        source_dataset_id="dataset-1",
+        source_cursor=_TASK_CURSOR_1,
+        source_count=1,
+        source_fingerprint="a" * 64,
+        reason_code="notes_task_source_invalid",
+    )
+
+    assert blocked.metadata["notes_task_v1"]["resume_phase"] == "bootstrapping"
+    with pytest.raises(SyncStoreError, match="notes_task_readiness_transition_invalid"):
+        sync_store.transition_notes_task_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="blocked",
+            state="verifying",
+            source_dataset_id="dataset-1",
+            source_cursor=_TASK_CURSOR_1,
+            source_count=1,
+            source_fingerprint="a" * 64,
+        )
+    resumed = sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="blocked",
+        state="bootstrapping",
+        source_dataset_id="dataset-1",
+        source_cursor=_TASK_CURSOR_1,
+        source_count=1,
+        source_fingerprint="a" * 64,
+    )
+    advanced = sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="bootstrapping",
+        state="verifying",
+        source_dataset_id="dataset-1",
+        source_cursor=_TASK_CURSOR_1,
+        source_count=1,
+        source_fingerprint="a" * 64,
+    )
+    assert resumed.metadata["notes_task_v1"]["state"] == "bootstrapping"
+    assert advanced.metadata["notes_task_v1"]["state"] == "verifying"
+
+
+def test_notes_task_readiness_blocked_from_verifying_preserves_resume_progress(
+    sync_store: SyncV2Store,
+) -> None:
+    _task_readiness_at_first_bootstrap_page(sync_store)
+    sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="bootstrapping",
+        state="verifying",
+        source_dataset_id="dataset-1",
+        source_cursor=_TASK_CURSOR_1,
+        source_count=1,
+        source_fingerprint="a" * 64,
+    )
+    blocked = sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="verifying",
+        state="blocked",
+        source_dataset_id="dataset-1",
+        source_cursor=_TASK_CURSOR_1,
+        source_count=1,
+        source_fingerprint="a" * 64,
+        reason_code="notes_task_verification_failed",
+    )
+
+    assert blocked.metadata["notes_task_v1"]["resume_phase"] == "verifying"
+    with pytest.raises(SyncStoreError, match="notes_task_readiness_source_changed"):
+        sync_store.transition_notes_task_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="blocked",
+            state="verifying",
+            source_dataset_id="dataset-1",
+            source_cursor=_TASK_CURSOR_2,
+            source_count=2,
+            source_fingerprint="b" * 64,
+        )
+    resumed = sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="blocked",
+        state="verifying",
+        source_dataset_id="dataset-1",
+        source_cursor=_TASK_CURSOR_1,
+        source_count=1,
+        source_fingerprint="a" * 64,
+    )
+    ready = sync_store.transition_notes_task_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="verifying",
+        state="ready",
+        source_dataset_id="dataset-1",
+        source_cursor=_TASK_CURSOR_1,
+        source_count=1,
+        source_fingerprint="a" * 64,
+    )
+    assert resumed.metadata["notes_task_v1"]["state"] == "verifying"
+    assert ready.metadata["notes_task_v1"]["state"] == "ready"
 
 
 def test_insert_envelope_is_idempotent_by_dataset_and_client_envelope(sync_store: SyncV2Store):

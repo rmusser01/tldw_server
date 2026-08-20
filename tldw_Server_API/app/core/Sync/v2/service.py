@@ -111,6 +111,10 @@ from .mutation_group_validation import (
     StoredMutationGroupValidationError,
     validate_stored_mutation_group,
 )
+from .notes_task_readiness import (
+    NOTES_TASK_SERVER_METADATA_KEYS,
+    redact_notes_task_server_metadata,
+)
 from .profile import (
     SyncNotesAttachmentBootstrapDiagnostics,
     SyncProfileStatus,
@@ -1772,6 +1776,7 @@ class SyncV2Service:
             "notes_attachment_v2",
             "default_personal",
             "client_family",
+            *NOTES_TASK_SERVER_METADATA_KEYS,
         }
         if (
             requested_domains.intersection(
@@ -1798,7 +1803,10 @@ class SyncV2Service:
             )
         )
         return SyncDatasetEnrollment(
-            dataset=dataset,
+            dataset=replace(
+                dataset,
+                metadata=redact_notes_task_server_metadata(dataset.metadata),
+            ),
             cursors=dict.fromkeys(dataset.domains, "0"),
             key_setup_required=False,
         )
@@ -6978,7 +6986,11 @@ class SyncV2Service:
         last_updated_at = stats.last_updated_at or dataset.updated_at
         if last_updated_at < dataset.updated_at:
             last_updated_at = dataset.updated_at
-        metadata: dict[str, object] = {} if dataset.encryption_policy == "client_private_v1" else dict(dataset.metadata)
+        metadata = (
+            {}
+            if dataset.encryption_policy == "client_private_v1"
+            else redact_notes_task_server_metadata(dataset.metadata)
+        )
         return SyncRestoreManifestDataset(
             dataset_id=dataset.dataset_id,
             scope_type=dataset.scope_type,

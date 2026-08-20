@@ -1662,6 +1662,103 @@ def test_public_dataset_enrollment_rejects_notes_organization_and_reserved_metad
     assert sync_service.store.list_datasets_for_user("user-1") == []
 
 
+@pytest.mark.parametrize(
+    ("metadata_key", "value"),
+    [
+        (
+            "notes_task_v1",
+            {
+                "state": "ready",
+                "source_cursor": "00000000-0000-4000-8000-000000000001",
+                "source_count": 1,
+                "source_fingerprint": "a" * 64,
+                "reason_code": None,
+                "resume_phase": None,
+            },
+        ),
+        (
+            "notes_task_activity_v1",
+            {
+                "state": "ready",
+                "source_cursor": (
+                    "2026-08-13T00:00:00+00:00|"
+                    "00000000-0000-4000-8000-000000000011"
+                ),
+                "source_count": 1,
+                "source_fingerprint": "b" * 64,
+                "reason_code": None,
+                "resume_phase": None,
+            },
+        ),
+        ("task_activity_capture_enabled", True),
+    ],
+)
+def test_public_dataset_enrollment_rejects_forged_task_readiness_metadata(
+    sync_service: SyncV2Service,
+    metadata_key: str,
+    value: object,
+) -> None:
+    with pytest.raises(SyncStoreError, match="sync_reserved_dataset_enrollment"):
+        sync_service.enroll_dataset(
+            user_id="user-1",
+            dataset_id=f"forged-{metadata_key}",
+            metadata={metadata_key: value},
+        )
+
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+
+
+def test_public_enrollment_and_manifest_redact_internal_task_readiness(
+    sync_service: SyncV2Service,
+) -> None:
+    internal_metadata = {
+        "notes_task_v1": {
+            "state": "ready",
+            "source_cursor": "00000000-0000-4000-8000-000000000001",
+            "source_count": 1,
+            "source_fingerprint": "a" * 64,
+            "reason_code": None,
+            "resume_phase": None,
+        },
+        "notes_task_activity_v1": {
+            "state": "blocked",
+            "source_cursor": (
+                "2026-08-13T00:00:00+00:00|"
+                "00000000-0000-4000-8000-000000000011"
+            ),
+            "source_count": 1,
+            "source_fingerprint": "b" * 64,
+            "reason_code": "notes_task_activity_source_invalid",
+            "resume_phase": "bootstrapping",
+        },
+        "task_activity_capture_enabled": True,
+    }
+    sync_service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-internal-task-readiness",
+            owner_user_id="user-1",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={"label": "before", **internal_metadata},
+        )
+    )
+
+    enrollment = sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-internal-task-readiness",
+        metadata={"label": "after"},
+    )
+    manifest = sync_service.restore_manifest(user_id="user-1")
+    stored = sync_service.store.get_dataset(
+        "dataset-internal-task-readiness",
+        owner_user_id="user-1",
+    )
+
+    assert enrollment.dataset.metadata == {"label": "after"}
+    assert manifest.datasets[0].metadata == {"label": "after"}
+    assert stored is not None
+    assert stored.metadata == {"label": "after", **internal_metadata}
+
+
 def test_adapter_registry_accepts_known_domains_and_rejects_unknown_domains(
     registry: SyncAdapterRegistry,
 ):

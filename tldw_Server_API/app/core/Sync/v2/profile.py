@@ -23,53 +23,13 @@ from .models import (
     server_frontend_mutation_blockers_for_policy,
     server_frontend_mutation_enabled_for_policy,
 )
+from .notes_task_readiness import parse_notes_task_readiness_record
 from .store import SyncV2Store
 
 SYNC_V2_M1_PROTOCOL_VERSION = "sync-v2-m1"
 BOOTSTRAP_MODES = frozenset({"server_frontend", "offline_sync"})
 DEFAULT_CLIENT_FAMILY = "chatbook"
-_DORMANT_TASK_READINESS_STATES = frozenset(
-    {
-        "not_enrolled",
-        "enrolling",
-        "bootstrapping",
-        "verifying",
-        "ready",
-        "blocked",
-    }
-)
-_DORMANT_TASK_READINESS_REASON_CODES_BY_DOMAIN = {
-    "notes_task": frozenset(
-        {
-            "notes_task_source_invalid",
-            "notes_task_source_changed",
-            "notes_task_source_scope_invalid",
-            "notes_task_source_catalog_invalid",
-            "notes_task_verification_failed",
-        }
-    ),
-    "notes_task_activity": frozenset(
-        {
-            "notes_task_activity_source_invalid",
-            "notes_task_activity_source_changed",
-            "notes_task_activity_source_scope_invalid",
-            "notes_task_activity_source_catalog_invalid",
-            "notes_task_activity_verification_failed",
-        }
-    ),
-}
-_DORMANT_TASK_READINESS_CURSOR_MAX_BYTES = 4_096
-_DORMANT_TASK_READINESS_COUNT_MAX = 9_223_372_036_854_775_807
 _DORMANT_TASK_READINESS_MISSING = object()
-
-
-def _is_valid_dormant_task_cursor(value: object) -> bool:
-    if not isinstance(value, str) or not value or value != value.strip():
-        return False
-    try:
-        return len(value.encode("utf-8")) <= _DORMANT_TASK_READINESS_CURSOR_MAX_BYTES
-    except UnicodeEncodeError:
-        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -765,70 +725,30 @@ def _safe_dormant_task_readiness(
         state="blocked",
         reason_code=f"{domain}_readiness_state_invalid",
     )
-    if not isinstance(metadata, Mapping):
+    readiness_key = (
+        "notes_task_v1"
+        if domain == "notes_task"
+        else "notes_task_activity_v1"
+    )
+    result = parse_notes_task_readiness_record(
+        metadata,
+        readiness_key=readiness_key,
+    )
+    if result.record is None:
         return invalid
-    required = {
-        "state",
-        "source_cursor",
-        "source_count",
-        "source_fingerprint",
-        "reason_code",
-    }
-    if not required.issubset(metadata):
-        return invalid
-    state = metadata.get("state")
-    source_cursor = metadata.get("source_cursor")
-    source_count = metadata.get("source_count")
-    source_fingerprint = metadata.get("source_fingerprint")
-    reason_code = metadata.get("reason_code")
-    if state not in _DORMANT_TASK_READINESS_STATES:
-        return invalid
-    if (
-        isinstance(source_count, bool)
-        or not isinstance(source_count, int)
-        or source_count < 0
-        or source_count > _DORMANT_TASK_READINESS_COUNT_MAX
-    ):
-        return invalid
-    if source_cursor is not None and not _is_valid_dormant_task_cursor(source_cursor):
-        return invalid
-    if source_fingerprint is not None and (
-        not isinstance(source_fingerprint, str)
-        or len(source_fingerprint) != 64
-        or any(character not in "0123456789abcdef" for character in source_fingerprint)
-    ):
-        return invalid
-    if reason_code is not None and reason_code not in (
-        _DORMANT_TASK_READINESS_REASON_CODES_BY_DOMAIN[domain]
-    ):
-        return invalid
-    if (state == "blocked") != (reason_code is not None):
-        return invalid
-    if state in {"not_enrolled", "enrolling"} and (
-        source_cursor is not None
-        or source_count != 0
-        or source_fingerprint is not None
-    ):
-        return invalid
-    if source_count > 0 and (
-        source_cursor is None or source_fingerprint is None
-    ):
-        return invalid
-    if source_cursor is not None and source_fingerprint is None:
-        return invalid
-    if state in {"verifying", "ready"} and source_fingerprint is None:
-        return invalid
+    record = result.record
     cursor_hash = (
-        "sha256:" + hashlib.sha256(source_cursor.encode("utf-8")).hexdigest()
-        if source_cursor is not None
+        "sha256:"
+        + hashlib.sha256(record.source_cursor.encode("utf-8")).hexdigest()
+        if record.source_cursor is not None
         else None
     )
     return SyncDormantTaskDomainReadiness(
-        state=str(state),
-        source_count=source_count,
+        state=record.state,
+        source_count=record.source_count,
         cursor=cursor_hash,
-        source_fingerprint=source_fingerprint,
-        reason_code=reason_code if isinstance(reason_code, str) else None,
+        source_fingerprint=record.source_fingerprint,
+        reason_code=record.reason_code,
     )
 
 
