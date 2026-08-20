@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, TypeAlias, TypeVar
 
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
@@ -21,7 +21,8 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
-TaskConnection = sqlite3.Connection | BackendConnectionWrapper
+TaskConnection: TypeAlias = sqlite3.Connection | BackendConnectionWrapper
+ScopedReadT = TypeVar("ScopedReadT")
 
 
 class TaskStore:
@@ -65,11 +66,37 @@ class TaskStore:
                     entity="tasks",
                     entity_id=owner,
                 )  # noqa: TRY003
-            self._db.execute_query(
-                "SELECT set_config('app.current_dataset_id', ?, false)",
-                (dataset,),
-            )
         return owner, dataset
+
+    def _set_postgres_dataset_scope(
+        self,
+        conn: TaskConnection,
+        dataset_id: str,
+    ) -> None:
+        """Set transaction-local PostgreSQL task RLS scope on one connection."""
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            self._execute(
+                conn,
+                "SELECT set_config('app.current_dataset_id', ?, true)",
+                (dataset_id,),
+            )
+
+    def _with_scoped_read(
+        self,
+        *,
+        dataset_id: str,
+        conn: TaskConnection | None,
+        fn: Callable[[TaskConnection | None], ScopedReadT],
+    ) -> ScopedReadT:
+        """Run a read with transaction-local PostgreSQL dataset scope."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return fn(conn)
+        if conn is not None:
+            self._set_postgres_dataset_scope(conn, dataset_id)
+            return fn(conn)
+        with self._db.transaction() as transaction_conn:
+            self._set_postgres_dataset_scope(transaction_conn, dataset_id)
+            return fn(transaction_conn)
 
     def _require_authorized_write_scope(
         self,
@@ -92,6 +119,7 @@ class TaskStore:
         ).fetchall()
         if not rows:
             if dataset_id == self._LOCAL_UNBOUND:
+                self._set_postgres_dataset_scope(conn, dataset_id)
                 return
             raise ConflictError(
                 "Task write scope is not bound.",
@@ -112,6 +140,7 @@ class TaskStore:
                 entity="tasks",
                 entity_id=owner_user_id,
             )  # noqa: TRY003
+        self._set_postgres_dataset_scope(conn, dataset_id)
 
     def lock_authorized_write_scope(
         self,
@@ -362,7 +391,16 @@ class TaskStore:
     ) -> dict[str, Any] | None:
         """Return the markdown projection row for one task."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        return self._fetch_projection(task_id, owner_user_id=owner, dataset_id=dataset, conn=conn)
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=conn,
+            fn=lambda read_conn: self._fetch_projection(
+                task_id,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                conn=read_conn,
+            ),
+        )
 
     def get_note_reconciliation_snapshot(
         self,
@@ -373,14 +411,22 @@ class TaskStore:
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
         """Return note fields needed to validate task reconciliation input."""
-        owner, _dataset = self._scope(owner_user_id, dataset_id)
-        cursor = self._read(
-            "SELECT id, version, content, deleted FROM notes WHERE client_id = ? AND id = ?",
-            (owner, note_id),
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+
+        def _read_snapshot(read_conn: TaskConnection | None) -> dict[str, Any] | None:
+            cursor = self._read(
+                "SELECT id, version, content, deleted FROM notes WHERE client_id = ? AND id = ?",
+                (owner, note_id),
+                conn=read_conn,
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
             conn=conn,
+            fn=_read_snapshot,
         )
-        row = cursor.fetchone()
-        return dict(row) if row else None
 
     def list_live_projected_tasks(
         self,
@@ -397,42 +443,54 @@ class TaskStore:
         case rather than creating a replacement task beside an orphaned live row.
         """
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        cursor = self._read(
-            """
-            SELECT *
-              FROM note_tasks
-             WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?
-               AND deleted = ? AND projection_status = ?
-             ORDER BY created_at ASC, id ASC
-            """,
-            (owner, dataset, note_id, self._deleted_value(False), "live"),
+
+        def _read_projected_tasks(
+            read_conn: TaskConnection | None,
+        ) -> list[dict[str, dict[str, Any]]]:
+            cursor = self._read(
+                """
+                SELECT *
+                  FROM note_tasks
+                 WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?
+                   AND deleted = ? AND projection_status = ?
+                 ORDER BY created_at ASC, id ASC
+                """,
+                (owner, dataset, note_id, self._deleted_value(False), "live"),
+                conn=read_conn,
+            )
+            projected_tasks: list[dict[str, dict[str, Any]]] = []
+            for row in cursor.fetchall():
+                task = self._decode_task_row(row)
+                if task is None:
+                    continue
+                projection_state, projection = self._resolve_projection_state(
+                    task,
+                    task["id"],
+                    owner_user_id=owner,
+                    dataset_id=dataset,
+                    conn=read_conn,
+                )
+                if projection_state != "live":
+                    raise ConflictError(
+                        f"Task projection is {projection_state} for live task '{task['id']}'.",
+                        entity="tasks",
+                        entity_id=task["id"],
+                    )  # noqa: TRY003
+                projected_tasks.append(
+                    {
+                        "task": task,
+                        "projection": self._require_live_projection_row(
+                            task["id"], projection
+                        ),
+                    }
+                )
+            return projected_tasks
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
             conn=conn,
+            fn=_read_projected_tasks,
         )
-        projected_tasks: list[dict[str, dict[str, Any]]] = []
-        for row in cursor.fetchall():
-            task = self._decode_task_row(row)
-            if task is None:
-                continue
-            projection_state, projection = self._resolve_projection_state(
-                task,
-                task["id"],
-                owner_user_id=owner,
-                dataset_id=dataset,
-                conn=conn,
-            )
-            if projection_state != "live":
-                raise ConflictError(
-                    f"Task projection is {projection_state} for live task '{task['id']}'.",
-                    entity="tasks",
-                    entity_id=task["id"],
-                )  # noqa: TRY003
-            projected_tasks.append(
-                {
-                    "task": task,
-                    "projection": self._require_live_projection_row(task["id"], projection),
-                }
-            )
-        return projected_tasks
 
     @staticmethod
     def _validate_status(status: str) -> str:
@@ -656,12 +714,16 @@ class TaskStore:
     ) -> dict[str, Any] | None:
         """Return one task by ID."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        return self._fetch_task(
-            task_id,
-            owner_user_id=owner,
+        return self._with_scoped_read(
             dataset_id=dataset,
-            include_deleted=include_deleted,
             conn=conn,
+            fn=lambda read_conn: self._fetch_task(
+                task_id,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                include_deleted=include_deleted,
+                conn=read_conn,
+            ),
         )
 
     def list_tasks(
@@ -724,8 +786,16 @@ class TaskStore:
         sql_query += " ORDER BY t.created_at ASC, t.id ASC LIMIT ? OFFSET ?"
         params.append(self._clamp_limit(limit))
         params.append(self._normalize_offset(offset))
-        cursor = self._read(sql_query, tuple(params))
-        return [self._decode_task_row(row) for row in cursor.fetchall()]
+
+        def _read_tasks(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            cursor = self._read(sql_query, tuple(params), conn=read_conn)
+            return [self._decode_task_row(row) for row in cursor.fetchall()]
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=None,
+            fn=_read_tasks,
+        )
 
     def update_unlinked_task_metadata_record_only(
         self,
@@ -1509,8 +1579,16 @@ class TaskStore:
         else:
             query += " ORDER BY created_at ASC, id ASC LIMIT ?"
         params.append(self._clamp_limit(limit))
-        cursor = self._read(query, tuple(params))
-        return [self._decode_event_row(row) for row in cursor.fetchall()]
+
+        def _read_activity(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            cursor = self._read(query, tuple(params), conn=read_conn)
+            return [self._decode_event_row(row) for row in cursor.fetchall()]
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=None,
+            fn=_read_activity,
+        )
 
     def list_recent_task_activity(
         self,
@@ -1543,8 +1621,16 @@ class TaskStore:
         else:
             query += " ORDER BY created_at DESC, id DESC LIMIT ?"
         params.append(self._clamp_limit(limit))
-        cursor = self._read(query, tuple(params))
-        return [self._decode_event_row(row) for row in cursor.fetchall()]
+
+        def _read_activity(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            cursor = self._read(query, tuple(params), conn=read_conn)
+            return [self._decode_event_row(row) for row in cursor.fetchall()]
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=None,
+            fn=_read_activity,
+        )
 
     def list_recent_unread_task_activity(
         self,
@@ -1586,8 +1672,16 @@ class TaskStore:
         else:
             query += " ORDER BY events.created_at DESC, events.id DESC LIMIT ?"
         params.append(self._clamp_limit(limit))
-        cursor = self._read(query, tuple(params))
-        return [self._decode_event_row(row) for row in cursor.fetchall()]
+
+        def _read_activity(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            cursor = self._read(query, tuple(params), conn=read_conn)
+            return [self._decode_event_row(row) for row in cursor.fetchall()]
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=None,
+            fn=_read_activity,
+        )
 
     def mark_task_activity_read(
         self,
@@ -1713,16 +1807,24 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
         if user_id != owner:
             return None
-        cursor = self._read(
-            """
-            SELECT * FROM task_event_read_state
-             WHERE owner_user_id = ? AND dataset_id = ? AND event_id = ? AND user_id = ?
-            """,
-            (owner, dataset, event_id, user_id),
+
+        def _read_state(read_conn: TaskConnection | None) -> dict[str, Any] | None:
+            cursor = self._read(
+                """
+                SELECT * FROM task_event_read_state
+                 WHERE owner_user_id = ? AND dataset_id = ? AND event_id = ? AND user_id = ?
+                """,
+                (owner, dataset, event_id, user_id),
+                conn=read_conn,
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
             conn=conn,
+            fn=_read_state,
         )
-        row = cursor.fetchone()
-        return dict(row) if row else None
 
     def get_reconciliation_state(
         self,
@@ -1734,14 +1836,22 @@ class TaskStore:
     ) -> dict[str, Any] | None:
         """Return the last task reconciliation state for a note."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        cursor = self._read(
-            "SELECT * FROM note_task_reconciliation_state "
-            "WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?",
-            (owner, dataset, note_id),
+
+        def _read_state(read_conn: TaskConnection | None) -> dict[str, Any] | None:
+            cursor = self._read(
+                "SELECT * FROM note_task_reconciliation_state "
+                "WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?",
+                (owner, dataset, note_id),
+                conn=read_conn,
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
             conn=conn,
+            fn=_read_state,
         )
-        row = cursor.fetchone()
-        return dict(row) if row else None
 
     def set_reconciliation_state(
         self,
@@ -1848,40 +1958,49 @@ class TaskStore:
     ) -> list[dict[str, Any]]:
         """Return checklist-bearing notes whose task reconciliation is stale or missing."""
         owner, dataset = self._scope(owner_user_id, dataset_id)
-        cursor = self._read(
-            """
-            SELECT n.id, n.title, n.version, n.last_modified
-              FROM notes n
-              LEFT JOIN note_task_reconciliation_state r
-                ON r.owner_user_id = n.client_id AND r.dataset_id = ? AND r.note_id = n.id
-             WHERE n.client_id = ? AND n.deleted = ?
-               AND (
-                    n.content LIKE ?
-                 OR n.content LIKE ?
-                 OR n.content LIKE ?
-               )
-               AND (
-                    n.content LIKE ?
-                 OR n.content LIKE ?
-                 OR n.content LIKE ?
-               )
-               AND (
-                    r.note_id IS NULL
-                 OR r.note_version < n.version
-               )
-             ORDER BY n.last_modified DESC, n.id ASC
-             LIMIT ?
-            """,
-            (
-                dataset,
-                owner,
-                self._deleted_value(False),
-                *self._CHECKLIST_DISCOVERY_MARKER_PATTERNS,
-                *self._CHECKLIST_DISCOVERY_BULLET_PATTERNS,
-                self._clamp_limit(limit),
-            ),
+
+        def _read_candidates(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            cursor = self._read(
+                """
+                SELECT n.id, n.title, n.version, n.last_modified
+                  FROM notes n
+                  LEFT JOIN note_task_reconciliation_state r
+                    ON r.owner_user_id = n.client_id AND r.dataset_id = ? AND r.note_id = n.id
+                 WHERE n.client_id = ? AND n.deleted = ?
+                   AND (
+                        n.content LIKE ?
+                     OR n.content LIKE ?
+                     OR n.content LIKE ?
+                   )
+                   AND (
+                        n.content LIKE ?
+                     OR n.content LIKE ?
+                     OR n.content LIKE ?
+                   )
+                   AND (
+                        r.note_id IS NULL
+                     OR r.note_version < n.version
+                   )
+                 ORDER BY n.last_modified DESC, n.id ASC
+                 LIMIT ?
+                """,
+                (
+                    dataset,
+                    owner,
+                    self._deleted_value(False),
+                    *self._CHECKLIST_DISCOVERY_MARKER_PATTERNS,
+                    *self._CHECKLIST_DISCOVERY_BULLET_PATTERNS,
+                    self._clamp_limit(limit),
+                ),
+                conn=read_conn,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=None,
+            fn=_read_candidates,
         )
-        return [dict(row) for row in cursor.fetchall()]
 
     def count_candidate_notes_for_task_discovery(
         self,
@@ -1923,9 +2042,16 @@ class TaskStore:
         if note_id is not None:
             sql_query += " AND n.id = ?"
             params.append(note_id)
-        cursor = self._read(sql_query, tuple(params))
-        row = cursor.fetchone()
-        return int(row["stale_count"] if row else 0)
+        def _read_count(read_conn: TaskConnection | None) -> int:
+            cursor = self._read(sql_query, tuple(params), conn=read_conn)
+            row = cursor.fetchone()
+            return int(row["stale_count"] if row else 0)
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=None,
+            fn=_read_count,
+        )
 
     def resolve_task_compatibility_dataset_id(
         self,
@@ -1952,12 +2078,6 @@ class TaskStore:
             conn=conn,
         ).fetchall()
         if not rows:
-            if postgres:
-                self._read(
-                    "SELECT set_config('app.current_dataset_id', ?, false)",
-                    (self._LOCAL_UNBOUND,),
-                    conn=conn,
-                )
             return self._LOCAL_UNBOUND
         if len(rows) != 1:
             raise ConflictError(
@@ -1973,12 +2093,6 @@ class TaskStore:
                 entity="tasks",
                 entity_id=owner,
             )  # noqa: TRY003
-        if postgres:
-            self._read(
-                "SELECT set_config('app.current_dataset_id', ?, false)",
-                (dataset,),
-                conn=conn,
-            )
         return dataset
 
     def bind_local_task_graph_to_dataset(

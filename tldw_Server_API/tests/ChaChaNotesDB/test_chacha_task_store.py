@@ -74,6 +74,20 @@ def test_compatibility_resolver_is_one_indexed_authority_lookup() -> None:
         assert forbidden not in source
 
 
+def test_postgres_task_scope_uses_transaction_local_settings() -> None:
+    scope_source = inspect.getsource(TaskStore._scope)
+    setter_source = inspect.getsource(TaskStore._set_postgres_dataset_scope)
+    guard_source = inspect.getsource(TaskStore._require_authorized_write_scope)
+    resolver_source = inspect.getsource(
+        TaskStore.resolve_task_compatibility_dataset_id
+    )
+
+    assert "set_config('app.current_dataset_id', ?, false)" not in scope_source
+    assert "set_config('app.current_dataset_id', ?, true)" in setter_source
+    assert "_set_postgres_dataset_scope" in guard_source
+    assert "set_config('app.current_dataset_id'" not in resolver_source
+
+
 def test_every_task_graph_write_checks_the_private_scope_authority() -> None:
     for method_name in (
         "create_task",

@@ -22,6 +22,8 @@ from pydantic import (
     model_validator,
 )
 
+from tldw_Server_API.app.core.exceptions import NotesTaskContractError
+
 from .models import normalize_sync_timestamp
 
 _UUID4_MESSAGE = "IDs must be canonical lowercase UUIDv4 strings"
@@ -131,10 +133,6 @@ TaskActivitySource = Literal[
     "trusted_bootstrap_v1",
 ]
 DeleteReason = Literal["user_request", "correction", "policy"]
-
-
-class NotesTaskContractError(ValueError):
-    """Stable fail-closed error for Notes task Sync contract violations."""
 
 
 class _FrozenJsonDict(dict[str, Any]):

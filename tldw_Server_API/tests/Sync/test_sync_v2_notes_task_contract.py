@@ -6,9 +6,10 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
+from tldw_Server_API.app.core.exceptions import NotesTaskContractError
 from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
     NotesTaskActivityTombstoneV1,
-    NotesTaskContractError,
+    NotesTaskActivityV1,
     NotesTaskV1Payload,
     canonical_json_bytes,
     convert_legacy_task_event,
@@ -19,6 +20,8 @@ from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
     parse_notes_task_tombstone_v1,
     parse_notes_task_v1,
 )
+
+pytestmark = pytest.mark.unit
 
 OWNER_ID = "owner-user-1"
 TASK_ID = "11111111-1111-4111-8111-111111111111"
@@ -122,7 +125,7 @@ def legacy_event(**overrides: object) -> dict[str, object]:
     return event
 
 
-def convert_legacy(event: dict[str, object]):
+def convert_legacy(event: dict[str, object]) -> NotesTaskActivityV1:
     return convert_legacy_task_event(
         event,
         owner_user_id=OWNER_ID,

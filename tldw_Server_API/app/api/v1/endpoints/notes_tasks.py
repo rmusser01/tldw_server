@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RateLimiter,
@@ -149,6 +150,7 @@ def _task_response(
     scope: TaskStoreScope,
     include_projection: bool = True,
 ) -> TaskResponse:
+    """Build one backend-neutral task response within an authenticated scope."""
     projection = db.get_task_projection(
         owner_user_id=scope.owner_user_id,
         dataset_id=scope.dataset_id,
@@ -453,6 +455,31 @@ async def delete_task(
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Task delete failed")
 
 
+def _list_note_tasks_response(
+    db: CharactersRAGDB,
+    *,
+    owner_user_id: str,
+    note_id: str,
+    limit: int,
+) -> TaskListResponse:
+    """Build a note-scoped task list without blocking the async request loop."""
+    scope = resolve_task_compatibility_scope(
+        db, authenticated_owner_user_id=owner_user_id
+    )
+    if db.get_note_by_id(note_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+    tasks = db.list_tasks(
+        owner_user_id=scope.owner_user_id,
+        dataset_id=scope.dataset_id,
+        note_id=note_id,
+        limit=limit,
+    )
+    return TaskListResponse(
+        tasks=[_task_response(db, task, scope=scope) for task in tasks],
+        reconciliation=_stale_reconciliation_response(db, scope=scope, note_id=note_id),
+    )
+
+
 @router.get("/{note_id}/tasks", response_model=TaskListResponse, tags=["notes"])
 async def list_note_tasks(
     note_id: str,
@@ -464,20 +491,12 @@ async def list_note_tasks(
 ) -> TaskListResponse:
     await _check_rate_limit(rate_limiter, current_user, "notes.read")
     try:
-        scope = resolve_task_compatibility_scope(
-            db, authenticated_owner_user_id=str(current_user.id)
-        )
-        if db.get_note_by_id(note_id) is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
-        tasks = db.list_tasks(
-            owner_user_id=scope.owner_user_id,
-            dataset_id=scope.dataset_id,
+        return await run_in_threadpool(
+            _list_note_tasks_response,
+            db,
+            owner_user_id=str(current_user.id),
             note_id=note_id,
             limit=limit,
-        )
-        return TaskListResponse(
-            tasks=[_task_response(db, task, scope=scope) for task in tasks],
-            reconciliation=_stale_reconciliation_response(db, scope=scope, note_id=note_id),
         )
     except Exception as exc:
         _handle_task_error(exc)

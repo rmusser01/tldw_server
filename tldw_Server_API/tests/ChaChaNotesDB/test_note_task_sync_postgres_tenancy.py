@@ -21,6 +21,44 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 pytestmark = pytest.mark.integration
 
 
+def _postgres_session_dataset_scope(db: CharactersRAGDB) -> str | None:
+    """Read and end the current connection's session-level dataset setting."""
+    conn = db.get_connection()
+    row = conn.execute(
+        "SELECT current_setting('app.current_dataset_id', true) AS dataset_id"
+    ).fetchone()
+    conn.rollback()
+    return row["dataset_id"] if row else None
+
+
+def test_postgres_task_operations_do_not_leak_dataset_scope_to_the_session(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner = "950000"
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id=owner, backend=backend)
+
+    try:
+        note_id = db.add_note("Transaction-local task scope", "Body")
+        task = db.create_task(
+            owner_user_id=owner,
+            dataset_id="local-unbound",
+            note_id=note_id,
+            text="Do not leak RLS scope",
+        )
+        assert _postgres_session_dataset_scope(db) in (None, "")
+
+        assert db.get_task(
+            owner_user_id=owner,
+            dataset_id="local-unbound",
+            task_id=str(task["id"]),
+        )["id"] == task["id"]
+        assert _postgres_session_dataset_scope(db) in (None, "")
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
 def _restore_reviewed_postgres_v59_task_source(db: CharactersRAGDB) -> None:
     """Replace the fresh v60 task graph with the exact reviewed empty v59 source."""
     with db.transaction() as conn:

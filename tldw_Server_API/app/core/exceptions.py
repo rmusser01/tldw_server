@@ -59,6 +59,10 @@ class NoteAttachmentPolicyError(ValueError):
     """Raised when attachment metadata is outside the canonical Notes policy."""
 
 
+class NotesTaskContractError(ValueError):
+    """Stable fail-closed error for Notes task Sync contract violations."""
+
+
 class LegacyAttachmentSourceError(RuntimeError):
     """Sanitized failure while reading a legacy Notes attachment source."""
 

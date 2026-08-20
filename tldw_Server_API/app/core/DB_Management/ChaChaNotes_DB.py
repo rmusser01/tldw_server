@@ -130,6 +130,7 @@ from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (  # noqa: E402
     simulate_fsrs_review_transition,
 )
 from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile  # noqa: E402
+from tldw_Server_API.app.core.exceptions import NotesTaskContractError  # noqa: E402
 from tldw_Server_API.app.core.Sync.v2.notes_link import (  # noqa: E402
     NOTES_LINK_LABEL_MAX_CHARS,
     NOTES_LINK_WEIGHT_MAX,
@@ -138,7 +139,6 @@ from tldw_Server_API.app.core.Sync.v2.notes_link import (  # noqa: E402
     validate_notes_link_properties,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (  # noqa: E402
-    NotesTaskContractError,
     canonical_json_bytes,
     notes_task_object_hash,
     parse_notes_task_v1,
