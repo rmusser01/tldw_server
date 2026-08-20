@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, ConflictError, InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
 from tldw_Server_API.app.core.Notes.organization_capture import (
     active_coordinator,
     capture_note_upsert,
@@ -184,27 +184,8 @@ def resolve_task_compatibility_scope(
         raise InputError("Task owner cannot be empty.")  # noqa: TRY003
     if owner != str(db.client_id):
         raise ConflictError("Task scope is unavailable.", entity="tasks", entity_id=owner)  # noqa: TRY003
-    if db.backend_type == BackendType.POSTGRESQL:
-        return TaskStoreScope(owner_user_id=owner, dataset_id="local-unbound")
-    datasets: set[str] = set()
-    for table in (
-        "note_tasks",
-        "task_events",
-        "note_task_reconciliation_state",
-        "task_projection_drifts",
-    ):
-        cursor = db.execute_query(
-            f"SELECT DISTINCT dataset_id FROM {table} WHERE owner_user_id = ?",  # nosec B608
-            (owner,),
-        )
-        datasets.update(str(row["dataset_id"]) for row in cursor.fetchall())
-    if not datasets:
-        return TaskStoreScope(owner_user_id=owner, dataset_id="local-unbound")
-    if len(datasets) != 1:
-        raise ConflictError(
-            "Task compatibility scope is ambiguous.", entity="tasks", entity_id=owner
-        )  # noqa: TRY003
-    return TaskStoreScope(owner_user_id=owner, dataset_id=datasets.pop())
+    dataset = db.resolve_task_compatibility_dataset_id(owner_user_id=owner)  # type: ignore[attr-defined]
+    return TaskStoreScope(owner_user_id=owner, dataset_id=dataset)
 
 
 class NotesTaskService:
@@ -429,6 +410,12 @@ class NotesTaskService:
         coordinator = active_coordinator(db, user_id=actor.actor_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
+            if conn is not None:
+                db.task_store.lock_authorized_write_scope(
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
+                    conn=conn,
+                )
             task = self._require_task_version(
                 db,
                 task_id=task_id,
@@ -583,6 +570,12 @@ class NotesTaskService:
         coordinator = active_coordinator(db, user_id=actor.actor_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
+            if conn is not None:
+                db.task_store.lock_authorized_write_scope(
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
+                    conn=conn,
+                )
             task = self._require_task_version(
                 db,
                 task_id=task_id,

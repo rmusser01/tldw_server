@@ -59,6 +59,15 @@ and owner-scoped service predicates. Migrations are transactional and fail close
 on catalog drift. Existing data and REST behavior are preserved before a dataset
 explicitly enrolls in the new domains.
 
+Schema v60 also owns one private `note_task_scope_authority` relation. It records at
+most one immutable real dataset for each owner and uses owner-only forced PostgreSQL
+RLS. Absence of a row means the owner's task graph remains in the private
+`local-unbound` scope. Binding inserts the authority row atomically with the graph
+rekey, including when the graph is empty; replay to the same dataset is idempotent
+and a different target is rejected. Compatibility callers resolve this indexed
+product-owned row, never accept a client dataset selector, and all shared task-store
+writes must match the recorded authority.
+
 Because the product migration cannot read the separate Sync database, preserved
 inactive rows use a private owner-scoped local-unbound dataset sentinel. Explicit
 enrollment source-verifies and atomically rekeys the complete task graph to the

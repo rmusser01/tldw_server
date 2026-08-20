@@ -87,6 +87,10 @@ class _FakeTaskDB:
     def execute_query(_query: str, _params: Any = None) -> Any:
         return SimpleNamespace(fetchall=lambda: [])
 
+    def resolve_task_compatibility_dataset_id(self, *, owner_user_id: str) -> str:
+        assert owner_user_id == self.client_id  # nosec B101
+        return LOCAL_UNBOUND
+
     def get_task_projection(
         self,
         *,

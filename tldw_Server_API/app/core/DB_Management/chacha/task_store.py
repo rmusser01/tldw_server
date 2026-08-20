@@ -71,6 +71,72 @@ class TaskStore:
             )
         return owner, dataset
 
+    def _require_authorized_write_scope(
+        self,
+        conn: TaskConnection,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+    ) -> None:
+        """Serialize with binding and reject writes outside the private authority scope."""
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            self._execute(
+                conn,
+                "LOCK TABLE note_task_scope_authority IN SHARE MODE",
+            )
+        rows = self._read(
+            "SELECT owner_user_id,dataset_id FROM note_task_scope_authority "
+            "WHERE owner_user_id = ? LIMIT 2",
+            (owner_user_id,),
+            conn=conn,
+        ).fetchall()
+        if not rows:
+            if dataset_id == self._LOCAL_UNBOUND:
+                return
+            raise ConflictError(
+                "Task write scope is not bound.",
+                entity="tasks",
+                entity_id=owner_user_id,
+            )  # noqa: TRY003
+        row_owner = str(rows[0]["owner_user_id"]).strip()
+        authority_dataset = str(rows[0]["dataset_id"]).strip()
+        if (
+            len(rows) != 1
+            or row_owner != owner_user_id
+            or not authority_dataset
+            or authority_dataset == self._LOCAL_UNBOUND
+            or dataset_id != authority_dataset
+        ):
+            raise ConflictError(
+                "Task write scope conflicts with bound authority.",
+                entity="tasks",
+                entity_id=owner_user_id,
+            )  # noqa: TRY003
+
+    def lock_authorized_write_scope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        conn: TaskConnection,
+    ) -> None:
+        """Fence a wider note/task transaction before it reads or mutates graph rows."""
+        owner = str(owner_user_id).strip()
+        dataset = str(dataset_id).strip()
+        if not owner or not dataset:
+            raise InputError("Task owner and dataset scope cannot be empty.")  # noqa: TRY003
+        if self._db.backend_type == BackendType.POSTGRESQL and owner != str(self._db.client_id):
+            raise ConflictError(
+                "Task owner does not match the authenticated PostgreSQL client.",
+                entity="tasks",
+                entity_id=owner,
+            )  # noqa: TRY003
+        self._require_authorized_write_scope(
+            conn,
+            owner_user_id=owner,
+            dataset_id=dataset,
+        )
+
     def _canonical_task_values(self, task: Mapping[str, Any]) -> tuple[int, str, str | None, str | None]:
         revision = int(task.get("canonical_revision") or task.get("version") or 1)
         source = dict(task)
@@ -518,6 +584,9 @@ class TaskStore:
         )
 
         def _execute_create(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             self._require_active_note(note_id, final_task_id, owner_user_id=owner, conn=transaction_conn)
             self._execute(
                 transaction_conn,
@@ -679,6 +748,9 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_metadata_update(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             old = self._require_active_task(
                 self._require_expected_version(
                     self._fetch_task(
@@ -788,6 +860,9 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_update(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             old = self._require_active_task(
                 self._require_expected_version(
                     self._fetch_task(
@@ -924,6 +999,9 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_projection(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             task = self._require_active_task(
                 self._fetch_task(
                     task_id, owner_user_id=owner, dataset_id=dataset,
@@ -1014,6 +1092,9 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_unlink(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             old = self._require_active_task(
                 self._require_expected_version(
                     self._fetch_task(
@@ -1129,6 +1210,9 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_delete(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             old = self._require_active_task(
                 self._require_expected_version(
                     self._fetch_task(
@@ -1306,6 +1390,9 @@ class TaskStore:
         )
 
         def _execute_event(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             self._require_active_note(
                 note_id, final_event_id, owner_user_id=owner, conn=transaction_conn
             )
@@ -1483,17 +1570,21 @@ class TaskStore:
              AND state.event_id = events.id AND state.user_id = ?
             WHERE events.owner_user_id = ? AND events.dataset_id = ?
               AND (state.event_id IS NULL OR (state.read_at IS NULL AND state.dismissed_at IS NULL))
-              AND (? IS NULL OR events.task_id = ?)
-              AND (? IS NULL OR events.note_id = ?)
-              AND (? IS NULL OR events.actor_type = ?)
         """
+        params: list[Any] = [user_id, owner, dataset]
+        for column, value in (
+            ("task_id", task_id),
+            ("note_id", note_id),
+            ("actor_type", actor_type),
+        ):
+            if value is not None:
+                # Column names are fixed above; values remain parameterized.
+                query += f" AND events.{column} = ?"  # nosec B608
+                params.append(value)
         if self._db.backend_type == BackendType.SQLITE:
             query += " ORDER BY events.created_at DESC, events.rowid DESC LIMIT ?"
         else:
             query += " ORDER BY events.created_at DESC, events.id DESC LIMIT ?"
-        params: list[Any] = [
-            user_id, owner, dataset, task_id, task_id, note_id, note_id, actor_type, actor_type
-        ]
         params.append(self._clamp_limit(limit))
         cursor = self._read(query, tuple(params))
         return [self._decode_event_row(row) for row in cursor.fetchall()]
@@ -1514,6 +1605,9 @@ class TaskStore:
             raise ConflictError("Task event not found.", entity="tasks", entity_id=event_id)  # noqa: TRY003
 
         def _execute_read(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             self._execute(
                 transaction_conn,
                 """
@@ -1566,6 +1660,9 @@ class TaskStore:
             raise ConflictError("Task event not found.", entity="tasks", entity_id=event_id)  # noqa: TRY003
 
         def _execute_dismiss(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             self._execute(
                 transaction_conn,
                 """
@@ -1664,6 +1761,9 @@ class TaskStore:
         owner, dataset = self._scope(owner_user_id, dataset_id)
 
         def _execute_state(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
             self._execute(
                 transaction_conn,
                 """
@@ -1827,6 +1927,60 @@ class TaskStore:
         row = cursor.fetchone()
         return int(row["stale_count"] if row else 0)
 
+    def resolve_task_compatibility_dataset_id(
+        self,
+        *,
+        owner_user_id: str,
+        conn: TaskConnection | None = None,
+    ) -> str:
+        """Resolve the private immutable owner-to-dataset binding, or the sentinel."""
+        owner = str(owner_user_id).strip()
+        if not owner:
+            raise InputError("Task owner cannot be empty.")  # noqa: TRY003
+        postgres = self._db.backend_type == BackendType.POSTGRESQL
+        if postgres and owner != str(self._db.client_id):
+            raise ConflictError(
+                "Task compatibility scope is unavailable.",
+                entity="tasks",
+                entity_id=owner,
+            )  # noqa: TRY003
+
+        rows = self._read(
+            "SELECT owner_user_id,dataset_id FROM note_task_scope_authority "
+            "WHERE owner_user_id = ? LIMIT 2",
+            (owner,),
+            conn=conn,
+        ).fetchall()
+        if not rows:
+            if postgres:
+                self._read(
+                    "SELECT set_config('app.current_dataset_id', ?, false)",
+                    (self._LOCAL_UNBOUND,),
+                    conn=conn,
+                )
+            return self._LOCAL_UNBOUND
+        if len(rows) != 1:
+            raise ConflictError(
+                "Task compatibility scope is inconsistent.",
+                entity="tasks",
+                entity_id=owner,
+            )  # noqa: TRY003
+        row_owner = str(rows[0]["owner_user_id"]).strip()
+        dataset = str(rows[0]["dataset_id"]).strip()
+        if row_owner != owner or not dataset or dataset == self._LOCAL_UNBOUND:
+            raise ConflictError(
+                "Task compatibility scope is inconsistent.",
+                entity="tasks",
+                entity_id=owner,
+            )  # noqa: TRY003
+        if postgres:
+            self._read(
+                "SELECT set_config('app.current_dataset_id', ?, false)",
+                (dataset,),
+                conn=conn,
+            )
+        return dataset
+
     def bind_local_task_graph_to_dataset(
         self,
         *,
@@ -1878,6 +2032,25 @@ class TaskStore:
 
         def _counts(snapshot: dict[str, tuple[int, str]]) -> dict[str, int]:
             return {table: count for table, (count, _hash) in snapshot.items()}
+
+        def _graph_datasets(transaction_conn: TaskConnection) -> set[str]:
+            datasets: set[str] = set()
+            for table, _ordering in self._BIND_TABLE_ORDER:
+                rows = self._read(
+                    f"SELECT DISTINCT dataset_id FROM {table} WHERE owner_user_id = ?",  # nosec B608
+                    (owner,),
+                    conn=transaction_conn,
+                ).fetchall()
+                for row in rows:
+                    dataset = str(row["dataset_id"]).strip()
+                    if not dataset:
+                        raise ConflictError(
+                            "Task dataset binding found malformed graph scope.",
+                            entity="tasks",
+                            entity_id=target,
+                        )  # noqa: TRY003
+                    datasets.add(dataset)
+            return datasets
 
         def _prove_parents(transaction_conn: TaskConnection) -> None:
             invalid = self._read(
@@ -1987,7 +2160,8 @@ class TaskStore:
                 )  # noqa: TRY003
             self._execute(
                 transaction_conn,
-                "LOCK TABLE notes, note_tasks, task_note_projections, task_events, "
+                "LOCK TABLE note_task_scope_authority, notes, note_tasks, "
+                "task_note_projections, task_events, "
                 "task_event_read_state, note_task_reconciliation_state, task_projection_drifts "
                 "IN ACCESS EXCLUSIVE MODE",
             )
@@ -2010,15 +2184,71 @@ class TaskStore:
 
         def _execute_bind_body(transaction_conn: TaskConnection) -> dict[str, int]:
             _prepare_postgres(transaction_conn)
+            authority_lock = " FOR UPDATE" if postgres else ""
+            authority_rows = self._read(
+                # authority_lock is a fixed backend suffix, never caller input.
+                "SELECT owner_user_id,dataset_id FROM note_task_scope_authority "
+                f"WHERE owner_user_id = ?{authority_lock}",  # nosec B608
+                (owner,),
+                conn=transaction_conn,
+            ).fetchall()
+            if len(authority_rows) > 1:
+                raise ConflictError(
+                    "Task dataset binding authority is inconsistent.",
+                    entity="tasks",
+                    entity_id=target,
+                )  # noqa: TRY003
+            authority_dataset = None
+            if authority_rows:
+                authority_owner = str(authority_rows[0]["owner_user_id"]).strip()
+                authority_dataset = str(authority_rows[0]["dataset_id"]).strip()
+                if (
+                    authority_owner != owner
+                    or not authority_dataset
+                    or authority_dataset == self._LOCAL_UNBOUND
+                ):
+                    raise ConflictError(
+                        "Task dataset binding authority is inconsistent.",
+                        entity="tasks",
+                        entity_id=target,
+                    )  # noqa: TRY003
+                if authority_dataset != target:
+                    raise ConflictError(
+                        "Task dataset binding is immutable.",
+                        entity="tasks",
+                        entity_id=target,
+                    )  # noqa: TRY003
+
+            graph_datasets = _graph_datasets(transaction_conn)
             source_snapshot = _snapshot(transaction_conn, self._LOCAL_UNBOUND)
             target_snapshot = _snapshot(transaction_conn, target)
             source_counts = _counts(source_snapshot)
             target_counts = _counts(target_snapshot)
+            if authority_dataset == target:
+                if graph_datasets - {target} or any(source_counts.values()):
+                    raise ConflictError(
+                        "Task dataset binding authority conflicts with graph scope.",
+                        entity="tasks",
+                        entity_id=target,
+                    )  # noqa: TRY003
+                _finish_postgres(transaction_conn)
+                return target_counts
+            if graph_datasets - {self._LOCAL_UNBOUND, target}:
+                raise ConflictError(
+                    "Task dataset binding found an unowned graph scope.",
+                    entity="tasks",
+                    entity_id=target,
+                )  # noqa: TRY003
             if any(target_counts.values()):
                 raise ConflictError(
                     "Task dataset binding target collision.", entity="tasks", entity_id=target
                 )  # noqa: TRY003
             if not any(source_counts.values()):
+                self._execute(
+                    transaction_conn,
+                    "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+                    (owner, target),
+                )
                 _finish_postgres(transaction_conn)
                 return source_counts
             _prove_parents(transaction_conn)
@@ -2050,6 +2280,11 @@ class TaskStore:
                     entity="tasks",
                     entity_id=target,
                 )  # noqa: TRY003
+            self._execute(
+                transaction_conn,
+                "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+                (owner, target),
+            )
             _finish_postgres(transaction_conn)
             return _counts(rebound)
 
@@ -2062,6 +2297,7 @@ class TaskStore:
             except Exception:  # noqa: BLE001 - rollback must cover every failed bind
                 self._execute(transaction_conn, "ROLLBACK TO SAVEPOINT bind_local_task_graph")
                 self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_task_graph")
+                self._db._verify_note_task_schema_postgres(transaction_conn)
                 raise
             self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_task_graph")
             return result

@@ -34,11 +34,11 @@ def test_postgres_initializer_authority_is_schema_v60() -> None:
     assert "_verify_note_task_schema_postgres" in source
 
 
-def test_postgres_v60_ddl_is_fixed_and_scopes_all_six_relations() -> None:
+def test_postgres_v60_ddl_is_fixed_and_scopes_graph_plus_authority() -> None:
     statements = CharactersRAGDB._note_task_v60_postgres_ddl()
     sql = " ".join("\n".join(statements).split()).lower()
 
-    assert len(statements) == 7
+    assert len(statements) == 8
     assert "create unique index uq_notes_owner_id on notes(client_id,id)" in sql
     for table in CharactersRAGDB._NOTE_TASK_V60_TABLES:
         assert f"create table {table}_v60" in sql
@@ -48,6 +48,9 @@ def test_postgres_v60_ddl_is_fixed_and_scopes_all_six_relations() -> None:
         assert "dataset_id text not null" in sql.split(
             f"create table {table}_v60", 1
         )[1].split("create table", 1)[0]
+    assert "create table note_task_scope_authority_v60" in sql
+    assert "note_task_scope_authority_pkey primary key(owner_user_id)" in sql
+    assert "dataset_id<>'local-unbound'" in sql
     assert "primary key(owner_user_id,dataset_id,id)" in sql
     assert "references note_tasks_v60(owner_user_id,dataset_id,id)" in sql
     assert "references task_events_v60(owner_user_id,dataset_id,id)" in sql
@@ -383,6 +386,75 @@ def _rewrite_sqlite_catalog(db_path: Path, *, object_name: str, old: str, new: s
         conn.execute("PRAGMA writable_schema=OFF")
 
 
+@pytest.mark.parametrize(
+    "drift",
+    ("weakened_constraint", "extra_index", "extra_trigger", "extra_view", "extra_table"),
+)
+def test_sqlite_v60_upgrade_rejects_exact_v59_source_catalog_drift_before_ddl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    db_path = tmp_path / f"v59-source-{drift}.sqlite"
+    _prepare_v59_database(db_path)
+    drift_object = "note_tasks"
+    if drift == "weakened_constraint":
+        _rewrite_sqlite_catalog(
+            db_path,
+            object_name=drift_object,
+            old="CHECK(status IN ('open','done'))",
+            new="CHECK(status IN ('open','done','paused'))",
+        )
+    else:
+        statements = {
+            "extra_index": (
+                "CREATE INDEX unexpected_task_index ON note_tasks(text)",
+                "unexpected_task_index",
+            ),
+            "extra_trigger": (
+                "CREATE TRIGGER unexpected_task_trigger AFTER UPDATE ON note_tasks "
+                "BEGIN SELECT NEW.id; END",
+                "unexpected_task_trigger",
+            ),
+            "extra_view": (
+                "CREATE VIEW unexpected_task_view AS SELECT id FROM note_tasks",
+                "unexpected_task_view",
+            ),
+            "extra_table": (
+                "CREATE TABLE unexpected_task_table("
+                "id TEXT PRIMARY KEY, task_id TEXT REFERENCES note_tasks(id))",
+                "unexpected_task_table",
+            ),
+        }
+        statement, drift_object = statements[drift]
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(statement)
+
+    checkpoints: list[str] = []
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "_note_task_v60_migration_checkpoint",
+        lambda _db, stage: checkpoints.append(stage),
+    )
+    with pytest.raises(CharactersRAGDBError, match="v59 SQLite source catalog drifted"):
+        CharactersRAGDB(str(db_path), client_id=OWNER)
+
+    assert checkpoints == []  # nosec B101 - validation must precede v60 DDL.
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(  # nosec B101
+            "SELECT version FROM db_schema_version WHERE schema_name=?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()[0] == 59
+        assert conn.execute("SELECT id FROM note_tasks").fetchone()[0] == TASK_ID  # nosec B101
+        assert conn.execute("SELECT id FROM task_events").fetchone()[0] == EVENT_ID  # nosec B101
+        catalog_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name=?", (drift_object,)
+        ).fetchone()[0]
+        assert catalog_sql is not None  # nosec B101
+        if drift == "weakened_constraint":
+            assert "'paused'" in catalog_sql  # nosec B101
+
+
 def test_sqlite_v60_upgrade_preserves_graph_under_local_unbound_scope(tmp_path: Path) -> None:
     db_path = tmp_path / "task-v59.sqlite"
     _prepare_v59_database(db_path)
@@ -401,6 +473,7 @@ def test_sqlite_v60_upgrade_preserves_graph_under_local_unbound_scope(tmp_path: 
                     "task_event_read_state",
                     "note_task_reconciliation_state",
                     "task_projection_drifts",
+                    "note_task_scope_authority",
                 )
             }
             assert counts == {  # nosec B101
@@ -410,6 +483,7 @@ def test_sqlite_v60_upgrade_preserves_graph_under_local_unbound_scope(tmp_path: 
                 "task_event_read_state": 1,
                 "note_task_reconciliation_state": 1,
                 "task_projection_drifts": 0,
+                "note_task_scope_authority": 0,
             }
         task = upgraded.get_task(
             owner_user_id=OWNER,
@@ -497,6 +571,13 @@ def test_sqlite_v60_has_exact_scoped_task_graph_columns(tmp_path: Path) -> None:
                 "task_projection_drifts",
             ):
                 assert {"owner_user_id", "dataset_id"} <= _table_columns(conn, table)  # nosec B101
+            assert _table_columns(conn, "note_task_scope_authority") == {  # nosec B101
+                "owner_user_id",
+                "dataset_id",
+            }
+            assert conn.execute(  # nosec B101
+                "SELECT COUNT(*) FROM note_task_scope_authority"
+            ).fetchone()[0] == 0
             foreign_keys = conn.execute("PRAGMA foreign_key_list(task_note_projections)").fetchall()
             assert any(str(row[5]).upper() == "CASCADE" for row in foreign_keys)  # nosec B101
     finally:
@@ -629,6 +710,11 @@ def test_sqlite_v60_dataset_cursor_page_uses_exact_index(
                     "WHERE owner_user_id=? AND dataset_id=? AND id=?",
                     (cursor, OWNER, LOCAL_UNBOUND, target_event["id"]),
                 )
+            conn.execute(
+                "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+                (OWNER, "other-dataset"),
+            )
+            for cursor in range(1, 65):
                 other_event = db.record_task_event(
                     owner_user_id=OWNER,
                     dataset_id="other-dataset",
@@ -642,6 +728,10 @@ def test_sqlite_v60_dataset_cursor_page_uses_exact_index(
                     "WHERE owner_user_id=? AND dataset_id=? AND id=?",
                     (cursor, OWNER, "other-dataset", other_event["id"]),
                 )
+            conn.execute(
+                "DELETE FROM note_task_scope_authority WHERE owner_user_id=?",
+                (OWNER,),
+            )
             conn.execute("ANALYZE task_events")
             plan = [
                 str(row[3])

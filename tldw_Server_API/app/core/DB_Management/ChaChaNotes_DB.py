@@ -676,6 +676,8 @@ class CharactersRAGDB:
         "note_task_reconciliation_state",
         "task_projection_drifts",
     )
+    _NOTE_TASK_SCOPE_AUTHORITY_TABLE = "note_task_scope_authority"
+    _NOTE_TASK_V60_RELATIONS = (*_NOTE_TASK_V60_TABLES, _NOTE_TASK_SCOPE_AUTHORITY_TABLE)
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
     _SQLITE_CORE_SCHEMA_TABLES = frozenset(
@@ -11001,7 +11003,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @staticmethod
     def _note_task_v60_postgres_ddl() -> tuple[str, ...]:
-        """Return the fixed six-table PostgreSQL v60 replacement schema."""
+        """Return the fixed task graph plus private scope-authority schema."""
         return (
             "CREATE UNIQUE INDEX uq_notes_owner_id ON notes(client_id,id)",
             """
@@ -11151,6 +11153,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE
             )
             """,
+            """
+            CREATE TABLE note_task_scope_authority_v60(
+              owner_user_id TEXT NOT NULL
+                CONSTRAINT note_task_scope_authority_owner_check
+                CHECK(char_length(btrim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL
+                CONSTRAINT note_task_scope_authority_dataset_check
+                CHECK(char_length(btrim(dataset_id)) > 0
+                  AND dataset_id=btrim(dataset_id)
+                  AND dataset_id<>'local-unbound'),
+              CONSTRAINT note_task_scope_authority_pkey PRIMARY KEY(owner_user_id)
+            )
+            """,
         )
 
     @staticmethod
@@ -11294,6 +11309,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ("created_at", ts, True, None), ("updated_at", ts, True, None),
                 ("resolved_at", ts, False, None),
             ),
+            "note_task_scope_authority": (
+                ("owner_user_id", "text", True, None),
+                ("dataset_id", "text", True, None),
+            ),
         }
 
     @staticmethod
@@ -11343,11 +11362,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 AND EXISTS(SELECT 1 FROM notes AS note WHERE note.id=task_projection_drifts.note_id
                 AND note.client_id=current_setting('app.current_user_id',true)
                 AND note.client_id=task_projection_drifts.owner_user_id)""",
+            "note_task_scope_authority": """note_task_scope_authority.owner_user_id=
+                current_setting('app.current_user_id',true)""",
         }
 
     @staticmethod
     def _note_task_v60_sqlite_ddl() -> tuple[str, ...]:
-        """Return the fixed six-table v60 SQLite replacement schema."""
+        """Return the fixed task graph plus private scope-authority schema."""
         return (
             "CREATE UNIQUE INDEX uq_notes_owner_id ON notes(client_id,id)",
             """
@@ -11485,6 +11506,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ON UPDATE CASCADE ON DELETE CASCADE,
               FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
                 ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE note_task_scope_authority_v60(
+              owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL CHECK(
+                length(trim(dataset_id)) > 0
+                AND dataset_id=trim(dataset_id)
+                AND dataset_id<>'local-unbound'),
+              PRIMARY KEY(owner_user_id)
             )
             """,
         )
@@ -11637,7 +11668,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return " ".join(sql.split()).lower() if sql is not None else None
 
     def _note_task_catalog_snapshot_sqlite(self, conn: sqlite3.Connection) -> dict[str, Any]:
-        tables = self._NOTE_TASK_V60_TABLES
+        tables = self._NOTE_TASK_V60_RELATIONS
         placeholders = ",".join("?" for _ in tables)
         table_sql = {
             str(row[0]): self._normalize_sqlite_catalog_sql(row[1])
@@ -11705,12 +11736,109 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             expected.execute("PRAGMA foreign_keys=ON")
             expected.execute("CREATE TABLE notes(id TEXT PRIMARY KEY, client_id TEXT NOT NULL)")
             self._create_note_task_schema_v60_sqlite(expected)
-            for table in self._NOTE_TASK_V60_TABLES:
+            for table in self._NOTE_TASK_V60_RELATIONS:
                 expected.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}")  # nosec B608
             self._create_note_task_indexes_v60_sqlite(expected)
             return self._note_task_catalog_snapshot_sqlite(expected)
         finally:
             expected.close()
+
+    def _note_task_v59_catalog_snapshot_sqlite(
+        self, conn: sqlite3.Connection
+    ) -> dict[str, Any]:
+        """Return the exact legacy task catalog consumed by the v60 migration."""
+        tables = self._NOTE_TASK_V60_TABLES[:-1]
+        placeholders = ",".join("?" for _ in tables)
+        table_sql = {
+            str(row[0]): self._normalize_sqlite_catalog_sql(row[1])
+            for row in conn.execute(
+                f"SELECT name,sql FROM sqlite_master WHERE type='table' "  # nosec B608
+                f"AND name IN ({placeholders}) ORDER BY name",
+                tables,
+            )
+        }
+        explicit_index_sql = {
+            str(row[0]): (str(row[1]), self._normalize_sqlite_catalog_sql(row[2]))
+            for row in conn.execute(
+                f"SELECT name,tbl_name,sql FROM sqlite_master WHERE type='index' "  # nosec B608
+                f"AND tbl_name IN ({placeholders}) AND sql IS NOT NULL ORDER BY name",
+                tables,
+            )
+        }
+        table_details: dict[str, Any] = {}
+        for table in tables:
+            index_rows = [
+                tuple(row) for row in conn.execute(f"PRAGMA index_list({table})")  # nosec B608
+            ]
+            table_details[table] = {
+                "xinfo": [
+                    tuple(row) for row in conn.execute(f"PRAGMA table_xinfo({table})")  # nosec B608
+                ],
+                "foreign_keys": [
+                    tuple(row) for row in conn.execute(f"PRAGMA foreign_key_list({table})")  # nosec B608
+                ],
+                "indexes": [
+                    (
+                        index_row,
+                        [
+                            tuple(row)
+                            for row in conn.execute(
+                                f"PRAGMA index_xinfo({index_row[1]})"  # nosec B608
+                            )
+                        ],
+                    )
+                    for index_row in index_rows
+                ],
+            }
+        related_objects = {
+            str(row[1]): (
+                str(row[0]),
+                str(row[2]),
+                self._normalize_sqlite_catalog_sql(row[3]),
+            )
+            for row in conn.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_master "
+                "WHERE type IN ('table','trigger','view') ORDER BY type,name"
+            )
+            if not (str(row[0]) == "table" and str(row[1]) in tables)
+            and (
+                str(row[2]) in tables
+                or any(
+                    re.search(rf"\b{re.escape(table)}\b", str(row[3]), re.IGNORECASE)
+                    for table in tables
+                )
+            )
+        }
+        return {
+            "table_sql": table_sql,
+            "explicit_index_sql": explicit_index_sql,
+            "table_details": table_details,
+            "related_objects": related_objects,
+        }
+
+    def _expected_note_task_v59_catalog_sqlite(self) -> dict[str, Any]:
+        expected = sqlite3.connect(":memory:")
+        try:
+            expected.execute("PRAGMA foreign_keys=ON")
+            expected.execute("CREATE TABLE notes(id TEXT PRIMARY KEY)")
+            expected.execute(
+                "CREATE TABLE db_schema_version(schema_name TEXT PRIMARY KEY, version INTEGER)"
+            )
+            expected.execute(
+                "INSERT INTO db_schema_version(schema_name,version) VALUES (?,47)",
+                (self._SCHEMA_NAME,),
+            )
+            expected.executescript(self._MIGRATION_SQL_V47_TO_V48)
+            return self._note_task_v59_catalog_snapshot_sqlite(expected)
+        finally:
+            expected.close()
+
+    def _verify_note_task_v59_catalog_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Reject legacy task catalog drift before creating any v60 relation."""
+        if self._note_task_v59_catalog_snapshot_sqlite(
+            conn
+        ) != self._expected_note_task_v59_catalog_sqlite():
+            raise SchemaError("Notes task v59 SQLite source catalog drifted.")  # noqa: TRY003
 
     def _verify_note_task_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Reject any current-v60 SQLite task catalog drift instead of repairing it."""
@@ -11721,7 +11849,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             or set(actual["table_details"]) != set(expected["table_details"])
             or any(
                 actual["table_details"][table][key] != expected["table_details"][table][key]
-                for table in self._NOTE_TASK_V60_TABLES
+                for table in self._NOTE_TASK_V60_RELATIONS
                 for key in ("xinfo", "foreign_keys")
             )
         ):
@@ -11732,7 +11860,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             or any(
                 actual["table_details"][table]["indexes"]
                 != expected["table_details"][table]["indexes"]
-                for table in self._NOTE_TASK_V60_TABLES
+                for table in self._NOTE_TASK_V60_RELATIONS
             )
         ):
             raise SchemaError("Notes task v60 SQLite index catalog drifted.")  # noqa: TRY003
@@ -11749,8 +11877,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         tables = self._sqlite_table_names(conn)
         if not source_tables.issubset(tables):
             raise SchemaError("Notes task v60 migration source catalog is incomplete.")  # noqa: TRY003
-        targets = {f"{table}_v60" for table in self._NOTE_TASK_V60_TABLES}
-        if "task_projection_drifts" in tables or tables.intersection(targets):
+        self._verify_note_task_v59_catalog_sqlite(conn)
+        targets = {f"{table}_v60" for table in self._NOTE_TASK_V60_RELATIONS}
+        if (
+            "task_projection_drifts" in tables
+            or self._NOTE_TASK_SCOPE_AUTHORITY_TABLE in tables
+            or tables.intersection(targets)
+        ):
             raise SchemaError("Notes task v60 target-table collision requires explicit repair.")  # noqa: TRY003
         self._create_note_task_schema_v60_sqlite(conn)
         self._note_task_v60_migration_checkpoint("create")
@@ -11759,7 +11892,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for table in ("task_event_read_state","task_note_projections","note_task_reconciliation_state",
                       "task_events","note_tasks"):
             conn.execute(f"DROP TABLE {table}")  # nosec B608 - fixed relation names.
-        for table in self._NOTE_TASK_V60_TABLES:
+        for table in self._NOTE_TASK_V60_RELATIONS:
             conn.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}")  # nosec B608
         self._create_note_task_indexes_v60_sqlite(conn)
         self._note_task_v60_migration_checkpoint("index")
@@ -12201,9 +12334,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _verify_note_task_schema_postgres(self, conn: Any) -> None:
         """Verify the complete PostgreSQL v60 task graph without repairing drift."""
         backend = self.backend
-        authority_relations = ("notes", *self._NOTE_TASK_V60_TABLES)
+        authority_relations = ("notes", *self._NOTE_TASK_V60_RELATIONS)
         backend.execute(
-            "LOCK TABLE notes, note_tasks, task_note_projections, task_events, "
+            "LOCK TABLE note_task_scope_authority, notes, note_tasks, "
+            "task_note_projections, task_events, "
             "task_event_read_state, note_task_reconciliation_state, task_projection_drifts "
             "IN SHARE MODE",
             connection=conn,
@@ -12255,11 +12389,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND column_row.attnum>0 AND NOT column_row.attisdropped
              ORDER BY table_row.relname,column_row.attnum
             """,
-            (list(self._NOTE_TASK_V60_TABLES),),
+            (list(self._NOTE_TASK_V60_RELATIONS),),
             connection=conn,
         ).rows
         actual_columns: dict[str, list[tuple[str, str, bool, str | None]]] = {
-            table: [] for table in self._NOTE_TASK_V60_TABLES
+            table: [] for table in self._NOTE_TASK_V60_RELATIONS
         }
         for row in column_rows:
             default = row.get("default_expression")
@@ -12270,7 +12404,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     None if default is None else "".join(str(default).lower().split()),
                 )
             )
-        if any(tuple(actual_columns[table]) != expected_columns[table] for table in self._NOTE_TASK_V60_TABLES):
+        if any(
+            tuple(actual_columns[table]) != expected_columns[table]
+            for table in self._NOTE_TASK_V60_RELATIONS
+        ):
             raise SchemaError("Notes task v60 PostgreSQL column catalog drifted.")  # noqa: TRY003
 
         constraint_rows = backend.execute(
@@ -12306,7 +12443,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND table_row.relname = ANY(%s)
                AND constraint_row.contype <> 'n'
             """,
-            (list(self._NOTE_TASK_V60_TABLES),),
+            (list(self._NOTE_TASK_V60_RELATIONS),),
             connection=conn,
         ).rows
 
@@ -12370,6 +12507,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "'unsupported_markdown'])"
             ),
             "task_projection_drifts_status_check": "status=any(array['open','resolved','dismissed'])",
+            "note_task_scope_authority_owner_check": "char_length(btrim(owner_user_id))>0",
+            "note_task_scope_authority_dataset_check": (
+                "char_length(btrim(dataset_id))>0anddataset_id=btrim(dataset_id)and"
+                "dataset_id<>'local-unbound'"
+            ),
         }
         expected_primary = {
             "note_tasks_pkey": ("note_tasks", ("owner_user_id", "dataset_id", "id")),
@@ -12385,6 +12527,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ),
             "task_projection_drifts_pkey": (
                 "task_projection_drifts", ("owner_user_id", "dataset_id", "id"),
+            ),
+            "note_task_scope_authority_pkey": (
+                "note_task_scope_authority", ("owner_user_id",),
             ),
         }
         expected_foreign = {
@@ -12515,7 +12660,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                )
              ORDER BY index_table.relname,index_key.ordinality
             """,
-            (list(self._NOTE_TASK_V60_TABLES),),
+            (list(self._NOTE_TASK_V60_RELATIONS),),
             connection=conn,
         ).rows
         indexes: dict[str, dict[str, Any]] = {}
@@ -12826,7 +12971,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         forced_relations = self._verify_note_task_v59_authority_catalog(
             relation_rows, policy_rows
         )
-        collision_names = ("task_projection_drifts", *(f"{table}_v60" for table in self._NOTE_TASK_V60_TABLES))
+        collision_names = (
+            "task_projection_drifts",
+            self._NOTE_TASK_SCOPE_AUTHORITY_TABLE,
+            *(f"{table}_v60" for table in self._NOTE_TASK_V60_RELATIONS),
+        )
         collisions = backend.execute(
             """
             SELECT table_row.relname AS relation_name
@@ -12959,7 +13108,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "task_events", "note_tasks",
         ):
             backend.execute(f"DROP TABLE {table}", connection=conn)  # nosec B608
-        for table in self._NOTE_TASK_V60_TABLES:
+        for table in self._NOTE_TASK_V60_RELATIONS:
             backend.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}", connection=conn)  # nosec B608
         for statement in self._note_task_v60_postgres_indexes():
             backend.execute(statement, connection=conn)
@@ -12973,10 +13122,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 f"ALTER TABLE IF EXISTS {table} " in statement
                 or f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}" in statement
                 or f"CREATE POLICY {table}_tenant_isolation ON {table}" in statement
-                for table in self._NOTE_TASK_V60_TABLES
+                for table in self._NOTE_TASK_V60_RELATIONS
             ):
                 task_rls.append(statement)
-        if len(task_rls) != 4 * len(self._NOTE_TASK_V60_TABLES):
+        if len(task_rls) != 4 * len(self._NOTE_TASK_V60_RELATIONS):
             raise SchemaError("Notes task v60 RLS definition is not canonical.")  # noqa: TRY003
         for statement in task_rls:
             backend.execute(statement, connection=conn)
@@ -37058,6 +37207,7 @@ for _task_store_method in (
     "set_reconciliation_state",
     "candidate_notes_for_task_discovery",
     "count_candidate_notes_for_task_discovery",
+    "resolve_task_compatibility_dataset_id",
     "bind_local_task_graph_to_dataset",
 ):
     setattr(

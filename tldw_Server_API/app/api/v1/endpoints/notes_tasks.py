@@ -134,6 +134,14 @@ def _note_summary(db: CharactersRAGDB, note_id: str) -> TaskNoteSummaryResponse 
     )
 
 
+def _timestamp_response(value: Any) -> str | None:
+    """Normalize backend timestamp values at the existing string response boundary."""
+    if value is None:
+        return None
+    isoformat = getattr(value, "isoformat", None)
+    return str(isoformat() if callable(isoformat) else value)
+
+
 def _task_response(
     db: CharactersRAGDB,
     task: dict[str, Any],
@@ -154,9 +162,9 @@ def _task_response(
         metadata=dict(task.get("metadata_json") or {}),
         projection_status=task["projection_status"],
         version=int(task["version"]),
-        created_at=task.get("created_at"),
-        updated_at=task.get("updated_at"),
-        completed_at=task.get("completed_at"),
+        created_at=_timestamp_response(task.get("created_at")),
+        updated_at=_timestamp_response(task.get("updated_at")),
+        completed_at=_timestamp_response(task.get("completed_at")),
         note=_note_summary(db, str(task["note_id"])),
         projection=_projection_response(projection),
     )
@@ -351,8 +359,8 @@ async def update_task_activity_state(
         return TaskActivityStateResponse(
             event_id=str(state_row["event_id"]),
             user_id=str(state_row["user_id"]),
-            read_at=state_row.get("read_at"),
-            dismissed_at=state_row.get("dismissed_at"),
+            read_at=_timestamp_response(state_row.get("read_at")),
+            dismissed_at=_timestamp_response(state_row.get("dismissed_at")),
         )
     except Exception as exc:
         _handle_task_error(exc)
@@ -531,6 +539,9 @@ async def reconcile_note_tasks(
 
 
 def _activity_response(event: dict[str, Any], state_row: dict[str, Any] | None) -> TaskActivityResponse:
+    created_at = _timestamp_response(event.get("created_at"))
+    if created_at is None:
+        raise ValueError("Task activity created_at is required.")
     return TaskActivityResponse(
         id=str(event["id"]),
         task_id=event.get("task_id"),
@@ -543,7 +554,7 @@ def _activity_response(event: dict[str, Any], state_row: dict[str, Any] | None) 
         approval_id=event.get("approval_id"),
         old_value=event.get("old_value_json"),
         new_value=event.get("new_value_json"),
-        created_at=str(event["created_at"]),
-        read_at=state_row.get("read_at") if state_row else None,
-        dismissed_at=state_row.get("dismissed_at") if state_row else None,
+        created_at=created_at,
+        read_at=_timestamp_response(state_row.get("read_at")) if state_row else None,
+        dismissed_at=_timestamp_response(state_row.get("dismissed_at")) if state_row else None,
     )

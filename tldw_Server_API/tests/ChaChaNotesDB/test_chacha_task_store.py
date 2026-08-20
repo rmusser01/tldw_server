@@ -48,7 +48,7 @@ def test_bind_local_task_graph_has_one_strict_postgres_and_sqlite_contract() -> 
     bind_source = inspect.getsource(TaskStore.bind_local_task_graph_to_dataset)
 
     assert "only supported by SQLite" not in bind_source
-    assert "LOCK TABLE notes, note_tasks, task_note_projections, task_events" in source
+    assert "LOCK TABLE note_task_scope_authority, notes, note_tasks" in source
     assert "IN ACCESS EXCLUSIVE MODE" in source
     assert "_get_schema_version_postgres" in source
     assert "_verify_note_task_schema_postgres" in source
@@ -57,6 +57,111 @@ def test_bind_local_task_graph_has_one_strict_postgres_and_sqlite_contract() -> 
     assert "FORCE ROW LEVEL SECURITY" in source
     assert "_note_task_v60_hash" in source
     assert "complete-set verification" in source
+
+
+def test_compatibility_resolver_is_one_indexed_authority_lookup() -> None:
+    source = inspect.getsource(TaskStore.resolve_task_compatibility_dataset_id)
+
+    assert "note_task_scope_authority" in source
+    assert "SELECT owner_user_id,dataset_id" in source
+    for forbidden in (
+        "ACCESS EXCLUSIVE",
+        "ROW LEVEL SECURITY",
+        "SELECT DISTINCT",
+        "_BIND_TABLE_ORDER",
+        "_verify_note_task_schema_postgres",
+    ):
+        assert forbidden not in source
+
+
+def test_every_task_graph_write_checks_the_private_scope_authority() -> None:
+    for method_name in (
+        "create_task",
+        "update_unlinked_task_metadata_record_only",
+        "update_task_record",
+        "set_task_projection",
+        "mark_task_unlinked",
+        "soft_delete_task",
+        "record_task_event",
+        "mark_task_activity_read",
+        "mark_task_activity_dismissed",
+        "set_reconciliation_state",
+    ):
+        source = inspect.getsource(getattr(TaskStore, method_name))
+        assert "_require_authorized_write_scope" in source, method_name
+
+
+def test_empty_bind_persists_immutable_authority_and_guards_writes(
+    db: CharactersRAGDB,
+) -> None:
+    zero_counts = {
+        table: 0 for table, _ordering in db.task_store._BIND_TABLE_ORDER
+    }
+
+    assert db.bind_local_task_graph_to_dataset(
+        owner_user_id=db.client_id,
+        target_dataset_id="dataset-a",
+    ) == zero_counts
+    assert db.resolve_task_compatibility_dataset_id(
+        owner_user_id=db.client_id
+    ) == "dataset-a"
+    assert db.bind_local_task_graph_to_dataset(
+        owner_user_id=db.client_id,
+        target_dataset_id="dataset-a",
+    ) == zero_counts
+    with pytest.raises(ConflictError, match="immutable"):
+        db.bind_local_task_graph_to_dataset(
+            owner_user_id=db.client_id,
+            target_dataset_id="dataset-b",
+        )
+
+    note_id = _create_note(db)
+    with pytest.raises(ConflictError, match="scope conflicts"):
+        db.create_task(
+            owner_user_id=db.client_id,
+            dataset_id=LOCAL_UNBOUND,
+            note_id=note_id,
+            text="Wrong scope",
+        )
+    task = db.create_task(
+        owner_user_id=db.client_id,
+        dataset_id="dataset-a",
+        note_id=note_id,
+        text="Bound scope",
+    )
+    rebound = db.bind_local_task_graph_to_dataset(
+        owner_user_id=db.client_id,
+        target_dataset_id="dataset-a",
+    )
+    assert rebound["note_tasks"] == 1
+    assert db.get_task(
+        owner_user_id=db.client_id,
+        dataset_id="dataset-a",
+        task_id=task["id"],
+    )["id"] == task["id"]
+
+
+def test_idempotent_bind_rejects_authority_sentinel_inconsistency(
+    db: CharactersRAGDB,
+) -> None:
+    db.bind_local_task_graph_to_dataset(
+        owner_user_id=db.client_id,
+        target_dataset_id="dataset-a",
+    )
+    note_id = _create_note(db)
+    now = db._get_current_utc_timestamp_iso()
+    db.execute_query(
+        "INSERT INTO note_task_reconciliation_state("
+        "owner_user_id,dataset_id,note_id,note_version,status,reconciled_at,"
+        "item_count,warning_count,cursor) VALUES (?,?,?,?,?,?,?,?,?)",
+        (db.client_id, LOCAL_UNBOUND, note_id, 1, "complete", now, 0, 0, None),
+    )
+
+    with pytest.raises(ConflictError, match="authority conflicts"):
+        db.bind_local_task_graph_to_dataset(
+            owner_user_id=db.client_id,
+            target_dataset_id="dataset-a",
+        )
 
 
 def test_canonical_task_store_methods_are_keyword_only_scope_first() -> None:
@@ -2051,12 +2156,20 @@ def test_bind_local_task_graph_rekeys_complete_scope_atomically(db: CharactersRA
 def test_bind_local_task_graph_rejects_target_collision_without_partial_rekey(db: CharactersRAGDB) -> None:
     note_id = _create_note(db)
     local_task = _create_task(db, note_id, task_id="collision-task")
+    db.execute_query(
+        "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+        (db.client_id, "dataset-a"),
+    )
     db.create_task(
         owner_user_id=db.client_id,
         dataset_id="dataset-a",
         task_id=local_task["id"],
         note_id=note_id,
         text="Existing target task",
+    )
+    db.execute_query(
+        "DELETE FROM note_task_scope_authority WHERE owner_user_id=?",
+        (db.client_id,),
     )
 
     with pytest.raises(ConflictError, match="collision"):

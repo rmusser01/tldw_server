@@ -298,6 +298,16 @@ def test_chacha_note_task_graph_rls_checks_scope_and_owned_parents_for_reads_and
         assert policy.count(f"{table}.owner_user_id = {owner}") == 2
         assert policy.count(f"{table}.dataset_id = {dataset}") == 2
 
+    authority_policy = sql.split(
+        "CREATE POLICY note_task_scope_authority_tenant_isolation "
+        "ON note_task_scope_authority",
+        1,
+    )[1].split(";", 1)[0]
+    assert authority_policy.count(
+        f"note_task_scope_authority.owner_user_id = {owner}"
+    ) == 2
+    assert "current_dataset_id" not in authority_policy
+
     task_policy = sql.split(
         "CREATE POLICY note_tasks_tenant_isolation ON note_tasks", 1
     )[1].split(";", 1)[0]

@@ -15,6 +15,7 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
     with sqlite3.connect(db_path) as conn:
         for table in (
             "note_attachments",
+            "note_task_scope_authority",
             "task_projection_drifts",
             "task_event_read_state",
             "task_note_projections",
@@ -52,6 +53,7 @@ def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
         "task_event_read_state",
         "task_note_projections",
         "note_task_reconciliation_state",
+        "note_task_scope_authority",
     } <= tables
     assert "tasks" not in tables  # nosec B101
     assert final_version == CharactersRAGDB._CURRENT_SCHEMA_VERSION  # nosec B101

@@ -4,7 +4,7 @@
 
 **Goal:** Establish strict dormant `notes.task`/`notes.task_activity` contracts, schema-v60 collision-safe task storage, forced PostgreSQL tenancy, separate canonical task revisions, and resumable readiness state without advertising either domain.
 
-**Architecture:** ChaChaNotes remains the product authority. Schema v60 transactionally rebuilds the existing task graph into owner/dataset-scoped tables, initially using a private local-unbound sentinel for legacy REST rows; explicit enrollment later rekeys the graph under the dataset fence. A shared contract module owns parsing and hashing, while public supported/writable capability lists remain unchanged.
+**Architecture:** ChaChaNotes remains the product authority. Schema v60 transactionally rebuilds the existing task graph into six owner/dataset-scoped graph tables plus one private owner-to-dataset authority relation, initially using a private local-unbound sentinel for legacy REST rows; explicit enrollment later records the immutable authority and rekeys the graph under the dataset fence. A shared contract module owns parsing and hashing, while public supported/writable capability lists remain unchanged.
 
 **Tech Stack:** Python 3.11, Pydantic, SQLite, PostgreSQL, FastAPI Sync models, pytest, Ruff, Bandit.
 
@@ -31,12 +31,12 @@
 
 - `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` — schema v60 migration, exact current-catalog verification, store wiring.
 - `tldw_Server_API/app/core/DB_Management/chacha/task_store.py` — owner/dataset predicates, canonical revision/hash, local-unbound binding/rekey helpers.
-- `tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py` — forced RLS for all six task-side tables.
+- `tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py` — six owner/dataset graph policies plus one owner-only scope-authority policy.
 - `tldw_Server_API/app/core/DB_Management/Sync_DB.py` — independent dormant readiness records and atomic state transitions.
 - `tldw_Server_API/app/core/Sync/v2/models.py` — known-but-dormant domain types and discoverable private schemas; do not add to supported lists.
 - `tldw_Server_API/app/core/Sync/v2/store.py` — readiness facade methods.
 - `tldw_Server_API/app/core/Sync/v2/profile.py` — sanitized internal readiness status only; no writable advertisement.
-- `tldw_Server_API/app/core/Notes_Tasks/service.py` — trusted local-unbound compatibility scope and enrolled scope forwarding.
+- `tldw_Server_API/app/core/Notes_Tasks/service.py` — trusted indexed scope-authority lookup and scope forwarding.
 - `tldw_Server_API/app/core/Notes_Tasks/reconciler.py` — trusted scope forwarding for legacy reconciliation.
 - `tldw_Server_API/app/api/v1/endpoints/notes_tasks.py` — authenticated owner scope forwarding without wire changes.
 - `tldw_Server_API/app/core/MCP_unified/modules/implementations/notes_module.py` — authenticated MCP owner scope forwarding without tool-schema changes.
@@ -192,7 +192,8 @@ git commit -m "feat(sync): define dormant Notes task contracts"
 
 - [ ] **Step 1: Write migration RED tests**
 
-Assert current version 60, fresh/59→60 parity, exact six table schemas, composite
+Assert current version 60, fresh/59→60 parity, exact six graph schemas plus the
+private scope-authority relation, composite
 owner/dataset identities and FKs, `ON UPDATE CASCADE`, task canonical revision/hash,
 event lifecycle columns, drift table, bounded indexes, integer storage classes,
 post-DDL rollback, collision failure, and version-last behavior.
@@ -218,8 +219,9 @@ Expected: current schema is 59 and v60 structures are absent.
 
 - [ ] **Step 3: Add fixed SQLite v60 DDL and conversion helpers**
 
-Define the six exact replacement table/index statements and pure row converters in
-`ChaChaNotes_DB.py`. Add unit tests for canonical column/check/index SQL, source-row
+Define the six exact graph replacement table/index statements, the private
+scope-authority relation, and pure row converters in `ChaChaNotes_DB.py`. Add unit
+tests for canonical column/check/index SQL, source-row
 conversion, local-unbound scope, and malformed-metadata diagnostics before invoking
 the initializer.
 
@@ -237,7 +239,7 @@ Under the existing initializer lock/transaction:
 
 1. require exact v59 authority and required source tables;
 2. reject any v60 target-table collision;
-3. create replacement tables with composite scope and exact checks;
+3. create six replacement graph tables plus the empty scope-authority relation with exact checks;
 4. map each source row to its proven owner and private local-unbound sentinel;
 5. compute canonical task hashes with the shared contract;
 6. source-count/hash verify every table;
@@ -264,8 +266,12 @@ service resolves either the enrolled dataset or the private local-unbound sentin
 Do not make endpoints or MCP tools accept a client-selected dataset. Update the REST,
 MCP, and reconciler call sites in this step and prove their public schemas unchanged.
 Add `bind_local_task_graph_to_dataset()` which verifies the complete source set,
-rejects target collisions, and updates the sentinel scope in one product transaction
-through cascading composite FKs.
+rejects target collisions, updates the sentinel scope, and records the immutable
+owner authority in one product transaction through cascading composite FKs. Empty
+graphs still record the target; same-target replay is idempotent, different-target
+rebind fails closed, and every shared task-store write must match the authority.
+Normal compatibility resolution is one indexed owner lookup and performs no table
+locks, catalog verification, RLS toggles, or graph scans.
 
 ```python
 def get_task(
@@ -358,13 +364,15 @@ Implement `_migrate_from_v59_to_v60_postgres(conn)` and
 initializer branches. Follow the reviewed v59 ordering: schema-version row lock first, fixed relation
 locks, catalog-owner/RLS verification, exact temporary FORCE handling only when
 needed, validate before DDL, transactional rebuild/copy/swap, restore FORCE, install
-all six canonical policies, exact verify, then version bump last. Current-v60
+the six graph policies plus the owner-only scope-authority policy, exact verify,
+then version bump last. Current-v60
 startup locks and verifies the full catalog; it never repairs drift silently.
 
-- [ ] **Step 5: Add all six forced-RLS policies**
+- [ ] **Step 5: Add all graph and scope-authority forced-RLS policies**
 
 Use owner/dataset predicates plus owned-note/task/event EXISTS checks in both USING
-and WITH CHECK. Enumerate all policies and reject extra permissive policies.
+and WITH CHECK for the six graph relations. Use an owner-only predicate for the
+private scope-authority relation. Enumerate all policies and reject extra permissive policies.
 
 - [ ] **Step 6: Run live GREEN and commit**
 

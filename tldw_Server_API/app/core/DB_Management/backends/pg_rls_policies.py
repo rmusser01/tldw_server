@@ -460,6 +460,12 @@ def build_chacha_rls_sql() -> list[str]:
     """.strip()
     add_tenant_policy("task_projection_drifts", drift_scope)
 
+    scope_authority_owner = """
+    note_task_scope_authority.owner_user_id =
+      current_setting('app.current_user_id', true)
+    """.strip()
+    add_tenant_policy("note_task_scope_authority", scope_authority_owner)
+
     note_edge_owner = """
     note_edges.user_id = current_setting('app.current_user_id', true)
     AND EXISTS (

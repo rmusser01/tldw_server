@@ -25,6 +25,7 @@ def _restore_reviewed_postgres_v59_task_source(db: CharactersRAGDB) -> None:
     """Replace the fresh v60 task graph with the exact reviewed empty v59 source."""
     with db.transaction() as conn:
         for table in (
+            "note_task_scope_authority",
             "task_projection_drifts",
             "task_event_read_state",
             "task_note_projections",
@@ -151,29 +152,63 @@ def _create_complete_postgres_local_task_graph(
     }
 
 
+def _seed_occupied_target_without_authority(
+    db: CharactersRAGDB,
+    *,
+    owner: str,
+    target: str,
+    note_id: str,
+) -> None:
+    """Create a deliberate split-scope fixture outside the guarded product path."""
+    db.execute_query(
+        "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+        (owner, target),
+    )
+    try:
+        db.create_task(
+            owner_user_id=owner,
+            dataset_id=target,
+            task_id=str(uuid4()),
+            note_id=note_id,
+            text="Occupied target",
+            actor_type=None,
+        )
+    finally:
+        db.execute_query(
+            "DELETE FROM note_task_scope_authority WHERE owner_user_id=?",
+            (owner,),
+        )
+
+
 def _postgres_task_force_flags(conn: Any) -> dict[str, bool]:
     rows = conn.execute(
         "SELECT relname,relforcerowsecurity FROM pg_class c "
         "JOIN pg_namespace n ON n.oid=c.relnamespace "
         "WHERE n.nspname=current_schema() AND c.relname=ANY(?)",
-        (list(CharactersRAGDB._NOTE_TASK_V60_TABLES),),
+        (list(CharactersRAGDB._NOTE_TASK_V60_RELATIONS),),
     ).fetchall()
     return {str(row["relname"]): bool(row["relforcerowsecurity"]) for row in rows}
 
 
-def _postgres_notes_authority_snapshot(backend: Any) -> tuple[tuple[object, ...], ...]:
+def _postgres_rls_authority_snapshot(
+    backend: Any,
+    *,
+    table: str,
+) -> tuple[tuple[object, ...], ...]:
     with backend.transaction() as conn:
         relation = backend.execute(
             "SELECT relrowsecurity,relforcerowsecurity,relowner=current_user::regrole "
             "AS is_table_owner,pg_has_role(current_user,n.nspowner,'USAGE') "
             "AS is_schema_owner FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-            "WHERE n.nspname=current_schema() AND c.relname='notes'",
+            "WHERE n.nspname=current_schema() AND c.relname=?",
+            (table,),
             connection=conn,
         ).rows
         policies = backend.execute(
             "SELECT policyname,permissive,roles::text AS roles,cmd,qual,with_check "
-            "FROM pg_policies WHERE schemaname=current_schema() AND tablename='notes' "
+            "FROM pg_policies WHERE schemaname=current_schema() AND tablename=? "
             "ORDER BY policyname",
+            (table,),
             connection=conn,
         ).rows
     return (
@@ -221,13 +256,8 @@ def test_postgres_bind_local_task_graph_rejects_cross_owner_and_occupied_target(
             db.bind_local_task_graph_to_dataset(
                 owner_user_id="950022", target_dataset_id=target
             )
-        db.create_task(
-            owner_user_id=owner,
-            dataset_id=target,
-            task_id=str(uuid4()),
-            note_id=note_id,
-            text="Occupied target",
-            actor_type=None,
+        _seed_occupied_target_without_authority(
+            db, owner=owner, target=target, note_id=note_id
         )
         with pytest.raises(ConflictError, match="target collision"):
             db.bind_local_task_graph_to_dataset(
@@ -284,13 +314,8 @@ def test_postgres_bind_caught_collision_restores_force_in_caller_transaction(
 
     try:
         note_id, task_id, _counts = _create_complete_postgres_local_task_graph(db)
-        db.create_task(
-            owner_user_id=owner,
-            dataset_id=target,
-            task_id=str(uuid4()),
-            note_id=note_id,
-            text="Occupied target",
-            actor_type=None,
+        _seed_occupied_target_without_authority(
+            db, owner=owner, target=target, note_id=note_id
         )
         with db.transaction() as conn:
             with pytest.raises(ConflictError, match="target collision"):
@@ -300,7 +325,7 @@ def test_postgres_bind_caught_collision_restores_force_in_caller_transaction(
                     conn=conn,
                 )
             assert _postgres_task_force_flags(conn) == dict.fromkeys(
-                CharactersRAGDB._NOTE_TASK_V60_TABLES, True
+                CharactersRAGDB._NOTE_TASK_V60_RELATIONS, True
             )
 
         assert db.get_task(
@@ -341,7 +366,7 @@ def test_postgres_bind_caught_hash_failure_rolls_back_rekey_and_restores_force(
                     conn=conn,
                 )
             assert _postgres_task_force_flags(conn) == dict.fromkeys(
-                CharactersRAGDB._NOTE_TASK_V60_TABLES, True
+                CharactersRAGDB._NOTE_TASK_V60_RELATIONS, True
             )
 
         assert db.get_task(
@@ -372,12 +397,12 @@ def test_postgres_note_task_schema_v60_is_authoritative(
                 "SELECT tablename, policyname FROM pg_policies "
                 "WHERE schemaname = current_schema() AND tablename = ANY(?) "
                 "ORDER BY tablename, policyname",
-                (list(CharactersRAGDB._NOTE_TASK_V60_TABLES),),
+                (list(CharactersRAGDB._NOTE_TASK_V60_RELATIONS),),
             ).fetchall()
         assert version == 60
         assert [(row["tablename"], row["policyname"]) for row in policy_rows] == [
             (table, f"{table}_tenant_isolation")
-            for table in sorted(CharactersRAGDB._NOTE_TASK_V60_TABLES)
+            for table in sorted(CharactersRAGDB._NOTE_TASK_V60_RELATIONS)
         ]
     finally:
         db.close_all_connections()
@@ -412,13 +437,65 @@ def test_postgres_current_v60_rejects_notes_authority_drift_without_repair(
         with db.transaction() as conn:
             for statement in drift_statements:
                 conn.execute(statement)
-        drifted = _postgres_notes_authority_snapshot(backend)
+        drifted = _postgres_rls_authority_snapshot(backend, table="notes")
         db.close_all_connections()
         drift_backend = DatabaseBackendFactory.create_backend(pg_database_config)
         with pytest.raises(CharactersRAGDBError, match="ownership or RLS|policy catalog"):
             startup_db = CharactersRAGDB(":memory:", client_id=owner, backend=drift_backend)
         observer_backend = DatabaseBackendFactory.create_backend(pg_database_config)
-        assert _postgres_notes_authority_snapshot(observer_backend) == drifted
+        assert _postgres_rls_authority_snapshot(observer_backend, table="notes") == drifted
+    finally:
+        if startup_db is not None:
+            startup_db.close_all_connections()
+        db.close_all_connections()
+        backend.get_pool().close_all()
+        if drift_backend is not None:
+            drift_backend.get_pool().close_all()
+        if observer_backend is not None:
+            observer_backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize(
+    "drift_statements",
+    (
+        ("ALTER TABLE note_task_scope_authority NO FORCE ROW LEVEL SECURITY",),
+        ("DROP POLICY note_task_scope_authority_tenant_isolation ON note_task_scope_authority",),
+        (
+            "CREATE POLICY note_task_scope_authority_open ON note_task_scope_authority "
+            "USING (true) WITH CHECK (true)",
+        ),
+        (
+            "DROP POLICY note_task_scope_authority_tenant_isolation "
+            "ON note_task_scope_authority",
+            "CREATE POLICY note_task_scope_authority_tenant_isolation "
+            "ON note_task_scope_authority USING (true) WITH CHECK (true)",
+        ),
+    ),
+    ids=("no-force", "missing-policy", "extra-policy", "weakened-policy"),
+)
+def test_postgres_current_v60_rejects_scope_authority_drift_without_repair(
+    pg_database_config: DatabaseConfig,
+    drift_statements: tuple[str, ...],
+) -> None:
+    owner = "950028"
+    table = "note_task_scope_authority"
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id=owner, backend=backend)
+    drift_backend = None
+    observer_backend = None
+    startup_db = None
+
+    try:
+        with db.transaction() as conn:
+            for statement in drift_statements:
+                conn.execute(statement)
+        drifted = _postgres_rls_authority_snapshot(backend, table=table)
+        db.close_all_connections()
+        drift_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        with pytest.raises(CharactersRAGDBError, match="ownership or RLS|policy catalog"):
+            startup_db = CharactersRAGDB(":memory:", client_id=owner, backend=drift_backend)
+        observer_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        assert _postgres_rls_authority_snapshot(observer_backend, table=table) == drifted
     finally:
         if startup_db is not None:
             startup_db.close_all_connections()
@@ -441,6 +518,10 @@ def test_postgres_dataset_cursor_page_uses_exact_index(
     note_id = db.add_note("Cursor parent", "Body")
 
     try:
+        db.bind_local_task_graph_to_dataset(
+            owner_user_id=owner,
+            target_dataset_id=dataset_id,
+        )
         with db.transaction() as conn:
             for cursor in range(1, 65):
                 target_event = db.record_task_event(
@@ -456,6 +537,15 @@ def test_postgres_dataset_cursor_page_uses_exact_index(
                     "WHERE owner_user_id=? AND dataset_id=? AND id=?",
                     (cursor, owner, dataset_id, target_event["id"]),
                 )
+            conn.execute(
+                "UPDATE note_task_scope_authority SET dataset_id=? WHERE owner_user_id=?",
+                (other_dataset_id, owner),
+            )
+            conn.execute(
+                "SELECT set_config('app.current_dataset_id', ?, true)",
+                (other_dataset_id,),
+            )
+            for cursor in range(1, 65):
                 other_event = db.record_task_event(
                     owner_user_id=owner,
                     dataset_id=other_dataset_id,
@@ -469,6 +559,10 @@ def test_postgres_dataset_cursor_page_uses_exact_index(
                     "WHERE owner_user_id=? AND dataset_id=? AND id=?",
                     (cursor, owner, other_dataset_id, other_event["id"]),
                 )
+            conn.execute(
+                "UPDATE note_task_scope_authority SET dataset_id=? WHERE owner_user_id=?",
+                (dataset_id, owner),
+            )
             conn.execute("ANALYZE task_events")
             conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset_id,))
             conn.execute("SET LOCAL enable_seqscan=off")
@@ -520,6 +614,14 @@ def test_postgres_note_tasks_allow_same_id_for_two_owners(
     try:
         db_a.add_note("Owner A", "Body", note_id=note_a)
         db_b.add_note("Owner B", "Body", note_id=note_b)
+        db_a.bind_local_task_graph_to_dataset(
+            owner_user_id=owner_a,
+            target_dataset_id=dataset_id,
+        )
+        db_b.bind_local_task_graph_to_dataset(
+            owner_user_id=owner_b,
+            target_dataset_id=dataset_id,
+        )
         first = db_a.create_task(
             owner_user_id=owner_a,
             dataset_id=dataset_id,
@@ -536,14 +638,15 @@ def test_postgres_note_tasks_allow_same_id_for_two_owners(
             text="Same ID",
             actor_type=None,
         )
-        third = db_a.create_task(
-            owner_user_id=owner_a,
-            dataset_id=other_dataset_id,
-            task_id=task_id,
-            note_id=note_a,
-            text="Same ID, other dataset",
-            actor_type=None,
-        )
+        with pytest.raises(ConflictError, match="bound authority"):
+            db_a.create_task(
+                owner_user_id=owner_a,
+                dataset_id=other_dataset_id,
+                task_id=task_id,
+                note_id=note_a,
+                text="Same ID, other dataset",
+                actor_type=None,
+            )
         event_a = db_a.record_task_event(
             owner_user_id=owner_a,
             dataset_id=dataset_id,
@@ -575,7 +678,6 @@ def test_postgres_note_tasks_allow_same_id_for_two_owners(
 
         assert first["owner_user_id"] == owner_a
         assert second["owner_user_id"] == owner_b
-        assert third["dataset_id"] == other_dataset_id
         assert db_a.get_task(
             owner_user_id=owner_a,
             dataset_id=dataset_id,
@@ -599,6 +701,10 @@ def test_postgres_note_tasks_allow_same_id_for_two_owners(
                     f"GRANT SELECT, INSERT, UPDATE ON {ident(table)} TO {ident(role_name)}",
                     connection=conn,
                 )
+            backend_a.execute(
+                f"GRANT SELECT ON note_task_scope_authority TO {ident(role_name)}",
+                connection=conn,
+            )
             backend_a.execute(f"GRANT {ident(role_name)} TO CURRENT_USER", connection=conn)
         role_created = True
 
@@ -615,6 +721,13 @@ def test_postgres_note_tasks_allow_same_id_for_two_owners(
                 connection=conn,
             ).rows[0]
             assert principal == {"rolsuper": False, "rolbypassrls": False}
+            visible_authority = backend_a.execute(
+                "SELECT owner_user_id,dataset_id FROM note_task_scope_authority",
+                connection=conn,
+            ).rows
+            assert visible_authority == [
+                {"owner_user_id": owner_a, "dataset_id": dataset_id}
+            ]
             visible_tasks = backend_a.execute(
                 "SELECT owner_user_id,note_id FROM note_tasks WHERE id=?", (task_id,), connection=conn
             ).rows
@@ -831,7 +944,7 @@ def _populate_reviewed_postgres_v59_source(
 
 
 def _postgres_v60_task_catalog_snapshot(db: CharactersRAGDB) -> dict[str, object]:
-    tables = list(CharactersRAGDB._NOTE_TASK_V60_TABLES)
+    tables = list(CharactersRAGDB._NOTE_TASK_V60_RELATIONS)
     with db.transaction() as conn:
         relation_rows = conn.execute(
             "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class c "
@@ -895,8 +1008,9 @@ def _postgres_v59_source_snapshot(db: CharactersRAGDB) -> dict[str, object]:
     }
     collision_names = (
         "task_projection_drifts",
+        "note_task_scope_authority",
         "uq_notes_owner_id",
-        *(f"{table}_v60" for table in CharactersRAGDB._NOTE_TASK_V60_TABLES),
+        *(f"{table}_v60" for table in CharactersRAGDB._NOTE_TASK_V60_RELATIONS),
     )
     with db.transaction() as conn:
         version = conn.execute(
