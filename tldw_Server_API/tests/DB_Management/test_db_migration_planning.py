@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +27,86 @@ def test_migrate_to_version_rejects_missing_intermediate_versions(tmp_path: Path
 
     with pytest.raises(MigrationError, match=r"Missing migration versions: \[2\]"):
         migrator.migrate_to_version(3, create_backup=False)
+
+
+def test_execute_migration_rolls_back_failed_multi_statement_script(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE schema_version (version INTEGER)")
+        conn.execute("INSERT INTO schema_version VALUES (0)")
+        conn.commit()
+
+    migrator = DatabaseMigrator(str(db_path), str(tmp_path / "migrations"))
+    migrator.initialize_migration_table()
+    migration = db_migration_module.Migration(
+        version=1,
+        name="partial_failure_demo",
+        up_sql=(
+            "CREATE TABLE kept_after_failure (id INTEGER); "
+            "INSERT INTO missing_table VALUES (1);"
+        ),
+    )
+
+    with pytest.raises(MigrationError, match="missing_table"):
+        migrator.execute_migration(migration)
+
+    with sqlite3.connect(db_path) as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        rows = conn.execute(
+            "SELECT version, success, error_message FROM schema_migrations"
+        ).fetchall()
+        version = conn.execute("SELECT version FROM schema_version").fetchone()[0]
+
+    assert "kept_after_failure" not in tables
+    assert rows == [(1, 0, "no such table: missing_table")]
+    assert version == 0
+
+
+def test_prepare_migration_statements_extracts_function_style_foreign_key_pragmas() -> None:
+    pre, main, post = DatabaseMigrator._prepare_migration_statements(
+        """
+        PRAGMA foreign_keys(OFF);
+        CREATE TABLE parent (id INTEGER PRIMARY KEY);
+        PRAGMA foreign_keys(ON);
+        """
+    )
+
+    assert [statement.strip() for statement in pre] == ["PRAGMA foreign_keys(OFF);"]
+    assert [statement.strip() for statement in main] == [
+        "CREATE TABLE parent (id INTEGER PRIMARY KEY);"
+    ]
+    assert [statement.strip() for statement in post] == ["PRAGMA foreign_keys(ON);"]
+
+
+def test_split_sql_statements_checks_completeness_only_at_statement_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def _complete_statement(candidate: str) -> bool:
+        calls.append(candidate)
+        return candidate.endswith(";")
+
+    monkeypatch.setattr(db_migration_module.sqlite3, "complete_statement", _complete_statement)
+
+    sql = """
+    -- comment without semicolon
+    CREATE TABLE first (id INTEGER);
+    INSERT INTO first VALUES (1);
+    """
+
+    statements = DatabaseMigrator._split_sql_statements(sql)
+
+    assert [statement.strip() for statement in statements] == [
+        "-- comment without semicolon\n    CREATE TABLE first (id INTEGER);",
+        "INSERT INTO first VALUES (1);",
+    ]
+    assert len(calls) == sql.count(";")
 
 
 def test_migrate_to_version_rejects_rollback_without_down_sql(
