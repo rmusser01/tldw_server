@@ -32,6 +32,26 @@ def _build_guarded_app() -> FastAPI:
     return app
 
 
+def _build_mcp_body_guarded_app() -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/api/v1/mcp/request")
+    async def guarded_mcp_request(
+        request: Request,
+        _guard: None = Depends(enforce_http_security),
+    ):
+        return {"body": (await request.body()).decode("utf-8")}
+
+    @app.post("/api/v1/mcp/tools/execute")
+    async def guarded_mcp_tool(
+        request: Request,
+        _guard: None = Depends(enforce_http_security),
+    ):
+        return {"body": (await request.body()).decode("utf-8")}
+
+    return app
+
+
 def _clear_ip_access_controller_cache() -> None:
     ip_filter.get_ip_access_controller.cache_clear()  # type: ignore[attr-defined]
 
@@ -73,6 +93,79 @@ def test_enforce_http_security_rejects_large_payload(monkeypatch):
         assert r_big.status_code == 413
     finally:
         client.close()
+
+
+def test_mcp_http_guard_rejects_standalone_source_before_endpoint_materialization(monkeypatch):
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(
+        allowed_client_ips=[],
+        blocked_client_ips=[],
+        trust_x_forwarded_for=False,
+        trusted_proxy_depth=0,
+        trusted_proxy_ips=[],
+        http_max_body_bytes=4096,
+        client_cert_required=False,
+        client_cert_header=None,
+        client_cert_header_value=None,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.security.request_guards.get_config",
+        lambda: cfg,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.security.ip_filter.get_config",
+        lambda: cfg,
+    )
+    _clear_ip_access_controller_cache()
+
+    payload = b'{"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"html_document":"PRIVATE"}}}'
+    with TestClient(_build_mcp_body_guarded_app()) as client:
+        response = client.post(
+            "/api/v1/mcp/request",
+            content=payload,
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "standalone_html_creation_requires_generation"}
+    assert b"PRIVATE" not in response.content
+
+
+def test_mcp_http_guard_replays_allowed_structured_bytes_exactly(monkeypatch):
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(
+        allowed_client_ips=[],
+        blocked_client_ips=[],
+        trust_x_forwarded_for=False,
+        trusted_proxy_depth=0,
+        trusted_proxy_ips=[],
+        http_max_body_bytes=4096,
+        client_cert_required=False,
+        client_cert_header=None,
+        client_cert_header_value=None,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.security.request_guards.get_config",
+        lambda: cfg,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.security.ip_filter.get_config",
+        lambda: cfg,
+    )
+    _clear_ip_access_controller_cache()
+
+    payload = b'{ "arguments" : { "content_kind" : "structured_slides", "slides" : [ ] } }'
+    with TestClient(_build_mcp_body_guarded_app()) as client:
+        response = client.post(
+            "/api/v1/mcp/tools/execute",
+            content=payload,
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["body"].encode("utf-8") == payload
 
 
 def test_enforce_http_security_get_skips_body_read(monkeypatch):
