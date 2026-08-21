@@ -165,6 +165,29 @@ class ReconciliationBatchResult:
     results: list[ReconciliationResult]
 
 
+@dataclass(frozen=True)
+class TaskStoreScope:
+    """Trusted product scope used by compatibility REST and MCP callers."""
+
+    owner_user_id: str
+    dataset_id: str
+
+
+def resolve_task_compatibility_scope(
+    db: CharactersRAGDB,
+    *,
+    authenticated_owner_user_id: str,
+) -> TaskStoreScope:
+    """Resolve product-owned task scope without accepting a client dataset selector."""
+    owner = str(authenticated_owner_user_id).strip()
+    if not owner:
+        raise InputError("Task owner cannot be empty.")  # noqa: TRY003
+    if owner != str(db.client_id):
+        raise ConflictError("Task scope is unavailable.", entity="tasks", entity_id=owner)  # noqa: TRY003
+    dataset = db.resolve_task_compatibility_dataset_id(owner_user_id=owner)  # type: ignore[attr-defined]
+    return TaskStoreScope(owner_user_id=owner, dataset_id=dataset)
+
+
 class NotesTaskService:
     """Coordinate task-backed checklist reconciliation for saved notes."""
 
@@ -187,13 +210,20 @@ class NotesTaskService:
         note_version: int,
         content: str,
         actor: TaskActor,
+        owner_user_id: str | None = None,
     ) -> ReconciliationResult:
+        scope = resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=owner_user_id or db.client_id,
+        )
         return self._reconciler.reconcile_note(
             db=db,
             note_id=note_id,
             note_version=note_version,
             content=content,
             actor=actor,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
         )
 
     def reconcile_stale_notes(
@@ -202,9 +232,17 @@ class NotesTaskService:
         db: CharactersRAGDB,
         limit: int,
         actor: TaskActor,
+        owner_user_id: str | None = None,
     ) -> ReconciliationBatchResult:
+        scope = resolve_task_compatibility_scope(
+            db, authenticated_owner_user_id=owner_user_id or db.client_id
+        )
         work_limit = max(0, int(limit))
-        to_process = db.candidate_notes_for_task_discovery(limit=work_limit) if work_limit else []
+        to_process = db.candidate_notes_for_task_discovery(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            limit=work_limit,
+        ) if work_limit else []
         results: list[ReconciliationResult] = []
         for candidate in to_process:
             note = db.get_note_by_id(str(candidate["id"]))
@@ -217,9 +255,13 @@ class NotesTaskService:
                     note_version=int(note["version"]),
                     content=str(note.get("content") or ""),
                     actor=actor,
+                    owner_user_id=scope.owner_user_id,
                 )
             )
-        remaining = db.count_candidate_notes_for_task_discovery()
+        remaining = db.count_candidate_notes_for_task_discovery(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+        )
         return ReconciliationBatchResult(
             status="incomplete" if remaining else "clean",
             processed_notes=len(results),
@@ -233,6 +275,7 @@ class NotesTaskService:
         db: CharactersRAGDB,
         note_id: str,
         actor: TaskActor,
+        owner_user_id: str | None = None,
     ) -> ReconciliationResult:
         note = self._require_note(db, note_id)
         return self.reconcile_note(
@@ -241,6 +284,7 @@ class NotesTaskService:
             note_version=int(note["version"]),
             content=str(note.get("content") or ""),
             actor=actor,
+            owner_user_id=owner_user_id,
         )
 
     def ensure_note_reconciled(
@@ -249,9 +293,17 @@ class NotesTaskService:
         db: CharactersRAGDB,
         note_id: str,
         actor: TaskActor,
+        owner_user_id: str | None = None,
     ) -> ReconciliationResult | None:
+        scope = resolve_task_compatibility_scope(
+            db, authenticated_owner_user_id=owner_user_id or db.client_id
+        )
         note = self._require_note(db, note_id)
-        state = db.get_reconciliation_state(note_id)
+        state = db.get_reconciliation_state(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            note_id=note_id,
+        )
         if state is not None and int(state["note_version"]) == int(note["version"]):
             if state["status"] == "clean":
                 return None
@@ -267,6 +319,7 @@ class NotesTaskService:
             note_version=int(note["version"]),
             content=str(note.get("content") or ""),
             actor=actor,
+            owner_user_id=scope.owner_user_id,
         )
 
     def create_task_for_note(
@@ -279,7 +332,11 @@ class NotesTaskService:
         metadata: dict[str, Any],
         expected_note_version: int,
         actor: TaskActor,
+        owner_user_id: str | None = None,
     ) -> dict[str, Any]:
+        scope = resolve_task_compatibility_scope(
+            db, authenticated_owner_user_id=owner_user_id or db.client_id
+        )
         self._validate_task_text(text)
         self._validate_task_status(status)
         self._validate_metadata(metadata)
@@ -296,6 +353,7 @@ class NotesTaskService:
                 note_version=expected_note_version,
                 content=str(note.get("content") or ""),
                 actor=self._internal_reconciliation_actor(actor),
+                owner_user_id=scope.owner_user_id,
             )
             new_content = self._append_checklist_line(str(note.get("content") or ""), line)
             _write_note_content(
@@ -312,10 +370,15 @@ class NotesTaskService:
                 note_version=int(updated_note["version"]),
                 content=str(updated_note.get("content") or ""),
                 actor=actor,
+                owner_user_id=scope.owner_user_id,
             )
             if not result.created_task_ids:
                 raise ConflictError("Task creation did not create a task record.", entity="tasks", entity_id=note_id)
-            task = db.get_task(result.created_task_ids[-1])
+            task = db.get_task(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                task_id=result.created_task_ids[-1],
+            )
             if task is None:
                 raise ConflictError("Created task was not found.", entity="tasks", entity_id=note_id)
             return task
@@ -332,7 +395,11 @@ class NotesTaskService:
         status: str | None = None,
         metadata: dict[str, Any] | None = None,
         record_only: bool = False,
+        owner_user_id: str | None = None,
     ) -> dict[str, Any]:
+        scope = resolve_task_compatibility_scope(
+            db, authenticated_owner_user_id=owner_user_id or db.client_id
+        )
         if text is not None:
             self._validate_task_text(text)
         if status is not None:
@@ -343,10 +410,17 @@ class NotesTaskService:
         coordinator = active_coordinator(db, user_id=actor.actor_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
+            if conn is not None:
+                db.task_store.lock_authorized_write_scope(
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
+                    conn=conn,
+                )
             task = self._require_task_version(
                 db,
                 task_id=task_id,
                 expected_task_version=expected_task_version,
+                scope=scope,
                 conn=conn,
             )
             projection_status = str(task["projection_status"])
@@ -368,6 +442,7 @@ class NotesTaskService:
                     expected_task_version=expected_task_version,
                     metadata=metadata,
                     actor=actor,
+                    scope=scope,
                 )
             if projection_status != "live":
                 raise ConflictError(
@@ -384,7 +459,7 @@ class NotesTaskService:
             if expected_note_version is None:
                 raise InputError("expected_note_version is required for projected task updates.")
 
-            projection = self._require_projection(db, task_id=task_id, conn=conn)
+            projection = self._require_projection(db, task_id=task_id, scope=scope, conn=conn)
             note = self._require_note_version(
                 db,
                 note_id=str(task["note_id"]),
@@ -429,6 +504,8 @@ class NotesTaskService:
             )
             updated_note_version = expected_note_version + 1
             updated_task = db.update_task_record(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
                 task_id=task_id,
                 expected_version=expected_task_version,
                 text=new_text,
@@ -451,6 +528,8 @@ class NotesTaskService:
                 line_number=int(projection["line_number"]),
             )
             db.set_task_projection(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
                 task_id=task_id,
                 note_id=str(note["id"]),
                 note_version=updated_note_version,
@@ -470,6 +549,7 @@ class NotesTaskService:
                 note_version=updated_note_version,
                 content=new_content,
                 actor=self._internal_reconciliation_actor(actor),
+                owner_user_id=scope.owner_user_id,
             )
             return updated_task
 
@@ -482,14 +562,25 @@ class NotesTaskService:
         expected_note_version: int | None,
         record_only: bool,
         actor: TaskActor,
+        owner_user_id: str | None = None,
     ) -> dict[str, Any]:
+        scope = resolve_task_compatibility_scope(
+            db, authenticated_owner_user_id=owner_user_id or db.client_id
+        )
         coordinator = active_coordinator(db, user_id=actor.actor_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
+            if conn is not None:
+                db.task_store.lock_authorized_write_scope(
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
+                    conn=conn,
+                )
             task = self._require_task_version(
                 db,
                 task_id=task_id,
                 expected_task_version=expected_task_version,
+                scope=scope,
                 conn=conn,
             )
             projection_status = str(task["projection_status"])
@@ -503,6 +594,8 @@ class NotesTaskService:
                         entity_id=task_id,
                     )
                 return db.soft_delete_task(
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
                     task_id=task_id,
                     expected_version=expected_task_version,
                     allow_record_only=True,
@@ -529,7 +622,7 @@ class NotesTaskService:
             if expected_note_version is None:
                 raise InputError("expected_note_version is required for projected task deletion.")
 
-            projection = self._require_projection(db, task_id=task_id, conn=conn)
+            projection = self._require_projection(db, task_id=task_id, scope=scope, conn=conn)
             note = self._require_note_version(
                 db,
                 note_id=str(task["note_id"]),
@@ -559,6 +652,8 @@ class NotesTaskService:
                 conn=conn,
             )
             deleted = db.soft_delete_task(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
                 task_id=task_id,
                 expected_version=expected_task_version,
                 projection_note_id=str(projection["note_id"]),
@@ -578,6 +673,7 @@ class NotesTaskService:
                 note_version=expected_note_version + 1,
                 content=new_content,
                 actor=self._internal_reconciliation_actor(actor),
+                owner_user_id=scope.owner_user_id,
             )
             return deleted
 
@@ -610,9 +706,16 @@ class NotesTaskService:
         *,
         task_id: str,
         expected_task_version: int,
+        scope: TaskStoreScope,
         conn: TaskConnection,
     ) -> dict[str, Any]:
-        task = db.task_store._fetch_task(task_id, include_deleted=False, conn=conn)
+        task = db.task_store._fetch_task(
+            task_id,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            include_deleted=False,
+            conn=conn,
+        )
         if task is None:
             raise ConflictError(f"Task with ID '{task_id}' not found.", entity="tasks", entity_id=task_id)
         if int(task["version"]) != int(expected_task_version):
@@ -624,8 +727,19 @@ class NotesTaskService:
         return task
 
     @staticmethod
-    def _require_projection(db: CharactersRAGDB, *, task_id: str, conn: TaskConnection) -> dict[str, Any]:
-        projection = db.get_task_projection(task_id, conn=conn)
+    def _require_projection(
+        db: CharactersRAGDB,
+        *,
+        task_id: str,
+        scope: TaskStoreScope,
+        conn: TaskConnection,
+    ) -> dict[str, Any]:
+        projection = db.get_task_projection(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+            conn=conn,
+        )
         if projection is None:
             raise ConflictError(f"Task projection is missing for task '{task_id}'.", entity="tasks", entity_id=task_id)
         return projection
@@ -786,8 +900,11 @@ class NotesTaskService:
         expected_task_version: int,
         metadata: dict[str, Any],
         actor: TaskActor,
+        scope: TaskStoreScope,
     ) -> dict[str, Any]:
         return db.update_unlinked_task_metadata_record_only(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
             task_id=str(task["id"]),
             expected_version=expected_task_version,
             metadata=metadata,

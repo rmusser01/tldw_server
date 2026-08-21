@@ -23,11 +23,13 @@ from .models import (
     server_frontend_mutation_blockers_for_policy,
     server_frontend_mutation_enabled_for_policy,
 )
+from .notes_task_readiness import parse_notes_task_readiness_record
 from .store import SyncV2Store
 
 SYNC_V2_M1_PROTOCOL_VERSION = "sync-v2-m1"
 BOOTSTRAP_MODES = frozenset({"server_frontend", "offline_sync"})
 DEFAULT_CLIENT_FAMILY = "chatbook"
+_DORMANT_TASK_READINESS_MISSING = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +102,26 @@ class SyncNotesAttachmentBootstrapDiagnostics:
         default_factory=list
     )
     recovery_actions: list[SyncRecoveryActionDescriptor] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDormantTaskDomainReadiness:
+    """Privacy-safe internal readiness for one dormant task domain."""
+
+    state: str = "not_enrolled"
+    source_count: int = 0
+    cursor: str | None = None
+    source_fingerprint: str | None = None
+    reason_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDormantTaskReadinessDiagnostics:
+    """Owner-scoped dormant task readiness without source payload values."""
+
+    task: SyncDormantTaskDomainReadiness
+    task_activity: SyncDormantTaskDomainReadiness
+    task_activity_capture_enabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,6 +334,37 @@ class SyncV2ProfileManager:
             dataset=dataset,
             device_id=device_id,
             created=None,
+        )
+
+    def notes_task_readiness_diagnostics(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+    ) -> SyncDormantTaskReadinessDiagnostics:
+        """Return owner-only, payload-free readiness for dormant task domains."""
+
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        return SyncDormantTaskReadinessDiagnostics(
+            task=_safe_dormant_task_readiness(
+                dataset.metadata.get(
+                    "notes_task_v1",
+                    _DORMANT_TASK_READINESS_MISSING,
+                ),
+                domain="notes_task",
+            ),
+            task_activity=_safe_dormant_task_readiness(
+                dataset.metadata.get(
+                    "notes_task_activity_v1",
+                    _DORMANT_TASK_READINESS_MISSING,
+                ),
+                domain="notes_task_activity",
+            ),
+            task_activity_capture_enabled=(
+                dataset.metadata.get("task_activity_capture_enabled") is True
+            ),
         )
 
     def notes_attachment_bootstrap_diagnostics(
@@ -660,6 +713,45 @@ def _safe_notes_attachment_status(
     }
 
 
+def _safe_dormant_task_readiness(
+    metadata: object,
+    *,
+    domain: str,
+) -> SyncDormantTaskDomainReadiness:
+    if metadata is _DORMANT_TASK_READINESS_MISSING:
+        return SyncDormantTaskDomainReadiness()
+
+    invalid = SyncDormantTaskDomainReadiness(
+        state="blocked",
+        reason_code=f"{domain}_readiness_state_invalid",
+    )
+    readiness_key = (
+        "notes_task_v1"
+        if domain == "notes_task"
+        else "notes_task_activity_v1"
+    )
+    result = parse_notes_task_readiness_record(
+        metadata,
+        readiness_key=readiness_key,
+    )
+    if result.record is None:
+        return invalid
+    record = result.record
+    cursor_hash = (
+        "sha256:"
+        + hashlib.sha256(record.source_cursor.encode("utf-8")).hexdigest()
+        if record.source_cursor is not None
+        else None
+    )
+    return SyncDormantTaskDomainReadiness(
+        state=record.state,
+        source_count=record.source_count,
+        cursor=cursor_hash,
+        source_fingerprint=record.source_fingerprint,
+        reason_code=record.reason_code,
+    )
+
+
 def _safe_non_negative_int(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
@@ -726,6 +818,8 @@ __all__ = [
     "BOOTSTRAP_MODES",
     "DEFAULT_CLIENT_FAMILY",
     "SYNC_V2_M1_PROTOCOL_VERSION",
+    "SyncDormantTaskDomainReadiness",
+    "SyncDormantTaskReadinessDiagnostics",
     "SyncNotesAttachmentBootstrapDiagnostics",
     "SyncNotesAttachmentCleanupSample",
     "SyncProfileDatasetStatus",

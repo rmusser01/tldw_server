@@ -81,6 +81,34 @@ deletion authority would make crash recovery unsafe.
 12. TASK-13005 is implemented as four atomic PRs: persistence contract, mutation
     lifecycle, legacy bootstrap, then restore/retention/diagnostics and rollout.
 
+## Operational completion and failure semantics
+
+The completed implementation applies the decisions above as one fail-closed
+lifecycle:
+
+- version-2 capability advertisement is dataset-bound and writable only when
+  blob transfer, the dedicated default-off rollout gate, encryption, enrollment,
+  and `notes_attachment_v2: ready` all agree;
+- canonical create, rename, replace, delete, and restore are idempotent,
+  optimistic mutations. Product projection and accepted-envelope history share
+  the materialization fence; injected projection or binding failures roll back
+  the accepted envelope rather than publishing partial authority;
+- restore ordering requires the owning Note before a live attachment ref, and
+  completeness is derived from immutable revision bindings and verified bytes;
+- legacy bootstrap is resumable and source-verified, publishes readiness only
+  after count/postcondition verification, retains source files for rollback,
+  and exposes only bounded hashed diagnostics;
+- historical binding release is monotonic and auditable. Physical collection
+  revalidates all blockers under the dataset fence, uses
+  `available -> deleting -> deleted`, and leaves retryable `deleting` state when
+  byte removal cannot be proven complete; and
+- diagnostics are read-only hints. Stable public errors and logs omit filenames,
+  source paths, storage keys, blob bytes, payloads, and secret metadata.
+
+No additional ADR is required for these operational details: they directly
+implement Decisions 2, 3, 6, 8, 9, and 10 without changing the ownership,
+storage, migration, or retention architecture selected here.
+
 ## Consequences
 
 - Users can rename, replace, delete, restore, and synchronize an attachment without

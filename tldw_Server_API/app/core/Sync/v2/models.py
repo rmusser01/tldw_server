@@ -36,6 +36,8 @@ SyncDomain = Literal[
     "notes.folder",
     "notes.folder_link",
     "notes.link",
+    "notes.task",
+    "notes.task_activity",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -437,6 +439,38 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     }
 
 
+def _sync_v2_internal_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
+    """Return private known-domain contracts without advertising dormant domains."""
+
+    from .notes_task_contract import (
+        NotesTaskActivityTombstoneV1,
+        NotesTaskActivityV1,
+        NotesTaskV1Payload,
+    )
+
+    schemas = sync_v2_domain_schemas()
+    task_schema = NotesTaskV1Payload.model_json_schema()
+    activity_schema = NotesTaskActivityV1.model_json_schema()
+    activity_tombstone_schema = NotesTaskActivityTombstoneV1.model_json_schema()
+    schemas.update(
+        {
+            "notes.task": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": task_schema,
+                "tombstone": task_schema,
+            },
+            "notes.task_activity": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": activity_schema,
+                "tombstone": activity_tombstone_schema,
+            },
+        }
+    )
+    return schemas
+
+
 def sync_v2_server_supported_adapter_versions() -> dict[SyncDomain, list[int]]:
     """Return bounded server-supported versions independently of writability."""
 
@@ -526,7 +560,7 @@ def normalize_supported_adapter_versions(
 
     requested = normalize_sync_v2_requested_domains(requested_domains)
     if value is None:
-        return {cast(SyncDomain, domain): [1] for domain in requested}
+        return {domain: [1] for domain in requested}
     if not isinstance(value, Mapping):
         raise ValueError("supported_adapter_versions must be an object")
     if len(value) > SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS:
@@ -538,7 +572,7 @@ def normalize_supported_adapter_versions(
     known = set(SYNC_V2_SUPPORTED_DOMAINS)
     requested_set = set(requested)
     normalized: dict[SyncDomain, list[int]] = {
-        cast(SyncDomain, domain): [1] for domain in requested
+        domain: [1] for domain in requested
     }
     for raw_domain, raw_versions in value.items():
         if not isinstance(raw_domain, str) or raw_domain not in known:
@@ -571,7 +605,7 @@ def normalize_supported_adapter_versions(
             )
         if len(set(versions)) != len(versions):
             raise ValueError("supported_adapter_versions contains duplicate adapter versions")
-        normalized[cast(SyncDomain, raw_domain)] = sorted(versions)
+        normalized[raw_domain] = sorted(versions)
     return normalized
 
 

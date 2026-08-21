@@ -2037,6 +2037,128 @@ def test_dataset_enroll_endpoint_rejects_forged_attachment_readiness(
     assert sync_service.store.list_datasets_for_user("user-1") == []
 
 
+@pytest.mark.parametrize(
+    ("metadata_key", "value", "private_marker"),
+    [
+        (
+            "notes_task_v1",
+            {
+                "state": "ready",
+                "source_cursor": "00000000-0000-4000-8000-000000000001",
+            },
+            "00000000-0000-4000-8000-000000000001",
+        ),
+        (
+            "notes_task_activity_v1",
+            {
+                "state": "ready",
+                "source_cursor": (
+                    "2026-08-13T00:00:00+00:00|"
+                    "00000000-0000-4000-8000-000000000011"
+                ),
+            },
+            "00000000-0000-4000-8000-000000000011",
+        ),
+        ("task_activity_capture_enabled", True, "task_activity_capture_enabled"),
+    ],
+)
+def test_dataset_enroll_endpoint_rejects_forged_task_readiness(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    metadata_key: str,
+    value: object,
+    private_marker: str,
+) -> None:
+    response = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": f"forged-{metadata_key}",
+            "scope_type": "personal",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+            "metadata": {metadata_key: value},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "error_code": "sync_reserved_dataset_enrollment",
+        "message": "Reserved Sync dataset capabilities require profile bootstrap.",
+    }
+    assert private_marker not in response.text
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+
+
+def test_dataset_enrollment_and_manifest_never_disclose_task_readiness_metadata(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    server_metadata = {
+        "notes_task_v1": {
+            "state": "ready",
+            "source_cursor": "00000000-0000-4000-8000-000000000001",
+            "source_count": 1,
+            "source_fingerprint": "a" * 64,
+            "reason_code": None,
+            "resume_phase": None,
+        },
+        "notes_task_activity_v1": {
+            "state": "ready",
+            "source_cursor": (
+                "2026-08-13T00:00:00+00:00|"
+                "00000000-0000-4000-8000-000000000011"
+            ),
+            "source_count": 1,
+            "source_fingerprint": "b" * 64,
+            "reason_code": None,
+            "resume_phase": None,
+        },
+        "task_activity_capture_enabled": True,
+    }
+    sync_service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-task-readiness-private",
+            owner_user_id="user-1",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={"label": "before", **server_metadata},
+        )
+    )
+
+    enrolled = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-task-readiness-private",
+            "scope_type": "personal",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+            "metadata": {"label": "after"},
+        },
+    )
+    manifest = client.get(
+        "/api/v1/sync/restore-manifest",
+        params={"dataset_id": "dataset-task-readiness-private"},
+    )
+    stored = sync_service.store.get_dataset(
+        "dataset-task-readiness-private",
+        owner_user_id="user-1",
+    )
+
+    assert enrolled.status_code == 200
+    assert enrolled.json()["metadata"] == {"label": "after"}
+    assert manifest.status_code == 200
+    assert manifest.json()["datasets"][0]["metadata"] == {"label": "after"}
+    assert stored is not None
+    assert stored.metadata == {"label": "after", **server_metadata}
+    for private_marker in (
+        "notes_task_v1",
+        "notes_task_activity_v1",
+        "task_activity_capture_enabled",
+        "00000000-0000-4000-8000-000000000011",
+    ):
+        assert private_marker not in enrolled.text
+        assert private_marker not in manifest.text
+
+
 def test_key_recovery_bundle_validation_error_does_not_expose_wrapped_material(
     client: TestClient,
     sync_service: SyncV2Service,

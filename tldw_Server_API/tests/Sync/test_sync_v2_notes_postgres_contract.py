@@ -340,14 +340,74 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
         with backend.transaction() as conn:
             db._create_attachment_revision_binding(
                 SyncAttachmentRevisionBindingCreate(
-                dataset_id="dataset-binding-pg",
+                    dataset_id="dataset-binding-pg",
                 attachment_id="11111111-1111-4111-8111-111111111111",
                 attachment_revision=1,
-                blob_hash="sha256:" + "a" * 64,
+                blob_hash="sha256:" + "c" * 64,
                 size_bytes=1,
                 establishing_server_cursor=1,
                 availability_at_acceptance="metadata_only",
                 ),
+                connection=conn,
+            )
+            for index in range(2, 130):
+                attachment_id = (
+                    f"{index:08x}-0000-4000-8000-{index:012x}"
+                )
+                db._create_attachment_revision_binding(
+                    SyncAttachmentRevisionBindingCreate(
+                        dataset_id="dataset-binding-pg",
+                        attachment_id=attachment_id,
+                        attachment_revision=1,
+                        blob_hash="sha256:" + "a" * 64,
+                        size_bytes=1,
+                        establishing_server_cursor=index,
+                        availability_at_acceptance="metadata_only",
+                    ),
+                    connection=conn,
+                )
+                db.execute(
+                    "UPDATE sync_attachment_revision_bindings "
+                    "SET resolved_blob_id = ? WHERE dataset_id = ? "
+                    "AND attachment_id = ? AND attachment_revision = ?",
+                    (
+                        f"resolved-blob-{index}",
+                        "dataset-binding-pg",
+                        attachment_id,
+                        1,
+                    ),
+                    connection=conn,
+                )
+            for index in range(130, 258):
+                attachment_id = (
+                    f"{index:08x}-0000-4000-8000-{index:012x}"
+                )
+                db._create_attachment_revision_binding(
+                    SyncAttachmentRevisionBindingCreate(
+                        dataset_id="dataset-binding-pg",
+                        attachment_id=attachment_id,
+                        attachment_revision=1,
+                        blob_hash="sha256:" + "a" * 64,
+                        size_bytes=1,
+                        establishing_server_cursor=index,
+                        availability_at_acceptance="metadata_only",
+                    ),
+                    connection=conn,
+                )
+                db.execute(
+                    "UPDATE sync_attachment_revision_bindings "
+                    "SET retention_released_at = ? WHERE dataset_id = ? "
+                    "AND attachment_id = ? AND attachment_revision = ?",
+                    (
+                        "2026-08-11T21:00:00+00:00",
+                        "dataset-binding-pg",
+                        attachment_id,
+                        1,
+                    ),
+                    connection=conn,
+                )
+            db.execute(
+                "ANALYZE sync_attachment_revision_bindings",
                 connection=conn,
             )
         with pytest.raises(SyncDatasetNotFoundError):
@@ -380,6 +440,7 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
             )
         with backend.transaction() as conn:
             db.execute("SET LOCAL enable_seqscan = off", connection=conn)
+            db.execute("SET LOCAL enable_bitmapscan = off", connection=conn)
             lookup_rows = db.execute(
                 "EXPLAIN SELECT attachment_id FROM sync_attachment_revision_bindings "
                 "WHERE dataset_id = ? AND attachment_id = ? AND attachment_revision = ?",
@@ -405,13 +466,32 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
                 ("owner-binding-pg", "dataset-binding-pg"),
                 connection=conn,
             ).rows
+            for index in range(258, 386):
+                db._create_attachment_revision_binding(
+                    SyncAttachmentRevisionBindingCreate(
+                        dataset_id="dataset-binding-pg",
+                        attachment_id=(
+                            f"{index:08x}-0000-4000-8000-{index:012x}"
+                        ),
+                        attachment_revision=1,
+                        blob_hash="sha256:" + "b" * 64,
+                        size_bytes=2,
+                        establishing_server_cursor=index,
+                        availability_at_acceptance="metadata_only",
+                    ),
+                    connection=conn,
+                )
+            db.execute(
+                "ANALYZE sync_attachment_revision_bindings",
+                connection=conn,
+            )
             digest_rows = db.execute(
                 "EXPLAIN SELECT attachment_id FROM sync_attachment_revision_bindings "
                 "WHERE dataset_id = ? AND blob_hash = ? AND size_bytes = ? "
                 "AND resolved_blob_id IS NULL AND retention_released_at IS NULL "
                 "ORDER BY establishing_server_cursor, attachment_id, attachment_revision "
                 "LIMIT 1000",
-                ("dataset-binding-pg", "sha256:" + "a" * 64, 1),
+                ("dataset-binding-pg", "sha256:" + "c" * 64, 1),
                 connection=conn,
             ).rows
             release_rows = db.execute(
@@ -442,6 +522,7 @@ def test_postgres_attachment_binding_lookup_and_unresolved_page_use_declared_ind
         release_plan = " ".join(str(next(iter(row.values()))) for row in release_rows)
         assert "sync_attachment_revision_bindings_pkey" in lookup_plan
         assert "idx_sync_attachment_bindings_unresolved" in page_plan
+        assert "Filter: (resolved_blob_id IS NULL)" not in page_plan
         assert "idx_sync_dataset_storage_namespaces_owner" in namespace_plan
         assert "idx_sync_attachment_bindings_pending_digest" in digest_plan
         assert "idx_sync_attachment_bindings_retention_release" in release_plan

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,6 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.Notes_Tasks.models import TaskActor
 from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService, _parse_checklist_line
-
 
 pytestmark = pytest.mark.unit
 
@@ -35,6 +35,15 @@ def _add_note(db: CharactersRAGDB, *, title: str, content: str) -> dict[str, Any
     return note
 
 
+def test_projected_mutations_lock_task_scope_before_reading_task_or_note_rows() -> None:
+    """Keep projected note writes in the same authority-first order as dataset bind."""
+    for method in (NotesTaskService.update_task, NotesTaskService.delete_task):
+        source = inspect.getsource(method)
+        fence = source.index("lock_authorized_write_scope")
+        assert fence < source.index("_require_task_version")
+        assert fence < source.index("_write_note_content")
+
+
 def test_create_task_for_note_rejects_invalid_status_without_rewriting_note(db: CharactersRAGDB) -> None:
     service = NotesTaskService()
     note = _add_note(db, title="Tasks", content="Intro\n")
@@ -53,7 +62,11 @@ def test_create_task_for_note_rejects_invalid_status_without_rewriting_note(db: 
     saved = db.get_note_by_id(str(note["id"]))
     assert saved is not None
     assert saved["content"] == "Intro\n"
-    assert db.list_tasks(note_id=str(note["id"])) == []
+    assert db.list_tasks(
+        note_id=str(note["id"]),
+        owner_user_id=db.client_id,
+        dataset_id="local-unbound",
+    ) == []
 
 
 @pytest.mark.parametrize(

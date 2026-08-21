@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Sync.v2.errors import (
@@ -89,6 +89,14 @@ from tldw_Server_API.app.core.Sync.v2.models import (
 from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
     SYNC_MUTATION_GROUP_MAX_SIZE,
 )
+from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
+    NOTES_TASK_READINESS_REASON_CODES_BY_KEY,
+    NOTES_TASK_READINESS_STATES,
+    NOTES_TASK_SERVER_METADATA_KEYS,
+    NotesTaskReadinessRecord,
+    default_notes_task_readiness_record,
+    parse_notes_task_readiness_record,
+)
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 from .backends.base import (
@@ -118,6 +126,21 @@ _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "payload_hash",
     "availability",
 }
+_NOTES_TASK_READINESS_TRANSITIONS = {
+    "not_enrolled": frozenset({"not_enrolled", "enrolling"}),
+    "enrolling": frozenset(
+        {"enrolling", "bootstrapping", "blocked", "not_enrolled"}
+    ),
+    "bootstrapping": frozenset(
+        {"bootstrapping", "verifying", "blocked", "not_enrolled"}
+    ),
+    "verifying": frozenset({"verifying", "ready", "blocked", "not_enrolled"}),
+    "blocked": frozenset(
+        {"blocked", "bootstrapping", "verifying", "not_enrolled"}
+    ),
+    "ready": frozenset({"ready"}),
+}
+_NOTES_TASK_LOCAL_UNBOUND_DATASET_ID = "local-unbound"
 
 
 def _is_rebase_required_conflict_source(
@@ -3377,11 +3400,14 @@ class SyncDatabase:
         self._validate_dataset_contract(dataset)
         now = utcnow_iso()
         domains_json = encode_json(dataset.domains, default=[])
-        metadata_json = encode_json(dataset.metadata, default={})
         with self.backend.transaction() as conn:
+            lock_suffix = (
+                " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+            )
             existing = _first(
                 self.execute(
-                    "SELECT * FROM sync_datasets WHERE dataset_id = ?",
+                    "SELECT * FROM sync_datasets WHERE dataset_id = ?"
+                    + lock_suffix,  # nosec B608 - backend-controlled row lock suffix.
                     (dataset.dataset_id,),
                     connection=conn,
                 )
@@ -3391,6 +3417,27 @@ class SyncDatabase:
                     raise SyncStoreError(
                         f"Sync dataset already belongs to another user: {dataset.dataset_id}"
                     )
+                raw_existing_metadata = existing.get("metadata_json")
+                if not isinstance(raw_existing_metadata, str):
+                    raise SyncStoreError("sync_dataset_metadata_invalid")
+                try:
+                    existing_metadata = json.loads(raw_existing_metadata)
+                except ValueError as exc:
+                    raise SyncStoreError("sync_dataset_metadata_invalid") from exc
+                if not isinstance(existing_metadata, dict):
+                    raise SyncStoreError("sync_dataset_metadata_invalid")
+                metadata = {
+                    key: value
+                    for key, value in dataset.metadata.items()
+                    if key not in NOTES_TASK_SERVER_METADATA_KEYS
+                }
+                metadata.update(
+                    {
+                        key: existing_metadata[key]
+                        for key in NOTES_TASK_SERVER_METADATA_KEYS
+                        if key in existing_metadata
+                    }
+                )
                 self.execute(
                     """
                     UPDATE sync_datasets
@@ -3410,7 +3457,7 @@ class SyncDatabase:
                         dataset.scope_type,
                         dataset.encryption_policy,
                         domains_json,
-                        metadata_json,
+                        encode_json(metadata, default={}),
                         now,
                         dataset.archived_at,
                         dataset.dataset_id,
@@ -3434,7 +3481,7 @@ class SyncDatabase:
                         dataset.scope_type,
                         dataset.encryption_policy,
                         domains_json,
-                        metadata_json,
+                        encode_json(dataset.metadata, default={}),
                         now,
                         now,
                         dataset.archived_at,
@@ -4656,6 +4703,248 @@ class SyncDatabase:
                 metadata={"default_personal": True, "client_family": "chatbook"},
             )
         )
+
+    @staticmethod
+    def _notes_task_readiness_record(
+        metadata: Mapping[str, Any],
+        readiness_key: str,
+    ) -> NotesTaskReadinessRecord:
+        if readiness_key not in metadata:
+            return default_notes_task_readiness_record()
+        result = parse_notes_task_readiness_record(
+            metadata[readiness_key],
+            readiness_key=readiness_key,
+        )
+        if result.record is None:
+            raise SyncStoreError("notes_task_readiness_state_invalid")
+        return result.record
+
+    def transition_notes_task_domain_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        readiness_key: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        task_activity_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Atomically persist one bounded dormant task-domain readiness transition."""
+
+        if readiness_key not in NOTES_TASK_READINESS_REASON_CODES_BY_KEY:
+            raise SyncStoreError("notes_task_readiness_domain_invalid")
+        if (
+            expected_state not in NOTES_TASK_READINESS_STATES
+            or state not in NOTES_TASK_READINESS_STATES
+        ):
+            raise SyncStoreError("notes_task_readiness_transition_invalid")
+        if (
+            not isinstance(source_dataset_id, str)
+            or source_dataset_id != dataset_id
+            or source_dataset_id == _NOTES_TASK_LOCAL_UNBOUND_DATASET_ID
+        ):
+            raise SyncStoreError("notes_task_readiness_source_scope_invalid")
+        if task_activity_capture_enabled is not None and not isinstance(
+            task_activity_capture_enabled, bool
+        ):
+            raise SyncStoreError("notes_task_readiness_capture_invalid")
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if row.get("scope_type") != "personal":
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            raw_metadata = row.get("metadata_json")
+            if not isinstance(raw_metadata, str) or not raw_metadata:
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            try:
+                metadata = json.loads(raw_metadata)
+            except ValueError as exc:
+                raise SyncStoreError("notes_task_readiness_state_invalid") from exc
+            if not isinstance(metadata, dict):
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            current = self._notes_task_readiness_record(metadata, readiness_key)
+            if current.state != expected_state:
+                raise SyncStoreError("notes_task_readiness_compare_and_set_failed")
+            if state not in _NOTES_TASK_READINESS_TRANSITIONS[expected_state]:
+                raise SyncStoreError("notes_task_readiness_transition_invalid")
+            if (
+                isinstance(source_count, int)
+                and not isinstance(source_count, bool)
+                and source_count < current.source_count
+            ):
+                raise SyncStoreError("notes_task_readiness_progress_regressed")
+
+            resume_phase: str | None = None
+            if state == "blocked":
+                if expected_state == "blocked":
+                    resume_phase = current.resume_phase
+                elif expected_state == "verifying":
+                    resume_phase = "verifying"
+                else:
+                    resume_phase = "bootstrapping"
+            parsed = parse_notes_task_readiness_record(
+                {
+                    "state": state,
+                    "source_cursor": source_cursor,
+                    "source_count": source_count,
+                    "source_fingerprint": source_fingerprint,
+                    "reason_code": reason_code,
+                    "resume_phase": resume_phase,
+                },
+                readiness_key=readiness_key,
+            )
+            if parsed.record is None:
+                raise SyncStoreError(
+                    parsed.error_code or "notes_task_readiness_state_invalid"
+                )
+            requested = parsed.record
+
+            current_count = current.source_count
+            current_cursor = current.source_cursor
+            current_cursor_key = current.source_cursor_key
+            current_fingerprint = current.source_fingerprint
+            resetting_empty = state == "not_enrolled" and current_count == 0
+            if state == "blocked" and any(
+                (
+                    source_cursor != current_cursor,
+                    source_count != current_count,
+                    source_fingerprint != current_fingerprint,
+                )
+            ):
+                raise SyncStoreError("notes_task_readiness_source_changed")
+            if (
+                expected_state == "blocked"
+                and state not in {"blocked", "not_enrolled"}
+            ):
+                if state != current.resume_phase:
+                    raise SyncStoreError("notes_task_readiness_transition_invalid")
+                if any(
+                    (
+                        source_cursor != current_cursor,
+                        source_count != current_count,
+                        source_fingerprint != current_fingerprint,
+                    )
+                ):
+                    raise SyncStoreError("notes_task_readiness_source_changed")
+            if (
+                expected_state == "ready"
+                and requested.as_metadata() != current.as_metadata()
+            ):
+                raise SyncStoreError("notes_task_readiness_source_changed")
+            if not resetting_empty:
+                if source_count < current_count:
+                    raise SyncStoreError("notes_task_readiness_progress_regressed")
+                requested_cursor_key = requested.source_cursor_key
+                if current_cursor_key is not None:
+                    if requested_cursor_key is None:
+                        raise SyncStoreError(
+                            "notes_task_readiness_progress_regressed"
+                        )
+                    if readiness_key == "notes_task_v1":
+                        if not isinstance(current_cursor_key, UUID) or not isinstance(
+                            requested_cursor_key, UUID
+                        ):
+                            raise SyncStoreError(
+                                "notes_task_readiness_cursor_invalid"
+                            )
+                        cursor_regressed = (
+                            requested_cursor_key.int < current_cursor_key.int
+                        )
+                    else:
+                        if not isinstance(current_cursor_key, tuple) or not isinstance(
+                            requested_cursor_key, tuple
+                        ):
+                            raise SyncStoreError(
+                                "notes_task_readiness_cursor_invalid"
+                            )
+                        current_created_at, current_activity_id = current_cursor_key
+                        requested_created_at, requested_activity_id = (
+                            requested_cursor_key
+                        )
+                        cursor_regressed = (
+                            requested_created_at < current_created_at
+                            or (
+                                requested_created_at == current_created_at
+                                and requested_activity_id.int
+                                < current_activity_id.int
+                            )
+                        )
+                    if cursor_regressed:
+                        raise SyncStoreError(
+                            "notes_task_readiness_progress_regressed"
+                        )
+                cursor_advanced = requested.source_cursor_key != current_cursor_key
+                count_advanced = source_count != current_count
+                if cursor_advanced != count_advanced:
+                    raise SyncStoreError("notes_task_readiness_progress_regressed")
+                if cursor_advanced and source_fingerprint == current_fingerprint:
+                    raise SyncStoreError("notes_task_readiness_source_changed")
+                if current_fingerprint is not None and source_fingerprint is None:
+                    raise SyncStoreError("notes_task_readiness_progress_regressed")
+                if (
+                    not cursor_advanced
+                    and not count_advanced
+                    and current_fingerprint is not None
+                    and source_fingerprint != current_fingerprint
+                ):
+                    raise SyncStoreError("notes_task_readiness_source_changed")
+            if state == "not_enrolled" and not resetting_empty:
+                raise SyncStoreError("notes_task_readiness_disable_forbidden")
+
+            raw_capture = metadata.get("task_activity_capture_enabled", False)
+            if not isinstance(raw_capture, bool):
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            capture_enabled = (
+                raw_capture
+                if task_activity_capture_enabled is None
+                else task_activity_capture_enabled
+            )
+            metadata[readiness_key] = requested.as_metadata()
+            task = self._notes_task_readiness_record(metadata, "notes_task_v1")
+            activity = self._notes_task_readiness_record(
+                metadata,
+                "notes_task_activity_v1",
+            )
+            readiness_records = (task, activity)
+            if capture_enabled and any(
+                item.state == "not_enrolled" for item in readiness_records
+            ):
+                raise SyncStoreError("notes_task_readiness_capture_incomplete")
+            if not capture_enabled and any(
+                item.state in {"bootstrapping", "verifying", "ready"}
+                for item in readiness_records
+            ):
+                raise SyncStoreError("notes_task_readiness_capture_required")
+            if raw_capture and not capture_enabled and any(
+                item.source_count != 0 or item.state == "ready"
+                for item in readiness_records
+            ):
+                raise SyncStoreError("notes_task_readiness_capture_disable_forbidden")
+            metadata["task_activity_capture_enabled"] = capture_enabled
+
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset readiness transition was not persisted")
+            return _dataset_from_row(updated)
 
     def begin_notes_organization_bootstrap(
         self,
@@ -11502,6 +11791,7 @@ class SyncDatabase:
                     'idx_sync_attachment_bindings_unresolved',
                     'idx_sync_attachment_bindings_blob',
                     'idx_sync_attachment_bindings_blob_retention',
+                    'idx_sync_attachment_bindings_retention_release',
                     'idx_sync_attachment_bindings_pending_digest',
                     'uq_sync_dataset_storage_namespace_id',
                     'idx_sync_dataset_storage_namespaces_owner'

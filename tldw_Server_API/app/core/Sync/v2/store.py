@@ -315,6 +315,66 @@ class SyncV2Store:
     def get_or_create_default_personal_dataset(self, user_id: str) -> SyncDataset:
         return self.db.get_or_create_default_personal_dataset(user_id)
 
+    def transition_notes_task_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        task_activity_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Delegate one dormant notes.task readiness transition."""
+
+        return self.db.transition_notes_task_domain_readiness(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            readiness_key="notes_task_v1",
+            expected_state=expected_state,
+            state=state,
+            source_dataset_id=source_dataset_id,
+            source_cursor=source_cursor,
+            source_count=source_count,
+            source_fingerprint=source_fingerprint,
+            reason_code=reason_code,
+            task_activity_capture_enabled=task_activity_capture_enabled,
+        )
+
+    def transition_notes_task_activity_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        task_activity_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Delegate one dormant notes.task_activity readiness transition."""
+
+        return self.db.transition_notes_task_domain_readiness(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            readiness_key="notes_task_activity_v1",
+            expected_state=expected_state,
+            state=state,
+            source_dataset_id=source_dataset_id,
+            source_cursor=source_cursor,
+            source_count=source_count,
+            source_fingerprint=source_fingerprint,
+            reason_code=reason_code,
+            task_activity_capture_enabled=task_activity_capture_enabled,
+        )
+
     def begin_notes_organization_bootstrap(
         self,
         dataset_id: str,
