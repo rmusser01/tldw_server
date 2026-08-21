@@ -216,6 +216,70 @@ def test_sqlite_incomplete_archive_projection_fails_generation_readiness(tmp_pat
     )["uuid"]
 
 
+def test_active_slides_generation_owner_ids_are_distinct_filtered_and_keyset_paginated(tmp_path):
+    manager = JobManager(tmp_path / "slides-active-owners.db")
+    for owner, idempotency_key in (
+        ("2", "owner-2-a"),
+        ("10", "owner-10-a"),
+        ("10", "owner-10-b"),
+    ):
+        manager.create_job(
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+            payload={"receipt_id": idempotency_key},
+            owner_user_id=owner,
+            idempotency_key=idempotency_key,
+        )
+    manager.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="export",
+        payload={},
+        owner_user_id="1",
+    )
+    terminal = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "terminal"},
+        owner_user_id="3",
+        idempotency_key="owner-3-terminal",
+    )
+    with sqlite3.connect(manager.db_path) as connection:
+        connection.execute(
+            "UPDATE jobs SET status='completed' WHERE id=?",
+            (terminal["id"],),
+        )
+
+    first = manager.list_active_slides_generation_owner_ids(limit=1)
+    second = manager.list_active_slides_generation_owner_ids(
+        after_owner_user_id=first[-1],
+        limit=10,
+    )
+
+    assert first == ["10"]
+    assert second == ["2"]
+
+
+@pytest.mark.parametrize(
+    ("after_owner_user_id", "limit"),
+    [("", 1), (" ", 1), (None, 0), (None, 1001), (None, True)],
+)
+def test_active_slides_generation_owner_ids_reject_invalid_bounds(
+    tmp_path,
+    after_owner_user_id,
+    limit,
+):
+    manager = JobManager(tmp_path / "slides-active-owner-bounds.db")
+
+    with pytest.raises(ValueError):
+        manager.list_active_slides_generation_owner_ids(
+            after_owner_user_id=after_owner_user_id,
+            limit=limit,
+        )
+
+
 def test_sqlite_failed_archive_forward_alter_persists_fail_closed_diagnostic(
     tmp_path,
     monkeypatch,

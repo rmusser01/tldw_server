@@ -91,16 +91,10 @@ def test_route_enabled_predicate_requires_env_flag_and_route_gate(
 
 
 def _runtime_managed_worker_names() -> set[str]:
-    return {
-        field.name
-        for field in fields(LifespanWorkerRuntimeState)
-        if field.name.endswith("_task")
-    }
+    return {field.name for field in fields(LifespanWorkerRuntimeState) if field.name.endswith("_task")}
 
 
-LEGACY_MANAGED_WORKER_NAMES = (
-    legacy_worker_names_from_ownership_matrix() | _runtime_managed_worker_names()
-)
+LEGACY_MANAGED_WORKER_NAMES = legacy_worker_names_from_ownership_matrix() | _runtime_managed_worker_names()
 
 TASK5_JOB_POLLER_SPEC_NAMES = {
     "core_jobs_task",
@@ -113,6 +107,7 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "audio_jobs_task",
     "audiobook_jobs_task",
     "presentation_render_jobs_task",
+    "standalone_html_generation_jobs_task",
     "research_workspace_output_jobs_task",
     "media_ingest_jobs_task",
     "media_ingest_heavy_jobs_task",
@@ -127,6 +122,7 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
 }
 
 TASK6_BACKGROUND_SPEC_NAMES = {
+    "agent_task_jobs_task",
     "reminder_jobs_task",
     "admin_backup_jobs_task",
     "admin_byok_validation_jobs_task",
@@ -145,6 +141,7 @@ TASK6_BACKGROUND_SPEC_NAMES = {
 }
 
 TASK7_SERVICE_TAIL_SPEC_NAMES = {
+    "automation_definitions_sched_task",
     "jobs_metrics_task",
     "loop_lag_task",
     "jobs_metrics_reconcile_task",
@@ -350,11 +347,7 @@ def test_legacy_worker_spec_parity_reports_missing_worker_name() -> None:
     )
 
     missing_name = "ephemeral_cleanup_task"
-    specs = [
-        _worker_spec(name)
-        for name in sorted(LEGACY_MANAGED_WORKER_NAMES)
-        if name != missing_name
-    ]
+    specs = [_worker_spec(name) for name in sorted(LEGACY_MANAGED_WORKER_NAMES) if name != missing_name]
 
     with pytest.raises(AssertionError, match=missing_name):
         assert_legacy_worker_spec_parity(LEGACY_MANAGED_WORKER_NAMES, specs)

@@ -1238,6 +1238,82 @@ class JobManager:
             "archive_projection_ready": projection_ready,
         }
 
+    def list_active_slides_generation_owner_ids(
+        self,
+        *,
+        after_owner_user_id: str | None = None,
+        limit: int = 100,
+    ) -> list[str]:
+        """List distinct owners with active standalone generation jobs."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be an integer between 1 and 1000")
+        if after_owner_user_id is not None:
+            if (
+                not isinstance(after_owner_user_id, str)
+                or not after_owner_user_id.strip()
+                or len(after_owner_user_id.encode("utf-8")) > 512
+            ):
+                raise ValueError("after_owner_user_id must be a nonblank UTF-8 string of at most 512 bytes")
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        SELECT owner_user_id
+                        FROM (
+                            SELECT DISTINCT owner_user_id
+                            FROM jobs
+                            WHERE domain=%s AND queue=%s AND job_type=%s
+                              AND status IN ('queued', 'processing')
+                              AND owner_user_id IS NOT NULL
+                              AND BTRIM(owner_user_id) <> ''
+                        ) AS active_owners
+                        WHERE (CAST(%s AS TEXT) IS NULL
+                               OR owner_user_id COLLATE "C" > %s)
+                        ORDER BY owner_user_id COLLATE "C" ASC
+                        LIMIT %s
+                        """,
+                        (
+                            _SLIDES_GENERATION_DOMAIN,
+                            _SLIDES_GENERATION_QUEUE,
+                            _SLIDES_GENERATION_JOB_TYPE,
+                            after_owner_user_id,
+                            after_owner_user_id,
+                            limit,
+                        ),
+                    )
+                    return [str(row["owner_user_id"]) for row in cur.fetchall()]
+
+            rows = conn.execute(
+                """
+                SELECT owner_user_id
+                FROM (
+                    SELECT DISTINCT owner_user_id
+                    FROM jobs
+                    WHERE domain=? AND queue=? AND job_type=?
+                      AND status IN ('queued', 'processing')
+                      AND owner_user_id IS NOT NULL
+                      AND TRIM(owner_user_id) <> ''
+                ) AS active_owners
+                WHERE (? IS NULL OR owner_user_id COLLATE BINARY > ?)
+                ORDER BY owner_user_id COLLATE BINARY ASC
+                LIMIT ?
+                """,
+                (
+                    _SLIDES_GENERATION_DOMAIN,
+                    _SLIDES_GENERATION_QUEUE,
+                    _SLIDES_GENERATION_JOB_TYPE,
+                    after_owner_user_id,
+                    after_owner_user_id,
+                    limit,
+                ),
+            ).fetchall()
+            return [str(row["owner_user_id"]) for row in rows]
+        finally:
+            conn.close()
+
     def _slides_generation_ready_in_connection(
         self,
         conn: Any,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 
@@ -16,6 +17,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import (
 )
 from tldw_Server_API.app.api.v1.endpoints.slides import (
     _load_version_payload,
+    _slides_lifespan,
 )
 from tldw_Server_API.app.api.v1.endpoints.slides import (
     router as slides_router,
@@ -255,6 +257,33 @@ def test_slides_lifespan_without_html_pool_shuts_down_cleanly():
 
     assert getattr(app.state, "standalone_html_validation_pool", None) is None
     assert getattr(app.state, "standalone_html_validation_pool_lock", None) is None
+
+
+def test_slides_lifespan_defers_worker_owned_pool_cleanup_until_composite_shutdown(tmp_path):
+    app = FastAPI()
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="1")
+    validation_pool = _InlineValidationPool(db)
+    app.state.standalone_html_validation_pool = validation_pool
+    app.state.standalone_html_validation_pool_worker_owned = True
+    app.include_router(slides_router, prefix="/api/v1")
+
+    with TestClient(app):
+        pass
+
+    assert validation_pool.closed is False
+    assert app.state.standalone_html_validation_pool is validation_pool
+    asyncio.run(validation_pool.close())
+    db.close_connection()
+
+
+@pytest.mark.asyncio
+async def test_worker_owned_slides_lifespan_does_not_suppress_endpoint_errors():
+    app = FastAPI()
+    app.state.standalone_html_validation_pool_worker_owned = True
+
+    with pytest.raises(RuntimeError, match="endpoint failed"):
+        async with _slides_lifespan(app):
+            raise RuntimeError("endpoint failed")
 
 
 def test_negotiated_validation_errors_match_fastapi_body_and_add_vary(html_client):

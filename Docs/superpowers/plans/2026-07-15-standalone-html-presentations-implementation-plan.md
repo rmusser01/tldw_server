@@ -557,11 +557,11 @@ git commit -m "feat(slides): commit receipt-backed HTML jobs (TASK-12115)"
 - Test: `tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py`
 - Test: `tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py`
 
-- [ ] **Step 1: Write failing reconciliation and lifecycle tests**
+- [x] **Step 1: Write failing reconciliation and lifecycle tests**
 
 Cover active-owner priority, canonical one-level user-DB discovery, containment/regular-file/schema/no-symlink checks, one open database at a time, shared startup epoch before handler admission, Jobs-store/leader failure closed, 15-minute full sweep, cursor resume, lag overload, two-process crash takeover, stale leader publication refusal, Jobs-unavailable 24-hour logical expiry, confirmed 15-minute missing-job failure, active/archive UUID repair, completed-presentation precedence, terminal input cleanup, and key-retirement proof after a complete fenced sweep.
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -571,19 +571,21 @@ python -m pytest -q \
   tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py
 ```
 
-- [ ] **Step 3: Implement the fenced sweep**
+- [x] **Step 3: Implement the fenced sweep**
 
 Acquire and checkpoint only through Task 7's shared Jobs-store row. Prioritize active Jobs owners, then stream dormant databases through the fenced cursor. Apply receipt transitions as idempotent owner-scoped CAS operations and publish startup-complete/lag only with the current token. Reconciliation never re-enqueues a missing job.
 
-- [ ] **Step 4: Register startup, steady-state, and shutdown ownership**
+- [x] **Step 4: Register startup, steady-state, and shutdown ownership**
 
 Run the startup sweep before generation handler admission, continue at least once per minute, and guarantee a complete pass every 15 minutes or expose `generation_reconciler_overloaded`. Register stop events/tasks beside existing content Jobs workers and test deterministic shutdown.
 
-- [ ] **Step 5: Run focused tests and worker lifecycle regressions**
+- [x] **Step 5: Run focused tests and worker lifecycle regressions**
 
 Run Step 2 and the existing content-worker catalog tests that cover startup failure/cleanup.
 
-- [ ] **Step 6: Commit**
+Final Task 9 verification: assertion-level TDD closed fenced cursor/lease races, startup-readiness and overload diagnostics, Jobs-outage local expiry, corrupt/mismatched physical database ownership, strict existing-only SQLite opening, live-config authority broadening, PostgreSQL nullable-cursor typing, quarantine mapping, exact-UUID correlation gaps, and sticky shutdown races around blocked reconciliation batches. The affected matrix passed 377 tests with 24 repository-managed PostgreSQL fixture/runtime skips: 227 Slides/reconciler, 90 lifecycle/services, and 60 Jobs coordination. Ruff, Black, `py_compile`, Git diff, and Bandit checks passed; Bandit reported zero findings in the seven touched production files. Two fresh independent specification/quality reviews found no Critical, Important, or Minor blockers. Interactive execution remains disabled, and Task 10 remains untouched.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Slides/standalone_html_reconciler.py tldw_Server_API/app/services/startup_content_jobs_pollers.py tldw_Server_API/tests/Slides/test_standalone_html_reconciler.py tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"

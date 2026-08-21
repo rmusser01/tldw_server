@@ -21,8 +21,12 @@ _KEY_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}\Z")
 _CONFIG_EPOCH_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}\Z")
 _BASE64URL_RE = re.compile(r"[A-Za-z0-9_-]+\Z")
 _LOWER_HEX_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_PRODUCTION_COORDINATION_EPOCH_RE = re.compile(
+    r"(?:v1:g(?P<generation>[1-9][0-9]{0,18}):)?sha256:(?P<digest>[0-9a-f]{64})\Z"
+)
 _HMAC_FRAME_PREFIX = b"tldw\x00slides\x00standalone-html\x00hmac\x00v1\x00"
 _MAX_ACTIVE_KEYS = 4
+_MAX_COORDINATION_GENERATION = (1 << 63) - 1
 _RETIREMENT_FLOOR = timedelta(days=32)
 MAX_HMAC_KEYS_JSON_BYTES = 4_096
 
@@ -94,6 +98,19 @@ def _validate_config_epoch(
     if not isinstance(value, str) or _CONFIG_EPOCH_RE.fullmatch(value) is None:
         raise error_type("config epoch must be a safe visible revision token")
     return value
+
+
+def _production_coordination_epoch(value: str | None) -> tuple[int, str] | None:
+    """Return the ordered generation and digest for a production epoch token."""
+    if not isinstance(value, str):
+        return None
+    match = _PRODUCTION_COORDINATION_EPOCH_RE.fullmatch(value)
+    if match is None:
+        return None
+    generation = int(match.group("generation") or "0")
+    if generation > _MAX_COORDINATION_GENERATION:
+        return None
+    return generation, match.group("digest")
 
 
 @dataclass(frozen=True, slots=True)
@@ -832,6 +849,14 @@ class StandaloneHtmlKeyRegistry:
         if before.current_key_id == desired and state.config_epoch == new_config_epoch:
             before.require_generation_ready()
             return before
+        previous_coordination = _production_coordination_epoch(state.config_epoch)
+        next_coordination = _production_coordination_epoch(new_config_epoch)
+        if previous_coordination is not None and (
+            next_coordination is None
+            or next_coordination[0] < previous_coordination[0]
+            or (next_coordination[0] == previous_coordination[0] and next_coordination[1] != previous_coordination[1])
+        ):
+            raise DigestKeyRotationError("digest key coordination generation cannot move backward or change in place")
         prior_current = next(
             (record for record in before.records if record.state is DigestKeyState.CURRENT),
             None,

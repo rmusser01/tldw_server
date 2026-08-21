@@ -151,6 +151,7 @@ from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 
 _VALIDATION_POOL_ATTR = "standalone_html_validation_pool"
 _VALIDATION_POOL_LOCK_ATTR = "standalone_html_validation_pool_lock"
+_VALIDATION_POOL_WORKER_OWNED_ATTR = "standalone_html_validation_pool_worker_owned"
 
 
 class _SlidesRoute(APIRoute):
@@ -206,15 +207,16 @@ async def _slides_lifespan(app: Any) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        pool = getattr(app.state, _VALIDATION_POOL_ATTR, None)
-        try:
-            if pool is not None:
-                await pool.close()
-        finally:
-            with contextlib.suppress(AttributeError, KeyError):
-                delattr(app.state, _VALIDATION_POOL_ATTR)
-            with contextlib.suppress(AttributeError, KeyError):
-                delattr(app.state, _VALIDATION_POOL_LOCK_ATTR)
+        if getattr(app.state, _VALIDATION_POOL_WORKER_OWNED_ATTR, False) is not True:
+            pool = getattr(app.state, _VALIDATION_POOL_ATTR, None)
+            try:
+                if pool is not None:
+                    await pool.close()
+            finally:
+                with contextlib.suppress(AttributeError, KeyError):
+                    delattr(app.state, _VALIDATION_POOL_ATTR)
+                with contextlib.suppress(AttributeError, KeyError):
+                    delattr(app.state, _VALIDATION_POOL_LOCK_ATTR)
 
 
 router = APIRouter(
