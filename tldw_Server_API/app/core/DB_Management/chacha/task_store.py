@@ -177,6 +177,7 @@ class TaskStore:
         source = dict(task)
         if isinstance(source.get("metadata_json"), dict):
             source["metadata_json"] = self._json_dumps(source["metadata_json"], "metadata")
+        source["completed_at"] = normalize_sync_timestamp(source.get("completed_at"))
         object_hash, code, diagnostic_hash = self._db._canonicalize_legacy_task_v60(
             source,
             owner_user_id=str(source["owner_user_id"]),
@@ -349,23 +350,37 @@ class TaskStore:
         owner_user_id: str,
         dataset_id: str,
         include_deleted: bool,
+        for_update: bool = False,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
+        lock_clause = (
+            " FOR UPDATE"
+            if for_update and self._db.backend_type == BackendType.POSTGRESQL
+            else ""
+        )
         if include_deleted:
             cursor = self._read(
-                "SELECT * FROM note_tasks WHERE owner_user_id = ? AND dataset_id = ? AND id = ?",
+                "SELECT * FROM note_tasks "
+                "WHERE owner_user_id = ? AND dataset_id = ? AND id = ?"
+                + lock_clause,  # nosec B608
                 (owner_user_id, dataset_id, task_id),
                 conn=conn,
             )
             return self._decode_task_row(cursor.fetchone())
-        cursor = self._read(
+        if lock_clause:
+            lock_clause = " FOR UPDATE OF t"
+        query = (
             """
             SELECT t.*
               FROM note_tasks t
               JOIN notes n ON n.id = t.note_id
              WHERE t.owner_user_id = ? AND t.dataset_id = ? AND t.id = ?
                AND n.client_id = t.owner_user_id AND t.deleted = ? AND n.deleted = ?
-            """,
+            """
+            + lock_clause  # nosec B608
+        )
+        cursor = self._read(
+            query,
             (owner_user_id, dataset_id, task_id, self._deleted_value(False), self._deleted_value(False)),
             conn=conn,
         )
@@ -884,6 +899,7 @@ class TaskStore:
             owner_user_id=owner,
             dataset_id=dataset,
             include_deleted=True,
+            for_update=True,
             conn=conn,
         )
         if (
