@@ -4,7 +4,7 @@
 
 **Date:** 2026-08-21
 
-**Status:** Approved for implementation planning
+**Status:** Approved for implementation
 
 ## Executive Decision
 
@@ -97,7 +97,7 @@ The data ownership split is:
 | Workspace identity and source membership | Owner ChaChaNotes database |
 | Media text, chunks, and source readiness | Owner Media database and Jobs projection |
 | Embeddings | Owner embedding namespace |
-| Provider credentials and model choice | Recipient or server configuration resolved for the recipient |
+| Provider credentials and model choice | Recipient or server configuration resolved for the authenticated recipient, never inferred from content ownership |
 | Shared-chat conversation, messages, citations, and receipts | Recipient ChaChaNotes database |
 
 Stored recipient references to a share, owner, or owner workspace are historical
@@ -114,8 +114,9 @@ The backend adds three focused units:
 2. `SharedWorkspaceChatService` resolves source scope, performs retrieval,
    validates provenance, invokes generation, and coordinates revalidation and
    persistence.
-3. `SharedWorkspaceChatStore` owns recipient-side thread mapping, request
-   receipts, fenced leases, and strict transactional message/citation writes.
+3. `SharedWorkspaceChatStore`, implemented inside `core/DB_Management`, owns
+   recipient-side thread mapping, request receipts, fenced leases, and strict
+   transactional message/citation writes. Sharing services contain no raw SQL.
 
 The frontend adds a lightweight `ResearchWorkspaceRouteGate` shared by both
 route wrappers and a dedicated `SharedResearchWorkspace` surface. The existing
@@ -157,10 +158,12 @@ task's UI.
 The access service performs these checks in order:
 
 1. Validate the authenticated principal and global permission.
-2. Load the share record.
-3. Reject missing, revoked, or deleted-target shares.
-4. Validate current team or organization membership from the authenticated,
-   server-validated scope.
+2. Resolve the unrevoked share and current accessor membership with one
+   authoritative AuthNZ repository query.
+3. Collapse missing, revoked, inactive-scope, suspended-membership, and
+   out-of-scope results to the same denial.
+4. Do not use token or request-state team/organization claims as the current
+   membership authority.
 5. Resolve the owner workspace before opening media or conversation data.
 6. Compute server-authoritative `allowed_actions` from the access tier and
    implementation availability.
@@ -169,6 +172,10 @@ A missing global permission returns `403`. A missing share, revoked share,
 deleted workspace, or out-of-scope accessor returns the same neutral `404`
 response. This prevents share enumeration. Operational failures after access is
 established return a typed `503` rather than masquerading as a missing share.
+
+`GET /sharing/shared-with-me` uses the same authoritative active-membership
+repository query rather than iterating team/organization IDs from token claims,
+so a suspended or removed member stops seeing stale share entries immediately.
 
 The owner may open their own share URL, but the URL still renders the recipient
 shared view. Editing requires the ordinary local workspace route.
@@ -225,6 +232,12 @@ This becomes the single bounded bootstrap envelope:
     "edit_workspace": {"allowed": false, "reason_code": "shared_write_not_available"},
     "clone_workspace": {"allowed": false, "reason_code": "clone_deferred"}
   },
+  "generation_default": {
+    "provider": "llama",
+    "model": "configured-model",
+    "ready": true,
+    "reason_code": null
+  },
   "source_summary": {
     "total": 2,
     "queryable": 2,
@@ -249,16 +262,25 @@ authorization, owner workspace identity, and owner source membership are
 critical bootstrap dependencies. Their failure rejects the whole envelope.
 Optional provider readiness, Jobs progress enrichment, or recipient history
 failure appears as a bounded `partial_errors` entry and disables only the
-dependent action.
+dependent action. `generation_default` is resolved by the server for the
+recipient and exact current share scope. It contains only provider, model,
+readiness, and a stable reason code; it never exposes credential source, key
+presence, endpoint, or raw provider diagnostics. `provider` and `model` are
+non-empty only when `ready=true`; an unavailable default uses null values and a
+non-empty stable `reason_code`.
 
 Each partial error has exactly `area`, `code`, `message`, and `retryable`
 fields. The bootstrap contains at most eight partial errors. Messages are
 recipient-safe copy selected from stable codes rather than raw exception text.
 
-`allowed_actions` is the only frontend control authority. Client defaults are
-deny, not allow. `view_chat_add` and `full_edit` remain visible as the granted
-tier, but write actions remain disabled with `shared_write_not_available` in
-this slice.
+`allowed_actions` is the only frontend permission/action authority. Client
+defaults are deny, not allow. Form validity, source selection, and the
+server-projected generation readiness may further disable submission, but can
+never grant an action. The ordinary model catalog is discovery metadata rather
+than credential or authorization proof; every submitted provider/model is
+resolved again by the backend. `view_chat_add` and `full_edit` remain visible as
+the granted tier, but write actions remain disabled with
+`shared_write_not_available` in this slice.
 
 ### Source Listing
 
@@ -406,6 +428,11 @@ turned into citation records. A generated answer must have at least one verified
 evidence citation. Empty retrieval returns `409 no_relevant_evidence` without a
 generation call or persisted turn.
 
+Prompt budgeting produces an immutable evidence subset containing exactly the
+labels and text sent to the provider. Response labels and citation quotes are
+resolved only against that subset; dropped evidence and text trimmed from the
+last retained item cannot appear in a citation.
+
 At most 20 citations are returned or persisted. Each quote is limited to 1,000
 characters and total persisted quote text is limited to 16,000 characters per
 assistant message.
@@ -440,7 +467,10 @@ shares. Required mappings are:
 | 409 | `source_subset_required` | `all` exceeds the source cap |
 | 409 | `shared_source_changed` | Frozen source membership or content changed |
 | 409 | `no_relevant_evidence` | Retrieval found no verified evidence |
+| 422 | `invalid_shared_workspace_request` | A recipient read path or query value is invalid |
 | 422 | `invalid_shared_chat_request` | Request shape or values are invalid |
+| 422 | `shared_chat_context_too_large` | The question and minimum evidence cannot fit the selected model context |
+| 429 | `shared_workspace_rate_limited` | Recipient read rate limit exceeded |
 | 429 | `shared_chat_rate_limited` | Recipient/share rate limit exceeded |
 | 503 | `shared_workspace_unavailable` | Authorized owner data cannot be read |
 | 503 | `retrieval_unavailable` | RAG retrieval failed |
@@ -455,6 +485,13 @@ paths, SQL, model credentials, query content, or retrieved excerpts.
 The recipient ChaChaNotes schema gains two dedicated tables for SQLite and
 PostgreSQL.
 
+The active `CharactersRAGDB.client_id`, normalized to a non-empty string, is
+the sole recipient tenant identity for this persistence layer. Recipient and
+historical owner IDs are stored as `TEXT`, matching ChaChaNotes' canonical
+tenant representation and avoiding a dependency on AuthNZ's current numeric ID
+implementation. The store derives the recipient key from its bound database;
+Sharing services and HTTP payloads cannot provide or override it.
+
 ### `shared_workspace_chat_threads`
 
 The table contains:
@@ -464,7 +501,12 @@ The table contains:
 - `conversation_id` with a local foreign key to `conversations`;
 - historical `owner_user_id` and `workspace_id` references;
 - creation and update timestamps; and
-- a unique key on `(recipient_user_id, share_id)`.
+- a unique key on `(recipient_user_id, share_id)` plus a composite unique key
+  that lets receipts reference the exact thread/conversation mapping.
+
+On PostgreSQL, the table has forced row-level security. Its `USING` and `WITH
+CHECK` predicates require the recipient key to equal `app.current_user_id` and
+the mapped conversation to be live and owned by that same recipient.
 
 Conversation creation and thread mapping occur in one transaction. An insert
 race reloads the winning mapping. The conversation uses:
@@ -498,6 +540,19 @@ The table contains:
 - bounded error code and timestamps; and
 - a unique key on `(recipient_user_id, share_id, request_id)`.
 
+A composite foreign key to
+`shared_workspace_chat_threads(recipient_user_id, share_id, conversation_id)`
+prevents a receipt from pairing one valid share mapping with another valid
+conversation. The thread's conversation foreign key remains the cascade root.
+
+On PostgreSQL, the table also has forced row-level security. Its read/write
+predicate requires the same recipient key, a matching recipient-visible thread
+for the share and conversation, and a recipient-owned conversation. Any
+non-null message references must point to messages in that conversation owned
+by the same recipient. These policies are installed by the canonical ChaCha RLS
+builder during migration and normal initialization; store predicates remain
+defense in depth.
+
 The source-ID JSON contains at most 500 canonical IDs and no owner media IDs or
 content. It allows `mode=all` retries to resolve the original source set rather
 than a newer set. The table otherwise stores references and bounded codes, not
@@ -519,18 +574,21 @@ dead process.
 2. The same request ID with another fingerprint returns
    `request_id_conflict`.
 3. A matching completed receipt returns the stored assistant response without
-   retrieval or generation, but only after current share authorization.
+   reserving generation capacity, retrieval, or generation, but only after
+   current share authorization.
 4. A matching unexpired in-progress receipt returns `request_in_progress` and
    bounded retry timing.
 5. A matching retryable or expired receipt can be reclaimed by an atomic
    compare-and-swap that increments the lease epoch and replaces the token.
-6. The initial claimant resolves and stores canonical source IDs plus the
+6. Only a new or reclaimed claimant reserves recipient/share generation rate
+   capacity; a rejected reservation returns the receipt to `retryable`.
+7. The initial claimant resolves and stores canonical source IDs plus the
    snapshot hash before retrieval. A claimant that crashed before this update
    leaves no frozen set, so its fenced successor may perform the initial
    resolution.
-7. Every source snapshot update, failure transition, and completion includes
+8. Every source snapshot update, failure transition, and completion includes
    the current epoch and token in its update predicate.
-8. A stale request whose token no longer matches cannot persist messages or
+9. A stale request whose token no longer matches cannot persist messages or
    complete the receipt.
 
 Transient retrieval, provider, backend, or disconnect failures move the receipt
@@ -595,13 +653,18 @@ Unrelated workspace source changes do not abort the request.
 2. Resolve or create the recipient chat thread and claim the request receipt.
 3. Resolve canonical source IDs to the frozen source authorization snapshot.
 4. Retrieve using only the owner Media database and owner embedding namespace.
-5. Set the RAG source set to media only, pass explicit non-empty media IDs,
-   disable cache, and disable generation.
-6. Reject the complete retrieval result if any passage lacks verifiable media
-   provenance or belongs to media outside the frozen snapshot.
+5. Set the RAG source set to media only, pass explicit non-empty media IDs, and
+   apply a locked retrieval-only policy that disables cache, profiles,
+   provider-backed query transforms/reranking, adaptive execution, external
+   retrieval, generation, and fallback.
+6. Reject the complete retrieval result if the pipeline reports an error,
+   returns a generated answer or external-source marker, or any passage lacks
+   verifiable `media_db` provenance inside the frozen snapshot.
 7. Revalidate share authorization and selected source snapshots.
-8. Generate with recipient-resolved credentials, a server-owned grounding
-   prompt, no tools, and no fallback generator.
+8. Resolve a server-owned context budget and recipient credentials, limiting
+   scoped credential lookup to the share's authoritative team/organization
+   scope, then generate with a server-owned grounding prompt, no tools, and no
+   fallback generator.
 9. Validate returned citation labels against the verified evidence set.
 10. Revalidate share authorization and selected source snapshots again.
 11. Persist the turn atomically in the recipient database.
@@ -613,10 +676,39 @@ supplied to retrieval, which prevents owner notes and conversations from
 entering the context. Cache is explicitly disabled to avoid cross-share or
 cross-recipient reuse.
 
+The shared service passes no caller-owned resolved request, retrieval plan,
+profile, metadata, or extra RAG kwargs. A signature-contract test requires every
+security-sensitive pipeline parameter to be explicitly pinned or reviewed as
+inert. Runtime postconditions still reject generation or source broadening, so
+configuration or future default drift fails closed rather than silently
+widening retrieval.
+
 Source content is treated as untrusted input. Shared chat cannot request tools,
 MCP, ACP, sandbox execution, or provider-side function calls. The server-owned
-prompt separates instructions from retrieved evidence and tells the model not
-to follow instructions embedded in sources.
+prompt separates instructions from a JSON-serialized evidence array and tells
+the model not to follow instructions embedded in sources. Source text is never
+interpolated into hand-written delimiters that it could terminate or forge.
+
+The complete serialized prompt is budgeted before credential use or generation.
+A positive context window comes from server-owned model/runtime metadata.
+Known values from 2,048 through 1,000,000 tokens are accepted, larger values
+are capped at 1,000,000, a known smaller model is rejected for this flow, and
+unknown or invalid metadata uses a conservative 4,096-token window. The service
+reserves 256-1,200 output tokens and a ten-percent-or-256-token safety margin,
+caps evidence input at 12,000 tokens, and rejects a question that leaves no
+room for one non-empty evidence item. It never silently truncates the user's
+question. Counting uses a local `tiktoken` encoding when available and
+otherwise a UTF-8 byte upper bound. It must not call provider-native or
+commercial tokenizer endpoints with shared content.
+
+Credential resolution receives `request=None` plus explicit team and
+organization ID lists containing only the authoritative share scope. Trusted
+base-URL eligibility is derived separately from the authenticated request.
+This preserves recipient BYOK -> current share scope -> server fallback order
+without allowing stale request-state active-scope claims to narrow or replace
+the share scope. Credentials are never selected because the share owner owns
+the source data. When the owner opens their own share URL, their user credential
+is eligible only because the authenticated owner is also the recipient.
 
 Provider failures are returned as typed errors. `FallbackGenerator` is disabled
 for this path so a provider failure cannot be displayed as an answer assembled
@@ -719,6 +811,9 @@ ACP, sandbox, artifacts, or local workspace controls.
   through an opaque `before` cursor based on stable message ordering.
 - The current source scope count appears directly above the composer.
 - Provider and model controls display the effective generation destination.
+- The server `generation_default` seeds selection ahead of local/global model
+  preferences. The generic catalog may offer alternatives but does not prove
+  credential availability; submission remains server-authoritative.
 - The submit action generates one request UUID and reuses it for network retry.
 - A source-state conflict refreshes the source set and creates a new request ID
   only after the user retries.
@@ -750,13 +845,15 @@ keyboard. Text and controls must not overflow at mobile or desktop widths.
 
 ## Browser Extension Boundary
 
-TASK-12020.40 does not change extension code or add shared-workspace capture.
-The shared bootstrap exposes no writable destination capability, and the shared
-WebUI exposes no add-source request path or writable workspace handoff metadata.
-An extension must continue to require an explicitly selected recipient-owned
-local workspace before capture. Full extension destination rejection,
-access-tier handling, capture receipts, and save-and-open behavior remain
-separate work.
+TASK-12020.40 changes only the extension-hosted Research Workspace route wrapper
+so it uses the same fail-closed `ResearchWorkspaceRouteGate` as the WebUI. It
+does not change extension capture, destination, or handoff contracts and does
+not add shared-workspace capture. The shared bootstrap exposes no writable
+destination capability, and the shared WebUI exposes no add-source request path
+or writable workspace handoff metadata. An extension must continue to require
+an explicitly selected recipient-owned local workspace before capture. Full
+extension destination rejection, access-tier handling, capture receipts, and
+save-and-open behavior remain separate work.
 
 ## Privacy, Security, and Audit
 
@@ -795,7 +892,10 @@ Run equivalent focused tests against SQLite and PostgreSQL:
 - completed receipt replay returns the stored message;
 - strict metadata failure rolls back both messages and receipt completion;
 - conversation deletion cascades thread and receipt rows; and
-- SQLite and backend abstraction errors map to the same domain responses.
+- SQLite and backend abstraction errors map to the same domain responses;
+- PostgreSQL policy catalogs show RLS enabled and forced for both tables; and
+- a second recipient on the same PostgreSQL backend cannot read or mutate the
+  first recipient's thread or receipts even with known identifiers.
 
 ### Backend and Security Tests
 
@@ -817,6 +917,9 @@ Run equivalent focused tests against SQLite and PostgreSQL:
 - Unrelated source changes do not abort the request.
 - Empty retrieval does not call generation.
 - Provider failure never invokes fallback generation.
+- Known and unknown model context windows enforce deterministic local-only
+  prompt budgets; oversized questions fail before provider or tokenizer HTTP
+  calls.
 - Completed replay authorizes before reading recipient receipt data.
 - Removed-source and revoked-share citation preview fails closed.
 
