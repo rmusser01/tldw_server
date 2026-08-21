@@ -92,6 +92,7 @@ class AdapterDeferred:
 SyncAdapterOutcome = AdapterAccepted | AdapterRejected | AdapterConflict | AdapterDeferred
 SyncHead = SyncEnvelope | SyncEnvelopeCreate
 SyncHeadLookup = Callable[[SyncDomain, str], SyncHead | None]
+AuthorizedNoteLookup = Callable[[str], SyncHead | None]
 SyncDomainHeadLoader = Callable[[SyncDomain], Sequence[SyncHead]]
 BootstrapRelationshipVerifier = Callable[
     [SyncDomain, str, Mapping[str, object]], bool
@@ -125,6 +126,7 @@ class SyncAdapterContext:
 
     prior_envelopes: Sequence[SyncHead] = field(default_factory=tuple)
     get_head: SyncHeadLookup | None = None
+    get_authorized_note: AuthorizedNoteLookup | None = None
     list_heads: SyncDomainHeadLoader | None = None
     trusted_server_origin: bool = False
     organization_group_state: str | None = None
