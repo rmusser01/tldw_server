@@ -200,6 +200,20 @@ def _coerce_int_list(raw: Any) -> list[int]:
     return out
 
 
+def _parse_impersonated_by_claim(raw: Any) -> int:
+    if isinstance(raw, bool):
+        raise ValueError("impersonated_by must be a positive integer")
+    if isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, str) and raw.isdecimal():
+        value = int(raw)
+    else:
+        raise ValueError("impersonated_by must be an integer or decimal digit string")
+    if value <= 0:
+        raise ValueError("impersonated_by must be a positive integer")
+    return value
+
+
 def _normalize_active_id(raw: Any, ids: list[int]) -> Optional[int]:
     if raw is None:
         return ids[0] if len(ids) == 1 else None
@@ -537,6 +551,27 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         token_team_ids = _coerce_int_list(payload.get("team_ids"))
         token_active_org_id = payload.get("active_org_id")
         token_active_team_id = payload.get("active_team_id")
+        if "impersonation" in payload:
+            token_impersonation_raw = payload.get("impersonation")
+            if not isinstance(token_impersonation_raw, bool):
+                logger.warning("Token impersonation claim is invalid")
+                raise credentials_exception
+            token_impersonation = token_impersonation_raw
+        else:
+            token_impersonation = False
+        impersonated_by_user_id: Optional[int] = None
+        if "impersonated_by" in payload:
+            try:
+                impersonated_by_user_id = _parse_impersonated_by_claim(payload.get("impersonated_by"))
+            except ValueError:
+                logger.warning("Token impersonated_by claim is invalid")
+                raise credentials_exception
+        if token_impersonation and impersonated_by_user_id is None:
+            logger.warning("Token impersonation claim is missing actor attribution")
+            raise credentials_exception
+        if not token_impersonation and impersonated_by_user_id is not None:
+            logger.warning("Token actor attribution claim is present without impersonation")
+            raise credentials_exception
     except (InvalidTokenError, TokenExpiredError) as e:
         logger.warning(f"Token validation failed: {e}")
         raise credentials_exception from e
@@ -700,6 +735,8 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
     # Attach user id for downstream context (usage logging, RBAC rate limits)
     with contextlib.suppress(_USER_DB_NONCRITICAL_EXCEPTIONS):
         request.state.user_id = user.id
+        request.state.impersonation = token_impersonation
+        request.state.impersonated_by_user_id = impersonated_by_user_id
 
     team_ids: list[int] = []
     org_ids: list[int] = []
@@ -875,6 +912,8 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
             subject=None,
             token_type="access",
             jti=None,
+            impersonation=token_impersonation,
+            impersonated_by_user_id=impersonated_by_user_id,
             roles=list(user.roles or []),
             permissions=list(user.permissions or []),
             is_admin=bool(user.is_admin),

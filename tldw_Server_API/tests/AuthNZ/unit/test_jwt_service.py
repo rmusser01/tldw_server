@@ -2,6 +2,8 @@
 Unit tests for JWT service.
 """
 
+from datetime import timedelta
+
 import pytest
 from jose import jwt
 
@@ -362,3 +364,66 @@ class TestJWTServiceUnit:
         bad = svc_bad.create_access_token(1, "bad", "user")
         with pytest.raises(InvalidTokenError):
             svc.decode_access_token(bad)
+
+
+def test_create_access_token_accepts_expiry_override(jwt_service):
+    token = jwt_service.create_access_token(
+        user_id=42,
+        username="target",
+        role="user",
+        expires_delta=timedelta(minutes=15),
+    )
+
+    payload = jwt.decode(
+        token,
+        jwt_service._decode_key,
+        algorithms=[jwt_service.algorithm],
+        options={"verify_aud": False},
+    )
+
+    assert payload["sub"] == "42"
+    assert int(payload["exp"]) - int(payload["iat"]) == 15 * 60
+
+
+def test_create_impersonation_access_token_marks_actor_and_short_ttl(jwt_service):
+    token = jwt_service.create_impersonation_access_token(
+        user_id=42,
+        username="target",
+        role="user",
+        impersonated_by=7,
+        expires_delta=timedelta(minutes=15),
+    )
+
+    payload = jwt.decode(
+        token,
+        jwt_service._decode_key,
+        algorithms=[jwt_service.algorithm],
+        options={"verify_aud": False},
+    )
+
+    assert payload["sub"] == "42"
+    assert payload["impersonation"] is True
+    assert payload["impersonated_by"] == 7
+    assert int(payload["exp"]) - int(payload["iat"]) == 15 * 60
+
+
+@pytest.mark.parametrize("impersonated_by", [True, 0, -1, None, "not-a-user-id"])
+def test_create_impersonation_access_token_rejects_invalid_actor(jwt_service, impersonated_by):
+    with pytest.raises(ValueError, match="impersonated_by must be a positive integer"):
+        jwt_service.create_impersonation_access_token(
+            user_id=42,
+            username="target",
+            role="user",
+            impersonated_by=impersonated_by,
+            expires_delta=timedelta(minutes=15),
+        )
+
+
+def test_create_access_token_rejects_non_positive_expiry_override(jwt_service):
+    with pytest.raises(ValueError, match="expires_delta must be positive"):
+        jwt_service.create_access_token(
+            user_id=42,
+            username="target",
+            role="user",
+            expires_delta=timedelta(seconds=0),
+        )
