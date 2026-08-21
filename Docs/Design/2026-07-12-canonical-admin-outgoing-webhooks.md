@@ -5,7 +5,7 @@ Date: 2026-07-12
 Revalidated: 2026-08-21 against `origin/dev` at
 `2e0815c1e4577902a220044619822ab6b1cb395f`
 
-Status: Approved conversational design; written specification under review
+Status: Approved design and reviewed implementation plan on 2026-08-21
 
 Backlog: TASK-13013 (replaces the colliding historical TASK-12950 record)
 
@@ -123,9 +123,68 @@ All webhook endpoints require a platform-admin principal. The route layer owns:
   type, outcome, request ID, and reason code;
 - stable HTTP status and error-code mapping.
 
+Control-plane mutations additionally require a user-backed principal with a
+numeric `user_id`; API-key-backed users qualify, but a service principal with no
+user identity does not. This keeps creator/updater IDs and the per-user unified
+audit database unambiguous. Such callers receive
+`403 admin_webhook_user_principal_required` before service entry. Read-only
+catalog, status, list, and get operations retain the broader platform-admin
+rule.
+
 Audit records and logs never contain the full destination URL, URL path, query,
 signing secret, signature, event body, receiver response body, or approved
 incident narrative.
+
+While temporary legacy compatibility exists, its create/update API and dispatch
+behavior remain unchanged, but new audit records are hardened to contain only
+the webhook ID, event count, and enabled state. They no longer persist the
+historical full destination URL or event values.
+
+Webhook mutations use the repository's mandatory unified-audit pattern rather
+than a generic best-effort route helper. The route constructs a bounded audit
+sink from the authenticated principal and request context, and the control-plane
+service awaits that sink after its conditional SQL and idempotency work but
+before the repository transaction commits. The pre-commit outcome is
+`accepted` or `no_op`, not `succeeded`, because the unified audit store and the
+AuthNZ transaction are separate durability boundaries. If mandatory audit
+persistence is unavailable, the transaction rolls back and the API returns
+`503 admin_webhook_audit_unavailable`.
+
+After a user-backed mutation actor is established, every deterministic domain,
+mode, policy, conflict, limit, and precondition denial emits exactly one bounded
+`denied` mutation audit before its response; dependency, repository, key, and
+unexpected service failures emit `failed`. A failure inside the repository unit
+of work writes its audit before raising so incidental state also rolls back; a
+pre-transaction failure writes before returning. Audit failure replaces the
+original response with `503 admin_webhook_audit_unavailable`, and the route does
+not emit a duplicate mutation event. Unvalidated targets and event values are
+omitted from audit metadata. Framework request-shape validation can fail before
+an authenticated mutation actor exists;
+that path emits only the redacted validation response and the existing bounded
+request/security telemetry, never a fabricated per-user mutation audit. If the
+AuthNZ commit fails after an `accepted` audit event, the service attempts a
+second `failed` event with the same request ID and operation identity; the
+retained `accepted` event makes an indeterminate crash window visible even if
+that follow-up write also fails. This protocol guarantees that no webhook
+mutation commits when its required pre-commit audit write is unavailable. It
+deliberately does not claim distributed atomicity between the AuthNZ and unified-
+audit stores.
+
+Authorized catalog, status, list, and get calls emit bounded data-access audit
+events through the existing best-effort read path. Read-audit failure never
+blocks status or metadata recovery during an audit outage. List audits contain
+only actor, action, request ID, result count, and outcome; they do not enumerate
+targets or event subscriptions.
+
+Host-side import apply/rejection, key-rotation state changes, rollback-backup
+extraction, and rollback-artifact retirement use a separate closed operational
+audit record. Each CLI invocation has a generated request ID and records only
+operator ID, fixed action, durable operation ID, `accepted`/`completed`/`failed`
+outcome, and stable reason code; key material, artifact paths, source content,
+fingerprints, and free text are forbidden. A mandatory `accepted` write occurs
+before the first state or filesystem mutation. Completion/failure is correlated
+afterward, while durable migration state remains the recovery authority across
+the unavoidable audit/database/filesystem crash windows.
 
 ### Component Boundaries
 
@@ -176,9 +235,14 @@ declared and tested before `/{webhook_id}` routes.
 - `GET /status`
   Returns feature mode, schema/import state, encryption-key state, reconciler
   heartbeat, worker heartbeat, queue/backlog counts, oldest pending age, and
-  retention status. Sensitive values are redacted.
+  retention status. It also reports whether structural legacy-file restore
+  remains permitted and the rollback-window expiry, without exposing artifact paths.
+  Sensitive values are redacted.
 - `GET /`
-  Returns paginated, non-deleted registration metadata.
+  Returns non-deleted registration metadata ordered by numeric ID descending.
+  Offset pagination uses `limit=50` by default, bounds limit to 1-100 and
+  offset to 0-1,000, and returns `items`, `total`, `limit`, and
+  `offset`.
 - `GET /{webhook_id}`
   Returns one registration's metadata and a strong revision ETag.
 - `GET /{webhook_id}/deliveries`
@@ -191,6 +255,12 @@ from webhook ID and revision without containing secret material. Create, get,
 PATCH, and rotate responses that carry a registration representation also carry
 its current strong ETag so the UI never has to synthesize one.
 
+Because the full destination is non-retrievable, the admin edit workflow never
+prefills a URL input with `target_display`. Metadata-only PATCH requests omit
+`url`. Replacing a destination is a separate explicit action with an initially
+blank field that requires a complete new URL and operator confirmation; the
+redacted display is context only and is never submitted as a target.
+
 ### Mutation Endpoints
 
 - `POST /`
@@ -199,7 +269,9 @@ its current strong ETag so the UI never has to synthesize one.
 - `PATCH /{webhook_id}`
   Updates description, destination URL, event subscriptions, timeout, or active
   state. It never accepts a signing secret and requires the current ETag in
-  `If-Match`.
+  `If-Match`. The body forbids unknown and null fields and must contain at
+  least one recognized field; an effective same-value patch remains a valid
+  audited no-op.
 - `DELETE /{webhook_id}`
   Requires `If-Match`, soft-deletes the registration, and cancels automatic work
   that has not entered an HTTP request.
@@ -232,6 +304,16 @@ Reusing the same scoped key with a different request returns
 hexadecimal characters and documentation tells other clients to use at least
 equivalent entropy.
 
+The stored key lookup digest is domain-separated SHA-256 over scope plus the raw
+idempotency key. The stored canonical-request fingerprint is
+HMAC-SHA256 keyed by the presented raw idempotency key over a versioned domain,
+actor, operation, route/resource identity, normalized conditional version, and
+canonical body. This avoids making a plain request-body hash an offline oracle
+for destination path/query credentials. The raw key and canonical request are
+never persisted. A caller presenting the same raw key can still prove
+same/different request content while the webhook encryption key ring is
+unavailable.
+
 For an existing scoped key, lookup and request-hash comparison happen before a
 current-resource precondition check. An exact replay can therefore return its
 recorded result even though the successful first request changed the revision;
@@ -247,6 +329,64 @@ creates a replacement. A successful replay identifies itself as a replay and
 returns the recorded resource and secret versions. Idempotency records expire
 and are removed by the retention worker.
 
+Create and rotate claim, mutate, complete, and commit their idempotency record in
+one database transaction. A concurrent identical request therefore waits for
+the winner and then observes replay; it cannot observe the winner's uncommitted
+`in_progress` row. Same-key/different-request observes conflict after that
+commit. A bounded database lock/statement timeout returns
+`503 admin_webhook_database_busy`; the implementation does not split the
+transaction merely to manufacture an externally visible in-progress response.
+
+Every successful create/rotate response and eligible secret-bearing replay sets
+`Cache-Control: no-store` and `Pragma: no-cache`. The authenticated admin proxy
+preserves those headers and never logs or caches the response body.
+
+### Error And Validation Contract
+
+Every expected error produced by a matched canonical webhook route uses the
+same bounded envelope:
+
+```json
+{
+  "error": {
+    "code": "admin_webhook_validation_failed",
+    "message": "Webhook request validation failed",
+    "request_id": "4aa1324c-7fb7-49cf-9058-ce0df25d5932"
+  }
+}
+```
+
+The response also carries the same sanitized value in `X-Request-ID` and sets
+`Cache-Control: no-store`. Codes and messages come from a closed server-owned
+mapping; exception text, Pydantic error details, submitted values, and raw
+headers are never serialized. In particular, FastAPI's default `422` response
+is not used on canonical webhook routes because it can include rejected URL,
+query-token, signing-secret, `If-Match`, or `Idempotency-Key` input.
+
+Both the always-mounted status router and the canonical CRUD router use a
+route-scoped wrapper. It catches `RequestValidationError` before FastAPI's
+global handler and returns the fixed
+`422 admin_webhook_validation_failed` envelope. It also catches
+`HTTPException` without serializing `detail`: audited authentication/
+authorization 401/403/429/503 values map to fixed closed codes, while any other
+HTTP exception maps to a fixed `admin_webhook_request_rejected` code with a
+validated 4xx/5xx status or 500 fallback. Only the exact canonical
+`WWW-Authenticate: Bearer` header on 401 may survive. On 429, `Retry-After`
+survives only when it is ASCII decimal, parses to 0-86,400 seconds, and is
+reserialized from that integer. It derives the request ID only from normalized
+middleware state, never
+directly from a caller header. Known domain and service failures use the same
+response helper and fixed mapping; unexpected non-HTTP exceptions remain owned
+by the global sanitized 500 handler. Translating an auth response does not
+replace or duplicate the existing authentication/authorization audit path.
+
+OpenAPI declares the canonical `WebhookErrorResponse` for every applicable
+4xx/5xx response, including 422, rather than advertising FastAPI's default
+validation-detail schema. Regression tests submit unique canary values in a
+full destination URL, query credential, forbidden `secret`, malformed
+conditional header, and malformed idempotency header, then prove that none
+appears in response bodies, response headers, captured logs, or audit records.
+
 ### Registration Contract
 
 A registration includes:
@@ -259,17 +399,31 @@ A registration includes:
 - `timeout_seconds`, default 10 and maximum 30;
 - monotonic `revision` for optimistic concurrency;
 - `delivery_config_version`;
+- internal `target_version`, incremented only when the destination URL changes;
 - `secret_version`;
+- `secret_rotation_required`, set for every imported legacy registration and
+  cleared only by a successful canonical secret rotation;
 - creator/updater identity and timestamps;
 - soft-delete metadata.
 
 The server rejects caller-supplied signing secrets and wildcard subscriptions.
+It rejects duplicate/empty event values and canonicalizes every accepted
+subscription set into catalog order before request fingerprinting, persistence,
+comparison, and response serialization. Reordering the same set is therefore an
+idempotent same request and an effective PATCH no-op.
 Changing URL, events, timeout, active state, or secret increments
-`delivery_config_version`. Rotating the signing secret also increments
-`secret_version`. Every effective mutation increments `revision`.
+`delivery_config_version`. Changing URL also increments `target_version`.
+Rotating the signing secret also increments `secret_version`. Every effective
+mutation increments `revision`.
 Description-only changes do not supersede delivery work. A PATCH that already
 matches persisted values is a no-op: it does not increment any version and may
 return the current representation. Stale `If-Match` values fail before mutation.
+
+An imported registration cannot become active while
+`secret_rotation_required=true`; activation returns
+`409 admin_webhook_secret_rotation_required`. This prevents a secret previously
+stored in legacy plaintext or under unrelated credentials from becoming the
+canonical delivery credential without explicit operator rotation.
 
 Disabling a registration cancels pending or retrying automatic deliveries with
 reason `canceled_disabled`. Re-enabling affects future events only. Rotating a
@@ -327,24 +481,42 @@ assigned key IDs and one configured primary key ID. The key ring uses the
 repository's AES-GCM JSON-envelope primitive but does not derive runtime keys
 from BYOK, session, JWT, API-key, or other unrelated credentials.
 
+Key IDs contain 1-64 characters from `[A-Za-z0-9._-]`. Each configured key value
+is strict base64 encoding of exactly 32 random bytes, matching the existing
+AES-256 helper; malformed JSON, duplicate IDs, invalid base64, wrong-length keys,
+or a primary ID absent from the ring fail closed without logging key material.
+Runtime composition captures that failure as a closed redacted key-state value
+rather than crashing the status route. Status and permitted metadata operations
+remain available; every operation needing encryption/decryption returns the
+stable key error. Migration and key-rotation CLI commands require a concrete
+valid ring and exit before mutation when loading fails.
+
 The stored envelope records its key ID. Reads can decrypt with the primary or a
 configured previous key. New writes always use the primary. A rotation command
 re-encrypts every protected value under the new primary, verifies readback, and
 only then permits removal of the old key.
 
-Each encrypted plaintext includes and validates a purpose plus stable row
-identity: registration ID and delivery/secret version for targets and secrets,
-event ID and API version for event bytes, and operation/resource/version for
-idempotency replay material. Pending incident markers bind command/source
-identity and event API version. Exact body bytes are stored in a byte-safe
-encoded field inside that contextual envelope. This binds ciphertext to its
-intended row/marker even though the existing AES-GCM JSON helper has no
-associated-data API; copying an envelope to another row, marker, or field fails
-closed after decryption.
+Migration state records the canonical `active_primary_key_id`. Every ordinary
+protected write validates that the process's configured primary matches this
+value in the same transaction that checks rotation state. A lagging process
+therefore fails closed with `503 admin_webhook_key_configuration_mismatch`
+instead of reintroducing ciphertext under an old primary.
 
-Legacy BYOK/session/JWT/API-key candidates may be loaded only inside the explicit
-legacy migration command to decrypt old rows. Canonical runtime decryption never
-falls back to them.
+Each encrypted plaintext includes and validates a purpose plus stable row
+identity: registration ID and target version for targets, registration ID and
+secret version for secrets, event ID and API version for event bytes, and
+operation/resource/version for idempotency replay material. Pending incident
+markers bind command/source identity and event API version. Exact body bytes are
+stored in a byte-safe encoded field inside that contextual envelope. This binds
+ciphertext to its intended row/marker even though the existing AES-GCM JSON
+helper has no associated-data API; copying an envelope to another row, marker,
+or field fails closed after decryption.
+
+Legacy BYOK/session/JWT/API-key candidates may be loaded only inside
+`Admin_Webhooks/legacy_import.py` and only when dry-run and apply both receive
+the explicit `--allow-legacy-credential-decryption` CLI flag. Without the flag,
+affected rows remain unresolved. Canonical runtime decryption never imports the
+historical helper or tries those candidates.
 
 If no usable dedicated key is available:
 
@@ -370,28 +542,60 @@ set webhook mode `off` to restore ordinary product mutations without event
 capture. That mode change is an acknowledged availability-over-delivery decision
 shown in status/audit; key failure never makes that decision implicitly.
 
-Key rotation places secret-returning mutations and replays in a bounded
-`key_rotation_in_progress` maintenance state. It re-encrypts registration
-targets, registration secrets, retained canonical event bodies, pending
-encrypted incident markers, and unexpired idempotency replay secrets before
-readback verification. The previous key remains configured until every database
-row and file marker is verified. A request interrupted by rotation receives
-`503` and can retry with the same idempotency key after rotation; it does not
-receive a partial or newly generated response.
+Key rotation places every operation that writes protected values, plus
+secret-bearing replays, in a bounded `key_rotation_in_progress` maintenance
+state. In PR 1 this includes create, destination-URL update, signing-secret
+rotation, and secret replay; later event producers, tests, and redeliveries use
+the same gate. Metadata-only updates, disable, delete, and redacted reads remain
+available. Rotation re-encrypts registration targets, registration secrets,
+retained canonical event bodies, pending encrypted incident markers, and
+unexpired idempotency replay secrets before readback verification. The previous
+key remains configured until every database row and file marker is verified. A
+request interrupted by rotation receives `503` and can retry with the same
+idempotency key after rotation; it does not receive a partial or newly generated
+response.
+
+Key rotation and legacy import are mutually exclusive durable operations. An
+import cannot approve/apply while rotation is in progress, and rotation cannot
+start while an import is between approval, database commit, readback, and file
+sanitization. This keeps source fingerprints and protected backup context bound
+to one stable primary key.
 
 Rotation progress is durable in migration state: operation ID, source and target
 key IDs, phase, last processed table/key cursor, processed count, verified count,
-start time, and completion time. Each row update is idempotent because its
-envelope records the target key ID. After a crash, the operator resumes the same
-operation; the scanner skips already re-encrypted rows and continues from the
-durable cursor, then performs a complete readback pass. Once any row has moved,
-rotation is forward-resume only. The source key cannot be removed and
-secret-returning operations remain unavailable until verification commits the
-completed state.
+start time, and completion time. Rotation phase is exactly `rewriting`,
+`verifying`, `awaiting_primary_cutover`, or `complete`. The target only needs to be configured at
+start; the scanner explicitly encrypts to it while ordinary protected writes are
+blocked. Each row update is idempotent because its envelope records the target
+key ID. `processed_count` counts protected values durably observed under the
+target while a state-owned cursor advances, whether that invocation rewrote the
+value or resumed after an earlier file publication. Database row replacement,
+cursor, and count commit together. File publication precedes its database cursor
+update, so a crash is recovered by observing the target envelope and accounting
+for it once on the resumed cursor advance. `verified_count` uses the same
+inventory definition. After a crash, the operator resumes the same operation and
+continues from the durable cursor, then performs a complete readback pass.
+Verification moves to `awaiting_primary_cutover` and
+keeps protected writes blocked. After every process is deployed with the target
+as configured primary, finalize verifies that local primary, repeats the
+zero-source-envelope pass, sets `active_primary_key_id=target`, and completes.
+Every later request checks that durable ID, so a lagging old-primary process
+stays failed closed. Once any row has moved, rotation is forward-resume only.
+The source key cannot be removed until finalization commits.
 
-Pending incident-marker scans and rewrites use the existing system-ops file lock
-and atomic-save contract. Final verification repeats until no envelope using the
-source key exists in either database rows or the locked active file.
+Pending incident-marker scans and rewrites use the existing system-ops file lock.
+The current save path is a direct `Path.write_text`; PR 1 must upgrade it to a
+same-directory temporary write, file fsync, atomic replace, and parent-directory
+fsync before migration or marker code relies on crash-safe publication. Final
+verification repeats until no envelope using the source key exists in either
+database rows or the locked active file.
+
+Migration and key rotation never use the existing permissive `_load_store()`
+reader, which intentionally converts unreadable/malformed content into defaults
+for ordinary admin recovery. They use a strict, size-bounded structural snapshot
+reader under the same lock. Missing or whitespace-only files are explicit empty
+objects; read errors, oversized content, invalid JSON, and non-object roots fail
+closed without publishing a replacement or logging source content.
 
 The full destination URL is encrypted at rest. Separate non-secret hostname and
 redacted-display columns support listing, policy review, and audit without
@@ -407,8 +611,9 @@ expand/migrate/contract rollout.
 ### `admin_webhook_registrations`
 
 Stores canonical registration metadata, encrypted target URL and signing secret,
-key IDs, explicit event set, active/tombstone state, timeout, configuration and
-secret versions, resource revision, actor IDs, and timestamps.
+key IDs, explicit event set, active/tombstone state, timeout, target,
+configuration and secret versions, imported-secret rotation requirement, resource
+revision, actor IDs, and timestamps.
 
 ### `admin_webhook_events`
 
@@ -484,17 +689,37 @@ without another network call. Plain idempotency keys are not retained.
 
 ### `admin_webhook_migration_state`
 
-Stores the expected canonical schema version, legacy importer phase, source file
-webhook-subtree hash, protected full-backup digest, source table fingerprint,
-mapping/report digest, completion time, and operator identity. Both SQLite and
-PostgreSQL expose the same logical state.
+Stores the expected canonical schema version, legacy importer `phase`
+(`migration_pending`, `artifacts_pending`, `artifacts_ready`,
+`database_committed`, or `complete`), source file
+webhook-subtree fingerprint, fingerprint key ID, protected full-backup digest,
+source table fingerprint,
+mapping/report digest, source-fingerprint-bound rejection decisions, completion time,
+operator identity, and a monotonic state revision for compare-and-set updates. It
+also stores the mutually exclusive key-rotation operation ID, source/target key
+IDs, `rotation_phase` using the exact rotation values defined above, table/key
+cursor, processed/verified counts, and start/completion times described above.
+`rollback_retirement_phase` is exactly `not_applicable`, `retained`,
+`rollback_retirement_in_progress`, or `retired`. The row also stores nullable
+`first_canonical_activity_at` paired with `first_canonical_activity_kind`, whose
+closed values are `registration_mutation`, `event_capture`, or
+`delivery_attempt`, without resource identity or content.
+Both SQLite and PostgreSQL expose the same logical state;
+structured mappings and rejection decisions use canonical JSON with equivalent
+validation and size bounds. Private migration state also retains normalized
+active backup/key identities, rollback expiry, retirement phase/operator/times,
+and expected ciphertext digest for idempotent artifact retirement; status and
+API responses never expose those filesystem paths.
 
 ### Transaction Ownership
 
 The concrete AuthNZ repository owns all SQL and uses backend-specific parameter
 and transaction helpers. Insert-and-return operations must commit durably on
 SQLite and PostgreSQL. Service methods cannot use raw pool `fetchone` as a write
-shortcut.
+shortcut. Every effective canonical registration mutation records the first
+canonical activity marker in the same transaction; idempotent replay, rejected
+requests, and effective no-ops do not. PR 2/3 event capture and first delivery
+attempt use the same compare-and-set marker before their transaction commits.
 
 ## Legacy Migration
 
@@ -512,37 +737,176 @@ It never silently merges conflicting registrations. Invalid or undecryptable
 records remain in the report and keep migration status degraded until an
 operator resolves or explicitly rejects them.
 
+Canonical ID mapping is deterministic. Existing canonical IDs and one stable
+winner for each valid positive legacy numeric ID not already canonical are
+reserved first in sorted source order. Every collision or nonnumeric source receives the next free
+positive 64-bit ID from a cursor that skips all reservations. The import
+transaction advances `admin_webhook_sequences.next_value` above every inserted
+ID, so the first post-migration create cannot reuse a preserved or allocated ID.
+Exhaustion fails the plan without partial import.
+
+Usable legacy signing secrets are preserved byte-for-byte inside the dedicated
+encrypted envelope so migration does not silently break existing receivers, but
+every imported registration is marked `secret_rotation_required`. The admin UI
+shows that state and requires a canonical rotate-and-update-receiver workflow
+before activation. Rotation generates the canonical `whsec_...` value and clears
+the marker transactionally.
+
+An explicit rejection is a durable migration decision bound to source kind,
+source identity, and the exact source-record fingerprint. It records operator,
+timestamp, and one stable reason code from `receiver_decommissioned`,
+`duplicate_external_config`, `invalid_legacy_record`, or `operator_excluded`.
+Source drift invalidates the decision. Free text and source content are not
+copied into audit metadata. Migration cannot complete while any source record is
+neither imported nor covered by a current explicit rejection.
+
+Subtree, table, and source-record fingerprints are domain-separated HMAC-SHA256
+values under the current dedicated migration key, not plain hashes of legacy
+content that may contain weak secrets. Migration state records the fingerprint
+key ID. The protected-backup digest remains SHA-256 over ciphertext, and the
+mapping/report digest remains SHA-256 over a versioned canonical redacted
+`report_payload` that explicitly excludes the outer `report_digest` field,
+presentation timestamps, and filesystem paths. It includes whether legacy
+credential decryption was explicitly enabled. The published report is an
+envelope containing that payload plus its digest; dry-run, apply, and tests use
+one shared encoder so the digest is not self-referential.
+`report_digest` is exactly `sha256:` followed by 64 lowercase hexadecimal
+characters. Apply requires the literal digest recorded when the report was
+reviewed; deriving the approval argument from the report inside the apply
+command is forbidden because it bypasses review provenance.
+
+The migration operation ID is deterministic for one source snapshot and
+fingerprint key: `whmig_` plus the first 32 lowercase hexadecimal characters
+of HMAC-SHA256 over a separate operation-ID domain, fingerprint key ID, and the
+sorted source-kind/fingerprint pairs. It contains no source bytes. Unchanged
+dry-runs therefore retain one operation/resume identity; source drift or a
+fingerprint-key change creates a different operation ID and invalidates prior
+approval.
+
 Dry-run also reports projected non-deleted/active counts. Import writes nothing
 when accepted sources would exceed the configured or hard registration ceiling;
 the operator must raise the configured bound within 1,000 or explicitly reject/
 archive named legacy entries. Migration never truncates the source set to fit.
 
-For `system_ops.json`, migration follows this sequence while legacy webhook and
-incident-notify mutation routes are quiesced:
+A fresh installation, or an existing installation with no rows and no legacy
+webhook fields, still uses dry-run plus explicit apply approval. Apply rescans
+both sources and transactionally marks migration complete with zero mappings;
+it does not create a rollback backup or key because no file content is changed.
+A backup and external rollback-key path are required only when the current
+`system_ops.json` structurally contains fields that sanitization will remove.
+Database-only imports likewise do not create a file backup.
 
-1. Acquire the existing system-ops file lock.
-2. Parse the file structurally and hash the canonicalized legacy webhook
-   subtree. Create a full-file `0600` backup encrypted under a one-time rollback
-   key held outside the data directory; flush and fsync the ciphertext and
-   record its digest. The key is never stored beside or inside the backup.
-3. In one AuthNZ transaction, insert canonical registrations and the migration
-   marker containing the webhook-subtree hash, backup digest, and mapping
-   digest.
-4. Commit, decrypt/read back every imported registration, and verify counts and
+Report, backup, rollback-key, and active data paths must be distinct after
+normalization. Their existing parent directories must be owned by the invoking
+effective user and have no group/world write bits; the importer never creates or
+relaxes those directories. Backup and rollback-key files are created once with
+mode `0600` using exclusive, no-follow semantics and must not already exist or
+be symlinks; the redacted report is published through a mode-`0600`
+same-directory temporary file and atomic replace. Each artifact publication
+fsyncs file content and its parent directory before it is considered durable.
+Apply rejects non-regular files and verifies the persisted ciphertext/key
+artifacts it created before changing database or source state.
+
+Before creating a rollback key or backup, apply snapshots/fingerprints the
+source under the file lock, releases that lock, and compare-and-sets migration
+state to `artifacts_pending` with the operation ID, operator, approved report
+digest, source fingerprints/fingerprint-key ID, approved canonical source
+mapping and rejection decisions, and normalized private artifact identities.
+That state-owned redacted plan snapshot becomes the recovery authority after
+reservation. Initial apply must parse the reviewed report; resume still requires
+the same literal approved digest and a matching fresh source snapshot, but a
+missing mutable report file cannot strand a reserved operation. If that report
+still exists, a digest mismatch fails closed. Apply then reacquires the file
+lock, requires the same source fingerprint, and creates the key followed by the
+encrypted backup. No AuthNZ
+transaction is held while waiting for or holding the file lock.
+
+Each artifact uses a private, deterministic, operation-bound staging path in
+the same directory. The importer creates that staging inode with
+`O_CREAT|O_EXCL` and no-follow semantics, writes/fsyncs/readbacks complete
+bytes, then publishes to the absent final name with an atomic no-overwrite hard
+link, fsyncs the directory, removes the staging name, and fsyncs again. Migration
+state records both final and staging identities. Resume can finish a verified
+staging-to-final link or remove/recreate only an incomplete state-owned staging
+file while the final name is absent; it never overwrites, unlinks, or adopts an
+unclaimed final path. A crash after linking leaves a complete final inode and,
+at worst, a second state-owned name for that same inode which resume removes.
+
+A crash-resume may open an existing artifact only when that durable state claims
+the exact operation and normalized path; it must revalidate owner/mode, regular
+no-follow identity, ciphertext digest when known, envelope context,
+decryptability, and readback. The rollback-key file is versioned JSON binding
+the strict-base64 32-byte key to operation ID, source fingerprint, and approved
+report digest, so a key-only crash has verifiable context. Any unclaimed
+existing path still fails closed and is never deleted or adopted. Once both
+artifacts verify, a state CAS records their digest and moves to
+`artifacts_ready`. Thus exclusive creation protects the first attempt without
+making a post-fsync/pre-database crash unrecoverable.
+
+The backup is not an automatic in-place restore. A dedicated offline
+`extract-rollback-backup` command first verifies completed migration state,
+`rollback_retirement_phase=retained`, an unexpired rollback window, and no first
+canonical activity marker. It then verifies the recorded ciphertext digest,
+rollback-key permissions, envelope context, and object-shaped JSON, and writes
+plaintext only to a distinct operator-selected
+`0600` file outside the application data directory whose existing parent is
+owned by the invoking account and is not group/world writable. Publication uses
+exclusive/no-follow creation, file fsync, parent fsync, and readback. It never
+writes plaintext to stdout, logs, the active data path, or an existing file.
+Extraction is mandatory-audited and does not change migration state. The
+runbook requires the application and both legacy/canonical mutation
+routes to be quiesced before a human-reviewed structural recovery; only the
+legacy `webhooks` and `webhook_deliveries` fields may be merged into the
+current object so unrelated post-backup state is not overwritten. The extracted
+plaintext is handled as a short-lived secret artifact and deleted after the
+reviewed recovery.
+
+Rollback-artifact retirement branches on durable state before filesystem
+access. `not_applicable` and `retired` return stable no-op results without audit,
+state mutation, or path access. A retained artifact pair may be retired only
+after its window expires and an accepted operational audit is durable. Before
+unlinking, retirement records `rollback_retirement_in_progress` plus exact
+state-owned identities and ciphertext digest. Resume consults that marker before
+requiring files that a prior attempt may have removed, accepts absence only at
+the matching post-unlink recovery boundary, deletes the key before ciphertext,
+fsyncs each parent, and finally records `retired`. Identity mismatch fails closed.
+
+For `system_ops.json`, migration follows this sequence only after every app
+process is drained/stopped or has been restarted with the canonical selector in
+`migrate`, and operators have verified that no legacy webhook or
+incident-notify mutation route remains reachable on any node. The importer
+acquires the durable migration-operation CAS so a second CLI cannot start a
+competing operation. Source fingerprint rechecks detect accidental writes but
+do not replace this all-node quiescence requirement:
+
+1. Acquire the existing system-ops file lock, parse the file structurally,
+   fingerprint the canonicalized legacy webhook subtree, then release the lock.
+2. In AuthNZ, reserve the operation and exact private artifact identities in
+   `artifacts_pending`.
+3. Reacquire the file lock, require the same source fingerprint, then create a
+   contextual one-time rollback-key file outside the data directory and a full-file
+   `0600` backup under that key; flush/fsync/read back both, then persist the
+   ciphertext digest and `artifacts_ready`. The key is never stored beside or
+   inside the backup.
+4. In one AuthNZ transaction, insert canonical registrations and advance the
+   migration marker containing the webhook-subtree fingerprint/key ID, backup
+   digest, and mapping digest.
+5. Commit, decrypt/read back every imported registration, and verify counts and
    mappings.
-5. Reacquire the lock, require the same webhook-subtree hash, remove only legacy
+6. Reacquire the lock, require the same webhook-subtree fingerprint, remove only legacy
    webhook fields from the current JSON object, preserve incident and unrelated
    changes made between lock windows, and publish the sanitized file by atomic
    replace plus directory fsync.
-6. Retain the encrypted backup and separate rollback key for a bounded default
+7. Retain the encrypted backup and separate rollback key for a bounded default
    seven-day rollback window, then purge the active backup and destroy the key
-   through an explicit, auditable command. The configured active window may not
-   exceed 30 days. Infrastructure-backup retention is documented separately;
+   through an explicit, auditable command.
+   `TLDW_ADMIN_WEBHOOK_ROLLBACK_WINDOW_DAYS` defaults to 7 and accepts only
+   integers from 1 through 30. Infrastructure-backup retention is documented separately;
    destroying the one-time key makes retained ciphertext unusable after the
    rollback window.
 
 If the process crashes after the database commit but before JSON sanitization,
-the committed webhook-subtree hash and mapping make rerun idempotent. A changed
+the committed webhook-subtree fingerprint and mapping make rerun idempotent. A changed
 webhook subtree stops the importer for operator review; unrelated incident-file
 changes do not invalidate the mapping or get overwritten.
 
@@ -919,6 +1283,22 @@ Current `dev` already provides peer-verified one-hop transport in
 primitive with a status-only response mode instead of introducing a second DNS,
 socket, or TLS implementation.
 
+The canonical webhook layer first applies its stricter syntactic policy because
+the current generic helper permits HTTP and conditionally permits URL user-info
+for other callers. It rejects control characters, backslashes, user-info,
+fragments, missing absolute host/scheme, malformed IDNA/ports, and HTTP unless
+`TLDW_ADMIN_WEBHOOKS_ALLOW_HTTP_DEV=true`. That override is accepted only
+when the validated application environment is non-production; enabling it in
+production is a startup configuration error. The layer then delegates to the
+focused central `evaluate_platform_webhook_url_policy(url)` adapter. That
+adapter combines `EGRESS_ALLOWLIST`, `WORKFLOWS_EGRESS_ALLOWLIST`, and
+`WORKFLOWS_WEBHOOK_ALLOWLIST`; combines the matching three denylists with deny
+precedence; and calls the lower-level evaluator with sensitive observability
+forced on. It therefore owns the DNS, private/reserved-address, and port
+decisions without exposing destinations in logs. Registration stores no
+resolved IP as a delivery guarantee; PR 2 repeats and pins policy for each
+attempt.
+
 The central helper contract for webhooks is:
 
 - HTTPS only by default; development HTTP requires an explicit non-production
@@ -963,6 +1343,28 @@ behind an explicit compatibility mode so the repository is not released in a
 partially migrated state. PR 3 removes that temporary compatibility path and
 performs final route activation. The final state always has one mounted
 canonical router.
+
+While compatibility mode exists, one authenticated status selector is mounted
+in every mode and explicitly reports `route_selection=canonical|legacy`. The
+selector then mounts either canonical mutation/read routes or isolated legacy
+routes, never both for the same method/path. Clients must not infer legacy mode
+from a 404, transport failure, or malformed status response; those remain
+visible failures and cannot trigger a compatibility downgrade.
+
+Compatibility selection is valid only while canonical mode is `off`.
+`legacy_compat=true` with `migrate` or `on` is a startup configuration error.
+Operators switch to the canonical selector before entering `migrate`, which
+ensures legacy webhook and incident-notify mutation routes are quiesced for the
+import state machine.
+
+Because compatibility defaults false, an upgrade with canonical mode still
+`off` intentionally disables the historical webhook CRUD, test, delivery, and
+incident-notify routes rather than silently continuing their unsafe outbound
+behavior. Startup emits a fixed sanitized warning for this selector/mode
+combination, authenticated status makes the disabled selection explicit, and
+the upgrade runbook requires operators to choose either temporary
+`legacy_compat=true` or the reviewed migration sequence. This is a deliberate
+operator-visible compatibility break, not a 404-based fallback.
 
 When migration is pending, only status is available and other calls return
 `503 admin_webhook_migration_pending`. When keys are unavailable, the restricted
@@ -1022,7 +1424,13 @@ events, or receiver response bodies.
 
 An in-progress command keeps its key and normalized request in memory; automatic
 retry reuses both. The UI does not persist a secret-replay-capable key in local
-or session storage. If navigation/reload loses a create/rotate response, the UI
+or session storage. The page clears secret and retry-command references on
+`pagehide` and synchronously flushes removal of the sensitive rendered state
+before that handler returns. It clears again on a persisted back-forward-cache
+`pageshow` as defense in depth; it does not rely on a deferred framework update
+after the page has entered the cache. Tests assert the secret and retry action
+are absent immediately after `pagehide`, before simulating restoration. If
+navigation/reload loses a create/rotate response, the UI
 refetches the inactive registration and directs the operator through a new
 rotation rather than claiming the original secret is recoverable. A `412`
 response reloads the current representation/ETag and requires fresh operator
@@ -1038,8 +1446,11 @@ Rollback has three boundaries:
 
 1. **Before import:** code and additive schema can be reverted normally.
 2. **After import but before any canonical mutation or delivery:** disable the
-   feature and use the protected mapping/backup for an offline legacy restore if
-   necessary.
+   feature, quiesce writers, extract the protected backup to a separate secure
+   file, and perform the runbook's reviewed structural legacy-field restore if
+   necessary. Never replace the active file wholesale. Status and extraction
+   both require the durable first-canonical-activity marker to remain empty and
+   the rollback window to remain open.
 3. **After the first canonical create, update, rotation, redelivery, or automatic
    event:** do not revert to the legacy writer. Disable delivery and forward-fix.
    Legacy restore at this point can lose canonical-only state.
@@ -1075,6 +1486,8 @@ The feature remains non-releaseable in canonical `on` mode until PR 3 lands.
   retention, metrics, and health;
 - test and manual redelivery behavior;
 - delivery-history API and operational service contracts.
+- transactional first-canonical-activity marking for synthetic event capture
+  and the first delivery attempt.
 
 This PR remains behind the disabled canonical mode and proves the data plane with
 synthetic events. It does not yet connect user or incident mutations.
@@ -1083,6 +1496,7 @@ synthetic events. It does not yet connect user or incident mutations.
 
 - durable user and incident producers;
 - source-identity deduplication and automatic delivery expansion;
+- transactional `event_capture` activity marking in every producer path;
 - final canonical router mounting and removal of legacy webhook handlers;
 - delivery-history and operational admin UI;
 - removal of temporary legacy compatibility routing;
@@ -1103,13 +1517,16 @@ route cutover.
 - OpenAPI request/response and stable error-code tests;
 - revision ETag, stale `If-Match`, no-op PATCH, and concurrent mutation tests;
 - create/active registration bounds, configuration validation, degraded
-  over-limit behavior, set-based fanout, and tombstone-purge tests;
+  over-limit behavior, and tombstone-purge eligibility tests;
 - SQLite fresh install and upgrades from pre-080, 080, and 082 states;
 - PostgreSQL fresh install and representative legacy upgrade;
 - durable SQLite write/commit regression tests;
 - JSON and legacy-table dry run, import, conflict, crash-point, readback,
   encrypted-backup/key-destruction, sanitization, unrelated-file-change, and
   rerun tests;
+- first-canonical-activity marker tests proving effective mutations close the
+  legacy-restore window transactionally while replay, rejection, and no-op do
+  not;
 - dedicated key absence, primary/previous rotation, legacy re-encryption, and
   runtime-fallback rejection tests;
 - create/rotate idempotent replay, route scoping, superseded-secret replay, and
@@ -1127,6 +1544,8 @@ route cutover.
 ### PR 2 Gates
 
 - one automatic delivery per matching registration;
+- set-based fanout proves expansion does not issue one registration query per
+  delivery;
 - synthetic event-body encryption/decryption, key rotation, and 64 KiB boundary
   assertions;
 - all enqueue, post-attempt disposition, and cancellation crash points for
