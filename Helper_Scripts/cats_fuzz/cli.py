@@ -1,0 +1,237 @@
+"""Command-line orchestration for the local CATS OpenAPI fuzzing harness."""
+
+from __future__ import annotations
+
+import argparse
+import ipaddress
+
+# This wrapper invokes fixed local CLI argv with shell=False.
+import subprocess  # nosec B404
+from collections.abc import Mapping
+from pathlib import Path
+from urllib.parse import urlparse
+
+from loguru import logger
+
+from Helper_Scripts.cats_fuzz.env import build_child_env, build_server_env
+from Helper_Scripts.cats_fuzz.manifest import get_builtin_block
+from Helper_Scripts.cats_fuzz.openapi_export import build_openapi_export_command
+from Helper_Scripts.cats_fuzz.runner import run_contract_block, run_runtime_block
+from Helper_Scripts.cats_fuzz.server import start_server, stop_server
+
+OPENAPI_EXPORT_TIMEOUT_SECONDS = 120
+_TIMEOUT_EXIT_CODE = 124
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse and validate harness CLI arguments."""
+    parser = argparse.ArgumentParser(description="Run local CATS OpenAPI fuzzing blocks.")
+    parser.add_argument(
+        "--block",
+        action="append",
+        choices=("contract", "public-read", "auth-read"),
+        help="CATS harness block to run; repeat to select multiple blocks.",
+    )
+    parser.add_argument("--output", default="artifacts/cats-fuzz", help="Artifact output directory.")
+    parser.add_argument("--cats-bin", default="cats", help="CATS executable to invoke.")
+    parser.add_argument("--server-url", help="Existing server URL for runtime blocks.")
+    parser.add_argument(
+        "--start-server",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Start a local loopback uvicorn server for runtime blocks.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Pass dry-run mode to runtime CATS blocks.")
+    parser.add_argument(
+        "--allow-external",
+        action="store_true",
+        help=(
+            "Permit parent env to contain real credentials; known sensitive values are "
+            "still scrubbed from the child env."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.block is None:
+        args.block = ["contract", "public-read"]
+    if args.start_server is None:
+        args.start_server = args.server_url is None
+    first_runtime_block = _first_runtime_block(args.block)
+    if first_runtime_block is not None and not args.start_server and not args.server_url:
+        parser.error(f"{first_runtime_block} requires --server-url or --start-server")
+    if args.server_url:
+        _validate_server_url(parser, args.server_url, args.block)
+    return args
+
+
+def _first_output_line(value: str) -> str | None:
+    """Return the first non-empty line from command output."""
+    for line in value.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return None
+
+
+def _cats_version_line(value: str) -> str | None:
+    """Return the first CATS version banner line from command output."""
+    for line in value.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("CATS version "):
+            return stripped
+    return None
+
+
+def _cats_version(cats_bin: str) -> str:
+    """Read the installed CATS version without failing the harness on lookup errors."""
+    try:
+        # Fixed argv, shell=False; cats_bin selects the local CATS executable.
+        result = subprocess.run(  # nosec B603
+            [cats_bin, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return "unknown"
+
+    if result.returncode != 0:
+        return "unknown"
+    return (
+        _cats_version_line(result.stdout)
+        or _cats_version_line(result.stderr)
+        or _first_output_line(result.stdout)
+        or _first_output_line(result.stderr)
+        or "unknown"
+    )
+
+
+def _first_runtime_block(selected_blocks: list[str]) -> str | None:
+    """Return the first selected block that requires a running API server."""
+    for block_name in selected_blocks:
+        if block_name != "contract":
+            return block_name
+    return None
+
+
+def _is_loopback_server_url(server_url: str) -> bool:
+    """Return True when a server URL points at localhost or a loopback IP."""
+    parsed = urlparse(server_url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if not parsed.hostname:
+        return False
+    hostname = parsed.hostname.lower()
+    if hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_server_url(parser: argparse.ArgumentParser, server_url: str, selected_blocks: list[str]) -> None:
+    """Reject runtime server URLs that could send fuzzing traffic outside loopback or path roots."""
+    parsed = urlparse(server_url)
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        parser.error("--server-url must be an origin URL without a path, query, or fragment")
+
+    for block_name in selected_blocks:
+        if block_name == "contract":
+            continue
+        block = get_builtin_block(block_name)
+        if not block.allows_network and not _is_loopback_server_url(server_url):
+            parser.error(f"{block_name} only allows loopback --server-url values")
+
+
+def _normalize_subprocess_output(value: str | bytes | None) -> str:
+    """Convert partial subprocess output to text for artifact logs."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _export_openapi_contract(contract_path: Path, child_env: Mapping[str, str], output_dir: Path) -> int:
+    """Run OpenAPI export in an isolated subprocess and persist diagnostic logs."""
+    stdout_path = output_dir / "openapi-export.stdout.log"
+    stderr_path = output_dir / "openapi-export.stderr.log"
+    # Local helper argv, shell=False, executed with an isolated child env.
+    try:
+        result = subprocess.run(  # nosec B603
+            build_openapi_export_command(contract_path),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=OPENAPI_EXPORT_TIMEOUT_SECONDS,
+            env=dict(child_env),
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout_path.write_text(_normalize_subprocess_output(exc.output), encoding="utf-8")
+        stderr_path.write_text(_normalize_subprocess_output(exc.stderr), encoding="utf-8")
+        logger.error("OpenAPI export timed out after {} seconds; see {}", OPENAPI_EXPORT_TIMEOUT_SECONDS, stderr_path)
+        return _TIMEOUT_EXIT_CODE
+
+    stdout_path.write_text(result.stdout, encoding="utf-8")
+    stderr_path.write_text(result.stderr, encoding="utf-8")
+    if result.returncode != 0:
+        logger.error("OpenAPI export failed; see {}", stderr_path)
+    return result.returncode
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run selected harness blocks and return the first non-zero block exit code."""
+    args = parse_args(argv)
+    selected_blocks = list(args.block)
+    first_runtime_block = _first_runtime_block(selected_blocks)
+    needs_runtime = first_runtime_block is not None
+
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    child_env = build_child_env(output_dir, allow_external=args.allow_external)
+    contract_path = output_dir / "openapi.json"
+
+    export_exit_code = _export_openapi_contract(contract_path, child_env, output_dir)
+    if export_exit_code != 0:
+        return export_exit_code
+
+    cats_version = _cats_version(args.cats_bin)
+    started_server = None
+    exit_code = 0
+
+    try:
+        if needs_runtime and args.start_server:
+            server_env = build_server_env(output_dir, child_env)
+            started_server = start_server(server_env, log_dir=output_dir / "server")
+
+        for block_name in selected_blocks:
+            if block_name == "contract":
+                summary = run_contract_block(
+                    contract_path,
+                    output_dir,
+                    cats_version,
+                    cats_bin=args.cats_bin,
+                )
+            else:
+                server_url = started_server.url if started_server is not None else args.server_url
+                summary = run_runtime_block(
+                    get_builtin_block(block_name),
+                    contract_path,
+                    server_url,
+                    output_dir,
+                    cats_version,
+                    cats_bin=args.cats_bin,
+                    dry_run=args.dry_run,
+                    env=child_env,
+                )
+
+            if exit_code == 0 and summary.exit_code != 0:
+                exit_code = summary.exit_code
+    finally:
+        if started_server is not None:
+            stop_server(started_server)
+
+    return exit_code
+
+
+__all__ = ["_cats_version", "_export_openapi_contract", "main", "parse_args"]

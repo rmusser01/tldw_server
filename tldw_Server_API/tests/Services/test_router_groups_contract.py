@@ -4383,6 +4383,15 @@ def test_minimal_test_router_specs_participate_in_route_policy(
     assert set(actual_counts) - set(expected_counts) == set()
 
 
+def test_minimal_optional_setup_router_participates_in_route_policy() -> None:
+    """Verify setup API routes can be disabled by generated runtime configs."""
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+
+    setup_spec = next(spec for spec in iter_minimal_optional_router_specs() if spec.name == "setup")
+
+    assert setup_spec.route_key == "setup"
+
+
 def test_minimal_source_delegates_always_included_routers_to_imported_specs() -> None:
     """Verify minimal always-included router specs no longer direct-import endpoints."""
     source = _minimal_group_source_text()
