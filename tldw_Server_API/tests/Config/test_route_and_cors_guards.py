@@ -1,13 +1,17 @@
 import asyncio
 import builtins
 import importlib
+import json
 import os
 from pathlib import Path
 import re
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.testclient import TestClient
 import pytest
 from starlette.requests import Request
+from starlette.responses import Response
 
 # Keep this module importable even when local/dev env sets ALLOWED_ORIGINS='*'.
 os.environ["ALLOWED_ORIGINS"] = "http://localhost:3000"
@@ -17,6 +21,11 @@ from tldw_Server_API.app.core import config as config_mod
 importlib.reload(config_mod)
 
 from tldw_Server_API.app import main as app_main
+from tldw_Server_API.app.core.Security.drain_gate_middleware import CORS_EXPOSE_HEADERS
+from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
+    standalone_request_validation_response,
+    standalone_response_invalid_response,
+)
 
 app_main = importlib.reload(app_main)
 
@@ -251,6 +260,133 @@ def test_global_unhandled_exception_handler_keeps_cors_for_allowed_origin() -> N
 
     assert response.status_code == 500
     assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    exposed = {item.strip().lower() for item in response.headers["access-control-expose-headers"].split(",")}
+    assert exposed == {item.lower() for item in CORS_EXPOSE_HEADERS}
+
+
+def test_normal_cors_preflight_allows_standalone_mutation_and_negotiation_headers() -> None:
+    with TestClient(app_main.app) as client:
+        response = client.options(
+            "/api/v1/slides/generations",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": (
+                    "Authorization,Content-Type,Idempotency-Key,If-Match," "X-Slides-Accept-Content-Kinds"
+                ),
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    if app_main._cors_allow_credentials:
+        assert response.headers["access-control-allow-credentials"] == "true"
+    else:
+        assert "access-control-allow-credentials" not in response.headers
+    assert "origin" in response.headers["vary"].lower()
+    allowed = {item.strip().lower() for item in response.headers["access-control-allow-headers"].split(",")}
+    assert {"idempotency-key", "if-match", "x-slides-accept-content-kinds"} <= allowed
+
+
+def test_runtime_cors_policy_exposes_download_cache_backoff_and_trace_headers(monkeypatch) -> None:
+    monkeypatch.setattr(app_main, "_cors_allow_credentials", True)
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/slides/presentations/deck/export",
+        "raw_path": b"/api/v1/slides/presentations/deck/export",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"origin", b"http://localhost:3000")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "app": app_main.app,
+    }
+    response = app_main._apply_runtime_cors_headers(Request(scope), Response(status_code=503))
+
+    exposed = {item.strip().lower() for item in response.headers["access-control-expose-headers"].split(",")}
+    assert exposed == {item.lower() for item in CORS_EXPOSE_HEADERS}
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-credentials"] == "true"
+    assert "origin" in response.headers["vary"].lower()
+
+
+def test_runtime_cors_policy_merges_origin_into_existing_vary(monkeypatch) -> None:
+    monkeypatch.setattr(app_main, "_cors_allow_credentials", True)
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/slides/presentations/deck",
+        "raw_path": b"/api/v1/slides/presentations/deck",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"origin", b"http://localhost:3000")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "app": app_main.app,
+    }
+    response = Response(status_code=500, headers={"Vary": "Accept-Encoding"})
+
+    app_main._apply_runtime_cors_headers(Request(scope), response)
+
+    vary = {item.strip().lower() for item in response.headers["vary"].split(",")}
+    assert vary == {"accept-encoding", "origin"}
+
+
+def test_standalone_request_validation_sanitizes_locations_and_never_returns_input() -> None:
+    sentinel = "PRIVATE_SOURCE_5cdda9"
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/slides/generations",
+        "raw_path": b"/api/v1/slides/generations",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "app": app_main.app,
+    }
+    error = RequestValidationError(
+        [
+            {
+                "type": "extra_forbidden",
+                "loc": ("body", sentinel, 999, "prompt", "too-deep"),
+                "msg": sentinel,
+                "input": {"html_document": sentinel},
+                "ctx": {"error": ValueError(sentinel)},
+            }
+        ]
+    )
+
+    response = standalone_request_validation_response(Request(scope), error)
+    body = response.body
+
+    assert response.status_code == 422
+    assert sentinel.encode() not in body
+    assert len(body) < 1024
+    assert json.loads(body)["errors"][0]["location"] == [
+        "body",
+        "unknown_field",
+        "unknown_index",
+        "prompt",
+    ]
+
+
+def test_standalone_response_failure_is_fixed_and_source_free() -> None:
+    sentinel = "PRIVATE_HTML_609e6c"
+
+    response = standalone_response_invalid_response(RuntimeError(sentinel))
+
+    assert response.status_code == 500
+    assert response.body == b'{"detail":"standalone_html_response_invalid"}'
+    assert sentinel.encode() not in response.body
 
 
 def test_run_startup_config_validation_logs_warning_on_import_error(monkeypatch) -> None:

@@ -13,11 +13,14 @@ import contextlib
 import ipaddress
 import os
 import secrets
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, Security, WebSocket, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -65,6 +68,10 @@ from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_
 from tldw_Server_API.app.core.MCP_unified.protocol import _trusted_compat_claims_metadata
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security
 from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
+from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
+    match_standalone_request_route,
+    standalone_request_validation_response,
+)
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.services import admin_tool_catalog_service
@@ -83,8 +90,27 @@ _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS = (
 )
 _ACCESS_TOKEN_TYPE = "access"  # nosec B105
 
+
+class _MCPRoute(APIRoute):
+    """Redact body-validation details on standalone-aware MCP transports."""
+
+    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        original = super().get_route_handler()
+
+        async def route_handler(request: Request) -> Response:
+            try:
+                return await original(request)
+            except RequestValidationError as exc:
+                route = match_standalone_request_route(request.method, request.url.path)
+                if route is None or route.mode != "generic_mcp":
+                    raise
+                return standalone_request_validation_response(request, exc)
+
+        return route_handler
+
+
 # Create router
-router = APIRouter(prefix="/mcp", tags=["mcp-unified"])
+router = APIRouter(prefix="/mcp", tags=["mcp-unified"], route_class=_MCPRoute)
 
 # Security
 security = HTTPBearer(auto_error=False)
