@@ -136,6 +136,7 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "persona_visual_generation_task",
         "persona_visual_portability_task",
         "presentation_render_jobs_task",
+        "standalone_html_generation_jobs_task",
         "privilege_snapshot_task",
         "prompt_studio_jobs_task",
         "quality_eval_task",

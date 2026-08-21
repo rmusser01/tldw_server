@@ -45,6 +45,11 @@ def _keyring(*key_ids: str, current: str | None = None) -> StandaloneHtmlHmacKey
     )
 
 
+def _coordination_epoch(generation: int, fill: str) -> str:
+    digest = fill * 64
+    return f"sha256:{digest}" if generation == 0 else f"v1:g{generation}:sha256:{digest}"
+
+
 def _current(key_id: str, *, activated_at: datetime = NOW) -> DigestKeyMetadata:
     return DigestKeyMetadata(
         key_id=key_id,
@@ -816,6 +821,187 @@ async def test_same_current_key_can_advance_epoch_without_changing_key_metadata(
 
     assert snapshot.config_epoch == "epoch-2"
     assert snapshot.records == (_current("current", activated_at=activated_at),)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_key", [False, True])
+async def test_production_epoch_rejects_lower_coordination_generation_before_cas(
+    same_key: bool,
+) -> None:
+    current_key = "current"
+    desired_key = current_key if same_key else "prior"
+    records = [_current(current_key, activated_at=NOW - timedelta(days=2))]
+    if not same_key:
+        records.append(
+            _retiring(
+                desired_key,
+                activated_at=NOW - timedelta(days=10),
+                retired_at=NOW - timedelta(days=1),
+            )
+        )
+    store = FakeRegistryStore(
+        records=tuple(records),
+        config_epoch=_coordination_epoch(2, "b"),
+    )
+    registry = StandaloneHtmlKeyRegistry(
+        store=store,
+        keyring=_keyring(
+            *((current_key,) if same_key else (current_key, desired_key)),
+            current=desired_key,
+        ),
+    )
+
+    with pytest.raises(DigestKeyRotationError, match="coordination generation"):
+        await registry.activate_configured_current(
+            expected_current_key_id=current_key,
+            expected_config_epoch=_coordination_epoch(2, "b"),
+            new_config_epoch=_coordination_epoch(1, "a"),
+            now=NOW,
+        )
+
+    assert [name for name, _ in store.calls] == ["load"]
+
+
+@pytest.mark.asyncio
+async def test_production_epoch_rejects_equal_generation_different_manifest_before_cas() -> None:
+    store = FakeRegistryStore(
+        records=(_current("current", activated_at=NOW - timedelta(days=1)),),
+        config_epoch=_coordination_epoch(4, "a"),
+    )
+    registry = StandaloneHtmlKeyRegistry(
+        store=store,
+        keyring=_keyring("current"),
+    )
+
+    with pytest.raises(DigestKeyRotationError, match="coordination generation"):
+        await registry.activate_configured_current(
+            expected_current_key_id="current",
+            expected_config_epoch=_coordination_epoch(4, "a"),
+            new_config_epoch=_coordination_epoch(4, "b"),
+            now=NOW,
+        )
+
+    assert [name for name, _ in store.calls] == ["load"]
+
+
+@pytest.mark.asyncio
+async def test_higher_production_generation_succeeds_and_exact_winner_is_idempotent() -> None:
+    store = FakeRegistryStore(
+        records=(_current("old", activated_at=NOW - timedelta(days=1)),),
+        config_epoch=_coordination_epoch(1, "a"),
+    )
+    registry = StandaloneHtmlKeyRegistry(
+        store=store,
+        keyring=_keyring("old", "new", current="new"),
+    )
+    kwargs = {
+        "expected_current_key_id": "old",
+        "expected_config_epoch": _coordination_epoch(1, "a"),
+        "new_config_epoch": _coordination_epoch(2, "b"),
+        "now": NOW,
+    }
+
+    first = await registry.activate_configured_current(**kwargs)
+    second = await registry.activate_configured_current(**kwargs)
+
+    assert first == second
+    assert first.current_key_id == "new"
+    assert first.config_epoch == _coordination_epoch(2, "b")
+    assert [name for name, _ in store.calls].count("current_cas") == 1
+
+
+@pytest.mark.asyncio
+async def test_forward_then_rollback_generation_prevents_stale_aba_oscillation() -> None:
+    store = FakeRegistryStore(
+        records=(_current("a", activated_at=NOW - timedelta(days=2)),),
+        config_epoch=_coordination_epoch(1, "a"),
+    )
+    forward = StandaloneHtmlKeyRegistry(
+        store=store,
+        keyring=_keyring("a", "b", current="b"),
+    )
+    await forward.activate_configured_current(
+        expected_current_key_id="a",
+        expected_config_epoch=_coordination_epoch(1, "a"),
+        new_config_epoch=_coordination_epoch(2, "b"),
+        now=NOW,
+    )
+    rollback = StandaloneHtmlKeyRegistry(
+        store=store,
+        keyring=_keyring("a", "b", current="a"),
+    )
+    await rollback.activate_configured_current(
+        expected_current_key_id="b",
+        expected_config_epoch=_coordination_epoch(2, "b"),
+        new_config_epoch=_coordination_epoch(3, "a"),
+        now=NOW + timedelta(minutes=1),
+    )
+    cas_count = [name for name, _ in store.calls].count("current_cas")
+
+    for stale_registry, stale_epoch in (
+        (rollback, _coordination_epoch(1, "a")),
+        (forward, _coordination_epoch(2, "b")),
+    ):
+        with pytest.raises(DigestKeyRotationError, match="coordination generation"):
+            await stale_registry.activate_configured_current(
+                expected_current_key_id="a",
+                expected_config_epoch=_coordination_epoch(3, "a"),
+                new_config_epoch=stale_epoch,
+                now=NOW + timedelta(minutes=2),
+            )
+
+    assert [name for name, _ in store.calls].count("current_cas") == cas_count
+    assert store.state.config_epoch == _coordination_epoch(3, "a")
+
+
+@pytest.mark.asyncio
+async def test_legacy_production_epoch_is_generation_zero() -> None:
+    store = FakeRegistryStore(
+        records=(_current("current", activated_at=NOW - timedelta(days=1)),),
+        config_epoch=_coordination_epoch(0, "a"),
+    )
+    registry = StandaloneHtmlKeyRegistry(
+        store=store,
+        keyring=_keyring("current"),
+    )
+
+    with pytest.raises(DigestKeyRotationError, match="coordination generation"):
+        await registry.activate_configured_current(
+            expected_current_key_id="current",
+            expected_config_epoch=_coordination_epoch(0, "a"),
+            new_config_epoch=_coordination_epoch(0, "b"),
+            now=NOW,
+        )
+    advanced = await registry.activate_configured_current(
+        expected_current_key_id="current",
+        expected_config_epoch=_coordination_epoch(0, "a"),
+        new_config_epoch=_coordination_epoch(1, "b"),
+        now=NOW,
+    )
+
+    assert advanced.config_epoch == _coordination_epoch(1, "b")
+
+
+@pytest.mark.asyncio
+async def test_production_epoch_cannot_downgrade_to_unordered_token() -> None:
+    store = FakeRegistryStore(
+        records=(_current("current", activated_at=NOW - timedelta(days=1)),),
+        config_epoch=_coordination_epoch(1, "a"),
+    )
+    registry = StandaloneHtmlKeyRegistry(
+        store=store,
+        keyring=_keyring("current"),
+    )
+
+    with pytest.raises(DigestKeyRotationError, match="coordination generation"):
+        await registry.activate_configured_current(
+            expected_current_key_id="current",
+            expected_config_epoch=_coordination_epoch(1, "a"),
+            new_config_epoch="unordered-epoch",
+            now=NOW,
+        )
+
+    assert [name for name, _ in store.calls] == ["load"]
 
 
 @pytest.mark.asyncio

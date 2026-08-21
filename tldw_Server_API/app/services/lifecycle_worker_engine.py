@@ -52,9 +52,7 @@ class LifecycleWorkerEngine:
 
         shutdown_phase = _normalize_shutdown_phase(phase)
         for batch in self._reverse_dependency_batches(session, shutdown_phase):
-            await asyncio.gather(
-                *(self._stop_one(session, shutdown_phase, handle) for handle in batch)
-            )
+            await asyncio.gather(*(self._stop_one(session, shutdown_phase, handle) for handle in batch))
         session.publish_stopped_names(shutdown_phase)
         session.publish_inventory()
 
@@ -130,9 +128,7 @@ class LifecycleWorkerEngine:
     ) -> None:
         for dependency_name in spec.depends_on:
             if dependency_name not in session.handles_by_name:
-                raise RuntimeError(
-                    f"Worker {spec.name!r} dependency {dependency_name!r} did not start"
-                )
+                raise RuntimeError(f"Worker {spec.name!r} dependency {dependency_name!r} did not start")
 
     async def _create_handle(
         self,
@@ -206,13 +202,10 @@ class LifecycleWorkerEngine:
             batch_names = [
                 spec.name
                 for spec in session.graph.specs
-                if spec.name in remaining
-                and not self._has_remaining_dependent(spec.name, remaining, session.graph)
+                if spec.name in remaining and not self._has_remaining_dependent(spec.name, remaining, session.graph)
             ]
             if not batch_names:
-                batch_names = [
-                    spec.name for spec in session.graph.specs if spec.name in remaining
-                ]
+                batch_names = [spec.name for spec in session.graph.specs if spec.name in remaining]
             batches.append([session.handles_by_name[name] for name in batch_names])
             remaining.difference_update(batch_names)
 
@@ -234,8 +227,7 @@ class LifecycleWorkerEngine:
                 )
             except Exception as exc:  # noqa: BLE001 - cleanup must not hide startup aborts.
                 logger.warning(
-                    "Lifecycle worker startup cleanup failed while stopping registered "
-                    "workers: {}",
+                    "Lifecycle worker startup cleanup failed while stopping registered " "workers: {}",
                     exc,
                 )
 
@@ -245,10 +237,7 @@ class LifecycleWorkerEngine:
         remaining: set[str],
         graph: WorkerSpecGraph,
     ) -> bool:
-        return any(
-            spec.name in remaining and name in spec.depends_on
-            for spec in graph.specs
-        )
+        return any(spec.name in remaining and name in spec.depends_on for spec in graph.specs)
 
     async def _stop_one(
         self,
@@ -280,8 +269,7 @@ class LifecycleWorkerEngine:
             return True
         except asyncio.TimeoutError:
             logger.warning(
-                "App Shutdown: Timed out waiting for lifecycle worker {} shutdown callback "
-                "after {}s",
+                "App Shutdown: Timed out waiting for lifecycle worker {} shutdown callback " "after {}s",
                 handle.name,
                 handle.timeout_sec,
             )
@@ -310,8 +298,7 @@ class LifecycleWorkerEngine:
             return bool(handle.task.done())
         except asyncio.TimeoutError:
             logger.warning(
-                "App Shutdown: Timed out waiting for lifecycle worker {} after {}s; "
-                "cancelling",
+                "App Shutdown: Timed out waiting for lifecycle worker {} after {}s; " "cancelling",
                 handle.name,
                 handle.timeout_sec,
             )
@@ -336,15 +323,17 @@ class LifecycleWorkerEngine:
                 exc,
             )
             return
-        try:
-            await asyncio.wait_for(handle.task, timeout=1.0)
-        except asyncio.CancelledError:
-            pass
-        except asyncio.TimeoutError:
+        done, _ = await asyncio.wait({handle.task}, timeout=1.0)
+        if handle.task not in done:
             logger.warning(
                 "App Shutdown: Lifecycle worker {} did not cancel within 1.0s after timeout",
                 handle.name,
             )
+            return
+        try:
+            handle.task.result()
+        except asyncio.CancelledError:
+            pass
         except Exception as exc:  # noqa: BLE001 - worker failures must not block shutdown.
             logger.warning(
                 "App Shutdown: Lifecycle worker {} raised after cancellation: {}",

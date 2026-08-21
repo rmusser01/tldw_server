@@ -4,7 +4,7 @@ title: Add first-class standalone HTML-JS presentation generation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-16 13:15
+updated_date: 2026-08-21 22:59
 labels:
 - slides
 - presentation-studio
@@ -90,6 +90,15 @@ modified_files:
 - tldw_Server_API/app/core/Slides/standalone_html_service.py
 - tldw_Server_API/app/services/standalone_html_generation_jobs_worker.py
 - tldw_Server_API/tests/Slides/test_standalone_html_generation_jobs.py
+- tldw_Server_API/app/core/Slides/standalone_html_reconciler.py
+- tldw_Server_API/app/services/lifecycle_worker_engine.py
+- tldw_Server_API/app/services/startup_content_jobs_pollers.py
+- tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py
+- tldw_Server_API/tests/Services/test_lifecycle_worker_engine.py
+- tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py
+- tldw_Server_API/tests/Services/test_startup_worker_groups.py
+- tldw_Server_API/tests/Slides/test_standalone_html_reconciler.py
+- tldw_Server_API/tests/Slides/test_standalone_html_reconciler_db.py
 ---
 
 ## Description
@@ -256,4 +265,6 @@ TDD reproduced the defects before fixes: cancellation and lease loss during the 
 Fresh verification: standalone generation 113/113 passed. The affected Task 7/Task 8/render/quarantine matrix passed 226 tests with 26 repository-managed PostgreSQL skips and 5 warnings (seed 2544557896). py_compile and git diff --check passed. Ruff passes all changed semantics; the full touched-file run reports only five unchanged baseline F401/F841 findings in legacy tests. Black leaves every new/changed hunk unchanged; its only output is surrounding legacy manager/quarantine formatting outside this diff. Production Bandit scanned 11,234 LOC with 0 findings and 0 errors at /private/tmp/bandit_task12115_task8_review_fixes.json. Independent SQL and security re-audits report no remaining Critical or Important findings. Interactive execution remains disabled, Task 9 lifecycle wiring remains deferred, and TASK-12115 remains In Progress.
 
 2026-07-18 Task 8 final immutable review closure: commits 169bdf9b20, 56644c7f3b, and fb470bb0b6 implement and harden the receipt-backed standalone HTML generation worker path. Fresh specification review of fb470bb0b6 found no Critical or Important blockers and independently passed 212 tests; fresh quality review of 56644c7f3b..fb470bb0b6 found no Critical or Important blockers and independently passed 211 tests. Final local evidence remains 113 focused tests passed, 226 affected tests passed with 26 repository-managed PostgreSQL skips, py_compile/diff/scoped Ruff/changed-hunk Black clean, and Bandit 0 findings across 11,234 lines. Task 8 is complete. TASK-12115 remains In Progress for Task 9 and later work; Task 9 was not started and interactive execution remains disabled.
+
+2026-08-21 Task 9 closure: implemented fenced active/dormant Slides reconciliation, canonical strict-existing database discovery/opening, source-free key-retirement proof, Jobs-outage local expiry, lifecycle startup/readiness/overload/shutdown ownership, boot-epoch/live-config authority fences, and SQLite/PostgreSQL coordination pagination. Review-driven TDD also closed stale lease/admission snapshots, physical database owner mismatches, fixed quarantine mapping, ordinary and expired immutable Jobs UUID conflicts, and sticky shutdown races around first- and second-batch reconciliation stalls. Final verification passed 377 tests with 24 repository-managed PostgreSQL fixture/runtime skips (227 Slides/reconciler, 90 lifecycle/services, 60 Jobs coordination). Black, Ruff, py_compile, and git diff checks passed. Production Bandit reported 0 findings and 0 errors across the seven touched production files. Independent final specification and quality reviews reported no Critical, Important, or Minor findings. Interactive execution remains disabled; Task 10 was not started. Overall TASK-12115 remains In Progress for Task 10 and later work.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

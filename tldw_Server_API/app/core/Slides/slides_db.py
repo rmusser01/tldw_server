@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import stat
 import threading
 import uuid
 from collections.abc import Callable, Iterable, Mapping
@@ -52,6 +54,8 @@ _STANDALONE_HTML_MAX_DOCUMENT_BYTES = 1_048_576
 _STANDALONE_HTML_SNAPSHOT_MAX_BYTES = 2 * _STANDALONE_HTML_MAX_DOCUMENT_BYTES + 65_536
 _STANDALONE_HTML_MAX_VERSION_RETENTION = 25
 _STANDALONE_HTML_MAX_EMPTY_SLIDES_JSON_CHARS = 64
+_GENERATION_RECONCILIATION_BATCH_MAX = 500
+_GENERATION_RECEIPT_MISSING_CODE = "generation_receipt_unresolved_pending"
 _SNAPSHOT_SCHEMA_VERSION = 1
 
 
@@ -225,6 +229,30 @@ class SlidesGenerationInputRow:
 
 
 @dataclass(frozen=True, slots=True)
+class SlidesGenerationReconciliationRow:
+    """Source-free receipt metadata used by the dormant-database reconciler."""
+
+    id: str
+    owner_user_id: str
+    digest_key_id: str
+    jobs_idempotency_key: str
+    job_id: int | None
+    job_uuid: str | None
+    presentation_id: str | None
+    receipt_status: str
+    error_code: str | None
+    error_message: str | None
+    created_at: str
+    updated_at: str
+    expires_at: str | None
+    input_expires_at: str | None
+    input_exists: bool
+    presentation_exists: bool
+    presentation_content_kind: str | None
+    presentation_generation_job_uuid: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class SlidesGenerationClaimResult:
     """Atomic receipt/input claim result."""
 
@@ -326,6 +354,16 @@ _INPUT_PROJECTION = """
     endpoint_identity, system_prompt, prompt_sha256, prompt_contract_version,
     input_expires_at, created_at
 """
+_GENERATION_RECONCILIATION_PROJECTION = """
+    r.id, r.owner_user_id, r.digest_key_id, r.jobs_idempotency_key,
+    r.job_id, r.job_uuid, r.presentation_id, r.receipt_status,
+    r.error_code, r.error_message, r.created_at, r.updated_at, r.expires_at,
+    i.input_expires_at,
+    CASE WHEN i.receipt_id IS NULL THEN 0 ELSE 1 END AS input_exists,
+    CASE WHEN p.id IS NULL THEN 0 ELSE 1 END AS presentation_exists,
+    p.content_kind AS presentation_content_kind,
+    p.generation_job_uuid AS presentation_generation_job_uuid
+"""
 
 _REQUIRED_BASE_SCHEMA_OBJECTS = {
     ("table", "schema_version"),
@@ -372,8 +410,74 @@ class SlidesDatabase:
         else:
             self._db_path_str = str(db_path)
             self.db_path = Path(self._db_path_str).resolve() if self._db_path_str != ":memory:" else Path(":memory:")
+        self._sqlite_uri = False
+        self._expected_file_identity: tuple[int, int, int] | None = None
+        self._expected_directory_identities: tuple[tuple[Path, tuple[int, int, int]], ...] = ()
         self._local = threading.local()
         self._ensure_schema()
+
+    @classmethod
+    def open_existing_complete(
+        cls,
+        db_path: str | Path,
+        client_id: str,
+        *,
+        expected_file_identity: tuple[int, int, int],
+        expected_directory_identities: tuple[
+            tuple[str | Path, tuple[int, int, int]],
+            ...,
+        ] = (),
+        standalone_html_version_retention: int = _STANDALONE_HTML_MAX_VERSION_RETENTION,
+    ) -> SlidesDatabase:
+        """Open one existing complete database without creating or migrating it."""
+        if not client_id:
+            raise ValueError("client_id is required")
+        if not 1 <= standalone_html_version_retention <= _STANDALONE_HTML_MAX_VERSION_RETENTION:
+            raise ValueError("standalone_html_version_retention must be between 1 and 25")
+        if (
+            not isinstance(expected_file_identity, tuple)
+            or len(expected_file_identity) != 3
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in expected_file_identity)
+        ):
+            raise ValueError("expected_file_identity is invalid")
+        if expected_file_identity[2] != stat.S_IFREG or not isinstance(expected_directory_identities, tuple):
+            raise ValueError("expected_file_identity is invalid")
+        normalized_directories: list[tuple[Path, tuple[int, int, int]]] = []
+        for entry in expected_directory_identities:
+            if (
+                not isinstance(entry, tuple)
+                or len(entry) != 2
+                or not isinstance(entry[1], tuple)
+                or len(entry[1]) != 3
+                or any(isinstance(value, bool) or not isinstance(value, int) for value in entry[1])
+                or entry[1][2] != stat.S_IFDIR
+            ):
+                raise ValueError("expected_directory_identities is invalid")
+            normalized_directories.append(
+                (
+                    Path(os.path.abspath(os.fspath(Path(entry[0])))),
+                    entry[1],
+                )
+            )
+
+        lexical_path = Path(os.path.abspath(os.fspath(Path(db_path))))
+        instance = cls.__new__(cls)
+        instance.client_id = str(client_id)
+        instance.standalone_html_version_retention = standalone_html_version_retention
+        instance.db_path = lexical_path
+        instance._db_path_str = lexical_path.as_uri() + "?mode=rw"
+        instance._sqlite_uri = True
+        instance._expected_file_identity = expected_file_identity
+        instance._expected_directory_identities = tuple(normalized_directories)
+        instance._local = threading.local()
+        try:
+            instance.get_connection()
+        except Exception as exc:
+            instance.close_connection()
+            if isinstance(exc, SchemaError) and str(exc) == "Slides database is unavailable or incomplete":
+                raise
+            raise SchemaError("Slides database is unavailable or incomplete") from exc
+        return instance
 
     @staticmethod
     def _schema_is_complete(conn: sqlite3.Connection) -> bool:
@@ -541,11 +645,54 @@ class SlidesDatabase:
     def get_connection(self) -> sqlite3.Connection:
         conn = getattr(self._local, "connection", None)
         if conn is None:
-            conn = sqlite3.connect(self._db_path_str, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            configure_sqlite_connection(conn)
+            try:
+                conn = sqlite3.connect(
+                    self._db_path_str,
+                    check_same_thread=False,
+                    uri=self._sqlite_uri,
+                )
+                conn.row_factory = sqlite3.Row
+                if self._expected_file_identity is not None:
+                    self._validate_opened_existing_connection(conn)
+                configure_sqlite_connection(conn)
+            except Exception:
+                if conn is not None:
+                    conn.close()
+                raise
             self._local.connection = conn
         return conn
+
+    def _validate_opened_existing_connection(self, conn: sqlite3.Connection) -> None:
+        """Bind a strict-open connection to the validated regular-file inode."""
+        expected = self._expected_file_identity
+        if expected is None:
+            return
+
+        def require_identity(
+            path: Path,
+            expected_identity: tuple[int, int, int],
+            *,
+            directory: bool,
+        ) -> None:
+            metadata = os.stat(path, follow_symlinks=False)
+            identity = (metadata.st_dev, metadata.st_ino, stat.S_IFMT(metadata.st_mode))
+            expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+            if stat.S_ISLNK(metadata.st_mode) or not expected_type(metadata.st_mode) or identity != expected_identity:
+                raise SchemaError("Slides database is unavailable or incomplete")
+
+        try:
+            for directory_path, directory_identity in self._expected_directory_identities:
+                require_identity(directory_path, directory_identity, directory=True)
+            require_identity(self.db_path, expected, directory=False)
+            if not self._schema_is_complete(conn):
+                raise SchemaError("Slides database is unavailable or incomplete")
+            for directory_path, directory_identity in self._expected_directory_identities:
+                require_identity(directory_path, directory_identity, directory=True)
+            require_identity(self.db_path, expected, directory=False)
+        except (OSError, sqlite3.Error, SchemaError, ValueError) as exc:
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError("Slides database is unavailable or incomplete") from exc
 
     def close_connection(self) -> None:
         conn = getattr(self._local, "connection", None)
@@ -569,6 +716,31 @@ class SlidesDatabase:
     @staticmethod
     def _utcnow_iso() -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    @staticmethod
+    def _canonical_utc_timestamp(value: object) -> datetime:
+        """Parse one second-precision canonical UTC timestamp."""
+        if not isinstance(value, str):
+            raise InputError("timestamp must be canonical UTC")
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            raise InputError("timestamp must be canonical UTC") from None
+        if (
+            parsed.tzinfo is None
+            or parsed.utcoffset() != timedelta(0)
+            or parsed.replace(microsecond=0).isoformat() != value
+        ):
+            raise InputError("timestamp must be canonical UTC")
+        return parsed
+
+    @staticmethod
+    def _generation_job_uuid_cas(expected_job_uuid: str | None, *, alias: str = "") -> tuple[str, tuple[str, ...]]:
+        """Build an exact nullable Jobs UUID predicate for internal static SQL."""
+        column = f"{alias}.job_uuid" if alias else "job_uuid"
+        if expected_job_uuid is None:
+            return f"{column} IS NULL", ()
+        return f"{column} = ?", (expected_job_uuid,)
 
     def _insert_sync_log(
         self,
@@ -1842,6 +2014,269 @@ class SlidesDatabase:
         if not row:
             raise KeyError("slides_generation_input_not_found")
         return SlidesGenerationInputRow(**dict(row))
+
+    def list_generation_receipts_for_reconciliation(
+        self,
+        *,
+        owner_user_id: str,
+        after_receipt_id: str | None,
+        limit: int,
+    ) -> list[SlidesGenerationReconciliationRow]:
+        """List one deterministic, source-free physical-database receipt page."""
+        if not isinstance(owner_user_id, str) or not owner_user_id:
+            raise InputError("owner_user_id is required")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= _GENERATION_RECONCILIATION_BATCH_MAX
+        ):
+            raise InputError("reconciliation limit must be between 1 and 500")
+        after_clause = "" if after_receipt_id is None else "AND r.id > ?"
+        parameters: tuple[Any, ...] = (limit,) if after_receipt_id is None else (after_receipt_id, limit)
+        rows = (
+            self.get_connection()
+            .execute(
+                f"SELECT {_GENERATION_RECONCILIATION_PROJECTION} "  # nosec B608
+                "FROM slides_generation_receipts r "
+                "LEFT JOIN slides_generation_inputs i ON i.receipt_id = r.id "
+                "LEFT JOIN presentations p ON p.id = r.presentation_id "
+                f"WHERE 1 = 1 {after_clause} "  # nosec B608
+                "ORDER BY r.id ASC LIMIT ?",
+                parameters,
+            )
+            .fetchall()
+        )
+        result: list[SlidesGenerationReconciliationRow] = []
+        for row in rows:
+            values = dict(row)
+            values["input_exists"] = bool(values["input_exists"])
+            values["presentation_exists"] = bool(values["presentation_exists"])
+            result.append(SlidesGenerationReconciliationRow(**values))
+        return result
+
+    def repair_generation_receipt_job(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+        expected_job_uuid: str | None,
+        job_id: int | None,
+        job_uuid: str,
+        receipt_status: str,
+        updated_at: str,
+    ) -> bool:
+        """CAS one nonterminal receipt to authoritative Jobs binding/state."""
+        if receipt_status not in {"queued", "running"}:
+            raise InputError("generation receipt status must be queued or running")
+        if not isinstance(job_uuid, str) or not job_uuid:
+            raise InputError("job_uuid is required")
+        if expected_job_uuid is not None and expected_job_uuid != job_uuid:
+            raise InputError("generation repair cannot replace a Jobs UUID")
+        if job_id is not None and (isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0):
+            raise InputError("job_id must be a positive integer or null")
+        self._canonical_utc_timestamp(updated_at)
+        job_uuid_clause, job_uuid_parameters = self._generation_job_uuid_cas(expected_job_uuid)
+        with self.transaction(immediate=True) as conn:
+            cursor = conn.execute(
+                "UPDATE slides_generation_receipts SET "
+                "job_id = COALESCE(?, job_id), job_uuid = ?, receipt_status = ?, "
+                "error_message = CASE WHEN error_code = ? THEN NULL ELSE error_message END, "
+                "error_code = CASE WHEN error_code = ? THEN NULL ELSE error_code END, "
+                "updated_at = ? WHERE id = ? AND owner_user_id = ? "
+                "AND receipt_status IN ('claimed', 'queued', 'running') "
+                f"AND {job_uuid_clause}",  # nosec B608
+                (
+                    job_id,
+                    job_uuid,
+                    receipt_status,
+                    _GENERATION_RECEIPT_MISSING_CODE,
+                    _GENERATION_RECEIPT_MISSING_CODE,
+                    updated_at,
+                    receipt_id,
+                    owner_user_id,
+                    *job_uuid_parameters,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def mark_generation_receipt_job_missing(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+        expected_job_uuid: str | None,
+        observed_at: str,
+    ) -> str | None:
+        """Persist and return the first authoritative Jobs-miss timestamp."""
+        self._canonical_utc_timestamp(observed_at)
+        job_uuid_clause, job_uuid_parameters = self._generation_job_uuid_cas(expected_job_uuid)
+        with self.transaction(immediate=True) as conn:
+            row = conn.execute(
+                "SELECT error_code, updated_at FROM slides_generation_receipts "
+                "WHERE id = ? AND owner_user_id = ? "
+                "AND receipt_status IN ('claimed', 'queued', 'running') "
+                f"AND {job_uuid_clause}",  # nosec B608
+                (receipt_id, owner_user_id, *job_uuid_parameters),
+            ).fetchone()
+            if row is None:
+                return None
+            if row["error_code"] == _GENERATION_RECEIPT_MISSING_CODE:
+                return str(row["updated_at"])
+            cursor = conn.execute(
+                "UPDATE slides_generation_receipts SET error_code = ?, "
+                "error_message = NULL, updated_at = ? "
+                "WHERE id = ? AND owner_user_id = ? "
+                "AND receipt_status IN ('claimed', 'queued', 'running') "
+                f"AND {job_uuid_clause}",  # nosec B608
+                (
+                    _GENERATION_RECEIPT_MISSING_CODE,
+                    observed_at,
+                    receipt_id,
+                    owner_user_id,
+                    *job_uuid_parameters,
+                ),
+            )
+            return observed_at if cursor.rowcount == 1 else None
+
+    def terminalize_expired_generation_receipt(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+        expected_job_uuid: str | None,
+        as_of: str,
+    ) -> bool:
+        """Fail an overdue receipt at its immutable logical input deadline."""
+        as_of_timestamp = self._canonical_utc_timestamp(as_of)
+        job_uuid_clause, job_uuid_parameters = self._generation_job_uuid_cas(
+            expected_job_uuid,
+            alias="r",
+        )
+        with self.transaction(immediate=True) as conn:
+            row = conn.execute(
+                "SELECT r.created_at AS receipt_created_at, "
+                "i.created_at AS input_created_at, i.input_expires_at "
+                "FROM slides_generation_receipts r "
+                "LEFT JOIN slides_generation_inputs i ON i.receipt_id = r.id "
+                "WHERE r.id = ? AND r.owner_user_id = ? "
+                "AND r.receipt_status IN ('claimed', 'queued', 'running') "
+                f"AND {job_uuid_clause}",  # nosec B608
+                (receipt_id, owner_user_id, *job_uuid_parameters),
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                receipt_created_at = self._canonical_utc_timestamp(row["receipt_created_at"])
+            except InputError:
+                raise SlidesDatabaseError("generation_timestamp_invalid") from None
+            input_deadline = receipt_created_at + timedelta(days=1)
+            try:
+                input_created_at = self._canonical_utc_timestamp(row["input_created_at"])
+                stored_input_deadline = self._canonical_utc_timestamp(row["input_expires_at"])
+            except InputError:
+                # Corrupt input metadata cannot extend the receipt-derived deadline.
+                pass
+            else:
+                if input_created_at == receipt_created_at and stored_input_deadline == input_deadline:
+                    input_deadline = stored_input_deadline
+            if as_of_timestamp < input_deadline:
+                return False
+            terminal_at = input_deadline.isoformat()
+            expires_at = (input_deadline + timedelta(days=30)).isoformat()
+            unaliased_job_clause, unaliased_job_parameters = self._generation_job_uuid_cas(expected_job_uuid)
+            cursor = conn.execute(
+                "UPDATE slides_generation_receipts SET receipt_status = 'failed', "
+                "error_code = 'generation_expired', "
+                "error_message = 'Generation input expired.', "
+                "updated_at = ?, expires_at = ? "
+                "WHERE id = ? AND owner_user_id = ? "
+                "AND receipt_status IN ('claimed', 'queued', 'running') "
+                f"AND {unaliased_job_clause}",  # nosec B608
+                (
+                    terminal_at,
+                    expires_at,
+                    receipt_id,
+                    owner_user_id,
+                    *unaliased_job_parameters,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                "DELETE FROM slides_generation_inputs WHERE receipt_id = ?",
+                (receipt_id,),
+            )
+            return True
+
+    def delete_terminal_generation_input(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+    ) -> bool:
+        """Delete an orphaned input only for an owner-scoped terminal receipt."""
+        with self.transaction(immediate=True) as conn:
+            cursor = conn.execute(
+                "DELETE FROM slides_generation_inputs WHERE receipt_id = ? "
+                "AND EXISTS (SELECT 1 FROM slides_generation_receipts r "
+                "WHERE r.id = slides_generation_inputs.receipt_id "
+                "AND r.owner_user_id = ? "
+                "AND r.receipt_status IN ('completed', 'failed', 'cancelled'))",
+                (receipt_id, owner_user_id),
+            )
+            return cursor.rowcount == 1
+
+    def delete_expired_generation_receipts(
+        self,
+        *,
+        owner_user_id: str,
+        expires_before: str,
+        limit: int,
+    ) -> int:
+        """Delete bounded expired terminal receipt metadata, never presentations."""
+        self._canonical_utc_timestamp(expires_before)
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= _GENERATION_RECONCILIATION_BATCH_MAX
+        ):
+            raise InputError("reconciliation limit must be between 1 and 500")
+        with self.transaction(immediate=True) as conn:
+            cursor = conn.execute(
+                "DELETE FROM slides_generation_receipts WHERE id IN ("
+                "SELECT id FROM slides_generation_receipts "
+                "WHERE owner_user_id = ? "
+                "AND receipt_status IN ('completed', 'failed', 'cancelled') "
+                "AND expires_at IS NOT NULL AND expires_at <= ? "
+                "ORDER BY id ASC LIMIT ?)",
+                (owner_user_id, expires_before, limit),
+            )
+            return max(cursor.rowcount, 0)
+
+    def count_unexpired_generation_receipts_for_digest_key(
+        self,
+        *,
+        owner_user_id: str,
+        digest_key_id: str,
+        as_of: str,
+    ) -> int:
+        """Count physical-database live receipt references to one digest key."""
+        if not isinstance(owner_user_id, str) or not owner_user_id:
+            raise InputError("owner_user_id is required")
+        self._canonical_utc_timestamp(as_of)
+        row = (
+            self.get_connection()
+            .execute(
+                "SELECT COUNT(*) AS count FROM slides_generation_receipts "
+                "WHERE digest_key_id = ? "
+                "AND (receipt_status IN ('claimed', 'queued', 'running') "
+                "OR (receipt_status IN ('completed', 'failed', 'cancelled') "
+                "AND (expires_at IS NULL OR expires_at > ?)))",
+                (digest_key_id, as_of),
+            )
+            .fetchone()
+        )
+        return int(row["count"]) if row is not None else 0
 
     def find_generation_receipt_by_idempotency_digests(
         self,

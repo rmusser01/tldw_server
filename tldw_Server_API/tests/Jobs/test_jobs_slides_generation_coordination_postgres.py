@@ -25,6 +25,48 @@ UTC = timezone.utc
 NOW = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
 
 
+def test_active_owner_first_page_types_nullable_cursor_parameter(monkeypatch) -> None:
+    """Keep PostgreSQL from inferring an unknown type for the first-page NULL."""
+
+    class _Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        def close(self) -> None:
+            return None
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self.sql = ""
+            self.params = ()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        def execute(self, sql, params) -> None:
+            self.sql = " ".join(str(sql).split())
+            self.params = tuple(params)
+
+        def fetchall(self):
+            return [{"owner_user_id": "owner-1"}]
+
+    manager = object.__new__(JobManager)
+    manager.backend = "postgres"
+    cursor = _Cursor()
+    monkeypatch.setattr(manager, "_connect", _Connection)
+    monkeypatch.setattr(manager, "_pg_cursor", lambda _conn: cursor)
+
+    assert manager.list_active_slides_generation_owner_ids(limit=1) == ["owner-1"]
+    assert "CAST(%s AS TEXT) IS NULL" in cursor.sql
+    assert cursor.params[3:] == (None, None, 1)
+
+
 @pytest.mark.pg_jobs
 def test_postgres_migration_adds_archive_indexes_shared_tables_and_narrow_uuid_constraint(
     jobs_pg_dsn,
@@ -470,6 +512,55 @@ def test_postgres_reconciliation_takeover_and_revision_fencing_matches_sqlite(jo
     assert changed["startup_complete_epoch"] is None
     assert changed["last_complete_epoch"] is None
     assert changed["lag"] == 0
+
+
+@pytest.mark.pg_jobs
+def test_postgres_active_slides_generation_owners_match_sqlite_scope_and_order(
+    jobs_pg_dsn,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    for owner, idempotency_key in (
+        ("2", "pg-owner-2-a"),
+        ("10", "pg-owner-10-a"),
+        ("10", "pg-owner-10-b"),
+    ):
+        manager.create_job(
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+            payload={"receipt_id": idempotency_key},
+            owner_user_id=owner,
+            idempotency_key=idempotency_key,
+        )
+    manager.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="export",
+        payload={},
+        owner_user_id="1",
+    )
+    terminal = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "pg-terminal"},
+        owner_user_id="3",
+        idempotency_key="pg-owner-3-terminal",
+    )
+    with psycopg.connect(jobs_pg_dsn) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE jobs SET status='completed' WHERE id=%s",
+            (terminal["id"],),
+        )
+
+    first = manager.list_active_slides_generation_owner_ids(limit=1)
+    second = manager.list_active_slides_generation_owner_ids(
+        after_owner_user_id=first[-1],
+        limit=10,
+    )
+
+    assert first == ["10"]
+    assert second == ["2"]
 
 
 @pytest.mark.pg_jobs
