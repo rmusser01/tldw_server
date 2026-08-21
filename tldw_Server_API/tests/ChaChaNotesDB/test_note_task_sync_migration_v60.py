@@ -26,11 +26,12 @@ TASK_ID = "22222222-2222-4222-8222-222222222222"
 EVENT_ID = "33333333-3333-4333-8333-333333333333"
 
 
-def test_postgres_initializer_authority_is_schema_v60() -> None:
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 60
+def test_postgres_initializer_preserves_v60_step_before_current_v61() -> None:
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 61
     source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
     assert "target_version = self._POSTGRES_SCHEMA_VERSION" in source
     assert "_migrate_from_v59_to_v60_postgres" in source
+    assert "_migrate_from_v60_to_v61_postgres" in source
     assert "_verify_note_task_schema_postgres" in source
 
 
@@ -462,7 +463,7 @@ def test_sqlite_v60_upgrade_preserves_graph_under_local_unbound_scope(tmp_path: 
     upgraded = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         with upgraded.transaction() as conn:
-            assert upgraded._get_db_version(conn) == 60  # nosec B101
+            assert upgraded._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION  # nosec B101
             assert conn.execute("PRAGMA foreign_key_check").fetchall() == []  # nosec B101
             counts = {
                 table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])  # nosec B608
@@ -814,7 +815,7 @@ def test_sqlite_v60_same_path_concurrent_openers_complete_one_migration(
     with ThreadPoolExecutor(max_workers=2) as executor:
         versions = list(executor.map(lambda _index: open_same_path(), range(2)))
 
-    assert versions == [60, 60]  # nosec B101
+    assert versions == [CharactersRAGDB._CURRENT_SCHEMA_VERSION] * 2  # nosec B101
     assert checkpoints == ["create", "copy", "index", "verify"]  # nosec B101
     with sqlite3.connect(db_path) as conn:
         tables = {str(row[0]) for row in conn.execute(
@@ -823,7 +824,7 @@ def test_sqlite_v60_same_path_concurrent_openers_complete_one_migration(
         assert conn.execute(  # nosec B101
             "SELECT version FROM db_schema_version WHERE schema_name=?",
             (CharactersRAGDB._SCHEMA_NAME,),
-        ).fetchone()[0] == 60
+        ).fetchone()[0] == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         assert not any(name.endswith("_v60") for name in tables)  # nosec B101
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []  # nosec B101
 

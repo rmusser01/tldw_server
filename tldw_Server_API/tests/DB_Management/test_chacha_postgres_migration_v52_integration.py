@@ -1,4 +1,4 @@
-"""PostgreSQL migration coverage from ChaChaNotes schema v52 to current."""
+"""PostgreSQL migration coverage from ChaChaNotes schema v52 to current v61."""
 
 import pytest
 
@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
 
 
-def test_postgres_v52_to_current_preserves_questions_and_is_rerunnable(
+def test_postgres_v52_to_current_v61_preserves_questions_and_is_rerunnable(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -62,7 +62,26 @@ def test_postgres_v52_to_current_preserves_questions_and_is_rerunnable(
         question = db.get_question(question_id)
 
         assert columns == {"group_id", "group_prompt"}
+        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 61
         assert int(version) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        relations = {
+            row["table_name"]
+            for row in backend.execute(
+                """
+                SELECT table_name
+                  FROM information_schema.tables
+                 WHERE table_schema = current_schema()
+                   AND table_name IN (
+                       'shared_workspace_chat_threads',
+                       'shared_workspace_chat_requests'
+                   )
+                """
+            ).rows
+        }
+        assert relations == {
+            "shared_workspace_chat_threads",
+            "shared_workspace_chat_requests",
+        }
         assert question is not None
         assert question["question_text"] == "Preserved question"
         assert question["options"] == ["A", "B"]

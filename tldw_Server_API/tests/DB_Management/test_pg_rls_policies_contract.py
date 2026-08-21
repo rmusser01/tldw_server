@@ -87,6 +87,72 @@ def test_chacha_rls_includes_workspace_resource_memberships_tenant_policy():
     assert "client_id = current_setting('app.current_user_id', true)" in sql
 
 
+def test_shared_workspace_chat_rls_is_guarded_forced_and_canonical() -> None:
+    policy_statements = rls_module.build_shared_workspace_chat_rls_sql()
+    policy_sql = " ".join("\n".join(policy_statements).split())
+    canonical_sql = "\n".join(build_chacha_rls_sql())
+
+    for table in (
+        "shared_workspace_chat_threads",
+        "shared_workspace_chat_requests",
+    ):
+        assert f"to_regclass('{table}')" in policy_sql
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in policy_sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in policy_sql
+        assert f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}" in policy_sql
+        assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in policy_sql
+    for statement in policy_statements:
+        assert canonical_sql.count(statement) == 1
+
+
+def test_shared_workspace_chat_rls_checks_recipient_conversation_thread_and_messages() -> None:
+    sql = " ".join("\n".join(rls_module.build_shared_workspace_chat_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    thread_policy = sql.split(
+        "CREATE POLICY shared_workspace_chat_threads_tenant_isolation "
+        "ON shared_workspace_chat_threads",
+        1,
+    )[1].split("$thread_policy$", 1)[0]
+    request_policy = sql.split(
+        "CREATE POLICY shared_workspace_chat_requests_tenant_isolation "
+        "ON shared_workspace_chat_requests",
+        1,
+    )[1].split("$request_policy$", 1)[0]
+
+    assert "USING (" in thread_policy
+    assert "WITH CHECK (" in thread_policy
+    for clause in (
+        f"shared_workspace_chat_threads.recipient_user_id = {owner}",
+        "conversation.id = shared_workspace_chat_threads.conversation_id",
+        f"conversation.client_id = {owner}",
+        "conversation.client_id = shared_workspace_chat_threads.recipient_user_id",
+        "conversation.deleted = false",
+    ):
+        assert thread_policy.count(clause) == 2
+
+    assert "USING (" in request_policy
+    assert "WITH CHECK (" in request_policy
+    for clause in (
+        f"shared_workspace_chat_requests.recipient_user_id = {owner}",
+        "thread.recipient_user_id = shared_workspace_chat_requests.recipient_user_id",
+        "thread.share_id = shared_workspace_chat_requests.share_id",
+        "thread.conversation_id = shared_workspace_chat_requests.conversation_id",
+        "conversation.id = shared_workspace_chat_requests.conversation_id",
+        f"conversation.client_id = {owner}",
+        "conversation.client_id = shared_workspace_chat_requests.recipient_user_id",
+        "conversation.deleted = false",
+        "user_message.id = shared_workspace_chat_requests.user_message_id",
+        "user_message.conversation_id = shared_workspace_chat_requests.conversation_id",
+        f"user_message.client_id = {owner}",
+        "user_message.client_id = shared_workspace_chat_requests.recipient_user_id",
+        "assistant_message.id = shared_workspace_chat_requests.assistant_message_id",
+        "assistant_message.conversation_id = shared_workspace_chat_requests.conversation_id",
+        f"assistant_message.client_id = {owner}",
+        "assistant_message.client_id = shared_workspace_chat_requests.recipient_user_id",
+    ):
+        assert request_policy.count(clause) == 2
+
+
 def test_chacha_rls_scopes_graph_projection_state_and_allows_unresolved_targets():
     sql = " ".join("\n".join(build_chacha_rls_sql()).split())
 
