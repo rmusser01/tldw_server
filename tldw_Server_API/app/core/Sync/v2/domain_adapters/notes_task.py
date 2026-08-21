@@ -73,8 +73,21 @@ class NotesTaskDomainAdapter:
         ):
             return _rejected(envelope, "notes_task_payload_invalid")
 
+        trusted_bootstrap = _trusted_task_bootstrap(envelope, context)
         restore_intent = envelope.routing_metadata.get("restore_intent")
-        if set(envelope.routing_metadata) - {"restore_intent"} or restore_intent not in {
+        allowed_routing = (
+            {
+                "bootstrap_capture",
+                "bootstrap_id",
+                "source",
+                "origin",
+                "server_device_id",
+                "server_owner_user_id",
+            }
+            if trusted_bootstrap
+            else {"restore_intent"}
+        )
+        if set(envelope.routing_metadata) - allowed_routing or restore_intent not in {
             None,
             True,
         }:
@@ -110,22 +123,30 @@ class NotesTaskDomainAdapter:
         if envelope.object_id != payload.task_id or envelope.parent_id != payload.note_id:
             return _conflict(envelope, "notes_task_identity_conflict")
 
-        if context is None or context.get_authorized_note is None:
+        get_authorized_note = context.get_authorized_note if context is not None else None
+        if not trusted_bootstrap and get_authorized_note is None:
             return _rejected(envelope, "notes_task_authorization_unavailable")
-        note = context.get_authorized_note(payload.note_id)
-        if note is None or note.dataset_id != dataset.dataset_id:
-            return AdapterDeferred(
-                client_envelope_id=envelope.client_envelope_id,
-                message="The authorized parent note is not available yet",
-            )
-        if _is_deleted(note):
-            return _conflict(envelope, "notes_task_parent_conflict")
+        if not trusted_bootstrap:
+            if get_authorized_note is None:
+                return _rejected(envelope, "notes_task_authorization_unavailable")
+            note = get_authorized_note(payload.note_id)
+            if note is None or note.dataset_id != dataset.dataset_id:
+                return AdapterDeferred(
+                    client_envelope_id=envelope.client_envelope_id,
+                    message="The authorized parent note is not available yet",
+                )
+            if _is_deleted(note):
+                return _conflict(envelope, "notes_task_parent_conflict")
 
         head = _get_head(envelope, context)
         if head is not None and _literal_replay(head, envelope):
             return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
 
         if head is None:
+            if trusted_bootstrap:
+                if _has_base(envelope) or restore_intent is True:
+                    return _conflict(envelope, "notes_task_base_conflict")
+                return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
             if _has_base(envelope) or expected_revision != 1:
                 return _conflict(envelope, "notes_task_base_conflict")
             if restore_intent is True:
@@ -196,6 +217,23 @@ def _same_identity(head: SyncHead, task_id: str, note_id: str) -> bool:
 
 def _is_deleted(head: SyncHead) -> bool:
     return head.operation == "tombstone" or head.deleted
+
+
+def _trusted_task_bootstrap(
+    envelope: SyncEnvelopeCreate,
+    context: SyncAdapterContext | None,
+) -> bool:
+    bootstrap_id = envelope.routing_metadata.get("bootstrap_id")
+    return bool(
+        context is not None
+        and context.trusted_server_origin
+        and isinstance(bootstrap_id, str)
+        and bootstrap_id
+        and context.notes_task_bootstrap_id == bootstrap_id
+        and envelope.routing_metadata.get("bootstrap_capture") is True
+        and envelope.routing_metadata.get("source") == "notes-task-bootstrap"
+        and envelope.routing_metadata.get("origin") == "server"
+    )
 
 
 def _rejected(

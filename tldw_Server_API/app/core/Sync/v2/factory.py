@@ -23,6 +23,7 @@ from .domain_adapters.media import MediaMetadataAdapter
 from .domain_adapters.notes import NotesDomainAdapter
 from .domain_adapters.notes_link import NotesLinkDomainAdapter
 from .domain_adapters.notes_organization import NotesOrganizationDomainAdapter
+from .domain_adapters.notes_task import NotesTaskDomainAdapter
 from .domain_adapters.source_cache import SourceCacheAdapter
 from .domain_adapters.workspaces import WorkspacesDomainAdapter
 from .materializers import (
@@ -33,6 +34,7 @@ from .materializers import (
     NotesLinkMaterializer,
     NotesMaterializer,
     NotesOrganizationMaterializer,
+    NotesTaskMaterializer,
     SourceCacheMaterializer,
     SyncMaterializer,
 )
@@ -47,6 +49,7 @@ from .models import (
 from .notes_attachment_bootstrap import NotesAttachmentBootstrapper
 from .notes_link_bootstrap import NotesLinkBootstrapper
 from .notes_organization_bootstrap import NotesOrganizationBootstrapper
+from .notes_task_bootstrap import NotesTaskBootstrapper
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
 from .store import SyncV2Store
@@ -77,6 +80,7 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
         + [MediaMetadataAdapter(domain=domain) for domain in MEDIA_SYNC_DOMAINS]
         + [NotesOrganizationDomainAdapter(domain=domain) for domain in NOTES_ORGANIZATION_DOMAINS]
         + [NotesLinkDomainAdapter()]
+        + [NotesTaskDomainAdapter()]
     )
 
 
@@ -97,6 +101,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         "chat.message": ChatMessageMaterializer(note_db),
         "notes.note": NotesMaterializer(note_db),
         "notes.link": NotesLinkMaterializer(note_db),
+        "notes.task": NotesTaskMaterializer(note_db),
         "source_cache.entry": SourceCacheMaterializer(),
         "media.item": MediaMetadataMaterializer(domain="media.item"),
         "media.keyword": MediaMetadataMaterializer(domain="media.keyword"),
@@ -116,6 +121,10 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         materializers=materializers,
         advertised_domains=settings.supported_domains,
     )
+    _validate_notes_task_components(
+        adapters=adapters,
+        materializers=materializers,
+    )
     return SyncV2Service(
         store=store,
         adapters=adapters,
@@ -126,6 +135,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         dataset_bootstrapper=NotesOrganizationBootstrapper(note_db),
         notes_link_bootstrapper=NotesLinkBootstrapper(note_db),
         notes_attachment_bootstrapper=NotesAttachmentBootstrapper(note_db),
+        notes_task_bootstrapper=NotesTaskBootstrapper(note_db),
     )
 
 
@@ -166,6 +176,21 @@ def _validate_notes_link_components(
     if not isinstance(materializers.get("notes.link"), NotesLinkMaterializer):
         raise RuntimeError(
             "Advertised Sync domain has no user-bound materializer: notes.link"
+        )
+
+
+def _validate_notes_task_components(
+    *,
+    adapters: SyncAdapterRegistry,
+    materializers: Mapping[SyncDomain, SyncMaterializer],
+) -> None:
+    """Fail closed when the private dormant task lifecycle is partially wired."""
+
+    if not isinstance(adapters.get("notes.task"), NotesTaskDomainAdapter):
+        raise RuntimeError("Private Sync domain has no strict adapter: notes.task")
+    if not isinstance(materializers.get("notes.task"), NotesTaskMaterializer):
+        raise RuntimeError(
+            "Private Sync domain has no user-bound materializer: notes.task"
         )
 
 

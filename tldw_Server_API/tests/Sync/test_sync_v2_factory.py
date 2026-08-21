@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.core.Sync.v2 import factory
@@ -65,7 +67,7 @@ def test_sync_v2_factory_rejects_invalid_positive_integer_env(monkeypatch, name:
 def test_sync_v2_factory_registers_each_notes_organization_domain_as_a_complete_pair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    note_db = object()
+    note_db = SimpleNamespace(task_store=object())
     monkeypatch.setattr(factory, "_sync_v2_store_for_user", lambda *args: object())
     monkeypatch.setattr(factory, "_chacha_notes_db_for_user", lambda user_id: note_db)
     monkeypatch.setattr(factory, "_sync_v2_blob_store_for_user", lambda user_id: None)
@@ -110,7 +112,7 @@ def test_sync_v2_factory_fails_closed_when_an_advertised_notes_organization_pair
 def test_sync_v2_factory_registers_and_validates_notes_link_pair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    note_db = object()
+    note_db = SimpleNamespace(task_store=object())
     monkeypatch.setattr(factory, "_sync_v2_store_for_user", lambda *args: object())
     monkeypatch.setattr(factory, "_chacha_notes_db_for_user", lambda user_id: note_db)
     monkeypatch.setattr(factory, "_sync_v2_blob_store_for_user", lambda user_id: None)

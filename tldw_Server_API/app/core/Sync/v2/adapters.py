@@ -43,6 +43,8 @@ ATTACHMENT_REF_SERVER_AVAILABILITY: frozenset[str] = frozenset({"server", "serve
 KNOWN_SYNC_DOMAINS: frozenset[str] = frozenset(
     {
         *SYNC_V2_SUPPORTED_DOMAINS,
+        "notes.task",
+        "notes.task_activity",
         "notes",
         "chat",
         "workspaces",
@@ -133,6 +135,7 @@ class SyncAdapterContext:
     organization_bootstrap_id: str | None = None
     notes_link_bootstrap_id: str | None = None
     attachment_ref_bootstrap_id: str | None = None
+    notes_task_bootstrap_id: str | None = None
     bootstrap_relationship_verifier: BootstrapRelationshipVerifier | None = None
     bootstrap_relationship_absence_verifier: BootstrapRelationshipVerifier | None = None
     supports_attachments: bool = False

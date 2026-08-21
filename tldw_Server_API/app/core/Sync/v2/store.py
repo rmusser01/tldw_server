@@ -73,6 +73,7 @@ class SyncV2Store:
         envelopes: Sequence[SyncEnvelope | SyncEnvelopeCreate],
         *,
         require_predecessors: bool = True,
+        trusted_notes_task_bootstrap_id: str | None = None,
     ) -> Iterator[SyncV2Store]:
         """Hold the durable dataset lock and one Sync transaction for projection."""
 
@@ -80,7 +81,10 @@ class SyncV2Store:
             (envelope.dataset_id, envelope.domain, envelope.object_id)
             for envelope in envelopes
         ]
-        with self.db.materialization_transaction(keys) as connection:
+        with self.db.materialization_transaction(
+            keys,
+            trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,
+        ) as connection:
             guarded = copy(self)
             guarded._connection = connection
             if require_predecessors:
@@ -623,12 +627,14 @@ class SyncV2Store:
         envelopes: Sequence[SyncEnvelopeCreate],
         *,
         trusted_notes_organization_bootstrap_id: str | None = None,
+        trusted_notes_task_bootstrap_id: str | None = None,
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
         return self.db.insert_envelopes_atomic(
             envelopes,
             trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
+            trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,
         )
 
     def list_mutation_group(
@@ -790,12 +796,14 @@ class SyncV2Store:
         server_cursor: int,
         *,
         bootstrap_id: str,
+        notes_task_bootstrap: bool = False,
     ) -> SyncEnvelope:
         """Record a verified bootstrap step as applied without product replay."""
 
         return self.db.mark_bootstrap_envelope_verified(
             server_cursor,
             bootstrap_id=bootstrap_id,
+            notes_task_bootstrap=notes_task_bootstrap,
             connection=self._connection,
         )
 

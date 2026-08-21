@@ -17,7 +17,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     logger,
 )
 from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
-from tldw_Server_API.app.core.Sync.v2.notes_task_contract import NotesTaskV1Payload
+from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
+    NotesTaskV1Payload,
+    notes_task_object_hash,
+    parse_notes_task_v1,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -927,7 +931,7 @@ class TaskStore:
         )
         cursor = self._execute(
             conn,
-            "UPDATE note_tasks SET text = ?, status = ?, metadata_json = ?, "
+            "UPDATE note_tasks SET text = ?, status = ?, metadata_json = ?, "  # nosec B608
             "updated_at = ?, completed_at = ?, deleted = ?, version = version + 1, "
             "canonical_revision = ?, canonical_hash = ?, source_diagnostic_code = NULL, "
             "source_diagnostic_hash = NULL"
@@ -1176,6 +1180,92 @@ class TaskStore:
             conn=None,
             fn=_read_tasks,
         )
+
+    def page_tasks_for_sync_bootstrap(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        after_task_id: str | None = None,
+        limit: int = 500,
+        conn: TaskConnection | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return one canonical task keyset page for private Sync bootstrap."""
+
+        if isinstance(limit, bool) or not 1 <= limit <= 500:
+            raise ValueError("Notes task bootstrap page limit must be 1..500")
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        cursor = str(after_task_id or "")
+
+        def _page(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            rows = self._read(
+                "SELECT * FROM note_tasks WHERE owner_user_id = ? AND dataset_id = ? "
+                "AND id > ? ORDER BY id ASC LIMIT ?",
+                (owner, dataset, cursor, limit),
+                conn=read_conn,
+            ).fetchall()
+            return [self._sync_bootstrap_task_row(row, owner) for row in rows]
+
+        return self._with_scoped_read(dataset_id=dataset, conn=conn, fn=_page)
+
+    @staticmethod
+    def _sync_bootstrap_task_row(row: Mapping[str, Any], owner: str) -> dict[str, Any]:
+        decoded = dict(row)
+        raw_metadata = decoded.get("metadata_json")
+        if isinstance(raw_metadata, str):
+            try:
+                metadata = json.loads(raw_metadata)
+            except (TypeError, ValueError) as exc:
+                raise CharactersRAGDBError("notes_task_source_invalid") from exc
+        else:
+            metadata = raw_metadata
+        if not isinstance(metadata, dict) or decoded.get("source_diagnostic_code") is not None:
+            raise CharactersRAGDBError("notes_task_source_invalid")
+        metadata_keys = set(metadata)
+        legacy_keys = {"due_date", "priority", "estimate"}
+        canonical_keys = {
+            "description",
+            "priority",
+            "due_date",
+            "estimate",
+            "recurrence",
+            "assignee_id",
+            "tags",
+            "custom",
+        }
+        legacy = metadata_keys.issubset(legacy_keys)
+        if not legacy and metadata_keys != canonical_keys:
+            raise CharactersRAGDBError("notes_task_source_invalid")
+        raw_payload: dict[str, Any] = {
+            "task_id": decoded.get("id"),
+            "note_id": decoded.get("note_id"),
+            "title": decoded.get("text"),
+            "description": None if legacy else metadata.get("description"),
+            "status": decoded.get("status"),
+            "completed_at": normalize_sync_timestamp(decoded.get("completed_at")),
+            "priority": metadata.get("priority"),
+            "due_date": metadata.get("due_date"),
+            "estimate": metadata.get("estimate"),
+            "recurrence": None if legacy else metadata.get("recurrence"),
+            "assignee_id": None if legacy else metadata.get("assignee_id"),
+            "tags": [] if legacy else metadata.get("tags"),
+            "custom": {} if legacy else metadata.get("custom"),
+        }
+        try:
+            payload = parse_notes_task_v1(raw_payload, owner_user_id=owner)
+            revision = int(decoded.get("canonical_revision") or 0)
+            expected_hash = notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=bool(decoded.get("deleted")),
+            )
+        except (TypeError, ValueError) as exc:
+            raise CharactersRAGDBError("notes_task_source_invalid") from exc
+        if decoded.get("canonical_hash") != expected_hash:
+            raise CharactersRAGDBError("notes_task_source_invalid")
+        decoded["metadata_json"] = metadata
+        decoded["sync_payload"] = payload.model_dump(mode="json")
+        return decoded
 
     def update_unlinked_task_metadata_record_only(
         self,
