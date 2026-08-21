@@ -72,4 +72,4 @@
 - [x] Run Backlog task listing and inspect TASK-13013 and TASK-12983.
 - [x] Verify every local dependency exists and the release graph has no cycle.
 - [x] Run `git diff --check` and scan changed files for prohibited private details or sensitive values.
-- [ ] Commit on `codex/core-release-readiness-backlog`.
+- [x] Commit on `codex/core-release-readiness-backlog`.
