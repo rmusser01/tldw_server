@@ -36,8 +36,6 @@ from ..schemas.sharing_schemas import (
     PublicImportRequest,
     PublicSharePreview,
     ResourceType,
-    SharedChatRequest,
-    SharedMediaResponse,
     SharedWithMeItem,
     SharedWithMeResponse,
     SharedWorkspaceSourceResponse,
@@ -57,8 +55,6 @@ from ..utils.prototype_error_contract import (
 )
 
 router = APIRouter(prefix="/sharing", tags=["sharing"])
-_SHARED_CHAT_ERROR_MESSAGE = "Chat request failed"
-_SHARED_CHAT_ERRORS_MESSAGE = "One or more internal pipeline errors were suppressed."
 
 
 # ── Lazy service construction ──
@@ -206,60 +202,6 @@ async def _get_owned_prototype_workspace(
             )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
     return workspace
-
-
-def _sanitize_shared_chat_result(value: Any) -> Any:
-    """Redact nested internal error details from shared chat data."""
-    if isinstance(value, dict):
-        sanitized: dict[str, Any] = {}
-        for key, item in value.items():
-            if key in {"exception", "traceback", "stack", "stack_trace"} and item:
-                sanitized[key] = _SHARED_CHAT_ERROR_MESSAGE
-                continue
-            if key in {"error", "errors"}:
-                continue
-            sanitized[key] = _sanitize_shared_chat_result(item)
-        return sanitized
-    if isinstance(value, list):
-        return [_sanitize_shared_chat_result(item) for item in value]
-    return value
-
-
-def _build_shared_chat_response(result: Any) -> dict[str, Any]:
-    """Construct a safe shared-chat response without echoing raw pipeline errors."""
-    if hasattr(result, "model_dump"):
-        payload = result.model_dump()
-    elif isinstance(result, dict):
-        payload = dict(result)
-    else:
-        return {"result": _sanitize_shared_chat_result(result)}
-
-    response: dict[str, Any] = {}
-    for key in (
-        "query",
-        "documents",
-        "expanded_queries",
-        "metadata",
-        "timings",
-        "citations",
-        "academic_citations",
-        "chunk_citations",
-        "generated_answer",
-        "cache_hit",
-        "security_report",
-        "total_time",
-        "claims",
-        "factuality",
-    ):
-        if key in payload:
-            response[key] = _sanitize_shared_chat_result(payload[key])
-
-    if payload.get("error"):
-        response["error"] = _SHARED_CHAT_ERROR_MESSAGE
-    if payload.get("errors"):
-        response["errors"] = [_SHARED_CHAT_ERRORS_MESSAGE]
-
-    return response
 
 
 # ── IP-based rate limiter for public (unauthenticated) endpoints ──
@@ -862,120 +804,6 @@ async def list_shared_workspace_sources(
         )
         for s in sources
     ]
-
-
-@router.get(
-    "/shared-with-me/{share_id}/media/{media_id}",
-    response_model=SharedMediaResponse,
-    dependencies=[Depends(rbac_rate_limit("sharing.read"))],
-    summary="Read a media item from a shared workspace",
-)
-async def get_shared_workspace_media(
-    share_id: int,
-    media_id: int,
-    user: User = Depends(get_request_user),
-):
-    repo = await _maybe_await(_get_repo())
-    share = await repo.get_share(share_id)
-    if not share or share.get("is_revoked"):
-        raise HTTPException(status_code=404, detail="Share not found or revoked")
-
-    await _validate_user_has_share_access(share, user)
-
-    # Verify media_id is a source in this workspace
-    from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
-
-    chacha_db = await get_chacha_db_for_owner(share["owner_user_id"])
-    sources = chacha_db.list_workspace_sources(share["workspace_id"])
-    source_media_ids = {s.get("media_id") for s in sources}
-    if media_id not in source_media_ids:
-        raise HTTPException(
-            status_code=404,
-            detail="Media item not found in this shared workspace",
-        )
-
-    from ..API_Deps.DB_Deps import managed_media_db_for_owner
-
-    with managed_media_db_for_owner(share["owner_user_id"]) as media_db:
-        media = media_db.get_media_by_id(media_id)
-    if not media:
-        raise HTTPException(status_code=404, detail="Media item not found")
-
-    return SharedMediaResponse(
-        id=media["id"],
-        title=media.get("title", ""),
-        url=media.get("url"),
-        media_type=media.get("type"),
-        content=media.get("content"),
-        author=media.get("author"),
-        ingestion_date=media.get("ingestion_date"),
-    )
-
-
-@router.post(
-    "/shared-with-me/{share_id}/chat",
-    response_model=dict[str, Any],
-    dependencies=[Depends(rbac_rate_limit("sharing.read"))],
-    summary="Chat with a shared workspace's sources via RAG",
-)
-async def chat_with_shared_workspace(
-    share_id: int,
-    body: SharedChatRequest,
-    request: Request,
-    user: User = Depends(get_request_user),
-):
-    repo = await _maybe_await(_get_repo())
-    audit = _get_audit_service()
-
-    share = await repo.get_share(share_id)
-    if not share or share.get("is_revoked"):
-        raise HTTPException(status_code=404, detail="Share not found or revoked")
-
-    await _validate_user_has_share_access(share, user)
-
-    from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
-    from ..API_Deps.DB_Deps import get_media_db_path_for_rag, managed_media_db_for_owner
-
-    owner_chacha = await get_chacha_db_for_owner(share["owner_user_id"])
-
-    # Build RAG pipeline kwargs using the owner's databases but the accessor's namespace
-    try:
-        from ....core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
-
-        with managed_media_db_for_owner(share["owner_user_id"]) as owner_media:
-            owner_media_db_path = get_media_db_path_for_rag(owner_media)
-            result = await unified_rag_pipeline(
-                query=body.query,
-                media_db_path=owner_media_db_path,
-                notes_db_path=owner_chacha.db_path if hasattr(owner_chacha, "db_path") else None,
-                api_name=body.api_name,
-                model=body.model,
-                system_message=body.system_message,
-                index_namespace=f"user_{share['owner_user_id']}_media_embeddings",
-                media_db=owner_media,
-                chacha_db=owner_chacha,
-            )
-
-        await _audit_log_best_effort(
-            audit,
-            "share.chat",
-            resource_type="workspace",
-            resource_id=share["workspace_id"],
-            owner_user_id=share["owner_user_id"],
-            actor_user_id=user.id,
-            share_id=share_id,
-            ip_address=_client_ip(request),
-        )
-
-        return _build_shared_chat_response(result)
-    except ImportError:
-        raise HTTPException(
-            status_code=501,
-            detail="RAG pipeline not available",
-        ) from None
-    except Exception:
-        logger.error("Shared workspace chat failed")
-        raise HTTPException(status_code=500, detail="Chat request failed") from None
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

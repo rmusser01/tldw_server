@@ -58,8 +58,6 @@ import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { WorkspaceBanner } from "./WorkspaceBanner"
-import { SharedWorkspaceBanner } from "./SharedWorkspaceBanner"
-import { SharedWorkspaceProvider } from "./SharedWorkspaceContext"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ChatPane } from "./ChatPane"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
@@ -1282,47 +1280,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
   const startTutorial = useTutorialStore((s) => s.startTutorial)
-
-  // Shared workspace state (from ?shared= query param)
-  const [sharedShareId, setSharedShareId] = React.useState<number | null>(null)
-  const [sharedAccessLevel, setSharedAccessLevel] = React.useState<
-    "view_chat" | "view_chat_add" | "full_edit" | null
-  >(null)
-  const [sharedOwnerUserId, setSharedOwnerUserId] = React.useState<number | null>(null)
-  const [sharedAllowClone, setSharedAllowClone] = React.useState(false)
-
-  React.useEffect(() => {
-    try {
-      const params = new URLSearchParams(
-        getResearchWorkspaceSearchFromLocation(window.location)
-      )
-      const shareIdStr = params.get("shared")
-      if (shareIdStr) {
-        const sid = parseInt(shareIdStr, 10)
-        if (!isNaN(sid)) {
-          setSharedShareId(sid)
-          // Fetch share details
-          import("@/hooks/useSharing").then(async (mod) => {
-            try {
-              const { getTldwServerURL } = await import("@/services/tldw-server")
-              const { fetchWithTldwAuth } = await import("@/services/tldw/auth-fetch")
-              const base = await getTldwServerURL()
-              const res = await fetchWithTldwAuth(`${base}/api/v1/sharing/shared-with-me/${sid}/workspace`)
-              if (res.ok) {
-                const data = await res.json()
-                const share = data.share
-                if (share) {
-                  setSharedAccessLevel(share.access_level)
-                  setSharedOwnerUserId(share.owner_user_id)
-                  setSharedAllowClone(share.allow_clone)
-                }
-              }
-            } catch { /* ignore fetch failures */ }
-          })
-        }
-      }
-    } catch { /* ignore URL parsing failures */ }
-  }, [])
 
   // Workspace store
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
@@ -3617,12 +3574,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   }
 
   return (
-    <SharedWorkspaceProvider
-      shareId={sharedShareId}
-      ownerUserId={sharedOwnerUserId}
-      accessLevel={sharedAccessLevel}
-      allowClone={sharedAllowClone}
-    >
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--surface-2),var(--bg)_45%)] text-text">
       {messageContextHolder}
       <a
@@ -3799,7 +3750,6 @@ const ResearchWorkspaceBody: React.FC = () => {
             workspaceName={workspaceName}
             isMobile
           />
-          <SharedWorkspaceBanner />
           {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
@@ -3857,7 +3807,6 @@ const ResearchWorkspaceBody: React.FC = () => {
             workspaceName={workspaceName}
             isMobile={false}
           />
-          <SharedWorkspaceBanner />
           {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
@@ -4319,7 +4268,6 @@ const ResearchWorkspaceBody: React.FC = () => {
         </div>
       )}
     </div>
-    </SharedWorkspaceProvider>
   )
 }
 
