@@ -1,10 +1,10 @@
 ---
 id: TASK-13013
 title: Design canonical admin outgoing webhooks
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-21 19:48'
-updated_date: '2026-08-21 20:34'
+updated_date: '2026-08-21 20:39'
 labels:
   - admin
   - webhooks
@@ -25,11 +25,11 @@ Write and review the canonical public design for one secure admin outgoing-webho
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Canonical design records one mounted router and removal of the duplicate legacy webhook handlers.
-- [ ] #2 Design specifies SQLite and PostgreSQL migrations, secret lifecycle, legacy import, and rollback constraints.
-- [ ] #3 Design specifies durable event/outbox delivery through Jobs, SSRF controls, protocol, retries, retention, and operations.
-- [ ] #4 Design defines reviewable upstream implementation PRs and complete verification gates.
-- [ ] #5 Independent specification review passes and the user approves the written document before implementation planning.
+- [x] #1 Canonical design records one mounted router and removal of the duplicate legacy webhook handlers.
+- [x] #2 Design specifies SQLite and PostgreSQL migrations, secret lifecycle, legacy import, and rollback constraints.
+- [x] #3 Design specifies durable event/outbox delivery through Jobs, SSRF controls, protocol, retries, retention, and operations.
+- [x] #4 Design defines reviewable upstream implementation PRs and complete verification gates.
+- [x] #5 Independent specification review passes and the user approves the written document before implementation planning.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -54,14 +54,22 @@ The oversized delivery review unit was split into three upstream PRs: control pl
 2026-08-21 second manual pass: hardened test operations with If-Match and idempotent one-attempt replay; defined idempotency/precondition ordering and nonpersistent UI replay keys; bound registration fanout and tombstone growth; context-bound every encrypted envelope; made mode-on source mutations fail before domain commit when the key is unavailable; added fail-closed worker admission, no-attempt deferral, lease/expiry horizons, stale-attempt scheduling through Jobs, and a single-owner prepared-disposition contract. This pass also corrected the stale PR-2 activation statement. Verification remains pending; no runtime code changed.
 
 Fresh documentation verification on 2026-08-21: origin/dev resolves to 2e0815c1e4577902a220044619822ab6b1cb395f; the stale-wording scan returned no matches; Backlog CLI parsed TASK-13013; git diff --check passed. The changed set is design/Backlog history only, so runtime tests and Bandit are not applicable. User approval remains pending before implementation planning.
+
+2026-08-21 approval gate: user approved the reviewed design, including the registration bounds, fail-closed mode-on source mutation policy, three-PR upstream activation sequence, and conditional hosted compatibility approach. Implementation planning may proceed; runtime implementation remains out of scope for this task.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Approved canonical outgoing-webhook design completed. The design reconciles the duplicate implementations into one mounted admin control plane, specifies cross-database persistence and migration, contextual encryption and legacy import, Jobs-backed delivery and recovery, bounded retries and fanout, SSRF-safe transport, durable producers, operations, and three independently reviewable upstream PRs. Verification: Backlog parsing and git diff --check passed; runtime tests and Bandit were not applicable because this task changed documentation and task records only.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
