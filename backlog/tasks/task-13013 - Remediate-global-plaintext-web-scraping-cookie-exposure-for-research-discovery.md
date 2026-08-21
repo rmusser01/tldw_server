@@ -1,16 +1,20 @@
 ---
-id: TASK-12969
-title: Remediate global plaintext web-scraping cookie exposure
+id: TASK-13013
+title: Remediate global plaintext web-scraping cookie exposure for research discovery
 status: To Do
+assignee: []
+created_date: '2026-08-21 19:36'
 labels:
-- security
-- web-scraping
-- authnz
-- multi-user
-priority: High
+  - security
+  - web-scraping
+  - authnz
+  - multi-user
+  - research-discovery
+dependencies: []
 references:
-- TASK-12968
-- TASK-12964
+  - TASK-12968
+  - TASK-12964
+priority: high
 ---
 
 ## Description
@@ -32,15 +36,9 @@ Eliminate the existing global plaintext domain-cookie store and cross-user raw c
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Created as the unique research-discovery replacement for the ambiguous active TASK-12969 record. The superseded discovery record is archived at `backlog/archive/tasks/task-12969 - Remediate-global-plaintext-web-scraping-cookie-exposure.md` after every discovery-specific reference was migrated.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
