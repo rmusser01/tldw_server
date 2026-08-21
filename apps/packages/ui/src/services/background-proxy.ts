@@ -53,6 +53,7 @@ import {
   isServicePromptRequestPath,
   servicePromptPrincipalMatches,
   servicePromptRefreshLineageMatches,
+  servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch
 } from "@/services/tldw/service-prompt-scope-error"
 
@@ -467,7 +468,20 @@ const resolveCurrentServicePromptConfig = async (
   storage: DirectRuntimeStorage,
   checked: ServicePromptTargetConfig
 ): Promise<TldwConfig> => {
-  const current = await resolveDirectConfig(storage)
+  const stored = await resolveDirectConfig(storage)
+  const runtimeApiKey = !isHostedTldwDeployment() &&
+    checked.authMode === "single-user"
+    ? String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    : ""
+  const current = runtimeApiKey
+    ? { ...(stored ?? checked), apiKey: runtimeApiKey }
+    : stored
+  const singleUserApiKeyScopeMatches = current
+    ? servicePromptSingleUserApiKeyScopeMatches(
+        current,
+        checked.expectedSingleUserApiKeyScope
+      )
+    : true
   if ((!current && !isHostedTldwDeployment()) ||
     (current && !servicePromptTargetsMatch(current, checked)) ||
     (current &&
@@ -482,6 +496,7 @@ const resolveCurrentServicePromptConfig = async (
         current,
         checked.expectedRefreshToken
       )) ||
+    !singleUserApiKeyScopeMatches ||
     (current?.authMode === "multi-user" &&
       !isHostedTldwDeployment() &&
       current.authSource !== "cookie-session" &&
@@ -763,6 +778,7 @@ const createDirectRuntime = (
 ) => {
   let originalConfig: TldwConfig | undefined
   return {
+    ...(servicePromptConfig ? { useRuntimeAuthOverride: false } : {}),
     getConfig: servicePromptConfig
       ? async () => {
           const current = await resolveCurrentServicePromptConfig(
@@ -1519,7 +1535,9 @@ async function* bgStreamDirectUnsafe<
       if (csrfToken) resolvedHeaders["X-CSRF-Token"] = csrfToken
     }
   } else if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
-    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    const runtimeApiKey = servicePromptConfig
+      ? ""
+      : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
     const key = runtimeApiKey || String(cfg?.apiKey || "").trim()
     if (!key) {
       throw new Error(

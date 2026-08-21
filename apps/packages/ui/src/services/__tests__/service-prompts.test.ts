@@ -83,7 +83,10 @@ import type {
 } from "@/services/tldw/domains/service-prompts"
 import { ServicePromptApiError } from "@/services/tldw/domains/service-prompts"
 import { servicePromptMethods } from "@/services/tldw/domains/service-prompts"
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import {
+  buildChatSurfaceScopeKeyFromConfig,
+  deriveSingleUserApiKeyCredentialScope
+} from "@/services/chat-surface-scope"
 
 const definition = (
   id: KnownServicePromptId,
@@ -301,6 +304,17 @@ const scopeKeyFor = (
   value: NonNullable<Parameters<typeof buildChatSurfaceScopeKeyFromConfig>[0]>,
   userId: string | number | null
 ) => buildChatSurfaceScopeKeyFromConfig(value, { userId })
+
+const singleUserApiKeyScopeFor = (
+  value: NonNullable<Parameters<typeof buildChatSurfaceScopeKeyFromConfig>[0]>
+): string => {
+  const scope = deriveSingleUserApiKeyCredentialScope(
+    value.authMode,
+    value.apiKey
+  )
+  if (!scope) throw new Error("Single-user config is missing its API-key scope.")
+  return scope
+}
 
 const VALID_REVISION = "123e4567-e89b-42d3-a456-426614174000"
 
@@ -621,7 +635,10 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(snapshot.scopeSignal).toBeInstanceOf(AbortSignal)
     expect(snapshot.release).toBeTypeOf("function")
     expect(snapshot.requestScope).toEqual({
-      config: targetConfig(config),
+      config: {
+        ...targetConfig(config),
+        expectedSingleUserApiKeyScope: singleUserApiKeyScopeFor(config)
+      },
       userId: null
     })
     expect(Object.isFrozen(snapshot.requestScope)).toBe(true)
@@ -918,6 +935,43 @@ describe("Service Prompt migration and runtime snapshots", () => {
     })
 
     await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(watched?.tldwConfig).toBeTypeOf("function")
+  })
+
+  it("aborts a single-user lease when changed API keys collide in the UI scope hash", async () => {
+    const capturedKey = "key-s54895-4z7"
+    const changedKey = "key-jiqole-3dcy"
+    mocks.ensureConfig.mockResolvedValue({ ...config, apiKey: capturedKey })
+    let detailSignal: AbortSignal | undefined
+    mocks.getServicePrompt.mockImplementation(
+      async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
+        detailSignal = options.signal
+        return await new Promise<ServicePromptDetail>((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")))
+        })
+      }
+    )
+    const external = new AbortController()
+    const pending = loadServicePromptSnapshot(
+      ["chat.rag.answer"],
+      { signal: external.signal }
+    )
+    await vi.waitFor(() => expect(detailSignal).toBeDefined())
+    const watched = mocks.localWatch.mock.calls.at(-1)?.[0] as
+      | { tldwConfig?: (change: { newValue?: unknown }) => void }
+      | undefined
+
+    watched?.tldwConfig?.({
+      newValue: { ...config, apiKey: changedKey }
+    })
+
+    try {
+      await vi.waitFor(() => expect(detailSignal?.aborted).toBe(true))
+    } finally {
+      external.abort()
+      await pending.catch(() => undefined)
+    }
     expect(watched?.tldwConfig).toBeTypeOf("function")
   })
 

@@ -149,7 +149,13 @@ const flushPromises = async () => {
 }
 
 import background from "@/entries/background"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
+
+const WORKER_API_KEY_SCOPE = deriveSingleUserApiKeyCredentialScope(
+  "single-user",
+  "worker-session-key"
+)!
 
 describe("background effective extension auth", () => {
   let windowDescriptor: PropertyDescriptor | undefined
@@ -259,6 +265,38 @@ describe("background effective extension auth", () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it("rejects a same-target single-user API-key change before worker dispatch", async () => {
+    const fetchSpy = vi.fn(async () =>
+      new Response(JSON.stringify({ id: "wrong-account-write" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchSpy)
+
+    await expect(
+      sendRuntimeMessage({
+        type: "tldw:request",
+        payload: {
+          path: "/api/v1/service-prompts/chat.rag.answer",
+          method: "PUT",
+          body: { parts: {}, expected_revision: null },
+          servicePromptConfig: {
+            serverUrl: "https://api.example.test",
+            authMode: "single-user",
+            authSource: "manual",
+            expectedSingleUserApiKeyScope: "key:captured-account"
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      status: 412,
+      data: { detail: { code: "request_config_scope_changed" } }
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it("uses the current worker credential after the configured target matches", async () => {
     const fetchSpy = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {
@@ -278,7 +316,7 @@ describe("background effective extension auth", () => {
             serverUrl: "https://api.example.test",
             authMode: "single-user",
             authSource: "manual",
-            apiKey: "checked-worker-key"
+            expectedSingleUserApiKeyScope: WORKER_API_KEY_SCOPE
           }
         }
       })
@@ -823,7 +861,8 @@ describe("background effective extension auth", () => {
         servicePromptConfig: {
           serverUrl: "https://api.example.test",
           authMode: "single-user",
-          authSource: "manual"
+          authSource: "manual",
+          expectedSingleUserApiKeyScope: WORKER_API_KEY_SCOPE
         }
       }
     })).resolves.toMatchObject({ ok: true, status: 200 })
@@ -858,7 +897,8 @@ describe("background effective extension auth", () => {
         servicePromptConfig: {
           serverUrl: "https://api.example.test",
           authMode: "single-user",
-          authSource: "manual"
+          authSource: "manual",
+          expectedSingleUserApiKeyScope: WORKER_API_KEY_SCOPE
         }
       }
     })).resolves.toMatchObject({ ok: false, status: 400 })
@@ -951,7 +991,33 @@ describe("background effective extension auth", () => {
         servicePromptConfig: {
           serverUrl: "https://api.example.test",
           authMode: "single-user",
-          authSource: "manual"
+          authSource: "manual",
+          expectedSingleUserApiKeyScope: WORKER_API_KEY_SCOPE
+        }
+      }
+    })).resolves.toMatchObject({
+      ok: false,
+      status: 412,
+      data: { detail: { code: "request_config_scope_changed" } }
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("does not upload after a same-target single-user API-key change", async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+
+    await expect(sendRuntimeMessage({
+      type: "tldw:upload",
+      payload: {
+        path: "/api/v1/media/add",
+        method: "POST",
+        fields: { media_type: "document", urls: ["https://example.com"] },
+        servicePromptConfig: {
+          serverUrl: "https://api.example.test",
+          authMode: "single-user",
+          authSource: "manual",
+          expectedSingleUserApiKeyScope: "key:captured-account"
         }
       }
     })).resolves.toMatchObject({
@@ -986,7 +1052,8 @@ describe("background effective extension auth", () => {
         servicePromptConfig: {
           serverUrl: "https://api.example.test",
           authMode: "single-user",
-          authSource: "manual"
+          authSource: "manual",
+          expectedSingleUserApiKeyScope: WORKER_API_KEY_SCOPE
         }
       }
     })).resolves.toMatchObject({
@@ -994,6 +1061,7 @@ describe("background effective extension auth", () => {
       status: 412,
       data: { detail: { code: "request_config_scope_changed" } }
     })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   it("aborts a started scoped worker upload after target drift", async () => {
@@ -1084,7 +1152,8 @@ describe("background effective extension auth", () => {
         servicePromptConfig: {
           serverUrl: "https://api.example.test",
           authMode: "single-user",
-          authSource: "manual"
+          authSource: "manual",
+          expectedSingleUserApiKeyScope: WORKER_API_KEY_SCOPE
         }
       }
     })).resolves.toMatchObject({ ok: true, status: 200 })
@@ -1255,6 +1324,36 @@ describe("background effective extension auth", () => {
       event: "error",
       status: 412
     }))
+  })
+
+  it("does not stream after a same-target single-user API-key change", async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const port = connectRuntimePort("tldw:stream")
+    const capturedScope = deriveSingleUserApiKeyCredentialScope(
+      "single-user",
+      "captured-account-key"
+    )
+
+    port.postMessage({
+      path: "/api/v1/chat/completions",
+      method: "POST",
+      body: { stream: true },
+      servicePromptConfig: {
+        serverUrl: "https://api.example.test",
+        authMode: "single-user",
+        authSource: "manual",
+        expectedSingleUserApiKeyScope: capturedScope!
+      }
+    })
+
+    await vi.waitFor(() => {
+      expect(port.messages).toContainEqual(expect.objectContaining({
+        event: "error",
+        status: 412
+      }))
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it.each([

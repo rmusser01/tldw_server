@@ -3,7 +3,10 @@ import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import {
+  buildChatSurfaceScopeKeyFromConfig,
+  deriveSingleUserApiKeyCredentialScope
+} from "@/services/chat-surface-scope"
 import { ServicePromptApiError } from "@/services/tldw/domains/service-prompts"
 import type {
   KnownServicePromptId,
@@ -11,10 +14,7 @@ import type {
   ServicePromptRequestScope,
   ServicePromptSource
 } from "@/services/tldw/domains/service-prompts"
-import type {
-  ServicePromptTargetConfig,
-  TldwConfig
-} from "@/services/tldw/TldwApiClient"
+import type { ServicePromptTargetConfig } from "@/services/tldw/TldwApiClient"
 import {
   createServicePromptScopeChangedError,
   servicePromptPrincipalMatches,
@@ -456,11 +456,18 @@ export const resolveServicePromptScope = async (
     userId = user.id
   }
 
+  const singleUserApiKeyScope = deriveSingleUserApiKeyCredentialScope(
+    resolvedConfig.authMode,
+    resolvedConfig.apiKey
+  )
   const config = Object.freeze({
     serverUrl: resolvedConfig.serverUrl,
     authMode: resolvedConfig.authMode,
     authSource: resolvedConfig.authSource,
-    orgId: resolvedConfig.orgId
+    orgId: resolvedConfig.orgId,
+    ...(singleUserApiKeyScope
+      ? { expectedSingleUserApiKeyScope: singleUserApiKeyScope }
+      : {})
   })
 
   return Object.freeze({
@@ -489,10 +496,10 @@ const storedConfigMatchesScope = (
     return false
   }
   if (scope.config.authMode === "single-user") {
-    return buildChatSurfaceScopeKeyFromConfig(
-      config as unknown as TldwConfig,
-      { userId: null }
-    ) === scope.scopeKey
+    return deriveSingleUserApiKeyCredentialScope(
+      typeof config.authMode === "string" ? config.authMode : null,
+      typeof config.apiKey === "string" ? config.apiKey : null
+    ) === scope.config.expectedSingleUserApiKeyScope
   }
   if (scope.userId === null) return true
   const accessToken = typeof config.accessToken === "string"

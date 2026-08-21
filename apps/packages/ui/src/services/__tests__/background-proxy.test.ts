@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 
 const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
@@ -160,6 +161,87 @@ describe("background proxy fallback safety", () => {
     })
 
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("does not directly dispatch after a same-target single-user API-key change", async () => {
+    const current = {
+      serverUrl: "https://api.example.com",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.com",
+      apiKey: "current-account-key"
+    }
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? current : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { id: "wrong-account-write" }
+    })
+    const { bgRequest } = await importProxy()
+
+    await expect(bgRequest({
+      path: "/api/v1/service-prompts/chat.rag.answer",
+      method: "PUT",
+      body: { parts: {}, expected_revision: null },
+      preferDirect: true,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "single-user",
+        authSource: "manual",
+        expectedSingleUserApiKeyScope: "key:captured-account"
+      }
+    })).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("directly dispatches with the same captured single-user API-key scope", async () => {
+    const apiKey = "same-account-key"
+    const current = {
+      serverUrl: "https://api.example.com",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.com",
+      apiKey
+    }
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? current : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { revision: "same-account" }
+    })
+    const { bgRequest } = await importProxy()
+
+    await expect(bgRequest({
+      path: "/api/v1/service-prompts/chat.rag.answer",
+      method: "GET",
+      preferDirect: true,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "single-user",
+        authSource: "manual",
+        expectedSingleUserApiKeyScope:
+          deriveSingleUserApiKeyCredentialScope("single-user", apiKey)!
+      }
+    })).resolves.toEqual({ revision: "same-account" })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest.mock.calls[0]?.[1]).toMatchObject({
+      useRuntimeAuthOverride: false
+    })
   })
 
   it("does not warn for expected response statuses", async () => {
@@ -1793,6 +1875,49 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
+  it("does not directly upload after a same-target single-user API-key change", async () => {
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig"
+        ? {
+            serverUrl: "https://api.example.com",
+            authMode: "single-user",
+            authSource: "manual",
+            credentialSource: "manual",
+            apiKeyPersistence: "device",
+            apiKeyServerOrigin: "https://api.example.com",
+            apiKey: "changed-account-key"
+          }
+        : null
+    )
+    mocks.tldwRequest.mockImplementation(async (_request, runtime) => {
+      await runtime.getConfig()
+      return { ok: true, status: 200, data: { id: "wrong-account-write" } }
+    })
+    const { bgUpload } = await importProxy()
+
+    await expect(bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      fields: { urls: ["https://example.com"] },
+      preferDirect: true,
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "single-user",
+        authSource: "manual",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(
+          "single-user",
+          "captured-account-key"
+        )!
+      }
+    })).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
   it("sanitizes opted-in RAG direct-stream non-2xx failures before throwing", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: false })
     mocks.storageGet.mockImplementation(async (key: string) => {
@@ -3078,8 +3203,9 @@ describe("background proxy fallback safety", () => {
           status: 200,
           headers: { "content-type": "text/event-stream" }
         }
-      )
-    })
+    )
+  })
+
     vi.stubGlobal("fetch", fetchSpy as any)
 
     const { bgStream } = await importProxy()

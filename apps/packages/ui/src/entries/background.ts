@@ -84,6 +84,7 @@ import {
   isServicePromptRequestPath,
   servicePromptPrincipalMatches,
   servicePromptRefreshLineageMatches,
+  servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch,
 } from "@/services/tldw/service-prompt-scope-error";
 import { arrayBufferToBase64 } from "@/utils/compress";
@@ -152,6 +153,7 @@ type ServicePromptTargetLock = Readonly<{
   orgId?: unknown;
   expectedUserId?: unknown;
   expectedRefreshToken?: unknown;
+  expectedSingleUserApiKeyScope?: unknown;
 }>;
 
 const readServicePromptTargetLock = (
@@ -165,6 +167,8 @@ const readServicePromptTargetLock = (
         orgId: (value as Record<string, unknown>).orgId,
         expectedUserId: (value as Record<string, unknown>).expectedUserId,
         expectedRefreshToken: (value as Record<string, unknown>).expectedRefreshToken,
+        expectedSingleUserApiKeyScope:
+          (value as Record<string, unknown>).expectedSingleUserApiKeyScope,
       })
     : null;
 
@@ -422,6 +426,12 @@ export default defineBackground({
       checked: ServicePromptTargetLock,
     ) => {
       const current = await getEffectiveConfig();
+      const singleUserApiKeyScopeMatches = current
+        ? servicePromptSingleUserApiKeyScopeMatches(
+            current,
+            checked.expectedSingleUserApiKeyScope,
+          )
+        : true;
       if (
         (!current && !isHostedTldwDeployment()) ||
         (current && !servicePromptTargetsMatch(current, checked)) ||
@@ -437,6 +447,7 @@ export default defineBackground({
             current,
             checked.expectedRefreshToken,
           )) ||
+        !singleUserApiKeyScopeMatches ||
         (current?.authMode === "multi-user" &&
           !isHostedTldwDeployment() &&
           current.authSource !== "cookie-session" &&

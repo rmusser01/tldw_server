@@ -3,8 +3,13 @@ import { describe, expect, it } from "vitest"
 import {
   createServicePromptScopeChangedError,
   isServicePromptRequestPath,
+  servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch
 } from "../service-prompt-scope-error"
+import {
+  buildChatSurfaceScopeKeyFromConfig,
+  deriveSingleUserApiKeyCredentialScope,
+} from "@/services/chat-surface-scope"
 
 describe("Service Prompt scope policy", () => {
   it("compares only the frozen target keys", () => {
@@ -24,6 +29,56 @@ describe("Service Prompt scope policy", () => {
     }
 
     expect(servicePromptTargetsMatch(current, captured)).toBe(true)
+  })
+
+  it("requires the captured single-user API-key scope to match", () => {
+    const expected = deriveSingleUserApiKeyCredentialScope(
+      "single-user",
+      "captured-account-key"
+    )
+
+    expect(servicePromptSingleUserApiKeyScopeMatches({
+      authMode: "single-user",
+      apiKey: "captured-account-key"
+    }, expected)).toBe(true)
+    expect(servicePromptSingleUserApiKeyScopeMatches({
+      authMode: "single-user",
+      apiKey: "different-account-key"
+    }, expected)).toBe(false)
+    expect(servicePromptSingleUserApiKeyScopeMatches({
+      authMode: "single-user",
+      apiKey: "captured-account-key"
+    }, undefined)).toBe(false)
+    expect(servicePromptSingleUserApiKeyScopeMatches({
+      authMode: "multi-user"
+    }, undefined)).toBe(true)
+  })
+
+  it("rejects a changed API key that collides in the UI scope hash", () => {
+    const capturedKey = "key-s54895-4z7"
+    const changedKey = "key-jiqole-3dcy"
+    const expectedScope = deriveSingleUserApiKeyCredentialScope(
+      "single-user",
+      capturedKey
+    )
+
+    expect(buildChatSurfaceScopeKeyFromConfig({
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      apiKey: changedKey
+    }, { userId: null })).toBe(
+      buildChatSurfaceScopeKeyFromConfig({
+        serverUrl: "https://api.example.test",
+        authMode: "single-user",
+        apiKey: capturedKey
+      }, { userId: null })
+    )
+    expect(
+      servicePromptSingleUserApiKeyScopeMatches(
+        { authMode: "single-user", apiKey: changedKey },
+        expectedScope
+      )
+    ).toBe(false)
   })
 
   it("allows only Service Prompt and exact scoped execution routes", () => {

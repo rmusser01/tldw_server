@@ -753,7 +753,7 @@ export const useChatActions = ({
     [appendFormattingGuidePrompt]
   )
   const messagesRef = React.useRef(messages)
-  const discardCurrentTurnOnAbortRef = React.useRef(false)
+  const discardCurrentTurnOnAbortSignalRef = React.useRef<AbortSignal | null>(null)
   // Tracks the abort controller owned by the most recently started turn. Used so
   // a finishing turn only resets the shared streaming flag / controller if it
   // still owns it (a newer in-flight turn may have taken ownership).
@@ -2648,7 +2648,8 @@ export const useChatActions = ({
     } catch (e) {
       if (
         discardAbortedTurnIfRequested({
-          discardRequested: discardCurrentTurnOnAbortRef.current,
+          discardRequested:
+            discardCurrentTurnOnAbortSignalRef.current === signal,
           error: e,
           previousMessages: chatHistory,
           previousHistory: chatMemory,
@@ -2851,7 +2852,9 @@ export const useChatActions = ({
       setStreaming(false)
       return chatSubmitFailed(interruptionReason)
     } finally {
-      discardCurrentTurnOnAbortRef.current = false
+      if (discardCurrentTurnOnAbortSignalRef.current === signal) {
+        discardCurrentTurnOnAbortSignalRef.current = null
+      }
       cancelStreamingUpdate()
       if (inactivityTimer) clearTimeout(inactivityTimer)
       // Only null the shared controller if this turn still owns it, so a newer
@@ -4040,19 +4043,30 @@ export const useChatActions = ({
     } catch (e) {
       const errorMessage =
         e instanceof Error ? e.message : t("somethingWentWrong")
-      notification.error({
-        message: t("error"),
-        description: errorMessage
-      })
+      const requestCancelled =
+        signal.aborted &&
+        isAbortLikeError(e) &&
+        !isRequestConfigScopeChangedError(e)
+      if (!requestCancelled) {
+        notification.error({
+          message: t("error"),
+          description: errorMessage
+        })
+      }
       // If this turn still owns the shared controller (e.g. a pre-stream failure
       // before any chat mode ran), release it so the UI is not left streaming.
       if (releaseAbortControllerIfOwned(signal)) {
         setAbortController(null)
+        setIsProcessing(false)
+        setStreaming(false)
       }
-      setIsProcessing(false)
-      setStreaming(false)
-      return chatSubmitFailed(errorMessage)
+      return requestCancelled
+        ? chatSubmitSkipped("Request cancelled")
+        : chatSubmitFailed(errorMessage)
     } finally {
+      if (discardCurrentTurnOnAbortSignalRef.current === signal) {
+        discardCurrentTurnOnAbortSignalRef.current = null
+      }
       if (compareServicePromptSnapshot) compareServicePromptSnapshot.release()
       if (turnServicePromptSnapshot) turnServicePromptSnapshot.release()
       if (replyActive && capturedReplyTargetId != null) {
@@ -4230,6 +4244,13 @@ export const useChatActions = ({
         }
       )
     } catch (e) {
+      if (
+        signal.aborted &&
+        isAbortLikeError(e) &&
+        !isRequestConfigScopeChangedError(e)
+      ) {
+        return
+      }
       const errorMessage =
         e instanceof Error ? e.message : t("somethingWentWrong")
       notification.error({
@@ -4356,7 +4377,7 @@ export const useChatActions = ({
         options.discardTurn === true
 
       if (discardTurn) {
-        discardCurrentTurnOnAbortRef.current = true
+        discardCurrentTurnOnAbortSignalRef.current = abortController.signal
       }
 
       abortController.abort()

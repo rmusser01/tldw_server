@@ -27,10 +27,7 @@ import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { createJsonResponseLike } from "@/services/tldw/json-response-like"
 import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
-import {
-  isRequestConfigScopeChangedError,
-  servicePromptTargetsMatch
-} from "@/services/tldw/service-prompt-scope-error"
+import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
 import {
@@ -214,6 +211,7 @@ export type ServicePromptTargetConfig = Readonly<
   > & {
     expectedUserId?: string | number | null
     expectedRefreshToken?: string
+    expectedSingleUserApiKeyScope?: string
   }
 >
 

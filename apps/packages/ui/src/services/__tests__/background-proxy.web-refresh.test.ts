@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 
 // This suite exercises the REAL request-core (no tldwRequest mock) through the
 // web/direct fallback of background-proxy, to verify token refresh is wired in
@@ -11,7 +12,9 @@ const mocks = vi.hoisted(() => ({
   sessionStorageGet: vi.fn(),
   storageSet: vi.fn(),
   storageRemove: vi.fn(),
-  runtimeApiKey: null as string | null
+  runtimeApiKey: null as string | null,
+  nextRuntimeApiKey: null as string | null,
+  runtimeApiKeyReads: 0
 }))
 
 vi.mock("wxt/browser", () => ({
@@ -36,7 +39,13 @@ vi.mock("@/services/tldw/runtime-auth-override", async (importOriginal) => ({
   ...await importOriginal<
     typeof import("@/services/tldw/runtime-auth-override")
   >(),
-  getRuntimeSingleUserApiKeyOverride: () => mocks.runtimeApiKey
+  getRuntimeSingleUserApiKeyOverride: () => {
+    const value = mocks.runtimeApiKeyReads > 0 && mocks.nextRuntimeApiKey !== null
+      ? mocks.nextRuntimeApiKey
+      : mocks.runtimeApiKey
+    mocks.runtimeApiKeyReads += 1
+    return value
+  }
 }))
 
 const importProxy = async () => import("@/services/background-proxy")
@@ -67,6 +76,8 @@ describe("background proxy web token refresh", () => {
     }
     mocks.sessionStore = {}
     mocks.runtimeApiKey = null
+    mocks.nextRuntimeApiKey = null
+    mocks.runtimeApiKeyReads = 0
     mocks.storageGet.mockReset()
     mocks.sessionStorageGet.mockReset()
     mocks.storageSet.mockReset()
@@ -486,6 +497,70 @@ describe("background proxy web token refresh", () => {
       }
     }))).rejects.toMatchObject({ status: 412 })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("does not stream after a same-target single-user runtime key change", async () => {
+    mocks.store.tldwConfig = {
+      serverUrl: "https://api.example.com",
+      authMode: "single-user",
+      apiKey: "captured-account-key"
+    }
+    mocks.runtimeApiKey = "changed-account-key"
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+
+    const { bgStream } = await importProxy()
+    await expect(collectStream(bgStream({
+      path: "/api/v1/chat/completions" as `/${string}`,
+      method: "POST",
+      body: { stream: true },
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "single-user",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(
+          "single-user",
+          "captured-account-key"
+        )!
+      }
+    }))).rejects.toMatchObject({ status: 412 })
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("streams with the validated runtime key without reading a later override", async () => {
+    mocks.store.tldwConfig = {
+      serverUrl: "https://api.example.com",
+      authMode: "single-user",
+      apiKey: "stored-key"
+    }
+    mocks.runtimeApiKey = "captured-runtime-key"
+    mocks.nextRuntimeApiKey = "later-runtime-key"
+    const fetchSpy = vi.fn(async () =>
+      new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchSpy)
+
+    const { bgStream } = await importProxy()
+    await expect(collectStream(bgStream({
+      path: "/api/v1/chat/completions" as `/${string}`,
+      method: "POST",
+      body: { stream: true },
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "single-user",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(
+          "single-user",
+          "captured-runtime-key"
+        )!
+      }
+    }))).resolves.toEqual(['{"ok":true}'])
+
+    expect(mocks.runtimeApiKeyReads).toBe(1)
+    const headers = new Headers(fetchSpy.mock.calls[0]?.[1]?.headers)
+    expect(headers.get("X-API-KEY")).toBe("captured-runtime-key")
   })
 
   it.each([
@@ -1024,7 +1099,7 @@ describe("background proxy web token refresh", () => {
     expect(mocks.store.tldwConfig).toEqual(replacement)
   })
 
-  it("uses the current single-user runtime override instead of the checked credential", async () => {
+  it("uses the captured single-user runtime override when its scope still matches", async () => {
     mocks.store.tldwConfig = {
       serverUrl: "https://api.example.com",
       authMode: "single-user",
@@ -1045,12 +1120,46 @@ describe("background proxy web token refresh", () => {
       method: "GET",
       servicePromptConfig: {
         serverUrl: "https://api.example.com",
-        authMode: "single-user"
+        authMode: "single-user",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(
+          "single-user",
+          "conflicting-runtime-key"
+        )!
       }
     })).resolves.toEqual({ ok: true })
 
     const headers = new Headers(fetchSpy.mock.calls[0]?.[1]?.headers)
     expect(headers.get("X-API-KEY")).toBe("conflicting-runtime-key")
+  })
+
+  it("rejects a changed single-user runtime override before direct fetch", async () => {
+    mocks.store.tldwConfig = {
+      serverUrl: "https://api.example.com",
+      authMode: "single-user",
+      apiKey: "captured-account-key"
+    }
+    mocks.runtimeApiKey = "changed-account-key"
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/service-prompts/chat.rag.answer" as unknown as `/${string}`,
+      method: "GET",
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com",
+        authMode: "single-user",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(
+          "single-user",
+          "captured-account-key"
+        )!
+      }
+    })).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it("fails a scoped direct request closed after same-target logout", async () => {

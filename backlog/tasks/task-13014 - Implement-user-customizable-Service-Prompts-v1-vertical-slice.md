@@ -1,16 +1,16 @@
 ---
-id: TASK-12974
+id: TASK-13014
 title: Implement user-customizable Service Prompts v1 vertical slice
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-17 04:57
+updated_date: 2026-08-21 23:07
 labels:
 - service-prompts
 - implementation
 dependencies: []
 references:
-- TASK-12973
+- TASK-13013
 - https://github.com/rmusser01/tldw_server/pull/2747
 documentation:
 - Docs/superpowers/specs/2026-07-12-user-customizable-service-prompts-design.md
@@ -88,7 +88,7 @@ modified_files:
 - apps/packages/ui/src/services/tldw/deployment-mode.ts
 - apps/packages/ui/src/services/tldw/__tests__/deployment-mode.test.ts
 - apps/packages/ui/src/routes/sidepanel-chat.tsx
-- backlog/tasks/task-12974 - Implement-user-customizable-Service-Prompts-v1-vertical-slice.md
+- backlog/tasks/task-13014 - Implement-user-customizable-Service-Prompts-v1-vertical-slice.md
 ---
 
 ## Description
@@ -177,11 +177,24 @@ Focused pytest generated the repository-known untracked watchlist template bypro
 Task 7 Sidepanel E2E debugging (2026-07-16): stopped after three attempts per repo rule. Attempt 1 used raw Zustand setState(chatMode='rag'); async Sidepanel state did not render RAG. Attempt 2 used the visible RAG controls for nextgen/legacy, but the default casual composer exposed neither control. Attempt 3 switched to Pro through the real sidebar UI, opened the real delivery-options checkbox, and clicked 'Chat with current page'; the control was present and clickable but immediately reverted (Playwright: clicking checkbox did not change its state). Current hypothesis: asynchronous active-tab/session restoration overwrites chatMode after test configuration. Next action is read-only trace of restore readiness and comparison with existing Sidepanel E2E patterns before any further run.
 Task 7 rewrite E2E stop/reassessment (2026-07-16): stopped after three golden-expectation iterations. With the non-stream mock corrected, all workflows issued both rewrite and final-answer calls. Iteration 1 assumed only Sidepanel included the submitted question in chat_history; packaged Main disproved this by including it. Iteration 2 assumed all workflows included it; packaged Document disproved this by passing prior history only. Iteration 3 assumed Main+Sidepanel included it; packaged Sidepanel disproved this by passing prior history only. Therefore the observed real-UI contract is explicit: Main includes the submitted turn, Document and legacy Sidepanel use prior history only. Reassessment rejects dynamic variable extraction as too weak/tautological and a shared heuristic as incorrect; next change will encode the exact three-workflow mapping.
 Task 7 packaged web E2E stop/reassessment (2026-07-16): stopped after three assertion approaches. Attempt 1 required the packaged template to occupy the entire message; attempt 2 searched for the exact template as an embedded substring; attempt 3 removed the duplicated formatter expectation by extracting the real search_results value from the custom Normal request, proving the same value reached both Compare branches, then using that exact value for the packaged template. Attempt 3 still found no packaged-template candidate, while the removed custom marker remained absent. Live backend detail exactly matches the golden packaged template. Next action is read-only trace of request message construction/default selection and targeted capture diagnostics; do not weaken to a marker-only assertion.
+
+Backlog ID reconciliation (2026-08-21): after the latest dev rebase, the branch-local implementation ID TASK-12974 collided with dev's frontend-licensing task, and its planning reference TASK-12973 collided with dev's Embeddings task. With explicit requester approval for the narrow manual Backlog exception, the canonical IDs are TASK-13014 for this implementation and TASK-13013 for its planning record. Historical commit subjects retain the old IDs as immutable history; current direct references use the canonical IDs.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 7 final contract correction (2026-07-16): strict custom and packaged runtime captures supersede the earlier rewrite-mapping note. Main RAG passes prior turns only; Document and legacy Sidepanel include the submitted question. The earlier note that records the opposite mapping is historical and incorrect.
 
 Task 7 final closeout (2026-07-16): committed release gates in 4f2498c43c. Final strict E2E is green: runtime propagation 4/4 and freshly rebuilt production extension cross-host/corrupt/reset/Preview/axe gate 2/2. Focused shared UI passes 80/80; planned UI matrix 284/284; backend 293/293; OpenAPI, route, typecheck, lint, locale, compile, production build, Ruff, compileall, Bandit zero findings, and git diff checks pass. Final independent correctness/YAGNI review is clean. CI shard configuration remains deliberately unchanged per requester; existing repo-wide lint/build warnings are baseline and non-blocking.
+
+PR #2747 latest-dev finalization (2026-08-21): rebased onto origin/dev 2e0815c1e4 and addressed every actionable review finding. Final review hardening binds immutable Service Prompt scope to the exact effective single-user API-key credential across direct and worker request/upload/stream paths using a domain-separated SHA-256 marker, preserves structured scope-change failures through RAG sanitization, and treats manual Stop during prompt preflight as cancellation without leaking discard or UI state into overlapping turns. Independent correctness, security, and overlap-race reviews found no remaining actionable issue. Fresh shared-UI verification passed 45 changed files and 701/701 tests (excluding one origin/dev-proven character-stream baseline file); extension compile passed; focused ESLint reported 0 errors; git diff --check passed. Backend code was unchanged by this final delta, so the prior focused backend, Ruff, compileall, and Bandit-zero gates remain applicable. With explicit requester approval for the narrow manual Backlog exception, colliding branch-local IDs were rekeyed to TASK-13013/TASK-13014 and verified through the official CLI. CI shards and cancellation fallout remain intentionally ignored per requester. Push/merge remain gated by the required requester-authored PR Change summary and the post-push trusted frontend license status.
+
+PR #2747 rebase/review follow-up (2026-07-16): rebased codex/service-prompts-v1-plan and resolved the background/deployment-mode conflicts while retaining dev's worker-safe deployment guard. Review-driven TDD registered the legacy Sidepanel snapshot controller before async prompt loading, made controller release identity-safe, stabilized Settings listeners with latest-state refs, and preserved retryable local migration state. Focused Service Prompt UI and compile/lint/OpenAPI/diff gates passed. CI shards remain intentionally unchanged.
+
+PR #2747 second review follow-up (2026-07-16): addressed the validated Qodo findings. Canonical exceptions, helper docstrings, pytest classification, worker-thread DB execution and connection retirement, and structural 422 handling are covered by focused regressions. Translation prompt-store failures deliberately remain outside the provider-failure catch so configuration failures stay distinct and fail closed. Backend/UI/compile/Ruff/Bandit/diff gates passed.
+
+PR #2747 latest-dev/review closeout (2026-07-17): rebased onto origin/dev 668b0fce57 and force-pushed the rewritten branch. TDD now refreshes the shared client before remote save/reset/reload/import scope comparisons, invalidates proven target mismatches, and keeps local discard independent of remote identity resolution. OpenAPI conflict resolution was independently audited against latest dev; the combined checked fingerprint passed. Backend and WebUI focused matrices, extension compile, Ruff, compileall, ESLint, Bandit, and diff checks passed. Merge remains gated by final review/check results and the repository-required requester-authored Change summary.
+
+PR #2747 final review corrections (2026-07-18, in progress): independent post-rebase review identified same-user JWT refresh loss on scoped requests, partial-output persistence after scope abort, transient Settings reconciliation deleting dirty drafts, and structural 422 location leakage. Test-first fixes are being verified before the final push.
+PR #2747 final review hardening (2026-07-18): resolved all actionable review findings TDD-first. Scope-bound request guards now fail closed across direct/extension transport, token refresh, chat/media/RAG/research mutations, and local persistence; ambiguous extension transport failures no longer replay non-idempotent writes; prompt preflight selects exact route definitions before side effects; Compare and Sidepanel preserve completed/partial work on manual Stop while rejecting account/target drift; refresh rotation remains CAS-bound to source access+refresh lineage. Final pre-rebase verification: 55/55 focused backend tests; 587/587 changed UI tests excluding one proven pre-existing character-stream baseline file (HEAD 5 failures, current 4); focused stop regressions 30/30 and surrounding abort/persistence 71/71; extension compile passed; Bandit zero findings; no new Ruff findings versus HEAD; git diff --check passed. Independent final correctness/security review found no remaining actionable findings. CI shards remain intentionally ignored per requester. Merge remains subject to the repository-required requester-authored Change summary.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -201,16 +214,3 @@ Release proof includes real disposable-server cross-host save/reset/scope isolat
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR #2747 rebase/review follow-up (2026-07-16): rebased codex/service-prompts-v1-plan and resolved the background/deployment-mode conflicts while retaining dev's worker-safe deployment guard. Review-driven TDD registered the legacy Sidepanel snapshot controller before async prompt loading, made controller release identity-safe, stabilized Settings listeners with latest-state refs, and preserved retryable local migration state. Focused Service Prompt UI and compile/lint/OpenAPI/diff gates passed. CI shards remain intentionally unchanged.
-
-PR #2747 second review follow-up (2026-07-16): addressed the validated Qodo findings. Canonical exceptions, helper docstrings, pytest classification, worker-thread DB execution and connection retirement, and structural 422 handling are covered by focused regressions. Translation prompt-store failures deliberately remain outside the provider-failure catch so configuration failures stay distinct and fail closed. Backend/UI/compile/Ruff/Bandit/diff gates passed.
-
-PR #2747 latest-dev/review closeout (2026-07-17): rebased onto origin/dev 668b0fce57 and force-pushed the rewritten branch. TDD now refreshes the shared client before remote save/reset/reload/import scope comparisons, invalidates proven target mismatches, and keeps local discard independent of remote identity resolution. OpenAPI conflict resolution was independently audited against latest dev; the combined checked fingerprint passed. Backend and WebUI focused matrices, extension compile, Ruff, compileall, ESLint, Bandit, and diff checks passed. Merge remains gated by final review/check results and the repository-required requester-authored Change summary.
-
-PR #2747 final review corrections (2026-07-18, in progress): independent post-rebase review identified same-user JWT refresh loss on scoped requests, partial-output persistence after scope abort, transient Settings reconciliation deleting dirty drafts, and structural 422 location leakage. Test-first fixes are being verified before the final push.
-PR #2747 final review hardening (2026-07-18): resolved all actionable review findings TDD-first. Scope-bound request guards now fail closed across direct/extension transport, token refresh, chat/media/RAG/research mutations, and local persistence; ambiguous extension transport failures no longer replay non-idempotent writes; prompt preflight selects exact route definitions before side effects; Compare and Sidepanel preserve completed/partial work on manual Stop while rejecting account/target drift; refresh rotation remains CAS-bound to source access+refresh lineage. Final pre-rebase verification: 55/55 focused backend tests; 587/587 changed UI tests excluding one proven pre-existing character-stream baseline file (HEAD 5 failures, current 4); focused stop regressions 30/30 and surrounding abort/persistence 71/71; extension compile passed; Bandit zero findings; no new Ruff findings versus HEAD; git diff --check passed. Independent final correctness/security review found no remaining actionable findings. CI shards remain intentionally ignored per requester. Merge remains subject to the repository-required requester-authored Change summary.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -1,3 +1,4 @@
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 const SCOPE_CHANGED_CODE = "request_config_scope_changed"
@@ -53,6 +54,23 @@ export const servicePromptRefreshLineageMatches = (
   const expected = expectedRefreshToken.trim()
   return Boolean(expected) &&
     String(current.refreshToken || "").trim() === expected
+}
+
+export const servicePromptSingleUserApiKeyScopeMatches = (
+  current: Readonly<{
+    authMode?: unknown
+    apiKey?: unknown
+  }>,
+  expectedScope: unknown
+): boolean => {
+  if (current.authMode !== "single-user") {
+    return expectedScope === undefined
+  }
+  if (typeof expectedScope !== "string") return false
+  return deriveSingleUserApiKeyCredentialScope(
+    "single-user",
+    typeof current.apiKey === "string" ? current.apiKey : null
+  ) === expectedScope
 }
 
 const readCanonicalPathname = (path: unknown): string | null => {

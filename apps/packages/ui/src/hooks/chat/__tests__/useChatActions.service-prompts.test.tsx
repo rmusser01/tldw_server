@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatActions } from "../useChatActions";
 
 const {
+  addChatMessageMock,
   events,
   createChatMock,
   documentChatModeMock,
@@ -18,12 +19,14 @@ const {
   runChatPersistenceTransactionMock,
   saveHistoryMock,
   saveMessageMock,
+  streamCharacterChatCompletionMock,
   setLastUsedModelMock,
   setLastUsedPromptMock,
   tabChatModeMock,
   updateCreatedAtMock,
   updatePageTitleMock,
 } = vi.hoisted(() => ({
+  addChatMessageMock: vi.fn(),
   events: [] as string[],
   createChatMock: vi.fn(),
   documentChatModeMock: vi.fn(),
@@ -39,6 +42,7 @@ const {
   ),
   saveHistoryMock: vi.fn(),
   saveMessageMock: vi.fn(),
+  streamCharacterChatCompletionMock: vi.fn(),
   setLastUsedModelMock: vi.fn(async () => undefined),
   setLastUsedPromptMock: vi.fn(async () => undefined),
   tabChatModeMock: vi.fn(),
@@ -171,8 +175,9 @@ vi.mock("@/services/chat-settings", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    addChatMessage: addChatMessageMock,
     createChat: createChatMock,
-    streamCharacterChatCompletion: vi.fn(),
+    streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     initialize: vi.fn(async () => null),
   },
 }));
@@ -252,6 +257,26 @@ const deferred = <T,>() => {
     reject = rejectPromise;
   });
   return { promise, reject, resolve };
+};
+
+const rejectWhenAborted = (signal: AbortSignal): Promise<never> =>
+  new Promise((_, reject) => {
+    const rejectAbort = () => {
+      const error = new Error("Service Prompt request was aborted.");
+      error.name = "AbortError";
+      reject(error);
+    };
+    if (signal.aborted) {
+      rejectAbort();
+      return;
+    }
+    signal.addEventListener("abort", rejectAbort, { once: true });
+  });
+
+const createAbortError = () => {
+  const error = new Error("AbortError");
+  error.name = "AbortError";
+  return error;
 };
 
 const createHookOptions = ({
@@ -747,6 +772,200 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(saveMessageMock).not.toHaveBeenCalled();
     expect(normalChatModeMock).not.toHaveBeenCalled();
     expect(releaseSnapshotMock).not.toHaveBeenCalled();
+    expect(options.notification.error).toHaveBeenCalledWith({
+      message: "error",
+      description: "Workflow prompts are unavailable",
+    });
+  });
+
+  it("treats Stop during normal prompt preflight as cancellation without an error notification", async () => {
+    loadServicePromptSnapshotMock.mockImplementationOnce(
+      async (_ids: unknown, { signal }: { signal: AbortSignal }) => {
+        events.push("loadSnapshot");
+        return rejectWhenAborted(signal);
+      },
+    );
+    const options = {
+      ...createHookOptions({ webSearch: true }),
+      compareModeActive: false,
+      compareSelectedModels: [],
+    };
+    const { result } = renderHook(() => {
+      const [abortController, setAbortController] =
+        React.useState<AbortController | null>(null);
+      return useChatActions({
+        ...options,
+        abortController,
+        setAbortController,
+      } as unknown as Parameters<typeof useChatActions>[0]);
+    });
+    let submission!: ReturnType<typeof result.current.onSubmit>;
+    let submissionResult!: Awaited<typeof submission>;
+
+    await act(async () => {
+      submission = result.current.onSubmit({
+        message: "Stop before prompts load",
+        image: "",
+      });
+      await vi.waitFor(() => {
+        expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    await act(async () => {
+      result.current.stopStreamingRequest();
+      submissionResult = await submission;
+    });
+
+    expect(submissionResult).toEqual({
+      status: "skipped",
+      reason: "Request cancelled",
+    });
+    expect(options.notification.error).not.toHaveBeenCalled();
+    expect(normalChatModeMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a newer turn active when an older aborted prompt preflight settles late", async () => {
+    const olderSnapshot = deferred<typeof snapshot>();
+    const newerSnapshot = deferred<typeof snapshot>();
+    loadServicePromptSnapshotMock
+      .mockReturnValueOnce(olderSnapshot.promise)
+      .mockReturnValueOnce(newerSnapshot.promise);
+    const options = {
+      ...createHookOptions({ webSearch: true }),
+      compareModeActive: false,
+      compareSelectedModels: [],
+    };
+    const { result } = renderHook(() =>
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
+    );
+    const olderController = new AbortController();
+    const newerController = new AbortController();
+    let olderSubmission!: ReturnType<typeof result.current.onSubmit>;
+    let newerSubmission!: ReturnType<typeof result.current.onSubmit>;
+    let olderResult!: Awaited<typeof olderSubmission>;
+
+    await act(async () => {
+      olderSubmission = result.current.onSubmit({
+        message: "Older turn",
+        image: "",
+        controller: olderController,
+      });
+      await vi.waitFor(() => {
+        expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    olderController.abort();
+    await act(async () => {
+      newerSubmission = result.current.onSubmit({
+        message: "Newer turn",
+        image: "",
+        controller: newerController,
+      });
+      await vi.waitFor(() => {
+        expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(2);
+      });
+    });
+    options.setStreaming.mockClear();
+    options.setIsProcessing.mockClear();
+    options.setAbortController.mockClear();
+
+    await act(async () => {
+      olderSnapshot.reject(createAbortError());
+      olderResult = await olderSubmission;
+    });
+
+    expect(olderResult).toEqual({
+      status: "skipped",
+      reason: "Request cancelled",
+    });
+    expect(options.setStreaming).not.toHaveBeenCalledWith(false);
+    expect(options.setIsProcessing).not.toHaveBeenCalledWith(false);
+    expect(options.setAbortController).not.toHaveBeenCalledWith(null);
+
+    await act(async () => {
+      newerController.abort();
+      newerSnapshot.reject(createAbortError());
+      await newerSubmission;
+    });
+  });
+
+  it("does not carry a discarded prompt preflight into a later character turn", async () => {
+    loadServicePromptSnapshotMock.mockImplementationOnce(
+      async (_ids: unknown, { signal }: { signal: AbortSignal }) =>
+        rejectWhenAborted(signal),
+    );
+    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 });
+    streamCharacterChatCompletionMock.mockImplementationOnce(
+      async function* () {
+        yield await Promise.reject(createAbortError());
+      },
+    );
+    const options = {
+      ...createHookOptions({ webSearch: true }),
+      compareModeActive: false,
+      compareSelectedModels: [],
+    };
+    const laterCharacter = {
+      id: "12",
+      name: "Later Character",
+      system_prompt: "Stay in character",
+    };
+    const laterAssistant = {
+      kind: "character" as const,
+      id: "12",
+      name: "Later Character",
+      system_prompt: "Stay in character",
+      metadata: { selectionMode: "tracked" },
+    };
+    const { result, rerender } = renderHook(
+      ({ characterMode }: { characterMode: boolean }) => {
+        const [abortController, setAbortController] =
+          React.useState<AbortController | null>(null);
+        return useChatActions({
+          ...options,
+          abortController,
+          setAbortController,
+          selectedCharacter: characterMode ? laterCharacter : null,
+          selectedAssistant: characterMode ? laterAssistant : null,
+        } as unknown as Parameters<typeof useChatActions>[0]);
+      },
+      { initialProps: { characterMode: false } },
+    );
+    let preflightSubmission!: ReturnType<typeof result.current.onSubmit>;
+    let characterResult!: Awaited<ReturnType<typeof result.current.onSubmit>>;
+
+    await act(async () => {
+      preflightSubmission = result.current.onSubmit({
+        message: "Queued turn being replaced",
+        image: "",
+      });
+      await vi.waitFor(() => {
+        expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    await act(async () => {
+      result.current.stopStreamingRequest({ discardTurn: true });
+      await preflightSubmission;
+    });
+    rerender({ characterMode: true });
+
+    await act(async () => {
+      characterResult = await result.current.onSubmit({
+        message: "Later character turn",
+        image: "",
+      });
+    });
+
+    expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1);
+    expect(characterResult).toEqual({
+      status: "failed",
+      errorMessage: "AbortError",
+    });
   });
 
   it.each([
@@ -824,6 +1043,51 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(saveHistoryMock).not.toHaveBeenCalled();
     expect(saveMessageMock).not.toHaveBeenCalled();
     expect(modeMock).not.toHaveBeenCalled();
+    expect(options.notification.error).toHaveBeenCalledWith({
+      message: "error",
+      description: "Workflow prompts are unavailable",
+    });
+  });
+
+  it("treats Stop during per-model prompt preflight as cancellation without an error notification", async () => {
+    loadServicePromptSnapshotMock.mockImplementationOnce(
+      async (_ids: unknown, { signal }: { signal: AbortSignal }) => {
+        events.push("loadSnapshot");
+        return rejectWhenAborted(signal);
+      },
+    );
+    const options = createHookOptions({ webSearch: true });
+    const { result } = renderHook(() => {
+      const [abortController, setAbortController] =
+        React.useState<AbortController | null>(null);
+      return useChatActions({
+        ...options,
+        abortController,
+        setAbortController,
+      } as unknown as Parameters<typeof useChatActions>[0]);
+    });
+    let submission!: ReturnType<typeof result.current.sendPerModelReply>;
+    let submissionResult!: Awaited<typeof submission>;
+
+    await act(async () => {
+      submission = result.current.sendPerModelReply({
+        clusterId: "cluster-1",
+        modelId: "model-a",
+        message: "Stop before prompts load",
+      });
+      await vi.waitFor(() => {
+        expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    await act(async () => {
+      result.current.stopStreamingRequest();
+      submissionResult = await submission;
+    });
+
+    expect(submissionResult).toBeUndefined();
+    expect(options.notification.error).not.toHaveBeenCalled();
+    expect(normalChatModeMock).not.toHaveBeenCalled();
   });
 
   it.each([
