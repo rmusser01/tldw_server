@@ -3555,6 +3555,12 @@ def test_opaque_and_deferred_binding_values_are_diagnostic_only() -> None:
     assert asdict(binding) == {"binding_id": "pubmed_ids", "values": (101, 202)}
 
 
+def test_group_execution_controller_cursor_contract_accepts_opaque_cursor() -> None:
+    cursor_parameter = inspect.signature(executor_module._GroupExecutionController.__call__).parameters["cursor"]
+
+    assert cursor_parameter.annotation == "NumericCursor | OpaqueCursor | None"
+
+
 @pytest.mark.asyncio
 async def test_figshare_numeric_json_body_cursor_replaces_page_for_second_dispatch() -> None:
     registry, plan = _paginated_figshare_plan()

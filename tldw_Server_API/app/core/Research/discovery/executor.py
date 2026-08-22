@@ -1575,7 +1575,7 @@ class _GroupExecutionController:
         self,
         intent: DispatchIntent,
         *,
-        cursor: NumericCursor | None = None,
+        cursor: NumericCursor | OpaqueCursor | None = None,
         bindings: tuple[NumericCSVBindingValues, ...] = (),
     ) -> DiscoveryGatewayResponse:
         if self._owner_task is None or asyncio.current_task() is not self._owner_task:

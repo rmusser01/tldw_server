@@ -150,7 +150,7 @@ _EXPECTED_AST_DIGESTS = {
     "contracts.py": "31006c7e537eadf401494f1356cf55d690da2af8314adb57751b59ce88d36e52",
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
     "planner.py": "863f441ffdf5e3a8405e3e4a29810600a1add1477adef1dd6b1cb2b86e006d3b",
-    "executor.py": "52a331775ad765970a0fee25e1271f45855d7f2cba333438bf17b6af401697ae",
+    "executor.py": "f96a7f310a608def1c163cd88c22481b21cdba99281eb9a76326bffb74fd0296",
     "gateway_adapters.py": "016490dea3c58134c8b5a80d27659cc00762f20afd1f4f52822774ba5dab79cc",
     "gateway.py": "9fa3be4b099e4beb519e63bee037873d55fcd8425c7ec939520ea100cd896654",
     "identity.py": "f59640d8f793fd3ebd11df49d333f73ebee9e59efb549393116bee2a241f5f06",
