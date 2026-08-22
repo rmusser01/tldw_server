@@ -2287,6 +2287,30 @@ def test_pmc_trusted_inputs_reject_group_identity_policy_and_filter_drift(
         _module()._trusted_pubmed_central_inputs(group)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("logical_attempt_id", ""),
+        ("logical_attempt_id", _StringSubclass("logical_attempt_v2_equal_value")),
+        ("catalog_source_id", _StringSubclass("pubmed_central")),
+        ("selection_reason", "default"),
+        ("selection_reason", _StringSubclass("explicit")),
+        ("source_predicate", object()),
+    ),
+)
+def test_pmc_trusted_inputs_seal_exact_logical_attempt_lineage(
+    field: str,
+    value: object,
+) -> None:
+    group = _cloned_pmc_group()
+    if field == "logical_attempt_id" and isinstance(value, _StringSubclass):
+        value = _StringSubclass(group.logical_attempts[0].logical_attempt_id)
+    object.__setattr__(group.logical_attempts[0], field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
 @pytest.mark.parametrize("intents", ((), "duplicate", "list"))
 def test_pmc_trusted_inputs_require_two_intents_in_an_exact_tuple(intents: object) -> None:
     group = _cloned_pmc_group()

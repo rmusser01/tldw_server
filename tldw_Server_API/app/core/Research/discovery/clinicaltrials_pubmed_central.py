@@ -885,7 +885,13 @@ def _trusted_pubmed_central_inputs(
         or type(group.logical_attempts) is not tuple
         or len(group.logical_attempts) != 1
         or type(group.logical_attempts[0]) is not PlannedLogicalAttempt
+        or type(group.logical_attempts[0].logical_attempt_id) is not str
+        or not group.logical_attempts[0].logical_attempt_id
+        or type(group.logical_attempts[0].catalog_source_id) is not str
         or group.logical_attempts[0].catalog_source_id != "pubmed_central"
+        or type(group.logical_attempts[0].selection_reason) is not str
+        or group.logical_attempts[0].selection_reason != "explicit"
+        or group.logical_attempts[0].source_predicate is not None
         or type(group.fallback_order) is not int
         or group.fallback_order != 0
         or type(group.intents) is not tuple
