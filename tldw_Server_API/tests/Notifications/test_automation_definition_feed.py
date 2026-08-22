@@ -4,26 +4,33 @@ Mirrors test_reminders_scheduler.py's shapes: real per-user
 ScheduledTasksDatabase under a tmp USER_DB_BASE_DIR (preview-gated
 definition creation through the REAL DB methods), direct fire-path
 invocation, and captured ``create_job`` kwargs. No reimplementation.
+
+The arming model under test: each occurrence is its own DateTrigger job
+with the slot bound into the job args at arm time, so a late callback
+still enqueues the occurrence it was armed for (review finding #7).
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
+    DefinitionRow,
     ScheduledTasksDatabase,
 )
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.services.reminders_scheduler import _normalize_slot_to_utc_iso
 from tldw_Server_API.app.services.scheduled_task_automation_scheduler import (
     ARMED_HEALTH,
     AUTOMATION_DOMAIN,
     AUTOMATION_JOB_TYPE,
     _AutomationScheduler,
+    _next_occurrence,
     build_trigger,
-    compute_run_slot,
 )
 
 pytestmark = pytest.mark.unit
@@ -52,10 +59,10 @@ def automation_scheduler_env(monkeypatch, tmp_path):
 def _create_definition(
     user_id: int,
     *,
-    schedule: dict,
+    schedule: dict[str, Any],
     lifecycle: str = "configured",
     family: str = "recurring_question",
-) -> "object":
+) -> DefinitionRow:
     db = ScheduledTasksDatabase.for_user(user_id=user_id)
     db.ensure_schema()
     preview = db.create_preview(
@@ -96,10 +103,10 @@ def _create_definition(
     )
 
 
-def _capture_jobs(scheduler: _AutomationScheduler) -> list[dict]:
-    created: list[dict] = []
+def _capture_jobs(scheduler: _AutomationScheduler) -> list[dict[str, Any]]:
+    created: list[dict[str, Any]] = []
 
-    def _capture(**kwargs):
+    def _capture(**kwargs: Any) -> dict[str, int]:
         created.append(kwargs)
         return {"id": len(created)}
 
@@ -107,28 +114,41 @@ def _capture_jobs(scheduler: _AutomationScheduler) -> list[dict]:
     return created
 
 
+def _bare_scheduler(user_id: int) -> _AutomationScheduler:
+    """A scheduler with a warmed per-user DB cache and NO APS instance.
+
+    The fire path only needs the DB cache; arming needs APS and is tested
+    separately against a real AsyncIOScheduler.
+    """
+    scheduler = _AutomationScheduler()
+    scheduler._get_db(user_id)
+    return scheduler
+
+
 # ---------------------------------------------------------------------------
 # Trigger building — all five kinds, plus honest-refusal cases
 # ---------------------------------------------------------------------------
 
 
-def test_build_trigger_one_time():
-    trigger, reason = build_trigger({"kind": "one_time", "run_at": "2026-08-21T09:00:00+00:00"})
+def test_build_trigger_one_time() -> None:
+    trigger, reason = build_trigger(
+        {"kind": "one_time", "run_at": "2026-08-21T09:00:00+00:00"}
+    )
     assert trigger is not None and reason is None
 
 
-def test_build_trigger_interval():
+def test_build_trigger_interval() -> None:
     trigger, reason = build_trigger({"kind": "interval", "seconds": 900})
     assert trigger is not None and reason is None
 
 
-def test_build_trigger_daily_and_weekly():
+def test_build_trigger_daily_and_weekly() -> None:
     daily, _ = build_trigger({"kind": "daily", "at": "09:30", "timezone": "UTC"})
     weekly, _ = build_trigger({"kind": "weekly", "weekday": 0, "at": "09:30"})
     assert daily is not None and weekly is not None
 
 
-def test_build_trigger_cron():
+def test_build_trigger_cron() -> None:
     trigger, reason = build_trigger({"kind": "cron", "cron": "*/5 * * * *"})
     assert trigger is not None and reason is None
 
@@ -145,29 +165,54 @@ def test_build_trigger_cron():
         ({"kind": "hourly"}, "unsupported"),
     ],
 )
-def test_build_trigger_refuses_unusable_schedules(schedule, expect_fragment):
+def test_build_trigger_refuses_unusable_schedules(
+    schedule: dict[str, Any], expect_fragment: str
+) -> None:
     trigger, reason = build_trigger(schedule)
     assert trigger is None
     assert expect_fragment in reason
 
 
 # ---------------------------------------------------------------------------
-# Slot computation
+# Next-occurrence derivation
 # ---------------------------------------------------------------------------
 
 
-def test_compute_run_slot_one_time_uses_run_at():
-    run_at = datetime(2026, 8, 21, 9, 0, tzinfo=timezone.utc)
-    slot = compute_run_slot({"kind": "one_time", "run_at": run_at.isoformat()}, None)
-    assert slot == run_at
+def test_next_occurrence_one_time_past_returns_none() -> None:
+    trigger, _ = build_trigger(
+        {"kind": "one_time", "run_at": "2020-01-01T00:00:00+00:00"}
+    )
+    assert _next_occurrence(trigger, after=datetime.now(timezone.utc)) is None
 
 
-def test_compute_run_slot_periodic_returns_current_slot():
+def test_next_occurrence_periodic_returns_next_boundary() -> None:
     trigger, _ = build_trigger({"kind": "daily", "at": "09:00", "timezone": "UTC"})
-    now = datetime(2026, 8, 21, 9, 0, tzinfo=timezone.utc)
-    slot = compute_run_slot({"kind": "daily", "at": "09:00"}, trigger, now=now)
-    assert slot is not None
-    assert slot.hour == 9 and slot.minute == 0 and slot <= now
+    after = datetime(2026, 8, 21, 10, 0, tzinfo=timezone.utc)
+    nxt = _next_occurrence(trigger, after=after)
+    assert nxt is not None
+    assert nxt == datetime(2026, 8, 22, 9, 0, tzinfo=timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# Enumeration (review finding #5: list_definitions returns (rows, total))
+# ---------------------------------------------------------------------------
+
+
+def test_configured_definitions_returns_plain_row_list(automation_scheduler_env) -> None:
+    user_id = 989
+    _create_definition(user_id, schedule={"kind": "cron", "cron": "0 9 * * *"})
+    _create_definition(
+        user_id, schedule={"kind": "cron", "cron": "0 10 * * *"}, lifecycle="paused"
+    )
+
+    scheduler = _AutomationScheduler()
+    rows = scheduler._configured_definitions(user_id)
+
+    # The paused definition must be excluded; iterating the result must
+    # yield DefinitionRow objects, never a (rows, total) tuple's tail int.
+    assert len(rows) == 1
+    assert all(isinstance(row, DefinitionRow) for row in rows)
+    assert rows[0].lifecycle == "configured"
 
 
 # ---------------------------------------------------------------------------
@@ -176,15 +221,17 @@ def test_compute_run_slot_periodic_returns_current_slot():
 
 
 @pytest.mark.asyncio
-async def test_due_slot_enqueues_job_once(automation_scheduler_env):
+async def test_due_slot_enqueues_job_once(automation_scheduler_env) -> None:
     user_id = 990
     definition = _create_definition(user_id, schedule={"kind": "cron", "cron": "* * * * *"})
+    slot = datetime.now(timezone.utc).replace(second=0, microsecond=0)
 
-    scheduler = _AutomationScheduler()
-    scheduler._get_db(user_id)  # warm the cache against the real DB
+    scheduler = _bare_scheduler(user_id)
     created = _capture_jobs(scheduler)
 
-    await scheduler._run_definition_schedule(definition.id, user_id=user_id)
+    await scheduler._run_definition_schedule(
+        definition.id, user_id, _normalize_slot_to_utc_iso(slot)
+    )
 
     assert len(created) == 1
     assert created[0]["domain"] == AUTOMATION_DOMAIN
@@ -192,11 +239,42 @@ async def test_due_slot_enqueues_job_once(automation_scheduler_env):
     assert created[0]["owner_user_id"] == user_id
     assert created[0]["payload"]["definition_id"] == definition.id
     assert created[0]["payload"]["family"] == "recurring_question"
-    assert created[0]["idempotency_key"].startswith(f"definition:{definition.id}:")
+    assert created[0]["payload"]["scheduled_for"] == _normalize_slot_to_utc_iso(slot)
+    assert created[0]["idempotency_key"] == (
+        f"definition:{definition.id}:{_normalize_slot_to_utc_iso(slot)}"
+    )
 
 
 @pytest.mark.asyncio
-async def test_same_slot_fires_one_idempotency_key(automation_scheduler_env):
+async def test_late_fire_still_enqueues_the_armed_slot(automation_scheduler_env) -> None:
+    """Misfire correctness (review finding #7).
+
+    The callback runs 90s after the boundary it was armed for; the slot,
+    scheduled_for, and idempotency key must all name the ARMED occurrence,
+    not anything derived from the late wall clock.
+    """
+    user_id = 996
+    definition = _create_definition(user_id, schedule={"kind": "cron", "cron": "* * * * *"})
+    slot = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(
+        seconds=90
+    )
+
+    scheduler = _bare_scheduler(user_id)
+    created = _capture_jobs(scheduler)
+
+    await scheduler._run_definition_schedule(
+        definition.id, user_id, _normalize_slot_to_utc_iso(slot)
+    )
+
+    assert len(created) == 1
+    assert created[0]["payload"]["scheduled_for"] == _normalize_slot_to_utc_iso(slot)
+    assert created[0]["idempotency_key"] == (
+        f"definition:{definition.id}:{_normalize_slot_to_utc_iso(slot)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_same_slot_fires_one_idempotency_key(automation_scheduler_env) -> None:
     """Two scheduler passes over the same slot produce the identical key.
 
     The Jobs layer returns the same row for a duplicate key, so identical
@@ -204,62 +282,98 @@ async def test_same_slot_fires_one_idempotency_key(automation_scheduler_env):
     """
     user_id = 991
     definition = _create_definition(user_id, schedule={"kind": "cron", "cron": "* * * * *"})
-    scheduler = _AutomationScheduler()
-    scheduler._get_db(user_id)
+    slot_iso = _normalize_slot_to_utc_iso(
+        datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    )
+    scheduler = _bare_scheduler(user_id)
     created = _capture_jobs(scheduler)
 
-    await scheduler._run_definition_schedule(definition.id, user_id=user_id)
-    await scheduler._run_definition_schedule(definition.id, user_id=user_id)
+    await scheduler._run_definition_schedule(definition.id, user_id, slot_iso)
+    await scheduler._run_definition_schedule(definition.id, user_id, slot_iso)
 
     assert len(created) == 2
     assert created[0]["idempotency_key"] == created[1]["idempotency_key"]
 
 
 @pytest.mark.asyncio
-async def test_non_configured_lifecycle_never_fires(automation_scheduler_env):
+async def test_non_configured_lifecycle_never_fires(automation_scheduler_env) -> None:
     user_id = 992
     definition = _create_definition(
-        user_id, schedule={"kind": "cron", "cron": "*/5 * * * *"}, lifecycle="paused"
+        user_id, schedule={"kind": "cron", "cron": "* * * * *"}, lifecycle="paused"
     )
-    scheduler = _AutomationScheduler()
-    scheduler._get_db(user_id)
+    scheduler = _bare_scheduler(user_id)
     created = _capture_jobs(scheduler)
 
-    await scheduler._run_definition_schedule(definition.id, user_id=user_id)
+    await scheduler._run_definition_schedule(definition.id, user_id, "2026-08-21T09:00:00+00:00")
 
     assert created == []
 
 
 @pytest.mark.asyncio
-async def test_future_one_time_slot_skips_early_fire(automation_scheduler_env):
+async def test_future_slot_skips_early_fire(automation_scheduler_env) -> None:
     user_id = 993
+    definition = _create_definition(user_id, schedule={"kind": "one_time", "run_at": ""})
     run_at = datetime.now(timezone.utc) + timedelta(hours=2)
-    definition = _create_definition(
-        user_id, schedule={"kind": "one_time", "run_at": run_at.isoformat()}
+    db = ScheduledTasksDatabase.for_user(user_id=user_id)
+    db.update_definition(
+        owner_id=user_id,
+        definition_id=definition.id,
+        patch={"schedule": {"kind": "one_time", "run_at": run_at.isoformat()}},
     )
-    scheduler = _AutomationScheduler()
-    scheduler._get_db(user_id)
+    scheduler = _bare_scheduler(user_id)
     created = _capture_jobs(scheduler)
 
-    await scheduler._run_definition_schedule(definition.id, user_id=user_id)
+    await scheduler._run_definition_schedule(
+        definition.id, user_id, _normalize_slot_to_utc_iso(run_at)
+    )
 
     assert created == []
 
 
 @pytest.mark.asyncio
-async def test_unusable_schedule_never_fires(automation_scheduler_env):
+async def test_unusable_schedule_never_fires(automation_scheduler_env) -> None:
     user_id = 994
     # The DB stores whatever the schedule dict carried; the feed must skip
     # a definition whose per-kind fields are junk even though 'kind' is
     # among the supported five.
     definition = _create_definition(user_id, schedule={"kind": "interval"})
-    scheduler = _AutomationScheduler()
-    scheduler._get_db(user_id)
+    scheduler = _bare_scheduler(user_id)
     created = _capture_jobs(scheduler)
 
-    await scheduler._run_definition_schedule(definition.id, user_id=user_id)
+    await scheduler._run_definition_schedule(definition.id, user_id, "2026-08-21T09:00:00+00:00")
 
     assert created == []
+
+
+# ---------------------------------------------------------------------------
+# Arming against a real APScheduler instance
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_arms_next_occurrence_with_slot_bound_in_args(automation_scheduler_env) -> None:
+    user_id = 997
+    definition = _create_definition(user_id, schedule={"kind": "daily", "at": "23:59"})
+
+    scheduler = _AutomationScheduler()
+    scheduler._aps = AsyncIOScheduler(timezone="UTC")
+    scheduler._aps.start()
+    try:
+        assert scheduler._arm(definition, user_id) is True
+
+        jobs = scheduler._aps.get_jobs()
+        assert len(jobs) == 1
+        job = jobs[0]
+        assert job.id == f"automation:{definition.id}"
+        # One DateTrigger occurrence with the slot bound into args:
+        (arg_definition_id, arg_user_id, arg_slot_iso) = job.args
+        assert arg_definition_id == definition.id
+        assert arg_user_id == user_id
+        assert datetime.fromisoformat(arg_slot_iso).hour == 23
+        assert datetime.fromisoformat(arg_slot_iso).minute == 59
+    finally:
+        scheduler._aps.shutdown(wait=False)
+        scheduler._aps = None
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +381,7 @@ async def test_unusable_schedule_never_fires(automation_scheduler_env):
 # ---------------------------------------------------------------------------
 
 
-def test_mark_ready_flips_health_with_audit_and_no_version_churn(automation_scheduler_env):
+def test_mark_ready_flips_health_with_audit_and_no_version_churn(automation_scheduler_env) -> None:
     user_id = 995
     definition = _create_definition(user_id, schedule={"kind": "cron", "cron": "0 9 * * *"})
     db = ScheduledTasksDatabase.for_user(user_id=user_id)
