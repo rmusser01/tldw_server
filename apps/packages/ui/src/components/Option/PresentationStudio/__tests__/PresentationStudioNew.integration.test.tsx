@@ -355,4 +355,28 @@ describe("PresentationStudioNew authority refresh integration", () => {
     expect(screen.getByDisplayValue("Draft hidden by first probe outage")).toBeDisabled()
     expect(screen.getByText("Preserved draft")).toBeVisible()
   })
+
+  it("keeps the hydrated recovery form mounted when Retry cannot access storage", async () => {
+    storeDraft("Recovery source retained through outage")
+    mocks.getSlidesCapabilities.mockResolvedValue(disabledCapabilities)
+    const { PresentationStudioNew } = await loadSubject()
+    render(<PresentationStudioNew />)
+
+    const source = await screen.findByDisplayValue("Recovery source retained through outage")
+    expect(source).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Forget preserved draft" })).toBeEnabled()
+
+    const keySpy = vi.spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "key")
+      .mockImplementation(() => { throw new DOMException("storage unavailable", "SecurityError") })
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+    await waitFor(() => expect(mocks.getSlidesCapabilities).toHaveBeenCalledTimes(2))
+    keySpy.mockRestore()
+    expect(await screen.findByText("Recovery unavailable")).toBeVisible()
+    expect(screen.getByDisplayValue("Recovery source retained through outage")).toBe(source)
+    expect(source).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Forget preserved draft" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible()
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
 })

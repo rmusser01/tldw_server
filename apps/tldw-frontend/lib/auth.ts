@@ -1,5 +1,6 @@
 import { apiClient } from './api';
 import { getRuntimeApiBearer, getRuntimeApiKey } from './authStorage';
+import { clearStandaloneHtmlSessionRecords } from '@tldw/ui/services/tldw/standalone-html-session-records';
 
 export interface LoginCredentials {
   username: string;
@@ -59,24 +60,6 @@ const hasStoredApiBearer = (): boolean => !!getStoredApiBearer();
 const hasJwtToken = (): boolean => {
   if (typeof window === 'undefined') return false;
   return !!localStorage.getItem('access_token');
-};
-
-const PRESENTATION_STUDIO_HTML_SESSION_PREFIXES = [
-  'tldw:presentation-studio:html:draft:v1:',
-  'tldw:presentation-studio:html:resume:v1:',
-] as const;
-
-const clearStandaloneHtmlSessionRecords = (): void => {
-  try {
-    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
-      const key = window.sessionStorage.key(index);
-      if (key && PRESENTATION_STUDIO_HTML_SESSION_PREFIXES.some((prefix) => key.startsWith(prefix))) {
-        window.sessionStorage.removeItem(key);
-      }
-    }
-  } catch {
-    // Storage may be unavailable; authentication cleanup still completes.
-  }
 };
 
 const getApiErrorInfo = (error: unknown): ApiErrorLike => {

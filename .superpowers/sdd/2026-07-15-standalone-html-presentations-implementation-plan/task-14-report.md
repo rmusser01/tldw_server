@@ -261,3 +261,39 @@ No global/module source cache, history or URL source state, unsafe request heade
 The stable refresh wrapper preserves the existing semantic form, labelled controls, provider/model/adapter/endpoint/revision description list, status and alert regions, visible focus, and shared action sizing. Retained target data is explicitly described as reference-only, and all source-bearing fields plus submission remain disabled while authority is loading or unavailable. Combined Retry is exposed in capability-error, offline, disabled, validator, and recovery-first states without introducing duplicate actions in the active HTML flow.
 
 The layout continues to collapse to one column at narrow widths, uses existing surface/border/text/focus/state tokens, and adds no gradients, glass, card grid, decorative motion, em-dash copy, imagery, or bespoke visual system. The flow remains non-executing, and browser automation remains deferred to Task 17 as required.
+
+## Final recovery-boundary fix round 4
+
+### Review verification and RED
+
+Both round-4 findings were verified against `8b1557f364` before production changes. Settings uses `TldwAuthService.logout()`, while the frontend header/auth hook uses the separate `AuthService.logout()`; only the latter contained Task 14 cleanup and a trusted logout notification. The recovery probe retained its trusted source-free `kind` while setting `status` to `checking`, but cleared that kind when storage inspection returned transient `unavailable`; `PresentationStudioNew` mounted recovery solely from `status === "available"`, so combined Retry replaced the real form with loading under disabled generation.
+
+The coherent five-file regression matrix added direct Settings-path logout coverage, hook recovery-kind semantics, and a real New/form topology test before production edits. An initial run exposed four test-cascade failures because the deliberately throwing storage spy remained active after the first intended assertion; only test cleanup was corrected. The clean canonical RED then collected five files and 60 tests: 3 intended failures and 57 passes. The failures were exactly the missing Settings logout boundary, lost trusted recovery kind, and unmounted hydrated form. A later self-review boundary test produced one additional genuine isolated RED with 1 failure and 42 skipped tests: a confirmed scope switch followed by inaccessible storage retained the old recovery kind.
+
+### Round-4 implementation
+
+- Extracted one source-free `clearStandaloneHtmlSessionRecords()` utility. It enumerates key names backwards, removes only the two Task 14 prefixes, never reads values, tolerates unavailable storage, and is used by both logout services.
+- `TldwAuthService.logout()` now clears local config tokens, clears its refresh timer, purges Task 14 session keys, and then emits the same narrow logout principal boundary used by the frontend auth service. The existing best-effort server logout behavior is unchanged.
+- The recovery probe now retains a previously trusted `draft` or `resume` kind through `checking` and same-scope transient `unavailable`, but clears it on definitive `none`, confirmed scope switch, scope-mismatch notification, or logout.
+- `PresentationStudioNew` keys stable form topology from the retained source-free recovery kind. The same form stays first and mounted during capability plus recovery Retry, remains submission-guarded without current authority, preserves its local Forget action, and shows a source-free **Recovery unavailable** warning with one combined Retry path.
+
+No module/global/history/URL source cache, duplicated logout cleanup, automatic replay, provider picker, execution sink, dependency, or unrelated Settings change was added.
+
+### Round-4 verification
+
+- Baseline before test edits: 5 files and 72 tests passed.
+- First focused GREEN: 5 files and 60 tests passed.
+- Confirmed-scope-switch hook GREEN: 1 file and 43 tests passed.
+- Final staged focused matrix, including the added switch boundary: 5 files and 61 tests passed.
+- Final amended canonical matrix: 12 files and 202 tests passed.
+- Adjacent Presentation Studio and all three neighboring route suites: 16 files and 83 tests passed.
+- Direct auth, canonical-config, capability, connectivity, API-send, background-proxy, request-core, connection-sync, hosted-auth, and standalone-client regressions: 14 files and 176 tests passed.
+- OpenAPI guard: 317 client paths and 49 fallback fields verified; the same 10 reviewed OSS exception paths were reported and allowed.
+- The single required package typecheck used `NODE_OPTIONS=--max-old-space-size=8192` and completed without diagnostics. Task 14 diagnostics: none. Inherited diagnostics in this run: none.
+- `git diff --check` passed. Targeted ESLint reported zero errors; eight sibling-package paths were ignored by the frontend base-path configuration. Targeted Prettier reported the repository formatting baseline on all selected files, reproduced by untouched `Common/Button.tsx` and `pages/_app.tsx`; no bulk rewrite was made.
+- Bandit remains not applicable because round 4 touches no Python.
+- Static review found no HTML parser/insertion, `srcdoc`, Blob URL, iframe, popup, worker, dynamic import, eval, Function constructor, history/URL source state, analytics, or global-store sink in round-4 production changes. The shared logout utility contains one definition, two callers, `sessionStorage.key/removeItem`, and no `getItem`.
+
+### Round-4 files and concerns
+
+Production changes are limited to the shared session-record utility, both logout services, the recovery probe, and `PresentationStudioNew`. Direct logout, hook, and New/form tests were added or amended, plus this report. The protected `antd` artifact and both Watchlist templates remain untouched and unstaged. No functional concern remains; the only observed warnings are the established Vitest localStorage/i18next noise and repository formatter/linter-scope baselines described above.

@@ -3,6 +3,7 @@ import { bgRequest } from "@/services/background-proxy"
 import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { clearStandaloneHtmlSessionRecords } from "@/services/tldw/standalone-html-session-records"
 
 export interface LoginCredentials {
   username: string
@@ -222,6 +223,13 @@ export class TldwAuthService {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer)
       this.refreshTimer = null
+    }
+
+    clearStandaloneHtmlSessionRecords()
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
+        detail: { kind: "logout" }
+      }))
     }
   }
 

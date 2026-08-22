@@ -73,7 +73,7 @@ describe("PresentationStudioNew", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.slides = slidesState()
-    mocks.recovery = { status: "none", retry: mocks.retryRecovery }
+    mocks.recovery = { status: "none", kind: null, retry: mocks.retryRecovery }
   })
 
   it("gates the HTML option until capability confirmation and exposes recovery actions for errors", async () => {
@@ -126,7 +126,7 @@ describe("PresentationStudioNew", () => {
 
   it("auto-offers source-free recovery even when current capability is unavailable", async () => {
     mocks.slides = slidesState({ status: "error", canGenerate: false, capabilities: null })
-    mocks.recovery = { status: "available", retry: mocks.retryRecovery }
+    mocks.recovery = { status: "available", kind: "resume", retry: mocks.retryRecovery }
     const { PresentationStudioNew } = await loadSubject()
     render(<PresentationStudioNew />)
 

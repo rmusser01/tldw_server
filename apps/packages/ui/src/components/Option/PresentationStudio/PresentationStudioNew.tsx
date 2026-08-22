@@ -16,13 +16,13 @@ export const PresentationStudioNew: React.FC = () => {
   const slides = useSlidesCapabilities()
   const recovery = useStandaloneHtmlRecoveryProbe()
   const [creationMode, setCreationMode] = React.useState<CreationMode>("structured")
-  const recoveryAvailable = recovery.status === "available"
+  const hasTrustedRecovery = recovery.kind !== null
   const capabilityConfirmed = ["ready", "generation_disabled", "validator_unavailable"].includes(slides.status)
-  const htmlOptionEnabled = capabilityConfirmed || recoveryAvailable
+  const htmlOptionEnabled = capabilityConfirmed || hasTrustedRecovery
 
   React.useEffect(() => {
-    if (recoveryAvailable) setCreationMode("standalone_html")
-  }, [recoveryAvailable])
+    if (hasTrustedRecovery) setCreationMode("standalone_html")
+  }, [hasTrustedRecovery])
 
   const retryStandalone = React.useCallback(async () => {
     await Promise.all([slides.retry(), recovery.retry()])
@@ -31,7 +31,7 @@ export const PresentationStudioNew: React.FC = () => {
   const standaloneContent = React.useMemo(() => {
     const retainedEnabledCapability =
       slides.capabilities?.generation_modes.standalone_html.enabled === true
-    const keepFormMounted = retainedEnabledCapability || recoveryAvailable
+    const keepFormMounted = retainedEnabledCapability || hasTrustedRecovery
     let state: React.ReactNode = null
 
     if (slides.status === "loading") {
@@ -78,21 +78,32 @@ export const PresentationStudioNew: React.FC = () => {
 
     if (!keepFormMounted) return state
 
+    const recoveryState = recovery.status === "unavailable" && hasTrustedRecovery ? (
+      <StatePanel
+        state="unavailable"
+        title="Recovery unavailable"
+        message="The preserved form remains in this tab, but browser recovery storage could not be checked."
+        primaryAction={state ? undefined : { label: "Retry", onClick: () => void retryStandalone() }}
+        role="status"
+      />
+    ) : null
+
     return (
       <div className="space-y-4">
         <StandaloneHtmlGenerationForm
           capabilities={slides.capabilities}
-          recoveryOnly={recoveryAvailable && !slides.canGenerate}
+          recoveryOnly={hasTrustedRecovery && !slides.canGenerate}
           authorityConfirmed={slides.canGenerate}
           refreshing={slides.status === "loading"}
           onCapabilitiesChanged={retryStandalone}
           onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
           onStopWaiting={() => navigate("/presentation-studio")}
         />
+        {recoveryState}
         {state}
       </div>
     )
-  }, [navigate, recoveryAvailable, retryStandalone, slides])
+  }, [hasTrustedRecovery, navigate, recovery.status, retryStandalone, slides])
 
   return (
     <div className="space-y-6 py-6">
