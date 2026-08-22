@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-22 23:04'
+updated_date: '2026-08-22 23:08'
 labels:
   - admin
   - webhooks
@@ -86,14 +86,16 @@ Planning correction: the approved design assigns final legacy-handler deletion a
 Post-rebase verification: full Python PR 1 matrix 466 passed/449 warnings; PostgreSQL-required migration/repository/import matrix 19 passed/40 warnings with no skips on postgres:18 (18.6); Ruff passed; Bandit passed with existing nosec annotation diagnostics only; canonical and compatibility sensitive-log scans passed. Admin UI focused webhook/proxy/transport matrix 77 passed; TypeScript typecheck passed; targeted ESLint across every changed UI/auth/test file passed; production Next build passed; auto-started Chromium control-plane journey 1 passed under Node 20 after proving/fixing the Edge WebCrypto regression; persistence/console sink scan passed.
 
 Known upstream admin-ui baselines are not attributed to this branch: clean origin/dev under Node 20 has 47 failed/653 passed of 700 tests, including 6 obsolete webhook-page failures; this branch has 41 failed/711 passed of 752 tests with those 6 webhook failures resolved and no stable new failure. One unchanged AI Ops timing test failed once in a concurrent structured run and passed 8/8 in isolation. Package-wide lint remains the previously recorded 3 require-import errors plus 41 unrelated warnings; changed-file ESLint is clean. Final evidence document and review state remain pending; task stays In Progress.
+
+2026-08-22 PR 1 verification evidence recorded at Docs/Evidence/Admin_Webhooks_PR1_Verification.md against tested source commit a79fe91f2f. The evidence includes exact OpenAPI, Python, required PostgreSQL, Ruff, Bandit, redaction, focused UI, typecheck, build, Playwright, and browser-sink results, plus explicit origin/dev package-test and lint baselines. DoD verification, documentation, Bandit, and known-blocker records are complete. Final summary/status remain open until human and Qodo PR review findings are resolved.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
