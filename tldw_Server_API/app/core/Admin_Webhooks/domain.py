@@ -10,7 +10,7 @@ import re
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from urllib.parse import SplitResult, urlsplit
@@ -18,6 +18,8 @@ from urllib.parse import SplitResult, urlsplit
 from tldw_Server_API.app.core.Security.egress import (
     evaluate_platform_webhook_url_policy,
 )
+
+from .crypto import ProtectedValue
 
 
 class WebhookErrorCode(str, Enum):
@@ -47,6 +49,7 @@ class WebhookErrorCode(str, Enum):
     KEY_ROTATION_IN_PROGRESS = "admin_webhook_key_rotation_in_progress"
     DATABASE_BUSY = "admin_webhook_database_busy"
     AUDIT_UNAVAILABLE = "admin_webhook_audit_unavailable"
+    OPERATION_FAILED = "admin_webhook_operation_failed"
     USER_PRINCIPAL_REQUIRED = "admin_webhook_user_principal_required"
     DELIVERY_UNAVAILABLE = "admin_webhook_delivery_unavailable"
 
@@ -73,6 +76,7 @@ _ERROR_STATUS = {
     WebhookErrorCode.KEY_ROTATION_IN_PROGRESS: 503,
     WebhookErrorCode.DATABASE_BUSY: 503,
     WebhookErrorCode.AUDIT_UNAVAILABLE: 503,
+    WebhookErrorCode.OPERATION_FAILED: 503,
     WebhookErrorCode.USER_PRINCIPAL_REQUIRED: 403,
     WebhookErrorCode.DELIVERY_UNAVAILABLE: 503,
     WebhookErrorCode.REQUEST_REJECTED: 400,
@@ -190,6 +194,175 @@ class ValidatedWebhookTarget:
     url: str
     hostname: str
     target_display: str
+
+
+_PENDING_MARKER_FIELDS = frozenset(
+    {
+        "event_id",
+        "event_type",
+        "api_version",
+        "source_kind",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_version",
+        "source_command_id",
+        "body_ciphertext_json",
+        "body_key_id",
+        "created_at",
+    }
+)
+_MARKER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
+_MARKER_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+
+
+@dataclass(frozen=True)
+class PendingIncidentWebhookMarker:
+    """Dormant crash-safe incident event marker with only protected body bytes."""
+
+    event_id: str
+    event_type: str
+    api_version: str
+    source_kind: str
+    aggregate_type: str | None
+    aggregate_id: str | None
+    aggregate_version: str | None
+    source_command_id: str | None
+    body: ProtectedValue
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        if _MARKER_ID_PATTERN.fullmatch(self.event_id) is None:
+            raise ValueError("pending marker event ID is invalid")
+        if not self.event_type.startswith("incident.") or (
+            _MARKER_COMPONENT_PATTERN.fullmatch(self.event_type) is None
+        ):
+            raise ValueError("pending marker event type is invalid")
+        if _MARKER_COMPONENT_PATTERN.fullmatch(self.api_version) is None:
+            raise ValueError("pending marker API version is invalid")
+        if self.source_kind not in {"aggregate", "command"}:
+            raise ValueError("pending marker source kind is invalid")
+        if not isinstance(self.body, ProtectedValue):
+            raise TypeError("pending marker body must be protected")
+        if not isinstance(self.created_at, datetime) or self.created_at.tzinfo is None:
+            raise ValueError("pending marker timestamp must be timezone-aware")
+
+        aggregate_values = (
+            self.aggregate_type,
+            self.aggregate_id,
+            self.aggregate_version,
+        )
+        if self.source_kind == "aggregate":
+            if self.source_command_id is not None or any(
+                value is None or _MARKER_ID_PATTERN.fullmatch(value) is None
+                for value in aggregate_values
+            ):
+                raise ValueError("pending aggregate marker identity is invalid")
+        elif (
+            any(value is not None for value in aggregate_values)
+            or self.source_command_id is None
+            or _MARKER_ID_PATTERN.fullmatch(self.source_command_id) is None
+        ):
+            raise ValueError("pending command marker identity is invalid")
+
+    @property
+    def envelope_purpose(self) -> str:
+        return "pending_incident.body"
+
+    @property
+    def envelope_identity(self) -> Mapping[str, str | int]:
+        identity: dict[str, str | int] = {
+            "event_id": self.event_id,
+            "api_version": self.api_version,
+        }
+        if self.source_kind == "command":
+            source_command_id = self.source_command_id
+            if source_command_id is None:
+                raise ValueError("pending command marker identity is invalid")
+            identity["source_command_id"] = source_command_id
+        else:
+            aggregate_type = self.aggregate_type
+            aggregate_id = self.aggregate_id
+            aggregate_version = self.aggregate_version
+            if (
+                aggregate_type is None
+                or aggregate_id is None
+                or aggregate_version is None
+            ):
+                raise ValueError("pending aggregate marker identity is invalid")
+            identity.update(
+                {
+                    "aggregate_type": aggregate_type,
+                    "aggregate_id": aggregate_id,
+                    "aggregate_version": aggregate_version,
+                }
+            )
+        return identity
+
+    def to_store_record(self) -> dict[str, object]:
+        """Return the exact structural representation persisted in system ops."""
+        return {
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "api_version": self.api_version,
+            "source_kind": self.source_kind,
+            "aggregate_type": self.aggregate_type,
+            "aggregate_id": self.aggregate_id,
+            "aggregate_version": self.aggregate_version,
+            "source_command_id": self.source_command_id,
+            "body_ciphertext_json": self.body.ciphertext_json,
+            "body_key_id": self.body.key_id,
+            "created_at": self.created_at.astimezone(timezone.utc).isoformat(),
+        }
+
+    @classmethod
+    def from_store_record(cls, value: object) -> PendingIncidentWebhookMarker:
+        """Parse one exact marker record without permissive coercion."""
+        if not isinstance(value, dict) or set(value) != _PENDING_MARKER_FIELDS:
+            raise ValueError("pending incident marker record is invalid")
+
+        def optional_text(name: str) -> str | None:
+            item = value[name]
+            if item is None:
+                return None
+            if not isinstance(item, str):
+                raise ValueError("pending incident marker record is invalid")
+            return item
+
+        required_text: dict[str, str] = {}
+        for name in (
+            "event_id",
+            "event_type",
+            "api_version",
+            "source_kind",
+            "body_ciphertext_json",
+            "body_key_id",
+            "created_at",
+        ):
+            item = value[name]
+            if not isinstance(item, str):
+                raise ValueError("pending incident marker record is invalid")
+            required_text[name] = item
+        try:
+            created_at = datetime.fromisoformat(
+                required_text["created_at"].replace("Z", "+00:00")
+            )
+        except ValueError:
+            raise ValueError("pending incident marker record is invalid") from None
+        return cls(
+            event_id=required_text["event_id"],
+            event_type=required_text["event_type"],
+            api_version=required_text["api_version"],
+            source_kind=required_text["source_kind"],
+            aggregate_type=optional_text("aggregate_type"),
+            aggregate_id=optional_text("aggregate_id"),
+            aggregate_version=optional_text("aggregate_version"),
+            source_command_id=optional_text("source_command_id"),
+            body=ProtectedValue(
+                ciphertext_json=required_text["body_ciphertext_json"],
+                key_id=required_text["body_key_id"],
+            ),
+            created_at=created_at,
+        )
 
 
 _ETAG_PATTERN = re.compile(r'^"admin-webhook-([1-9][0-9]*)-r([1-9][0-9]*)"$')

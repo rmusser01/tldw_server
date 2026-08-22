@@ -160,6 +160,8 @@ def _strict_envelope(ciphertext_json: str) -> dict[str, object]:
     decoded_fields: dict[str, bytes] = {}
     for field in ("nonce", "ct", "tag"):
         encoded = envelope[field]
+        if not isinstance(encoded, str):
+            raise WebhookKeyError(WebhookKeyErrorCode.DECRYPTION_FAILED)
         try:
             decoded = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as exc:
@@ -182,6 +184,10 @@ class WebhookKeyRing:
     def __init__(self, keys: Mapping[str, str], *, primary_id: str) -> None:
         self._keys = MappingProxyType(dict(keys))
         self.primary_id = primary_id
+
+    def has_key(self, key_id: str) -> bool:
+        """Return whether one validated operator key ID is configured."""
+        return isinstance(key_id, str) and key_id in self._keys
 
     @classmethod
     def from_environment(cls, environ: Mapping[str, str]) -> WebhookKeyRing:

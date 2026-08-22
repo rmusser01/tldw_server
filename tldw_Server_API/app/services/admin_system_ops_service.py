@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import hmac
 import json
 import os
 import secrets
+import stat
+import tempfile
 import time
 from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta, timezone
@@ -36,6 +39,15 @@ _WEBHOOK_MAX_URL_LENGTH = 2048
 _STORE_LOCK = Lock()
 _STORE_PATH = Path(get_database_dir()) / "system_ops.json"
 _LOCK_TIMEOUT_SECONDS = float(os.getenv("SYSTEM_OPS_LOCK_TIMEOUT", "5"))
+_STRICT_STORE_MAX_BYTES = 67_108_864
+_STRICT_STORE_READ_CHUNK_BYTES = 1024 * 1024
+_DIRECTORY_FSYNC_UNSUPPORTED_ERRNOS = frozenset(
+    {
+        errno.EINVAL,
+        getattr(errno, "ENOTSUP", errno.EINVAL),
+        getattr(errno, "EOPNOTSUPP", errno.EINVAL),
+    }
+)
 
 _SYSTEM_OPS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -215,6 +227,59 @@ def _normalize_incident_record(value: Any) -> dict[str, Any]:
     return incident
 
 
+def _load_store_strict(
+    path: Path,
+    max_bytes: int = _STRICT_STORE_MAX_BYTES,
+) -> dict[str, Any]:
+    """Read a bounded store without recovery defaults or content logging."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
+        raise ValueError("system ops store size limit is invalid")
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return {}
+
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("system ops store must be a regular file")
+        if metadata.st_size > max_bytes:
+            raise ValueError("system ops store exceeds size limit")
+
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(
+                fd,
+                min(_STRICT_STORE_READ_CHUNK_BYTES, max_bytes - total + 1),
+            )
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError("system ops store exceeds size limit")
+    finally:
+        os.close(fd)
+
+    payload = b"".join(chunks)
+    if not payload.strip():
+        return {}
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("system ops store must contain valid UTF-8") from None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        raise ValueError("system ops store must contain valid JSON") from None
+    if not isinstance(data, dict):
+        raise ValueError("system ops store must contain a JSON object")
+    return data
+
+
 def _load_store() -> dict[str, Any]:
     if not _STORE_PATH.exists():
         return _default_store()
@@ -239,9 +304,45 @@ def _load_store() -> dict[str, Any]:
     return data
 
 
+def _atomic_write_store(path: Path, store: dict[str, Any]) -> None:
+    """Publish one complete JSON object with file and directory durability."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(store, indent=2, sort_keys=False).encode("utf-8")
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        dir=path.parent,
+    )
+    temporary_path = Path(temporary_name)
+    descriptor_open = True
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb", closefd=True) as stream:
+            descriptor_open = False
+            written = stream.write(payload)
+            if written != len(payload):
+                raise OSError("incomplete system ops store write")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, path)
+
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            try:
+                os.fsync(directory_fd)
+            except OSError as exc:
+                if exc.errno not in _DIRECTORY_FSYNC_UNSUPPORTED_ERRNOS:
+                    raise
+        finally:
+            os.close(directory_fd)
+    finally:
+        if descriptor_open:
+            with suppress(OSError):
+                os.close(fd)
+        temporary_path.unlink(missing_ok=True)
+
+
 def _save_store(store: dict[str, Any]) -> None:
-    _STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _STORE_PATH.write_text(json.dumps(store, indent=2, sort_keys=False), encoding="utf-8")
+    _atomic_write_store(_STORE_PATH, store)
 
 
 def _normalize_flag_scope(scope: str) -> str:

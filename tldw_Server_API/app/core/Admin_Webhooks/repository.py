@@ -28,6 +28,13 @@ from .domain import IdempotencyScope, WebhookError, WebhookRegistration, redact_
 
 _MAX_PAGE_SIZE = 500
 _MIN_TOMBSTONE_RETENTION_DAYS = 30
+DATABASE_PROTECTED_TABLE_ORDER = (
+    "registration_targets",
+    "registration_secrets",
+    "event_bodies",
+    "idempotency_replay_secrets",
+)
+_DATABASE_PROTECTED_TABLES = frozenset(DATABASE_PROTECTED_TABLE_ORDER)
 _ACTIVITY_KINDS = frozenset({"registration_mutation", "event_capture", "delivery_attempt"})
 _SAFE_METADATA_KEYS = frozenset(
     {
@@ -187,6 +194,44 @@ class StoredWebhookRegistration:
     registration: WebhookRegistration
     target: ProtectedValue
     secret: ProtectedValue
+
+
+@dataclass(frozen=True)
+class ProtectedRow:
+    """One closed protected-value inventory entry with contextual identity."""
+
+    table: str
+    row_identity: str
+    field: str
+    protected: ProtectedValue
+    purpose: str
+    envelope_identity: Mapping[str, str | int]
+
+    def __post_init__(self) -> None:
+        if self.table not in _DATABASE_PROTECTED_TABLES:
+            raise ValueError("protected row table is invalid")
+        if not isinstance(self.row_identity, str) or not self.row_identity:
+            raise ValueError("protected row identity is invalid")
+        if not isinstance(self.protected, ProtectedValue):
+            raise TypeError("protected row value is invalid")
+        expected = {
+            "registration_targets": ("target", "registration.target"),
+            "registration_secrets": ("secret", "registration.secret"),
+            "event_bodies": ("body", "event.body"),
+            "idempotency_replay_secrets": (
+                "replay_secret",
+                "idempotency.secret_replay",
+            ),
+        }[self.table]
+        if (self.field, self.purpose) != expected:
+            raise ValueError("protected row field is invalid")
+        if not isinstance(self.envelope_identity, Mapping) or not self.envelope_identity:
+            raise ValueError("protected row envelope identity is invalid")
+        object.__setattr__(
+            self,
+            "envelope_identity",
+            MappingProxyType(dict(self.envelope_identity)),
+        )
 
 
 @dataclass(frozen=True)
@@ -784,6 +829,26 @@ class AdminWebhookRepository:
                 is_postgres=self.is_postgres,
             ).get_migration_state(lock=False)
 
+    async def page_protected_rows(
+        self,
+        *,
+        table: str,
+        after: str | None,
+        limit: int,
+        inventory_at: datetime | None = None,
+    ) -> list[ProtectedRow]:
+        """Read a bounded page, optionally freezing replay expiry eligibility."""
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).page_protected_rows(
+                table=table,
+                after=after,
+                limit=limit,
+                inventory_at=inventory_at,
+            )
+
     async def find_purge_eligible_registration_ids(
         self,
         *,
@@ -940,6 +1005,279 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             (True,),
         )
         return int(row["count"]) if row is not None else 0
+
+    async def page_protected_rows(
+        self,
+        *,
+        table: str,
+        after: str | None,
+        limit: int,
+        inventory_at: datetime | None = None,
+    ) -> list[ProtectedRow]:
+        """Return a deterministic page from one explicitly known table/field."""
+        if table not in _DATABASE_PROTECTED_TABLES:
+            raise ValueError("protected row table is invalid")
+        if not 1 <= limit <= _MAX_PAGE_SIZE:
+            raise ValueError(f"limit must be between 1 and {_MAX_PAGE_SIZE}")
+        if inventory_at is not None:
+            inventory_at = _utc_datetime(inventory_at, field="inventory_at")
+
+        if table in {
+            "registration_targets",
+            "registration_secrets",
+            "idempotency_replay_secrets",
+        }:
+            if after is None:
+                after_id = 0
+            elif not isinstance(after, str) or not after.isdigit() or int(after) < 1:
+                raise ValueError("protected row cursor is invalid")
+            else:
+                after_id = int(after)
+
+        if table == "registration_targets":
+            rows = await self._fetch(
+                """
+                SELECT id, target_ciphertext_json, target_key_id, target_version
+                FROM admin_webhook_registrations
+                WHERE id > ?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (after_id, limit),
+            )
+            return [
+                ProtectedRow(
+                    table=table,
+                    row_identity=str(row["id"]),
+                    field="target",
+                    protected=ProtectedValue(
+                        ciphertext_json=str(row["target_ciphertext_json"]),
+                        key_id=str(row["target_key_id"]),
+                    ),
+                    purpose="registration.target",
+                    envelope_identity={
+                        "registration_id": int(row["id"]),
+                        "target_version": int(row["target_version"]),
+                    },
+                )
+                for row in rows
+            ]
+
+        if table == "registration_secrets":
+            rows = await self._fetch(
+                """
+                SELECT id, secret_ciphertext_json, secret_key_id, secret_version
+                FROM admin_webhook_registrations
+                WHERE id > ?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (after_id, limit),
+            )
+            return [
+                ProtectedRow(
+                    table=table,
+                    row_identity=str(row["id"]),
+                    field="secret",
+                    protected=ProtectedValue(
+                        ciphertext_json=str(row["secret_ciphertext_json"]),
+                        key_id=str(row["secret_key_id"]),
+                    ),
+                    purpose="registration.secret",
+                    envelope_identity={
+                        "registration_id": int(row["id"]),
+                        "secret_version": int(row["secret_version"]),
+                    },
+                )
+                for row in rows
+            ]
+
+        if table == "event_bodies":
+            if after is not None and (not isinstance(after, str) or not after):
+                raise ValueError("protected row cursor is invalid")
+            rows = await self._fetch(
+                """
+                SELECT id, api_version, body_ciphertext_json, body_key_id
+                FROM admin_webhook_events
+                WHERE id > ?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (after or "", limit),
+            )
+            return [
+                ProtectedRow(
+                    table=table,
+                    row_identity=str(row["id"]),
+                    field="body",
+                    protected=ProtectedValue(
+                        ciphertext_json=str(row["body_ciphertext_json"]),
+                        key_id=str(row["body_key_id"]),
+                    ),
+                    purpose="event.body",
+                    envelope_identity={
+                        "event_id": str(row["id"]),
+                        "api_version": str(row["api_version"]),
+                    },
+                )
+                for row in rows
+            ]
+
+        if inventory_at is None:
+            rows = await self._fetch(
+                """
+                SELECT id, lookup_digest, resource_id, secret_version,
+                       replay_secret_ciphertext_json, replay_secret_key_id
+                FROM admin_webhook_idempotency
+                WHERE id > ?
+                  AND state = 'completed'
+                  AND replay_secret_ciphertext_json IS NOT NULL
+                  AND replay_secret_key_id IS NOT NULL
+                  AND resource_id IS NOT NULL
+                  AND secret_version IS NOT NULL
+                  AND expires_at > CURRENT_TIMESTAMP
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (after_id, limit),
+            )
+        else:
+            rows = await self._fetch(
+                """
+                SELECT id, lookup_digest, resource_id, secret_version,
+                       replay_secret_ciphertext_json, replay_secret_key_id
+                FROM admin_webhook_idempotency
+                WHERE id > ?
+                  AND state = 'completed'
+                  AND replay_secret_ciphertext_json IS NOT NULL
+                  AND replay_secret_key_id IS NOT NULL
+                  AND resource_id IS NOT NULL
+                  AND secret_version IS NOT NULL
+                  AND expires_at > ?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (after_id, inventory_at, limit),
+            )
+        return [
+            ProtectedRow(
+                table=table,
+                row_identity=str(row["id"]),
+                field="replay_secret",
+                protected=ProtectedValue(
+                    ciphertext_json=str(row["replay_secret_ciphertext_json"]),
+                    key_id=str(row["replay_secret_key_id"]),
+                ),
+                purpose="idempotency.secret_replay",
+                envelope_identity={
+                    "lookup_digest": str(row["lookup_digest"]),
+                    "registration_id": int(row["resource_id"]),
+                    "secret_version": int(row["secret_version"]),
+                },
+            )
+            for row in rows
+        ]
+
+    async def replace_protected_value(
+        self,
+        row: ProtectedRow,
+        *,
+        expected_ciphertext: str,
+        replacement: ProtectedValue,
+    ) -> bool:
+        """Replace one known envelope only if its full persisted identity matches."""
+        if not isinstance(row, ProtectedRow) or not isinstance(replacement, ProtectedValue):
+            raise TypeError("protected row and replacement are required")
+        if not isinstance(expected_ciphertext, str) or not hmac.compare_digest(
+            expected_ciphertext,
+            row.protected.ciphertext_json,
+        ):
+            raise ValueError("expected protected ciphertext is invalid")
+
+        identity = row.envelope_identity
+        if row.table == "registration_targets":
+            changed = await self._execute(
+                """
+                UPDATE admin_webhook_registrations
+                SET target_ciphertext_json = ?, target_key_id = ?
+                WHERE id = ?
+                  AND target_version = ?
+                  AND target_ciphertext_json = ?
+                  AND target_key_id = ?
+                """,
+                (
+                    replacement.ciphertext_json,
+                    replacement.key_id,
+                    int(row.row_identity),
+                    identity["target_version"],
+                    expected_ciphertext,
+                    row.protected.key_id,
+                ),
+            )
+        elif row.table == "registration_secrets":
+            changed = await self._execute(
+                """
+                UPDATE admin_webhook_registrations
+                SET secret_ciphertext_json = ?, secret_key_id = ?
+                WHERE id = ?
+                  AND secret_version = ?
+                  AND secret_ciphertext_json = ?
+                  AND secret_key_id = ?
+                """,
+                (
+                    replacement.ciphertext_json,
+                    replacement.key_id,
+                    int(row.row_identity),
+                    identity["secret_version"],
+                    expected_ciphertext,
+                    row.protected.key_id,
+                ),
+            )
+        elif row.table == "event_bodies":
+            changed = await self._execute(
+                """
+                UPDATE admin_webhook_events
+                SET body_ciphertext_json = ?, body_key_id = ?
+                WHERE id = ?
+                  AND api_version = ?
+                  AND body_ciphertext_json = ?
+                  AND body_key_id = ?
+                """,
+                (
+                    replacement.ciphertext_json,
+                    replacement.key_id,
+                    row.row_identity,
+                    identity["api_version"],
+                    expected_ciphertext,
+                    row.protected.key_id,
+                ),
+            )
+        else:
+            changed = await self._execute(
+                """
+                UPDATE admin_webhook_idempotency
+                SET replay_secret_ciphertext_json = ?, replay_secret_key_id = ?
+                WHERE id = ?
+                  AND lookup_digest = ?
+                  AND resource_id = ?
+                  AND secret_version = ?
+                  AND replay_secret_ciphertext_json = ?
+                  AND replay_secret_key_id = ?
+                """,
+                (
+                    replacement.ciphertext_json,
+                    replacement.key_id,
+                    int(row.row_identity),
+                    identity["lookup_digest"],
+                    identity["registration_id"],
+                    identity["secret_version"],
+                    expected_ciphertext,
+                    row.protected.key_id,
+                ),
+            )
+        if changed not in {0, 1}:
+            raise RuntimeError("protected value compare-and-set affected multiple rows")
+        return changed == 1
 
     async def _lock_registration_admission(self) -> None:
         query = (

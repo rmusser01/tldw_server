@@ -1067,6 +1067,11 @@ async def test_key_rotation_and_primary_mismatch_block_only_protected_writes(
     plane: ControlPlaneFixture,
 ) -> None:
     registration = await _seed_registration(plane)
+    replay_command = _create_command(key="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    replayable = await plane.service.create(
+        replay_command,
+        audit_sink=_recording_sink([]),
+    )
     current = await plane.repository.get_migration_state()
     async with plane.repository.transaction() as tx:
         await tx.compare_and_set_migration_state(
@@ -1099,6 +1104,40 @@ async def test_key_rotation_and_primary_mismatch_block_only_protected_writes(
             audit_sink=_recording_sink([]),
         )
     assert rotating.value.code is WebhookErrorCode.KEY_ROTATION_IN_PROGRESS
+
+    with pytest.raises(WebhookError) as create_blocked:
+        await plane.service.create(
+            _create_command(key="cccccccccccccccccccccccccccccccc"),
+            audit_sink=_recording_sink([]),
+        )
+    assert create_blocked.value.code is WebhookErrorCode.KEY_ROTATION_IN_PROGRESS
+
+    with pytest.raises(WebhookError) as replay_blocked:
+        await plane.service.create(
+            replay_command,
+            audit_sink=_recording_sink([]),
+        )
+    assert replay_blocked.value.code is WebhookErrorCode.KEY_ROTATION_IN_PROGRESS
+    assert replayable.registration.id != registration.id
+
+    with pytest.raises(WebhookError) as secret_rotation_blocked:
+        await plane.service.rotate_secret(
+            _rotate_command(
+                registration.id,
+                metadata.registration.revision,
+            ),
+            audit_sink=_recording_sink([]),
+        )
+    assert (
+        secret_rotation_blocked.value.code
+        is WebhookErrorCode.KEY_ROTATION_IN_PROGRESS
+    )
+
+    deleted = await plane.service.delete(
+        _delete_command(registration.id, metadata.registration.revision),
+        audit_sink=_recording_sink([]),
+    )
+    assert deleted.registration.deleted_at is not None
 
     state = await plane.repository.get_migration_state()
     async with plane.repository.transaction() as tx:

@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     idempotency_lookup_digest,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.repository import (
+    DATABASE_PROTECTED_TABLE_ORDER,
     AdminWebhookRepository,
     IdempotencyLookupKind,
     RegistrationInsert,
@@ -74,11 +75,50 @@ async def pg_repo(test_db_pool) -> PostgreSQLRepositoryFixture:
     )
 
 
-def _protected(label: str) -> ProtectedValue:
+def _protected(
+    label: str,
+    *,
+    key_id: str = "key-2026-08",
+) -> ProtectedValue:
     return ProtectedValue(
         ciphertext_json=f'{{"ciphertext":"opaque-{label}"}}',
-        key_id="key-2026-08",
+        key_id=key_id,
     )
+
+
+async def _complete_migration(
+    repository: AdminWebhookRepository,
+    *,
+    primary_key_id: str = "key-2026-08",
+) -> None:
+    state = await repository.get_migration_state()
+    digest = "sha256:" + ("a" * 64)
+    fingerprint = "hmac-sha256:" + ("b" * 64)
+    async with repository.transaction() as tx:
+        await tx.compare_and_set_migration_state(
+            expected_revision=state.state_revision,
+            updates={
+                "phase": "complete",
+                "import_operation_id": "whmig_" + ("c" * 32),
+                "import_operator_id": 7,
+                "import_started_at": NOW,
+                "import_approved_at": NOW,
+                "database_committed_at": NOW,
+                "fingerprint_key_id": primary_key_id,
+                "active_primary_key_id": primary_key_id,
+                "system_ops_webhook_fingerprint": fingerprint,
+                "legacy_table_fingerprint": fingerprint,
+                "redacted_report_digest": digest,
+                "completed_at": NOW,
+                "active_report_path": "/srv/tldw/webhook-report.json",
+                "staging_report_path": "/srv/tldw/webhook-report.json.staging",
+                "report_owner_id": 1000,
+                "report_group_id": 1000,
+                "report_mode": 384,
+                "report_file_identity": "1048576:41",
+            },
+            at=NOW,
+        )
 
 
 def _registration_insert(webhook_id: int, *, now: datetime = NOW) -> RegistrationInsert:
@@ -165,6 +205,207 @@ async def test_postgres_counts_secret_rotation_required(
             at=NOW + timedelta(minutes=2),
         )
     assert await pg_repo.repository.count_secret_rotation_required() == 0
+
+
+async def test_postgres_pages_and_replaces_every_protected_inventory(
+    pg_repo: PostgreSQLRepositoryFixture,
+) -> None:
+    async with pg_repo.repository.transaction() as tx:
+        webhook_id = await tx.allocate_registration_id()
+        await tx.insert_registration(_registration_insert(webhook_id))
+
+    await pg_repo.pool.execute(
+        """
+        INSERT INTO admin_webhook_events (
+            id, event_type, api_version, source_kind, source_command_id,
+            source_component, body_ciphertext_json, body_key_id, body_size_bytes,
+            created_at
+        ) VALUES (?, ?, ?, 'command', ?, ?, ?, ?, ?, ?)
+        """,
+        "event-protected-1",
+        "incident.created",
+        "2026-07-01",
+        "command-protected-1",
+        "admin",
+        _protected("event-body").ciphertext_json,
+        "key-2026-08",
+        12,
+        NOW,
+    )
+    scope, digest, fingerprint = _idempotency(
+        "0123456789abcdef0123456789abcdef",
+        body={"description": "protected inventory"},
+    )
+    async with pg_repo.repository.transaction() as tx:
+        await tx.claim_idempotency(
+            lookup_digest=digest,
+            scope=scope,
+            request_fingerprint=fingerprint,
+            now=NOW,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        )
+        await tx.complete_idempotency(
+            lookup_digest=digest,
+            request_fingerprint=fingerprint,
+            resource_id=webhook_id,
+            resource_version=1,
+            secret_version=1,
+            replay_secret=_protected("replay-secret"),
+            response_status=201,
+            response_metadata={"result_kind": "created"},
+            at=NOW,
+        )
+
+    expected_fields = {
+        "registration_targets": "target",
+        "registration_secrets": "secret",
+        "event_bodies": "body",
+        "idempotency_replay_secrets": "replay_secret",
+    }
+    for table in DATABASE_PROTECTED_TABLE_ORDER:
+        rows = await pg_repo.repository.page_protected_rows(
+            table=table,
+            after=None,
+            limit=1,
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.field == expected_fields[table]
+        replacement = _protected(f"rotated-{table}", key_id="key-2026-09")
+        async with pg_repo.repository.transaction() as tx:
+            assert await tx.replace_protected_value(
+                row,
+                expected_ciphertext=row.protected.ciphertext_json,
+                replacement=replacement,
+            )
+        readback = await pg_repo.repository.page_protected_rows(
+            table=table,
+            after=None,
+            limit=1,
+        )
+        assert readback[0].protected == replacement
+        assert (
+            await pg_repo.repository.page_protected_rows(
+                table=table,
+                after=readback[0].row_identity,
+                limit=1,
+            )
+            == []
+        )
+
+    expired_at = datetime.now(timezone.utc) - timedelta(days=1)
+    await pg_repo.pool.execute(
+        "UPDATE admin_webhook_idempotency SET expires_at = ?",
+        expired_at,
+    )
+    assert (
+        await pg_repo.repository.page_protected_rows(
+            table="idempotency_replay_secrets",
+            after=None,
+            limit=1,
+        )
+        == []
+    )
+    snapshot_rows = await pg_repo.repository.page_protected_rows(
+        table="idempotency_replay_secrets",
+        after=None,
+        limit=1,
+        inventory_at=expired_at - timedelta(minutes=1),
+    )
+    assert len(snapshot_rows) == 1
+    snapshot_row = snapshot_rows[0]
+    async with pg_repo.repository.transaction() as tx:
+        assert await tx.replace_protected_value(
+            snapshot_row,
+            expected_ciphertext=snapshot_row.protected.ciphertext_json,
+            replacement=_protected("snapshot-replay", key_id="key-2026-10"),
+        )
+
+
+async def test_postgres_protected_rewrite_and_rotation_cursor_are_atomic(
+    pg_repo: PostgreSQLRepositoryFixture,
+) -> None:
+    await _complete_migration(pg_repo.repository)
+    async with pg_repo.repository.transaction() as tx:
+        webhook_id = await tx.allocate_registration_id()
+        await tx.insert_registration(_registration_insert(webhook_id))
+        initial = await tx.lock_migration_state()
+        started = await tx.compare_and_set_migration_state(
+            expected_revision=initial.state_revision,
+            updates={
+                "rotation_operation_id": "rotation-postgres-1",
+                "rotation_source_key_id": "key-2026-08",
+                "rotation_target_key_id": "key-2026-09",
+                "rotation_phase": "rewriting",
+                "rotation_table_cursor": "registration_targets",
+                "rotation_started_at": NOW,
+            },
+            at=NOW,
+        )
+    row = (
+        await pg_repo.repository.page_protected_rows(
+            table="registration_targets",
+            after=None,
+            limit=1,
+        )
+    )[0]
+    replacement = _protected("atomic-target", key_id="key-2026-09")
+
+    with pytest.raises(TransactionError, match="rollback protected batch"):
+        async with pg_repo.repository.transaction() as tx:
+            assert await tx.replace_protected_value(
+                row,
+                expected_ciphertext=row.protected.ciphertext_json,
+                replacement=replacement,
+            )
+            await tx.compare_and_set_migration_state(
+                expected_revision=started.state_revision,
+                updates={
+                    "rotation_key_cursor": row.row_identity,
+                    "rotation_processed_count": 1,
+                },
+                at=NOW + timedelta(minutes=1),
+            )
+            raise RuntimeError("rollback protected batch")
+
+    rolled_back_row = (
+        await pg_repo.repository.page_protected_rows(
+            table="registration_targets",
+            after=None,
+            limit=1,
+        )
+    )[0]
+    rolled_back_state = await pg_repo.repository.get_migration_state()
+    assert rolled_back_row.protected == row.protected
+    assert rolled_back_state.rotation_key_cursor is None
+    assert rolled_back_state.rotation_processed_count == 0
+
+    async with pg_repo.repository.transaction() as tx:
+        assert await tx.replace_protected_value(
+            row,
+            expected_ciphertext=row.protected.ciphertext_json,
+            replacement=replacement,
+        )
+        committed = await tx.compare_and_set_migration_state(
+            expected_revision=rolled_back_state.state_revision,
+            updates={
+                "rotation_key_cursor": row.row_identity,
+                "rotation_processed_count": 1,
+            },
+            at=NOW + timedelta(minutes=2),
+        )
+    assert committed.rotation_key_cursor == row.row_identity
+    assert committed.rotation_processed_count == 1
+
+    async with pg_repo.repository.transaction() as tx:
+        assert (
+            await tx.replace_protected_value(
+                row,
+                expected_ciphertext=row.protected.ciphertext_json,
+                replacement=_protected("stale", key_id="key-2026-10"),
+            )
+            is False
+        )
 
 
 async def test_postgres_revision_noop_versions_soft_delete_and_limits(
