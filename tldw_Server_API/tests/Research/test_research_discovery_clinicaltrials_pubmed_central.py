@@ -776,6 +776,34 @@ def test_clinicaltrials_trusted_inputs_reject_independent_intent_material_drift(
 
 
 @pytest.mark.parametrize(
+    "mutation",
+    ("query_pairs_list", "empty_body_list", "empty_bindings_list", "integer_page_size"),
+)
+def test_clinicaltrials_trusted_inputs_reject_post_construction_intent_container_and_value_type_drift(
+    mutation: str,
+) -> None:
+    group = _cloned_clinical_group()
+    intent = group.intents[0]
+    if mutation == "query_pairs_list":
+        object.__setattr__(intent, "query_pairs", list(intent.query_pairs))
+    elif mutation == "empty_body_list":
+        object.__setattr__(intent, "json_body_pairs", [])
+    elif mutation == "empty_bindings_list":
+        object.__setattr__(intent, "query_bindings", [])
+    else:
+        page_size = replace(intent.query_pairs[4])
+        object.__setattr__(page_size, "value", 50)
+        object.__setattr__(
+            intent,
+            "query_pairs",
+            intent.query_pairs[:4] + (page_size,) + intent.query_pairs[5:],
+        )
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+@pytest.mark.parametrize(
     ("_case", "index", "replacement"),
     (
         ("term_key", 0, QueryPair("query.other", '"Synthetic" AND "bounded" AND "discovery"')),

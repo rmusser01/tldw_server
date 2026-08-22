@@ -250,6 +250,14 @@ def _trusted_clinicaltrials_inputs(
     if limits != RouteLimits(2, 0, 0, 20_000, 2_097_152, 100, 16_384):
         raise DiscoveryAdapterError("provider_payload_invalid")
     intent = group.intents[0]
+    if (
+        type(intent.query_pairs) is not tuple
+        or type(intent.json_body_pairs) is not tuple
+        or intent.json_body_pairs != ()
+        or type(intent.query_bindings) is not tuple
+        or intent.query_bindings != ()
+    ):
+        raise DiscoveryAdapterError("provider_payload_invalid")
     pairs = tuple((pair.name, pair.value) for pair in intent.query_pairs)
     if (
         intent.route_id != group.route_id
@@ -259,8 +267,6 @@ def _trusted_clinicaltrials_inputs(
         or intent.path != "/api/v2/studies"
         or intent.limits != limits
         or intent.policy_digest != group.policy_digest
-        or intent.json_body_pairs
-        or intent.query_bindings
         or len(pairs) != 6
         or tuple(name for name, _value in pairs)
         != ("query.term", "format", "markupFormat", "fields", "pageSize", "countTotal")
