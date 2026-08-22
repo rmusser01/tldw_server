@@ -226,6 +226,86 @@ def test_retryable_and_expired_claims_reclaim_with_one_new_fence(db: CharactersR
     assert reclaimed_expired.lease_token != expired.lease_token
 
 
+@pytest.mark.parametrize(
+    ("winner_status", "expected_disposition"),
+    [
+        ("completed", "replay"),
+        ("retryable", "claimed"),
+        ("conflicted", "request_id_conflict"),
+        ("in_progress", "in_progress"),
+    ],
+)
+def test_reclaim_cas_loser_reclassifies_fresh_winner_state(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    winner_status: str,
+    expected_disposition: str,
+) -> None:
+    thread = _thread(db)
+    request_id = uuid4()
+    first = _claim(db, request_id=request_id)
+    assert db.shared_workspace_chat_store.mark_retryable(
+        claim=first, error_code="generation_failed"
+    )
+
+    store = db.shared_workspace_chat_store
+    original_fetch = store._fetch_receipt_with_conn
+    raced = False
+    replay_marker = object()
+
+    def fetch_then_publish_winner(conn, share_id, loaded_request_id):
+        nonlocal raced
+        row = original_fetch(conn, share_id, loaded_request_id)
+        if not raced:
+            raced = True
+            lease_token = "winner-token" if winner_status == "in_progress" else None
+            lease_expires_at = (
+                store._db_datetime(NOW + timedelta(minutes=10))
+                if winner_status == "in_progress"
+                else None
+            )
+            conn.execute(
+                "UPDATE shared_workspace_chat_requests "
+                "SET status = ?, lease_epoch = lease_epoch + 1, lease_token = ?, "
+                "lease_expires_at = ?, completed_at = ? "
+                "WHERE share_id = ? AND request_id = ?",
+                (
+                    winner_status,
+                    lease_token,
+                    lease_expires_at,
+                    store._db_datetime(NOW) if winner_status == "completed" else None,
+                    share_id,
+                    str(loaded_request_id),
+                ),
+            )
+        return row
+
+    monkeypatch.setattr(store, "_fetch_receipt_with_conn", fetch_then_publish_winner)
+    if winner_status == "completed":
+        monkeypatch.setattr(store, "load_completed_turn", lambda **_kwargs: replay_marker)
+
+    result = store.claim_request(
+        share_id=41,
+        request_id=request_id,
+        request_fingerprint="fingerprint-a",
+        conversation_id=thread.conversation_id,
+        lease_seconds=600,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert result.disposition == expected_disposition
+    assert result.lease_epoch == first.lease_epoch + (
+        2 if winner_status == "retryable" else 1
+    )
+    if winner_status == "completed":
+        assert result.completed_turn is replay_marker
+    elif winner_status == "retryable":
+        assert result.lease_token not in {None, first.lease_token, "winner-token"}
+    elif winner_status == "in_progress":
+        assert result.lease_token is None
+        assert result.retry_after_ms == 599_000
+
+
 def test_claim_requires_aware_utc_now_and_bounds_retry_timing(db: CharactersRAGDB) -> None:
     _thread(db)
     with pytest.raises(InputError, match="aware"):
@@ -353,6 +433,12 @@ def test_idempotent_freeze_does_not_mutate_an_existing_frozen_receipt(
         provider="llama",
         model="model-a",
     )
+    first_updated_at = db.execute_query(
+        "SELECT updated_at FROM shared_workspace_chat_requests WHERE request_id = ?",
+        (str(claim.request_id),),
+    ).fetchone()["updated_at"]
+    assert "T" in first_updated_at
+    assert first_updated_at.endswith("+00:00")
     sentinel = "2026-08-21T19:00:00+00:00"
     with db.transaction() as conn:
         conn.execute(
@@ -618,6 +704,54 @@ def test_cleanup_is_bounded_and_never_deletes_completed_or_retryable(
         "SELECT status FROM shared_workspace_chat_requests ORDER BY status"
     ).fetchall()
     assert [row["status"] for row in statuses] == ["completed", "retryable"]
+
+
+def test_failure_timestamps_are_canonical_and_cleanup_honors_24_hour_boundary(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store as store_module
+
+    class FrozenDateTime(datetime):
+        current = NOW
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromtimestamp(cls.current.timestamp(), tz=tz)
+
+    claims = [_claim(db, request_id=uuid4()) for _ in range(2)]
+    for claim in claims:
+        assert db.shared_workspace_chat_store.freeze_sources(
+            claim=claim,
+            source_mode="include",
+            source_ids=("source-a",),
+            snapshot_hash="snapshot-a",
+            provider="llama",
+            model="model-a",
+        )
+
+    monkeypatch.setattr(store_module, "datetime", FrozenDateTime)
+    for claim, age_hours in zip(claims, (23, 25), strict=True):
+        FrozenDateTime.current = FrozenDateTime.fromtimestamp(
+            (NOW - timedelta(hours=age_hours)).timestamp(),
+            tz=timezone.utc,
+        )
+        assert db.shared_workspace_chat_store.mark_conflicted(
+            claim=claim, error_code="shared_source_changed"
+        )
+
+    rows = db.execute_query(
+        "SELECT request_id, updated_at FROM shared_workspace_chat_requests "
+        "WHERE status = 'conflicted' ORDER BY request_id"
+    ).fetchall()
+    assert all("T" in row["updated_at"] and row["updated_at"].endswith("+00:00") for row in rows)
+
+    cleanup_now = FrozenDateTime.fromtimestamp(NOW.timestamp(), tz=timezone.utc)
+    assert db.shared_workspace_chat_store.purge_expired_conflicts(now=cleanup_now) == 1
+    remaining = db.execute_query(
+        "SELECT request_id FROM shared_workspace_chat_requests WHERE status = 'conflicted'"
+    ).fetchall()
+    assert [row["request_id"] for row in remaining] == [str(claims[0].request_id)]
 
 
 def test_cleanup_failure_cannot_weaken_claim_correctness(

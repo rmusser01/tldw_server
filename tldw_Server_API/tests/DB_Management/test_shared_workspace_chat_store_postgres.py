@@ -42,6 +42,15 @@ def _close(db: CharactersRAGDB) -> None:
     db.close_all_connections()
 
 
+def _reset_restricted_session(db: CharactersRAGDB) -> None:
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("RESET ROLE")
+    cursor.execute("RESET row_security")
+    cursor.execute("RESET app.current_user_id")
+    conn.commit()
+
+
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 def test_postgres_store_round_trips_thread_claim_freeze_complete_and_history(
@@ -171,6 +180,36 @@ def test_postgres_store_blocks_cross_recipient_select_claim_update_and_delete(
             claim=forged, error_code="forged"
         )
 
+        with db_b.transaction() as conn:
+            hidden_threads = conn.execute(
+                "SELECT share_id FROM shared_workspace_chat_threads "
+                "WHERE share_id = ? AND conversation_id = ?",
+                (61, thread_a.conversation_id),
+            ).fetchall()
+            hidden_receipts = conn.execute(
+                "SELECT request_id FROM shared_workspace_chat_requests "
+                "WHERE share_id = ? AND request_id = ?",
+                (61, str(claim_a.request_id)),
+            ).fetchall()
+            direct_update = conn.execute(
+                "UPDATE shared_workspace_chat_requests SET error_code = ? "
+                "WHERE share_id = ? AND request_id = ?",
+                ("recipient-b-direct-update", 61, str(claim_a.request_id)),
+            )
+            direct_delete = conn.execute(
+                "DELETE FROM shared_workspace_chat_requests "
+                "WHERE share_id = ? AND request_id = ?",
+                (61, str(claim_a.request_id)),
+            )
+        assert hidden_threads == []
+        assert hidden_receipts == []
+        assert direct_update.rowcount == 0
+        assert direct_delete.rowcount == 0
+        assert db_a.execute_query(
+            "SELECT error_code FROM shared_workspace_chat_requests WHERE request_id = ?",
+            (str(claim_a.request_id),),
+        ).fetchone()[0] is None
+
         with db_a.transaction() as conn:
             conn.execute(
                 "UPDATE shared_workspace_chat_requests SET status = 'conflicted', "
@@ -183,11 +222,30 @@ def test_postgres_store_blocks_cross_recipient_select_claim_update_and_delete(
             (str(claim_a.request_id),),
         ).fetchone()[0] == 1
     finally:
-        db_a.close_all_connections()
-        db_b.close_all_connections()
-        if role_created:
-            with backend.transaction() as conn:
-                backend.execute(f"REVOKE {ident(role_name)} FROM CURRENT_USER", connection=conn)
-                backend.execute(f"DROP OWNED BY {ident(role_name)}", connection=conn)
-                backend.execute(f"DROP ROLE {ident(role_name)}", connection=conn)
-        backend.get_pool().close_all()
+        try:
+            try:
+                _reset_restricted_session(db_a)
+            finally:
+                try:
+                    _reset_restricted_session(db_b)
+                finally:
+                    if role_created:
+                        with backend.transaction() as conn:
+                            backend.execute(
+                                f"REVOKE {ident(role_name)} FROM CURRENT_USER",
+                                connection=conn,
+                            )
+                            backend.execute(
+                                f"DROP OWNED BY {ident(role_name)}", connection=conn
+                            )
+                            backend.execute(
+                                f"DROP ROLE {ident(role_name)}", connection=conn
+                            )
+        finally:
+            try:
+                db_a.close_connection()
+            finally:
+                try:
+                    db_b.close_connection()
+                finally:
+                    backend.get_pool().close_all()

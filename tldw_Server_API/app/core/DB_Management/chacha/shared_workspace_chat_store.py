@@ -355,7 +355,7 @@ class SharedWorkspaceChatStore:
                     """
                     UPDATE shared_workspace_chat_requests
                        SET source_mode = ?, source_ids_json = ?, source_snapshot_hash = ?,
-                           provider = ?, model = ?, updated_at = CURRENT_TIMESTAMP
+                           provider = ?, model = ?, updated_at = ?
                      WHERE recipient_user_id = ? AND share_id = ? AND request_id = ?
                        AND conversation_id = ? AND lease_epoch = ? AND lease_token = ?
                        AND status = 'in_progress'
@@ -367,6 +367,7 @@ class SharedWorkspaceChatStore:
                         snapshot,
                         normalized_provider,
                         normalized_model,
+                        self._db_datetime(datetime.now(timezone.utc)),
                         self._recipient_user_id,
                         claim.share_id,
                         str(claim.request_id),
@@ -658,93 +659,152 @@ class SharedWorkspaceChatStore:
         expires_at: datetime,
         now: datetime,
     ) -> SharedWorkspaceChatClaim:
-        with self._db.transaction() as conn:
-            existing = self._fetch_receipt_with_conn(conn, share_id, request_id)
-        if existing is None:
-            raise CharactersRAGDBError("Conflicting shared workspace receipt was not reloadable.")
-        if existing.get("request_fingerprint") != fingerprint:
-            return self._claim_from_row(existing, disposition="request_id_conflict")
-        if existing.get("conversation_id") != conversation_id:
-            return self._claim_from_row(existing, disposition="request_id_conflict")
-        status = str(existing.get("status"))
+        try:
+            with self._db.transaction() as conn:
+                receipt = self._fetch_receipt_with_conn(conn, share_id, request_id)
+            if receipt is None:
+                raise CharactersRAGDBError(
+                    "Conflicting shared workspace receipt was not reloadable."
+                )
+
+            for attempt in range(2):
+                classified = self._classify_existing_claim_state(
+                    receipt,
+                    share_id=share_id,
+                    request_id=request_id,
+                    fingerprint=fingerprint,
+                    conversation_id=conversation_id,
+                    now=now,
+                )
+                if classified is not None:
+                    return classified
+                attempt_token = token if attempt == 0 else secrets.token_urlsafe(32)
+                reclaimed = self._attempt_reclaim(
+                    receipt,
+                    share_id=share_id,
+                    request_id=request_id,
+                    fingerprint=fingerprint,
+                    conversation_id=conversation_id,
+                    token=attempt_token,
+                    expires_at=expires_at,
+                    now=now,
+                )
+                if reclaimed is not None:
+                    return reclaimed
+                with self._db.transaction() as conn:
+                    receipt = self._fetch_receipt_with_conn(conn, share_id, request_id)
+                if receipt is None:
+                    raise CharactersRAGDBError("Reclaim race winner could not be loaded.")
+
+            classified = self._classify_existing_claim_state(
+                receipt,
+                share_id=share_id,
+                request_id=request_id,
+                fingerprint=fingerprint,
+                conversation_id=conversation_id,
+                now=now,
+            )
+            if classified is not None:
+                return classified
+            raise CharactersRAGDBError(
+                "Shared workspace request remained reclaimable after bounded contention."
+            )
+        except CharactersRAGDBError:
+            raise
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(f"Shared workspace request reclaim failed: {exc}") from exc
+
+    def _classify_existing_claim_state(
+        self,
+        receipt: dict[str, Any],
+        *,
+        share_id: int,
+        request_id: UUID,
+        fingerprint: str,
+        conversation_id: str,
+        now: datetime,
+    ) -> SharedWorkspaceChatClaim | None:
+        if (
+            receipt.get("request_fingerprint") != fingerprint
+            or receipt.get("conversation_id") != conversation_id
+        ):
+            return self._claim_from_row(receipt, disposition="request_id_conflict")
+        status = str(receipt.get("status"))
         if status == "completed":
             completed = self.load_completed_turn(share_id=share_id, request_id=request_id)
             if completed is None:
                 raise CharactersRAGDBError("Completed receipt is missing its stored turn.")
-            return self._claim_from_row(existing, disposition="replay", completed_turn=completed)
-        prior_expiry = self._optional_datetime(existing.get("lease_expires_at"))
+            return self._claim_from_row(
+                receipt,
+                disposition="replay",
+                completed_turn=completed,
+            )
+        prior_expiry = self._optional_datetime(receipt.get("lease_expires_at"))
         if status == "in_progress" and prior_expiry is not None and prior_expiry > now:
             retry_ms = min(
                 _MAX_RETRY_AFTER_MS,
                 max(0, math.ceil((prior_expiry - now).total_seconds() * 1000)),
             )
             return self._claim_from_row(
-                existing,
+                receipt,
                 disposition="in_progress",
                 retry_after_ms=retry_ms,
             )
         if status not in {"retryable", "in_progress"}:
-            return self._claim_from_row(existing, disposition="request_id_conflict")
+            return self._claim_from_row(receipt, disposition="request_id_conflict")
+        return None
 
-        prior_epoch = int(existing["lease_epoch"])
-        prior_expiry_db = existing.get("lease_expires_at")
-        try:
-            with self._db.transaction() as conn:
-                updated = conn.execute(
-                    """
-                    UPDATE shared_workspace_chat_requests
-                       SET status = 'in_progress', lease_epoch = ?, lease_token = ?,
-                           lease_expires_at = ?, error_code = NULL, updated_at = ?
-                     WHERE recipient_user_id = ? AND share_id = ? AND request_id = ?
-                       AND request_fingerprint = ? AND conversation_id = ?
-                       AND lease_epoch = ? AND status = ?
-                       AND (
-                         lease_expires_at = ?
-                         OR (lease_expires_at IS NULL AND ? IS NULL)
-                       )
-                    """,
-                    (
-                        prior_epoch + 1,
-                        token,
-                        self._db_datetime(expires_at),
-                        self._db_datetime(now),
-                        self._recipient_user_id,
-                        share_id,
-                        str(request_id),
-                        fingerprint,
-                        conversation_id,
-                        prior_epoch,
-                        status,
-                        prior_expiry_db,
-                        prior_expiry_db,
-                    ),
-                )
-                if updated.rowcount == 1:
-                    refreshed = self._fetch_receipt_with_conn(conn, share_id, request_id)
-                    if refreshed is None:
-                        raise CharactersRAGDBError("Reclaimed receipt could not be loaded.")
-                    return self._claim_from_row(refreshed, disposition="claimed")
-        except CharactersRAGDBError:
-            raise
-        except (sqlite3.Error, BackendDatabaseError) as exc:
-            raise CharactersRAGDBError(f"Shared workspace request reclaim failed: {exc}") from exc
-
+    def _attempt_reclaim(
+        self,
+        receipt: dict[str, Any],
+        *,
+        share_id: int,
+        request_id: UUID,
+        fingerprint: str,
+        conversation_id: str,
+        token: str,
+        expires_at: datetime,
+        now: datetime,
+    ) -> SharedWorkspaceChatClaim | None:
+        prior_epoch = int(receipt["lease_epoch"])
+        status = str(receipt["status"])
+        prior_expiry_db = receipt.get("lease_expires_at")
         with self._db.transaction() as conn:
-            winner = self._fetch_receipt_with_conn(conn, share_id, request_id)
-        if winner is None:
-            raise CharactersRAGDBError("Reclaim race winner could not be loaded.")
-        winner_expiry = self._optional_datetime(winner.get("lease_expires_at"))
-        retry_ms = None
-        if winner_expiry is not None:
-            retry_ms = min(
-                _MAX_RETRY_AFTER_MS,
-                max(0, math.ceil((winner_expiry - now).total_seconds() * 1000)),
+            updated = conn.execute(
+                """
+                UPDATE shared_workspace_chat_requests
+                   SET status = 'in_progress', lease_epoch = ?, lease_token = ?,
+                       lease_expires_at = ?, error_code = NULL, updated_at = ?
+                 WHERE recipient_user_id = ? AND share_id = ? AND request_id = ?
+                   AND request_fingerprint = ? AND conversation_id = ?
+                   AND lease_epoch = ? AND status = ?
+                   AND (
+                     lease_expires_at = ?
+                     OR (lease_expires_at IS NULL AND ? IS NULL)
+                   )
+                """,
+                (
+                    prior_epoch + 1,
+                    token,
+                    self._db_datetime(expires_at),
+                    self._db_datetime(now),
+                    self._recipient_user_id,
+                    share_id,
+                    str(request_id),
+                    fingerprint,
+                    conversation_id,
+                    prior_epoch,
+                    status,
+                    prior_expiry_db,
+                    prior_expiry_db,
+                ),
             )
-        return self._claim_from_row(
-            winner,
-            disposition="in_progress",
-            retry_after_ms=retry_ms,
-        )
+            if updated.rowcount != 1:
+                return None
+            refreshed = self._fetch_receipt_with_conn(conn, share_id, request_id)
+            if refreshed is None:
+                raise CharactersRAGDBError("Reclaimed receipt could not be loaded.")
+            return self._claim_from_row(refreshed, disposition="claimed")
 
     def _mark_failed(
         self,
@@ -755,13 +815,14 @@ class SharedWorkspaceChatStore:
     ) -> bool:
         self._validate_claim(claim)
         code = self._bounded_text(error_code, "error_code", _MAX_ERROR_CODE_BYTES)
+        failed_at = self._db_datetime(datetime.now(timezone.utc))
         try:
             with self._db.transaction() as conn:
                 cursor = conn.execute(
                     """
                     UPDATE shared_workspace_chat_requests
                        SET status = ?, error_code = ?, lease_token = NULL,
-                           lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+                           lease_expires_at = NULL, updated_at = ?
                      WHERE recipient_user_id = ? AND share_id = ? AND request_id = ?
                        AND conversation_id = ? AND lease_epoch = ? AND lease_token = ?
                        AND status = 'in_progress'
@@ -770,6 +831,7 @@ class SharedWorkspaceChatStore:
                     (
                         status,
                         code,
+                        failed_at,
                         self._recipient_user_id,
                         claim.share_id,
                         str(claim.request_id),
