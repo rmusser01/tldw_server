@@ -149,7 +149,7 @@ _EXPECTED_IMPORT_DIGESTS = {
 _EXPECTED_AST_DIGESTS = {
     "contracts.py": "31006c7e537eadf401494f1356cf55d690da2af8314adb57751b59ce88d36e52",
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
-    "planner.py": "f1574f3291115f5c60f244600b50c856964da72b9047b97604aac87bec2165af",
+    "planner.py": "b43701e6c30186cee509b03e4cd98b8c7006e609dbb577696f8a74a93b44694a",
     "executor.py": "f96a7f310a608def1c163cd88c22481b21cdba99281eb9a76326bffb74fd0296",
     "gateway_adapters.py": "7f416c949d1795c3cc47df2d926ce34f49d9c7c7454d0d6d19aaafc98ea0f76a",
     "gateway.py": "9fa3be4b099e4beb519e63bee037873d55fcd8425c7ec939520ea100cd896654",

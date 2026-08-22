@@ -61,6 +61,17 @@ _NCBI_TOOL = "tldw_server"
 _NCBI_EMAIL = "contact@tldwproject.com"
 
 
+def _is_identity_pubmed_route(route: AccessRoute) -> bool:
+    """Return whether one route is the complete sealed NCBI identity overlay."""
+    return (
+        route.route_id == "pubmed_ncbi_eutils_pubmed_direct"
+        and route.backend_id == "ncbi_eutils_pubmed"
+        and route.adapter_id == "pubmed_v2"
+        and route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION
+        and route.policy.policy_version == _PUBMED_IDENTITY_POLICY_VERSION
+    )
+
+
 def _planning_error(code: str) -> ValueError:
     """Build a centralized planning error without loading application services on import."""
     from tldw_Server_API.app.core.exceptions import PlanningError
@@ -234,6 +245,8 @@ def compile_discovery_plan(
                     )
                 )
                 continue
+            if _is_identity_pubmed_route(route) and any(filter_.name in {"tool", "email"} for filter_ in filters):
+                raise _planning_error(f"identity_query_filter_not_allowed:{route.route_id}")
 
             intents = (
                 _build_intents(route, normalized_query, request.result_limit)
@@ -560,13 +573,7 @@ def _build_intents(
         and route.adapter_version == "foundation-v2"
         and route.policy.policy_version == "research-discovery-route-policy-v2-foundation"
     )
-    identity_pubmed = (
-        route.route_id == "pubmed_ncbi_eutils_pubmed_direct"
-        and route.backend_id == "ncbi_eutils_pubmed"
-        and route.adapter_id == "pubmed_v2"
-        and route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION
-        and route.policy.policy_version == _PUBMED_IDENTITY_POLICY_VERSION
-    )
+    identity_pubmed = _is_identity_pubmed_route(route)
     if foundation_pubmed or identity_pubmed:
         pairs = (
             QueryPair("db", "pubmed"),
@@ -604,10 +611,14 @@ def _build_intents(
                 ),
             ),
         )
-    if (
-        route.route_id == "pubmed_ncbi_eutils_pubmed_direct"
-        or route.backend_id == "ncbi_eutils_pubmed"
-        or route.adapter_id == "pubmed_v2"
+    if any(
+        (
+            route.route_id == "pubmed_ncbi_eutils_pubmed_direct",
+            route.backend_id == "ncbi_eutils_pubmed",
+            route.adapter_id == "pubmed_v2",
+            route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION,
+            route.policy.policy_version == _PUBMED_IDENTITY_POLICY_VERSION,
+        )
     ):
         raise _planning_error(f"invalid_pubmed_route_identity:{route.route_id}")
 

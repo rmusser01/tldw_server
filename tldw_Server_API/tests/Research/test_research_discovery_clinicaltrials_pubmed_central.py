@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central import (
@@ -22,15 +24,21 @@ from tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central i
     clinicaltrials_pubmed_central_shadow_registry,
 )
 from tldw_Server_API.app.core.Research.discovery.contracts import (
+    AccessRoute,
     BudgetCeilings,
     ExecutionMode,
     QueryPair,
 )
 from tldw_Server_API.app.core.Research.discovery.planner import (
+    PlanningError,
     PlanningRequest,
     compile_discovery_plan,
 )
-from tldw_Server_API.app.core.Research.discovery.registry import foundation_readiness
+from tldw_Server_API.app.core.Research.discovery.registry import (
+    DiscoveryRegistry,
+    foundation_readiness,
+    foundation_registry,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -98,6 +106,30 @@ def test_shadow_registry_replaces_only_pubmed_with_the_identity_overlay() -> Non
         (CLINICALTRIALS_GOV_ADAPTER_ID, CLINICALTRIALS_GOV_ADAPTER_VERSION),
         (PUBMED_CENTRAL_ADAPTER_ID, PUBMED_CENTRAL_ADAPTER_VERSION),
     }
+    assert {
+        identity: (
+            profile.max_input_bytes,
+            profile.max_records,
+            profile.max_depth,
+            profile.max_nodes,
+            profile.max_string_chars,
+            profile.max_numeric_token_chars,
+            profile.parse_deadline_ms,
+        )
+        for identity, profile in _FAMILY_PARSING_PROFILES.items()
+    } == {
+        ("clinicaltrials_gov_v2", "clinicaltrials-gov-v2"): (2_097_152, 50, 16, 50_000, 65_536, 32, 500),
+        ("pubmed_central_v2", "pubmed-central-v2"): (2_097_152, 100, 16, 50_000, 65_536, 32, 500),
+    }
+
+
+def test_shadow_registry_preserves_every_non_pubmed_route_exactly() -> None:
+    foundation = foundation_registry()
+    shadow = clinicaltrials_pubmed_central_shadow_registry()
+
+    assert tuple(route for route in shadow.routes if route.route_id != "pubmed_ncbi_eutils_pubmed_direct") == tuple(
+        route for route in foundation.routes if route.route_id != "pubmed_ncbi_eutils_pubmed_direct"
+    )
 
 
 def test_identity_overlay_plans_exact_identity_pairs_on_both_hops() -> None:
@@ -128,3 +160,90 @@ def test_identity_overlay_plans_exact_identity_pairs_on_both_hops() -> None:
     )
     assert summary.query_bindings[0].query_name == "id"
     assert QueryPair("tool", "tldw_server") in search.query_pairs
+
+
+def _registry_with_pubmed_route(route: AccessRoute) -> DiscoveryRegistry:
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    original_route_id = "pubmed_ncbi_eutils_pubmed_direct"
+    return DiscoveryRegistry(
+        catalog_version=registry.catalog_version,
+        registry_version="identity-mutation-registry-v1",
+        sources=tuple(
+            replace(
+                source,
+                route_references=tuple(
+                    (
+                        replace(reference, route_id=route.route_id)
+                        if reference.route_id == original_route_id
+                        else reference
+                    )
+                    for reference in source.route_references
+                ),
+            )
+            for source in registry.sources
+        ),
+        routes=tuple(route if item.route_id == original_route_id else item for item in registry.routes),
+        backends=registry.backends,
+    )
+
+
+@pytest.mark.parametrize(
+    "route_change",
+    (
+        {"route_id": "pubmed_ncbi_eutils_pubmed_partial"},
+        {"backend_id": "crossref_api"},
+        {"adapter_id": "pubmed_v3"},
+        {"adapter_version": "foundation-v2"},
+        {"policy": "foundation"},
+    ),
+)
+def test_partial_or_swapped_pubmed_overlay_identity_fails_closed_before_plan_emission(
+    route_change: dict[str, str],
+) -> None:
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_ncbi_eutils_pubmed_direct")
+    policy = route.policy
+    if route_change.get("policy") == "foundation":
+        policy = replace(policy, policy_version="research-discovery-route-policy-v2-foundation", policy_digest="")
+    mutated = replace(
+        route,
+        route_id=route_change.get("route_id", route.route_id),
+        backend_id=route_change.get("backend_id", route.backend_id),
+        adapter_id=route_change.get("adapter_id", route.adapter_id),
+        adapter_version=route_change.get("adapter_version", route.adapter_version),
+        policy=policy,
+    )
+    readiness = foundation_readiness(ExecutionMode.SYNTHETIC)
+    readiness = replace(
+        readiness,
+        routes=tuple(
+            replace(entry, route_id=mutated.route_id) if entry.route_id == route.route_id else entry
+            for entry in readiness.routes
+        ),
+    )
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("pubmed",), "bounded discovery", (), 7),
+            registry=_registry_with_pubmed_route(mutated),
+            readiness=readiness,
+            budget=_budget(),
+        )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    (
+        (QueryPair("tool", "attacker"),),
+        (QueryPair("email", "attacker@example.test"),),
+        (QueryPair("tool", "attacker"), QueryPair("email", "attacker@example.test")),
+    ),
+)
+def test_identity_overlay_rejects_user_supplied_identity_filters(filters: tuple[QueryPair, ...]) -> None:
+    with pytest.raises(PlanningError, match="identity_query_filter_not_allowed"):
+        compile_discovery_plan(
+            PlanningRequest(("pubmed",), "bounded discovery", filters, 7),
+            registry=clinicaltrials_pubmed_central_shadow_registry(),
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(),
+        )

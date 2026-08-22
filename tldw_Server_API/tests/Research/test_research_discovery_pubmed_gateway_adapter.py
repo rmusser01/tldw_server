@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.Research.discovery.executor import (
 from tldw_Server_API.app.core.Research.discovery.gateway import (
     DiscoveryGatewayResponse,
     DiscoveryGatewayTrace,
+    dispatch_once,
 )
 from tldw_Server_API.app.core.Research.discovery.identity import build_fingerprint
 from tldw_Server_API.app.core.Research.discovery.planner import (
@@ -46,7 +47,11 @@ from tldw_Server_API.app.core.Research.discovery.registry import (
     foundation_readiness,
     foundation_registry,
 )
-from tldw_Server_API.app.core.Security.http_hop import HTTPHopLimits
+from tldw_Server_API.app.core.Security.http_hop import (
+    HTTPHopLimits,
+    HTTPHopResponse,
+    NormalizedHTTPHopRequest,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -539,6 +544,42 @@ def _overlay_plan_for(*, result_limit: int = 2):
     return registry, plan
 
 
+async def _execute_overlay_via_one_hop(bodies: list[bytes]):
+    registry, plan = _overlay_plan_for()
+    adapter = _module().foundation_gateway_adapters()[_ADAPTER_ID]
+    raw_bodies = list(bodies)
+    requests: list[NormalizedHTTPHopRequest] = []
+    responses: list[DiscoveryGatewayResponse] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        requests.append(request)
+        body = raw_bodies.pop(0)
+        return HTTPHopResponse(
+            status_code=200,
+            headers=(("content-type", "application/json"),),
+            body=body,
+            resolved_ips=("93.184.216.34",),
+            connected_ip="93.184.216.34",
+            response_header_bytes=64,
+            wire_bytes=len(body),
+        )
+
+    async def gateway(route, intent, *, is_policy_active):
+        response = await dispatch_once(route, intent, is_policy_active=is_policy_active, one_hop=one_hop)
+        responses.append(response)
+        return response
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={_ADAPTER_ID: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("overlay-search", "overlay-summary")).__next__,
+    )
+    return result, requests, responses
+
+
 @pytest.mark.asyncio
 async def test_identity_overlay_executes_exact_two_hop_identity_shape_without_repr_leaks() -> None:
     registry, plan = _overlay_plan_for()
@@ -577,23 +618,105 @@ async def test_identity_overlay_executes_exact_two_hop_identity_shape_without_re
     assert "31415926" not in repr(dispatch.calls[1][2])
 
 
+@pytest.mark.parametrize("summary_stage", (False, True))
 @pytest.mark.asyncio
-async def test_identity_overlay_accepts_only_the_documented_json_rate_envelope() -> None:
+async def test_identity_overlay_accepts_only_the_documented_json_rate_envelope(summary_stage: bool) -> None:
     registry, plan = _overlay_plan_for()
     group = plan.dispatch_groups[0]
     route = registry.get_route(group.route_id)
-    dispatch = _RecordingDispatch(
-        [
-            _response(
-                route,
-                group.intents[0],
-                _json({"error": "API rate limit exceeded", "count": "11"}),
-            )
-        ]
+    rate_limited = _response(
+        route,
+        group.intents[1 if summary_stage else 0],
+        _json({"error": "API rate limit exceeded", "count": "11"}),
     )
+    responses: list[object] = [rate_limited]
+    if summary_stage:
+        responses = [_response(route, group.intents[0], _fixture("esearch_success")), rate_limited]
+    dispatch = _RecordingDispatch(responses)
 
     with pytest.raises(executor_module.DiscoveryAdapterError, match="provider_rate_limited"):
         await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_executes_through_executor_gateway_and_one_hop_with_foundation_output() -> None:
+    foundation_result, _dispatch, _group = await _invoke([_fixture("esearch_success"), _fixture("esummary_success")])
+    result, requests, responses = await _execute_overlay_via_one_hop(
+        [_fixture("esearch_success"), _fixture("esummary_success")]
+    )
+
+    assert tuple(candidate.record for candidate in result.candidates) == tuple(
+        candidate.record for candidate in foundation_result.candidates
+    )
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.SUCCEEDED
+    assert result.usage.pages == 1
+    assert result.usage.accounting.created == result.usage.accounting.debited == 2
+    assert [response.trace.query_keys for response in responses] == [
+        ("db", "term", "retstart", "retmax", "retmode", "sort", "tool", "email"),
+        ("db", "retmode", "tool", "email", "id"),
+    ]
+    assert [request.target.split("?", 1)[0] for request in requests] == [
+        "/entrez/eutils/esearch.fcgi",
+        "/entrez/eutils/esummary.fcgi",
+    ]
+    assert all("tldw_server" not in repr(item) and "contact@tldwproject.com" not in repr(item) for item in requests)
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_empty_esearch_stops_after_one_executor_dispatch() -> None:
+    result, requests, responses = await _execute_overlay_via_one_hop([_fixture("esearch_empty")])
+
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.VALID_EMPTY
+    assert len(requests) == len(responses) == 1
+    assert result.usage.accounting.created == result.usage.accounting.debited == 1
+
+
+@pytest.mark.parametrize("stage", (0, 1))
+@pytest.mark.asyncio
+async def test_identity_overlay_dispatch_cancellation_at_either_stage_propagates_unchanged(stage: int) -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    cancelled = asyncio.CancelledError(f"identity-overlay-stage-{stage}-cancelled")
+    responses: list[object] = [cancelled]
+    if stage == 1:
+        responses = [_response(route, group.intents[0], _fixture("esearch_success")), cancelled]
+    dispatch = _RecordingDispatch(responses)
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    assert caught.value is cancelled
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {"error": "API rate limit exceeded", "count": "11", "extra": "x"},
+        {"error": "API rate limit exceeded"},
+        {"error": "API rate limit exceeded", "count": 11},
+        {"error": "API rate limit exceeded!", "count": "11"},
+    ),
+)
+@pytest.mark.parametrize("summary_stage", (False, True))
+@pytest.mark.asyncio
+async def test_identity_overlay_rejects_near_match_json_rate_envelopes_as_payload_invalid(
+    payload: dict[str, object], summary_stage: bool
+) -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    bodies = [_json(payload)]
+    if summary_stage:
+        bodies = [_fixture("esearch_success"), _json(payload)]
+    dispatch = _RecordingDispatch(
+        [_response(route, group.intents[min(index, 1)], body) for index, body in enumerate(bodies)]
+    )
+
+    with pytest.raises(executor_module.DiscoveryAdapterError) as caught:
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
 
 
 @pytest.mark.asyncio

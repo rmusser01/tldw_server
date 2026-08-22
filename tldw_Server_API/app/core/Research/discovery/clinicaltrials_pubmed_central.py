@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import MappingProxyType
 
+from .contracts import AccessRoute
 from .gateway_adapters import _ParsingProfile
 from .registry import DiscoveryRegistry, foundation_registry
 
@@ -82,7 +83,7 @@ def clinicaltrials_pubmed_central_shadow_registry() -> DiscoveryRegistry:
     )
 
 
-def _pubmed_identity_overlay(route):
+def _pubmed_identity_overlay(route: AccessRoute) -> AccessRoute:
     """Return the exact identity-bearing replacement for the foundation PubMed route."""
     return replace(
         route,
