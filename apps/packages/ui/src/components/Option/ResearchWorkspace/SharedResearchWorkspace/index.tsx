@@ -64,6 +64,8 @@ const LoadedSharedWorkspace: React.FC<{ shareId: number }> = ({ shareId }) => {
     "sources"
   )
   const [previewOpen, setPreviewOpen] = React.useState(false)
+  const canInspectSources =
+    state.allowedActions?.inspect_sources.allowed === true
 
   React.useEffect(() => {
     if (state.status === "loaded") headingRef.current?.focus()
@@ -71,11 +73,12 @@ const LoadedSharedWorkspace: React.FC<{ shareId: number }> = ({ shareId }) => {
 
   const openPreview = React.useCallback(
     (sourceId: string, chunkIndex: number | undefined, trigger: HTMLElement) => {
+      if (!canInspectSources) return
       previewTriggerRef.current = trigger
       setPreviewOpen(true)
       void previewSource(sourceId, chunkIndex)
     },
-    [previewSource]
+    [canInspectSources, previewSource]
   )
 
   const closePreview = React.useCallback(() => {
@@ -141,6 +144,7 @@ const LoadedSharedWorkspace: React.FC<{ shareId: number }> = ({ shareId }) => {
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg text-text"
     >
       <SharedWorkspaceHeader
+        allowedActions={state.allowedActions}
         bootstrap={state.bootstrap}
         headingRef={headingRef}
       />
@@ -181,12 +185,22 @@ const LoadedSharedWorkspace: React.FC<{ shareId: number }> = ({ shareId }) => {
             ))}
           </div>
           <section
-            id={"shared-workspace-" + activePane + "-panel"}
+            id="shared-workspace-sources-panel"
             role="tabpanel"
-            aria-labelledby={"shared-workspace-" + activePane + "-tab"}
+            aria-labelledby="shared-workspace-sources-tab"
+            hidden={activePane !== "sources"}
             className="min-h-0 min-w-0 flex-1 overflow-hidden"
           >
-            {activePane === "sources" ? sourcesPane : chatPane}
+            {sourcesPane}
+          </section>
+          <section
+            id="shared-workspace-chat-panel"
+            role="tabpanel"
+            aria-labelledby="shared-workspace-chat-tab"
+            hidden={activePane !== "chat"}
+            className="min-h-0 min-w-0 flex-1 overflow-hidden"
+          >
+            {chatPane}
           </section>
         </div>
       ) : (
@@ -202,6 +216,7 @@ const LoadedSharedWorkspace: React.FC<{ shareId: number }> = ({ shareId }) => {
       <SharedWorkspacePreview
         error={state.errors.preview}
         isMobile={isMobile}
+        loading={state.previewLoading}
         onClose={closePreview}
         open={previewOpen}
         preview={state.preview}

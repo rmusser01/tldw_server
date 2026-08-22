@@ -189,6 +189,30 @@ const preview = (sourceId: string): SharedSourcePreview => ({
 })
 
 describe("sharedResearchWorkspaceReducer", () => {
+  it("clears old preview evidence and exposes the next target at preview start", () => {
+    const loaded = sharedResearchWorkspaceReducer(
+      createInitialSharedResearchWorkspaceState(4, 1),
+      {
+        type: "previewSucceeded",
+        generation: 1,
+        preview: preview("source-old")
+      }
+    )
+
+    const loading = sharedResearchWorkspaceReducer(loaded, {
+      type: "previewStarted",
+      generation: 1,
+      sourceId: "source-new",
+      chunkIndex: 7
+    })
+
+    expect(loading.preview).toBeNull()
+    expect(loading.previewLoading).toBe(true)
+    expect(loading.previewTarget).toEqual({
+      sourceId: "source-new",
+      chunkIndex: 7
+    })
+  })
   it("starts fail closed and represents the bootstrap selection as all queryable sources", () => {
     const initial = createInitialSharedResearchWorkspaceState(4, 1)
     expect(
@@ -207,7 +231,7 @@ describe("sharedResearchWorkspaceReducer", () => {
     expect(state.model).toBe("gpt-5-mini")
   })
 
-  it("fails closed for an internally inconsistent generation default", () => {
+  it("rejects an inconsistent generation default without rewriting server actions", () => {
     const state = sharedResearchWorkspaceReducer(
       createInitialSharedResearchWorkspaceState(4, 1),
       {
@@ -224,7 +248,10 @@ describe("sharedResearchWorkspaceReducer", () => {
 
     expect(state.provider).toBeNull()
     expect(state.model).toBeNull()
-    expect(state.allowedActions.ask_grounded_questions.allowed).toBe(false)
+    expect(state.allowedActions.ask_grounded_questions).toEqual({
+      allowed: true,
+      reason_code: null
+    })
   })
 
   it("reconciles removed and nonqueryable selections from a complete source refresh", () => {
@@ -818,6 +845,35 @@ describe("useSharedResearchWorkspace", () => {
     expect(result.current.state.selectedSourceIds).toEqual([])
   })
 
+  it("makes every inspect operation a no-op when inspect_sources is denied", async () => {
+    const denied = bootstrap(4)
+    denied.allowed_actions.inspect_sources = {
+      allowed: false,
+      reason_code: "workspace_inspection_disabled"
+    }
+    api.bootstrap.mockResolvedValue(denied)
+    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+    const initialQuery = result.current.state.sourceQuery
+    const initialSelection = result.current.state.selectedSourceIds
+
+    act(() => {
+      result.current.setSourceQuery({ offset: 50, limit: 50, q: "blocked" })
+      result.current.setSelectedSourceIds([])
+      result.current.selectAllSources()
+      result.current.clearSelectedSources()
+    })
+    await act(async () => {
+      await result.current.refreshSources({ offset: 50, limit: 50 })
+      await result.current.previewSource("source-1")
+    })
+
+    expect(result.current.state.sourceQuery).toEqual(initialQuery)
+    expect(result.current.state.selectedSourceIds).toEqual(initialSelection)
+    expect(api.listSources).not.toHaveBeenCalled()
+    expect(api.previewSource).not.toHaveBeenCalled()
+  })
+
   it("blocks retries during a rate limit and updates the bounded countdown", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-08-22T00:00:00Z"))
@@ -876,5 +932,43 @@ describe("useSharedResearchWorkspace", () => {
       "shared_chat_context_too_large"
     )
     expect(result.current.state.draft).toBe("Context draft")
+  })
+
+  it("never exposes stale evidence under a newer deferred preview target", async () => {
+    const first = deferred<SharedSourcePreview>()
+    const second = deferred<SharedSourcePreview>()
+    api.bootstrap.mockResolvedValue(bootstrap(4))
+    api.previewSource
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+
+    act(() => {
+      void result.current.previewSource("source-1")
+    })
+    expect(result.current.state.preview).toBeNull()
+    expect(result.current.state.previewLoading).toBe(true)
+    expect(result.current.state.previewTarget).toEqual({
+      sourceId: "source-1",
+      chunkIndex: null
+    })
+
+    act(() => {
+      void result.current.previewSource("source-2", 9)
+    })
+    expect(result.current.state.preview).toBeNull()
+    expect(result.current.state.previewTarget).toEqual({
+      sourceId: "source-2",
+      chunkIndex: 9
+    })
+
+    await act(async () => first.resolve(preview("source-1")))
+    expect(result.current.state.preview).toBeNull()
+    expect(result.current.state.previewTarget?.sourceId).toBe("source-2")
+
+    await act(async () => second.resolve(preview("source-2")))
+    expect(result.current.state.preview?.source_id).toBe("source-2")
+    expect(result.current.state.previewLoading).toBe(false)
   })
 })

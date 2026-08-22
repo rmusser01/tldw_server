@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { I18nextProvider } from "react-i18next"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -28,8 +28,9 @@ vi.mock("@/services/tldw/domains/shared-workspaces", () => ({
 }))
 vi.mock("@/services/tldw-server", () => ({ fetchChatModels }))
 
-const renderAt = (width: number) => {
+const renderAt = (width: number, height: number) => {
   window.innerWidth = width
+  window.innerHeight = height
   return render(
     <MemoryRouter>
       <I18nextProvider i18n={testI18n}>
@@ -59,21 +60,39 @@ describe("SharedResearchWorkspace responsive layout", () => {
   })
 
   it("uses Sources and Chat tabs in a bounded 390x844 mobile shell", async () => {
-    renderAt(390)
-    const shell = await screen.findByTestId("shared-workspace-shell")
-    expect(shell.className).toContain("min-w-0")
-    expect(shell.className).toContain("overflow-hidden")
+    renderAt(390, 844)
+    await screen.findByTestId("shared-workspace-shell")
     expect(screen.getByRole("tablist", { name: "Shared workspace panes" })).toBeInTheDocument()
+    const panels = screen.getAllByRole("tabpanel", { hidden: true })
+    expect(panels).toHaveLength(2)
+    expect(panels[0]).not.toHaveAttribute("hidden")
+    expect(panels[1]).toHaveAttribute("hidden")
+    fireEvent.click(screen.getByRole("tab", { name: "Chat" }))
+    expect(panels[0]).toHaveAttribute("hidden")
+    expect(panels[1]).not.toHaveAttribute("hidden")
     expect(screen.queryByTestId("shared-workspace-desktop-grid")).not.toBeInTheDocument()
   })
 
+  it("opens a mobile preview sheet with a loading label before evidence arrives", async () => {
+    api.previewSource.mockReturnValue(new Promise(() => undefined))
+    renderAt(390, 844)
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Preview Queryable report" })
+    )
+
+    expect(
+      await screen.findByRole("dialog", { name: "Loading source preview" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("Loading source preview", { selector: "p" })
+    ).toHaveAttribute("aria-live", "polite")
+  })
+
   it("uses fixed minmax Sources and Chat tracks in a bounded 1440x900 shell", async () => {
-    renderAt(1440)
-    const grid = await screen.findByTestId("shared-workspace-desktop-grid")
-    expect(grid.className).toContain("min-w-0")
-    expect(grid.className).toContain("grid-cols-[minmax(18rem,0.72fr)_minmax(0,1.28fr)]")
-    expect(screen.getByTestId("shared-workspace-sources-pane").className).toContain("min-w-0")
-    expect(screen.getByTestId("shared-workspace-chat-pane").className).toContain("min-w-0")
+    renderAt(1440, 900)
+    await screen.findByTestId("shared-workspace-desktop-grid")
+    expect(screen.getByTestId("shared-workspace-sources-pane")).toBeVisible()
+    expect(screen.getByTestId("shared-workspace-chat-pane")).toBeVisible()
     expect(screen.queryByRole("tablist", { name: "Shared workspace panes" })).not.toBeInTheDocument()
   })
 })

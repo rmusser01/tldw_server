@@ -48,6 +48,8 @@ export interface SharedResearchWorkspaceState {
   model: string | null
   pendingSubmission: PendingSharedSubmission | null
   preview: SharedSourcePreview | null
+  previewLoading: boolean
+  previewTarget: { sourceId: string; chunkIndex: number | null } | null
   rateLimitUntil: number | null
   rateLimitRemainingMs: number
   errors: {
@@ -91,6 +93,8 @@ export const createInitialSharedResearchWorkspaceState = (
   model: null,
   pendingSubmission: null,
   preview: null,
+  previewLoading: false,
+  previewTarget: null,
   rateLimitUntil: null,
   rateLimitRemainingMs: 0,
   errors: {
@@ -136,6 +140,12 @@ export type SharedResearchWorkspaceAction =
       type: "historyFailed"
       generation: number
       error: SharedWorkspaceError
+    }
+  | {
+      type: "previewStarted"
+      generation: number
+      sourceId: string
+      chunkIndex: number | null
     }
   | {
       type: "previewSucceeded"
@@ -271,20 +281,11 @@ export const sharedResearchWorkspaceReducer = (
   switch (action.type) {
     case "bootstrapSucceeded": {
       const generationReady = validGenerationDefault(action.bootstrap)
-      const allowedActions = generationReady
-        ? action.bootstrap.allowed_actions
-        : {
-            ...action.bootstrap.allowed_actions,
-            ask_grounded_questions: {
-              allowed: false,
-              reason_code: "generation_default_unavailable"
-            }
-          }
       return {
         ...state,
         status: "loaded",
         bootstrap: action.bootstrap,
-        allowedActions,
+        allowedActions: action.bootstrap.allowed_actions,
         sources: {
           items: action.bootstrap.sources.items,
           pagination: action.bootstrap.sources.pagination,
@@ -342,14 +343,31 @@ export const sharedResearchWorkspaceReducer = (
       }
     case "historyFailed":
       return { ...state, errors: { ...state.errors, history: action.error } }
+    case "previewStarted":
+      return {
+        ...state,
+        preview: null,
+        previewLoading: true,
+        previewTarget: {
+          sourceId: action.sourceId,
+          chunkIndex: action.chunkIndex
+        },
+        errors: { ...state.errors, preview: null }
+      }
     case "previewSucceeded":
       return {
         ...state,
         preview: action.preview,
+        previewLoading: false,
         errors: { ...state.errors, preview: null }
       }
     case "previewFailed":
-      return { ...state, errors: { ...state.errors, preview: action.error } }
+      return {
+        ...state,
+        preview: null,
+        previewLoading: false,
+        errors: { ...state.errors, preview: action.error }
+      }
     case "draftChanged":
       return {
         ...state,

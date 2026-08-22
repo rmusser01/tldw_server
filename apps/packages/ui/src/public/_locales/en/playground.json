@@ -26,6 +26,9 @@
   "sharedWorkspace_viewOnly": {
     "message": "View only"
   },
+  "sharedWorkspace_accessRestricted": {
+    "message": "Access restricted"
+  },
   "sharedWorkspace_canAsk": {
     "message": "Can ask questions"
   },
@@ -152,6 +155,9 @@
   "sharedWorkspace_loadOlder": {
     "message": "Load older messages"
   },
+  "sharedWorkspace_retryOlder": {
+    "message": "Retry older messages"
+  },
   "sharedWorkspace_you": {
     "message": "You"
   },
@@ -160,6 +166,9 @@
   },
   "sharedWorkspace_noProvider": {
     "message": "Choose a configured model before asking a question."
+  },
+  "sharedWorkspace_generationFailed": {
+    "message": "Generation failed. Try again."
   },
   "sharedWorkspace_openModelSettings": {
     "message": "Open model settings"

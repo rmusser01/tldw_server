@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { I18nextProvider } from "react-i18next"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -77,6 +78,10 @@ describe("SharedResearchWorkspace accessibility", () => {
     expect(
       screen.getByRole("checkbox", { name: "Select Queryable report" })
     ).toBeInTheDocument()
+    const panels = screen.getAllByRole("tabpanel", { hidden: true })
+    expect(panels).toHaveLength(2)
+    expect(panels[0]).not.toHaveAttribute("hidden")
+    expect(panels[1]).toHaveAttribute("hidden")
 
     sourcesTab.focus()
     fireEvent.keyDown(sourcesTab, { key: "ArrowRight" })
@@ -90,12 +95,13 @@ describe("SharedResearchWorkspace accessibility", () => {
   })
 
   it("opens sources and citations from the keyboard and returns preview focus", async () => {
+    const user = userEvent.setup()
     renderWorkspace()
     const source = await screen.findByRole("button", {
       name: "Preview Queryable report"
     })
     source.focus()
-    fireEvent.keyDown(source, { key: "Enter" })
+    await user.keyboard("{Enter}")
     const dialog = await screen.findByRole("dialog", { name: "Source preview" })
     expect(dialog).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Close source preview" }))
@@ -110,11 +116,11 @@ describe("SharedResearchWorkspace accessibility", () => {
       name: "Open citation 1 from Queryable report"
     })
     citation.focus()
-    fireEvent.keyDown(citation, { key: " " })
+    await user.keyboard(" ")
     expect(await screen.findByRole("dialog", { name: "Source preview" })).toBeInTheDocument()
   })
 
-  it("announces loading and submission state without moving controls", async () => {
+  it("announces loading and exposes a dynamic submit label", async () => {
     let resolveAsk: (value: typeof chatResponse) => void = () => undefined
     api.ask.mockImplementation(
       (_shareId, request) =>
@@ -130,12 +136,16 @@ describe("SharedResearchWorkspace accessibility", () => {
       target: { value: "Pending question" }
     })
     const send = screen.getByRole("button", { name: "Ask shared workspace" })
-    const dimensions = send.className
     fireEvent.click(send)
     expect(screen.getByRole("status")).toHaveTextContent("Asking shared workspace")
-    expect(send.className).toBe(dimensions)
+    expect(
+      screen.getByRole("button", { name: "Asking shared workspace" })
+    ).toBeDisabled()
 
     resolveAsk(chatResponse)
     expect(await screen.findByRole("status")).toHaveTextContent("Answer added")
+    expect(
+      screen.getByRole("button", { name: "Ask shared workspace" })
+    ).toBeInTheDocument()
   })
 })

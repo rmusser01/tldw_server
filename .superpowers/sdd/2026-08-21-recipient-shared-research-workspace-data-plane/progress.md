@@ -109,6 +109,15 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Report: `task-9-implementer-report.md`.
 - Residual boundary: Task 11 owns live backend/provider/browser UAT. The two unrelated watchlist templates remain untouched and unstaged.
 - Status: implementation complete; pending controller review.
+- Initial reviewer: `01a028b6-17f2-74e2-b954-343b01a50c8e` (`Lovelace`), `gpt-5.6-sol`, high reasoning; review package `review-5f2f1221ef..9846518465.diff`.
+- Initial review blockers: generic Markdown crosses into artifact/Zustand/executable-preview paths; source inspection is not fully governed by `allowed_actions`; UI error mappings use noncanonical backend codes; older-history loading loses scroll position and has no error recovery; sequential previews retain stale evidence while loading; and responsive claims lack browser-level geometry evidence.
+- Task 9: minor (deferred): remove duplicate native-button Enter/Space handlers and verify with `userEvent.keyboard`.
+- Task 9: minor (deferred): keep stable hidden mobile tabpanels or remove invalid inactive `aria-controls` relationships.
+- Task 9: minor (deferred): distinguish filtered no-results copy from a genuinely empty shared workspace.
+- Fix Round 1/5: replaced generic Markdown with a structurally isolated ReactMarkdown+GFM renderer using inert code, no raw HTML/images, and safe links; enforced `inspect_sources` and `ask_grounded_questions` as the only source/chat authorities without rewriting server actions for model readiness; aligned canonical errors; preserved older-history anchors with visible retry; and added preview-start clearing/loading/target state with stale-response fencing.
+- Fix Round 1 TDD: blocking RED 8 failed/36 passed; semantic RED 4 failed/19 passed; inspect-controller RED 1 failed; final action-rewrite RED 1 failed. GREEN: exact Task 9 UI 23 passed; Task 8 controller plus safe renderer 32 passed; final combined changed surface 55 passed; changed-scope regressions 90 passed; locale mirror 2 passed.
+- Fix Round 1 browser evidence: raw CDP only at 390x844 and 1440x900 passed with zero root/pane horizontal overflow, no out-of-bounds controls, a full-height 390x844 mobile loading sheet, stable adjacent desktop tracks, dynamic preview/submit names, and stable 44x44 submit geometry. The mandated directory suite produced 832 passed/14 failed: 13 documented untouched baseline failures plus one load-only Studio timeout that passed standalone in 530 ms.
+- Fix Round 1 gates: focused ESLint and checker syntax passed; full TypeScript retained repository baseline diagnostics with none in changed shared-workspace files; static isolation/error-code guards and `git diff --check` passed. Bandit is not applicable. Full report appended to `task-9-implementer-report.md`; unrelated watchlist templates remain untouched and unstaged; Task 11 retains live-backend/provider UAT.
 
 ## Task 7 - Provider resolution, grounded generation, and safe chat API
 

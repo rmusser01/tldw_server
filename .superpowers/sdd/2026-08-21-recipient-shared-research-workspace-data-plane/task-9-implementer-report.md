@@ -100,3 +100,97 @@ Bandit is not applicable because Task 9 changes no Python production code.
 - Server `allowed_actions` remains the sole action authority. The recipient surface exposes read, preview, and grounded chat only.
 - Extension capture/destination contracts are unchanged. The two unrelated untracked watchlist templates remain untouched and unstaged.
 - The directory-wide focused suite remains non-green on the 13 reproducible baseline source-view failures described above. Task 11 still owns live backend/provider/browser UAT.
+
+## Fix Round 1/5 - Recipient isolation, action authority, recovery, and responsive evidence
+
+Reviewed head: `9846518465a0d3db2d1d306bf600513bbe4f2a1f`.
+
+### Blocking findings addressed
+
+- Replaced the generic product Markdown dependency with `SharedWorkspaceSafeMarkdown`, whose only imports are React, ReactMarkdown, and GFM. It skips raw HTML, drops every image, renders fenced code as inert `pre > code`, permits only absolute HTTP/HTTPS/mailto links, and has no route to CodeBlock, artifacts, Zustand, Mermaid, actions, iframe/sandbox, or storage settings. A structural import guard covers both the renderer and its two callers.
+- Made `allowed_actions.inspect_sources` the sole source-inspection authority at the rendered controls, callback boundary, and Task 8 controller boundary. Search, state filtering, pagination, selection, and preview fail closed and render the server reason. Header capability text comes only from `allowed_actions`; `access_level` is retained only as the policy-ceiling tooltip tier. Model readiness can block submission without rewriting the server action decision.
+- Replaced invented UI error codes with canonical `no_provider_configured`, `generation_failed`, `shared_chat_context_too_large`, `retrieval_unavailable`, and preview `shared_workspace_not_found`, using `TldwApiError` fixtures.
+- Preserved the first existing message's viewport offset when older history is prepended. History failures now render an alert and retry action, and upward pagination no longer invokes newest-message scrolling.
+- Added `previewStarted`, `previewLoading`, and `previewTarget` to the Task 8 reducer/controller. Starting a newer preview immediately clears old evidence; aborted or reordered older responses cannot render under the newer target.
+- Strengthened mobile tabpanel, keyboard, focus-return, dynamic submit-label, dynamic preview-label, and drawer behavior tests. Native buttons now use native Enter/Space activation, and both mobile tabpanels remain mounted with the inactive one hidden.
+
+### TDD evidence
+
+Initial blocking RED:
+
+```text
+cd apps/packages/ui && bunx vitest run src/components/Option/ResearchWorkspace/__tests__/SharedWorkspaceSafeMarkdown.test.tsx src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx src/components/Option/ResearchWorkspace/__tests__/shared-research-workspace-reducer.test.ts --maxWorkers=1 --no-file-parallelism
+```
+
+Result: 3 failed files; 8 failed and 36 passed. The safe renderer was absent, source inspection was not action-gated, history lacked anchor/retry behavior, recovery fixtures used invented codes, and preview start did not clear stale evidence. The same command passed 3 files/46 tests after the first implementation pass.
+
+Semantic/dynamic-label RED used the exact Task 9 UI command from the brief and produced 2 failed files; 4 failed and 19 passed. Stable mobile tabpanels, dynamic submit labeling, and dynamic preview labeling were absent. One intermediate rerun exposed the Ant Drawer title as its accessible name; the final exact command passed 3 files/23 tests:
+
+```text
+cd apps/packages/ui && bunx vitest run src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.accessibility.test.tsx src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.responsive.test.tsx --maxWorkers=1 --no-file-parallelism
+```
+
+Controller authority RED:
+
+```text
+cd apps/packages/ui && bunx vitest run src/components/Option/ResearchWorkspace/__tests__/shared-research-workspace-reducer.test.ts --maxWorkers=1 --no-file-parallelism -t "makes every inspect operation"
+```
+
+Result: 1 failed/29 skipped before the controller guard; GREEN: 1 passed/29 skipped. Final Task 8 controller plus safe-renderer command passed 2 files/32 tests.
+
+Final self-review authority RED:
+
+```text
+cd apps/packages/ui && bunx vitest run src/components/Option/ResearchWorkspace/__tests__/shared-research-workspace-reducer.test.ts --maxWorkers=1 --no-file-parallelism -t "without rewriting server actions"
+```
+
+Result: 1 failed/29 skipped because an inconsistent generation default rewrote `ask_grounded_questions` to denied. After keeping model readiness separate from authorization, GREEN was 1 passed/29 skipped. Final combined Task 9/controller/safe-renderer verification passed 5 files/55 tests.
+
+Covering test files:
+
+- `SharedWorkspaceSafeMarkdown.test.tsx`
+- `SharedResearchWorkspace.test.tsx`
+- `SharedResearchWorkspace.accessibility.test.tsx`
+- `SharedResearchWorkspace.responsive.test.tsx`
+- `shared-research-workspace-reducer.test.ts`
+
+### Regression and static verification
+
+Changed-scope command covering Task 9 UI, Task 8 controller, route gate, Share dialog, shared-workspace domain service, and locale mirror passed 9 files/90 tests.
+
+The mandated complete focused command was run verbatim:
+
+```text
+cd apps/packages/ui && bunx vitest run src/components/Option/ResearchWorkspace/__tests__ src/services/tldw/domains/__tests__/shared-workspaces.test.ts src/components/Option/Playground/__tests__/playground-locale-mirror.test.ts --maxWorkers=1 --no-file-parallelism
+```
+
+Result: 65 files; 61 passed/4 failed; 832 passed/14 failed. Thirteen failures are the already documented untouched baseline: 7 `SourceViewControls`, 5 Stage 12 saved-view state, and 1 incomplete `SourcesPane.stage2` fixture. The additional `StudioPane.stage2` test timed out only under full-suite load and passed standalone in 530 ms (1 passed/31 skipped).
+
+Locale mirror passed 1 file/2 tests. Focused ESLint over every changed TS/TSX file exited 0 with only the package's existing Next missing-pages notice. `node --check apps/tldw-frontend/scripts/shared-workspace-task9-cdp-check.mjs` exited 0. Package TypeScript completed with the repository's existing diagnostics; a second filtered run produced no diagnostic matching `SharedWorkspace`, `SharedResearchWorkspace`, or `shared-research-workspace`. The production static forbidden-dependency/invented-code grep returned no matches, while canonical error-code grep found only the required mappings. Bandit is not applicable to frontend-only production. `git diff --check` passed.
+
+### CDP-only browser geometry
+
+Server command:
+
+```text
+cd apps/tldw-frontend && NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run dev -- -p 18109
+```
+
+Deterministic raw-CDP command, with no computer-control tool:
+
+```text
+cd apps/tldw-frontend && TLDW_WEB_URL=http://127.0.0.1:18109 node scripts/shared-workspace-task9-cdp-check.mjs
+```
+
+Final measured result:
+
+- Mobile 390x844: document/body/shell/source horizontal overflow all 0; shell 390x753 at top 91; Sources panel 390x253 at top 195; inactive Chat panel measured 0x0; no control escaped viewport bounds. The loading preview sheet measured top 0, bottom 844, width 390, height 844 with body overflow 0; its accessible name was `Loading source preview`, then changed to the loaded preview name.
+- Desktop 1440x900: document/body/shell/source/chat horizontal overflow all 0; shell x=48, width 1392, height 849; Sources x=48..549.109, width 501.109, height 788; Chat x=549.109..1440, width 890.891, height 788; no control escaped bounds. Submit measured 44x44 before and during submission; its name changed from `Ask shared workspace` to `Asking shared workspace` and it was disabled while pending.
+
+Browser-check diagnostics were bounded to three attempts: the first found no Playwright-managed browser and switched to installed Chrome; the second timed out because deterministic fixtures lacked CORS preflight; the third exposed a checker assertion that treated a mounted hidden tabpanel as visible. CORS was stubbed and visibility was changed to measured geometry; the final command passed. The dev server was stopped cleanly.
+
+### Scope and concerns
+
+- The two English locale formats remain value-equivalent under the canonical mirror test.
+- The two unrelated untracked watchlist templates remain untouched and unstaged.
+- The 13 untouched local-workspace baseline failures remain outside Task 9. Task 11 still owns real-backend/provider UAT; this round deliberately adds only deterministic focused CDP behavior evidence.

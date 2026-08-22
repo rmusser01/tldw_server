@@ -2,7 +2,6 @@ import React from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { Loader2, Send } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import { Markdown } from "@/components/Common/Markdown"
 import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
 import { useModelSelector } from "@/hooks/playground"
 import {
@@ -14,6 +13,8 @@ import type { fetchChatModels } from "@/services/tldw-server"
 import type { SharedCitation } from "@/types/shared-workspace"
 import { resolveStartupSelectedModel } from "@/utils/model-startup-selection"
 import type { SharedResearchWorkspaceController } from "./useSharedResearchWorkspace"
+import { SharedWorkspaceSafeMarkdown } from "./SharedWorkspaceSafeMarkdown"
+import { formatSharedActionReason } from "./shared-action-reason"
 
 type ChatModel = Awaited<ReturnType<typeof fetchChatModels>>[number]
 
@@ -28,9 +29,10 @@ type SharedWorkspaceChatPaneProps = {
 
 const CitationButton: React.FC<{
   citation: SharedCitation
+  disabled: boolean
   index: number
   onPreviewCitation: SharedWorkspaceChatPaneProps["onPreviewCitation"]
-}> = ({ citation, index, onPreviewCitation }) => {
+}> = ({ citation, disabled, index, onPreviewCitation }) => {
   const { t } = useTranslation("playground")
   const activate = (target: HTMLButtonElement) =>
     onPreviewCitation(
@@ -47,23 +49,14 @@ const CitationButton: React.FC<{
         "Open citation {{index}} from {{title}}",
         { index: index + 1, title: citation.source_title }
       )}
+      disabled={disabled}
       onClick={(event) => activate(event.currentTarget)}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") return
-        event.preventDefault()
-        activate(event.currentTarget)
-      }}
-      className="min-w-0 rounded-md border border-border bg-surface2 px-2.5 py-2 text-left outline-none transition-colors hover:border-primary/50 hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus"
+      className="min-w-0 rounded-md border border-border bg-surface2 px-2.5 py-2 text-left outline-none transition-colors hover:border-primary/50 hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
     >
       <span className="block truncate text-xs font-semibold text-primary">
         [{index + 1}] {citation.source_title}
       </span>
-      <Markdown
-        message={citation.quote}
-        allowExternalImages={false}
-        enableMermaidDiagrams={false}
-        className="prose mt-0.5 max-w-none break-words text-xs text-text-muted dark:prose-invert"
-      />
+      <SharedWorkspaceSafeMarkdown compact content={citation.quote} />
     </button>
   )
 }
@@ -81,6 +74,11 @@ export const SharedWorkspaceChatPane: React.FC<
   const seededDefaultRef = React.useRef<string | null>(null)
   const awaitingAnswerRef = React.useRef(false)
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
+  const messagesScrollRef = React.useRef<HTMLDivElement>(null)
+  const historyAnchorRef = React.useRef<{
+    messageId: string
+    top: number
+  } | null>(null)
   const generationDefault = state.bootstrap?.generation_default
 
   React.useEffect(() => {
@@ -203,23 +201,31 @@ export const SharedWorkspaceChatPane: React.FC<
     !submitting &&
     !rateLimited
   const submissionCode = state.errors.submission?.code
+  const askReason = formatSharedActionReason(
+    state.allowedActions.ask_grounded_questions.reason_code
+  )
   const directError =
     submissionCode === "shared_source_changed"
       ? t(
           "sharedWorkspace.sourceConflict",
           "The shared source set changed. Refresh sources before trying again."
         )
-      : submissionCode === "shared_generation_unavailable"
+      : submissionCode === "no_provider_configured"
         ? t(
             "sharedWorkspace.noProvider",
             "Choose a configured model before asking a question."
           )
-        : submissionCode === "shared_context_budget_exceeded"
+        : submissionCode === "generation_failed"
+          ? t(
+              "sharedWorkspace.generationFailed",
+              "Generation failed. Try again."
+            )
+          : submissionCode === "shared_chat_context_too_large"
           ? t(
               "sharedWorkspace.contextBudget",
               "The selected sources exceed this model's context budget. Choose fewer sources and try again."
             )
-          : submissionCode === "shared_retrieval_unavailable"
+          : submissionCode === "retrieval_unavailable"
             ? t(
                 "sharedWorkspace.retrievalUnavailable",
                 "Shared source retrieval is temporarily unavailable. Try again."
@@ -249,14 +255,33 @@ export const SharedWorkspaceChatPane: React.FC<
     }
     awaitingAnswerRef.current = false
     setAnnouncement(t("sharedWorkspace.answerAdded", "Answer added"))
+    messagesEndRef.current?.scrollIntoView?.({ block: "nearest" })
   }, [state.messages, t])
 
-  React.useEffect(() => {
-    const messagesEnd = messagesEndRef.current
-    if (typeof messagesEnd?.scrollIntoView === "function") {
-      messagesEnd.scrollIntoView({ block: "nearest" })
+  React.useLayoutEffect(() => {
+    const anchor = historyAnchorRef.current
+    const scroll = messagesScrollRef.current
+    if (!anchor || !scroll) return
+    const anchoredMessage = scroll.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(anchor.messageId)}"]`
+    )
+    if (!anchoredMessage) return
+    scroll.scrollTop += anchoredMessage.getBoundingClientRect().top - anchor.top
+    historyAnchorRef.current = null
+  }, [state.messages])
+
+  const loadOlderHistory = async () => {
+    const scroll = messagesScrollRef.current
+    const anchor = scroll?.querySelector<HTMLElement>("[data-message-id]")
+    const messageId = anchor?.dataset.messageId
+    if (anchor && messageId) {
+      historyAnchorRef.current = {
+        messageId,
+        top: anchor.getBoundingClientRect().top
+      }
     }
-  }, [state.messages.length])
+    await controller.loadOlderHistory()
+  }
 
   const submit = async () => {
     if (!canSubmit) return
@@ -308,6 +333,7 @@ export const SharedWorkspaceChatPane: React.FC<
       </div>
 
       <div
+        ref={messagesScrollRef}
         role="log"
         aria-label={t(
           "sharedWorkspace.messagesLabel",
@@ -316,10 +342,21 @@ export const SharedWorkspaceChatPane: React.FC<
         className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5"
       >
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-          {state.nextBefore ? (
+          {state.errors.history ? (
+            <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2 text-xs text-danger">
+              <span role="alert">{state.errors.history.message}</span>
+              <button
+                type="button"
+                onClick={() => void loadOlderHistory()}
+                className="h-9 rounded-md px-3 font-medium text-primary outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                {t("sharedWorkspace.retryOlder", "Retry older messages")}
+              </button>
+            </div>
+          ) : state.nextBefore ? (
             <button
               type="button"
-              onClick={() => void controller.loadOlderHistory()}
+              onClick={() => void loadOlderHistory()}
               className="mx-auto h-9 rounded-md px-3 text-xs font-medium text-primary outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
               aria-label={t(
                 "sharedWorkspace.loadOlder",
@@ -344,18 +381,16 @@ export const SharedWorkspaceChatPane: React.FC<
                   ? t("sharedWorkspace.you", "You")
                   : t("sharedWorkspace.assistant", "Assistant")}
               </span>
-              <Markdown
-                message={message.content}
-                allowExternalImages={false}
-                enableMermaidDiagrams={false}
-                className="prose max-w-none break-words text-sm dark:prose-invert"
-              />
+              <SharedWorkspaceSafeMarkdown content={message.content} />
               {message.citations.length ? (
                 <div className="mt-3 grid min-w-0 gap-2">
                   {message.citations.map((citation, index) => (
                     <CitationButton
                       key={citation.citation_id}
                       citation={citation}
+                      disabled={
+                        !state.allowedActions.inspect_sources.allowed
+                      }
                       index={index}
                       onPreviewCitation={onPreviewCitation}
                     />
@@ -388,6 +423,9 @@ export const SharedWorkspaceChatPane: React.FC<
                 )}
               </Link>
             </div>
+          ) : null}
+          {!state.allowedActions.ask_grounded_questions.allowed && askReason ? (
+            <p className="text-sm text-warn">{askReason}</p>
           ) : null}
           {directError ? (
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-danger">
@@ -444,10 +482,17 @@ export const SharedWorkspaceChatPane: React.FC<
             </label>
             <button
               type="button"
-              aria-label={t(
-                "sharedWorkspace.askButton",
-                "Ask shared workspace"
-              )}
+              aria-label={
+                submitting
+                  ? t(
+                      "sharedWorkspace.askingStatus",
+                      "Asking shared workspace"
+                    )
+                  : t(
+                      "sharedWorkspace.askButton",
+                      "Ask shared workspace"
+                    )
+              }
               disabled={!canSubmit}
               onClick={() => void submit()}
               className="inline-flex h-11 w-11 items-center justify-center rounded-md bg-primary text-white outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"

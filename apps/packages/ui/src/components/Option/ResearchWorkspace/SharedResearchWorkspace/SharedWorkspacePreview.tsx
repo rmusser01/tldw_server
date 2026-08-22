@@ -2,13 +2,14 @@ import React from "react"
 import { Drawer, Tooltip } from "antd"
 import { ExternalLink, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import { Markdown } from "@/components/Common/Markdown"
 import type { SharedSourcePreview } from "@/types/shared-workspace"
 import type { SharedWorkspaceError } from "./shared-research-workspace-reducer"
+import { SharedWorkspaceSafeMarkdown } from "./SharedWorkspaceSafeMarkdown"
 
 type SharedWorkspacePreviewProps = {
   error: SharedWorkspaceError | null
   isMobile: boolean
+  loading: boolean
   onClose: () => void
   open: boolean
   preview: SharedSourcePreview | null
@@ -16,11 +17,10 @@ type SharedWorkspacePreviewProps = {
 
 export const SharedWorkspacePreview: React.FC<
   SharedWorkspacePreviewProps
-> = ({ error, isMobile, onClose, open, preview }) => {
+> = ({ error, isMobile, loading, onClose, open, preview }) => {
   const { t } = useTranslation("playground")
   const removed =
-    error?.code === "shared_source_removed" ||
-    error?.code === "shared_source_not_found"
+    error?.code === "shared_workspace_not_found"
 
   return (
     <Drawer
@@ -30,11 +30,17 @@ export const SharedWorkspacePreview: React.FC<
       closable={false}
       destroyOnHidden
       autoFocus
-      aria-label={t("sharedWorkspace.preview", "Source preview")}
+      aria-label={
+        loading
+          ? t("sharedWorkspace.loadingPreview", "Loading source preview")
+          : t("sharedWorkspace.preview", "Source preview")
+      }
       title={
         <div className="flex min-w-0 items-center justify-between gap-2">
           <span className="truncate text-sm font-semibold">
-            {t("sharedWorkspace.preview", "Source preview")}
+            {loading
+              ? t("sharedWorkspace.loadingPreview", "Loading source preview")
+              : t("sharedWorkspace.preview", "Source preview")}
           </span>
           <Tooltip
             title={t(
@@ -71,7 +77,7 @@ export const SharedWorkspacePreview: React.FC<
           </p>
         ) : error ? (
           <p className="p-4 text-sm text-danger">{error.message}</p>
-        ) : !preview ? (
+        ) : loading || !preview ? (
           <p className="p-4 text-sm text-text-muted" aria-live="polite">
             {t("sharedWorkspace.loadingPreview", "Loading source preview")}
           </p>
@@ -101,12 +107,7 @@ export const SharedWorkspacePreview: React.FC<
             </div>
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
               {preview.text_preview ? (
-                <Markdown
-                  message={preview.text_preview}
-                  allowExternalImages={false}
-                  enableMermaidDiagrams={false}
-                  className="prose max-w-none break-words text-sm dark:prose-invert"
-                />
+                <SharedWorkspaceSafeMarkdown content={preview.text_preview} />
               ) : null}
               {preview.snippets.map((snippet, index) => (
                 <section
@@ -119,12 +120,7 @@ export const SharedWorkspacePreview: React.FC<
                           index: snippet.chunk_index
                         })}
                   </h3>
-                  <Markdown
-                    message={snippet.text}
-                    allowExternalImages={false}
-                    enableMermaidDiagrams={false}
-                    className="prose max-w-none break-words text-sm dark:prose-invert"
-                  />
+                  <SharedWorkspaceSafeMarkdown content={snippet.text} />
                 </section>
               ))}
             </div>

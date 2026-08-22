@@ -175,6 +175,7 @@ export const useSharedResearchWorkspace = (
 
   const refreshSources = React.useCallback(
     async (query: SharedSourceQuery = state.sourceQuery): Promise<void> => {
+      if (!state.allowedActions.inspect_sources.allowed) return
       const generation = generationRef.current
       const controller = startOperation("sources")
       dispatch({ type: "sourcesStarted", generation })
@@ -206,6 +207,7 @@ export const useSharedResearchWorkspace = (
       releaseOperation,
       shareId,
       startOperation,
+      state.allowedActions.inspect_sources.allowed,
       state.sourceQuery
     ]
   )
@@ -246,8 +248,15 @@ export const useSharedResearchWorkspace = (
 
   const previewSource = React.useCallback(
     async (sourceId: string, chunkIndex?: number): Promise<void> => {
+      if (!state.allowedActions.inspect_sources.allowed) return
       const generation = generationRef.current
       const controller = startOperation("preview")
+      dispatch({
+        type: "previewStarted",
+        generation,
+        sourceId,
+        chunkIndex: chunkIndex ?? null
+      })
       try {
         const preview = await sharedWorkspacesApi.previewSource(
           shareId,
@@ -272,7 +281,13 @@ export const useSharedResearchWorkspace = (
         releaseOperation("preview", controller)
       }
     },
-    [isCurrentOperation, releaseOperation, shareId, startOperation]
+    [
+      isCurrentOperation,
+      releaseOperation,
+      shareId,
+      startOperation,
+      state.allowedActions.inspect_sources.allowed
+    ]
   )
 
   const sendRequest = React.useCallback(
@@ -439,13 +454,26 @@ export const useSharedResearchWorkspace = (
     submitDraft,
     retryPending,
     setDraft: (draft: string) => dispatch({ type: "draftChanged", draft }),
-    setSourceQuery: (query: SharedSourceQuery) =>
-      dispatch({ type: "sourceQueryChanged", query }),
-    setSelectedSourceIds: (sourceIds: string[]) =>
-      dispatch({ type: "selectedSourcesChanged", sourceIds }),
-    selectAllSources: () => dispatch({ type: "allSourcesSelected" }),
-    clearSelectedSources: () =>
-      dispatch({ type: "selectedSourcesChanged", sourceIds: [] }),
+    setSourceQuery: (query: SharedSourceQuery) => {
+      if (state.allowedActions.inspect_sources.allowed) {
+        dispatch({ type: "sourceQueryChanged", query })
+      }
+    },
+    setSelectedSourceIds: (sourceIds: string[]) => {
+      if (state.allowedActions.inspect_sources.allowed) {
+        dispatch({ type: "selectedSourcesChanged", sourceIds })
+      }
+    },
+    selectAllSources: () => {
+      if (state.allowedActions.inspect_sources.allowed) {
+        dispatch({ type: "allSourcesSelected" })
+      }
+    },
+    clearSelectedSources: () => {
+      if (state.allowedActions.inspect_sources.allowed) {
+        dispatch({ type: "selectedSourcesChanged", sourceIds: [] })
+      }
+    },
     setProvider: (provider: string | null) =>
       dispatch({ type: "providerChanged", provider }),
     setModel: (model: string | null) =>

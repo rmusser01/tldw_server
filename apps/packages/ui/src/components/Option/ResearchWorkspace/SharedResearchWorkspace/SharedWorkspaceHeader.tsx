@@ -3,15 +3,20 @@ import { Link } from "react-router-dom"
 import { Tooltip } from "antd"
 import { ArrowLeft, MessageSquareText } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import type { SharedWorkspaceBootstrap } from "@/types/shared-workspace"
+import type {
+  SharedAllowedActions,
+  SharedWorkspaceBootstrap
+} from "@/types/shared-workspace"
 
 type SharedWorkspaceHeaderProps = {
   bootstrap: SharedWorkspaceBootstrap
+  allowedActions: SharedAllowedActions
   headingRef: React.RefObject<HTMLHeadingElement>
 }
 
 export const SharedWorkspaceHeader: React.FC<SharedWorkspaceHeaderProps> = ({
   bootstrap,
+  allowedActions,
   headingRef
 }) => {
   const { t } = useTranslation("playground")
@@ -27,10 +32,11 @@ export const SharedWorkspaceHeader: React.FC<SharedWorkspaceHeaderProps> = ({
         "sharedWorkspace.readOnlyTooltip",
         "This shared workspace is available for reading and source preview only."
       )
-  const accessLabel =
-    bootstrap.share.access_level === "view"
+  const accessLabel = allowedActions.ask_grounded_questions.allowed
+    ? t("sharedWorkspace.canAsk", "Can ask questions")
+    : allowedActions.inspect_sources.allowed
       ? t("sharedWorkspace.viewOnly", "View only")
-      : t("sharedWorkspace.canAsk", "Can ask questions")
+      : t("sharedWorkspace.accessRestricted", "Access restricted")
 
   return (
     <header className="flex min-h-[3.75rem] min-w-0 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 py-2 sm:px-4">

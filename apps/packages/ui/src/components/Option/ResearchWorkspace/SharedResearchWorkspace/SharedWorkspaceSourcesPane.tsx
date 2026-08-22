@@ -4,6 +4,7 @@ import { Tooltip } from "antd"
 import { useTranslation } from "react-i18next"
 import type { SharedSource, SharedSourceQuery } from "@/types/shared-workspace"
 import type { SharedResearchWorkspaceController } from "./useSharedResearchWorkspace"
+import { formatSharedActionReason } from "./shared-action-reason"
 
 type SharedWorkspaceSourcesPaneProps = {
   controller: SharedResearchWorkspaceController
@@ -21,8 +22,12 @@ export const SharedWorkspaceSourcesPane: React.FC<
   const { state } = controller
   const page = state.sources
   const summary = state.sourceSummary
+  const inspectAction = state.allowedActions.inspect_sources
+  const canInspect = inspectAction.allowed
+  const inspectReason = formatSharedActionReason(inspectAction.reason_code)
 
   const runQuery = (patch: Partial<SharedSourceQuery>) => {
+    if (!canInspect) return
     const query = { ...state.sourceQuery, ...patch }
     controller.setSourceQuery(query)
     void controller.refreshSources(query)
@@ -48,6 +53,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
   }
 
   const toggleSource = (source: SharedSource, checked: boolean) => {
+    if (!canInspect) return
     const selected = new Set(state.selectedSourceIds)
     if (checked) selected.add(source.source_id)
     else selected.delete(source.source_id)
@@ -95,6 +101,12 @@ export const SharedWorkspaceSourcesPane: React.FC<
           </p>
         ) : null}
 
+        {!canInspect && inspectReason ? (
+          <p role="status" className="text-xs text-warn">
+            {inspectReason}
+          </p>
+        ) : null}
+
         <label className="relative block">
           <span className="sr-only">
             {t("sharedWorkspace.search", "Search shared sources")}
@@ -107,6 +119,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
             type="search"
             aria-label={t("sharedWorkspace.search", "Search shared sources")}
             value={state.sourceQuery.q ?? ""}
+            disabled={!canInspect}
             onChange={(event) => runQuery({ q: event.target.value, offset: 0 })}
             className="h-9 w-full rounded-md border border-border bg-surface2 pl-8 pr-3 text-sm outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-focus"
           />
@@ -126,6 +139,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
                 "Filter shared sources by state"
               )}
               value={state.sourceQuery.state ?? ""}
+              disabled={!canInspect}
               onChange={(event) =>
                 runQuery({ state: event.target.value || undefined, offset: 0 })
               }
@@ -141,6 +155,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
           </label>
           <button
             type="button"
+            disabled={!canInspect}
             onClick={controller.selectAllSources}
             className="h-9 whitespace-nowrap rounded-md px-2 text-xs font-medium text-primary outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
             aria-label={t(
@@ -152,6 +167,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
           </button>
           <button
             type="button"
+            disabled={!canInspect}
             onClick={controller.clearSelectedSources}
             className="h-9 whitespace-nowrap rounded-md px-2 text-xs font-medium text-text-muted outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
             aria-label={t(
@@ -201,7 +217,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
                         { title: source.title }
                       )}
                       checked={checked}
-                      disabled={!source.retrieval_ready}
+                      disabled={!canInspect || !source.retrieval_ready}
                       onChange={(event) =>
                         toggleSource(source, event.target.checked)
                       }
@@ -210,6 +226,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
                   </label>
                   <button
                     type="button"
+                    disabled={!canInspect}
                     aria-label={t(
                       "sharedWorkspace.previewSource",
                       "Preview {{title}}",
@@ -218,12 +235,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
                     onClick={(event) =>
                       onPreview(source.source_id, undefined, event.currentTarget)
                     }
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return
-                      event.preventDefault()
-                      onPreview(source.source_id, undefined, event.currentTarget)
-                    }}
-                    className="flex min-h-10 min-w-0 items-start gap-2 rounded-md px-1.5 py-1 text-left outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
+                    className="flex min-h-10 min-w-0 items-start gap-2 rounded-md px-1.5 py-1 text-left outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <FileText
                       className="mt-0.5 h-4 w-4 shrink-0 text-text-subtle"
@@ -281,7 +293,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
                 "sharedWorkspace.previousPage",
                 "Previous source page"
               )}
-              disabled={!page || page.pagination.offset === 0}
+              disabled={!canInspect || !page || page.pagination.offset === 0}
               onClick={() =>
                 runQuery({
                   offset: Math.max(
@@ -303,7 +315,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
                 "sharedWorkspace.nextPage",
                 "Next source page"
               )}
-              disabled={!page?.pagination.has_more}
+              disabled={!canInspect || !page?.pagination.has_more}
               onClick={() =>
                 runQuery({
                   offset:

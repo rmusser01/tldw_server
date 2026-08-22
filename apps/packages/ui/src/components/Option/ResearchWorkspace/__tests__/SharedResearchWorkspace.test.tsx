@@ -177,6 +177,63 @@ describe("SharedResearchWorkspace recipient surface", () => {
     expect(api.ask).not.toHaveBeenCalled()
   })
 
+  it("uses inspect_sources as the sole authority for every source control", async () => {
+    const bootstrap = buildBootstrap()
+    api.bootstrap.mockResolvedValue({
+      ...bootstrap,
+      share: { ...bootstrap.share, access_level: "full_edit" },
+      allowed_actions: {
+        ...bootstrap.allowed_actions,
+        inspect_sources: {
+          allowed: false,
+          reason_code: "workspace_inspection_disabled"
+        },
+        ask_grounded_questions: {
+          allowed: false,
+          reason_code: "no_provider_configured"
+        }
+      },
+      sources: {
+        ...bootstrap.sources,
+        pagination: {
+          ...bootstrap.sources.pagination,
+          total: 52,
+          has_more: true
+        }
+      }
+    })
+    renderWorkspace()
+
+    expect(await screen.findByText("Access restricted")).toBeInTheDocument()
+    expect(screen.queryByText("Can ask questions")).not.toBeInTheDocument()
+    expect(screen.getByText("workspace inspection disabled")).toBeInTheDocument()
+    expect(screen.getByText("no provider configured")).toBeInTheDocument()
+
+    expect(screen.getByLabelText("Search shared sources")).toBeDisabled()
+    expect(screen.getByLabelText("Filter shared sources by state")).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Select all queryable sources" })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Clear selected sources" })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("checkbox", { name: "Select Queryable report" })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Preview Queryable report" })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Next source page" })
+    ).toBeDisabled()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Preview Queryable report" })
+    )
+    expect(api.previewSource).not.toHaveBeenCalled()
+    expect(api.listSources).not.toHaveBeenCalled()
+  })
+
   it("uses server search, state filters, and pagination without dropping scope", async () => {
     api.listSources.mockResolvedValue({
       ...sourcePage,
@@ -264,13 +321,27 @@ describe("SharedResearchWorkspace recipient surface", () => {
     )
   })
 
-  it("loads older history upward without duplicate message IDs", async () => {
+  it("loads older history upward without duplicate IDs or losing the scroll anchor", async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
     renderWorkspace()
     await waitFor(() =>
       expect(
         screen.getByRole("log", { name: "Shared workspace messages" })
       ).toHaveTextContent("Existing grounded answer.")
     )
+    const log = screen.getByRole("log", { name: "Shared workspace messages" })
+    Object.defineProperty(log, "scrollTop", { value: 120, writable: true })
+    const anchor = document.querySelector<HTMLElement>(
+      '[data-message-id="message-existing"]'
+    )
+    expect(anchor).not.toBeNull()
+    const rect = vi
+      .spyOn(anchor!, "getBoundingClientRect")
+      .mockReturnValueOnce({ top: 200 } as DOMRect)
+      .mockReturnValueOnce({ top: 260 } as DOMRect)
+    scrollIntoView.mockClear()
+
     fireEvent.click(screen.getByRole("button", { name: "Load older messages" }))
     await waitFor(() =>
       expect(
@@ -278,6 +349,46 @@ describe("SharedResearchWorkspace recipient surface", () => {
       ).toHaveTextContent("Older question")
     )
     expect(document.querySelectorAll('[data-message-id="message-existing"]')).toHaveLength(1)
+    expect(log.scrollTop).toBe(180)
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    rect.mockRestore()
+  })
+
+  it("renders history failure recovery and retries older messages", async () => {
+    api.listMessages
+      .mockRejectedValueOnce(
+        new TldwApiError("history unavailable", 503, {
+          code: "retrieval_unavailable",
+          message: "Older messages are temporarily unavailable.",
+          retryable: true
+        })
+      )
+      .mockResolvedValueOnce({
+        conversation_id: "conversation-1",
+        messages: [
+          {
+            message_id: "message-older",
+            role: "user",
+            content: "Older question",
+            created_at: "2026-08-20T10:00:00Z",
+            citations: []
+          }
+        ],
+        next_before: null
+      })
+    renderWorkspace()
+    expect(
+      await screen.findByRole("log", { name: "Shared workspace messages" })
+    ).toHaveTextContent("Existing grounded answer.")
+
+    fireEvent.click(screen.getByRole("button", { name: "Load older messages" }))
+    expect(
+      await screen.findByText("Older messages are temporarily unavailable.")
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry older messages" }))
+
+    expect(await screen.findByText("Older question")).toBeInTheDocument()
+    expect(api.listMessages).toHaveBeenCalledTimes(2)
   })
 
   it("preserves draft and source scope across conflict and rate-limit recovery", async () => {
@@ -324,11 +435,16 @@ describe("SharedResearchWorkspace recipient surface", () => {
 
   it.each([
     [
-      "shared_retrieval_unavailable",
+      "no_provider_configured",
+      "Choose a configured model before asking a question."
+    ],
+    ["generation_failed", "Generation failed. Try again."],
+    [
+      "retrieval_unavailable",
       "Shared source retrieval is temporarily unavailable. Try again."
     ],
     [
-      "shared_context_budget_exceeded",
+      "shared_chat_context_too_large",
       "The selected sources exceed this model's context budget. Choose fewer sources and try again."
     ]
   ])("preserves recipient state for %s", async (code, copy) => {
@@ -357,7 +473,7 @@ describe("SharedResearchWorkspace recipient surface", () => {
           provider: null,
           model: null,
           ready: false,
-          reason_code: "no_configured_provider"
+          reason_code: "no_provider_configured"
         }
       })
     )
@@ -376,7 +492,7 @@ describe("SharedResearchWorkspace recipient surface", () => {
   it("shows direct removed-source copy when citation evidence is withdrawn", async () => {
     api.previewSource.mockRejectedValue(
       new TldwApiError("removed", 404, {
-        code: "shared_source_removed",
+        code: "shared_workspace_not_found",
         message: "removed",
         retryable: false
       })
