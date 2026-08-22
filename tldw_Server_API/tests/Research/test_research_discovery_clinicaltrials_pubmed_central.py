@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
+import inspect
 import json
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
 from typing import Any
 
 import pytest
@@ -169,8 +171,20 @@ class _OpaqueCursorQueryValuePolicySubclass(OpaqueCursorQueryValuePolicy):
     """Equal-valued opaque-cursor policy with a non-exact type."""
 
 
-def _module():
+def _module() -> ModuleType:
     return importlib.import_module(_MODULE)
+
+
+def test_family_module_functions_are_documented_and_module_loader_is_typed() -> None:
+    module_path = (
+        Path(__file__).parents[2] / "app" / "core" / "Research" / "discovery" / "clinicaltrials_pubmed_central.py"
+    )
+    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    functions = tuple(node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+
+    assert functions
+    assert all(ast.get_docstring(function) for function in functions)
+    assert inspect.signature(_module).return_annotation == "ModuleType"
 
 
 def _budget() -> BudgetCeilings:
@@ -1474,6 +1488,18 @@ async def test_clinicaltrials_identical_duplicate_collapses_only_after_raw_accou
 
     assert len(result.candidates) == 1
     assert len(dispatch.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_clinicaltrials_repeated_nonterminal_page_fails_atomically_after_raw_accounting() -> None:
+    first = _fixture_payload("success_page_1")
+    repeated = {"totalCount": 3, "studies": [first["studies"][0]], "nextPageToken": "synthetic-page-three"}
+    first["totalCount"] = 3
+
+    with pytest.raises(Exception) as caught:
+        await _invoke_clinical_bodies([_payload_bytes(first), _payload_bytes(repeated)])
+
+    _assert_adapter_error(caught.value, "provider_payload_invalid")
 
 
 @pytest.mark.asyncio

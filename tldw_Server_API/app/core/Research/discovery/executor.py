@@ -1238,7 +1238,8 @@ class _GroupExecutionController:
         self._used: set[int] = set()
         self._completed_searches: set[int] = set()
         self._successful_searches: set[int] = set()
-        self._seen_cursors: dict[int, set[int | str]] = {}
+        self._seen_numeric_cursors: dict[int, set[int]] = {}
+        self._seen_opaque_cursors: dict[int, set[str]] = {}
         self.physical_dispatches = 0
         self.pages = 0
         self.redirects = 0
@@ -1504,7 +1505,7 @@ class _GroupExecutionController:
                 self._reject("cursor_not_allowed")
             if intent_index not in self._successful_searches:
                 self._reject("search_not_ready")
-            seen_cursors = self._seen_cursors.get(intent_index, set())
+            seen_cursors = self._seen_opaque_cursors.get(intent_index, set())
             if cursor.value in seen_cursors:
                 self._reject("pagination_cursor_repeated")
             if type(query_key) is not str or body_key is not None:
@@ -1535,7 +1536,7 @@ class _GroupExecutionController:
             self._reject("cursor_not_allowed")
         if intent_index not in self._successful_searches:
             self._reject("search_not_ready")
-        seen_cursors = self._seen_cursors.get(intent_index, set())
+        seen_cursors = self._seen_numeric_cursors.get(intent_index, set())
         if cursor.value in seen_cursors:
             self._reject("pagination_cursor_repeated")
         if path_channel and seen_cursors and cursor.value < max(cast(set[int], seen_cursors)):
@@ -1675,8 +1676,10 @@ class _GroupExecutionController:
             pending_continuation = None
             if first_hop and is_page:
                 self.pages += 1
-                if type(page_cursor) in {int, str}:
-                    self._seen_cursors.setdefault(intent_index, set()).add(page_cursor)
+                if type(page_cursor) is int:
+                    self._seen_numeric_cursors.setdefault(intent_index, set()).add(page_cursor)
+                elif type(page_cursor) is str:
+                    self._seen_opaque_cursors.setdefault(intent_index, set()).add(page_cursor)
             first_hop = False
             aggregate_timed_out = False
             try:

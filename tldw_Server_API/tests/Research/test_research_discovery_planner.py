@@ -556,6 +556,29 @@ def test_pubmed_identity_overlay_rejects_exact_policy_or_route_semantic_drift(mu
 
 
 @pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda route: object.__setattr__(route, "policy", object()),
+        lambda route: object.__setattr__(route.policy, "origin", object()),
+    ),
+)
+def test_pubmed_identity_overlay_rejects_malformed_policy_objects_with_typed_planning_error(mutation) -> None:
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_ncbi_eutils_pubmed_direct")
+    mutation(route)
+
+    with pytest.raises(PlanningError) as caught:
+        compile_discovery_plan(
+            _request(("pubmed",), result_limit=7),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(max_physical_dispatches=8, max_pages_per_route=3, max_redirects=2, max_retries=2),
+        )
+
+    assert caught.value.code == "invalid_pubmed_route_identity:pubmed_ncbi_eutils_pubmed_direct"
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     (
         ("backend_id", "ncbi_eutils_pubmed"),

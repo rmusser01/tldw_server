@@ -322,6 +322,17 @@ def _plan_for(
     return registry, plan
 
 
+def _pubmed_group():
+    registry = foundation_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest(("pubmed",), "bounded discovery", (), 1),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(1, 2, 1, 0, 0, 40_000, 1),
+    )
+    return plan.dispatch_groups[0]
+
+
 def _response(
     route,
     intent,
@@ -516,6 +527,73 @@ def _assert_typed_error(error: BaseException, code: str) -> None:
     assert type(error) is error_type
     assert error.code == code
     assert str(error) == code
+
+
+@pytest.mark.asyncio
+async def test_ncbi_trusted_input_callback_attribute_error_normalizes_but_adapter_error_propagates() -> None:
+    module = _gateway_adapters_module()
+
+    def attribute_failure(_group: object):
+        raise AttributeError("synthetic structural callback failure")
+
+    async def forbidden_dispatch(*_args, **_kwargs):
+        raise AssertionError("trusted-input failure must precede dispatch")
+
+    with pytest.raises(_adapter_error_type()) as caught:
+        await module._execute_ncbi_esearch_summary(
+            object(),
+            forbidden_dispatch,
+            _CountingClock(),
+            trusted_inputs=attribute_failure,
+            parse_esearch_ids=lambda *_args, **_kwargs: (),
+            parse_summary_records=lambda *_args, **_kwargs: (),
+            strict_rate_envelope=False,
+        )
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
+    expected = _adapter_error_type()("provider_response_rejected")
+
+    def typed_failure(_group: object):
+        raise expected
+
+    with pytest.raises(_adapter_error_type()) as propagated:
+        await module._execute_ncbi_esearch_summary(
+            object(),
+            forbidden_dispatch,
+            _CountingClock(),
+            trusted_inputs=typed_failure,
+            parse_esearch_ids=lambda *_args, **_kwargs: (),
+            parse_summary_records=lambda *_args, **_kwargs: (),
+            strict_rate_envelope=False,
+        )
+
+    assert propagated.value is expected
+
+
+@pytest.mark.parametrize(
+    "mutation", ("intent", "query_container", "query_member", "binding_container", "binding_member", "limits")
+)
+def test_pubmed_trusted_inputs_reject_malformed_containers_before_dereference(mutation: str) -> None:
+    module = _gateway_adapters_module()
+    group = _pubmed_group()
+    search, summary = group.intents
+    if mutation == "intent":
+        object.__setattr__(group, "intents", (object(), summary))
+    elif mutation == "query_container":
+        object.__setattr__(search, "query_pairs", [])
+    elif mutation == "query_member":
+        object.__setattr__(search.query_pairs[0], "name", object())
+    elif mutation == "binding_container":
+        object.__setattr__(summary, "query_bindings", [])
+    elif mutation == "binding_member":
+        object.__setattr__(summary.query_bindings[0], "binding_id", object())
+    else:
+        object.__setattr__(group, "limits", object())
+
+    with pytest.raises(_adapter_error_type()) as caught:
+        module._trusted_pubmed_inputs(group)
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
 
 
 def _assert_two_completed_physical_hops(result) -> None:

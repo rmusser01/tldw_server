@@ -3439,6 +3439,48 @@ async def test_opaque_query_cursor_rejects_repeat_without_imposing_order() -> No
 
 
 @pytest.mark.asyncio
+async def test_numeric_path_progress_ignores_separately_tracked_opaque_history() -> None:
+    registry, plan = _path_paginated_plan()
+    group = plan.dispatch_groups[0]
+    observed_errors = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=NumericCursor(10))
+        controller = next(
+            cell.cell_contents
+            for cell in dispatch.__closure__ or ()
+            if type(cell.cell_contents) is executor_module._GroupExecutionController
+        )
+        opaque_history = getattr(controller, "_seen_opaque_cursors", None)
+        if opaque_history is None:
+            opaque_history = controller._seen_cursors
+        opaque_history.setdefault(0, set()).add("opaque-history")
+        try:
+            await dispatch(bound_group.intents[0], cursor=NumericCursor(5))
+        except Exception as error:  # noqa: BLE001 - assert the typed execution boundary below.
+            observed_errors.append(error)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("path-initial", "path-ten", "must-not-reserve")).__next__,
+    )
+
+    assert len(observed_errors) == 1
+    assert type(observed_errors[0]) is executor_module.DiscoveryExecutionError
+    assert observed_errors[0].code == "pagination_cursor_non_progress"
+    assert result.logical_outcomes[0].code == "pagination_cursor_non_progress"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("invalid_value", ("", "control\n", "caf\u00e9", "x" * 1_025))
 async def test_opaque_query_cursor_rejects_mutated_invalid_values_before_reservation(invalid_value: str) -> None:
     registry, plan = _opaque_query_paginated_plan()

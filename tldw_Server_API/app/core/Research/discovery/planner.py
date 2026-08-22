@@ -108,6 +108,8 @@ _CLINICALTRIALS_QUERY_KEYS = (
 
 def _is_identity_pubmed_route(route: AccessRoute) -> bool:
     """Return whether one route is the complete sealed NCBI identity overlay."""
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
     return (
         route.route_id == _PUBMED_ROUTE_ID
         and route.backend_id == _PUBMED_BACKEND_ID
@@ -120,6 +122,8 @@ def _is_identity_pubmed_route(route: AccessRoute) -> bool:
 
 def _is_foundation_pubmed_policy_owner(route: AccessRoute) -> bool:
     """Exclude the exact foundation identity from overlay-specific sealing."""
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
     return (
         route.route_id == _PUBMED_ROUTE_ID
         and route.backend_id == _PUBMED_BACKEND_ID
@@ -131,6 +135,10 @@ def _is_foundation_pubmed_policy_owner(route: AccessRoute) -> bool:
 
 def _has_pubmed_identity_component(route: AccessRoute) -> bool:
     """Return whether a non-foundation route claims any PubMed overlay marker."""
+    if type(route) is not AccessRoute:
+        return False
+    if type(route.policy) is not RoutePolicy:
+        return route.route_id == _PUBMED_ROUTE_ID
     if _is_foundation_pubmed_policy_owner(route):
         return False
     return any(
