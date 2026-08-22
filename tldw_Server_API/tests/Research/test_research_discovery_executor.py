@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     PathSlot,
     PathSlotKind,
     PathTemplate,
+    PlannedDispatchGroup,
     PredicateOperator,
     QueryMode,
     ReadinessOverlay,
@@ -51,6 +52,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
 )
 from tldw_Server_API.app.core.Research.discovery.executor import (
     AttemptJournal,
+    BoundDispatch,
     DiscoveryAdapterResult,
     DiscoveryCandidate,
     DispatchAccounting,
@@ -58,6 +60,7 @@ from tldw_Server_API.app.core.Research.discovery.executor import (
     NumericCSVBindingValues,
     NumericCursor,
     PhysicalDispatchState,
+    PolicyActivityCheck,
     execute_discovery_plan,
 )
 from tldw_Server_API.app.core.Research.discovery.gateway import (
@@ -3436,6 +3439,59 @@ async def test_opaque_query_cursor_rejects_repeat_without_imposing_order() -> No
     ) == ("z-token", "a-token")
     assert result.logical_outcomes[0].code == "pagination_cursor_repeated"
     assert result.usage.accounting == DispatchAccounting(3, 3, 0, 0, 3)
+
+
+@pytest.mark.asyncio
+async def test_numeric_path_progress_ignores_separately_tracked_opaque_history() -> None:
+    """Reject numeric cursor regression despite separately tracked opaque state."""
+    registry, plan = _path_paginated_plan()
+    group = plan.dispatch_groups[0]
+    observed_errors = []
+
+    async def gateway(
+        route: AccessRoute,
+        intent: DispatchIntent,
+        *,
+        is_policy_active: PolicyActivityCheck,
+    ) -> DiscoveryGatewayResponse:
+        """Return the deterministic response for a dispatched route intent."""
+        return _gateway_response(route, intent)
+
+    async def adapter(
+        bound_group: PlannedDispatchGroup,
+        dispatch: BoundDispatch,
+    ) -> DiscoveryAdapterResult:
+        """Dispatch numeric cursors after seeding isolated opaque history."""
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=NumericCursor(10))
+        controller = next(
+            cell.cell_contents
+            for cell in dispatch.__closure__ or ()
+            if type(cell.cell_contents) is executor_module._GroupExecutionController
+        )
+        opaque_history = getattr(controller, "_seen_opaque_cursors", None)
+        if opaque_history is None:
+            opaque_history = controller._seen_cursors
+        opaque_history.setdefault(0, set()).add("opaque-history")
+        try:
+            await dispatch(bound_group.intents[0], cursor=NumericCursor(5))
+        except Exception as error:  # noqa: BLE001 - assert the typed execution boundary below.
+            observed_errors.append(error)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("path-initial", "path-ten", "must-not-reserve")).__next__,
+    )
+
+    assert len(observed_errors) == 1
+    assert type(observed_errors[0]) is executor_module.DiscoveryExecutionError
+    assert observed_errors[0].code == "pagination_cursor_non_progress"
+    assert result.logical_outcomes[0].code == "pagination_cursor_non_progress"
 
 
 @pytest.mark.asyncio

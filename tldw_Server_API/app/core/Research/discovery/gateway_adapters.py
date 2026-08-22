@@ -1511,6 +1511,25 @@ def _trusted_pubmed_inputs(
     search, summary = group.intents
     limits = group.limits
     if (
+        type(search) is not DispatchIntent
+        or type(summary) is not DispatchIntent
+        or type(limits) is not RouteLimits
+        or type(search.query_pairs) is not tuple
+        or type(summary.query_pairs) is not tuple
+        or type(search.json_body_pairs) is not tuple
+        or type(summary.json_body_pairs) is not tuple
+        or type(search.query_bindings) is not tuple
+        or type(summary.query_bindings) is not tuple
+        or any(type(pair) is not QueryPair for pair in (*search.query_pairs, *summary.query_pairs))
+        or any(
+            type(pair.name) is not str or type(pair.value) is not str
+            for pair in (*search.query_pairs, *summary.query_pairs)
+        )
+        or len(summary.query_bindings) != 1
+        or type(summary.query_bindings[0]) is not DeferredNumericCSVQueryBinding
+    ):
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    if (
         search.operation_kind is not OperationKind.SEARCH
         or summary.operation_kind is not OperationKind.CONDITIONAL_SUMMARY
         or search.method != "GET"
@@ -1565,9 +1584,13 @@ def _trusted_pubmed_inputs(
     binding = summary.query_bindings[0]
     if (
         type(binding) is not DeferredNumericCSVQueryBinding
+        or type(binding.binding_id) is not str
         or binding.binding_id != _PUBMED_BINDING_ID
+        or type(binding.query_name) is not str
         or binding.query_name != "id"
+        or type(binding.max_item_chars) is not int
         or binding.max_item_chars != 16
+        or type(binding.max_items) is not int
     ):
         raise DiscoveryAdapterError("provider_payload_invalid")
     try:
@@ -1688,7 +1711,12 @@ async def _execute_ncbi_esearch_summary(
     strict_rate_envelope: bool,
 ) -> DiscoveryAdapterResult:
     """Execute one sealed ESearch and conditional ESummary pair."""
-    trusted_group, profile, max_input_bytes, retstart, retmax, binding = trusted_inputs(group)
+    try:
+        trusted_group, profile, max_input_bytes, retstart, retmax, binding = trusted_inputs(group)
+    except DiscoveryAdapterError:
+        raise
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError, OverflowError):
+        raise DiscoveryAdapterError("provider_payload_invalid") from None
     search, summary = trusted_group.intents
     search_response = _checked_response(await dispatch(search))
     search_payload, search_guard = _strict_json(
@@ -1713,7 +1741,7 @@ async def _execute_ncbi_esearch_summary(
         _raise_adapter_error(error)
     except DiscoveryAdapterError:
         raise
-    except (KeyError, TypeError, ValueError, OverflowError):
+    except (IndexError, KeyError, TypeError, ValueError, OverflowError):
         raise DiscoveryAdapterError("provider_payload_invalid") from None
     if not ids:
         return DiscoveryAdapterResult(candidates=())
@@ -1756,7 +1784,7 @@ async def _execute_ncbi_esearch_summary(
         _raise_adapter_error(error)
     except DiscoveryAdapterError:
         raise
-    except (KeyError, TypeError, ValueError, OverflowError):
+    except (IndexError, KeyError, TypeError, ValueError, OverflowError):
         raise DiscoveryAdapterError("provider_payload_invalid") from None
     return DiscoveryAdapterResult(tuple(candidates))
 

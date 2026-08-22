@@ -108,6 +108,8 @@ _CLINICALTRIALS_QUERY_KEYS = (
 
 def _is_identity_pubmed_route(route: AccessRoute) -> bool:
     """Return whether one route is the complete sealed NCBI identity overlay."""
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
     return (
         route.route_id == _PUBMED_ROUTE_ID
         and route.backend_id == _PUBMED_BACKEND_ID
@@ -120,6 +122,8 @@ def _is_identity_pubmed_route(route: AccessRoute) -> bool:
 
 def _is_foundation_pubmed_policy_owner(route: AccessRoute) -> bool:
     """Exclude the exact foundation identity from overlay-specific sealing."""
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
     return (
         route.route_id == _PUBMED_ROUTE_ID
         and route.backend_id == _PUBMED_BACKEND_ID
@@ -131,6 +135,22 @@ def _is_foundation_pubmed_policy_owner(route: AccessRoute) -> bool:
 
 def _has_pubmed_identity_component(route: AccessRoute) -> bool:
     """Return whether a non-foundation route claims any PubMed overlay marker."""
+    if type(route) is not AccessRoute:
+        return False
+    try:
+        policy_version = route.policy.policy_version
+    except Exception:  # noqa: BLE001 - malformed registry policies fail closed as identity drift.
+        policy_version = None
+    if type(route.policy) is not RoutePolicy:
+        return any(
+            (
+                route.route_id == _PUBMED_ROUTE_ID,
+                route.backend_id == _PUBMED_BACKEND_ID,
+                route.adapter_id == _PUBMED_ADAPTER_ID,
+                route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION,
+                policy_version == _PUBMED_IDENTITY_POLICY_VERSION,
+            )
+        )
     if _is_foundation_pubmed_policy_owner(route):
         return False
     return any(
@@ -357,6 +377,8 @@ def _has_exact_clinicaltrials_policy(route: AccessRoute) -> bool:
 
 def _has_exact_pubmed_identity_policy(route: AccessRoute) -> bool:
     """Anchor the PubMed identity overlay to one approved route and policy."""
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
     policy = route.policy
     origin = policy.origin
     return (

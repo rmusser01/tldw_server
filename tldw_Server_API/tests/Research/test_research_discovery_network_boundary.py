@@ -128,9 +128,9 @@ _EXPECTED_IMPORT_DIGESTS = {
 _EXPECTED_AST_DIGESTS = {
     "contracts.py": "31006c7e537eadf401494f1356cf55d690da2af8314adb57751b59ce88d36e52",
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
-    "planner.py": "cd86b4eec709cd193873f292c7b5e028653f13df938ca9f1ea1ba2fde7b11369",
-    "executor.py": "632a842dded5721b60966e234b63a3bb39f626bfb9ca3e53e9661844e88a9976",
-    "gateway_adapters.py": "98b8b0013e26fba491bf50e5270178b5c7d396990f601a2e63c3376b1fc8be32",
+    "planner.py": "f47af4f735688f3f8eca0a6c5e9620fca2a1ddabadc3ec1aef4324ac12afa39f",
+    "executor.py": "9b50ab4e6b7971ec8fa371a705175ee4ee0d81030136b1a6ccb44d33f7aad87c",
+    "gateway_adapters.py": "809bc6e27b6ccebeaac25108ef34823c9b2da53509cb74b7dc0c091ecb44947a",
     "gateway.py": "9fa3be4b099e4beb519e63bee037873d55fcd8425c7ec939520ea100cd896654",
     "identity.py": "f59640d8f793fd3ebd11df49d333f73ebee9e59efb549393116bee2a241f5f06",
     "catalog.py": "6f89e526a0cee3f934fc04da6adc5698800842e9f798ac45e35847d859e08ba6",
@@ -146,7 +146,7 @@ _EXPECTED_AST_DIGESTS = {
 }
 _EXPECTED_FAMILY_RAW_DIGESTS = {
     "biorxiv_medrxiv.py": "ee77fb9bc5da1cb93dc88baea86c9cd5b6a6e961d02faec97faa66cbcf383af9",
-    "clinicaltrials_pubmed_central.py": "fd95c87625e0f360cea486cf27dab159dfe66d1e58911954c13e2653f4f0032f",
+    "clinicaltrials_pubmed_central.py": "3eb3afbf50e3ddab04953e88ec33c4e1510eebfda731e36c80cb3b37f3d333df",
 }
 _EXPECTED_FAMILY_IMPORT_DIGESTS = {
     "biorxiv_medrxiv.py": "a9a057e486c28731299b0997b04862a6e81dc6454d73d4fc94d0806d6831ebf3",
@@ -154,7 +154,7 @@ _EXPECTED_FAMILY_IMPORT_DIGESTS = {
 }
 _EXPECTED_FAMILY_AST_DIGESTS = {
     "biorxiv_medrxiv.py": "21f46f0468fc0a83877d6cc4f1bb8830bdc48bbe4c10ee1c1db90d9144e67f95",
-    "clinicaltrials_pubmed_central.py": "57e7d21c5db2a4805f2ca8a87a457b9e2a0db83bca31f58b8cfb04c73f8d6289",
+    "clinicaltrials_pubmed_central.py": "b9c1e7635a6450563b7dbef0861f1bdc54db20dc571e3375512336c220e60a82",
 }
 _BIORXIV_MEDRXIV_LOCAL_IMPORTS = MappingProxyType(
     {

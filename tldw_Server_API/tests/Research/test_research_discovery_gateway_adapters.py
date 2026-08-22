@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
     DiscoveryOutcomeIdentity,
     ExecutionMode,
+    PlannedDispatchGroup,
 )
 from tldw_Server_API.app.core.Research.discovery.executor import (
     DiscoveryAdapterResult,
@@ -56,6 +57,12 @@ pytestmark = pytest.mark.unit
 
 _FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "research_discovery_gateway_adapters"
 _ADAPTER_MODULE = "tldw_Server_API.app.core.Research.discovery.gateway_adapters"
+
+
+class _EqualStringSubclass(str):
+    """String subclass used to prove exact scalar type checks."""
+
+
 _NORMALIZED_KEYS = {
     "title",
     "authors",
@@ -322,6 +329,18 @@ def _plan_for(
     return registry, plan
 
 
+def _pubmed_group() -> PlannedDispatchGroup:
+    """Build one valid foundation PubMed dispatch group for adapter tests."""
+    registry = foundation_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest(("pubmed",), "bounded discovery", (), 1),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(1, 2, 1, 0, 0, 40_000, 1),
+    )
+    return plan.dispatch_groups[0]
+
+
 def _response(
     route,
     intent,
@@ -516,6 +535,161 @@ def _assert_typed_error(error: BaseException, code: str) -> None:
     assert type(error) is error_type
     assert error.code == code
     assert str(error) == code
+
+
+@pytest.mark.asyncio
+async def test_ncbi_trusted_input_callback_attribute_error_normalizes_but_adapter_error_propagates() -> None:
+    module = _gateway_adapters_module()
+
+    def attribute_failure(_group: object):
+        raise AttributeError("synthetic structural callback failure")
+
+    async def forbidden_dispatch(*_args, **_kwargs):
+        raise AssertionError("trusted-input failure must precede dispatch")
+
+    with pytest.raises(_adapter_error_type()) as caught:
+        await module._execute_ncbi_esearch_summary(
+            object(),
+            forbidden_dispatch,
+            _CountingClock(),
+            trusted_inputs=attribute_failure,
+            parse_esearch_ids=lambda *_args, **_kwargs: (),
+            parse_summary_records=lambda *_args, **_kwargs: (),
+            strict_rate_envelope=False,
+        )
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
+
+    def indexed_failure(_group: object):
+        raise IndexError("synthetic indexed trusted-input failure")
+
+    with pytest.raises(_adapter_error_type()) as indexed_trusted_input:
+        await module._execute_ncbi_esearch_summary(
+            object(),
+            forbidden_dispatch,
+            _CountingClock(),
+            trusted_inputs=indexed_failure,
+            parse_esearch_ids=lambda *_args, **_kwargs: (),
+            parse_summary_records=lambda *_args, **_kwargs: (),
+            strict_rate_envelope=False,
+        )
+
+    _assert_typed_error(indexed_trusted_input.value, "provider_payload_invalid")
+
+    expected = _adapter_error_type()("provider_response_rejected")
+
+    def typed_failure(_group: object):
+        raise expected
+
+    with pytest.raises(_adapter_error_type()) as propagated:
+        await module._execute_ncbi_esearch_summary(
+            object(),
+            forbidden_dispatch,
+            _CountingClock(),
+            trusted_inputs=typed_failure,
+            parse_esearch_ids=lambda *_args, **_kwargs: (),
+            parse_summary_records=lambda *_args, **_kwargs: (),
+            strict_rate_envelope=False,
+        )
+
+    assert propagated.value is expected
+
+    group = _pubmed_group()
+    route = foundation_registry().get_route(group.route_id)
+    dispatch = _RecordingDispatch([_response(route, group.intents[0], b"{}")])
+
+    def indexed_parser(*_args, **_kwargs):
+        raise IndexError("synthetic indexed parser failure")
+
+    with pytest.raises(_adapter_error_type()) as indexed:
+        await module._execute_ncbi_esearch_summary(
+            group,
+            dispatch,
+            _CountingClock(),
+            trusted_inputs=module._trusted_pubmed_inputs,
+            parse_esearch_ids=indexed_parser,
+            parse_summary_records=lambda *_args, **_kwargs: (),
+            strict_rate_envelope=False,
+        )
+
+    _assert_typed_error(indexed.value, "provider_payload_invalid")
+
+    summary_dispatch = _RecordingDispatch(
+        [
+            _response(route, group.intents[0], b"{}"),
+            _response(route, group.intents[1], b"{}"),
+        ]
+    )
+
+    def indexed_summary_parser(*_args, **_kwargs):
+        raise IndexError("synthetic indexed summary callback failure")
+
+    with pytest.raises(_adapter_error_type()) as indexed_summary:
+        await module._execute_ncbi_esearch_summary(
+            group,
+            summary_dispatch,
+            _CountingClock(),
+            trusted_inputs=module._trusted_pubmed_inputs,
+            parse_esearch_ids=lambda *_args, **_kwargs: (("123", 1),),
+            parse_summary_records=indexed_summary_parser,
+            strict_rate_envelope=False,
+        )
+
+    _assert_typed_error(indexed_summary.value, "provider_payload_invalid")
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "intent",
+        "query_container",
+        "query_member",
+        "binding_container",
+        "binding_member",
+        "binding_id_scalar_type",
+        "binding_query_name_scalar_type",
+        "binding_max_item_chars_scalar_type",
+        "binding_max_items_scalar_type",
+        "limits",
+    ),
+)
+def test_pubmed_trusted_inputs_reject_malformed_containers_before_dereference(mutation: str) -> None:
+    module = _gateway_adapters_module()
+    group = _pubmed_group()
+    search, summary = group.intents
+    if mutation == "intent":
+        object.__setattr__(group, "intents", (object(), summary))
+    elif mutation == "query_container":
+        object.__setattr__(search, "query_pairs", [])
+    elif mutation == "query_member":
+        object.__setattr__(search.query_pairs[0], "name", object())
+    elif mutation == "binding_container":
+        object.__setattr__(summary, "query_bindings", [])
+    elif mutation == "binding_member":
+        object.__setattr__(summary.query_bindings[0], "binding_id", object())
+    elif mutation == "binding_id_scalar_type":
+        object.__setattr__(
+            summary.query_bindings[0],
+            "binding_id",
+            _EqualStringSubclass(summary.query_bindings[0].binding_id),
+        )
+    elif mutation == "binding_query_name_scalar_type":
+        object.__setattr__(
+            summary.query_bindings[0],
+            "query_name",
+            _EqualStringSubclass(summary.query_bindings[0].query_name),
+        )
+    elif mutation == "binding_max_item_chars_scalar_type":
+        object.__setattr__(summary.query_bindings[0], "max_item_chars", 16.0)
+    elif mutation == "binding_max_items_scalar_type":
+        object.__setattr__(summary.query_bindings[0], "max_items", 1.0)
+    else:
+        object.__setattr__(group, "limits", object())
+
+    with pytest.raises(_adapter_error_type()) as caught:
+        module._trusted_pubmed_inputs(group)
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
 
 
 def _assert_two_completed_physical_hops(result) -> None:

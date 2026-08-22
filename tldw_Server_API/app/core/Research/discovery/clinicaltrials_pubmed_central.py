@@ -213,6 +213,7 @@ def _pubmed_identity_overlay(route: AccessRoute) -> AccessRoute:
 
 
 def _clinicaltrials_source() -> SourceDefinition:
+    """Return the sealed ClinicalTrials.gov shadow source definition."""
     return SourceDefinition(
         catalog_source_id="clinicaltrials_gov",
         display_name="ClinicalTrials.gov",
@@ -228,6 +229,7 @@ def _clinicaltrials_source() -> SourceDefinition:
 
 
 def _pubmed_central_source() -> SourceDefinition:
+    """Return the sealed PubMed Central shadow source definition."""
     return SourceDefinition(
         catalog_source_id="pubmed_central",
         display_name="PubMed Central",
@@ -243,6 +245,7 @@ def _pubmed_central_source() -> SourceDefinition:
 
 
 def _clinicaltrials_route() -> AccessRoute:
+    """Return the exact ClinicalTrials.gov search route."""
     return AccessRoute(
         route_id="clinicaltrials_gov_studies_search_direct",
         backend_id="clinicaltrials_gov_api_v2",
@@ -285,6 +288,7 @@ def _clinicaltrials_route() -> AccessRoute:
 
 
 def _pubmed_central_route() -> AccessRoute:
+    """Return the exact PubMed Central E-utilities route."""
     return AccessRoute(
         route_id="pubmed_central_esearch_summary_direct",
         backend_id="ncbi_eutils_pmc",
@@ -471,10 +475,12 @@ def _trusted_clinicaltrials_inputs(
 
 
 def _has_forbidden_text_character(value: str) -> bool:
+    """Return whether text contains forbidden control or replacement characters."""
     return any(character == "\ufffd" or unicodedata.category(character) in {"Cc", "Cf", "Cs"} for character in value)
 
 
 def _contains_residual_markup(value: str) -> bool:
+    """Return whether text still contains markup delimiters or entity forms."""
     return "<" in value or ">" in value or _RESIDUAL_ENTITY_RE.search(value) is not None
 
 
@@ -555,19 +561,23 @@ def _plain_clinical_text(
 
 class _LegacySummaryParser(HTMLParser):
     def __init__(self) -> None:
+        """Initialize inert text collection for a legacy summary fragment."""
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.ignored_depth = 0
 
     def handle_starttag(self, tag: str, _attrs: list[tuple[str, str | None]]) -> None:
+        """Suppress text nested in script and style elements."""
         if tag.casefold() in {"script", "style"}:
             self.ignored_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
+        """Resume text collection after a suppressed element closes."""
         if tag.casefold() in {"script", "style"} and self.ignored_depth:
             self.ignored_depth -= 1
 
     def handle_data(self, data: str) -> None:
+        """Collect text content outside suppressed elements."""
         if not self.ignored_depth:
             self.parts.append(data)
 
@@ -621,6 +631,7 @@ def _partial_date(value: Any) -> str | None:
 
 
 def _optional_container(record: dict[str, Any], key: str) -> dict[str, Any] | None:
+    """Return one optional mapping field while rejecting malformed containers."""
     value = record.get(key, _MISSING)
     if value is _MISSING:
         return None
@@ -628,6 +639,7 @@ def _optional_container(record: dict[str, Any], key: str) -> dict[str, Any] | No
 
 
 def _optional_plain_field(container: dict[str, Any] | None, key: str, max_chars: int) -> str | None:
+    """Return one optional normalized text field from a mapping."""
     if container is None or key not in container:
         return None
     value = container[key]
@@ -642,6 +654,7 @@ def _optional_text_list(
     *,
     guard: _ParseGuard,
 ) -> tuple[str, ...] | None:
+    """Return an optional bounded tuple of normalized text values."""
     if container is None or key not in container:
         return None
     values = _require_list(container[key])
@@ -664,6 +677,7 @@ def _optional_interventions(
     *,
     guard: _ParseGuard,
 ) -> tuple[str, ...] | None:
+    """Return optional normalized intervention names from a protocol section."""
     if container is None or "interventions" not in container:
         return None
     values = _require_list(container["interventions"])
@@ -683,6 +697,7 @@ def _optional_interventions(
 
 
 def _optional_date(status: dict[str, Any] | None, key: str) -> str | None:
+    """Return one optional validated partial date from study status."""
     if status is None or key not in status:
         return None
     structure = _require_dict(status[key])
@@ -812,6 +827,7 @@ async def _execute_clinicaltrials_adapter(
     dispatch: BoundDispatch,
     clock: MonotonicClock,
 ) -> DiscoveryAdapterResult:
+    """Execute bounded ClinicalTrials.gov pages and atomically stage NCT records."""
     trusted, profile, max_input_bytes, page_size = _trusted_clinicaltrials_inputs(group)
     intent = trusted.intents[0]
     staged_by_nct: dict[str, dict[str, Any]] = {}
@@ -841,12 +857,15 @@ async def _execute_clinicaltrials_adapter(
             if token_required != (page.next_page_token is not None):
                 raise _PayloadInvalid
 
+            staged_before_page = len(staged_by_nct)
             for record in page.records:
                 nct_id = cast(str, cast(dict[str, str], record["provider_ids"])["nct_id"])
                 previous = staged_by_nct.get(nct_id)
                 if previous is not None and previous != record:
                     raise _PayloadInvalid
                 staged_by_nct.setdefault(nct_id, record)
+            if cumulative_raw < frozen_total and len(staged_by_nct) == staged_before_page:
+                raise _PayloadInvalid
             guard.checkpoint()
 
             capacity_remains = (
@@ -1246,6 +1265,7 @@ async def _execute_pubmed_central_adapter(
     dispatch: BoundDispatch,
     clock: MonotonicClock,
 ) -> DiscoveryAdapterResult:
+    """Execute the sealed PubMed Central ESearch and ESummary pair."""
     return await _execute_ncbi_esearch_summary(
         group,
         dispatch,
@@ -1280,12 +1300,14 @@ def clinicaltrials_pubmed_central_gateway_adapters(
         group: PlannedDispatchGroup,
         dispatch: BoundDispatch,
     ) -> DiscoveryAdapterResult:
+        """Bind the shared clock to the ClinicalTrials.gov adapter."""
         return await _execute_clinicaltrials_adapter(group, dispatch, monotonic_clock)
 
     async def pubmed_central_adapter(
         group: PlannedDispatchGroup,
         dispatch: BoundDispatch,
     ) -> DiscoveryAdapterResult:
+        """Bind the shared clock to the PubMed Central adapter."""
         return await _execute_pubmed_central_adapter(group, dispatch, monotonic_clock)
 
     return _compose_adapter_maps(
