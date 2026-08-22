@@ -1,7 +1,5 @@
-import re
 import pytest
-from fastapi import FastAPI
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
 
@@ -102,3 +100,26 @@ def test_http_metrics_records_http_exception_status():
         "http_requests_total",
         {"method": "GET", "endpoint": "/boom", "status": "404"},
     ) == 1
+
+
+def test_http_metrics_labels_never_capture_standalone_source_body():
+    sentinel = "PRIVATE_HTML_METRIC_LABEL_ebdc62"
+    app = FastAPI()
+    reg = get_metrics_registry()
+    reg.reset()
+
+    @app.post("/api/v1/slides/generations")
+    async def generation(request: Request):
+        await request.body()
+        return {"ok": True}
+
+    app.add_middleware(HTTPMetricsMiddleware)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/slides/generations",
+            content=sentinel,
+        )
+
+    assert response.status_code == 200
+    assert sentinel not in reg.export_prometheus_format()

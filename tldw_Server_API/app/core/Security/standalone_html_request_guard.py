@@ -44,9 +44,21 @@ _TRACKED_SCANNER_DEPTH = 6
 _MAX_SCANNER_TOKEN_BYTES = 128
 
 
-def _feed_scanner(scanner: ShallowStandaloneFieldScanner, body: bytes) -> None:
+def _feed_scanner(
+    scanner: ShallowStandaloneFieldScanner,
+    body: bytes,
+) -> int | None:
+    hold_from = 0 if scanner.requires_value_lookbehind else None
     for offset in range(0, len(body), SCANNER_CHUNK_BYTES):
-        scanner.feed(body[offset : offset + SCANNER_CHUNK_BYTES])
+        chunk_hold = scanner.feed(body[offset : offset + SCANNER_CHUNK_BYTES])
+        if scanner.requires_value_lookbehind:
+            if chunk_hold is None:
+                chunk_hold = 0
+            if hold_from is None or chunk_hold > 0:
+                hold_from = offset + chunk_hold
+        else:
+            hold_from = None
+    return hold_from
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +334,11 @@ class ShallowStandaloneFieldScanner:
         """Return scanner-owned variable bytes for constant-memory assertions."""
         return len(self._string_raw)
 
+    @property
+    def requires_value_lookbehind(self) -> bool:
+        """Return whether an exact forbidden value is still possible."""
+        return self._in_string and self._string_role == "value" and not self._capture_overflow
+
     def _tracked_parent(self) -> _ScanFrame | None:
         if self._depth <= _TRACKED_SCANNER_DEPTH and self._frames:
             return self._frames[-1]
@@ -433,7 +450,8 @@ class ShallowStandaloneFieldScanner:
         self._capture_overflow = False
         self._string_role = "ignore"
 
-    def feed(self, chunk: bytes) -> None:
+    def feed(self, chunk: bytes) -> int | None:
+        hold_from = 0 if self.requires_value_lookbehind else None
         index = 0
         while index < len(chunk):
             byte = chunk[index]
@@ -449,6 +467,7 @@ class ShallowStandaloneFieldScanner:
                 elif byte == 0x22:
                     self._in_string = False
                     self._finish_string()
+                    hold_from = None
                     index += 1
                     continue
                 elif not self._capture_overflow:
@@ -456,6 +475,9 @@ class ShallowStandaloneFieldScanner:
                 if len(self._string_raw) > _MAX_SCANNER_TOKEN_BYTES:
                     self._capture_overflow = True
                     self._string_raw.clear()
+                    if self._string_role == "value":
+                        self._string_role = "ignore"
+                        hold_from = None
                 index += 1
                 continue
             if self._in_primitive:
@@ -468,6 +490,8 @@ class ShallowStandaloneFieldScanner:
                 index += 1
             elif byte == 0x22:
                 self._start_string()
+                if self.requires_value_lookbehind:
+                    hold_from = index
                 index += 1
             elif byte == 0x7B:
                 self._open("object")
@@ -494,11 +518,15 @@ class ShallowStandaloneFieldScanner:
                 self._before_value()
                 self._in_primitive = True
                 index += 1
+        return hold_from if self.requires_value_lookbehind else None
 
     def finish(self) -> None:
         """Discard bounded lexical state; ordinary JSON parsing owns validity."""
         self._string_raw.clear()
         self._capture_overflow = False
+        self._escaped = False
+        self._in_string = False
+        self._string_role = "ignore"
 
 
 def _raw_header_values(scope: Mapping[str, Any], name: bytes) -> list[bytes]:
@@ -560,6 +588,81 @@ async def _send_rejection(
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+class _ShallowGuardedReceive:
+    """Withhold only an undecided content-kind token from downstream readers."""
+
+    def __init__(
+        self,
+        receive: Callable[[], Awaitable[dict[str, Any]]],
+        scanner: ShallowStandaloneFieldScanner,
+        scope: dict[str, Any],
+    ) -> None:
+        self._held = bytearray()
+        self._queued: dict[str, Any] | None = None
+        self._receive = receive
+        self._scanner = scanner
+        self._scope = scope
+        self.more_body = False
+
+    @staticmethod
+    def _request_message(body: bytes, *, more_body: bool) -> dict[str, Any]:
+        return {"type": "http.request", "body": body, "more_body": more_body}
+
+    async def __call__(self) -> dict[str, Any]:
+        if self._queued is not None:
+            message = self._queued
+            self._queued = None
+            return message
+
+        while True:
+            message = await self._receive()
+            if message.get("type") != "http.request":
+                if self._held:
+                    self._scanner.finish()
+                    self._queued = message
+                    held = bytes(self._held)
+                    self._held.clear()
+                    return self._request_message(held, more_body=True)
+                return message
+
+            body = message.get("body", b"")
+            if not isinstance(body, bytes):
+                body = bytes(body)
+                message = {**message, "body": body}
+            self.more_body = bool(message.get("more_body", False))
+            self._scope["standalone_html_guard_more_body"] = self.more_body
+            hold_from = _feed_scanner(self._scanner, body)
+            if not self.more_body:
+                self._scanner.finish()
+                hold_from = None
+
+            if self._held:
+                if hold_from == 0:
+                    self._held.extend(body)
+                    continue
+                held = bytes(self._held)
+                self._held.clear()
+                if hold_from is None:
+                    self._queued = message
+                else:
+                    safe_prefix = body[:hold_from]
+                    self._held.extend(body[hold_from:])
+                    if safe_prefix:
+                        self._queued = self._request_message(
+                            safe_prefix,
+                            more_body=True,
+                        )
+                return self._request_message(held, more_body=True)
+
+            if hold_from is None:
+                return message
+
+            safe_prefix = body[:hold_from]
+            self._held.extend(body[hold_from:])
+            if safe_prefix:
+                return self._request_message(safe_prefix, more_body=True)
 
 
 class StandaloneHtmlRequestGuardMiddleware:
@@ -645,22 +748,12 @@ class StandaloneHtmlRequestGuardMiddleware:
     async def _generic(self, scope, receive, send, route: StandaloneRequestRoute) -> None:
         mode: Literal["rest", "mcp"] = "mcp" if route.mode == "generic_mcp" else "rest"
         scanner = ShallowStandaloneFieldScanner(mode=mode)
-        more_body = False
-
-        async def guarded_receive() -> dict[str, Any]:
-            nonlocal more_body
-            message = await receive()
-            if message.get("type") == "http.request":
-                more_body = bool(message.get("more_body", False))
-                _feed_scanner(scanner, message.get("body", b""))
-                if not more_body:
-                    scanner.finish()
-            return message
+        guarded_receive = _ShallowGuardedReceive(receive, scanner, scope)
 
         try:
             await self.app(scope, guarded_receive, send)
         except StandaloneHtmlAdmissionError as error:
-            if more_body:
+            if guarded_receive.more_body:
                 await _drain_receive(receive)
             await _send_rejection(send, error)
 
@@ -675,16 +768,7 @@ def install_shallow_request_receive_guard(
         return
     scanner = ShallowStandaloneFieldScanner(mode=mode)
     original_receive = request._receive  # noqa: SLF001 - Starlette receive boundary.
-
-    async def guarded_receive() -> dict[str, Any]:
-        message = await original_receive()
-        if message.get("type") == "http.request":
-            request.scope["standalone_html_guard_more_body"] = bool(message.get("more_body", False))
-            _feed_scanner(scanner, message.get("body", b""))
-            if not message.get("more_body", False):
-                scanner.finish()
-        return message
-
+    guarded_receive = _ShallowGuardedReceive(original_receive, scanner, request.scope)
     request._receive = guarded_receive  # noqa: SLF001 - install before Request.body().
     request.scope["standalone_html_receive_guard"] = True
     request.scope["standalone_html_guard_original_receive"] = original_receive
