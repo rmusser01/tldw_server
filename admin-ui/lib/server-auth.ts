@@ -131,6 +131,8 @@ export const appendProxyHeaders = (request: NextRequest, headers: Headers): void
   const passthroughHeaders = [
     'accept',
     'content-type',
+    'idempotency-key',
+    'if-match',
     'if-none-match',
     'if-modified-since',
     'range',

@@ -11,6 +11,11 @@ const mockBuildApiUrlForRequest = vi.fn(
 
 const mockGetBackendAuthHeaders = vi.fn(() => new Headers());
 const mockAppendProxyHeaders = vi.fn((_req: unknown, headers: Headers) => {
+  const request = _req as { headers: Headers };
+  for (const name of ['if-match', 'idempotency-key']) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
   // Real implementation ensures x-request-id is always set
   if (!headers.has('x-request-id')) {
     headers.set('x-request-id', 'test-request-id');
@@ -20,7 +25,12 @@ const mockGetRequestBody = vi.fn(() => Promise.resolve(undefined));
 const mockBuildProxyResponse = vi.fn(async (response: Response) => {
   // Return a lightweight object that mimics NextResponse enough for assertions
   const body = await response.text().catch(() => '');
-  return { __proxy: true, body, status: response.status, headers: new Headers() };
+  return {
+    __proxy: true,
+    body,
+    status: response.status,
+    headers: new Headers(response.headers),
+  };
 });
 
 vi.mock('@/lib/api-config', () => ({
@@ -63,10 +73,11 @@ vi.mock('next/server', () => {
   return {
     NextRequest: MockNextRequest,
     NextResponse: {
-      json: (body: unknown, init?: { status?: number }) => ({
+      json: (body: unknown, init?: { status?: number; headers?: HeadersInit }) => ({
         __errorResponse: true,
         body,
         status: init?.status ?? 200,
+        headers: new Headers(init?.headers),
       }),
     },
   };
@@ -79,8 +90,12 @@ import { NextRequest } from 'next/server';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeRequest(path: string, method = 'GET'): InstanceType<typeof NextRequest> {
-  return new NextRequest(`http://localhost:3000/api/proxy${path}`, { method });
+function makeRequest(
+  path: string,
+  method = 'GET',
+  headers?: HeadersInit,
+): InstanceType<typeof NextRequest> {
+  return new NextRequest(`http://localhost:3000/api/proxy${path}`, { method, headers });
 }
 
 function okResponse(body = '{"ok":true}'): Response {
@@ -98,6 +113,8 @@ describe('Proxy route – forward()', () => {
     originalFetch = globalThis.fetch;
     vi.clearAllMocks();
     vi.useRealTimers();
+    mockGetBackendAuthHeaders.mockReturnValue(new Headers());
+    mockGetRequestBody.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -140,6 +157,91 @@ describe('Proxy route – forward()', () => {
     await GET(req);
 
     expect(mockAppendProxyHeaders).toHaveBeenCalledWith(req, authHeaders);
+  });
+
+  it('forwards conditional command headers without allowing an authorization override', async () => {
+    const cookieAuthHeaders = new Headers({ Authorization: 'Bearer cookie-token' });
+    mockGetBackendAuthHeaders.mockReturnValue(cookieAuthHeaders);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"id":41}', {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        etag: '"admin-webhook-41-r2"',
+        'cache-control': 'no-store',
+        pragma: 'no-cache',
+        'x-request-id': 'backend-request-id',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { PATCH } = await import('@/app/api/proxy/[...path]/route');
+    const result = await PATCH(makeRequest('/admin/webhooks/41', 'PATCH', {
+      authorization: 'Bearer browser-override',
+      'if-match': '"admin-webhook-41-r1"',
+      'idempotency-key': '0123456789abcdef',
+    }));
+
+    const forwarded = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(forwarded.get('authorization')).toBe('Bearer cookie-token');
+    expect(forwarded.get('if-match')).toBe('"admin-webhook-41-r1"');
+    expect(forwarded.get('idempotency-key')).toBe('0123456789abcdef');
+    const responseHeaders = (result as unknown as { headers: Headers }).headers;
+    expect(responseHeaders.get('etag')).toBe('"admin-webhook-41-r2"');
+    expect(responseHeaders.get('cache-control')).toBe('no-store');
+    expect(responseHeaders.get('pragma')).toBe('no-cache');
+    expect(responseHeaders.get('x-request-id')).toBe('test-request-id');
+  });
+
+  it('does not reflect or log webhook request canaries from a backend 422', async () => {
+    const canaries = {
+      url: 'https://receiver.example/private/path?token=url-canary',
+      query: 'query-canary',
+      secret: 'forbidden-secret-canary',
+      etag: 'etag-canary',
+      idempotency: 'idempotency-canary',
+    };
+    mockGetRequestBody.mockResolvedValue(new TextEncoder().encode(JSON.stringify({
+      url: canaries.url,
+      secret: canaries.secret,
+    })).buffer);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: 'admin_webhook_validation_failed',
+        message: 'Webhook request validation failed',
+        request_id: 'test-request-id',
+      },
+    }), {
+      status: 422,
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        pragma: 'no-cache',
+        'x-request-id': 'test-request-id',
+      },
+    })));
+
+    const { POST } = await import('@/app/api/proxy/[...path]/route');
+    const { logger } = await import('@/lib/logger');
+    const result = await POST(makeRequest('/admin/webhooks?probe=query-canary', 'POST', {
+      'if-match': canaries.etag,
+      'idempotency-key': canaries.idempotency,
+    }));
+
+    const serialized = JSON.stringify({
+      body: (result as unknown as { body: string }).body,
+      headers: Object.fromEntries(
+        (result as unknown as { headers: Headers }).headers.entries(),
+      ),
+    });
+    for (const canary of Object.values(canaries)) {
+      expect(serialized).not.toContain(canary);
+    }
+    expect((result as unknown as { headers: Headers }).headers.get('cache-control')).toBe('no-store');
+    expect((result as unknown as { headers: Headers }).headers.get('pragma')).toBe('no-cache');
+    expect((result as unknown as { headers: Headers }).headers.get('x-request-id')).toBe(
+      'test-request-id',
+    );
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   // 3b. x-request-id is set on success response
