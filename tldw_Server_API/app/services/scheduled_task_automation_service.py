@@ -11,6 +11,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas import (
+    ScheduledTaskRunNowResponse,
     ScheduledTaskActionCapability,
     ScheduledTaskAuditEventResponse,
     ScheduledTaskAuditListResponse,
@@ -169,19 +170,50 @@ class ScheduledTaskAutomationService:
         self._schema_ready_keys: set[tuple[int, str]] = set()
 
     def get_capabilities(self) -> ScheduledTaskAutomationCapabilitiesResponse:
-        """Return Phase 4B capabilities without exposing execution support."""
+        """Return capabilities with honest per-family execution truth.
+
+        Since TASK-13020/13021, definitions execute server-side through
+        the Jobs pipeline (scheduler feed + agent_task consumer) in
+        generation-only phase 1: recurring_question runs execute; agent_task
+        runs execute generation-only; tools are explicitly NOT executable
+        pending the approval-escalation design. The ``run_now`` action is
+        available on both families (TASK-13022).
+        """
+        def _execution_actions(tools_reason: str) -> dict[str, ScheduledTaskActionCapability]:
+            actions = self._definition_actions()
+            actions["run_now"] = ScheduledTaskActionCapability(
+                status="available",
+                required_permissions=[TASKS_CONTROL],
+            )
+            actions["execute"] = ScheduledTaskActionCapability(
+                status="available",
+                reason="phase1_generation_only",
+                required_permissions=[TASKS_CONTROL],
+            )
+            actions["execute_tools"] = ScheduledTaskActionCapability(
+                status="planned",
+                reason=tools_reason,
+                required_permissions=[TASKS_CONTROL],
+            )
+            return actions
+
         return ScheduledTaskAutomationCapabilitiesResponse(
             items=[
                 ScheduledTaskAutomationCapability(
                     family="recurring_question",
                     family_availability="available",
-                    actions=self._definition_actions(),
+                    actions=_execution_actions(
+                        "recurring_question has no tool surface; tools are not applicable"
+                    ),
                     related_capabilities={"rag": {"status": "not_checked"}},
                 ),
                 ScheduledTaskAutomationCapability(
                     family="agent_task",
                     family_availability="available",
-                    actions=self._definition_actions(),
+                    actions=_execution_actions(
+                        "tool-using agent tasks are not executable until the "
+                        "approval-escalation design lands"
+                    ),
                     related_capabilities={"acp": {"status": "not_checked"}},
                 ),
             ]
@@ -445,6 +477,102 @@ class ScheduledTaskAutomationService:
                 idempotency_key=idempotency_key,
                 request_id=request_id,
             ),
+        )
+
+
+    def run_now(
+        self,
+        *,
+        owner_id: int,
+        actor: str,
+        definition_id: str,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+    ) -> ScheduledTaskRunNowResponse:
+        """Trigger one immediate execution through the standard Jobs path.
+
+        A manual run is a REAL dispatch (tldw_chatbook ADR-077 decision 7 /
+        TASK-13022): the same ``agent_task_run`` Jobs pipeline the feed
+        enqueues into, with the same idempotency-key semantics -- a manual
+        run colliding with a scheduled run of the same slot dedupes
+        exactly like a redelivered Job. The manual slot is "now",
+        second-truncated UTC; a repeat trigger inside the same second
+        returns the existing job (``deduped=True``).
+
+        Lifecycle refusals reuse the transition error codes: archived
+        definitions refuse ``definition_archived``; admin/security-locked
+        disabled definitions refuse ``definition_disabled_locked``; paused
+        or unlocked-disabled definitions refuse ``definition_paused`` /
+        ``definition_disabled`` (a manual trigger must not silently
+        resurrect a definition the owner paused).
+        """
+        from datetime import datetime, timezone as _tz
+
+        from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+        repo = self._repo(owner_id)
+        definition = repo.get_definition(owner_id=owner_id, definition_id=definition_id)
+        if definition is None:
+            raise ScheduledTaskAutomationError("definition_not_found")
+        if definition.lifecycle == "archived":
+            raise ScheduledTaskAutomationError("definition_archived")
+        if definition.lifecycle == "disabled" and definition.disabled_lock_kind in {
+            "admin",
+            "security",
+        }:
+            raise ScheduledTaskAutomationError("definition_disabled_locked")
+        if definition.lifecycle == "paused":
+            raise ScheduledTaskAutomationError("definition_paused")
+        if definition.lifecycle == "disabled":
+            raise ScheduledTaskAutomationError("definition_disabled")
+
+        run_slot_utc = (
+            datetime.now(_tz.utc).replace(microsecond=0).isoformat()
+        )
+        payload = {
+            "definition_id": definition.id,
+            "user_id": owner_id,
+            "family": definition.family,
+            "scheduled_for": run_slot_utc,
+            "manual": True,
+        }
+        idem = f"definition:{definition.id}:{run_slot_utc}"
+        jm = JobManager()
+        job = jm.create_job(
+            domain="scheduled_tasks",
+            job_type="agent_task_run",
+            payload=payload,
+            owner_user_id=owner_id,
+            idempotency_key=idem,
+        )
+        deduped = bool(job.get("deduped")) if isinstance(job, dict) else False
+
+        try:
+            repo.create_audit_event(
+                owner_id=owner_id,
+                definition_id=definition.id,
+                event_type="definition.run_now",
+                actor=actor,
+                summary=f"Manual run triggered (slot {run_slot_utc})",
+                before=None,
+                after={"run_slot_utc": run_slot_utc, "job_id": (job or {}).get("id")},
+                request_id=request_id,
+                idempotency_key=idempotency_key,
+            )
+        except Exception:  # noqa: BLE001 - audit failure must not fail the trigger
+            from loguru import logger as _logger
+
+            _logger.exception(
+                "run_now audit failed",
+                definition_id=definition_id,
+                owner_id=owner_id,
+            )
+
+        return ScheduledTaskRunNowResponse(
+            definition_id=definition.id,
+            run_slot_utc=run_slot_utc,
+            job_id=(job or {}).get("id") if isinstance(job, dict) else None,
+            deduped=deduped,
         )
 
     def duplicate_definition(
