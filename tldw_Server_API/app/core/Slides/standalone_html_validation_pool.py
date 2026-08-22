@@ -131,6 +131,10 @@ _BUDGET_REASONS = frozenset(
 )
 _INVALID_REASONS = _SAFE_REASONS - _BUDGET_REASONS
 _LOCATION_REASONS = frozenset({"css_parse_error", "html_parse_error"})
+STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY = "_server_standalone_html_validation_pool"
+VALIDATION_POOL_ATTR = "standalone_html_validation_pool"
+VALIDATION_POOL_LOCK_ATTR = "standalone_html_validation_pool_lock"
+VALIDATION_POOL_WORKER_OWNED_ATTR = "standalone_html_validation_pool_worker_owned"
 
 
 def _validator_worker_main(
@@ -1058,4 +1062,31 @@ class StandaloneHtmlValidationPool:
                 raise asyncio.CancelledError
 
 
-__all__ = ["GenerationValidationReservation", "StandaloneHtmlValidationPool"]
+async def get_app_standalone_html_validation_pool(app: Any) -> StandaloneHtmlValidationPool:
+    """Return the lifecycle-owned validation pool stored on an ASGI app."""
+
+    state = app.state
+    pool = getattr(state, VALIDATION_POOL_ATTR, None)
+    if pool is not None:
+        return pool
+    lock = getattr(state, VALIDATION_POOL_LOCK_ATTR, None)
+    if lock is None:
+        lock = asyncio.Lock()
+        setattr(state, VALIDATION_POOL_LOCK_ATTR, lock)
+    async with lock:
+        pool = getattr(state, VALIDATION_POOL_ATTR, None)
+        if pool is None:
+            pool = StandaloneHtmlValidationPool()
+            setattr(state, VALIDATION_POOL_ATTR, pool)
+        return pool
+
+
+__all__ = [
+    "GenerationValidationReservation",
+    "STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY",
+    "StandaloneHtmlValidationPool",
+    "VALIDATION_POOL_ATTR",
+    "VALIDATION_POOL_LOCK_ATTR",
+    "VALIDATION_POOL_WORKER_OWNED_ATTR",
+    "get_app_standalone_html_validation_pool",
+]

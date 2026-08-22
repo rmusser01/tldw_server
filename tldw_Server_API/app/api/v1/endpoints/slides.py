@@ -139,7 +139,11 @@ from tldw_Server_API.app.core.Slides.standalone_html_contracts import (
     StandaloneHtmlValidationError,
 )
 from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
+    VALIDATION_POOL_ATTR,
+    VALIDATION_POOL_LOCK_ATTR,
+    VALIDATION_POOL_WORKER_OWNED_ATTR,
     StandaloneHtmlValidationPool,
+    get_app_standalone_html_validation_pool,
 )
 from tldw_Server_API.app.core.Slides.visual_style_resolver import (
     ResolvedBuiltinVisualStyle,
@@ -151,9 +155,9 @@ from tldw_Server_API.app.core.Slides.visual_styles import (
 )
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 
-_VALIDATION_POOL_ATTR = "standalone_html_validation_pool"
-_VALIDATION_POOL_LOCK_ATTR = "standalone_html_validation_pool_lock"
-_VALIDATION_POOL_WORKER_OWNED_ATTR = "standalone_html_validation_pool_worker_owned"
+_VALIDATION_POOL_ATTR = VALIDATION_POOL_ATTR
+_VALIDATION_POOL_LOCK_ATTR = VALIDATION_POOL_LOCK_ATTR
+_VALIDATION_POOL_WORKER_OWNED_ATTR = VALIDATION_POOL_WORKER_OWNED_ATTR
 
 
 class _SlidesRoute(APIRoute):
@@ -385,20 +389,7 @@ def _map_precondition_conflict(exc: ConflictError) -> HTTPException:
 
 async def _get_standalone_html_validation_pool(request: Request) -> StandaloneHtmlValidationPool:
     """Return the app-owned pool shared with the Task 8 generation worker."""
-    state = request.app.state
-    pool = getattr(state, _VALIDATION_POOL_ATTR, None)
-    if pool is not None:
-        return pool
-    lock = getattr(state, _VALIDATION_POOL_LOCK_ATTR, None)
-    if lock is None:
-        lock = asyncio.Lock()
-        setattr(state, _VALIDATION_POOL_LOCK_ATTR, lock)
-    async with lock:
-        pool = getattr(state, _VALIDATION_POOL_ATTR, None)
-        if pool is None:
-            pool = StandaloneHtmlValidationPool()
-            setattr(state, _VALIDATION_POOL_ATTR, pool)
-        return pool
+    return await get_app_standalone_html_validation_pool(request.app)
 
 
 def _slides_jobs_manager() -> JobManager:

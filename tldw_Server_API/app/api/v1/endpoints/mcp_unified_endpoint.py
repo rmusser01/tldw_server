@@ -73,6 +73,10 @@ from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
     standalone_request_validation_response,
 )
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
+from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
+    STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
+    get_app_standalone_html_validation_pool,
+)
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.services import admin_tool_catalog_service
 
@@ -716,6 +720,10 @@ async def _attach_api_key_metadata(
 
     _attach_rg_ingress_metadata(metadata, http_request)
     _attach_workspace_ingress_metadata(metadata, http_request)
+    if http_request is not None:
+        app = http_request.scope.get("app")
+        if app is not None:
+            metadata[STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY] = await get_app_standalone_html_validation_pool(app)
     return metadata
 
 
@@ -928,6 +936,7 @@ async def websocket_endpoint(
         await server.initialize()
 
     # Handle WebSocket connection
+    validation_pool = await get_app_standalone_html_validation_pool(websocket.app)
     await server.handle_websocket(
         websocket,
         client_id=_normalize_optional_text(client_id),
@@ -936,6 +945,9 @@ async def websocket_endpoint(
         mcp_session_id=_normalize_optional_text(mcp_session_id),
         workspace_id=_normalize_optional_text(workspace_id),
         cwd=_normalize_optional_text(cwd),
+        runtime_metadata={
+            STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY: validation_pool,
+        },
     )
 
 
@@ -1098,9 +1110,8 @@ async def mcp_request_batch(
 
     # If any initialize request is present and no session id was provided, generate one.
     try:
-        if (
-            not mcp_session_id
-            and any(isinstance(item, dict) and item.get("method") == "initialize" for item in payload)
+        if not mcp_session_id and any(
+            isinstance(item, dict) and item.get("method") == "initialize" for item in payload
         ):
             import uuid as _uuid
 
@@ -2017,9 +2028,7 @@ async def check_mcp_connection(
     except HTTPException:
         raise
     except Exception:
-        logger.opt(exception=True).warning(
-            "MCP connection test failed for {}", catalog_probe_url
-        )
+        logger.opt(exception=True).warning("MCP connection test failed for {}", catalog_probe_url)
         return MCPConnectionTestResponse(reachable=False, error="Connection failed")
 
 

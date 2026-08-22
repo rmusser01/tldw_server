@@ -1971,6 +1971,8 @@ class MCPProtocol:
                 for tool in module_tools:
                     tool_copy = tool.copy()
                     name = tool_copy.get("name")
+                    if isinstance(name, str) and name.startswith("slides.") and not self._slides_tools_allowed(context):
+                        continue
                     if isinstance(name, str) and name.strip():
                         try:
                             tool_copy = ensure_tool_definition_eval_metadata(tool_copy)

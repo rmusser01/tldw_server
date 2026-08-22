@@ -23,6 +23,9 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_user_profile_mode
+from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
+    STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
+)
 
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config, get_config_warnings, validate_config
@@ -1441,6 +1444,7 @@ class MCPServer:
         mcp_session_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
         cwd: Optional[str] = None,
+        runtime_metadata: Optional[dict[str, Any]] = None,
     ):
         """
         Handle a WebSocket connection.
@@ -1467,6 +1471,14 @@ class MCPServer:
         metadata = _websocket_transport_metadata(
             scope if isinstance(scope, dict) else {}
         )
+        if isinstance(runtime_metadata, dict):
+            validation_pool = runtime_metadata.get(
+                STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY
+            )
+            if validation_pool is not None:
+                metadata[
+                    STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY
+                ] = validation_pool
         if user_id is not None:
             principal = getattr(websocket_state, "auth_principal", None)
             metadata["auth_via"] = "single_user_session"
