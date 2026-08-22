@@ -245,6 +245,32 @@ describe("sharedWorkspacesApi", () => {
     })
   })
 
+  it("preserves an allowed server chat action when generation is unavailable", async () => {
+    fetchWithTldwAuth.mockResolvedValue(
+      jsonResponse(
+        bootstrapPayload({
+          provider: null,
+          model: null,
+          ready: false,
+          reason_code: "no_provider_configured"
+        })
+      )
+    )
+
+    const result = await sharedWorkspacesApi.bootstrap(42)
+
+    expect(result.generation_default).toEqual({
+      provider: null,
+      model: null,
+      ready: false,
+      reason_code: "no_provider_configured"
+    })
+    expect(result.allowed_actions.ask_grounded_questions).toEqual({
+      allowed: true,
+      reason_code: null
+    })
+  })
+
   it("rejects malformed typed envelopes instead of asserting their shape", async () => {
     fetchWithTldwAuth.mockResolvedValue(
       jsonResponse({ items: [], pagination: null, summary: {}, partial_errors: [] })

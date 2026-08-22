@@ -85,8 +85,12 @@ describe("SharedResearchWorkspace recipient surface", () => {
       await screen.findByRole("heading", { name: "Election evidence review" })
     ).toBeInTheDocument()
     expect(screen.getByText("Shared by Avery Owner")).toBeInTheDocument()
-    expect(screen.getByText("Can ask questions")).toBeInTheDocument()
-    fireEvent.mouseOver(screen.getByText("Can ask questions"))
+    expect(
+      screen.getByLabelText("Shared workspace capabilities")
+    ).toHaveTextContent("Can ask questions")
+    const tier = screen.getByLabelText("Access tier: view_chat_add")
+    expect(tier).toHaveTextContent("view_chat_add")
+    fireEvent.mouseOver(tier)
     expect(
       await screen.findByText(
         "This access level is the owner's policy ceiling. Editing shared content is not available here yet."
@@ -153,11 +157,26 @@ describe("SharedResearchWorkspace recipient surface", () => {
     expect(screen.getByRole("button", { name: "Ask shared workspace" })).toBeEnabled()
   })
 
-  it("treats server allowed_actions as the chat authority", async () => {
+  it("keeps a literal view tier separate from an allowed chat capability", async () => {
     const bootstrap = buildBootstrap()
     api.bootstrap.mockResolvedValue({
       ...bootstrap,
-      share: { ...bootstrap.share, access_level: "view" },
+      share: { ...bootstrap.share, access_level: "view" }
+    })
+
+    renderWorkspace()
+
+    expect(
+      await screen.findByLabelText("Shared workspace capabilities")
+    ).toHaveTextContent("Can ask questions")
+    expect(screen.getByLabelText("Access tier: view")).toHaveTextContent("view")
+  })
+
+  it("treats server allowed_actions and its reason as the chat authority", async () => {
+    const bootstrap = buildBootstrap()
+    api.bootstrap.mockResolvedValue({
+      ...bootstrap,
+      share: { ...bootstrap.share, access_level: "full_edit" },
       allowed_actions: {
         ...bootstrap.allowed_actions,
         ask_grounded_questions: {
@@ -167,7 +186,12 @@ describe("SharedResearchWorkspace recipient surface", () => {
       }
     })
     renderWorkspace()
-    await screen.findByText("View only")
+    expect(
+      await screen.findByLabelText("Shared workspace capabilities")
+    ).toHaveTextContent("View only: share read only")
+    expect(screen.getByLabelText("Access tier: full_edit")).toHaveTextContent(
+      "full_edit"
+    )
 
     fireEvent.change(screen.getByLabelText("Ask about shared sources"), {
       target: { value: "This must remain local" }
@@ -204,7 +228,11 @@ describe("SharedResearchWorkspace recipient surface", () => {
     })
     renderWorkspace()
 
-    expect(await screen.findByText("Access restricted")).toBeInTheDocument()
+    expect(
+      await screen.findByLabelText("Shared workspace capabilities")
+    ).toHaveTextContent(
+      "Access restricted: workspace inspection disabled"
+    )
     expect(screen.queryByText("Can ask questions")).not.toBeInTheDocument()
     expect(screen.getByText("workspace inspection disabled")).toBeInTheDocument()
     expect(screen.getByText("no provider configured")).toBeInTheDocument()
@@ -278,8 +306,10 @@ describe("SharedResearchWorkspace recipient surface", () => {
   it("seeds the exact server default, persists a turn, and opens citation evidence", async () => {
     renderWorkspace()
 
-    expect(await screen.findByTestId("model-selector")).toHaveTextContent(
-      "Anthropic / claude-shared"
+    await waitFor(() =>
+      expect(screen.getByTestId("model-selector")).toHaveTextContent(
+        "Anthropic / claude-shared"
+      )
     )
     expect(fetchChatModels).toHaveBeenCalledWith({ returnEmpty: true })
 

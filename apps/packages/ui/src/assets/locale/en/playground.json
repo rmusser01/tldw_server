@@ -13,6 +13,8 @@
     "back": "Back to Shared with me",
     "sharedBy": "Shared by {{owner}}",
     "accessTooltip": "This access level is the owner's policy ceiling. Editing shared content is not available here yet.",
+    "accessTierLabel": "Access tier: {{tier}}",
+    "capabilitiesLabel": "Shared workspace capabilities",
     "readOnlyTooltip": "This shared workspace is available for reading and source preview only.",
     "viewOnly": "View only",
     "accessRestricted": "Access restricted",

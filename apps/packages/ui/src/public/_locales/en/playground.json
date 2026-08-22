@@ -20,6 +20,12 @@
   "sharedWorkspace_accessTooltip": {
     "message": "This access level is the owner's policy ceiling. Editing shared content is not available here yet."
   },
+  "sharedWorkspace_accessTierLabel": {
+    "message": "Access tier: {{tier}}"
+  },
+  "sharedWorkspace_capabilitiesLabel": {
+    "message": "Shared workspace capabilities"
+  },
   "sharedWorkspace_readOnlyTooltip": {
     "message": "This shared workspace is available for reading and source preview only."
   },

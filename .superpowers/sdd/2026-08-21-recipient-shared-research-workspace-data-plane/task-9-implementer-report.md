@@ -194,3 +194,86 @@ Browser-check diagnostics were bounded to three attempts: the first found no Pla
 - The two English locale formats remain value-equivalent under the canonical mirror test.
 - The two unrelated untracked watchlist templates remain untouched and unstaged.
 - The 13 untouched local-workspace baseline failures remain outside Task 9. Task 11 still owns real-backend/provider UAT; this round deliberately adds only deterministic focused CDP behavior evidence.
+
+## Fix Round 2/5 - Preserve server action authority
+
+Reviewed head: `07b17d50efca82b1a84d679eccfeb7d41616710b`.
+
+### Blocking findings addressed
+
+- Removed the bootstrap parser's post-parse rewrite of `ask_grounded_questions`. Strictly parsed `allowed_actions` are now returned verbatim even when `generation_default.ready` is false. The chat composer independently requires both `ask_grounded_questions.allowed` and `generation_default.ready === true`, so readiness remains fail closed without becoming authorization.
+- Removed every `access_level` capability branch from `SharedWorkspaceHeader`. The header derives capability text and denial reason only from `allowed_actions`; it renders `access_level` literally as a compact policy-ceiling tier with the exact approved tooltip.
+- Added semantic labels that separate the capability statement from the tier metadata, and kept the two English locale representations value-equivalent through the canonical mirror test.
+
+### TDD evidence
+
+Covering test files:
+
+- `src/services/tldw/domains/__tests__/shared-workspaces.test.ts`
+- `src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx`
+- `src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.accessibility.test.tsx`
+- `src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.responsive.test.tsx`
+- `src/components/Option/ResearchWorkspace/__tests__/shared-research-workspace-reducer.test.ts`
+- `src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspaceRouteGate.test.tsx`
+- `src/components/Option/ResearchWorkspace/__tests__/research-workspace-route-state.test.ts`
+- `src/components/Option/Playground/__tests__/playground-locale-mirror.test.ts`
+
+Initial RED command:
+
+```text
+cd apps/packages/ui && bunx vitest run src/services/tldw/domains/__tests__/shared-workspaces.test.ts src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx --maxWorkers=1 --no-file-parallelism
+```
+
+Result: 2 failed files; 4 failed and 25 passed. The real bootstrap client changed the server's allowed ask action to `{ allowed: false, reason_code: "no_provider_configured" }`; the header lacked separate capability/tier semantics and still inferred capability copy from the tier.
+
+After the production changes, the same command passed 2 files/29 tests. One intermediate run had 28 passing tests and one obsolete badge assertion, which was updated to assert the action-derived capability line and literal tier independently.
+
+Final amended client/header/UI plus locale command:
+
+```text
+cd apps/packages/ui && bunx vitest run src/services/tldw/domains/__tests__/shared-workspaces.test.ts src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx src/components/Option/Playground/__tests__/playground-locale-mirror.test.ts --maxWorkers=1 --no-file-parallelism
+```
+
+Result: 3 files/31 tests passed.
+
+Exact Task 9 UI command:
+
+```text
+cd apps/packages/ui && bunx vitest run src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.accessibility.test.tsx src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.responsive.test.tsx --maxWorkers=1 --no-file-parallelism
+```
+
+The first post-refactor run exposed an existing asynchronous model-label assertion race: 1 failed and 23 passed. The assertion now waits for the controller's seeded default without changing product behavior. Final result: 3 files/24 tests passed.
+
+Affected Task 8 controller and route regression command:
+
+```text
+cd apps/packages/ui && bunx vitest run src/components/Option/ResearchWorkspace/__tests__/shared-research-workspace-reducer.test.ts src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspaceRouteGate.test.tsx src/components/Option/ResearchWorkspace/__tests__/research-workspace-route-state.test.ts --maxWorkers=1 --no-file-parallelism
+```
+
+Result: 3 files/55 tests passed. An initial attempt used a non-existent route-state filename and encountered the read-only sandbox's temporary-directory `EPERM`; no tests were collected. The corrected command above was rerun with the required filesystem permission and passed.
+
+### Lint, type, and structural evidence
+
+Focused ESLint command:
+
+```text
+cd apps/packages/ui && ../../tldw-frontend/node_modules/.bin/eslint --config ../../tldw-frontend/eslint.config.mjs src/services/tldw/domains/shared-workspaces.ts src/services/tldw/domains/__tests__/shared-workspaces.test.ts src/components/Option/ResearchWorkspace/SharedResearchWorkspace/SharedWorkspaceHeader.tsx src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx
+```
+
+Result: exit 0 with only the package's existing Next pages-directory notice.
+
+Package TypeScript command:
+
+```text
+cd apps/packages/ui && NODE_OPTIONS=--max-old-space-size=8192 bunx tsc -p tsconfig.json --noEmit --pretty false
+```
+
+Result: exit 2 with the repository's existing unrelated diagnostics. Filtering the same complete output for `SharedWorkspaceHeader`, `SharedResearchWorkspace.test`, and the changed shared-workspace service/test paths returned no matches.
+
+Structural authority guards returned no matches for header `access_level` comparisons/capability tooltip copy or parser assignments coupling `allowedActions` to `generationDefault`. A positive guard found the independent composer requirements on adjacent lines: server ask permission and `generationDefault?.ready === true`. `git diff --check` passed. Bandit is not applicable because this round changes frontend TypeScript/TSX, JSON locale data, tests, and tracking documentation only.
+
+### Scope and concerns
+
+- The server-projected action remains the sole authorization authority; provider/model readiness is only an independent submission prerequisite.
+- The two unrelated untracked watchlist templates remain untouched and unstaged.
+- Repository-wide TypeScript baseline diagnostics remain outside this change. Task 11 still owns live-backend UAT.

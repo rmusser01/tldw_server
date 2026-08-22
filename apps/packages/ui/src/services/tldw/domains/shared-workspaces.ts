@@ -279,11 +279,6 @@ const parseBootstrap = (value: unknown): SharedWorkspaceBootstrap => {
     item.generation_default
   )
   const allowedActions = parseActions(item.allowed_actions)
-  if (!generationDefault.ready) {
-    allowedActions.ask_grounded_questions = deniedAction(
-      generationDefault.reason_code
-    )
-  }
   return {
     schema_version: 1,
     generated_at: string(item.generated_at, 64),

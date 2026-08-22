@@ -1,12 +1,13 @@
 import React from "react"
 import { Link } from "react-router-dom"
 import { Tooltip } from "antd"
-import { ArrowLeft, MessageSquareText } from "lucide-react"
+import { ArrowLeft, ShieldCheck } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type {
   SharedAllowedActions,
   SharedWorkspaceBootstrap
 } from "@/types/shared-workspace"
+import { formatSharedActionReason } from "./shared-action-reason"
 
 type SharedWorkspaceHeaderProps = {
   bootstrap: SharedWorkspaceBootstrap
@@ -20,23 +21,23 @@ export const SharedWorkspaceHeader: React.FC<SharedWorkspaceHeaderProps> = ({
   headingRef
 }) => {
   const { t } = useTranslation("playground")
-  const grantedTierExplainsCeiling =
-    bootstrap.share.access_level === "view_chat_add" ||
-    bootstrap.share.access_level === "full_edit"
-  const tooltip = grantedTierExplainsCeiling
-    ? t(
-        "sharedWorkspace.accessTooltip",
-        "This access level is the owner's policy ceiling. Editing shared content is not available here yet."
-      )
-    : t(
-        "sharedWorkspace.readOnlyTooltip",
-        "This shared workspace is available for reading and source preview only."
-      )
-  const accessLabel = allowedActions.ask_grounded_questions.allowed
+  const capabilityLabel = allowedActions.ask_grounded_questions.allowed
     ? t("sharedWorkspace.canAsk", "Can ask questions")
     : allowedActions.inspect_sources.allowed
       ? t("sharedWorkspace.viewOnly", "View only")
       : t("sharedWorkspace.accessRestricted", "Access restricted")
+  const capabilityReason = allowedActions.ask_grounded_questions.allowed
+    ? null
+    : formatSharedActionReason(
+        allowedActions.inspect_sources.allowed
+          ? allowedActions.ask_grounded_questions.reason_code
+          : allowedActions.inspect_sources.reason_code ??
+              allowedActions.ask_grounded_questions.reason_code
+      )
+  const capabilityCopy = capabilityReason
+    ? `${capabilityLabel}: ${capabilityReason}`
+    : capabilityLabel
+  const accessTier = bootstrap.share.access_level
 
   return (
     <header className="flex min-h-[3.75rem] min-w-0 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 py-2 sm:px-4">
@@ -58,21 +59,39 @@ export const SharedWorkspaceHeader: React.FC<SharedWorkspaceHeaderProps> = ({
           {bootstrap.workspace.name}
         </h1>
         <p className="truncate text-xs text-text-muted">
-          {t("sharedWorkspace.sharedBy", "Shared by {{owner}}", {
-            owner: bootstrap.share.owner_display_name
-          })}
+          <span>
+            {t("sharedWorkspace.sharedBy", "Shared by {{owner}}", {
+              owner: bootstrap.share.owner_display_name
+            })}
+          </span>
+          <span aria-hidden="true"> · </span>
+          <span
+            aria-label={t(
+              "sharedWorkspace.capabilitiesLabel",
+              "Shared workspace capabilities"
+            )}
+          >
+            {capabilityCopy}
+          </span>
         </p>
       </div>
-      <Tooltip title={tooltip}>
+      <Tooltip
+        title={t(
+          "sharedWorkspace.accessTooltip",
+          "This access level is the owner's policy ceiling. Editing shared content is not available here yet."
+        )}
+      >
         <span
           tabIndex={0}
-          aria-label={accessLabel}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface2 px-2.5 text-xs font-medium text-text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          aria-label={t(
+            "sharedWorkspace.accessTierLabel",
+            "Access tier: {{tier}}",
+            { tier: accessTier }
+          )}
+          className="inline-flex h-8 max-w-32 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface2 px-2.5 text-xs font-medium text-text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
-          <MessageSquareText className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">
-            {accessLabel}
-          </span>
+          <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="truncate">{accessTier}</span>
         </span>
       </Tooltip>
     </header>
