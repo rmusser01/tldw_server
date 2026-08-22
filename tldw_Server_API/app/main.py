@@ -2397,8 +2397,18 @@ from tldw_Server_API.app.core.config import (
     should_disable_cors,
 )
 
-# FIXME - CORS
+# Starlette wraps later middleware around earlier middleware. Register LLM
+# budget first so receive-time admission runs before its JSON body parsing.
+from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
+
+try:
+    app.add_middleware(LLMBudgetMiddleware)
+except _STARTUP_GUARD_EXCEPTIONS as _e:
+    logger.debug(f"Skipping LLMBudgetMiddleware: {_e}")
+
 app.add_middleware(StandaloneHtmlRequestGuardMiddleware)
+
+# FIXME - CORS
 if should_disable_cors():
     logger.warning("CORS middleware disabled via configuration/ENV flag.")
 else:
@@ -2523,7 +2533,6 @@ except _STARTUP_GUARD_EXCEPTIONS as _csrf_e:
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 # Security middleware (headers + request size limit)
-from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
 from tldw_Server_API.app.core.AuthNZ.usage_logging_middleware import UsageLoggingMiddleware
 from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware
 from tldw_Server_API.app.core.Sandbox.middleware import SandboxArtifactTraversalGuardMiddleware
@@ -2721,12 +2730,6 @@ else:
             pass
         return response
 
-
-# Always apply LLM budget middleware (guarded by settings) even in tests so allowlists/budgets are enforced
-try:
-    app.add_middleware(LLMBudgetMiddleware)
-except _STARTUP_GUARD_EXCEPTIONS as _e:
-    logger.debug(f"Skipping LLMBudgetMiddleware: {_e}")
 
 # Request ID context should be available before the drain gate, and the drain gate
 # should reject work before the LLM budget middleware gets a chance to do heavier setup.

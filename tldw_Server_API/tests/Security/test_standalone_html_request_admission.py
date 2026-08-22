@@ -396,6 +396,50 @@ def test_generic_guard_rejects_before_forbidden_value_chunk_is_replayed_and_drai
     assert secret not in b"".join(message.get("body", b"") for message in sent)
 
 
+def test_generic_guard_withholds_split_forbidden_content_kind_value_from_downstream() -> None:
+    path = "/api/v1/slides/presentations"
+    prefix = b'{"content_kind":'
+    forbidden_prefix = b'"standalone_'
+    events = _request_events(prefix, forbidden_prefix, b'html","title":"deck"}')
+
+    delivered, sent, pending = asyncio.run(_invoke(path, events))
+
+    assert _status_and_body(sent) == (409, b'{"detail":"standalone_html_creation_requires_generation"}')
+    delivered_body = b"".join(event.get("body", b"") for event in delivered)
+    assert forbidden_prefix not in delivered_body
+    assert pending == []
+
+
+def test_generic_guard_withholds_one_byte_content_kind_fragments_until_decided() -> None:
+    path = "/api/v1/slides/presentations"
+    prefix = b'{"content_kind":'
+    forbidden_value = b'"standalone_html"'
+    events = _request_events(
+        prefix,
+        *(bytes([byte]) for byte in forbidden_value),
+        b"}",
+    )
+
+    delivered, sent, pending = asyncio.run(_invoke(path, events))
+
+    assert _status_and_body(sent) == (409, b'{"detail":"standalone_html_creation_requires_generation"}')
+    delivered_body = b"".join(event.get("body", b"") for event in delivered)
+    assert delivered_body == prefix
+    assert pending == []
+
+
+def test_generic_guard_replays_one_byte_allowed_content_kind_with_exact_bytes() -> None:
+    path = "/api/v1/slides/presentations"
+    body = b'{"content_kind":"structured_slides","slides":[]}'
+    events = _request_events(*(bytes([byte]) for byte in body))
+
+    delivered, sent, pending = asyncio.run(_invoke(path, events))
+
+    assert _status_and_body(sent)[0] == 200
+    assert b"".join(event.get("body", b"") for event in delivered) == body
+    assert pending == []
+
+
 def test_generic_guard_preserves_receive_error_and_has_no_spool_to_clean() -> None:
     path = "/api/v1/slides/presentations"
     scope = _scope(path)
