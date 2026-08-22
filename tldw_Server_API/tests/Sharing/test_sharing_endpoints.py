@@ -136,6 +136,69 @@ async def test_shared_with_me_workspace_name_preload_log_is_sanitized(
 
 
 @pytest.mark.asyncio
+async def test_shared_with_me_uses_authoritative_active_share_listing(
+    test_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    events: list[str] = []
+
+    class _Repo:
+        async def list_active_shares_for_user(self, user_id: int):
+            events.append(f"list:{user_id}")
+            return [
+                {
+                    "id": 44,
+                    "workspace_id": "authoritative-workspace",
+                    "owner_user_id": 2,
+                    "access_level": "view_chat",
+                    "allow_clone": False,
+                    "created_at": "2026-08-20T18:00:00+00:00",
+                }
+            ]
+
+        async def list_shares_for_scope(self, *_args, **_kwargs):
+            raise AssertionError("claim-loop discovery must not be used")
+
+    class _OwnerDb:
+        def get_workspace(self, workspace_id: str):
+            events.append(f"workspace:{workspace_id}")
+            return {"name": "Authoritative workspace"}
+
+    async def _owner_db(owner_user_id: int):
+        events.append(f"owner-db:{owner_user_id}")
+        return _OwnerDb()
+
+    monkeypatch.setattr(sharing, "_get_repo", lambda: _Repo())
+    monkeypatch.setattr(chacha_deps, "get_chacha_db_for_owner", _owner_db)
+
+    response = await sharing.shared_with_me(user=test_user)
+
+    assert response.model_dump(mode="json") == {
+        "items": [
+            {
+                "share_id": 44,
+                "workspace_id": "authoritative-workspace",
+                "workspace_name": "Authoritative workspace",
+                "owner_user_id": 2,
+                "owner_username": None,
+                "access_level": "view_chat",
+                "allow_clone": False,
+                "shared_at": "2026-08-20T18:00:00+00:00",
+            }
+        ],
+        "total": 1,
+    }
+    assert events == [
+        "list:1",
+        "owner-db:2",
+        "workspace:authoritative-workspace",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_verify_chatbook_ownership_uses_storage_user_id_for_numeric_users(monkeypatch):
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
     from tldw_Server_API.app.api.v1.endpoints import sharing
@@ -607,14 +670,71 @@ class TestSharedWithMe:
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
 
-    def test_get_shared_workspace(self, client, mock_repo):
+    def test_get_shared_workspace(self, client, mock_repo, monkeypatch):
         create = client.post("/api/v1/sharing/workspaces/ws-view/share", json={
             "share_scope_type": "team",
             "share_scope_id": 10,
         })
         share_id = create.json()["id"]
+
+        class _AccessService:
+            async def resolve(self, *, share_id: int, recipient_user_id: int):
+                return SimpleNamespace(
+                    share_id=share_id,
+                    workspace_id="ws-view",
+                    owner_user_id=2,
+                    recipient_user_id=recipient_user_id,
+                    access_level="view_chat",
+                    allow_clone=False,
+                    owner_display_name="Workspace owner",
+                    shared_at="2026-08-21T12:00:00+00:00",
+                    workspace={"name": "Shared workspace", "description": ""},
+                    policy_actions={
+                        "inspect_sources": {"allowed": True, "reason_code": None},
+                        "ask_grounded_questions": {"allowed": True, "reason_code": None},
+                        "add_sources": {
+                            "allowed": False,
+                            "reason_code": "shared_write_not_available",
+                        },
+                        "edit_workspace": {
+                            "allowed": False,
+                            "reason_code": "shared_write_not_available",
+                        },
+                        "clone_workspace": {
+                            "allowed": False,
+                            "reason_code": "clone_deferred",
+                        },
+                    },
+                )
+
+        async def _sources(_context):
+            return []
+
+        async def _projection(_context, _sources):
+            return {
+                "sources": [],
+                "summary": {"total": 0, "queryable": 0, "processing": 0, "failed": 0},
+                "partial_errors": [],
+            }
+
+        async def _history(_context, *, before, limit):
+            assert before is None
+            assert limit == 30
+            raise RuntimeError("empty test history")
+
+        client.app.dependency_overrides[
+            sharing_endpoints.get_shared_workspace_access_service
+        ] = lambda: _AccessService()
+        monkeypatch.setattr(sharing_endpoints, "_load_recipient_workspace_sources", _sources)
+        monkeypatch.setattr(sharing_endpoints, "_project_recipient_source_status", _projection)
+        monkeypatch.setattr(sharing_endpoints, "_load_recipient_chat_history", _history)
         resp = client.get(f"/api/v1/sharing/shared-with-me/{share_id}/workspace")
+
         assert resp.status_code == 200
+        data = resp.json()
+        assert data["sources"]["items"] == []
+        assert data["allowed_actions"]["inspect_sources"]["allowed"] is True
+        assert "owner_user_id" not in str(data)
 
     def test_legacy_shared_full_media_route_is_absent(self, client, mock_repo):
         response = client.get(

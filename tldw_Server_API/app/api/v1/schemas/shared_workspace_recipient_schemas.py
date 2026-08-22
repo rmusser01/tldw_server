@@ -1,0 +1,242 @@
+"""Strict recipient-facing schemas for shared research workspaces."""
+from __future__ import annotations
+
+from typing import Annotated, Literal
+from uuid import UUID
+
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
+
+Identifier = Annotated[str, StringConstraints(min_length=1, max_length=512)]
+ReasonCode = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+ShortCode = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+
+
+class _RecipientModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SharedWorkspaceErrorDetail(_RecipientModel):
+    code: ShortCode
+    message: str = Field(min_length=1, max_length=320)
+    retryable: bool
+    recovery_action: Literal["retry", "refresh", "reselect_sources"] | None = None
+    retry_after_ms: int | None = Field(default=None, ge=0, le=1_800_000)
+
+
+class SharedWorkspacePartialError(_RecipientModel):
+    area: str = Field(min_length=1, max_length=64)
+    code: ShortCode
+    message: str = Field(min_length=1, max_length=320)
+    retryable: bool
+
+
+class SharedWorkspaceAllowedAction(_RecipientModel):
+    allowed: bool
+    reason_code: ReasonCode | None = None
+
+    @model_validator(mode="after")
+    def _reason_matches_decision(self):
+        if self.allowed and self.reason_code is not None:
+            raise ValueError("allowed actions cannot include a denial reason")
+        if not self.allowed and self.reason_code is None:
+            raise ValueError("denied actions require a reason code")
+        return self
+
+
+class SharedWorkspaceAllowedActions(_RecipientModel):
+    inspect_sources: SharedWorkspaceAllowedAction
+    ask_grounded_questions: SharedWorkspaceAllowedAction
+    add_sources: SharedWorkspaceAllowedAction
+    edit_workspace: SharedWorkspaceAllowedAction
+    clone_workspace: SharedWorkspaceAllowedAction
+
+
+class SharedWorkspaceGenerationDefault(_RecipientModel):
+    provider: str | None = Field(default=None, min_length=1, max_length=128)
+    model: str | None = Field(default=None, min_length=1, max_length=512)
+    ready: bool
+    reason_code: ReasonCode | None = None
+
+    @model_validator(mode="after")
+    def _validate_readiness(self):
+        if self.ready:
+            if self.provider is None or self.model is None or self.reason_code is not None:
+                raise ValueError("ready generation defaults require provider and model only")
+        elif self.provider is not None or self.model is not None or self.reason_code is None:
+            raise ValueError("unavailable generation defaults require only a reason code")
+        return self
+
+
+class SharedWorkspacePagination(_RecipientModel):
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    total: int = Field(ge=0)
+    has_more: bool
+
+
+class SharedWorkspaceSource(_RecipientModel):
+    source_id: Identifier
+    title: str = Field(max_length=512)
+    source_type: str = Field(min_length=1, max_length=64)
+    origin_url: str | None = Field(default=None, min_length=1, max_length=2_048)
+    origin_host: str | None = Field(default=None, min_length=1, max_length=255)
+    state: str = Field(min_length=1, max_length=64)
+    reason_code: ReasonCode | None = None
+    citation_ready: bool
+    retrieval_ready: bool
+    position: int = Field(ge=0)
+    added_at: AwareDatetime | None = None
+
+
+class SharedWorkspaceSourceSummary(_RecipientModel):
+    total: int = Field(ge=0)
+    queryable: int = Field(ge=0)
+    processing: int = Field(ge=0)
+    failed: int = Field(ge=0)
+
+
+class SharedWorkspaceSourcePage(_RecipientModel):
+    items: list[SharedWorkspaceSource] = Field(max_length=200)
+    pagination: SharedWorkspacePagination
+    summary: SharedWorkspaceSourceSummary
+    partial_errors: list[SharedWorkspacePartialError] = Field(default_factory=list, max_length=8)
+
+
+class SharedWorkspacePreviewSnippet(_RecipientModel):
+    kind: Literal["content_excerpt", "chunk"]
+    text: str = Field(min_length=1, max_length=12_000)
+    start_char: int | None = Field(default=None, ge=0)
+    end_char: int | None = Field(default=None, ge=0)
+    chunk_index: int | None = Field(default=None, ge=0)
+
+
+class SharedWorkspaceSourcePreview(_RecipientModel):
+    source_id: Identifier
+    title: str = Field(max_length=512)
+    source_type: str = Field(min_length=1, max_length=64)
+    origin_url: str | None = Field(default=None, min_length=1, max_length=2_048)
+    origin_host: str | None = Field(default=None, min_length=1, max_length=255)
+    state: str = Field(min_length=1, max_length=64)
+    reason_code: ReasonCode | None = None
+    content_available: bool
+    preview_mode: str = Field(min_length=1, max_length=64)
+    unavailable_reason: ReasonCode | None = None
+    text_preview: str | None = Field(default=None, max_length=12_000)
+    text_total_chars: int | None = Field(default=None, ge=0)
+    text_truncated: bool
+    snippets: list[SharedWorkspacePreviewSnippet] = Field(max_length=10)
+    generated_at: AwareDatetime
+
+
+class SharedWorkspaceCitationLocator(_RecipientModel):
+    chunk: int | None = Field(default=None, ge=0)
+    start_char: int | None = Field(default=None, ge=0)
+    end_char: int | None = Field(default=None, ge=0)
+
+
+class SharedWorkspaceCitation(_RecipientModel):
+    citation_id: Identifier
+    source_id: Identifier
+    source_title: str = Field(max_length=512)
+    locator: SharedWorkspaceCitationLocator
+    quote: str = Field(min_length=1, max_length=1_000)
+    score: float = Field(allow_inf_nan=False)
+
+
+class SharedWorkspaceMessage(_RecipientModel):
+    message_id: Identifier
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=100_000)
+    created_at: AwareDatetime
+    citations: list[SharedWorkspaceCitation] = Field(default_factory=list, max_length=20)
+
+
+class SharedWorkspaceMessagePage(_RecipientModel):
+    conversation_id: Identifier | None = None
+    messages: list[SharedWorkspaceMessage] = Field(max_length=100)
+    next_before: str | None = Field(default=None, min_length=1, max_length=2_048)
+
+
+class SharedWorkspaceShare(_RecipientModel):
+    share_id: int = Field(gt=0)
+    access_level: str = Field(min_length=1, max_length=64)
+    allow_clone: bool
+    owner_display_name: str = Field(min_length=1, max_length=128)
+    shared_at: AwareDatetime | None = None
+
+
+class SharedWorkspaceIdentity(_RecipientModel):
+    workspace_id: Identifier
+    name: str = Field(max_length=512)
+    description: str = Field(max_length=2_000)
+
+
+class SharedWorkspaceBootstrapSources(_RecipientModel):
+    items: list[SharedWorkspaceSource] = Field(max_length=50)
+    pagination: SharedWorkspacePagination
+
+
+class SharedWorkspaceBootstrapResponse(_RecipientModel):
+    schema_version: Literal[1] = 1
+    generated_at: AwareDatetime
+    share: SharedWorkspaceShare
+    workspace: SharedWorkspaceIdentity
+    allowed_actions: SharedWorkspaceAllowedActions
+    generation_default: SharedWorkspaceGenerationDefault
+    source_summary: SharedWorkspaceSourceSummary
+    sources: SharedWorkspaceBootstrapSources
+    conversation: SharedWorkspaceMessagePage
+    partial_errors: list[SharedWorkspacePartialError] = Field(default_factory=list, max_length=8)
+
+
+class SharedWorkspaceChatSourceScope(_RecipientModel):
+    mode: Literal["all", "include"]
+    source_ids: list[Identifier] = Field(default_factory=list, max_length=500)
+
+    @model_validator(mode="after")
+    def _validate_mode(self):
+        if self.mode == "include" and not self.source_ids:
+            raise ValueError("include mode requires source IDs")
+        if self.mode == "all" and self.source_ids:
+            raise ValueError("all mode cannot include source IDs")
+        if len(self.source_ids) != len(set(self.source_ids)):
+            raise ValueError("source IDs must be unique")
+        return self
+
+
+class SharedWorkspaceChatRequest(_RecipientModel):
+    request_id: UUID
+    query: str = Field(min_length=1, max_length=10_000)
+    source_scope: SharedWorkspaceChatSourceScope
+    provider: str | None = Field(default=None, min_length=1, max_length=128)
+    model: str | None = Field(default=None, min_length=1, max_length=512)
+
+    @model_validator(mode="after")
+    def _query_is_not_blank(self):
+        if not self.query.strip():
+            raise ValueError("query must not be blank")
+        return self
+
+
+__all__ = [
+    "SharedWorkspaceAllowedAction",
+    "SharedWorkspaceBootstrapResponse",
+    "SharedWorkspaceChatRequest",
+    "SharedWorkspaceCitation",
+    "SharedWorkspaceErrorDetail",
+    "SharedWorkspaceGenerationDefault",
+    "SharedWorkspaceMessage",
+    "SharedWorkspaceMessagePage",
+    "SharedWorkspacePagination",
+    "SharedWorkspacePartialError",
+    "SharedWorkspaceSource",
+    "SharedWorkspaceSourcePage",
+    "SharedWorkspaceSourcePreview",
+]

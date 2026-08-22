@@ -6,16 +6,10 @@ from tldw_Server_API.app.api.v1.endpoints import sharing
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
 
-def test_unsafe_shared_chat_route_is_absent_until_safe_replacement(monkeypatch):
-    class _RepoStub:
-        async def get_share(self, share_id: int) -> dict[str, object]:
-            assert share_id == 12
-            return {
-                "id": share_id,
-                "owner_user_id": 7,
-                "workspace_id": "ws-shared",
-                "is_revoked": False,
-            }
+def test_unsafe_shared_chat_contract_is_rejected_by_typed_fail_closed_replacement():
+    class _AccessServiceStub:
+        async def resolve(self, **_kwargs):
+            raise AssertionError("malformed chat must fail before access resolution")
 
     app = FastAPI()
     app.include_router(sharing.router, prefix="/api/v1")
@@ -25,7 +19,9 @@ def test_unsafe_shared_chat_route_is_absent_until_safe_replacement(monkeypatch):
         email="reviewer@example.com",
         password_hash="hash",
     )
-    monkeypatch.setattr(sharing, "_get_repo", lambda: _RepoStub())
+    app.dependency_overrides[sharing.get_shared_workspace_access_service] = (
+        lambda: _AccessServiceStub()
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -34,5 +30,12 @@ def test_unsafe_shared_chat_route_is_absent_until_safe_replacement(monkeypatch):
         follow_redirects=False,
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "invalid_shared_chat_request",
+            "message": "The shared chat request is invalid.",
+            "retryable": False,
+        }
+    }
     assert "location" not in response.headers

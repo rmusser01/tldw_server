@@ -14,15 +14,36 @@ import sqlite3
 import threading
 import time
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
+from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    rbac_rate_limit,
+    require_permissions,
+)
+from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas import (
+    SharedWorkspaceBootstrapResponse,
+    SharedWorkspaceChatRequest,
+    SharedWorkspaceMessage,
+    SharedWorkspaceMessagePage,
+    SharedWorkspaceSource,
+    SharedWorkspaceSourcePage,
+    SharedWorkspaceSourcePreview,
+)
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.shared_workspace_recipient_route import (
+    SharedWorkspaceRecipientRoute,
+    recipient_error_detail,
+)
 
 from ..schemas.sharing_schemas import (
     AdminShareListResponse,
@@ -38,7 +59,6 @@ from ..schemas.sharing_schemas import (
     ResourceType,
     SharedWithMeItem,
     SharedWithMeResponse,
-    SharedWorkspaceSourceResponse,
     ShareListResponse,
     ShareResponse,
     ShareWorkspaceRequest,
@@ -55,6 +75,22 @@ from ..utils.prototype_error_contract import (
 )
 
 router = APIRouter(prefix="/sharing", tags=["sharing"])
+recipient_router = APIRouter(
+    prefix="/shared-with-me/{share_id}",
+    route_class=SharedWorkspaceRecipientRoute,
+)
+
+_RECIPIENT_PERMISSION_DETAIL = recipient_error_detail("sharing_permission_required")
+_RECIPIENT_READ_RATE_DETAIL = recipient_error_detail("shared_workspace_rate_limited")
+_RECIPIENT_CHAT_RATE_DETAIL = recipient_error_detail("shared_chat_rate_limited")
+_RECIPIENT_READ_DEPENDENCIES = [
+    Depends(require_permissions("sharing.read", detail=_RECIPIENT_PERMISSION_DETAIL)),
+    Depends(rbac_rate_limit("sharing.read", detail=_RECIPIENT_READ_RATE_DETAIL)),
+]
+_RECIPIENT_CHAT_DEPENDENCIES = [
+    Depends(require_permissions("sharing.read", detail=_RECIPIENT_PERMISSION_DETAIL)),
+    Depends(rbac_rate_limit("sharing.read", detail=_RECIPIENT_CHAT_RATE_DETAIL)),
+]
 
 
 # ── Lazy service construction ──
@@ -324,6 +360,406 @@ async def _verify_workspace_ownership(workspace_id: str, user: User) -> None:
         ) from exc
 
 
+# ── Recipient shared-workspace read plane ──
+
+
+def _recipient_http_error(status_code: int, code: str) -> HTTPException:
+    return HTTPException(status_code=status_code, detail=recipient_error_detail(code))
+
+
+async def get_shared_workspace_access_service():
+    """Build the authoritative access service used by recipient routes."""
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+    from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+        SharedWorkspaceAccessService,
+    )
+
+    from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
+
+    repo = await _maybe_await(_get_repo())
+    return SharedWorkspaceAccessService(
+        repo,
+        AuthnzUsersRepo(db_pool=repo.db_pool),
+        get_chacha_db_for_owner,
+    )
+
+
+async def _resolve_recipient_access(
+    service: Any,
+    *,
+    share_id: int,
+    recipient_user_id: int,
+):
+    from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+        SharedWorkspaceNotFound,
+        SharedWorkspaceUnavailable,
+    )
+
+    try:
+        return await service.resolve(
+            share_id=share_id,
+            recipient_user_id=recipient_user_id,
+        )
+    except SharedWorkspaceNotFound as exc:
+        raise _recipient_http_error(404, "shared_workspace_not_found") from exc
+    except SharedWorkspaceUnavailable as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+
+
+async def _load_recipient_workspace_sources(context: Any) -> list[dict[str, Any]]:
+    """Open the authorized owner's workspace DB only after access resolution."""
+    from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
+
+    try:
+        owner_db = await get_chacha_db_for_owner(context.owner_user_id)
+        sources = owner_db.list_workspace_sources(context.workspace_id)
+        return [dict(source) for source in sources]
+    except Exception as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+
+
+def _recipient_partial_error(
+    *,
+    area: str,
+    code: str,
+    message: str,
+    retryable: bool,
+) -> dict[str, Any]:
+    return {
+        "area": area,
+        "code": code,
+        "message": message,
+        "retryable": retryable,
+    }
+
+
+async def _project_recipient_source_status(
+    context: Any,
+    sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Project source readiness from owner media and optional Jobs."""
+    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import managed_media_db_for_owner
+    from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+    from tldw_Server_API.app.core.Workspaces.job_status import (
+        list_recent_workspace_source_ingest_jobs,
+    )
+    from tldw_Server_API.app.core.Workspaces.status_projection import (
+        build_source_status_projection,
+    )
+
+    partial_errors: list[dict[str, Any]] = []
+    try:
+        jobs = list_recent_workspace_source_ingest_jobs(
+            try_get_job_manager(),
+            owner_user_id=context.owner_user_id,
+        )
+    except Exception:
+        jobs = []
+        partial_errors.append(
+            _recipient_partial_error(
+                area="source_status",
+                code="jobs_status_unavailable",
+                message="Live source progress is temporarily unavailable.",
+                retryable=True,
+            )
+        )
+    try:
+        with managed_media_db_for_owner(context.owner_user_id) as media_db:
+            projection = build_source_status_projection(
+                workspace_id=context.workspace_id,
+                sources=sources,
+                media_db=media_db,
+                jobs=jobs,
+            )
+    except Exception:
+        projection = build_source_status_projection(
+            workspace_id=context.workspace_id,
+            sources=sources,
+            media_db=None,
+            jobs=jobs,
+        )
+        partial_errors.append(
+            _recipient_partial_error(
+                area="source_status",
+                code="source_readiness_unavailable",
+                message="Source readiness is temporarily unavailable.",
+                retryable=True,
+            )
+        )
+    projection["partial_errors"] = partial_errors[:8]
+    return projection
+
+
+async def _resolve_recipient_generation_default(context: Any) -> dict[str, Any]:
+    """Fail closed until Task 7 wires canonical recipient generation resolution."""
+    _ = context
+    return {
+        "provider": None,
+        "model": None,
+        "ready": False,
+        "reason_code": "no_provider_configured",
+    }
+
+
+async def _load_recipient_chat_history(
+    context: Any,
+    *,
+    before: str | None,
+    limit: int,
+) -> Any:
+    """Read recipient-owned history without creating a thread."""
+    from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+
+    recipient_db = await get_chacha_db_for_user_id(context.recipient_user_id)
+    store = recipient_db.shared_workspace_chat_store
+    page = await run_in_threadpool(
+        store.list_messages,
+        share_id=context.share_id,
+        before=before,
+        limit=limit,
+    )
+    thread = await run_in_threadpool(store.get_thread, share_id=context.share_id)
+    return page, (thread.conversation_id if thread is not None else None)
+
+
+def _bounded_recipient_text(value: Any, limit: int, *, fallback: str = "") -> str:
+    printable = "".join(
+        character if character.isprintable() else " " for character in str(value or "")
+    )
+    normalized = " ".join(printable.split())
+    return normalized[:limit].strip() or fallback
+
+
+def _safe_reason_code(value: Any, *, fallback: str) -> str:
+    candidate = str(value or "").strip()
+    if candidate and len(candidate) <= 128 and all(
+        character.isalnum() or character in "_.-" for character in candidate
+    ):
+        return candidate
+    return fallback
+
+
+def _safe_position(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sanitize_recipient_source_origin(value: Any) -> tuple[str | None, str | None]:
+    """Return only a normalized HTTP(S) origin or a bounded host label."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None, None
+    try:
+        parsed = urlsplit(raw)
+        scheme = parsed.scheme.lower()
+        host = (parsed.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return None, None
+    if not host:
+        return None, None
+    bounded_host = host[:255]
+    try:
+        port = parsed.port
+    except ValueError:
+        return None, bounded_host
+    if (
+        scheme not in {"http", "https"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or len(host) > 255
+    ):
+        return None, bounded_host
+    origin_host = f"[{host}]" if ":" in host else host
+    origin = f"{scheme}://{origin_host}{f':{port}' if port is not None else ''}"
+    return origin[:2048], bounded_host
+
+
+def _source_is_retrieval_ready(source_status: dict[str, Any]) -> bool:
+    state = str(source_status.get("state") or "").strip().lower()
+    readiness = source_status.get("readiness") or {}
+    return state == "queryable" or (
+        state == "partially_queryable"
+        and bool(readiness.get("text_extracted"))
+        and bool(readiness.get("fts_ready"))
+        and bool(readiness.get("tool_accessible"))
+    )
+
+
+def _recipient_source_model(
+    source: dict[str, Any],
+    source_status: dict[str, Any],
+) -> SharedWorkspaceSource:
+    origin_url, origin_host = _sanitize_recipient_source_origin(source.get("url"))
+    readiness = source_status.get("readiness") or {}
+    return SharedWorkspaceSource(
+        source_id=str(source.get("id") or ""),
+        title=_bounded_recipient_text(source.get("title"), 512),
+        source_type=_bounded_recipient_text(
+            source.get("source_type"), 64, fallback="media"
+        ),
+        origin_url=origin_url,
+        origin_host=origin_host,
+        state=_bounded_recipient_text(
+            source_status.get("state"), 64, fallback="unavailable"
+        ),
+        reason_code=_safe_reason_code(
+            source_status.get("status_reason"), fallback="source_unavailable"
+        ),
+        citation_ready=bool(readiness.get("citation_ready")),
+        retrieval_ready=_source_is_retrieval_ready(source_status),
+        position=_safe_position(source.get("position")),
+        added_at=source.get("added_at") or None,
+    )
+
+
+def _source_summary(value: Any, *, total: int) -> dict[str, int]:
+    summary = value if isinstance(value, dict) else {}
+    return {
+        "total": total,
+        "queryable": max(0, int(summary.get("queryable") or 0)),
+        "processing": max(0, int(summary.get("processing") or 0)),
+        "failed": max(0, int(summary.get("failed") or 0)),
+    }
+
+
+def _split_history_result(value: Any) -> tuple[Any, str | None]:
+    if isinstance(value, tuple) and len(value) == 2:
+        return value[0], value[1]
+    return value, None
+
+
+def _recipient_message_model(message: Any) -> SharedWorkspaceMessage:
+    citations = []
+    for citation in tuple(getattr(message, "citations", ()) or ())[:20]:
+        citations.append(
+            {
+                "citation_id": str(citation.get("citation_id") or ""),
+                "source_id": str(citation.get("source_id") or ""),
+                "source_title": _bounded_recipient_text(
+                    citation.get("source_title"), 512
+                ),
+                "locator": dict(citation.get("locator") or {}),
+                "quote": str(citation.get("quote") or "")[:1000],
+                "score": citation.get("score"),
+            }
+        )
+    return SharedWorkspaceMessage(
+        message_id=str(message.message_id),
+        role=str(message.role),
+        content=str(message.content)[:100_000],
+        created_at=message.created_at,
+        citations=citations,
+    )
+
+
+def _recipient_message_page(value: Any) -> SharedWorkspaceMessagePage:
+    page, conversation_id = _split_history_result(value)
+    return SharedWorkspaceMessagePage(
+        conversation_id=conversation_id,
+        messages=[_recipient_message_model(message) for message in page.messages],
+        next_before=page.next_before,
+    )
+
+
+async def _build_recipient_source_preview(
+    context: Any,
+    source: dict[str, Any],
+    *,
+    max_chars: int,
+    chunk_limit: int,
+    chunk_index: int | None,
+) -> dict[str, Any]:
+    """Project the local preview helper into a recipient-safe response."""
+    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import managed_media_db_for_owner
+    from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+    from tldw_Server_API.app.core.Workspaces.job_status import (
+        list_recent_workspace_source_ingest_jobs,
+    )
+    from tldw_Server_API.app.core.Workspaces.source_preview import (
+        build_workspace_source_preview,
+    )
+    from tldw_Server_API.app.core.Workspaces.status_projection import (
+        build_source_status_projection,
+    )
+
+    try:
+        jobs = list_recent_workspace_source_ingest_jobs(
+            try_get_job_manager(), owner_user_id=context.owner_user_id
+        )
+        with managed_media_db_for_owner(context.owner_user_id) as media_db:
+            status_payload = build_source_status_projection(
+                workspace_id=context.workspace_id,
+                sources=[source],
+                media_db=media_db,
+                jobs=jobs,
+            )
+            source_status = (status_payload.get("sources") or [{}])[0]
+            preview = build_workspace_source_preview(
+                workspace_id=context.workspace_id,
+                source=source,
+                source_status=source_status,
+                media_db=media_db,
+                max_chars=max_chars,
+                chunk_limit=chunk_limit,
+                focus_chunk_index=chunk_index,
+            )
+    except Exception as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+
+    origin_url, origin_host = _sanitize_recipient_source_origin(source.get("url"))
+    snippets = []
+    for snippet in list(preview.get("snippets") or [])[:10]:
+        text = str(snippet.get("text") or "")[:12_000]
+        if not text:
+            continue
+        snippets.append(
+            {
+                "kind": "chunk" if snippet.get("kind") == "chunk" else "content_excerpt",
+                "text": text,
+                "start_char": snippet.get("start_char"),
+                "end_char": snippet.get("end_char"),
+                "chunk_index": snippet.get("chunk_index"),
+            }
+        )
+    return {
+        "source_id": str(source.get("id") or ""),
+        "title": _bounded_recipient_text(source.get("title"), 512),
+        "source_type": _bounded_recipient_text(
+            source.get("source_type"), 64, fallback="media"
+        ),
+        "origin_url": origin_url,
+        "origin_host": origin_host,
+        "state": _bounded_recipient_text(
+            preview.get("state"), 64, fallback="unavailable"
+        ),
+        "reason_code": _safe_reason_code(
+            preview.get("status_reason"), fallback="source_unavailable"
+        ),
+        "content_available": bool(preview.get("content_available")),
+        "preview_mode": _bounded_recipient_text(
+            preview.get("preview_mode"), 64, fallback="empty"
+        ),
+        "unavailable_reason": (
+            _safe_reason_code(
+                preview.get("unavailable_reason"), fallback="content_unavailable"
+            )
+            if preview.get("unavailable_reason")
+            else None
+        ),
+        "text_preview": (
+            str(preview.get("text_preview"))[:12_000]
+            if preview.get("text_preview") is not None
+            else None
+        ),
+        "text_total_chars": preview.get("text_total_chars"),
+        "text_truncated": bool(preview.get("text_truncated")),
+        "snippets": snippets,
+        "generated_at": preview.get("generated_at"),
+    }
+
+
 def _chatbook_ownership_exists_sync(
     *,
     normalized_id: str,
@@ -580,42 +1016,18 @@ async def shared_with_me(
 ):
     repo = await _maybe_await(_get_repo())
 
-    # Gather shares from all teams/orgs the user belongs to
-    items: list[SharedWithMeItem] = []
-    team_ids = getattr(user, "team_ids", None) or []
-    org_ids = getattr(user, "org_ids", None) or []
-
-    for tid in team_ids:
-        shares = await repo.list_shares_for_scope("team", tid)
-        for s in shares:
-            if s["owner_user_id"] != user.id:
-                items.append(
-                    SharedWithMeItem(
-                        share_id=s["id"],
-                        workspace_id=s["workspace_id"],
-                        owner_user_id=s["owner_user_id"],
-                        access_level=s["access_level"],
-                        allow_clone=s["allow_clone"],
-                        shared_at=s.get("created_at"),
-                    )
-                )
-
-    for oid in org_ids:
-        shares = await repo.list_shares_for_scope("org", oid)
-        for s in shares:
-            if s["owner_user_id"] != user.id:
-                # Deduplicate by share_id
-                if not any(i.share_id == s["id"] for i in items):
-                    items.append(
-                        SharedWithMeItem(
-                            share_id=s["id"],
-                            workspace_id=s["workspace_id"],
-                            owner_user_id=s["owner_user_id"],
-                            access_level=s["access_level"],
-                            allow_clone=s["allow_clone"],
-                            shared_at=s.get("created_at"),
-                        )
-                    )
+    shares = await repo.list_active_shares_for_user(user.id)
+    items = [
+        SharedWithMeItem(
+            share_id=share["id"],
+            workspace_id=share["workspace_id"],
+            owner_user_id=share["owner_user_id"],
+            access_level=share["access_level"],
+            allow_clone=share["allow_clone"],
+            shared_at=share.get("created_at"),
+        )
+        for share in shares
+    ]
 
     # Batch-populate workspace names from each owner's ChaChaNotes DB
     if items:
@@ -645,24 +1057,149 @@ async def shared_with_me(
     return SharedWithMeResponse(items=items, total=len(items))
 
 
-@router.get(
-    "/shared-with-me/{share_id}/workspace",
-    dependencies=[Depends(rbac_rate_limit("sharing.read"))],
+@recipient_router.get(
+    "/workspace",
+    response_model=SharedWorkspaceBootstrapResponse,
+    dependencies=_RECIPIENT_READ_DEPENDENCIES,
     summary="Read shared workspace metadata",
 )
 async def get_shared_workspace(
     share_id: int,
     user: User = Depends(get_request_user),
-):
-    repo = await _maybe_await(_get_repo())
-    share = await repo.get_share(share_id)
-    if not share or share.get("is_revoked"):
-        raise HTTPException(status_code=404, detail="Share not found or revoked")
+    service: Any = Depends(get_shared_workspace_access_service),
+) -> SharedWorkspaceBootstrapResponse:
+    context = await _resolve_recipient_access(
+        service,
+        share_id=share_id,
+        recipient_user_id=user.id,
+    )
+    sources = await _load_recipient_workspace_sources(context)
+    projection = await _project_recipient_source_status(context, sources)
+    status_by_id = {
+        str(item.get("id") or ""): item
+        for item in projection.get("sources") or []
+        if isinstance(item, dict)
+    }
+    ordered_sources = sorted(
+        sources,
+        key=lambda source: (
+            _safe_position(source.get("position")),
+            str(source.get("id") or ""),
+        ),
+    )
+    try:
+        source_models = [
+            _recipient_source_model(
+                source,
+                status_by_id.get(str(source.get("id") or ""), {}),
+            )
+            for source in ordered_sources
+        ]
+    except ValidationError as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
 
-    # [CRITICAL FIX #2] Validate the user belongs to the share's scope
-    await _validate_user_has_share_access(share, user)
+    partial_errors = list(projection.get("partial_errors") or [])[:8]
+    try:
+        generation_default = await _resolve_recipient_generation_default(context)
+    except Exception:
+        generation_default = {
+            "provider": None,
+            "model": None,
+            "ready": False,
+            "reason_code": "no_provider_configured",
+        }
+        partial_errors.append(
+            _recipient_partial_error(
+                area="generation",
+                code="generation_default_unavailable",
+                message="The default generation target is temporarily unavailable.",
+                retryable=True,
+            )
+        )
+    try:
+        history = await _load_recipient_chat_history(
+            context,
+            before=None,
+            limit=30,
+        )
+        conversation = _recipient_message_page(history)
+    except Exception:
+        conversation = SharedWorkspaceMessagePage(
+            conversation_id=None,
+            messages=[],
+            next_before=None,
+        )
+        partial_errors.append(
+            _recipient_partial_error(
+                area="history",
+                code="history_unavailable",
+                message="Shared chat history is temporarily unavailable.",
+                retryable=True,
+            )
+        )
 
-    return {"share": ShareResponse(**share)}
+    actions = {
+        str(name): dict(value)
+        for name, value in context.policy_actions.items()
+        if isinstance(value, dict)
+    }
+    has_retrieval_source = any(source.retrieval_ready for source in source_models)
+    if not has_retrieval_source:
+        actions["ask_grounded_questions"] = {
+            "allowed": False,
+            "reason_code": "no_queryable_sources",
+        }
+    elif not bool(generation_default.get("ready")):
+        actions["ask_grounded_questions"] = {
+            "allowed": False,
+            "reason_code": _safe_reason_code(
+                generation_default.get("reason_code"),
+                fallback="no_provider_configured",
+            ),
+        }
+
+    try:
+        return SharedWorkspaceBootstrapResponse(
+            generated_at=datetime.now(timezone.utc),
+            share={
+                "share_id": context.share_id,
+                "access_level": _bounded_recipient_text(
+                    context.access_level, 64, fallback="view_chat"
+                ),
+                "allow_clone": context.allow_clone,
+                "owner_display_name": _bounded_recipient_text(
+                    context.owner_display_name,
+                    128,
+                    fallback="Workspace owner",
+                ),
+                "shared_at": context.shared_at,
+            },
+            workspace={
+                "workspace_id": context.workspace_id,
+                "name": _bounded_recipient_text(context.workspace.get("name"), 512),
+                "description": _bounded_recipient_text(
+                    context.workspace.get("description"), 2_000
+                ),
+            },
+            allowed_actions=actions,
+            generation_default=generation_default,
+            source_summary=_source_summary(
+                projection.get("summary"), total=len(source_models)
+            ),
+            sources={
+                "items": source_models[:50],
+                "pagination": {
+                    "offset": 0,
+                    "limit": 50,
+                    "total": len(source_models),
+                    "has_more": len(source_models) > 50,
+                },
+            },
+            conversation=conversation,
+            partial_errors=partial_errors[:8],
+        )
+    except ValidationError as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
 
 
 @router.post(
@@ -766,44 +1303,181 @@ def _run_clone_task(
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Shared-With-Me Proxy Endpoints
+# Recipient Shared-Workspace Read Endpoints
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-@router.get(
-    "/shared-with-me/{share_id}/sources",
-    response_model=list[SharedWorkspaceSourceResponse],
-    dependencies=[Depends(rbac_rate_limit("sharing.read"))],
+@recipient_router.get(
+    "/sources",
+    response_model=SharedWorkspaceSourcePage,
+    dependencies=_RECIPIENT_READ_DEPENDENCIES,
     summary="List sources of a shared workspace",
 )
 async def list_shared_workspace_sources(
     share_id: int,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    q: str | None = Query(default=None, min_length=1, max_length=512),
+    state: str | None = Query(default=None, min_length=1, max_length=64),
     user: User = Depends(get_request_user),
-):
-    repo = await _maybe_await(_get_repo())
-    share = await repo.get_share(share_id)
-    if not share or share.get("is_revoked"):
-        raise HTTPException(status_code=404, detail="Share not found or revoked")
-
-    await _validate_user_has_share_access(share, user)
-
-    from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
-
-    db = await get_chacha_db_for_owner(share["owner_user_id"])
-    sources = db.list_workspace_sources(share["workspace_id"])
-    return [
-        SharedWorkspaceSourceResponse(
-            id=s["id"],
-            workspace_id=s["workspace_id"],
-            media_id=s.get("media_id"),
-            title=s.get("title", ""),
-            source_type=s.get("source_type", "media"),
-            url=s.get("url"),
-            position=s.get("position", 0),
-            added_at=str(s.get("added_at", "")),
+    service: Any = Depends(get_shared_workspace_access_service),
+) -> SharedWorkspaceSourcePage:
+    context = await _resolve_recipient_access(
+        service,
+        share_id=share_id,
+        recipient_user_id=user.id,
+    )
+    sources = await _load_recipient_workspace_sources(context)
+    if q is not None:
+        needle = q.casefold()
+        sources = [
+            source
+            for source in sources
+            if needle
+            in " ".join(
+                (
+                    str(source.get("id") or ""),
+                    str(source.get("title") or ""),
+                    str(source.get("source_type") or ""),
+                    str(source.get("url") or ""),
+                )
+            ).casefold()
+        ]
+    sources.sort(
+        key=lambda source: (
+            _safe_position(source.get("position")),
+            str(source.get("id") or ""),
         )
-        for s in sources
-    ]
+    )
+    projection = await _project_recipient_source_status(context, sources)
+    status_by_id = {
+        str(item.get("id") or ""): item
+        for item in projection.get("sources") or []
+        if isinstance(item, dict)
+    }
+    try:
+        projected = [
+            _recipient_source_model(
+                source,
+                status_by_id.get(str(source.get("id") or ""), {}),
+            )
+            for source in sources
+        ]
+        if state is not None:
+            requested_state = state.casefold()
+            projected = [
+                source for source in projected if source.state.casefold() == requested_state
+            ]
+        page = projected[offset : offset + limit]
+        return SharedWorkspaceSourcePage(
+            items=page,
+            pagination={
+                "offset": offset,
+                "limit": limit,
+                "total": len(projected),
+                "has_more": offset + len(page) < len(projected),
+            },
+            summary=_source_summary(projection.get("summary"), total=len(sources)),
+            partial_errors=list(projection.get("partial_errors") or [])[:8],
+        )
+    except ValidationError as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+
+
+@recipient_router.get(
+    "/sources/{source_id}/preview",
+    response_model=SharedWorkspaceSourcePreview,
+    dependencies=_RECIPIENT_READ_DEPENDENCIES,
+    summary="Preview a source in a shared workspace",
+)
+async def preview_shared_workspace_source(
+    share_id: int,
+    source_id: str,
+    max_chars: int = Query(default=3_000, ge=1, le=12_000),
+    chunk_limit: int = Query(default=3, ge=0, le=10),
+    chunk_index: int | None = Query(default=None, ge=0),
+    user: User = Depends(get_request_user),
+    service: Any = Depends(get_shared_workspace_access_service),
+) -> SharedWorkspaceSourcePreview:
+    context = await _resolve_recipient_access(
+        service,
+        share_id=share_id,
+        recipient_user_id=user.id,
+    )
+    sources = await _load_recipient_workspace_sources(context)
+    source = next(
+        (candidate for candidate in sources if str(candidate.get("id") or "") == source_id),
+        None,
+    )
+    if source is None:
+        raise _recipient_http_error(404, "shared_workspace_not_found")
+    payload = await _build_recipient_source_preview(
+        context,
+        source,
+        max_chars=max_chars,
+        chunk_limit=chunk_limit,
+        chunk_index=chunk_index,
+    )
+    try:
+        return SharedWorkspaceSourcePreview(**payload)
+    except ValidationError as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+
+
+@recipient_router.get(
+    "/chat/messages",
+    response_model=SharedWorkspaceMessagePage,
+    dependencies=_RECIPIENT_READ_DEPENDENCIES,
+    summary="Read recipient-owned shared chat history",
+)
+async def get_shared_workspace_messages(
+    share_id: int,
+    before: str | None = Query(default=None, min_length=1, max_length=2_048),
+    limit: int = Query(default=30, ge=1, le=100),
+    user: User = Depends(get_request_user),
+    service: Any = Depends(get_shared_workspace_access_service),
+) -> SharedWorkspaceMessagePage:
+    context = await _resolve_recipient_access(
+        service,
+        share_id=share_id,
+        recipient_user_id=user.id,
+    )
+    try:
+        history = await _load_recipient_chat_history(
+            context,
+            before=before,
+            limit=limit,
+        )
+        return _recipient_message_page(history)
+    except (HTTPException, ValidationError) as exc:
+        if isinstance(exc, HTTPException):
+            raise
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+    except Exception as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+
+
+@recipient_router.post(
+    "/chat",
+    dependencies=_RECIPIENT_CHAT_DEPENDENCIES,
+    summary="Validate a shared chat request while generation remains unavailable",
+)
+async def validate_shared_workspace_chat_request(
+    share_id: int,
+    body: SharedWorkspaceChatRequest,
+    user: User = Depends(get_request_user),
+    service: Any = Depends(get_shared_workspace_access_service),
+) -> None:
+    _ = body
+    await _resolve_recipient_access(
+        service,
+        share_id=share_id,
+        recipient_user_id=user.id,
+    )
+    raise _recipient_http_error(503, "shared_workspace_unavailable")
+
+
+router.include_router(recipient_router)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

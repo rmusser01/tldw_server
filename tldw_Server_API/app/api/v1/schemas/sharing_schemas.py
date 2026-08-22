@@ -215,16 +215,3 @@ class AuditLogResponse(BaseModel):
     @model_validator(mode="after")
     def _default_pagination_aliases(self):
         return default_offset_pagination_aliases(self)
-
-
-# ── Proxy responses for shared-with-me ──
-
-class SharedWorkspaceSourceResponse(BaseModel):
-    id: str
-    workspace_id: str
-    media_id: int | None = None
-    title: str = ""
-    source_type: str = "media"
-    url: str | None = None
-    position: int = 0
-    added_at: str | None = None
