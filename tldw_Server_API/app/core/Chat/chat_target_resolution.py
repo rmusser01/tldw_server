@@ -41,6 +41,12 @@ class _TargetRequest:
     model: str | None
 
 
+@dataclass(frozen=True)
+class _CandidateChatTarget:
+    provider: str
+    model: str | None
+
+
 def config_default_llm_provider(
     config_data: dict[str, Any] | None = None,
 ) -> str | None:
@@ -128,35 +134,13 @@ def _configuration_error(provider: str | None = None) -> ChatConfigurationError:
     )
 
 
-def resolve_chat_provider_identity(
+def _resolve_candidate_chat_target(
     *,
     requested_provider: str | None,
     requested_model: str | None,
-) -> str:
-    """Resolve only the local canonical provider identity for a request."""
-
-    provider_input = (
-        requested_provider.strip()
-        if isinstance(requested_provider, str) and requested_provider.strip()
-        else None
-    )
-    if provider_input is None and isinstance(requested_model, str):
-        inline_provider, inline_model, _separator = _split_inline_provider_model(
-            requested_model
-        )
-        if inline_provider and inline_model:
-            provider_input = inline_provider
-    return _adapter_registry.get_registry().resolve_provider_name(
-        provider_input or get_default_provider()
-    )
-
-
-def resolve_chat_target(
-    *,
-    requested_provider: str | None,
-    requested_model: str | None,
-) -> ResolvedChatTarget:
-    """Resolve one direct target without routing or provider fallback."""
+    default_model_resolver: Callable[[str], str | None] | None = None,
+) -> _CandidateChatTarget:
+    """Normalize one provider/model candidate without checking target readiness."""
 
     provider_input = (
         requested_provider.strip()
@@ -171,31 +155,69 @@ def resolve_chat_target(
     default_provider = str(get_default_provider() or "").strip()
     registry = _adapter_registry.get_registry()
 
-    preliminary_provider = resolve_chat_provider_identity(
-        requested_provider=provider_input,
-        requested_model=model_input,
+    preliminary_provider_input = provider_input
+    if provider_input is None and isinstance(requested_model, str):
+        inline_provider, inline_model, _separator = _split_inline_provider_model(
+            requested_model
+        )
+        if inline_provider and inline_model:
+            preliminary_provider_input = inline_provider
+    preliminary_provider = registry.resolve_provider_name(
+        preliminary_provider_input or default_provider
     )
+    if not model_input and default_model_resolver is not None:
+        model_input = default_model_resolver(preliminary_provider)
     if not model_input:
-        model_input = get_default_model_for_provider(preliminary_provider)
-    if not preliminary_provider or not model_input:
-        raise _configuration_error(preliminary_provider or None)
+        return _CandidateChatTarget(provider=preliminary_provider, model=None)
 
     request_data = _TargetRequest(
         api_provider=provider_input,
         model=model_input,
     )
+    _, _, selected_provider, selected_model, _ = resolve_provider_and_model(
+        request_data=request_data,
+        metrics_default_provider=default_provider,
+        normalize_default_provider=default_provider,
+        routing_decision=None,
+    )
+    return _CandidateChatTarget(
+        provider=registry.resolve_provider_name(selected_provider),
+        model=str(selected_model or "").strip() or None,
+    )
+
+
+def resolve_chat_provider_identity(
+    *,
+    requested_provider: str | None,
+    requested_model: str | None,
+) -> str:
+    """Resolve only the local canonical provider identity for a request."""
+
+    return _resolve_candidate_chat_target(
+        requested_provider=requested_provider,
+        requested_model=requested_model,
+    ).provider
+
+
+def resolve_chat_target(
+    *,
+    requested_provider: str | None,
+    requested_model: str | None,
+) -> ResolvedChatTarget:
+    """Resolve one direct target without routing or provider fallback."""
+
+    registry = _adapter_registry.get_registry()
     try:
-        _, _, selected_provider, selected_model, _ = resolve_provider_and_model(
-            request_data=request_data,
-            metrics_default_provider=default_provider,
-            normalize_default_provider=default_provider,
-            routing_decision=None,
+        candidate = _resolve_candidate_chat_target(
+            requested_provider=requested_provider,
+            requested_model=requested_model,
+            default_model_resolver=get_default_model_for_provider,
         )
     except Exception as exc:  # noqa: BLE001 - normalize to one safe core error.
-        raise _configuration_error(preliminary_provider) from exc
+        raise _configuration_error() from exc
 
-    provider = registry.resolve_provider_name(selected_provider)
-    model = str(selected_model or "").strip()
+    provider = candidate.provider
+    model = candidate.model or ""
     if provider not in set(registry.list_providers()) or not model:
         raise _configuration_error(provider or None)
     if validate_provider_override(provider, model) is not None:

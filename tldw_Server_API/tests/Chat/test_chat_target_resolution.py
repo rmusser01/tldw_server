@@ -204,6 +204,78 @@ def test_request_provider_identity_uses_qualified_model_alias_and_default(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("catalog_providers", "expected_provider"),
+    [
+        (("anthropic",), "anthropic"),
+        (("anthropic", "openrouter"), "openai"),
+        ((), "openai"),
+    ],
+)
+def test_request_provider_identity_uses_only_unique_catalog_inference(
+    target_module,
+    monkeypatch,
+    catalog_providers: tuple[str, ...],
+    expected_provider: str,
+) -> None:
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda provider: [])
+    monkeypatch.setattr(
+        chat_service,
+        "_provider_has_model_cached",
+        lambda provider, model: False,
+    )
+    monkeypatch.setattr(
+        chat_service,
+        "_find_catalog_providers_for_model_cached",
+        lambda model: catalog_providers,
+    )
+
+    identity = target_module.resolve_chat_provider_identity(
+        requested_provider=None,
+        requested_model="claude-special",
+    )
+    target = target_module.resolve_chat_target(
+        requested_provider=None,
+        requested_model="claude-special",
+    )
+
+    assert identity == target.provider == expected_provider
+
+
+@pytest.mark.unit
+def test_request_provider_identity_never_infers_over_explicit_provider(
+    target_module,
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda provider: [])
+    monkeypatch.setattr(
+        chat_service,
+        "_provider_has_model_cached",
+        lambda provider, model: False,
+    )
+    monkeypatch.setattr(
+        chat_service,
+        "_find_catalog_providers_for_model_cached",
+        lambda model: ("anthropic",),
+    )
+
+    identity = target_module.resolve_chat_provider_identity(
+        requested_provider="openai",
+        requested_model="claude-special",
+    )
+    target = target_module.resolve_chat_target(
+        requested_provider="openai",
+        requested_model="claude-special",
+    )
+
+    assert identity == target.provider == "openai"
+
+
+@pytest.mark.unit
 def test_resolve_chat_target_rejects_missing_configured_model(
     target_module, monkeypatch
 ) -> None:

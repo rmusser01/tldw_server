@@ -221,3 +221,85 @@ The two unrelated untracked watchlist templates remained untouched and unstaged.
 
 - Live PostgreSQL execution remains an environment gap; the new reload operation uses the existing backend-neutral store transaction/fetch/classification helpers.
 - Real adapter initialization and provider/BYOK calls remain controller-owned UAT; focused tests use registry and adapter doubles and ordinary chat regressions exercise the existing local runtime.
+
+## Fix Round 2
+
+### Implementation Summary
+
+- Added one local candidate provider/model normalizer in `chat_target_resolution.py` and routed both lightweight lease identity and full target resolution through it.
+- Reused ordinary chat's existing alias, inline-provider, and unique pricing-catalog inference logic without adapter initialization, credential resolution, network calls, or target-readiness validation in the lease path.
+- Preserved default-provider selection when catalog matches are ambiguous or absent and preserved explicit-provider authority over catalog inference.
+- Kept credential-backed default-model lookup exclusive to full target resolution. A lease request with no model uses the canonical server provider directly and remains independent of credential-store readiness.
+- Left the already-cleared claim/resource, frozen-target, transition, adapter-readiness, endpoint, frontend, and watchlist paths unchanged.
+
+### RED Commands And Results
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/test_chat_target_resolution.py -k 'provider_identity' tldw_Server_API/tests/Sharing/test_shared_workspace_chat_endpoint.py -k 'provider_identity or receipt_lease' -q
+2 failed, 6 passed, 39 deselected
+```
+
+Only the new unique catalog-match cases failed: provider identity returned the OpenAI default instead of Anthropic, and the lease therefore remained on the OpenAI timeout instead of the required 960 seconds. Ambiguous/no-match, explicit-provider, inline-provider, alias, and default cases passed.
+
+### GREEN Commands And Results
+
+Focused provider, target, and lease target:
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/test_chat_target_resolution.py tldw_Server_API/tests/Sharing/test_shared_workspace_chat_endpoint.py -k 'provider_identity or receipt_lease or resolve_chat_target' -q
+17 passed, 30 deselected, 6 warnings
+```
+
+Exact Task 7 suite:
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/test_chat_target_resolution.py tldw_Server_API/tests/Sharing/test_shared_workspace_chat_generation.py tldw_Server_API/tests/Sharing/test_shared_workspace_chat_endpoint.py tldw_Server_API/tests/DB_Management/test_shared_workspace_chat_store.py -q
+102 passed, 6 warnings
+```
+
+Ordinary provider-resolution regression:
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/test_chat_default_provider.py tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py -q
+200 passed, 1 skipped, 15 warnings
+```
+
+Static and security gates:
+
+```text
+source .venv/bin/activate && python -m ruff check tldw_Server_API/app/core/Chat/chat_target_resolution.py tldw_Server_API/tests/Chat/test_chat_target_resolution.py tldw_Server_API/tests/Sharing/test_shared_workspace_chat_endpoint.py
+All checks passed.
+
+source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chat/chat_target_resolution.py -f json -o /tmp/bandit_task7_fix2.json
+0 findings, 0 errors
+
+git diff --check
+passed
+```
+
+### Exact Files Changed
+
+- `.superpowers/sdd/2026-08-21-recipient-shared-research-workspace-data-plane/progress.md`
+- `.superpowers/sdd/2026-08-21-recipient-shared-research-workspace-data-plane/task-7-implementer-report.md`
+- `backlog/tasks/task-12020.40 - Bind-recipient-shared-workspace-sources-and-chat-to-the-canonical-share.md`
+- `tldw_Server_API/app/core/Chat/chat_target_resolution.py`
+- `tldw_Server_API/tests/Chat/test_chat_target_resolution.py`
+- `tldw_Server_API/tests/Sharing/test_shared_workspace_chat_endpoint.py`
+
+### Self-Review Findings
+
+- The candidate helper performs the same ordinary local normalization for every supplied model; full target resolution remains the only caller that follows candidate selection with override and enabled/loadable-adapter checks.
+- Lease identity deliberately does not resolve a missing default model because that helper can consult credential-backed override storage. With no requested model, execution and lease both begin from the canonical server default provider, while replay/active/conflict handling remains independent of current credential or adapter readiness.
+- The unique-match tests stub only local catalog lookups. The ordinary chat regression target exercises the unchanged production provider resolver and catalog behavior across its existing integration matrix.
+- No endpoint orchestration or receipt transition code changed in this round, so the four cleared Fix Round 1 findings remain isolated from this correction.
+
+### PostgreSQL And Environment State
+
+Per round scope, live PostgreSQL and live provider/BYOK UAT were not run. This change adds no schema, migration, RLS policy, store SQL, frontend code, route, alias, redirect, credential lookup, adapter initialization, or network operation to lease identity.
+
+The two unrelated untracked watchlist templates remained untouched and unstaged.
+
+### Concerns And Residual Risks
+
+- Real provider/BYOK execution remains controller-owned UAT; this round intentionally verifies only local provider selection and mocked timeout configuration.
+- Live PostgreSQL remains unexecuted, but Fix Round 2 does not touch persistence or PostgreSQL-specific behavior.

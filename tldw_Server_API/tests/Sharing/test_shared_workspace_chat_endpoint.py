@@ -673,3 +673,45 @@ async def test_receipt_lease_uses_qualified_model_provider_and_registry_alias(
 
     assert sharing._shared_chat_lease_seconds(qualified) == 960
     assert sharing._shared_chat_lease_seconds(aliased) == 480
+
+
+async def test_receipt_lease_uses_unique_catalog_provider_for_unqualified_model(
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core.Chat import (
+        chat_service,
+        chat_target_resolution,
+    )
+
+    monkeypatch.setattr(chat_target_resolution, "get_default_provider", lambda: "openai")
+    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda provider: [])
+    monkeypatch.setattr(
+        chat_service,
+        "_provider_has_model_cached",
+        lambda provider, model: False,
+    )
+    monkeypatch.setattr(
+        chat_service,
+        "_find_catalog_providers_for_model_cached",
+        lambda model: ("anthropic",),
+    )
+    monkeypatch.setattr(
+        sharing,
+        "load_and_log_configs",
+        lambda: {
+            "openai_api": {"api_timeout": "240"},
+            "anthropic_api": {"api_timeout": "900"},
+        },
+    )
+    body = _body().model_copy(
+        update={"provider": None, "model": "claude-special"}
+    )
+
+    assert (
+        chat_target_resolution.resolve_chat_provider_identity(
+            requested_provider=body.provider,
+            requested_model=body.model,
+        )
+        == "anthropic"
+    )
+    assert sharing._shared_chat_lease_seconds(body) == 960

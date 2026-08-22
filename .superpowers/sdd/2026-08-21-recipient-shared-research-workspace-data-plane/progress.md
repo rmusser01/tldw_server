@@ -89,6 +89,12 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Fix Round 1 gates: Ruff passed all changed production/tests; Bandit reported zero findings/errors across the three changed production files; `git diff --check` passed.
 - Fix Round 1 environment: live PostgreSQL and real provider UAT were intentionally not run. No schema, migration, RLS, frontend, route alias, or noncanonical endpoint changed. The two unrelated watchlist templates remained untouched and unstaged.
 - Fix Round 1 report: appended to `task-7-implementer-report.md`. Parent task remains In Progress; status is implementation complete and pending controller review.
+- Fix Round 2 reviewed head: `9901d7a06373bd77e2a4213ddb3894f0df6f2e60`.
+- Fix Round 2: unified lease identity and full target selection behind one local candidate normalizer, so an unqualified model's unique pricing-catalog match now selects the same canonical provider for execution and receipt lease timing. Ambiguous/no-match requests preserve the default, explicit providers remain authoritative, and lease identity does not load adapters, resolve credentials, or consult credential-backed default-model storage.
+- Fix Round 2 TDD RED: focused provider/lease target `2 failed, 6 passed`; only the unique catalog-provider identity and lease assertions failed.
+- Fix Round 2 GREEN: focused provider/lease/target target `17 passed`; exact Task 7 suite `102 passed`; ordinary chat defaults/resolution `200 passed, 1 skipped`.
+- Fix Round 2 gates: Ruff passed the changed production/tests; Bandit reported zero findings/errors for `chat_target_resolution.py`; `git diff --check` passed.
+- Fix Round 2 environment: live PostgreSQL and live provider UAT were intentionally not run. No orchestration, receipt transition, adapter-readiness, frontend, route, schema, migration, RLS, or unrelated watchlist path changed. Parent remains In Progress; status is implementation complete and pending controller review.
 
 ## Task 5 - Typed bounded recipient read APIs
 
