@@ -42,6 +42,61 @@ def _always_public(host: str):
     return True, ["203.0.113.10"]
 
 
+def test_platform_webhook_policy_composes_all_global_lists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def _capture(url: str, **kwargs: object) -> egress.URLPolicyResult:
+        observed["url"] = url
+        observed.update(kwargs)
+        return egress.URLPolicyResult(True)
+
+    monkeypatch.setenv(egress.GLOBAL_ALLOWLIST_ENV, "global.example")
+    monkeypatch.setenv(egress.ALLOWLIST_ENV, "workflow.example")
+    monkeypatch.setenv(egress.WEBHOOK_ALLOWLIST_ENV, "*.webhook.example")
+    monkeypatch.setenv(egress.GLOBAL_DENYLIST_ENV, "blocked-global.example")
+    monkeypatch.setenv(egress.DENYLIST_ENV, "blocked-workflow.example")
+    monkeypatch.setenv(egress.WEBHOOK_DENYLIST_ENV, "*.blocked-webhook.example")
+    monkeypatch.setattr(egress, "evaluate_url_policy", _capture)
+
+    result = egress.evaluate_platform_webhook_url_policy(
+        "https://receiver.example/private?token=secret"
+    )
+
+    assert result.allowed is True
+    assert observed == {
+        "url": "https://receiver.example/private?token=secret",
+        "allowlist": [
+            "global.example",
+            "workflow.example",
+            "webhook.example",
+        ],
+        "denylist": [
+            "blocked-global.example",
+            "blocked-workflow.example",
+            "blocked-webhook.example",
+        ],
+        "sensitive_observability": True,
+    }
+
+
+def test_platform_webhook_policy_preserves_deny_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(egress.GLOBAL_ALLOWLIST_ENV, "receiver.example")
+    monkeypatch.setenv(egress.WEBHOOK_ALLOWLIST_ENV, "receiver.example")
+    monkeypatch.setenv(egress.WEBHOOK_DENYLIST_ENV, "receiver.example")
+    monkeypatch.setenv(egress.BLOCK_PRIVATE_ENV, "false")
+
+    result = egress.evaluate_platform_webhook_url_policy(
+        "https://receiver.example/hook"
+    )
+
+    assert result.allowed is False
+    assert result.reason_code == "host_denied"
+
+
 class TestEgressPolicy:
     @pytest.fixture(autouse=True)
     def _scoped_policy_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
