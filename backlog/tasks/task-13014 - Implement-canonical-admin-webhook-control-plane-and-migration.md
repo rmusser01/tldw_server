@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-22 17:00'
+updated_date: '2026-08-22 17:35'
 labels:
   - admin
   - webhooks
@@ -27,7 +27,7 @@ Implement upstream PR 1 from the approved canonical outgoing-webhook design. Del
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 An executable TDD implementation plan maps every PR 1 requirement to exact files, interfaces, tests, commands, and commits.
-- [ ] #2 Canonical registration and idempotency persistence works on SQLite and PostgreSQL with revision ETags, bounded registrations, tombstones, and context-bound encrypted URL and secret material.
+- [x] #2 Canonical registration and idempotency persistence works on SQLite and PostgreSQL with revision ETags, bounded registrations, tombstones, and context-bound encrypted URL and secret material.
 - [ ] #3 Legacy JSON and database records import deterministically with collision handling, encrypted backup provenance, resumability, and documented rollback limits.
 - [ ] #4 Focused unit, migration, repository, API, authorization, encryption, and legacy-import tests pass on supported databases; security and documentation verification is recorded.
 - [ ] #5 Temporary routing mounts either the isolated legacy webhook router or the canonical webhook router for a process, never duplicate method/path handlers; final compatibility deletion remains assigned to PR 3.
@@ -66,6 +66,8 @@ Planning correction: the approved design assigns final legacy-handler deletion a
 2026-08-22 Task 2 complete: added a dedicated immutable webhook key ring over the repository explicit-key AES-GCM primitive. Strict loading preserves duplicate JSON pairs, requires canonical base64 32-byte keys and a configured primary, ignores unrelated credentials, and exposes a non-throwing closed runtime load result. Contextual envelopes bind purpose plus row/version identity; previous keys are read-only, ordinary writes use only the primary, rotation can explicitly re-encrypt, outer/base64 tampering fails closed, and event decrypt rechecks the 64 KiB bound. Migration fingerprints are HMAC-SHA256 under closed domains. TDD evidence includes missing-module RED, no-argument loader RED, and envelope/event readback RED; final combined Task 1-2 matrix 165 passed with 2 existing warnings. Ruff, Bandit, fallback scan, and git diff --check passed.
 
 2026-08-22 Task 3 complete: added additive SQLite migration 091 and an atomic PostgreSQL ensure helper for seven canonical webhook tables, backend-equivalent checks/partial indexes, sequence and singleton migration-state seeds, encrypted event-body storage, delivery/attempt/idempotency contracts, and crash-resumable import/rotation state. Startup now runs the PostgreSQL ensure in both application and standalone initialization paths. Review improvement: split report, backup, and rollback-key owner/group/mode/file-identity evidence and tightened phase/artifact/retirement combinations. TDD RED proved both helpers absent and startup unwired. Verification: SQLite canonical+legacy matrix 13 passed/2 warnings; disposable PostgreSQL matrix 4 passed/2 warnings with no skips; startup/core matrix 9 passed/2 warnings; Ruff passed (ignoring only two pre-existing SIM300 assertions in test_startup_auth.py); Bandit passed with existing nosec notices; git diff --check passed.
+
+2026-08-22 Task 4 complete: added the backend-neutral AdminWebhookRepository and transaction-bound unit of work for durable registration CRUD, optimistic revision CAS, exact version increments, soft-delete retention, deterministic pagination/counts, atomic create/activation capacity admission, monotonic numeric IDs, protected-row reads, scoped HMAC idempotency claims/completion/replay/expiry, superseded secret replay detection, migration-state CAS/activity markers/rotation cursors, and purge eligibility. Every write and write-followed-read uses DatabasePool.transaction(); PostgreSQL parameter adaptation and bounded lock/statement timeouts remain local. Review corrections serialized PostgreSQL capacity checks, limited replay supersession to secret rotation/deletion, rejected unredacted target metadata, prevented clearing imported-secret rotation requirements without replacement, mapped read-pool contention consistently, and restricted response metadata. TDD RED was the missing repository module. Final verification: canonical contract/crypto/SQLite migration+repository matrix 129 passed with 2 existing warnings; disposable PostgreSQL repository matrix 9 passed with 20 warnings and no skips; disposable PostgreSQL migration matrix 4 passed with 10 warnings and no skips; focused mypy passed; Ruff passed; Bandit passed with no findings; transaction-shortcut, sensitive-canary, and git diff checks returned no findings.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
