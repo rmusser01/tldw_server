@@ -2,10 +2,15 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.testclient import TestClient
 from starlette.responses import Response
 
 from tldw_Server_API.app.api.v1.endpoints import slides as slides_ep
+from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
+    is_standalone_sensitive_route,
+    standalone_response_invalid_response,
+)
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabaseError
 from tldw_Server_API.app.core.Slides.slides_generator import SlidesGenerationError
 
@@ -221,3 +226,35 @@ async def test_slides_health_uses_source_free_database_probe():
     assert response.service == "slides"
     assert response.status == "ok"
     assert db.probe_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/api/v1/slides/presentations/deck-1"),
+        ("PUT", "/api/v1/slides/presentations/deck-1/html-source"),
+        ("POST", "/api/v1/slides/presentations/deck-1/restore"),
+        ("GET", "/api/v1/slides/presentations/deck-1/versions/1"),
+        ("GET", "/api/v1/slides/presentations/deck-1/export"),
+    ],
+)
+def test_broken_source_response_routes_return_one_fixed_redacted_error(method, path):
+    sentinel = "SECRET-HTML-DOCUMENT-RESPONSE"
+    app = FastAPI()
+
+    async def _broken_response():
+        raise RuntimeError(sentinel)
+
+    @app.exception_handler(Exception)
+    async def _handler(request: Request, exc: Exception):
+        assert is_standalone_sensitive_route(request.method, request.url.path)
+        return standalone_response_invalid_response(exc)
+
+    app.add_api_route(path, _broken_response, methods=[method])
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.request(method, path)
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "standalone_html_response_invalid"}
+    assert sentinel not in response.text

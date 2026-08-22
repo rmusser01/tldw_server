@@ -87,6 +87,7 @@ from tldw_Server_API.app.core.Slides.presentation_service import (
     STANDALONE_HTML,
     PresentationService,
     PresentationServiceError,
+    merge_auth_vary_header,
     merge_vary_header,
     parse_accepted_content_kinds,
     presentation_detail,
@@ -187,6 +188,20 @@ class _SlidesRoute(APIRoute):
                             "detail": detail["code"],
                             "operation": detail["operation"],
                             "content_kind": detail["content_kind"],
+                        },
+                        headers=headers,
+                    )
+                if (
+                    isinstance(detail, dict)
+                    and detail.get("code") == "presentation_version_conflict"
+                    and set(detail) == {"code", "current_version", "etag"}
+                ):
+                    return JSONResponse(
+                        status_code=exc.status_code,
+                        content={
+                            "detail": detail["code"],
+                            "current_version": detail["current_version"],
+                            "etag": detail["etag"],
                         },
                         headers=headers,
                     )
@@ -1587,6 +1602,7 @@ async def get_presentation(
     if row.content_kind == STANDALONE_HTML:
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        merge_auth_vary_header(response.headers)
     return _build_presentation_response(row, additive=STANDALONE_HTML in accepted)
 
 
@@ -1635,13 +1651,22 @@ async def save_standalone_html_source(
     except InputError as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to save standalone HTML") from exc
     except ConflictError as exc:
-        raise _map_precondition_conflict(exc) from exc
+        current = db.get_presentation_kind(presentation_id)
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail={
+                "code": "presentation_version_conflict",
+                "current_version": int(current.version),
+                "etag": _format_etag(current.version, current.content_kind),
+            },
+        ) from exc
     except PresentationServiceError as exc:
         raise _map_presentation_service_error(exc) from exc
     response.headers["ETag"] = _format_etag(row.version, row.content_kind)
     response.headers["Last-Modified"] = row.last_modified
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
+    merge_auth_vary_header(response.headers)
     return _build_presentation_response(row, additive=True)
 
 
@@ -2011,6 +2036,7 @@ async def restore_presentation(
     if row.content_kind == STANDALONE_HTML:
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        merge_auth_vary_header(response.headers)
     return _build_presentation_response(row, additive=STANDALONE_HTML in accepted)
 
 
@@ -2318,8 +2344,10 @@ async def get_presentation_version(
         raise HTTPException(status_code=409, detail="version_content_kind_mismatch")
     response.headers["ETag"] = _format_etag(version, kind.content_kind)
     if kind.content_kind == STANDALONE_HTML:
+        response.headers["Last-Modified"] = row.created_at
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        merge_auth_vary_header(response.headers)
     return _payload_to_presentation(payload, additive=STANDALONE_HTML in accepted)
 
 
@@ -2370,6 +2398,7 @@ async def restore_presentation_version(
     if row.content_kind == STANDALONE_HTML:
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        merge_auth_vary_header(response.headers)
     return _build_presentation_response(row, additive=STANDALONE_HTML in accepted)
 
 
@@ -2760,10 +2789,8 @@ async def export_presentation(
             "export",
             export_format=str(format.value),
         )
-        if format == ExportFormat.HTML:
-            raise service.operation_not_supported(kind.content_kind, "export")
         row = db.get_presentation_by_id(presentation_id, include_deleted=False)
-        if row.content_kind == STANDALONE_HTML and format == ExportFormat.JSON:
+        if row.content_kind == STANDALONE_HTML and format in {ExportFormat.HTML, ExportFormat.JSON}:
             await service.validate_saved_standalone(row)
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
@@ -2773,15 +2800,28 @@ async def export_presentation(
         raise _map_presentation_service_error(exc) from exc
 
     if row.content_kind == STANDALONE_HTML:
-        payload = jsonable_encoder(_build_presentation_response(row, additive=True))
-        body = export_presentation_json(payload).encode("utf-8")
+        if format == ExportFormat.HTML:
+            body = row.html_document.encode("utf-8")
+            media_type = "application/octet-stream"
+            filename = "presentation.html"
+        else:
+            payload = jsonable_encoder(_build_presentation_response(row, additive=True))
+            body = export_presentation_json(payload).encode("utf-8")
+            media_type = "application/json"
+            filename = "presentation.json"
         headers = {
-            "Content-Disposition": f'attachment; filename="presentation_{presentation_id}.json"',
+            "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
+            "X-Download-Options": "noopen",
+            "Referrer-Policy": "no-referrer",
+            "Cross-Origin-Resource-Policy": "same-origin",
+            "ETag": _format_etag(row.version, row.content_kind),
+            "Last-Modified": row.last_modified,
         }
         merge_vary_header(headers)
-        return Response(content=body, media_type="application/json", headers=headers)
+        merge_auth_vary_header(headers)
+        return Response(content=body, media_type=media_type, headers=headers)
 
     slides_raw = json.loads(row.slides)
     slides = [_slide_from_obj(item) for item in slides_raw]
@@ -2969,3 +3009,10 @@ async def slides_health(db: SlidesDatabase = Depends(get_slides_db_for_user)) ->
         logger.warning("slides health check failed")
         raise HTTPException(status_code=500, detail="slides_db_unavailable") from exc
     return SlidesHealthResponse(service="slides", status="ok")
+
+
+from tldw_Server_API.app.api.v1.endpoints.slides_standalone_html import (  # noqa: E402
+    router as standalone_html_router,
+)
+
+router.include_router(standalone_html_router)

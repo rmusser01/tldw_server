@@ -28,6 +28,11 @@ except ImportError:  # pragma: no cover - CSS sanitizer depends on optional tiny
     CSSSanitizer = None  # type: ignore
 
 try:
+    import tinycss2  # type: ignore
+except ImportError:  # pragma: no cover - direct dependency is smoke tested elsewhere
+    tinycss2 = None  # type: ignore
+
+try:
     import markdown  # type: ignore
 except Exception as exc:  # pragma: no cover - markdown is a declared dependency
     raise RuntimeError("markdown package is required for slides export") from exc
@@ -451,12 +456,29 @@ def _sanitize_custom_css(css_text: str | None) -> str | None:
     if re.search(r"url\s*\(", css_text, flags=re.IGNORECASE):
         raise SlidesExportInputError("custom_css_url_blocked")
     cleaned = css_text
-    if CSSSanitizer is not None:
+    if CSSSanitizer is not None and tinycss2 is not None:
         try:
             sanitizer = CSSSanitizer(allowed_css_properties=_ALLOWED_CSS_PROPERTIES)
-            cleaned = sanitizer.sanitize_css(css_text)
-        except Exception as exc:
-            logger.warning("slides export: css sanitizer failed: {}", exc)
+            rules = tinycss2.parse_stylesheet(
+                css_text,
+                skip_comments=False,
+                skip_whitespace=False,
+            )
+            sanitized_rules: list[str] = []
+            for rule in rules:
+                if rule.type in {"comment", "whitespace"}:
+                    sanitized_rules.append(tinycss2.serialize([rule]))
+                    continue
+                if rule.type != "qualified-rule":
+                    raise SlidesExportInputError("custom_css_rule_blocked")
+                declarations = sanitizer.sanitize_css(tinycss2.serialize(rule.content)).strip()
+                if declarations:
+                    sanitized_rules.append(f"{tinycss2.serialize(rule.prelude).strip()} {{{declarations}}}")
+            cleaned = "".join(sanitized_rules)
+        except SlidesExportInputError:
+            raise
+        except Exception:
+            logger.warning("slides export: css sanitizer failed")
             cleaned = ""
     cleaned = cleaned.replace("\x00", "").strip()
     return cleaned or None

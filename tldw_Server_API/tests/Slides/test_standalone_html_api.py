@@ -3,15 +3,21 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+    get_chacha_db_for_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import (
     get_collections_db_for_user,
 )
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import (
     get_slides_db_for_user,
 )
@@ -28,13 +34,119 @@ from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
+    is_standalone_sensitive_route,
+    standalone_request_validation_response,
+    standalone_response_invalid_response,
+)
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
+from tldw_Server_API.app.core.Slides.standalone_html_service import (
+    StandaloneHtmlGenerationError,
+    StandaloneHtmlGenerationSubmission,
+)
 from tldw_Server_API.app.core.Slides.standalone_html_validator import (
     validate_standalone_html,
 )
 
 _ACCEPT = "X-Slides-Accept-Content-Kinds"
 _BOTH = {_ACCEPT: "structured_slides,standalone_html"}
+_REVISION = "sha256:" + "a" * 64
+_GENERATION_REQUEST = {
+    "generation_mode": "standalone_html",
+    "generation_config_revision": _REVISION,
+    "source": {"kind": "prompt", "prompt": "Build a safe systems deck"},
+    "html_options": {
+        "presentation_type": "tech-sharing",
+        "audience": "backend engineers",
+        "slide_count": 10,
+        "visual_direction": "dark-technical",
+        "delivery_style": "speaker-led",
+    },
+}
+
+
+def _runtime_config(*, enabled: bool = True, reason: str | None = None):
+    return SimpleNamespace(
+        enabled=enabled,
+        disabled_reason=reason,
+        target=(
+            SimpleNamespace(
+                provider="openai",
+                model="allowed-model",
+                adapter_id="openai_official_chat_v1",
+                endpoint_identity="https://api.openai.com:443/v1/chat/completions",
+            )
+            if enabled
+            else None
+        ),
+        generation_config_revision=_REVISION if enabled else None,
+        input_limits=SimpleNamespace(
+            max_request_bytes=4_194_304,
+            max_source_chars=200_000,
+            max_source_tokens=50_000,
+            max_audience_chars=500,
+            max_source_identifier_bytes=256,
+            max_note_ids=100,
+            max_rag_query_chars=20_000,
+            max_rag_top_k=100,
+        ),
+        output_limits=SimpleNamespace(
+            max_provider_response_bytes=8_388_608,
+            max_document_bytes=1_048_576,
+        ),
+    )
+
+
+class _FakeGenerationService:
+    def __init__(self) -> None:
+        self.submission = StandaloneHtmlGenerationSubmission(
+            receipt_id="018f2f4a-6f79-7a27-a1aa-7bb60777d9f1",
+            status="queued",
+            job_uuid="018f2f4a-6f79-7a27-a1aa-7bb60777d9f2",
+            presentation_id=None,
+            replayed=False,
+        )
+        self.submit_calls: list[dict[str, object]] = []
+        self.status_calls: list[tuple[str, str]] = []
+        self.submit_error: StandaloneHtmlGenerationError | None = None
+
+    async def submit(self, **kwargs):
+        self.submit_calls.append(kwargs)
+        if self.submit_error is not None:
+            raise self.submit_error
+        return self.submission
+
+    def get_generation(self, *, owner_user_id: str, receipt_id: str):
+        self.status_calls.append((owner_user_id, receipt_id))
+        if receipt_id != self.submission.receipt_id:
+            raise StandaloneHtmlGenerationError("generation_not_found", status_code=404)
+        return self.submission
+
+
+class _FakeStandaloneRuntime:
+    def __init__(self) -> None:
+        self.config = _runtime_config()
+        self.generation_service = _FakeGenerationService()
+        self.reconcile_calls: list[str] = []
+        self.receipt_error: tuple[str | None, str | None] = (None, None)
+        self.job = {"progress_message": "Resolving source", "progress_percent": 25.0}
+
+    def config_loader(self):
+        return self.config
+
+    def reconcile_owner(self, owner_user_id: str):
+        self.reconcile_calls.append(owner_user_id)
+        return SimpleNamespace(jobs_available=True)
+
+    def receipt_error_fields(self, owner_user_id: str, receipt_id: str):
+        assert owner_user_id == "1"
+        assert receipt_id == self.generation_service.submission.receipt_id
+        return self.receipt_error
+
+    def job_progress(self, job_uuid: str, owner_user_id: str):
+        assert job_uuid == self.generation_service.submission.job_uuid
+        assert owner_user_id == "1"
+        return self.job
 
 
 class _InlineValidationPool:
@@ -170,8 +282,28 @@ def html_client(tmp_path):
     html = _create_html(db)
     app = FastAPI()
     validation_pool = _InlineValidationPool(db)
+    standalone_runtime = _FakeStandaloneRuntime()
     app.state.standalone_html_validation_pool = validation_pool
+    app.state.standalone_html_api_runtime = standalone_runtime
     app.include_router(slides_router, prefix="/api/v1", tags=["slides"])
+
+    @app.exception_handler(RequestValidationError)
+    async def _request_validation_handler(request: Request, exc: RequestValidationError):
+        if is_standalone_sensitive_route(request.method, request.url.path):
+            return standalone_request_validation_response(request, exc)
+        raise exc
+
+    @app.exception_handler(ResponseValidationError)
+    async def _response_validation_handler(request: Request, exc: ResponseValidationError):
+        if is_standalone_sensitive_route(request.method, request.url.path):
+            return standalone_response_invalid_response(exc)
+        raise exc
+
+    @app.exception_handler(Exception)
+    async def _sensitive_exception_handler(request: Request, exc: Exception):
+        if is_standalone_sensitive_route(request.method, request.url.path):
+            return standalone_response_invalid_response(exc)
+        raise exc
 
     async def _override_user():
         return User(
@@ -216,10 +348,18 @@ def html_client(tmp_path):
     async def _override_collections():
         return _Collections()
 
+    async def _override_media_db():
+        yield SimpleNamespace()
+
+    async def _override_chacha_db():
+        return SimpleNamespace()
+
     app.dependency_overrides[get_request_user] = _override_user
     app.dependency_overrides[get_auth_principal] = _override_principal
     app.dependency_overrides[get_slides_db_for_user] = _override_db
     app.dependency_overrides[get_collections_db_for_user] = _override_collections
+    app.dependency_overrides[get_media_db_for_user] = _override_media_db
+    app.dependency_overrides[get_chacha_db_for_user] = _override_chacha_db
 
     with TestClient(app) as client:
         yield client, db, structured, html
@@ -554,7 +694,7 @@ def test_html_source_errors_preserve_negotiation_vary(html_client):
     )
     stale = client.put(
         path,
-        content=_document(),
+        content=_document(title="Stale candidate"),
         headers={
             **_BOTH,
             "If-Match": '"v0"',
@@ -1053,3 +1193,387 @@ def test_structured_restore_keeps_legacy_missing_version_precedence(html_client)
 
     assert response.status_code == 404
     assert response.json()["detail"] == "presentation_version_not_found"
+
+
+def test_standalone_capabilities_exact_enabled_shape_and_private_cache(html_client):
+    client, _db, _structured, _html = html_client
+
+    response = client.get("/api/v1/slides/capabilities")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "schema_version": 1,
+        "content_kind_request_header": "X-Slides-Accept-Content-Kinds",
+        "content_kinds": {
+            "structured_slides": {"read": True, "edit": True},
+            "standalone_html": {
+                "read": True,
+                "edit": True,
+                "export_attachment": True,
+                "draft_attachment": True,
+                "reason": None,
+                "limits": {
+                    "max_document_bytes": 1_048_576,
+                    "max_source_write_bytes": 1_048_576,
+                    "max_draft_attachment_bytes": 1_048_576,
+                    "max_slides": 30,
+                    "max_nesting_depth": 128,
+                },
+            },
+        },
+        "generation_modes": {
+            "structured_slides": {
+                "enabled": True,
+                "transport": "existing_source_endpoints",
+            },
+            "standalone_html": {
+                "enabled": True,
+                "reason": None,
+                "transport": "slides_generation_job",
+                "source_kinds": ["prompt", "chat", "media", "notes", "rag"],
+                "provider": "openai",
+                "model": "allowed-model",
+                "adapter_id": "openai_official_chat_v1",
+                "endpoint_identity": "https://api.openai.com:443/v1/chat/completions",
+                "generation_config_revision": _REVISION,
+                "input_limits": {
+                    "max_request_bytes": 4_194_304,
+                    "max_source_chars": 200_000,
+                    "max_source_tokens": 50_000,
+                    "max_audience_chars": 500,
+                    "max_source_identifier_bytes": 256,
+                    "max_note_ids": 100,
+                    "max_rag_query_chars": 20_000,
+                    "max_rag_top_k": 100,
+                },
+                "output_limits": {
+                    "max_provider_response_bytes": 8_388_608,
+                    "max_document_bytes": 1_048_576,
+                },
+            },
+        },
+    }
+    assert response.headers["Cache-Control"] == "private, no-store"
+    vary = response.headers["Vary"].lower()
+    assert all(token in vary for token in ("authorization", "x-api-key", "cookie"))
+
+
+def test_validator_unavailable_capability_keeps_read_and_draft_only(html_client):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    runtime.config = _runtime_config(enabled=False, reason="validator_unavailable")
+
+    response = client.get("/api/v1/slides/capabilities")
+
+    assert response.status_code == 200, response.text
+    html_kind = response.json()["content_kinds"]["standalone_html"]
+    generation = response.json()["generation_modes"]["standalone_html"]
+    assert html_kind == {
+        "read": True,
+        "edit": False,
+        "export_attachment": False,
+        "draft_attachment": True,
+        "reason": "validator_unavailable",
+        "limits": html_kind["limits"],
+    }
+    assert generation["enabled"] is False
+    assert generation["reason"] == "validator_unavailable"
+    assert generation["generation_config_revision"] is None
+    assert all(generation[field] is None for field in ("provider", "model", "adapter_id", "endpoint_identity"))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param({"kind": "prompt", "prompt": "Material"}, id="prompt"),
+        pytest.param({"kind": "chat", "conversation_id": "chat-1"}, id="chat"),
+        pytest.param({"kind": "media", "media_id": 1}, id="media"),
+        pytest.param({"kind": "notes", "note_ids": ["note-1"]}, id="notes"),
+        pytest.param({"kind": "rag", "query": "bounded query", "top_k": 8}, id="rag"),
+    ],
+)
+def test_generation_accepts_each_closed_source_variant(html_client, source):
+    client, _db, _structured, _html = html_client
+    payload = {**_GENERATION_REQUEST, "source": source}
+
+    response = client.post(
+        "/api/v1/slides/generations",
+        json=payload,
+        headers={"Idempotency-Key": "task11-generation-key"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json() == {
+        "generation_id": "018f2f4a-6f79-7a27-a1aa-7bb60777d9f1",
+        "status": "queued",
+        "status_url": "/api/v1/slides/generations/018f2f4a-6f79-7a27-a1aa-7bb60777d9f1",
+        "presentation_id": None,
+    }
+    call = client.app.state.standalone_html_api_runtime.generation_service.submit_calls[-1]
+    assert call["owner_user_id"] == "1"
+    assert call["request"] == payload
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param({}, id="missing"),
+        pytest.param({"Idempotency-Key": "short"}, id="short"),
+        pytest.param({"Idempotency-Key": "contains spaces 123"}, id="invalid-character"),
+    ],
+)
+def test_generation_requires_one_valid_idempotency_header(html_client, headers):
+    client, _db, _structured, _html = html_client
+
+    response = client.post("/api/v1/slides/generations", json=_GENERATION_REQUEST, headers=headers)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] in {
+        "generation_idempotency_key_required",
+        "generation_idempotency_key_invalid",
+    }
+    assert client.app.state.standalone_html_api_runtime.generation_service.submit_calls == []
+
+
+def test_generation_closed_schema_rejects_provider_override_before_service(html_client):
+    client, _db, _structured, _html = html_client
+    payload = {**_GENERATION_REQUEST, "provider": "attacker-provider"}
+
+    response = client.post(
+        "/api/v1/slides/generations",
+        json=payload,
+        headers={"Idempotency-Key": "task11-generation-key"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "standalone_html_request_invalid"
+    assert "attacker-provider" not in response.text
+    assert client.app.state.standalone_html_api_runtime.generation_service.submit_calls == []
+
+
+def test_generation_maps_retryable_service_error_without_echoing_key(html_client):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    runtime.generation_service.submit_error = StandaloneHtmlGenerationError(
+        "generation_receipt_unresolved",
+        status_code=503,
+        retry_after=1,
+    )
+
+    response = client.post(
+        "/api/v1/slides/generations",
+        json=_GENERATION_REQUEST,
+        headers={"Idempotency-Key": "task11-secret-key"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "generation_receipt_unresolved"}
+    assert response.headers["Retry-After"] == "1"
+    assert "task11-secret-key" not in response.text
+
+
+def test_terminal_generation_replay_returns_closed_200_variant(html_client):
+    client, _db, _structured, _html = html_client
+    service = client.app.state.standalone_html_api_runtime.generation_service
+    service.submission = StandaloneHtmlGenerationSubmission(
+        receipt_id="018f2f4a-6f79-7a27-a1aa-7bb60777d9f1",
+        status="completed",
+        job_uuid="018f2f4a-6f79-7a27-a1aa-7bb60777d9f2",
+        presentation_id="presentation-1",
+        replayed=True,
+    )
+
+    response = client.post(
+        "/api/v1/slides/generations",
+        json=_GENERATION_REQUEST,
+        headers={"Idempotency-Key": "task11-generation-key"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "generation_id": "018f2f4a-6f79-7a27-a1aa-7bb60777d9f1",
+        "status": "completed",
+        "status_url": "/api/v1/slides/generations/018f2f4a-6f79-7a27-a1aa-7bb60777d9f1",
+        "presentation_id": "presentation-1",
+        "content_kind": "standalone_html",
+    }
+
+
+@pytest.mark.parametrize("generation_id", ["not-a-uuid", "018f2f4a-6f79-7a27-a1aa-7bb60777d900"])
+def test_generation_status_malformed_and_unknown_are_equivalent_404(html_client, generation_id):
+    client, _db, _structured, _html = html_client
+
+    response = client.get(f"/api/v1/slides/generations/{generation_id}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "generation_not_found"}
+
+
+def test_generation_status_reconciles_and_returns_bounded_progress_without_html(html_client):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    generation_id = runtime.generation_service.submission.receipt_id
+
+    response = client.get(f"/api/v1/slides/generations/{generation_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "generation_id": generation_id,
+        "status": "queued",
+        "status_url": f"/api/v1/slides/generations/{generation_id}",
+        "presentation_id": None,
+        "progress_text": "Resolving source",
+    }
+    assert runtime.reconcile_calls == ["1"]
+    assert "html" not in json.dumps(response.json()).lower()
+
+
+def test_generation_status_unresolved_claim_is_retryable_and_source_free(html_client):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    runtime.generation_service.submission = StandaloneHtmlGenerationSubmission(
+        receipt_id="018f2f4a-6f79-7a27-a1aa-7bb60777d9f1",
+        status="claimed",
+        job_uuid=None,
+        presentation_id=None,
+        replayed=True,
+    )
+
+    response = client.get(f"/api/v1/slides/generations/{runtime.generation_service.submission.receipt_id}")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "generation_receipt_unresolved"}
+    assert response.headers["Retry-After"] == "1"
+    assert "html" not in response.text.lower()
+
+
+def test_generation_status_jobs_failure_is_retryable_and_redacted(html_client):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+
+    def unavailable(_owner_user_id: str):
+        raise RuntimeError("SECRET-JOBS-OUTAGE")
+
+    runtime.reconcile_owner = unavailable
+
+    response = client.get(f"/api/v1/slides/generations/{runtime.generation_service.submission.receipt_id}")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "generation_receipt_unresolved"}
+    assert response.headers["Retry-After"] == "1"
+    assert "SECRET-JOBS-OUTAGE" not in response.text
+
+
+def _assert_html_attachment_headers(response) -> None:
+    assert response.headers["Content-Type"] == "application/octet-stream"
+    assert response.headers["Content-Disposition"] == 'attachment; filename="presentation.html"'
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Download-Options"] == "noopen"
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.headers["Referrer-Policy"] == "no-referrer"
+    assert response.headers["Cross-Origin-Resource-Policy"] == "same-origin"
+
+
+def test_draft_attachment_echoes_exact_invalid_deck_without_validation_or_persistence(html_client):
+    client, db, _structured, html = html_client
+    draft = b"not a valid deck, but exact UTF-8 recovery bytes \xe2\x98\x83"
+    validation_pool = client.app.state.standalone_html_validation_pool
+    validation_pool.calls.clear()
+
+    response = client.post(
+        f"/api/v1/slides/presentations/{html.id}/draft-attachment",
+        content=draft,
+        headers={**_BOTH, "Content-Type": "application/octet-stream"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.content == draft
+    _assert_html_attachment_headers(response)
+    assert db.get_presentation_by_id(html.id).version == 1
+    assert validation_pool.calls == []
+
+
+def test_draft_attachment_rejects_structured_kind_with_flat_operation_error(html_client):
+    client, _db, structured, _html = html_client
+
+    response = client.post(
+        f"/api/v1/slides/presentations/{structured.id}/draft-attachment",
+        content=b"not read for a structured target",
+        headers={**_BOTH, "Content-Type": "application/octet-stream"},
+    )
+
+    _assert_operation_error(
+        response,
+        operation="draft_attachment",
+        content_kind="structured_slides",
+    )
+
+
+def test_saved_html_and_json_exports_use_fixed_names_and_security_headers(html_client):
+    client, _db, _structured, html = html_client
+
+    html_export = client.get(
+        f"/api/v1/slides/presentations/{html.id}/export?format=html",
+        headers=_BOTH,
+    )
+    json_export = client.get(
+        f"/api/v1/slides/presentations/{html.id}/export?format=json",
+        headers=_BOTH,
+    )
+
+    assert html_export.status_code == 200, html_export.text
+    assert html_export.content == _document().encode("utf-8")
+    _assert_html_attachment_headers(html_export)
+    assert json_export.status_code == 200, json_export.text
+    assert json_export.headers["Content-Type"] == "application/json"
+    assert json_export.headers["Content-Disposition"] == 'attachment; filename="presentation.json"'
+    assert json_export.headers["X-Content-Type-Options"] == "nosniff"
+    assert json_export.headers["Cache-Control"] == "private, no-store"
+    assert json_export.headers["Referrer-Policy"] == "no-referrer"
+    assert json_export.headers["Cross-Origin-Resource-Policy"] == "same-origin"
+
+
+def test_html_version_content_has_strong_etag_last_modified_and_source_headers(html_client):
+    client, _db, _structured, html = html_client
+
+    response = client.get(
+        f"/api/v1/slides/presentations/{html.id}/versions/1",
+        headers=_BOTH,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["Content-Type"].startswith("application/json")
+    assert response.headers["ETag"] == '"v1"'
+    assert response.headers["Last-Modified"]
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Cache-Control"] == "private, no-store"
+    vary = response.headers["Vary"].lower()
+    assert all(token in vary for token in ("x-slides-accept-content-kinds", "authorization", "x-api-key", "cookie"))
+    assert response.json()["html_document"] == _document()
+
+
+def test_lost_save_response_reconciles_same_source_but_stale_different_source_is_bounded(html_client):
+    client, _db, _structured, html = html_client
+    path = f"/api/v1/slides/presentations/{html.id}/html-source"
+    changed_document = _document(title="Changed after response loss", text="new")
+    headers = {**_BOTH, "If-Match": '"v1"', "Content-Type": "application/octet-stream"}
+    changed = client.put(path, content=changed_document.encode(), headers=headers)
+    assert changed.status_code == 200, changed.text
+    validation_pool = client.app.state.standalone_html_validation_pool
+    validation_pool.calls.clear()
+
+    reconciled = client.put(path, content=changed_document.encode(), headers=headers)
+    stale = client.put(path, content=_document(title="Other").encode(), headers=headers)
+
+    assert reconciled.status_code == 200, reconciled.text
+    assert reconciled.headers["ETag"] == '"v2"'
+    assert reconciled.json()["version"] == 2
+    assert stale.status_code == 412
+    assert stale.json() == {
+        "detail": "presentation_version_conflict",
+        "current_version": 2,
+        "etag": '"v2"',
+    }
+    assert "html_document" not in stale.text
+    assert changed_document not in stale.text
+    assert validation_pool.calls == []

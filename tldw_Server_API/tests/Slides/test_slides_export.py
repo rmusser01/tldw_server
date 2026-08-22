@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Slides.slides_export import (
     SlidesAssetsMissingError,
     SlidesExportInputError,
     _normalize_pdf_options,
+    _sanitize_custom_css,
     _sanitize_markdown,
     export_presentation_bundle,
     export_presentation_json,
@@ -120,6 +121,17 @@ def test_sanitize_markdown_uses_bleach_without_css_sanitizer():
     assert "<ul>" in html
     assert "<li>one</li>" in html
     assert "&lt;ul" not in html
+
+
+def test_sanitize_custom_css_preserves_safe_selector_stylesheet():
+    css = ".reveal .slides section { color: red; background-color: #fff; }"
+
+    sanitized = _sanitize_custom_css(css)
+
+    assert sanitized is not None
+    assert ".reveal .slides section" in sanitized
+    assert "color: red;" in sanitized
+    assert "background-color: #fff;" in sanitized
 
 
 def test_slides_export_reraises_unexpected_css_sanitizer_import_errors(monkeypatch):

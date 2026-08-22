@@ -450,6 +450,201 @@ class GenerateFromRagRequest(SlideGenerationBase):
     top_k: int | None = Field(default=8, ge=1)
 
 
+class _ClosedStandaloneModel(BaseModel):
+    """Closed public schema used by the standalone HTML transport."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StandaloneHtmlPromptSource(_ClosedStandaloneModel):
+    kind: Literal["prompt"]
+    prompt: str
+
+
+class StandaloneHtmlChatSource(_ClosedStandaloneModel):
+    kind: Literal["chat"]
+    conversation_id: str
+
+
+class StandaloneHtmlMediaSource(_ClosedStandaloneModel):
+    kind: Literal["media"]
+    media_id: int = Field(ge=1, le=9_223_372_036_854_775_807)
+
+
+class StandaloneHtmlNotesSource(_ClosedStandaloneModel):
+    kind: Literal["notes"]
+    note_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class StandaloneHtmlRagSource(_ClosedStandaloneModel):
+    kind: Literal["rag"]
+    query: str = Field(max_length=20_000)
+    top_k: int = Field(default=8, ge=1, le=100)
+
+
+StandaloneHtmlGenerationSource = Annotated[
+    StandaloneHtmlPromptSource
+    | StandaloneHtmlChatSource
+    | StandaloneHtmlMediaSource
+    | StandaloneHtmlNotesSource
+    | StandaloneHtmlRagSource,
+    Field(discriminator="kind"),
+]
+
+
+class StandaloneHtmlOptions(_ClosedStandaloneModel):
+    presentation_type: Literal[
+        "pitch-deck",
+        "tech-sharing",
+        "product-launch",
+        "weekly-report",
+        "course-module",
+        "keynote",
+        "data-report",
+        "training",
+        "social-media",
+        "case-study",
+        "comparison",
+        "roadmap",
+    ]
+    audience: str = Field(max_length=500)
+    slide_count: int = Field(ge=1, le=30)
+    visual_direction: Literal[
+        "auto",
+        "dark-technical",
+        "minimal-light",
+        "editorial",
+        "corporate",
+        "soft-pastel",
+        "bold-creative",
+        "neo-brutalist",
+    ]
+    delivery_style: Literal["speaker-led", "self-guided"]
+
+
+class StandaloneHtmlGenerationRequest(_ClosedStandaloneModel):
+    generation_mode: Literal["standalone_html"]
+    generation_config_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    source: StandaloneHtmlGenerationSource
+    html_options: StandaloneHtmlOptions
+
+
+class StandaloneHtmlGenerationPendingResponse(_ClosedStandaloneModel):
+    generation_id: str
+    status: Literal["queued", "running"]
+    status_url: str
+    presentation_id: None
+    progress_text: str | None = None
+
+
+class StandaloneHtmlGenerationCompletedResponse(_ClosedStandaloneModel):
+    generation_id: str
+    status: Literal["completed"]
+    status_url: str
+    presentation_id: str
+    content_kind: Literal["standalone_html"]
+
+
+class StandaloneHtmlGenerationFailedResponse(_ClosedStandaloneModel):
+    generation_id: str
+    status: Literal["failed"]
+    status_url: str
+    presentation_id: None
+    error_code: str
+    error_message: str
+
+
+class StandaloneHtmlGenerationCancelledResponse(_ClosedStandaloneModel):
+    generation_id: str
+    status: Literal["cancelled"]
+    status_url: str
+    presentation_id: None
+    error_code: Literal["generation_cancelled"]
+
+
+StandaloneHtmlGenerationResponse = Annotated[
+    StandaloneHtmlGenerationPendingResponse
+    | StandaloneHtmlGenerationCompletedResponse
+    | StandaloneHtmlGenerationFailedResponse
+    | StandaloneHtmlGenerationCancelledResponse,
+    Field(discriminator="status"),
+]
+
+
+class StandaloneHtmlContentLimits(_ClosedStandaloneModel):
+    max_document_bytes: int
+    max_source_write_bytes: int
+    max_draft_attachment_bytes: int
+    max_slides: int
+    max_nesting_depth: int
+
+
+class StructuredSlidesContentCapability(_ClosedStandaloneModel):
+    read: Literal[True]
+    edit: Literal[True]
+
+
+class StandaloneHtmlContentCapability(_ClosedStandaloneModel):
+    read: Literal[True]
+    edit: bool
+    export_attachment: bool
+    draft_attachment: Literal[True]
+    reason: str | None
+    limits: StandaloneHtmlContentLimits
+
+
+class SlidesContentKindsCapability(_ClosedStandaloneModel):
+    structured_slides: StructuredSlidesContentCapability
+    standalone_html: StandaloneHtmlContentCapability
+
+
+class StructuredSlidesGenerationCapability(_ClosedStandaloneModel):
+    enabled: Literal[True]
+    transport: Literal["existing_source_endpoints"]
+
+
+class StandaloneHtmlInputLimitsResponse(_ClosedStandaloneModel):
+    max_request_bytes: int
+    max_source_chars: int
+    max_source_tokens: int
+    max_audience_chars: int
+    max_source_identifier_bytes: int
+    max_note_ids: int
+    max_rag_query_chars: int
+    max_rag_top_k: int
+
+
+class StandaloneHtmlOutputLimitsResponse(_ClosedStandaloneModel):
+    max_provider_response_bytes: int
+    max_document_bytes: int
+
+
+class StandaloneHtmlGenerationCapability(_ClosedStandaloneModel):
+    enabled: bool
+    reason: str | None
+    transport: Literal["slides_generation_job"]
+    source_kinds: tuple[Literal["prompt", "chat", "media", "notes", "rag"], ...]
+    provider: str | None
+    model: str | None
+    adapter_id: str | None
+    endpoint_identity: str | None
+    generation_config_revision: str | None
+    input_limits: StandaloneHtmlInputLimitsResponse
+    output_limits: StandaloneHtmlOutputLimitsResponse
+
+
+class SlidesGenerationModesCapability(_ClosedStandaloneModel):
+    structured_slides: StructuredSlidesGenerationCapability
+    standalone_html: StandaloneHtmlGenerationCapability
+
+
+class SlidesCapabilitiesResponse(_ClosedStandaloneModel):
+    schema_version: Literal[1]
+    content_kind_request_header: Literal["X-Slides-Accept-Content-Kinds"]
+    content_kinds: SlidesContentKindsCapability
+    generation_modes: SlidesGenerationModesCapability
+
+
 class ExportFormat(str, Enum):
     """Supported presentation export formats."""
 
