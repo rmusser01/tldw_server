@@ -689,6 +689,7 @@ def test_sync_automation_handlers_do_not_run_sqlite_work_on_event_loop():
     assert inspect.iscoroutinefunction(scheduled_tasks_control_plane.create_scheduled_task_reminder)  # nosec B101
 
 
+@pytest.mark.integration
 def test_run_now_triggers_real_dispatch_and_returns_run_reference(
     scheduled_tasks_client, auth_headers, monkeypatch
 ):
@@ -721,6 +722,7 @@ def test_run_now_triggers_real_dispatch_and_returns_run_reference(
     assert len(created) == 1  # nosec B101
     assert created[0]["domain"] == "scheduled_tasks"  # nosec B101
     assert created[0]["job_type"] == "agent_task_run"  # nosec B101
+    assert created[0]["queue"] == "default"  # nosec B101
     assert created[0]["owner_user_id"] is not None  # nosec B101
     assert created[0]["idempotency_key"] == (
         f"definition:{definition['id']}:{body['run_slot_utc']}"
@@ -728,6 +730,7 @@ def test_run_now_triggers_real_dispatch_and_returns_run_reference(
     assert created[0]["payload"]["manual"] is True  # nosec B101
 
 
+@pytest.mark.integration
 def test_run_now_paused_definition_refuses_with_existing_code(
     scheduled_tasks_client, auth_headers, monkeypatch
 ):
@@ -754,6 +757,7 @@ def test_run_now_paused_definition_refuses_with_existing_code(
     )
 
 
+@pytest.mark.integration
 def test_run_now_unknown_definition_404(scheduled_tasks_client, auth_headers):
     response = scheduled_tasks_client.post(
         "/api/v1/scheduled-tasks/definitions/no-such-definition/run",

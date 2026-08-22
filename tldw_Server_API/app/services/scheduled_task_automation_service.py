@@ -488,6 +488,7 @@ class ScheduledTaskAutomationService:
         definition_id: str,
         idempotency_key: str | None = None,
         request_id: str | None = None,
+        jobs: Any | None = None,
     ) -> ScheduledTaskRunNowResponse:
         """Trigger one immediate execution through the standard Jobs path.
 
@@ -509,6 +510,9 @@ class ScheduledTaskAutomationService:
         from datetime import datetime, timezone as _tz
 
         from tldw_Server_API.app.core.Jobs.manager import JobManager
+        from tldw_Server_API.app.services.scheduled_task_automation_scheduler import (
+            automation_jobs_queue,
+        )
 
         repo = self._repo(owner_id)
         definition = repo.get_definition(owner_id=owner_id, definition_id=definition_id)
@@ -526,53 +530,77 @@ class ScheduledTaskAutomationService:
         if definition.lifecycle == "disabled":
             raise ScheduledTaskAutomationError("definition_disabled")
 
-        run_slot_utc = (
-            datetime.now(_tz.utc).replace(microsecond=0).isoformat()
+        payload_hash = _canonical_hash(
+            {"definition_id": definition_id, "action": "run_now"}
         )
-        payload = {
-            "definition_id": definition.id,
-            "user_id": owner_id,
-            "family": definition.family,
-            "scheduled_for": run_slot_utc,
-            "manual": True,
-        }
-        idem = f"definition:{definition.id}:{run_slot_utc}"
-        jm = JobManager()
-        job = jm.create_job(
-            domain="scheduled_tasks",
-            job_type="agent_task_run",
-            payload=payload,
-            owner_user_id=owner_id,
-            idempotency_key=idem,
-        )
-        deduped = bool(job.get("deduped")) if isinstance(job, dict) else False
 
-        try:
-            repo.create_audit_event(
-                owner_id=owner_id,
+        def _dispatch(_tx: Any) -> ScheduledTaskRunNowResponse:
+            run_slot_utc = (
+                datetime.now(_tz.utc).replace(microsecond=0).isoformat()
+            )
+            payload = {
+                "definition_id": definition.id,
+                "user_id": owner_id,
+                "family": definition.family,
+                "scheduled_for": run_slot_utc,
+                "manual": True,
+            }
+            idem = f"definition:{definition.id}:{run_slot_utc}"
+            jm = jobs if jobs is not None else JobManager()
+            job = jm.create_job(
+                domain="scheduled_tasks",
+                queue=automation_jobs_queue(),
+                job_type="agent_task_run",
+                payload=payload,
+                owner_user_id=owner_id,
+                idempotency_key=idem,
+            )
+            deduped = bool(job.get("deduped")) if isinstance(job, dict) else False
+
+            try:
+                repo.create_audit_event(
+                    owner_id=owner_id,
+                    definition_id=definition.id,
+                    event_type="definition.run_now",
+                    actor=actor,
+                    summary=f"Manual run triggered (slot {run_slot_utc})",
+                    before=None,
+                    after={
+                        "run_slot_utc": run_slot_utc,
+                        "job_id": (job or {}).get("id") if isinstance(job, dict) else None,
+                    },
+                    request_id=request_id,
+                    idempotency_key=idempotency_key,
+                )
+            except Exception:  # noqa: BLE001 - audit must not fail the trigger
+                from loguru import logger as _logger
+
+                _logger.exception(
+                    "run_now audit failed",
+                    definition_id=definition_id,
+                    owner_id=owner_id,
+                )
+
+            return ScheduledTaskRunNowResponse(
                 definition_id=definition.id,
-                event_type="definition.run_now",
-                actor=actor,
-                summary=f"Manual run triggered (slot {run_slot_utc})",
-                before=None,
-                after={"run_slot_utc": run_slot_utc, "job_id": (job or {}).get("id")},
-                request_id=request_id,
-                idempotency_key=idempotency_key,
-            )
-        except Exception:  # noqa: BLE001 - audit failure must not fail the trigger
-            from loguru import logger as _logger
-
-            _logger.exception(
-                "run_now audit failed",
-                definition_id=definition_id,
-                owner_id=owner_id,
+                run_slot_utc=run_slot_utc,
+                job_id=(job or {}).get("id") if isinstance(job, dict) else None,
+                deduped=deduped,
             )
 
-        return ScheduledTaskRunNowResponse(
-            definition_id=definition.id,
-            run_slot_utc=run_slot_utc,
-            job_id=(job or {}).get("id") if isinstance(job, dict) else None,
-            deduped=deduped,
+        # Request-retry idempotency: the same (route, idempotency-key,
+        # payload) replays the PRIOR response instead of enqueueing a new
+        # manual slot -- the control-plane convention every other mutating
+        # action follows. The JOB-layer key (definition:{id}:{slot})
+        # remains the slot-collision dedupe with the scheduler feed.
+        if idempotency_key is None:
+            return _dispatch(None)
+        return self._with_idempotency(
+            owner_id=owner_id,
+            route="scheduled_task_automation.definition.run_now",
+            key=idempotency_key,
+            payload_hash=payload_hash,
+            operation=_dispatch,
         )
 
     def duplicate_definition(
@@ -1131,6 +1159,8 @@ class ScheduledTaskAutomationService:
                 return ScheduledTaskPreviewResponse.model_validate(snapshot)
             if response_ref.get("type") == "definition":
                 return ScheduledTaskDefinitionResponse.model_validate(snapshot)
+            if response_ref.get("type") == "run_now":
+                return ScheduledTaskRunNowResponse.model_validate(snapshot)
         if response_ref.get("type") == "preview":
             return self.get_preview(owner_id=owner_id, preview_id=str(response_ref["id"]))
         if response_ref.get("type") == "definition":
@@ -1149,6 +1179,12 @@ class ScheduledTaskAutomationService:
             return {
                 "type": "definition",
                 "id": response.id,
+                "snapshot": response.model_dump(mode="json"),
+            }
+        if isinstance(response, ScheduledTaskRunNowResponse):
+            return {
+                "type": "run_now",
+                "id": response.definition_id,
                 "snapshot": response.model_dump(mode="json"),
             }
         raise TypeError(f"unsupported idempotency response type: {type(response)!r}")

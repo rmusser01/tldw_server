@@ -34,6 +34,7 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas im
     ScheduledTaskListResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL, TASKS_READ
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services.scheduled_task_automation_service import (
     ScheduledTaskAutomationError,
     ScheduledTaskAutomationService,
@@ -645,7 +646,7 @@ def run_now_scheduled_task_automation_definition(
     request: Request,
     definition_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
-    principal=Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
+    principal: AuthPrincipal = Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
     service: ScheduledTaskAutomationService = Depends(get_scheduled_task_automation_service),
 ) -> ScheduledTaskRunNowResponse:
     """Trigger one immediate execution through the standard Jobs path.
