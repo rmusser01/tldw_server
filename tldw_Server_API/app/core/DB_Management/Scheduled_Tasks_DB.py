@@ -766,6 +766,27 @@ class ScheduledTasksDatabase:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+                    id INTEGER PRIMARY KEY,
+                    definition_id TEXT NOT NULL,
+                    owner_id INTEGER NOT NULL,
+                    scheduled_for TEXT,
+                    job_id TEXT,
+                    run_slot_utc TEXT NOT NULL,
+                    run_slot_key TEXT NOT NULL,
+                    status TEXT NOT NULL
+                        CHECK (status IN ('running', 'succeeded', 'failed', 'timed_out', 'skipped')),
+                    error TEXT,
+                    result_summary TEXT,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    completed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_definition
+                    ON scheduled_task_runs(definition_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_scheduled_task_runs_slot
+                    ON scheduled_task_runs(definition_id, run_slot_key);
+
                 CREATE TABLE IF NOT EXISTS scheduled_task_audit_events (
                     id TEXT PRIMARY KEY,
                     owner_id INTEGER NOT NULL,
@@ -1297,6 +1318,93 @@ class ScheduledTasksDatabase:
                 raise ValueError("definition version conflict")
             raise KeyError(f"definition not found after update: {definition_id}")
         return updated
+
+    def create_scheduled_task_run(
+        self,
+        *,
+        definition_id: str,
+        owner_id: int,
+        scheduled_for: str | None,
+        job_id: str | None,
+        run_slot_utc: str,
+        run_slot_key: str,
+        status: str,
+        error: str | None = None,
+        started_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Insert one run row, deduped on (definition_id, run_slot_key).
+
+        Mirrors the reminders' create_reminder_task_run semantics: an
+        insert that conflicts with an existing slot is a no-op, and the
+        EXISTING row is returned -- callers detect dedupe by checking the
+        returned status before doing any work.
+        """
+        now = _utcnow_iso()
+        with self._connect() as conn:
+            begin_immediate_if_needed(conn)
+            conn.execute(
+                "INSERT INTO scheduled_task_runs ("
+                "definition_id, owner_id, scheduled_for, job_id, run_slot_utc, "
+                "run_slot_key, status, error, created_at, started_at, completed_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL) "
+                "ON CONFLICT(definition_id, run_slot_key) DO NOTHING",
+                (
+                    definition_id,
+                    owner_id,
+                    scheduled_for,
+                    job_id,
+                    run_slot_utc,
+                    run_slot_key,
+                    status,
+                    error,
+                    now,
+                    started_at,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM scheduled_task_runs "
+                "WHERE definition_id = ? AND run_slot_key = ?",
+                (definition_id, run_slot_key),
+            ).fetchone()
+        if row is None:  # pragma: no cover - conflict path always returns a row
+            raise KeyError("scheduled_task_run_not_found")
+        return dict(row)
+
+    def update_scheduled_task_run_status(
+        self,
+        *,
+        run_id: int,
+        status: str,
+        error: str | None = None,
+        result_summary: str | None = None,
+        completed_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Update a run row's terminal (or interim) status by row id."""
+        with self._connect() as conn:
+            begin_immediate_if_needed(conn)
+            cursor = conn.execute(
+                "UPDATE scheduled_task_runs SET status = ?, error = ?, "
+                "result_summary = ?, completed_at = ? WHERE id = ?",
+                (status, error, result_summary, completed_at, run_id),
+            )
+            if cursor.rowcount <= 0:
+                raise KeyError(f"scheduled_task_run_not_found: {run_id}")
+            row = conn.execute(
+                "SELECT * FROM scheduled_task_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+        return dict(row)
+
+    def get_scheduled_task_run_by_slot(
+        self, *, definition_id: str, run_slot_key: str
+    ) -> dict[str, Any] | None:
+        """Return the run row for one (definition, slot), or None."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM scheduled_task_runs "
+                "WHERE definition_id = ? AND run_slot_key = ?",
+                (definition_id, run_slot_key),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def create_audit_event(
         self,
