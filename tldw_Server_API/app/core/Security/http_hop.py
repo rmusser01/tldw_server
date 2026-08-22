@@ -109,7 +109,7 @@ class NormalizedHTTPHopRequest:
     host: str
     port: int
     method: Literal["GET", "HEAD", "POST"]
-    target: str
+    target: str = field(repr=False)
     headers: tuple[tuple[str, str], ...] = ()
     body: bytes = b""
     limits: HTTPHopLimits = field(default_factory=HTTPHopLimits)

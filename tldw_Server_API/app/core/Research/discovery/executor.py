@@ -16,6 +16,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import field as dataclass_field
 from enum import Enum
 from types import MappingProxyType
 from typing import Any, Protocol, cast
@@ -33,6 +34,7 @@ from tldw_Server_API.app.core.exceptions import (
 
 from .contracts import (
     CREDENTIALED_ROUTE_SKIP_REASON,
+    MAX_OPAQUE_CURSOR_CHARS,
     MAX_PAGINATION_CURSOR,
     QUERY_MODE_NOT_SUPPORTED_SKIP_REASON,
     AccessRoute,
@@ -47,6 +49,7 @@ from .contracts import (
     ExactOrigin,
     ExecutionMode,
     JSONBodyPair,
+    OpaqueCursorQueryValuePolicy,
     OperationKind,
     PathSlot,
     PathSlotKind,
@@ -73,7 +76,13 @@ from .gateway import (
     reconstruct_redirect_intent,
 )
 from .identity import build_fingerprint
-from .planner import expected_dispatch_group_id, expected_logical_attempt_id
+from .planner import (
+    _has_exact_clinicaltrials_policy,
+    _has_exact_pubmed_central_policy,
+    _has_exact_pubmed_identity_policy,
+    expected_dispatch_group_id,
+    expected_logical_attempt_id,
+)
 from .registry import DiscoveryRegistry
 
 PolicyActivityCheck = Callable[[str, str], bool]
@@ -139,11 +148,24 @@ class NumericCursor:
 
 
 @dataclass(frozen=True, slots=True)
+class OpaqueCursor:
+    """A bounded opaque pagination cursor."""
+
+    value: str = dataclass_field(repr=False)
+
+    def __post_init__(self) -> None:
+        if type(self.value) is not str or not 1 <= len(self.value) <= MAX_OPAQUE_CURSOR_CHARS:
+            raise ValueError("invalid_opaque_cursor")
+        if any(not "!" <= character <= "~" for character in self.value):
+            raise ValueError("invalid_opaque_cursor")
+
+
+@dataclass(frozen=True, slots=True)
 class NumericCSVBindingValues:
     """Positive numeric values for one declared deferred CSV binding."""
 
     binding_id: str
-    values: tuple[int, ...]
+    values: tuple[int, ...] = dataclass_field(repr=False)
 
     def __post_init__(self) -> None:
         if type(self.binding_id) is not str or not self.binding_id:
@@ -794,7 +816,7 @@ class BoundDispatch(Protocol):
         self,
         intent: DispatchIntent,
         *,
-        cursor: NumericCursor | None = None,
+        cursor: NumericCursor | OpaqueCursor | None = None,
         bindings: tuple[NumericCSVBindingValues, ...] = (),
     ) -> DiscoveryGatewayResponse:
         """Dispatch one exact planned intent."""
@@ -1089,6 +1111,17 @@ def _gateway_error_metadata(error: DiscoveryGatewayError) -> tuple[str, bool, bo
     return code, retryable, timed_out
 
 
+def _group_matches_sealed_route(group: PlannedDispatchGroup, route: AccessRoute) -> bool:
+    """Re-seal family routes whose provenance is fixed by provider identity."""
+    if group.route_id == "clinicaltrials_gov_studies_search_direct":
+        return _has_exact_clinicaltrials_policy(route)
+    if group.route_id == "pubmed_central_esearch_summary_direct":
+        return _has_exact_pubmed_central_policy(route)
+    if group.route_id == "pubmed_ncbi_eutils_pubmed_direct" and group.adapter_version == "pubmed-v2-ncbi-identity":
+        return _has_exact_pubmed_identity_policy(route)
+    return True
+
+
 def _group_matches_route(group: PlannedDispatchGroup, route: AccessRoute) -> bool:
     try:
         limits = route.policy.limits
@@ -1100,6 +1133,7 @@ def _group_matches_route(group: PlannedDispatchGroup, route: AccessRoute) -> boo
             and group.adapter_version == route.adapter_version
             and type(route.attribution_basis) is str
             and bool(route.attribution_basis.strip())
+            and _group_matches_sealed_route(group, route)
             and group.fallback_order == route.fallback_order
             and group.policy_digest == route.policy.policy_digest == canonical_policy_digest(route.policy)
             and group.limits == limits
@@ -1204,7 +1238,7 @@ class _GroupExecutionController:
         self._used: set[int] = set()
         self._completed_searches: set[int] = set()
         self._successful_searches: set[int] = set()
-        self._seen_cursors: dict[int, set[int]] = {}
+        self._seen_cursors: dict[int, set[int | str]] = {}
         self.physical_dispatches = 0
         self.pages = 0
         self.redirects = 0
@@ -1347,9 +1381,9 @@ class _GroupExecutionController:
         route: AccessRoute,
         trusted_intent: DispatchIntent,
         intent_index: int,
-        cursor: NumericCursor | None,
+        cursor: NumericCursor | OpaqueCursor | None,
         bindings: tuple[NumericCSVBindingValues, ...],
-    ) -> tuple[DispatchIntent, int | None]:
+    ) -> tuple[DispatchIntent, int | str | None]:
         declared_bindings = trusted_intent.query_bindings
         if cursor is not None and (type(bindings) is not tuple or bindings):
             self._reject("cursor_and_bindings_conflict")
@@ -1395,6 +1429,14 @@ class _GroupExecutionController:
         path_template = route.policy.path_template
         path_index = path_template.pagination_segment_index if type(path_template) is PathTemplate else None
         path_channel = type(path_index) is int
+        opaque_policy = next(
+            (
+                policy
+                for policy in route.policy.query_value_policies
+                if policy.name == query_key and type(policy) is OpaqueCursorQueryValuePolicy
+            ),
+            None,
+        )
         if sum((type(query_key) is str, type(body_key) is str, path_channel)) > 1:
             self._reject("pagination_query_invalid")
         if cursor is None:
@@ -1405,6 +1447,10 @@ class _GroupExecutionController:
                 return trusted_intent, None
             if type(query_key) is str and body_key is None:
                 values = tuple(pair.value for pair in trusted_intent.query_pairs if pair.name == query_key)
+                if type(opaque_policy) is OpaqueCursorQueryValuePolicy:
+                    if values:
+                        self._reject("pagination_query_invalid")
+                    return trusted_intent, None
                 valid = (
                     len(values) == 1
                     and type(values[0]) is str
@@ -1446,6 +1492,39 @@ class _GroupExecutionController:
             if not valid:
                 self._reject("pagination_query_invalid")
             return trusted_intent, int(values[0])
+        if type(opaque_policy) is OpaqueCursorQueryValuePolicy:
+            if (
+                type(cursor) is not OpaqueCursor
+                or type(cursor.value) is not str
+                or not 1 <= len(cursor.value) <= opaque_policy.max_chars
+                or any(not "!" <= character <= "~" for character in cursor.value)
+            ):
+                self._reject("invalid_pagination_cursor")
+            if trusted_intent.operation_kind is not OperationKind.SEARCH:
+                self._reject("cursor_not_allowed")
+            if intent_index not in self._successful_searches:
+                self._reject("search_not_ready")
+            seen_cursors = self._seen_cursors.get(intent_index, set())
+            if cursor.value in seen_cursors:
+                self._reject("pagination_cursor_repeated")
+            if type(query_key) is not str or body_key is not None:
+                self._reject("pagination_query_invalid")
+            pairs_by_name = {pair.name: pair for pair in trusted_intent.query_pairs}
+            if (
+                len(pairs_by_name) != len(trusted_intent.query_pairs)
+                or query_key in pairs_by_name
+                or set(pairs_by_name) != set(route.policy.allowed_query_keys) - {query_key}
+            ):
+                self._reject("pagination_query_invalid")
+            try:
+                query_pairs = tuple(
+                    QueryPair(name, cursor.value) if name == query_key else pairs_by_name[name]
+                    for name in route.policy.allowed_query_keys
+                )
+                effective_intent = replace(trusted_intent, query_pairs=query_pairs)
+            except Exception:  # noqa: BLE001 - cursor reconstruction must latch a typed failure.
+                self._reject("invalid_pagination_cursor")
+            return effective_intent, cursor.value
         if (
             type(cursor) is not NumericCursor
             or type(cursor.value) is not int
@@ -1459,7 +1538,7 @@ class _GroupExecutionController:
         seen_cursors = self._seen_cursors.get(intent_index, set())
         if cursor.value in seen_cursors:
             self._reject("pagination_cursor_repeated")
-        if path_channel and seen_cursors and cursor.value < max(seen_cursors):
+        if path_channel and seen_cursors and cursor.value < max(cast(set[int], seen_cursors)):
             self._reject("pagination_cursor_non_progress")
         if type(query_key) is str and body_key is None:
             matching = tuple(index for index, pair in enumerate(trusted_intent.query_pairs) if pair.name == query_key)
@@ -1514,7 +1593,7 @@ class _GroupExecutionController:
         self,
         intent: DispatchIntent,
         *,
-        cursor: NumericCursor | None = None,
+        cursor: NumericCursor | OpaqueCursor | None = None,
         bindings: tuple[NumericCSVBindingValues, ...] = (),
     ) -> DiscoveryGatewayResponse:
         if self._owner_task is None or asyncio.current_task() is not self._owner_task:
@@ -1596,7 +1675,7 @@ class _GroupExecutionController:
             pending_continuation = None
             if first_hop and is_page:
                 self.pages += 1
-                if type(page_cursor) is int:
+                if type(page_cursor) in {int, str}:
                     self._seen_cursors.setdefault(intent_index, set()).add(page_cursor)
             first_hop = False
             aggregate_timed_out = False
@@ -1698,7 +1777,7 @@ def _adapter_dispatch(controller: _GroupExecutionController) -> BoundDispatch:
     async def dispatch(
         intent: DispatchIntent,
         *,
-        cursor: NumericCursor | None = None,
+        cursor: NumericCursor | OpaqueCursor | None = None,
         bindings: tuple[NumericCSVBindingValues, ...] = (),
     ) -> DiscoveryGatewayResponse:
         return await controller(intent, cursor=cursor, bindings=bindings)

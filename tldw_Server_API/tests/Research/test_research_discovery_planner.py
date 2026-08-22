@@ -10,6 +10,9 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Research.discovery import planner as planner_module
+from tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central import (
+    clinicaltrials_pubmed_central_shadow_registry,
+)
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
     AttributionMatch,
@@ -25,6 +28,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     ExecutionMode,
     JSONBodyPair,
     LiteralTermsQueryValuePolicy,
+    OpaqueCursorQueryValuePolicy,
     PathSlot,
     PathSlotKind,
     PathTemplate,
@@ -75,6 +79,10 @@ _FOUNDATION_SOURCE_IDS = (
 )
 
 
+class _EqualStringSubclass(str):
+    pass
+
+
 def _budget(**changes: int) -> BudgetCeilings:
     values = {
         "max_route_attempts": 16,
@@ -102,6 +110,106 @@ def _request(
         filters=filters,
         result_limit=result_limit,
     )
+
+
+def _pubmed_overlay_registry_with_mutation(mutation: str) -> DiscoveryRegistry:
+    """Build one valid registry whose identity overlay has one named drift."""
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    route_id = "pubmed_ncbi_eutils_pubmed_direct"
+    route = registry.get_route(route_id)
+    policy = route.policy
+    sources = registry.sources
+
+    if mutation == "origin_scheme":
+        policy = replace(policy, origin=ExactOrigin("http", "eutils.ncbi.nlm.nih.gov", 80), policy_digest="")
+    elif mutation == "origin_host":
+        policy = replace(policy, origin=ExactOrigin("https", "attacker.example", 443), policy_digest="")
+    elif mutation == "origin_port":
+        policy = replace(policy, origin=ExactOrigin("https", "eutils.ncbi.nlm.nih.gov", 444), policy_digest="")
+    elif mutation == "method":
+        policy = replace(policy, methods=("POST",), policy_digest="")
+    elif mutation == "method_scalar_type":
+        object.__setattr__(policy, "methods", (_EqualStringSubclass("GET"),))
+    elif mutation == "path_order":
+        policy = replace(policy, paths=tuple(reversed(policy.paths)), policy_digest="")
+    elif mutation == "path_scalar_type":
+        object.__setattr__(
+            policy,
+            "paths",
+            (_EqualStringSubclass(policy.paths[0]), *policy.paths[1:]),
+        )
+    elif mutation == "query_key_order":
+        keys = policy.allowed_query_keys
+        policy = replace(policy, allowed_query_keys=(keys[1], keys[0], *keys[2:]), policy_digest="")
+    elif mutation == "query_key_scalar_type":
+        keys = policy.allowed_query_keys
+        object.__setattr__(policy, "allowed_query_keys", (_EqualStringSubclass(keys[0]), *keys[1:]))
+    elif mutation == "pagination_key":
+        policy = replace(policy, pagination_query_key="id", policy_digest="")
+    elif mutation.startswith("limit_"):
+        limit_name, limit_value = {
+            "limit_pages": ("max_pages", 2),
+            "limit_redirects": ("max_redirects", 1),
+            "limit_retries": ("max_retries", 1),
+            "limit_timeout": ("timeout_ms", 19_999),
+            "limit_response_bytes": ("max_response_bytes", 2_097_151),
+            "limit_results": ("max_results", 99),
+            "limit_request_body_bytes": ("max_request_body_bytes", 16_383),
+        }[mutation]
+        policy = replace(
+            policy,
+            limits=replace(policy.limits, **{limit_name: limit_value}),
+            policy_digest="",
+        )
+        if mutation in {"limit_pages", "limit_redirects", "limit_retries"}:
+            route = replace(route, max_physical_dispatches=3)
+    elif mutation == "route_kind":
+        route = replace(route, route_kind=RouteKind.AGGREGATOR)
+    elif mutation == "query_modes":
+        route = replace(route, query_modes=(QueryMode.GENERAL_FREE_TEXT,))
+    elif mutation == "source_constraint":
+        route = replace(route, source_constraint=SourceConstraint.PROVIDER_SOURCE_FILTER)
+        predicate = SourcePredicate(
+            field_path=("provider",),
+            operator=PredicateOperator.EQUALS_ANY,
+            values=("pubmed",),
+        )
+        sources = tuple(
+            (
+                replace(
+                    source,
+                    route_references=tuple(
+                        replace(reference, source_predicate=predicate) if reference.route_id == route_id else reference
+                        for reference in source.route_references
+                    ),
+                )
+                if source.catalog_source_id == "pubmed"
+                else source
+            )
+            for source in sources
+        )
+    elif mutation == "attribution_basis":
+        route = replace(route, attribution_basis="attacker_claimed_native_response")
+    elif mutation == "credential_requirement":
+        route = replace(route, credential_requirement=CredentialRequirement.API_KEY)
+    elif mutation == "fallback_order":
+        route = replace(route, fallback_order=1)
+    elif mutation == "physical_allowance":
+        route = replace(route, max_physical_dispatches=3)
+    elif mutation not in {"policy_digest", "query_modes_scalar_type"}:
+        raise AssertionError(f"unknown test mutation: {mutation}")
+
+    route = replace(route, policy=policy)
+    if mutation == "query_modes_scalar_type":
+        object.__setattr__(route, "query_modes", ("structured_query",))
+    registry = replace(
+        registry,
+        sources=sources,
+        routes=tuple(route if candidate.route_id == route_id else candidate for candidate in registry.routes),
+    )
+    if mutation == "policy_digest":
+        object.__setattr__(route.policy, "policy_digest", "f" * 64)
+    return registry
 
 
 def _typed_query_registry() -> tuple[DiscoveryRegistry, ReadinessOverlay]:
@@ -247,6 +355,72 @@ def _typed_query_registry() -> tuple[DiscoveryRegistry, ReadinessOverlay]:
     return registry, readiness
 
 
+def _opaque_query_registry() -> tuple[DiscoveryRegistry, ReadinessOverlay]:
+    limits = RouteLimits(2, 0, 0, 250, 65_536, 100, 16_384)
+    policy = RoutePolicy(
+        policy_version="opaque-query-policy-v1",
+        origin=ExactOrigin("https", "clinical.example.test", 443),
+        methods=("GET",),
+        paths=("/api/v2/studies",),
+        allowed_query_keys=("query.term", "pageToken", "format", "pageSize"),
+        limits=limits,
+        pagination_query_key="pageToken",
+        query_value_policies=(
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            OpaqueCursorQueryValuePolicy("pageToken", 1_024, required=False),
+            ExactQueryValuePolicy("format", "json"),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+    )
+    route = AccessRoute(
+        route_id="opaque_query_search",
+        backend_id="opaque_query_backend",
+        adapter_id="opaque_query_adapter",
+        route_kind=RouteKind.DIRECT,
+        query_modes=(QueryMode.GENERAL_FREE_TEXT,),
+        source_constraint=SourceConstraint.NATIVE_CORPUS,
+        attribution_basis="native_response",
+        credential_requirement=CredentialRequirement.NONE,
+        fallback_order=0,
+        max_physical_dispatches=2,
+        adapter_version="opaque-v1",
+        policy=policy,
+    )
+    registry = DiscoveryRegistry(
+        catalog_version="opaque-query-catalog-v1",
+        registry_version="opaque-query-registry-v1",
+        sources=(
+            SourceDefinition(
+                catalog_source_id="opaque_query_source",
+                display_name="Opaque Query Source",
+                aliases=(),
+                categories=("synthetic",),
+                content_types=("records",),
+                surfaces=("standalone_search",),
+                route_references=(SourceRouteReference(route.route_id, None),),
+                site_hosts=("clinical.example.test",),
+                priority=10,
+                catalog_version="opaque-query-catalog-v1",
+            ),
+        ),
+        routes=(route,),
+        backends=(BackendDefinition("opaque_query_backend", "Opaque Query Backend"),),
+    )
+    readiness = ReadinessOverlay(
+        overlay_version="opaque-query-readiness-v1",
+        execution_mode=ExecutionMode.SYNTHETIC,
+        routes=(
+            RouteReadiness(
+                route.route_id,
+                ReadinessState.READY,
+                CredentialStatus.NOT_REQUIRED,
+                "synthetic_ready",
+            ),
+        ),
+    )
+    return registry, readiness
+
+
 def _aggregator_registry(
     *,
     first_predicate: SourcePredicate | None = None,
@@ -329,6 +503,87 @@ def _aggregator_registry(
         ),
     )
     return registry, readiness
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "origin_scheme",
+        "origin_host",
+        "origin_port",
+        "method",
+        "method_scalar_type",
+        "path_order",
+        "path_scalar_type",
+        "query_key_order",
+        "query_key_scalar_type",
+        "pagination_key",
+        "limit_pages",
+        "limit_redirects",
+        "limit_retries",
+        "limit_timeout",
+        "limit_response_bytes",
+        "limit_results",
+        "limit_request_body_bytes",
+        "policy_digest",
+        "route_kind",
+        "query_modes",
+        "query_modes_scalar_type",
+        "source_constraint",
+        "attribution_basis",
+        "credential_requirement",
+        "fallback_order",
+        "physical_allowance",
+    ),
+)
+def test_pubmed_identity_overlay_rejects_exact_policy_or_route_semantic_drift(mutation: str) -> None:
+    registry = _pubmed_overlay_registry_with_mutation(mutation)
+
+    with pytest.raises(PlanningError) as caught:
+        compile_discovery_plan(
+            _request(("pubmed",), result_limit=7),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(
+                max_physical_dispatches=8,
+                max_pages_per_route=3,
+                max_redirects=2,
+                max_retries=2,
+            ),
+        )
+
+    assert caught.value.code == "invalid_pubmed_route_identity:pubmed_ncbi_eutils_pubmed_direct"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("backend_id", "ncbi_eutils_pubmed"),
+        ("adapter_id", "pubmed_v2"),
+    ),
+)
+def test_pmc_identity_classifier_precedes_an_overlapping_pubmed_marker(field: str, value: str) -> None:
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_central_esearch_summary_direct")
+    mutated = replace(route, **{field: value})
+    registry = replace(
+        registry,
+        routes=tuple(mutated if candidate.route_id == route.route_id else candidate for candidate in registry.routes),
+    )
+
+    with pytest.raises(PlanningError) as caught:
+        compile_discovery_plan(
+            _request(
+                ("pubmed_central",),
+                query=planner_module.GeneralFreeTextQuery("bounded discovery"),
+                result_limit=7,
+            ),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(),
+        )
+
+    assert caught.value.code == "invalid_pubmed_central_route_identity:pubmed_central_esearch_summary_direct"
 
 
 def test_planning_request_accepts_only_exact_public_query_types() -> None:
@@ -558,6 +813,134 @@ def test_general_query_builds_only_literal_terms_and_route_owned_values() -> Non
         QueryPair("pageSize", "50"),
     )
     assert "cursorMark" not in {pair.name for pair in intent.query_pairs}
+
+
+def test_general_query_omits_named_optional_opaque_cursor_on_first_page() -> None:
+    registry, readiness = _opaque_query_registry()
+    plan = compile_discovery_plan(
+        _request(
+            ("opaque_query_source",),
+            query=planner_module.GeneralFreeTextQuery("alpha beta"),
+            result_limit=100,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
+    )
+
+    assert plan.dispatch_groups[0].intents[0].query_pairs == (
+        QueryPair("query.term", '"alpha" AND "beta"'),
+        QueryPair("format", "json"),
+        QueryPair("pageSize", "50"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("route_max_results", "expected_page_size"),
+    ((100, "50"), (25, "25")),
+)
+def test_general_query_clamps_decimal_to_route_and_rule_ceilings(
+    route_max_results: int,
+    expected_page_size: str,
+) -> None:
+    registry, readiness = _opaque_query_registry()
+    route = registry.get_route("opaque_query_search")
+    registry = replace(
+        registry,
+        routes=(
+            replace(
+                route,
+                policy=replace(
+                    route.policy,
+                    limits=replace(route.policy.limits, max_results=route_max_results),
+                    policy_digest="",
+                ),
+            ),
+        ),
+    )
+    plan = compile_discovery_plan(
+        _request(
+            ("opaque_query_source",),
+            query=planner_module.GeneralFreeTextQuery("alpha beta"),
+            result_limit=100,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
+    )
+
+    assert plan.dispatch_groups[0].intents[0].query_pairs[-1] == QueryPair("pageSize", expected_page_size)
+
+
+@pytest.mark.parametrize(
+    "query_value_policies",
+    (
+        (
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            OpaqueCursorQueryValuePolicy("pageToken", 1_024, required=True),
+            ExactQueryValuePolicy("format", "json"),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+        (
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            ExactQueryValuePolicy("pageToken", "first"),
+            OpaqueCursorQueryValuePolicy("format", 1_024, required=False),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+        (
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            OpaqueCursorQueryValuePolicy("pageToken", 1_024, required=False),
+            OpaqueCursorQueryValuePolicy("format", 1_024, required=False),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+    ),
+)
+def test_general_query_rejects_invalid_optional_opaque_cursor_policy(
+    query_value_policies: tuple[object, ...],
+) -> None:
+    registry, readiness = _opaque_query_registry()
+    route = registry.get_route("opaque_query_search")
+    registry = replace(
+        registry,
+        routes=(
+            replace(
+                route,
+                policy=replace(route.policy, query_value_policies=query_value_policies, policy_digest=""),
+            ),
+        ),
+    )
+
+    with pytest.raises(PlanningError) as exc_info:
+        compile_discovery_plan(
+            _request(
+                ("opaque_query_source",),
+                query=planner_module.GeneralFreeTextQuery("alpha beta"),
+                result_limit=100,
+            ),
+            registry=registry,
+            readiness=readiness,
+            budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
+        )
+
+    assert exc_info.value.code == "invalid_optional_opaque_cursor_policy:opaque_query_search"
+
+
+def test_general_query_rejects_term_longer_than_route_literal_policy_before_emitting_intent() -> None:
+    registry, readiness = _opaque_query_registry()
+
+    with pytest.raises(PlanningError) as exc_info:
+        compile_discovery_plan(
+            _request(
+                ("opaque_query_source",),
+                query=planner_module.GeneralFreeTextQuery("a" * 33),
+                result_limit=100,
+            ),
+            registry=registry,
+            readiness=readiness,
+            budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
+        )
+
+    assert exc_info.value.code == "invalid_literal_terms_policy:opaque_query_search"
 
 
 def test_general_query_accepts_exact_sixteen_by_sixty_four_term_boundary() -> None:

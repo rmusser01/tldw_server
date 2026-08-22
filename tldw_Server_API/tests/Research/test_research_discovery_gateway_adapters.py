@@ -608,7 +608,15 @@ def test_parse_profiles_are_private_exact_immutable_and_version_keyed() -> None:
 
     assert type(profiles) is MappingProxyType
     expected_adapter_ids = _ADAPTER_IDS + ("arxiv_v2", "pubmed_v2")
-    assert set(profiles) == {(adapter_id, "foundation-v2") for adapter_id in expected_adapter_ids}
+    assert set(profiles) == {
+        *((adapter_id, "foundation-v2") for adapter_id in expected_adapter_ids),
+        ("pubmed_v2", "pubmed-v2-ncbi-identity"),
+    }
+    assert (
+        profiles[("pubmed_v2", "pubmed-v2-ncbi-identity")]
+        is profiles[("pubmed_v2", "foundation-v2")]
+        is module._FOUNDATION_PROFILE
+    )
     expected = (2_097_152, 100, 16, 50_000, 65_536, 32, 500)
     for profile in profiles.values():
         assert (

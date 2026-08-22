@@ -1,16 +1,20 @@
 ---
-id: TASK-12970
-title: Add cooperative cancellation and partial-result finalization to Jobs
+id: TASK-13101
+title: Add cooperative cancellation and partial-result finalization for research Jobs
 status: To Do
+assignee: []
+created_date: '2026-08-21 19:37'
 labels:
-- jobs
-- cancellation
-- reliability
-- research
-priority: High
+  - jobs
+  - cancellation
+  - reliability
+  - research
+  - discovery
+dependencies: []
 references:
-- TASK-12964
-- TASK-12968.4
+  - TASK-12964
+  - TASK-12968.4
+priority: high
 ---
 
 ## Description
@@ -31,15 +35,9 @@ Add a Jobs-level cooperative cancellation primitive for processing jobs so worke
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Created as the research-discovery replacement for the ambiguous active TASK-12970 record. The superseded discovery record is archived at `backlog/archive/tasks/task-12970 - Add-cooperative-cancellation-and-partial-result-finalization-to-Jobs.md` after every discovery-specific reference and dependency was migrated; the unrelated Web_Scraping parent and children retain TASK-12970. The replacement was rekeyed from the historical branch-local TASK-13014 allocation to TASK-13101 after the latest-dev rebase exposed an unrelated active TASK-13014 claimant; historical commit subjects remain unchanged.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
