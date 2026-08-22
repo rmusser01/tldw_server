@@ -736,14 +736,23 @@ class TestSharedWithMe:
         assert data["allowed_actions"]["inspect_sources"]["allowed"] is True
         assert "owner_user_id" not in str(data)
 
-    def test_legacy_shared_full_media_route_is_absent(self, client, mock_repo):
-        response = client.get(
-            "/api/v1/sharing/shared-with-me/12/media/99",
-            follow_redirects=False,
-        )
+    def test_recipient_openapi_has_no_owner_media_operation(self, client, mock_repo):
+        schema = client.get("/openapi.json").json()
+        recipient_prefix = "/api/v1/sharing/shared-with-me/{share_id}/"
 
-        assert response.status_code == 404
-        assert "location" not in response.headers
+        media_operations = [
+            operation
+            for path, path_item in schema["paths"].items()
+            if path.startswith(recipient_prefix)
+            for method, operation in path_item.items()
+            if method == "get"
+            and any(
+                parameter.get("name") == "media_id"
+                for parameter in operation.get("parameters", [])
+            )
+        ]
+
+        assert media_operations == []
 
 
 class TestClone:

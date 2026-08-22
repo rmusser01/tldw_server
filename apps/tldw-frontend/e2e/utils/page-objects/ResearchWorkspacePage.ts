@@ -20,6 +20,142 @@ type WorkspaceSeedSource = {
   url?: string
 }
 
+export type SharedRecipientForbiddenRequestKind =
+  | "local_workspace"
+  | "studio"
+  | "notes"
+  | "mcp"
+  | "acp"
+  | "sandbox"
+  | "artifact"
+  | "source_mutation"
+  | "extension_writable_destination"
+  | "removed_full_media"
+
+export type SharedRecipientRequestLedgerEntry = {
+  method: string
+  url: string
+  pathname: string
+  forbiddenKind: SharedRecipientForbiddenRequestKind | null
+}
+
+export type SharedRecipientRequestLedger = {
+  snapshot: () => SharedRecipientRequestLedgerEntry[]
+  assertClean: () => void
+  dispose: () => void
+}
+
+const isMutatingMethod = (method: string): boolean =>
+  !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())
+
+export function classifySharedRecipientForbiddenRequest(
+  rawUrl: string,
+  method: string,
+  shareId: number
+): SharedRecipientForbiddenRequestKind | null {
+  let pathname: string
+  try {
+    pathname = new URL(rawUrl).pathname.toLowerCase()
+  } catch {
+    return "local_workspace"
+  }
+
+  const canonicalRoot = `/api/v1/sharing/shared-with-me/${shareId}`
+  if (
+    pathname === `${canonicalRoot}/media` ||
+    pathname.startsWith(`${canonicalRoot}/media/`) ||
+    pathname === `${canonicalRoot}/full-media` ||
+    pathname.startsWith(`${canonicalRoot}/full-media/`)
+  ) {
+    return "removed_full_media"
+  }
+  if (
+    /^\/api\/v1\/workspaces(?:\/|$)/.test(pathname) ||
+    /^\/api\/v1\/sharing\/workspaces(?:\/|$)/.test(pathname)
+  ) {
+    return "local_workspace"
+  }
+  if (/\/api\/v1\/(?:prompt-)?studio(?:\/|$)/.test(pathname)) {
+    return "studio"
+  }
+  if (/\/api\/v1\/notes?(?:\/|$)/.test(pathname)) {
+    return "notes"
+  }
+  if (/\/api\/v1\/mcp(?:\/|$)/.test(pathname)) {
+    return "mcp"
+  }
+  if (/\/api\/v1\/acp(?:\/|$)/.test(pathname)) {
+    return "acp"
+  }
+  if (/\/api\/v1\/sandbox(?:\/|$)/.test(pathname)) {
+    return "sandbox"
+  }
+  if (/\/api\/v1\/artifacts?(?:\/|$)/.test(pathname)) {
+    return "artifact"
+  }
+  if (isMutatingMethod(method) && /\/sources(?:\/|$)/.test(pathname)) {
+    return "source_mutation"
+  }
+  if (
+    isMutatingMethod(method) &&
+    /\/api\/v1\/(?:media|ingestion|web-clips?|clips?|capture)(?:\/|$)/.test(
+      pathname
+    )
+  ) {
+    return "extension_writable_destination"
+  }
+  return null
+}
+
+export function startSharedRecipientRequestLedger(
+  page: Page,
+  shareId: number
+): SharedRecipientRequestLedger {
+  const entries: SharedRecipientRequestLedgerEntry[] = []
+  const onRequest = (request: Request) => {
+    let sharedIsActive = false
+    try {
+      sharedIsActive = new URL(page.url()).searchParams.get("shared") === String(shareId)
+    } catch {
+      sharedIsActive = false
+    }
+    if (!sharedIsActive) return
+
+    const url = request.url()
+    const method = request.method().toUpperCase()
+    let pathname = url
+    try {
+      pathname = new URL(url).pathname
+    } catch {
+      // Keep the raw URL in diagnostics when parsing fails.
+    }
+    entries.push({
+      method,
+      url,
+      pathname,
+      forbiddenKind: classifySharedRecipientForbiddenRequest(url, method, shareId)
+    })
+  }
+
+  page.on("request", onRequest)
+  return {
+    snapshot: () => entries.map((entry) => ({ ...entry })),
+    assertClean: () => {
+      const forbidden = entries.filter((entry) => entry.forbiddenKind !== null)
+      expect(
+        forbidden,
+        `Shared recipient request ledger contained forbidden requests:\n${forbidden
+          .map(
+            (entry) =>
+              `${entry.forbiddenKind}: ${entry.method} ${entry.pathname}`
+          )
+          .join("\n")}`
+      ).toEqual([])
+    },
+    dispose: () => page.off("request", onRequest)
+  }
+}
+
 export type ResearchWorkspaceUatPersona = "beginner-no-key" | "power-api-key"
 
 export type ResearchWorkspaceRouteTiming = {
@@ -170,6 +306,11 @@ export class ResearchWorkspacePage {
   readonly globalSearchModal: Locator
   readonly globalSearchInput: Locator
   readonly addSourceModal: Locator
+  readonly sharedShell: Locator
+  readonly sharedSourcesPanel: Locator
+  readonly sharedChatPanel: Locator
+  readonly sharedComposer: Locator
+  readonly sharedPreviewDialog: Locator
 
   constructor(page: Page) {
     this.page = page
@@ -195,6 +336,15 @@ export class ResearchWorkspacePage {
       .getByRole("dialog")
       .filter({ hasText: /add sources/i })
       .first()
+    this.sharedShell = page.getByTestId("shared-workspace-shell")
+    this.sharedSourcesPanel = page.getByTestId("shared-workspace-sources-pane")
+    this.sharedChatPanel = page.getByTestId("shared-workspace-chat-pane")
+    this.sharedComposer = page.getByRole("textbox", {
+      name: "Ask about shared sources"
+    })
+    this.sharedPreviewDialog = page.getByRole("dialog", {
+      name: /source preview|loading source preview/i
+    })
   }
 
   private async disableNextJsPortalPointerInterception(): Promise<void> {
@@ -264,6 +414,87 @@ export class ResearchWorkspacePage {
     })
     await waitForConnection(this.page).catch(() => {})
     await this.disableNextJsPortalPointerInterception()
+  }
+
+  async gotoShared(shareId: number): Promise<void> {
+    await this.page.goto(`/research-workspace?shared=${shareId}`, {
+      waitUntil: "domcontentloaded"
+    })
+    await this.disableNextJsPortalPointerInterception()
+  }
+
+  async waitForSharedReady(workspaceName: string): Promise<void> {
+    await expect(this.sharedShell).toBeVisible({ timeout: 30_000 })
+    await expect(
+      this.page.getByRole("heading", { name: workspaceName, exact: true })
+    ).toBeVisible({ timeout: 30_000 })
+    await expect(this.sharedSourcesPanel).toBeVisible({ timeout: 30_000 })
+  }
+
+  async searchSharedSources(query: string): Promise<void> {
+    const search = this.page.getByRole("searchbox", {
+      name: "Search shared sources"
+    })
+    await expect(search).toBeVisible({ timeout: 10_000 })
+    await search.fill(query)
+  }
+
+  async filterSharedSourcesByState(state: string): Promise<void> {
+    await this.page
+      .getByRole("combobox", { name: "Filter shared sources by state" })
+      .selectOption(state)
+  }
+
+  async clearSharedSourceSelection(): Promise<void> {
+    await this.sharedSourcesPanel
+      .getByRole("button", { name: "Clear selected sources" })
+      .click()
+  }
+
+  async selectSharedSource(title: string): Promise<void> {
+    const checkbox = this.sharedSourcesPanel.getByRole("checkbox", {
+      name: `Select ${title}`
+    })
+    await expect(checkbox).toBeVisible({ timeout: 10_000 })
+    await checkbox.check()
+  }
+
+  async previewSharedSource(title: string): Promise<void> {
+    await this.sharedSourcesPanel
+      .getByRole("button", { name: `Preview ${title}` })
+      .click()
+    await expect(this.sharedPreviewDialog).toBeVisible({ timeout: 10_000 })
+  }
+
+  async closeSharedSourcePreview(): Promise<void> {
+    await this.sharedPreviewDialog
+      .getByRole("button", { name: "Close source preview" })
+      .click()
+    await expect(this.sharedPreviewDialog).toBeHidden({ timeout: 10_000 })
+  }
+
+  async askSharedWorkspace(query: string): Promise<void> {
+    await expect(this.sharedComposer).toBeVisible({ timeout: 10_000 })
+    await this.sharedComposer.fill(query)
+    await this.sharedChatPanel
+      .getByRole("button", { name: "Ask shared workspace" })
+      .click()
+  }
+
+  async openSharedCitation(sourceTitle: string): Promise<void> {
+    await this.sharedChatPanel
+      .getByRole("button", {
+        name: new RegExp(`open citation.*${sourceTitle}`, "i")
+      })
+      .click()
+    await expect(this.sharedPreviewDialog).toBeVisible({ timeout: 10_000 })
+  }
+
+  async activateSharedMobilePane(pane: "sources" | "chat"): Promise<void> {
+    const tab = this.page.locator(`#shared-workspace-${pane}-tab`)
+    await expect(tab).toHaveRole("tab")
+    await tab.click()
+    await expect(tab).toHaveAttribute("aria-selected", "true")
   }
 
   async gotoWithTiming(): Promise<ResearchWorkspaceRouteTiming> {

@@ -179,6 +179,55 @@ curl -X DELETE http://localhost:8000/api/v1/media/123/share \
 
 Note: You always retain ownership of your content. Sharing changes who can view it, not who owns it.
 
+## Recipient Shared Research Workspaces
+
+A recipient opens a shared research workspace at
+`/research-workspace?shared={share_id}`. The `/research` route is a separate
+experience and does not accept or redirect this recipient flow. If the share is
+unavailable, the recipient view fails closed instead of falling back to a local
+workspace.
+
+Recipient access requires `sharing.read` and an active, authoritative team
+membership. A missing permission returns `403`; a missing, revoked, or
+unauthorized share returns the same neutral `404` so callers cannot enumerate
+shares.
+
+### Recipient Data Ownership and Scope
+
+- Workspace metadata, shared source metadata, source previews, and source
+  content remain authoritative in the owner's databases.
+- Recipient chat transcripts, citations, and request receipts are stored in the
+  recipient's database. Owner notes and chats are never exposed or used as a
+  recipient persistence target.
+- Shared mode cannot read a recipient's local workspaces or use Studio, notes,
+  artifacts, MCP, ACP, sandbox, or extension writable destinations.
+- Recipients have read and chat access only. They cannot mutate shared sources.
+- Chat accepts an explicit frozen source scope: `all` for every source in the
+  share, or `include` with specific shared source IDs.
+
+The API may disclose the provider and model selected for the shared chat. It
+never returns owner API keys or base URLs. Generation is limited to the exact
+share scope and uses the recipient's credentials.
+
+Authorization is rechecked before owner-resource loading, before generation,
+and before persistence. Revocation prevents later access and prevents an
+in-flight response from being saved, but it cannot recall content that was
+already delivered or saved before revocation.
+
+### Canonical Recipient API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/v1/sharing/shared-with-me` | List shares available to the recipient |
+| `GET` | `/api/v1/sharing/shared-with-me/{share_id}/workspace` | Read shared workspace metadata |
+| `GET` | `/api/v1/sharing/shared-with-me/{share_id}/sources` | List and filter shared sources |
+| `GET` | `/api/v1/sharing/shared-with-me/{share_id}/sources/{source_id}/preview` | Preview a shared source |
+| `GET` | `/api/v1/sharing/shared-with-me/{share_id}/chat/messages` | Read the recipient's shared chat transcript |
+| `POST` | `/api/v1/sharing/shared-with-me/{share_id}/chat` | Ask against the frozen shared source scope |
+
+These are the only recipient workspace operations. There is no redirect,
+alias, local fallback, or raw full-media recipient operation.
+
 ## Searching Shared Content
 
 ### Scope Filters

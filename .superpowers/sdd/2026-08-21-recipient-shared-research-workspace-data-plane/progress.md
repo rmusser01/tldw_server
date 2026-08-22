@@ -132,6 +132,18 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Task 9 Fix Round 2 TDD: focused client/header UI RED produced 4 failed/25 passed; GREEN passed 29. Final amended client/header/UI plus locale mirror passed 31; exact Task 9 UI passed 24; affected Task 8 controller/route regressions passed 55. Focused ESLint passed; package TypeScript retained unrelated repository baseline diagnostics with no changed Task 9 diagnostic; static authority guards and `git diff --check` passed.
 - Fix Round 1 gates: focused ESLint and checker syntax passed; full TypeScript retained repository baseline diagnostics with none in changed shared-workspace files; static isolation/error-code guards and `git diff --check` passed. Bandit is not applicable. Full report appended to `task-9-implementer-report.md`; unrelated watchlist templates remain untouched and unstaged; Task 11 retains live-backend/provider UAT.
 
+## Task 10 - Integrated recipient security and contract closure
+
+- Base: `c833835a92`.
+- Brief: `task-10-brief.md`.
+- 2026-08-22: Started the owner/member/nonmember backend security matrix, stubbed Playwright interaction/request ledger, current documentation cleanup, and generated OpenAPI verification. Task 11 remains the only live-backend/browser truth. The two unrelated watchlist templates remain untouched and unstaged.
+- Backend gate environment ruling: Docker is unavailable after the repository PostgreSQL fixture's auto-start timeout. Do not attempt Docker again; run the required backend matrix with `TLDW_TEST_NO_DOCKER=1` and accept only the standard fixture-unavailable PostgreSQL skips, recording their exact count and reasons.
+- The prior no-Docker backend run was interrupted by the controller at 58%. Its process was terminated before the clean rerun and it has no valid completion result.
+- Implementation: added the integrated owner/member/nonmember security matrix, canonical authorization-order and OpenAPI absence guards, deterministic shared-mode Playwright request ledger/interaction coverage, current recipient contract documentation, pagination envelope record, and regenerated OpenAPI fingerprint. No production code changed and no production defect was found.
+- Verification: authoritative no-Docker backend matrix `508 passed, 11 standard fixture-unavailable skips`; supplemental PostgreSQL reason run `3 passed, 11 skipped`; exact Playwright `3 passed`; OpenAPI generation/verification passed; Bandit zero findings/errors across 46,442 lines; Ruff, focused ESLint, focused backend, generated-contract scan, guide parity, and diff check passed. Exact Vitest retained 13 documented untouched failures (`835 passed`); typecheck, exact ESLint command composition, and design-state retained unrelated repository baselines. Full evidence: `task-10-implementer-report.md`.
+- Scope: Task 11 remains live backend/provider/browser truth. The two unrelated watchlist templates remain untouched and unstaged.
+- Status: complete.
+
 ## Task 7 - Provider resolution, grounded generation, and safe chat API
 
 - Base: `fa5ce0b131ceb70422c1c36bf39fe4f423e1aa38`.
