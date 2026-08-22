@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
@@ -74,6 +75,12 @@ def merge_vary_header(
     if token.lower() not in {item.lower() for item in values}:
         values.append(token)
     headers["Vary"] = ", ".join(values)
+
+
+def merge_auth_vary_header(headers: MutableMapping[str, str]) -> None:
+    """Vary source-bearing responses across every supported auth carrier."""
+    for token in ("Authorization", "X-API-KEY", "Cookie"):
+        merge_vary_header(headers, token)
 
 
 def _json_value(raw: str | None, *, default: Any = None) -> Any:
@@ -280,12 +287,12 @@ class PresentationService:
         export_format: str | None = None,
     ) -> None:
         if content_kind == STRUCTURED_SLIDES:
-            if operation == "html_source" or export_format == "html":
+            if operation in {"html_source", "draft_attachment"} or export_format == "html":
                 raise PresentationService.operation_not_supported(content_kind, operation)
             return
         if content_kind != STANDALONE_HTML:
             raise PresentationService.operation_not_supported(content_kind, operation)
-        allowed = {"read", "versions", "delete", "restore", "html_source"}
+        allowed = {"read", "versions", "delete", "restore", "html_source", "draft_attachment"}
         if operation == "export" and export_format in {"html", "json"}:
             return
         if operation not in allowed:
@@ -369,6 +376,35 @@ class PresentationService:
         if current.content_kind != STANDALONE_HTML:
             raise InputError("operation_not_supported_for_content_kind")
         if current.version != expected_version:
+            identity = self.db.get_presentation_source_identity(presentation_id)
+            if isinstance(html_document, bytes):
+                candidate_bytes = html_document
+            elif isinstance(html_document, str):
+                try:
+                    candidate_bytes = html_document.encode("utf-8")
+                except UnicodeEncodeError:
+                    candidate_bytes = b""
+            else:
+                candidate_bytes = b""
+            if (
+                candidate_bytes
+                and identity.id == current.id
+                and identity.content_kind == STANDALONE_HTML
+                and identity.version == current.version
+                and identity.html_bytes == len(candidate_bytes)
+                and isinstance(identity.html_sha256, str)
+                and hashlib.sha256(candidate_bytes).hexdigest() == identity.html_sha256
+            ):
+                row = self.db.get_presentation_by_id(presentation_id, include_deleted=False)
+                if (
+                    row.version == current.version
+                    and row.content_kind == STANDALONE_HTML
+                    and row.title == identity.title
+                    and row.html_document is not None
+                    and row.html_document.encode("utf-8") == candidate_bytes
+                    and self.db.presentation_row_invariant_holds(row)
+                ):
+                    return row
             raise ConflictError(
                 "version_conflict",
                 entity="presentations",
@@ -381,6 +417,26 @@ class PresentationService:
             validation_result=derived,
             expected_version=expected_version,
         )
+
+    def prepare_draft_attachment(
+        self,
+        *,
+        presentation_id: str,
+        html_document: bytes,
+    ) -> bytes:
+        """Validate only the bounded recovery-echo transport invariants."""
+        kind = self.db.get_presentation_kind(presentation_id)
+        if kind.content_kind != STANDALONE_HTML:
+            raise self.operation_not_supported(kind.content_kind, "draft_attachment")
+        if not isinstance(html_document, bytes) or len(html_document) > 1_048_576:
+            raise PresentationServiceError("standalone_html_storage_limit", status_code=413)
+        try:
+            decoded = html_document.decode("utf-8")
+        except UnicodeDecodeError:
+            raise PresentationServiceError("standalone_html_invalid_document", status_code=422) from None
+        if "\x00" in decoded:
+            raise PresentationServiceError("standalone_html_invalid_document", status_code=422)
+        return html_document
 
     async def restore_version(
         self,
@@ -516,6 +572,7 @@ __all__ = [
     "PresentationServiceError",
     "STANDALONE_HTML",
     "STRUCTURED_SLIDES",
+    "merge_auth_vary_header",
     "merge_vary_header",
     "parse_accepted_content_kinds",
     "presentation_detail",

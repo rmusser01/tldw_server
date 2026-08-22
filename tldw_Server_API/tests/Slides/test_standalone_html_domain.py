@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import importlib.util
 import json
+import re
 import sqlite3
 
 import pytest
@@ -303,6 +304,30 @@ def test_source_free_projection_queries_do_not_load_html_or_version_payload(tmp_
     ).lower()
     assert "html_document" not in select_sql
     assert "payload_json" not in select_sql
+    db.close_connection()
+
+
+def test_standalone_source_identity_projection_is_source_free(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    html = _create_standalone(db)
+    statements: list[str] = []
+    db.get_connection().set_trace_callback(statements.append)
+
+    identity = db.get_presentation_source_identity(html.id)
+
+    assert identity.id == html.id
+    assert identity.content_kind == "standalone_html"
+    assert identity.version == html.version
+    assert identity.title == html.title
+    assert identity.html_sha256 == html.html_sha256
+    assert identity.html_bytes == html.html_bytes
+    select_sql = "\n".join(
+        statement for statement in statements if statement.lstrip().upper().startswith("SELECT")
+    ).lower()
+    assert "html_document" not in select_sql
+    assert "payload_json" not in select_sql
+    assert "generation_provenance_json" not in select_sql
+    assert re.search(r"\bslides\b", select_sql) is None
     db.close_connection()
 
 

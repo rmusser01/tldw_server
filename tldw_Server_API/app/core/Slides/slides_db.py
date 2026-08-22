@@ -170,6 +170,18 @@ class PresentationKindRow:
 
 
 @dataclass
+class PresentationSourceIdentityRow:
+    id: str
+    title: str
+    content_kind: str
+    version: int
+    deleted: int
+    last_modified: str
+    html_sha256: str | None
+    html_bytes: int | None
+
+
+@dataclass
 class PresentationVersionRow:
     presentation_id: str
     version: int
@@ -1355,6 +1367,26 @@ class SlidesDatabase:
         if not row:
             raise KeyError("presentation_not_found")
         return PresentationKindRow(**dict(row))
+
+    def get_presentation_source_identity(
+        self,
+        presentation_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> PresentationSourceIdentityRow:
+        """Fetch source-free identity metadata for save reconciliation."""
+        query = """
+            SELECT id, title, content_kind, version, deleted, last_modified,
+                   html_sha256, html_bytes
+            FROM presentations
+            WHERE id = ?
+        """
+        if not include_deleted:
+            query += " AND deleted = 0"
+        row = self.get_connection().execute(query, (presentation_id,)).fetchone()
+        if not row:
+            raise KeyError("presentation_not_found")
+        return PresentationSourceIdentityRow(**dict(row))
 
     def list_presentations(
         self,
