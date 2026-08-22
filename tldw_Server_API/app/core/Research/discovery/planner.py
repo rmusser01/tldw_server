@@ -55,6 +55,10 @@ _GENERAL_MAX_TERMS = 16
 _GENERAL_MAX_TERM_CHARS = 64
 _GENERAL_MAX_RAW_CHARS = _GENERAL_MAX_TERMS * _GENERAL_MAX_TERM_CHARS + _GENERAL_MAX_TERMS - 1
 _GENERAL_MAX_RAW_UTF8_BYTES = _GENERAL_MAX_TERMS * _GENERAL_MAX_TERM_CHARS * 4 + _GENERAL_MAX_TERMS - 1
+_PUBMED_IDENTITY_POLICY_VERSION = "research-discovery-route-policy-v2-foundation-pubmed-ncbi-identity-2026-08-21"
+_PUBMED_IDENTITY_ADAPTER_VERSION = "pubmed-v2-ncbi-identity"
+_NCBI_TOOL = "tldw_server"
+_NCBI_EMAIL = "contact@tldwproject.com"
 
 
 def _planning_error(code: str) -> ValueError:
@@ -549,7 +553,21 @@ def _build_intents(
     result_limit: int,
 ) -> tuple[DispatchIntent, ...]:
     limit = min(result_limit, route.policy.limits.max_results)
-    if route.backend_id == "ncbi_eutils_pubmed":
+    foundation_pubmed = (
+        route.route_id == "pubmed_ncbi_eutils_pubmed_direct"
+        and route.backend_id == "ncbi_eutils_pubmed"
+        and route.adapter_id == "pubmed_v2"
+        and route.adapter_version == "foundation-v2"
+        and route.policy.policy_version == "research-discovery-route-policy-v2-foundation"
+    )
+    identity_pubmed = (
+        route.route_id == "pubmed_ncbi_eutils_pubmed_direct"
+        and route.backend_id == "ncbi_eutils_pubmed"
+        and route.adapter_id == "pubmed_v2"
+        and route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION
+        and route.policy.policy_version == _PUBMED_IDENTITY_POLICY_VERSION
+    )
+    if foundation_pubmed or identity_pubmed:
         pairs = (
             QueryPair("db", "pubmed"),
             QueryPair("term", normalized_query),
@@ -562,6 +580,13 @@ def _build_intents(
             QueryPair("db", "pubmed"),
             QueryPair("retmode", "json"),
         )
+        if identity_pubmed:
+            identity_pairs = (
+                QueryPair("tool", _NCBI_TOOL),
+                QueryPair("email", _NCBI_EMAIL),
+            )
+            pairs += identity_pairs
+            summary_pairs += identity_pairs
         return (
             _intent(route, OperationKind.SEARCH, route.policy.paths[0], pairs),
             _intent(
@@ -579,6 +604,12 @@ def _build_intents(
                 ),
             ),
         )
+    if (
+        route.route_id == "pubmed_ncbi_eutils_pubmed_direct"
+        or route.backend_id == "ncbi_eutils_pubmed"
+        or route.adapter_id == "pubmed_v2"
+    ):
+        raise _planning_error(f"invalid_pubmed_route_identity:{route.route_id}")
 
     pairs_by_backend = {
         "arxiv_api": (

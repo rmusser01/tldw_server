@@ -133,7 +133,7 @@ _EXPECTED_IMPORT_DIGESTS = {
     "registry.py": "56ffcb107d482f12c2c2477f563b571e716ba73d0937e1a632c89a59b6c1b797",
     "planner.py": "7d0b5fc721c285979c99024ada64178742fa0cbea60166806c67a340d1fade23",
     "executor.py": "d501a6ecd493d758dba75cfae1ff863482de572e43c5d048109900057006250a",
-    "gateway_adapters.py": "7f46ba8f8b0f406553839518430151d7a186604ce8c7a6a8bc3db23eccfeb300",
+    "gateway_adapters.py": "0f7e168f695c4269b16566d45a7bb6fac4f28963d42a33f0e1599404e06e1b5f",
     "gateway.py": "faf5f17bc9dcde5dbe297b96ee5a6a85e906d2329be4ed4cc1e69e66e8e71088",
     "identity.py": "233069fec1e798085a85b14bc1d887a585e22b8a6a6ddaa7dd90001f65b2668d",
     "catalog.py": "2aed2f8efc153fb962668b00c1c3d0f2d51eea78ca03e9c181d30c02d2f7e8e8",
@@ -149,9 +149,9 @@ _EXPECTED_IMPORT_DIGESTS = {
 _EXPECTED_AST_DIGESTS = {
     "contracts.py": "31006c7e537eadf401494f1356cf55d690da2af8314adb57751b59ce88d36e52",
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
-    "planner.py": "863f441ffdf5e3a8405e3e4a29810600a1add1477adef1dd6b1cb2b86e006d3b",
+    "planner.py": "f1574f3291115f5c60f244600b50c856964da72b9047b97604aac87bec2165af",
     "executor.py": "f96a7f310a608def1c163cd88c22481b21cdba99281eb9a76326bffb74fd0296",
-    "gateway_adapters.py": "016490dea3c58134c8b5a80d27659cc00762f20afd1f4f52822774ba5dab79cc",
+    "gateway_adapters.py": "7f416c949d1795c3cc47df2d926ce34f49d9c7c7454d0d6d19aaafc98ea0f76a",
     "gateway.py": "9fa3be4b099e4beb519e63bee037873d55fcd8425c7ec939520ea100cd896654",
     "identity.py": "f59640d8f793fd3ebd11df49d333f73ebee9e59efb549393116bee2a241f5f06",
     "catalog.py": "6f89e526a0cee3f934fc04da6adc5698800842e9f798ac45e35847d859e08ba6",
@@ -626,9 +626,9 @@ def test_semantic_ast_digest_ignores_only_empty_type_parameter_schema() -> None:
 
     assert _semantic_ast_digest(legacy) == _semantic_ast_digest(versioned)
     assert _semantic_ast_digest(generic) != _semantic_ast_digest(versioned)
-    assert _semantic_ast_digest(
-        ast.parse("value = ', type_params=[]'")
-    ) != _semantic_ast_digest(ast.parse("value = ''"))
+    assert _semantic_ast_digest(ast.parse("value = ', type_params=[]'")) != _semantic_ast_digest(
+        ast.parse("value = ''")
+    )
 
 
 def _frozen_digest_violations(
@@ -1024,7 +1024,10 @@ def test_enabled_registry_factory_profiles_recordings_and_plan_are_exactly_equal
     module = _adapter_module()
     factory = module.foundation_gateway_adapters()
 
-    assert registry_identities == plan_identities == set(_RECORDED_FIXTURES) == set(module._PARSING_PROFILES)
+    foundation_profile_identities = {
+        identity for identity in module._PARSING_PROFILES if identity[1] == "foundation-v2"
+    }
+    assert registry_identities == plan_identities == set(_RECORDED_FIXTURES) == foundation_profile_identities
     assert set(factory) == {adapter_id for adapter_id, _version in registry_identities}
     assert all(route.credential_requirement is CredentialRequirement.NONE for route in ready_routes)
     assert {adapter.__module__ for adapter in factory.values()} == {_ADAPTER_MODULE_NAME}

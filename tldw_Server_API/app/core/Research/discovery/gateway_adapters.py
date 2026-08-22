@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ElementTree  # nosec B405
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import unquote, urlsplit
 
 from defusedxml.common import DefusedXmlException
@@ -85,7 +85,10 @@ _ADAPTER_IDS = (
     "pubmed_v2",
 )
 _PARSING_PROFILES = MappingProxyType(
-    {(adapter_id, "foundation-v2"): _FOUNDATION_PROFILE for adapter_id in _ADAPTER_IDS}
+    {
+        **{(adapter_id, "foundation-v2"): _FOUNDATION_PROFILE for adapter_id in _ADAPTER_IDS},
+        ("pubmed_v2", "pubmed-v2-ncbi-identity"): _FOUNDATION_PROFILE,
+    }
 )
 _CLOCK_CHECK_INTERVAL = 256
 _XML_CHUNK_BYTES = 8_192
@@ -118,9 +121,47 @@ _XML_ENCODING_RE = re.compile(r"\bencoding\s*=\s*(['\"])([^'\"]+)\1", re.IGNOREC
 _PUBMED_ID_RE = re.compile(r"[1-9][0-9]{0,15}\Z", re.ASCII)
 _PMCID_RE = re.compile(r"PMC[1-9][0-9]{0,15}\Z", re.ASCII)
 _PUBMED_BINDING_ID = "pubmed_esearch_ids"
+_PUBMED_IDENTITY_ADAPTER_VERSION = "pubmed-v2-ncbi-identity"
 _NCBI_JSON_VERSION = "0.3"
+_NCBI_RATE_COUNT_RE = re.compile(r"(?:0|[1-9][0-9]*)\Z", re.ASCII)
 _MAX_PUBMED_AUTHORS_PER_RECORD = 1_024
 _MAX_PUBMED_ARTICLE_IDS_PER_RECORD = 64
+
+_TrustedNCBIInputs = tuple[
+    PlannedDispatchGroup,
+    _ParsingProfile,
+    int,
+    int,
+    int,
+    DeferredNumericCSVQueryBinding,
+]
+
+
+class _TrustedNCBIInputsCallback(Protocol):
+    def __call__(self, group: object) -> _TrustedNCBIInputs: ...
+
+
+class _NCBIESearchIDsCallback(Protocol):
+    def __call__(
+        self,
+        payload: Any,
+        *,
+        profile: _ParsingProfile,
+        guard: _ParseGuard,
+        retstart: int,
+        retmax: int,
+        binding: DeferredNumericCSVQueryBinding,
+    ) -> tuple[tuple[str, int], ...]: ...
+
+
+class _NCBISummaryRecordsCallback(Protocol):
+    def __call__(
+        self,
+        payload: Any,
+        *,
+        expected_ids: tuple[str, ...],
+        guard: _ParseGuard,
+    ) -> tuple[dict[str, Any], ...]: ...
 
 
 class _ParseGuard:
@@ -1336,14 +1377,7 @@ def _initial_page_and_size(group: PlannedDispatchGroup) -> tuple[int, int]:
 
 def _trusted_pubmed_inputs(
     group: object,
-) -> tuple[
-    PlannedDispatchGroup,
-    _ParsingProfile,
-    int,
-    int,
-    int,
-    DeferredNumericCSVQueryBinding,
-]:
+) -> _TrustedNCBIInputs:
     """Validate the exact two-intent PubMed adapter contract before dispatch."""
     if type(group) is not PlannedDispatchGroup or group.adapter_id != "pubmed_v2":
         raise DiscoveryAdapterError("provider_payload_invalid")
@@ -1371,18 +1405,38 @@ def _trusted_pubmed_inputs(
     ):
         raise DiscoveryAdapterError("provider_payload_invalid")
     search_pairs = tuple((pair.name, pair.value) for pair in search.query_pairs)
+    summary_pairs = tuple((pair.name, pair.value) for pair in summary.query_pairs)
     if (
-        len(search_pairs) != 6
+        len(search_pairs) not in {6, 8}
+        or len(summary_pairs) not in {2, 4}
         or search_pairs[0] != ("db", "pubmed")
         or search_pairs[1][0] != "term"
         or type(search_pairs[1][1]) is not str
         or not search_pairs[1][1]
         or search_pairs[2][0] != "retstart"
         or search_pairs[3][0] != "retmax"
-        or search_pairs[4:] != (("retmode", "json"), ("sort", "relevance"))
-        or tuple((pair.name, pair.value) for pair in summary.query_pairs) != (("db", "pubmed"), ("retmode", "json"))
         or len(summary.query_bindings) != 1
     ):
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    base_search_pairs = (
+        ("db", "pubmed"),
+        search_pairs[1],
+        search_pairs[2],
+        search_pairs[3],
+        ("retmode", "json"),
+        ("sort", "relevance"),
+    )
+    base_summary_pairs = (("db", "pubmed"), ("retmode", "json"))
+    identity_pairs = (("tool", "tldw_server"), ("email", "contact@tldwproject.com"))
+    if group.adapter_version == "foundation-v2":
+        shape_valid = search_pairs == base_search_pairs and summary_pairs == base_summary_pairs
+    elif group.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION:
+        shape_valid = (
+            search_pairs == base_search_pairs + identity_pairs and summary_pairs == base_summary_pairs + identity_pairs
+        )
+    else:
+        shape_valid = False
+    if not shape_valid:
         raise DiscoveryAdapterError("provider_payload_invalid")
     binding = summary.query_bindings[0]
     if (
@@ -1480,13 +1534,37 @@ def _pubmed_summary_records(
     return tuple(records)
 
 
-async def _execute_pubmed_adapter(
+def _validate_identity_ncbi_error_envelope(
+    payload: Any,
+    profile: _ParsingProfile,
+) -> None:
+    """Classify only the documented JSON rate envelope for identity routes."""
+    root = _require_dict(payload)
+    if "error" not in root:
+        return
+    if (
+        set(root) == {"error", "count"}
+        and root["error"] == "API rate limit exceeded"
+        and type(root["count"]) is str
+        and len(root["count"]) <= profile.max_numeric_token_chars
+        and _NCBI_RATE_COUNT_RE.fullmatch(root["count"]) is not None
+    ):
+        raise DiscoveryAdapterError("provider_rate_limited")
+    raise _PayloadInvalid
+
+
+async def _execute_ncbi_esearch_summary(
     group: object,
     dispatch: BoundDispatch,
     clock: MonotonicClock,
+    *,
+    trusted_inputs: _TrustedNCBIInputsCallback,
+    parse_esearch_ids: _NCBIESearchIDsCallback,
+    parse_summary_records: _NCBISummaryRecordsCallback,
+    strict_rate_envelope: bool,
 ) -> DiscoveryAdapterResult:
-    """Execute explicit ESearch then conditional ESummary through BoundDispatch."""
-    trusted_group, profile, max_input_bytes, retstart, retmax, binding = _trusted_pubmed_inputs(group)
+    """Execute one sealed ESearch and conditional ESummary pair."""
+    trusted_group, profile, max_input_bytes, retstart, retmax, binding = trusted_inputs(group)
     search, summary = trusted_group.intents
     search_response = _checked_response(await dispatch(search))
     search_payload, search_guard = _strict_json(
@@ -1496,7 +1574,9 @@ async def _execute_pubmed_adapter(
         clock=clock,
     )
     try:
-        ids = _pubmed_esearch_ids(
+        if strict_rate_envelope:
+            _validate_identity_ncbi_error_envelope(search_payload, profile)
+        ids = parse_esearch_ids(
             search_payload,
             profile=profile,
             guard=search_guard,
@@ -1527,7 +1607,9 @@ async def _execute_pubmed_adapter(
         clock=clock,
     )
     try:
-        normalized_records = _pubmed_summary_records(
+        if strict_rate_envelope:
+            _validate_identity_ncbi_error_envelope(summary_payload, profile)
+        normalized_records = parse_summary_records(
             summary_payload,
             expected_ids=expected_ids,
             guard=summary_guard,
@@ -1553,6 +1635,26 @@ async def _execute_pubmed_adapter(
     except (KeyError, TypeError, ValueError, OverflowError):
         raise DiscoveryAdapterError("provider_payload_invalid") from None
     return DiscoveryAdapterResult(tuple(candidates))
+
+
+async def _execute_pubmed_adapter(
+    group: object,
+    dispatch: BoundDispatch,
+    clock: MonotonicClock,
+) -> DiscoveryAdapterResult:
+    """Execute the exact foundation or identity-bearing PubMed contract."""
+    strict_rate_envelope = (
+        type(group) is PlannedDispatchGroup and group.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION
+    )
+    return await _execute_ncbi_esearch_summary(
+        group,
+        dispatch,
+        clock,
+        trusted_inputs=_trusted_pubmed_inputs,
+        parse_esearch_ids=_pubmed_esearch_ids,
+        parse_summary_records=_pubmed_summary_records,
+        strict_rate_envelope=strict_rate_envelope,
+    )
 
 
 def _trusted_adapter_inputs(

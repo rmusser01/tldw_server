@@ -16,6 +16,9 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Research.discovery import executor as executor_module
+from tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central import (
+    clinicaltrials_pubmed_central_shadow_registry,
+)
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
     DiscoveryOutcomeIdentity,
@@ -518,6 +521,79 @@ async def test_executor_empty_search_creates_only_one_dispatch_id() -> None:
     assert len(gateway_calls) == 1
     assert tuple(record.dispatch_id for record in result.usage.physical_records) == ("pubmed-esearch-dispatch",)
     assert result.usage.accounting.created == result.usage.accounting.debited == 1
+
+
+def _overlay_plan_for(*, result_limit: int = 2):
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest(
+            source_ids=("pubmed",),
+            query="  BOUNDED   Discovery  ",
+            filters=(),
+            result_limit=result_limit,
+        ),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(1, 2, 1, 0, 0, 40_000, result_limit),
+    )
+    return registry, plan
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_executes_exact_two_hop_identity_shape_without_repr_leaks() -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    dispatch = _RecordingDispatch(
+        [
+            _response(route, group.intents[0], _fixture("esearch_success")),
+            _response(route, group.intents[1], _fixture("esummary_success")),
+        ]
+    )
+
+    result = await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    assert len(result.candidates) == 2
+    assert [tuple((pair.name, pair.value) for pair in call[0].query_pairs) for call in dispatch.calls] == [
+        (
+            ("db", "pubmed"),
+            ("term", "bounded discovery"),
+            ("retstart", "0"),
+            ("retmax", "2"),
+            ("retmode", "json"),
+            ("sort", "relevance"),
+            ("tool", "tldw_server"),
+            ("email", "contact@tldwproject.com"),
+        ),
+        (
+            ("db", "pubmed"),
+            ("retmode", "json"),
+            ("tool", "tldw_server"),
+            ("email", "contact@tldwproject.com"),
+        ),
+    ]
+    assert "tldw_server" not in repr(group)
+    assert "contact@tldwproject.com" not in repr(group)
+    assert "31415926" not in repr(dispatch.calls[1][2])
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_accepts_only_the_documented_json_rate_envelope() -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    dispatch = _RecordingDispatch(
+        [
+            _response(
+                route,
+                group.intents[0],
+                _json({"error": "API rate limit exceeded", "count": "11"}),
+            )
+        ]
+    )
+
+    with pytest.raises(executor_module.DiscoveryAdapterError, match="provider_rate_limited"):
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
 
 
 @pytest.mark.asyncio
