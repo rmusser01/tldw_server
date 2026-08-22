@@ -212,6 +212,124 @@ class SharedWorkspaceRepo:
         )
         return self._normalize_share_row(self._row_to_dict(row) if row else None)
 
+    async def get_active_share_for_user(
+        self,
+        share_id: int,
+        user_id: int,
+    ) -> dict[str, Any] | None:
+        """Return an active share when current database membership permits access."""
+        row = await self.db_pool.fetchone(
+            """
+            SELECT sw.id, sw.workspace_id, sw.owner_user_id,
+                   sw.share_scope_type, sw.share_scope_id,
+                   sw.access_level, sw.allow_clone, sw.created_by,
+                   sw.created_at, sw.updated_at, sw.revoked_at
+            FROM shared_workspaces sw
+            WHERE sw.id = ?
+              AND sw.revoked_at IS NULL
+              AND (
+                  (
+                      sw.share_scope_type = 'team'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM teams t
+                          JOIN organizations o ON o.id = t.org_id
+                          WHERE t.id = sw.share_scope_id
+                            AND COALESCE(t.is_active, FALSE) = TRUE
+                            AND COALESCE(o.is_active, FALSE) = TRUE
+                      )
+                  )
+                  OR (
+                      sw.share_scope_type = 'org'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM organizations o
+                          WHERE o.id = sw.share_scope_id
+                            AND COALESCE(o.is_active, FALSE) = TRUE
+                      )
+                  )
+              )
+              AND (
+                  sw.owner_user_id = ?
+                  OR (
+                      sw.share_scope_type = 'team'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM team_members tm
+                          WHERE tm.team_id = sw.share_scope_id
+                            AND tm.user_id = ?
+                            AND tm.status = 'active'
+                      )
+                  )
+                  OR (
+                      sw.share_scope_type = 'org'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM org_members om
+                          WHERE om.org_id = sw.share_scope_id
+                            AND om.user_id = ?
+                            AND om.status = 'active'
+                      )
+                  )
+              )
+            """,
+            (int(share_id), int(user_id), int(user_id), int(user_id)),
+        )
+        return self._normalize_share_row(self._row_to_dict(row) if row else None)
+
+    async def list_active_shares_for_user(self, user_id: int) -> list[dict[str, Any]]:
+        """List active shares granted by current membership, excluding owned shares."""
+        rows = await self.db_pool.fetchall(
+            """
+            SELECT sw.id, sw.workspace_id, sw.owner_user_id,
+                   sw.share_scope_type, sw.share_scope_id,
+                   sw.access_level, sw.allow_clone, sw.created_by,
+                   sw.created_at, sw.updated_at, sw.revoked_at
+            FROM shared_workspaces sw
+            WHERE sw.revoked_at IS NULL
+              AND sw.owner_user_id <> ?
+              AND (
+                  (
+                      sw.share_scope_type = 'team'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM teams t
+                          JOIN organizations o ON o.id = t.org_id
+                          WHERE t.id = sw.share_scope_id
+                            AND COALESCE(t.is_active, FALSE) = TRUE
+                            AND COALESCE(o.is_active, FALSE) = TRUE
+                      )
+                      AND EXISTS (
+                          SELECT 1
+                          FROM team_members tm
+                          WHERE tm.team_id = sw.share_scope_id
+                            AND tm.user_id = ?
+                            AND tm.status = 'active'
+                      )
+                  )
+                  OR (
+                      sw.share_scope_type = 'org'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM organizations o
+                          WHERE o.id = sw.share_scope_id
+                            AND COALESCE(o.is_active, FALSE) = TRUE
+                      )
+                      AND EXISTS (
+                          SELECT 1
+                          FROM org_members om
+                          WHERE om.org_id = sw.share_scope_id
+                            AND om.user_id = ?
+                            AND om.status = 'active'
+                      )
+                  )
+              )
+            ORDER BY sw.created_at DESC, sw.id DESC
+            """,
+            (int(user_id), int(user_id), int(user_id)),
+        )
+        return [self._normalize_share_row(self._row_to_dict(row)) or {} for row in rows]
+
     async def list_shares_for_workspace(
         self,
         workspace_id: str,

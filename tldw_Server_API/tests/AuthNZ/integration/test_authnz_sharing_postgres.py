@@ -16,6 +16,123 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio
+async def test_postgres_authoritative_share_queries_follow_current_membership_and_scope(
+    isolated_test_environment,
+) -> None:
+    _client, _db_name = isolated_test_environment
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.initialize import setup_database
+    from tldw_Server_API.app.core.AuthNZ.repos.shared_workspace_repo import (
+        SharedWorkspaceRepo,
+    )
+
+    pool = await get_db_pool()
+    assert await setup_database() is True
+    owner = await pool.fetchone(
+        """
+        INSERT INTO users (username, email, password_hash)
+        VALUES (?, ?, ?)
+        RETURNING id
+        """,
+        ("sharing-authority-owner", "sharing-authority-owner@example.test", "hash"),
+    )
+    recipient = await pool.fetchone(
+        """
+        INSERT INTO users (username, email, password_hash)
+        VALUES (?, ?, ?)
+        RETURNING id
+        """,
+        (
+            "sharing-authority-recipient",
+            "sharing-authority-recipient@example.test",
+            "hash",
+        ),
+    )
+    owner_id = int(owner["id"])
+    recipient_id = int(recipient["id"])
+    organization = await pool.fetchone(
+        """
+        INSERT INTO organizations (name, slug, owner_user_id, is_active)
+        VALUES (?, ?, ?, TRUE)
+        RETURNING id
+        """,
+        ("Sharing Authority Org", "sharing-authority-org", owner_id),
+    )
+    org_id = int(organization["id"])
+    team = await pool.fetchone(
+        """
+        INSERT INTO teams (org_id, name, slug, is_active)
+        VALUES (?, ?, ?, TRUE)
+        RETURNING id
+        """,
+        (org_id, "Sharing Authority Team", "sharing-authority-team"),
+    )
+    team_id = int(team["id"])
+    await pool.execute(
+        "INSERT INTO org_members (org_id, user_id, status) VALUES (?, ?, 'active')",
+        (org_id, recipient_id),
+    )
+    await pool.execute(
+        "INSERT INTO team_members (team_id, user_id, status) VALUES (?, ?, 'active')",
+        (team_id, recipient_id),
+    )
+
+    repo = SharedWorkspaceRepo(pool)
+    team_share = await repo.create_share(
+        workspace_id="pg-authoritative-team",
+        owner_user_id=owner_id,
+        share_scope_type="team",
+        share_scope_id=team_id,
+        created_by=owner_id,
+    )
+    org_share = await repo.create_share(
+        workspace_id="pg-authoritative-org",
+        owner_user_id=owner_id,
+        share_scope_type="org",
+        share_scope_id=org_id,
+        created_by=owner_id,
+    )
+    owned_share = await repo.create_share(
+        workspace_id="pg-authoritative-owned",
+        owner_user_id=recipient_id,
+        share_scope_type="team",
+        share_scope_id=team_id,
+        created_by=recipient_id,
+    )
+
+    assert (await repo.get_active_share_for_user(team_share["id"], recipient_id))["id"] == team_share["id"]
+    assert (await repo.get_active_share_for_user(org_share["id"], owner_id))["id"] == org_share["id"]
+    assert {row["id"] for row in await repo.list_active_shares_for_user(recipient_id)} == {
+        team_share["id"],
+        org_share["id"],
+    }
+    assert owned_share["id"] not in {
+        row["id"] for row in await repo.list_active_shares_for_user(recipient_id)
+    }
+
+    await pool.execute(
+        "UPDATE team_members SET status = 'suspended' WHERE team_id = ? AND user_id = ?",
+        (team_id, recipient_id),
+    )
+    assert await repo.get_active_share_for_user(team_share["id"], recipient_id) is None
+    assert [row["id"] for row in await repo.list_active_shares_for_user(recipient_id)] == [
+        org_share["id"]
+    ]
+
+    await pool.execute(
+        "DELETE FROM org_members WHERE org_id = ? AND user_id = ?",
+        (org_id, recipient_id),
+    )
+    assert await repo.list_active_shares_for_user(recipient_id) == []
+
+    await pool.execute("UPDATE teams SET is_active = FALSE WHERE id = ?", (team_id,))
+    assert await repo.get_active_share_for_user(team_share["id"], owner_id) is None
+    await pool.execute("UPDATE organizations SET is_active = FALSE WHERE id = ?", (org_id,))
+    assert await repo.get_active_share_for_user(org_share["id"], owner_id) is None
+
+
+@pytest.mark.asyncio
 async def test_postgres_runtime_startup_bootstraps_sharing_tables(
     isolated_test_environment,
 ) -> None:

@@ -2,10 +2,179 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.migrations import migration_016_create_orgs_teams
+
 pytestmark = pytest.mark.unit
+
+
+def _seed_active_scopes(conn: sqlite3.Connection) -> dict[str, int]:
+    migration_016_create_orgs_teams(conn)
+    conn.execute(
+        """
+        INSERT INTO organizations (id, name, slug, owner_user_id, is_active)
+        VALUES (10, 'Research Org', 'research-org', 1, 1)
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO teams (id, org_id, name, slug, is_active)
+        VALUES (20, 10, 'Research Team', 'research-team', 1)
+        """
+    )
+    conn.execute(
+        "INSERT INTO org_members (org_id, user_id, status) VALUES (10, 2, 'active')"
+    )
+    conn.execute(
+        "INSERT INTO team_members (team_id, user_id, status) VALUES (20, 2, 'active')"
+    )
+    conn.execute(
+        """
+        INSERT INTO users (id, username, email, password_hash)
+        VALUES (3, 'mallory', 'mallory@test.com', 'hash')
+        """
+    )
+    conn.commit()
+    return {"org_id": 10, "team_id": 20}
+
+
+async def _create_scoped_share(
+    repo: Any,
+    *,
+    workspace_id: str,
+    scope_type: str,
+    scope_id: int,
+    owner_user_id: int = 1,
+) -> dict[str, Any]:
+    return await repo.create_share(
+        workspace_id=workspace_id,
+        owner_user_id=owner_user_id,
+        share_scope_type=scope_type,
+        share_scope_id=scope_id,
+        created_by=owner_user_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_active_share_for_user_uses_current_team_membership_and_scope_state(
+    repo,
+    sharing_db,
+) -> None:
+    ids = _seed_active_scopes(sharing_db)
+    share = await _create_scoped_share(
+        repo,
+        workspace_id="ws-authoritative-team",
+        scope_type="team",
+        scope_id=ids["team_id"],
+    )
+
+    assert (await repo.get_active_share_for_user(share["id"], 2))["id"] == share["id"]
+    assert (await repo.get_active_share_for_user(share["id"], 1))["id"] == share["id"]
+    assert await repo.get_active_share_for_user(share["id"], 3) is None
+
+    sharing_db.execute(
+        "UPDATE team_members SET status = 'suspended' WHERE team_id = 20 AND user_id = 2"
+    )
+    sharing_db.commit()
+    assert await repo.get_active_share_for_user(share["id"], 2) is None
+
+    sharing_db.execute(
+        "UPDATE team_members SET status = 'active' WHERE team_id = 20 AND user_id = 2"
+    )
+    sharing_db.execute("UPDATE teams SET is_active = 0 WHERE id = 20")
+    sharing_db.commit()
+    assert await repo.get_active_share_for_user(share["id"], 2) is None
+    assert await repo.get_active_share_for_user(share["id"], 1) is None
+
+    sharing_db.execute("UPDATE teams SET is_active = 1 WHERE id = 20")
+    sharing_db.execute("UPDATE organizations SET is_active = 0 WHERE id = 10")
+    sharing_db.commit()
+    assert await repo.get_active_share_for_user(share["id"], 2) is None
+
+    sharing_db.execute("UPDATE organizations SET is_active = 1 WHERE id = 10")
+    sharing_db.execute("DELETE FROM team_members WHERE team_id = 20 AND user_id = 2")
+    sharing_db.commit()
+    assert await repo.get_active_share_for_user(share["id"], 2) is None
+
+    await repo.revoke_share(share["id"])
+    assert await repo.get_active_share_for_user(share["id"], 1) is None
+
+
+@pytest.mark.asyncio
+async def test_get_active_share_for_user_uses_current_org_membership_and_scope_state(
+    repo,
+    sharing_db,
+) -> None:
+    ids = _seed_active_scopes(sharing_db)
+    share = await _create_scoped_share(
+        repo,
+        workspace_id="ws-authoritative-org",
+        scope_type="org",
+        scope_id=ids["org_id"],
+    )
+
+    assert (await repo.get_active_share_for_user(share["id"], 2))["id"] == share["id"]
+    assert (await repo.get_active_share_for_user(share["id"], 1))["id"] == share["id"]
+
+    sharing_db.execute(
+        "UPDATE org_members SET status = 'suspended' WHERE org_id = 10 AND user_id = 2"
+    )
+    sharing_db.commit()
+    assert await repo.get_active_share_for_user(share["id"], 2) is None
+
+    sharing_db.execute(
+        "UPDATE org_members SET status = 'active' WHERE org_id = 10 AND user_id = 2"
+    )
+    sharing_db.execute("UPDATE organizations SET is_active = 0 WHERE id = 10")
+    sharing_db.commit()
+    assert await repo.get_active_share_for_user(share["id"], 2) is None
+    assert await repo.get_active_share_for_user(share["id"], 1) is None
+
+
+@pytest.mark.asyncio
+async def test_list_active_shares_for_user_excludes_owned_and_tracks_membership_changes(
+    repo,
+    sharing_db,
+) -> None:
+    ids = _seed_active_scopes(sharing_db)
+    team_share = await _create_scoped_share(
+        repo,
+        workspace_id="ws-shared-team",
+        scope_type="team",
+        scope_id=ids["team_id"],
+    )
+    org_share = await _create_scoped_share(
+        repo,
+        workspace_id="ws-shared-org",
+        scope_type="org",
+        scope_id=ids["org_id"],
+    )
+    await _create_scoped_share(
+        repo,
+        workspace_id="ws-owned-by-recipient",
+        scope_type="team",
+        scope_id=ids["team_id"],
+        owner_user_id=2,
+    )
+
+    listed = await repo.list_active_shares_for_user(2)
+    assert {share["id"] for share in listed} == {team_share["id"], org_share["id"]}
+    assert all(share["owner_user_id"] != 2 for share in listed)
+
+    sharing_db.execute(
+        "UPDATE team_members SET status = 'suspended' WHERE team_id = 20 AND user_id = 2"
+    )
+    sharing_db.commit()
+    assert [share["id"] for share in await repo.list_active_shares_for_user(2)] == [
+        org_share["id"]
+    ]
+
+    sharing_db.execute("DELETE FROM org_members WHERE org_id = 10 AND user_id = 2")
+    sharing_db.commit()
+    assert await repo.list_active_shares_for_user(2) == []
 
 
 @pytest.mark.asyncio
