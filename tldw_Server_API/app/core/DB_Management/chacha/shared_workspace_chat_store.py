@@ -608,17 +608,39 @@ class SharedWorkspaceChatStore:
             raise InputError("Conflict cleanup limit must be a positive integer.")
         bounded_limit = min(limit, 100)
         cutoff = current_time - timedelta(hours=24)
+        if self._db.backend_type == BackendType.SQLITE:
+            select_sql = """
+                SELECT share_id, request_id
+                  FROM shared_workspace_chat_requests
+                 WHERE recipient_user_id = ? AND status = 'conflicted'
+                   AND julianday(updated_at) < julianday(?)
+              ORDER BY julianday(updated_at) ASC, share_id ASC, request_id ASC
+                 LIMIT ?
+            """
+            delete_sql = """
+                DELETE FROM shared_workspace_chat_requests
+                 WHERE recipient_user_id = ? AND share_id = ? AND request_id = ?
+                   AND status = 'conflicted'
+                   AND julianday(updated_at) < julianday(?)
+            """
+        else:
+            select_sql = """
+                SELECT share_id, request_id
+                  FROM shared_workspace_chat_requests
+                 WHERE recipient_user_id = ? AND status = 'conflicted'
+                   AND updated_at < ?
+              ORDER BY updated_at ASC, share_id ASC, request_id ASC
+                 LIMIT ?
+            """
+            delete_sql = """
+                DELETE FROM shared_workspace_chat_requests
+                 WHERE recipient_user_id = ? AND share_id = ? AND request_id = ?
+                   AND status = 'conflicted' AND updated_at < ?
+            """
         try:
             with self._db.transaction() as conn:
                 rows = conn.execute(
-                    """
-                    SELECT share_id, request_id
-                      FROM shared_workspace_chat_requests
-                     WHERE recipient_user_id = ? AND status = 'conflicted'
-                       AND updated_at < ?
-                  ORDER BY updated_at ASC, share_id ASC, request_id ASC
-                     LIMIT ?
-                    """,
+                    select_sql,
                     (
                         self._recipient_user_id,
                         self._db_datetime(cutoff),
@@ -629,11 +651,7 @@ class SharedWorkspaceChatStore:
                 for row in rows:
                     record = self._row_dict(row)
                     cursor = conn.execute(
-                        """
-                        DELETE FROM shared_workspace_chat_requests
-                         WHERE recipient_user_id = ? AND share_id = ? AND request_id = ?
-                           AND status = 'conflicted' AND updated_at < ?
-                        """,
+                        delete_sql,
                         (
                             self._recipient_user_id,
                             record["share_id"],

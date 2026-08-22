@@ -754,6 +754,50 @@ def test_failure_timestamps_are_canonical_and_cleanup_honors_24_hour_boundary(
     assert [row["request_id"] for row in remaining] == [str(claims[0].request_id)]
 
 
+def test_cleanup_compares_and_orders_legacy_sqlite_timestamps_chronologically(
+    db: CharactersRAGDB,
+) -> None:
+    thread = _thread(db)
+    canonical_old_id = str(uuid4())
+    legacy_old_id = str(uuid4())
+    legacy_recent_id = str(uuid4())
+    timestamps = {
+        canonical_old_id: (NOW - timedelta(hours=26)).isoformat(),
+        legacy_old_id: (NOW - timedelta(hours=25)).strftime("%Y-%m-%d %H:%M:%S"),
+        legacy_recent_id: (NOW - timedelta(hours=23)).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    with db.transaction() as conn:
+        for request_id, updated_at in timestamps.items():
+            conn.execute(
+                "INSERT INTO shared_workspace_chat_requests("
+                "recipient_user_id, share_id, request_id, request_fingerprint, conversation_id, "
+                "status, updated_at) VALUES (?, ?, ?, ?, ?, 'conflicted', ?)",
+                (
+                    "recipient-a",
+                    41,
+                    request_id,
+                    f"fingerprint-{request_id}",
+                    thread.conversation_id,
+                    updated_at,
+                ),
+            )
+
+    assert db.shared_workspace_chat_store.purge_expired_conflicts(now=NOW, limit=1) == 1
+    after_first_delete = {
+        row["request_id"]
+        for row in db.execute_query(
+            "SELECT request_id FROM shared_workspace_chat_requests WHERE status = 'conflicted'"
+        ).fetchall()
+    }
+    assert after_first_delete == {legacy_old_id, legacy_recent_id}
+
+    assert db.shared_workspace_chat_store.purge_expired_conflicts(now=NOW) == 1
+    remaining = db.execute_query(
+        "SELECT request_id FROM shared_workspace_chat_requests WHERE status = 'conflicted'"
+    ).fetchall()
+    assert [row["request_id"] for row in remaining] == [legacy_recent_id]
+
+
 def test_cleanup_failure_cannot_weaken_claim_correctness(
     db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
