@@ -65,6 +65,7 @@ _PUBMED_CENTRAL_BACKEND_ID = "ncbi_eutils_pmc"
 _PUBMED_CENTRAL_ADAPTER_ID = "pubmed_central_v2"
 _PUBMED_CENTRAL_ADAPTER_VERSION = "pubmed-central-v2"
 _PUBMED_CENTRAL_POLICY_VERSION = "research-discovery-route-policy-v2-clinicaltrials-pmc"
+_PUBMED_CENTRAL_POLICY_DIGEST = "621115ce40342226999a120bfc3ab31fcac28a0e6eb2e37c39653bdd72791fc9"
 _PUBMED_CENTRAL_BINDING_ID = "pmc_esearch_ids"
 
 
@@ -97,15 +98,66 @@ def _has_pubmed_central_identity_component(route: AccessRoute) -> bool:
             route.backend_id == _PUBMED_CENTRAL_BACKEND_ID,
             route.adapter_id == _PUBMED_CENTRAL_ADAPTER_ID,
             route.adapter_version == _PUBMED_CENTRAL_ADAPTER_VERSION,
+            route.policy.policy_version == _PUBMED_CENTRAL_POLICY_VERSION
+            and not _is_clinicaltrials_shared_policy_owner(route),
         )
     )
+
+
+def _is_clinicaltrials_shared_policy_owner(route: AccessRoute) -> bool:
+    """Exclude the one exact sibling route that owns the shared policy marker."""
+    return (
+        route.route_id == "clinicaltrials_gov_studies_search_direct"
+        and route.backend_id == "clinicaltrials_gov_api_v2"
+        and route.adapter_id == "clinicaltrials_gov_v2"
+        and route.adapter_version == "clinicaltrials-gov-v2"
+        and route.policy.policy_version == _PUBMED_CENTRAL_POLICY_VERSION
+    )
+
+
+def _is_exact_contract_enum_member(
+    value: object,
+    *,
+    enum_name: str,
+    member_name: str,
+    member_value: str,
+) -> bool:
+    """Match one sealed contracts enum member without importing family-owned code."""
+    value_type = type(value)
+    try:
+        return (
+            value_type.__module__ == "tldw_Server_API.app.core.Research.discovery.contracts"
+            and value_type.__qualname__ == enum_name
+            and value_type.__members__[member_name] is value
+            and type(value.value) is str
+            and value.value == member_value
+        )
+    except (AttributeError, KeyError, TypeError):
+        return False
 
 
 def _has_exact_pubmed_central_policy(route: AccessRoute) -> bool:
     policy = route.policy
     origin = policy.origin
     return (
-        type(route.max_physical_dispatches) is int
+        _is_exact_contract_enum_member(
+            route.route_kind,
+            enum_name="RouteKind",
+            member_name="DIRECT",
+            member_value="direct",
+        )
+        and type(route.query_modes) is tuple
+        and route.query_modes == (QueryMode.GENERAL_FREE_TEXT,)
+        and _is_exact_contract_enum_member(
+            route.source_constraint,
+            enum_name="SourceConstraint",
+            member_name="NATIVE_CORPUS",
+            member_value="native_corpus",
+        )
+        and type(route.attribution_basis) is str
+        and route.attribution_basis == "ncbi_pmc_database"
+        and route.credential_requirement is CredentialRequirement.NONE
+        and type(route.max_physical_dispatches) is int
         and route.max_physical_dispatches == 2
         and type(route.fallback_order) is int
         and route.fallback_order == 0
@@ -114,6 +166,8 @@ def _has_exact_pubmed_central_policy(route: AccessRoute) -> bool:
         and origin.host == "eutils.ncbi.nlm.nih.gov"
         and type(origin.port) is int
         and origin.port == 443
+        and type(policy.policy_digest) is str
+        and policy.policy_digest == _PUBMED_CENTRAL_POLICY_DIGEST
         and policy.methods == ("GET",)
         and policy.paths == ("/entrez/eutils/esearch.fcgi", "/entrez/eutils/esummary.fcgi")
         and policy.path_template is None
@@ -287,6 +341,10 @@ def compile_discovery_plan(
     for source in sources:
         references = {reference.route_id: reference for reference in source.route_references}
         for route in registry.routes_for_source(source.catalog_source_id):
+            if _has_pubmed_central_identity_component(route) and (
+                not _is_pubmed_central_route(route) or not _has_exact_pubmed_central_policy(route)
+            ):
+                raise _planning_error(f"invalid_pubmed_central_route_identity:{route.route_id}")
             if query_context.mode not in route.query_modes:
                 skipped.append(
                     SkippedTarget(
@@ -687,6 +745,8 @@ def _build_intents(
     normalized_query: str,
     result_limit: int,
 ) -> tuple[DispatchIntent, ...]:
+    if _has_pubmed_central_identity_component(route):
+        raise _planning_error(f"invalid_pubmed_central_route_identity:{route.route_id}")
     limit = min(result_limit, route.policy.limits.max_results)
     foundation_pubmed = (
         route.route_id == "pubmed_ncbi_eutils_pubmed_direct"

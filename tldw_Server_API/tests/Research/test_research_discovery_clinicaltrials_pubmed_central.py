@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Research.discovery import planner as planner_module
 from tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central import (
     _FAMILY_PARSING_PROFILES,
     CLINICALTRIALS_FIELDS,
@@ -1856,6 +1857,105 @@ def test_partial_pmc_planner_identity_or_generic_shape_fails_closed(route_change
             readiness=readiness,
             budget=_pmc_budget(result_limit=10),
         )
+
+
+def test_generic_route_with_only_pmc_policy_marker_fails_closed() -> None:
+    foundation = foundation_registry()
+    original = foundation.get_route("arxiv_arxiv_api_direct")
+    mutated = replace(
+        original,
+        policy=replace(
+            original.policy,
+            policy_version=ROUTE_POLICY_VERSION,
+            policy_digest="",
+        ),
+    )
+    registry = DiscoveryRegistry(
+        catalog_version=foundation.catalog_version,
+        registry_version="generic-pmc-policy-marker-mutation-v1",
+        sources=foundation.sources,
+        routes=tuple(mutated if route.route_id == original.route_id else route for route in foundation.routes),
+        backends=foundation.backends,
+    )
+    assert (
+        mutated.route_id,
+        mutated.backend_id,
+        mutated.adapter_id,
+        mutated.adapter_version,
+    ) == (
+        "arxiv_arxiv_api_direct",
+        "arxiv_api",
+        "arxiv_v2",
+        "foundation-v2",
+    )
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("arxiv",), "alpha beta", (), 10),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(),
+        )
+
+
+def test_exact_pmc_identity_with_structured_mode_cannot_enter_raw_string_builder() -> None:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_central_esearch_summary_direct")
+    object.__setattr__(route, "query_modes", (QueryMode.STRUCTURED_QUERY,))
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("pubmed_central",), "alpha beta", (), 10),
+            registry=registry,
+            readiness=_module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.SYNTHETIC),
+            budget=_pmc_budget(result_limit=10),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("route_kind", RouteKind.AGGREGATOR),
+        ("query_modes", (QueryMode.GENERAL_FREE_TEXT, QueryMode.STRUCTURED_QUERY)),
+        ("source_constraint", SourceConstraint.PROVIDER_SOURCE_FILTER),
+        ("attribution_basis", "generic_provider_search"),
+        ("credential_requirement", CredentialRequirement.API_KEY),
+    ),
+)
+def test_pmc_planner_rejects_each_route_semantic_field_drift(field: str, value: object) -> None:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_central_esearch_summary_direct")
+    object.__setattr__(route, field, value)
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("pubmed_central",), GeneralFreeTextQuery("alpha beta"), (), 10),
+            registry=registry,
+            readiness=_module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.SYNTHETIC),
+            budget=_pmc_budget(result_limit=10),
+        )
+
+
+def test_pmc_planner_rejects_policy_digest_drift_before_intent_emission() -> None:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_central_esearch_summary_direct")
+    object.__setattr__(route.policy, "policy_digest", "0" * 64)
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("pubmed_central",), GeneralFreeTextQuery("alpha beta"), (), 10),
+            registry=registry,
+            readiness=_module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.SYNTHETIC),
+            budget=_pmc_budget(result_limit=10),
+        )
+
+
+def test_pmc_planner_local_policy_digest_matches_constructed_family_route() -> None:
+    expected = "621115ce40342226999a120bfc3ab31fcac28a0e6eb2e37c39653bdd72791fc9"
+    route = _module().clinicaltrials_pubmed_central_shadow_registry().get_route("pubmed_central_esearch_summary_direct")
+
+    assert route.policy.policy_digest == expected
+    assert expected == planner_module._PUBMED_CENTRAL_POLICY_DIGEST
 
 
 @pytest.mark.parametrize(

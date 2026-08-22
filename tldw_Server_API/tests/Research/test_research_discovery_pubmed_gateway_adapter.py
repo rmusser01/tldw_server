@@ -733,6 +733,74 @@ async def test_identity_overlay_rejects_conflicting_records_with_one_doi_fingerp
     assert dispatch.calls[1][2] == (NumericCSVBindingValues("pubmed_esearch_ids", (31415926, 27182818)),)
 
 
+@pytest.mark.asyncio
+async def test_shared_ncbi_helper_collapses_byte_identical_same_fingerprint_records() -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    binding = group.intents[1].query_bindings[0]
+    profile = _module()._PARSING_PROFILES[(_ADAPTER_ID, group.adapter_version)]
+    normalized = {
+        "title": "Synthetic byte-identical normalized record",
+        "authors": ("Synthetic Author",),
+        "abstract": None,
+        "snippet": None,
+        "doi": "10.5555/synthetic-identical-record",
+        "pmid": "31415926",
+        "pmcid": None,
+        "arxiv_id": None,
+        "url": "https://pubmed.ncbi.nlm.nih.gov/31415926/",
+        "pdf_url": None,
+        "provider": "pubmed",
+        "provider_ids": {"pmid": "31415926", "doi": "10.5555/synthetic-identical-record"},
+    }
+    duplicate = dict(normalized)
+    assert duplicate is not normalized
+    assert duplicate == normalized
+    assert _json(duplicate) == _json(normalized)
+
+    def trusted_inputs(candidate: object):
+        assert candidate is group
+        return group, profile, profile.max_input_bytes, 0, 2, binding
+
+    def parse_esearch_ids(_payload: object, **kwargs: object):
+        assert kwargs == {
+            "profile": profile,
+            "guard": kwargs["guard"],
+            "retstart": 0,
+            "retmax": 2,
+            "binding": binding,
+        }
+        return (("31415926", 31_415_926), ("27182818", 27_182_818))
+
+    def parse_summary_records(_payload: object, **kwargs: object):
+        assert kwargs["expected_ids"] == ("31415926", "27182818")
+        return normalized, duplicate
+
+    dispatch = _RecordingDispatch(
+        [
+            _response(route, group.intents[0], _json({"synthetic": "esearch"})),
+            _response(route, group.intents[1], _json({"synthetic": "esummary"})),
+        ]
+    )
+
+    result = await _module()._execute_ncbi_esearch_summary(
+        group,
+        dispatch,
+        _CountingClock(),
+        trusted_inputs=trusted_inputs,
+        parse_esearch_ids=parse_esearch_ids,
+        parse_summary_records=parse_summary_records,
+        strict_rate_envelope=False,
+    )
+
+    assert len(result.candidates) == 1
+    assert result.candidates[0].record == normalized
+    assert len(dispatch.calls) == 2
+    assert [call[0] for call in dispatch.calls] == list(group.intents)
+    assert dispatch.calls[1][2] == (NumericCSVBindingValues("pubmed_esearch_ids", (31415926, 27182818)),)
+
+
 @pytest.mark.parametrize(
     "payload",
     (
