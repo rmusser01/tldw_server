@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Callable
 
 import pytest
 from hypothesis import given, settings
@@ -562,7 +563,10 @@ def test_pubmed_identity_overlay_rejects_exact_policy_or_route_semantic_drift(mu
         lambda route: object.__setattr__(route.policy, "origin", object()),
     ),
 )
-def test_pubmed_identity_overlay_rejects_malformed_policy_objects_with_typed_planning_error(mutation) -> None:
+def test_pubmed_identity_overlay_rejects_malformed_policy_objects_with_typed_planning_error(
+    mutation: Callable[[AccessRoute], None],
+) -> None:
+    """Reject malformed PubMed policies through the typed planning boundary."""
     registry = clinicaltrials_pubmed_central_shadow_registry()
     route = registry.get_route("pubmed_ncbi_eutils_pubmed_direct")
     mutation(route)
@@ -580,17 +584,82 @@ def test_pubmed_identity_overlay_rejects_malformed_policy_objects_with_typed_pla
 
 @pytest.mark.parametrize("malformed_route", (object(),))
 def test_pubmed_identity_policy_predicate_rejects_non_contract_route_without_attribute_error(
-    malformed_route,
+    malformed_route: object,
 ) -> None:
+    """Reject an object that is not an exact PubMed identity route."""
     assert planner_module._has_exact_pubmed_identity_policy(malformed_route) is False
 
 
 def test_pubmed_identity_policy_predicate_rejects_non_contract_policy_without_attribute_error() -> None:
+    """Reject a PubMed route whose policy is not the contract type."""
     registry = clinicaltrials_pubmed_central_shadow_registry()
     route = registry.get_route("pubmed_ncbi_eutils_pubmed_direct")
     object.__setattr__(route, "policy", object())
 
     assert planner_module._has_exact_pubmed_identity_policy(route) is False
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda route: object.__setattr__(route, "route_id", "pubmed_ncbi_eutils_pubmed_direct"),
+        lambda route: object.__setattr__(route, "backend_id", "ncbi_eutils_pubmed"),
+        lambda route: object.__setattr__(route, "adapter_id", "pubmed_v2"),
+        lambda route: object.__setattr__(route, "adapter_version", "pubmed-v2-ncbi-identity"),
+        lambda route: object.__setattr__(
+            route,
+            "policy",
+            SimpleNamespace(
+                policy_version="research-discovery-route-policy-v2-foundation-pubmed-ncbi-identity-2026-08-21"
+            ),
+        ),
+    ),
+)
+def test_pubmed_identity_classifier_recognizes_each_marker_when_policy_is_malformed(
+    mutation: Callable[[AccessRoute], None],
+) -> None:
+    """Recognize every PubMed marker despite a malformed route policy."""
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("semantic_scholar_semantic_scholar_graph_api_direct")
+    object.__setattr__(route, "policy", object())
+    mutation(route)
+
+    assert planner_module._has_pubmed_identity_component(route) is True
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda route: object.__setattr__(route, "backend_id", "ncbi_eutils_pubmed"),
+        lambda route: object.__setattr__(route, "adapter_id", "pubmed_v2"),
+        lambda route: object.__setattr__(route, "adapter_version", "pubmed-v2-ncbi-identity"),
+        lambda route: object.__setattr__(
+            route,
+            "policy",
+            SimpleNamespace(
+                policy_version="research-discovery-route-policy-v2-foundation-pubmed-ncbi-identity-2026-08-21"
+            ),
+        ),
+    ),
+)
+def test_semantic_scholar_pubmed_markers_with_malformed_policy_fail_through_planning(
+    mutation: Callable[[AccessRoute], None],
+) -> None:
+    """Fail closed when Semantic Scholar carries one PubMed identity marker."""
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("semantic_scholar_semantic_scholar_graph_api_direct")
+    object.__setattr__(route, "policy", object())
+    mutation(route)
+
+    with pytest.raises(PlanningError) as caught:
+        compile_discovery_plan(
+            _request(("semantic_scholar",), result_limit=7),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(max_physical_dispatches=8, max_pages_per_route=3, max_redirects=2, max_retries=2),
+        )
+
+    assert caught.value.code == "invalid_pubmed_route_identity:semantic_scholar_semantic_scholar_graph_api_direct"
 
 
 @pytest.mark.parametrize(

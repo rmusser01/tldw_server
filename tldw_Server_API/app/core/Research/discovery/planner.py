@@ -137,8 +137,20 @@ def _has_pubmed_identity_component(route: AccessRoute) -> bool:
     """Return whether a non-foundation route claims any PubMed overlay marker."""
     if type(route) is not AccessRoute:
         return False
+    try:
+        policy_version = route.policy.policy_version
+    except Exception:  # noqa: BLE001 - malformed registry policies fail closed as identity drift.
+        policy_version = None
     if type(route.policy) is not RoutePolicy:
-        return route.route_id == _PUBMED_ROUTE_ID
+        return any(
+            (
+                route.route_id == _PUBMED_ROUTE_ID,
+                route.backend_id == _PUBMED_BACKEND_ID,
+                route.adapter_id == _PUBMED_ADAPTER_ID,
+                route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION,
+                policy_version == _PUBMED_IDENTITY_POLICY_VERSION,
+            )
+        )
     if _is_foundation_pubmed_policy_owner(route):
         return False
     return any(

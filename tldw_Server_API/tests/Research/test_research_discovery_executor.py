@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     PathSlot,
     PathSlotKind,
     PathTemplate,
+    PlannedDispatchGroup,
     PredicateOperator,
     QueryMode,
     ReadinessOverlay,
@@ -51,6 +52,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
 )
 from tldw_Server_API.app.core.Research.discovery.executor import (
     AttemptJournal,
+    BoundDispatch,
     DiscoveryAdapterResult,
     DiscoveryCandidate,
     DispatchAccounting,
@@ -58,6 +60,7 @@ from tldw_Server_API.app.core.Research.discovery.executor import (
     NumericCSVBindingValues,
     NumericCursor,
     PhysicalDispatchState,
+    PolicyActivityCheck,
     execute_discovery_plan,
 )
 from tldw_Server_API.app.core.Research.discovery.gateway import (
@@ -3440,14 +3443,25 @@ async def test_opaque_query_cursor_rejects_repeat_without_imposing_order() -> No
 
 @pytest.mark.asyncio
 async def test_numeric_path_progress_ignores_separately_tracked_opaque_history() -> None:
+    """Reject numeric cursor regression despite separately tracked opaque state."""
     registry, plan = _path_paginated_plan()
     group = plan.dispatch_groups[0]
     observed_errors = []
 
-    async def gateway(route, intent, *, is_policy_active):
+    async def gateway(
+        route: AccessRoute,
+        intent: DispatchIntent,
+        *,
+        is_policy_active: PolicyActivityCheck,
+    ) -> DiscoveryGatewayResponse:
+        """Return the deterministic response for a dispatched route intent."""
         return _gateway_response(route, intent)
 
-    async def adapter(bound_group, dispatch):
+    async def adapter(
+        bound_group: PlannedDispatchGroup,
+        dispatch: BoundDispatch,
+    ) -> DiscoveryAdapterResult:
+        """Dispatch numeric cursors after seeding isolated opaque history."""
         await dispatch(bound_group.intents[0])
         await dispatch(bound_group.intents[0], cursor=NumericCursor(10))
         controller = next(
