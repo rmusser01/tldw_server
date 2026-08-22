@@ -107,6 +107,13 @@ def provide_recurring_scheduler_worker_specs(
             stopper=_stop_reminders_scheduler_service,
         ),
         _recurring_scheduler_spec(
+            name="automation_definitions_sched_task",
+            task_name="automation_scheduler",
+            enabled=_env_enabled_predicate("SCHEDULED_TASKS_AUTOMATION_SCHEDULER_ENABLED"),
+            starter=_start_automation_scheduler_service,
+            stopper=_stop_automation_scheduler_service,
+        ),
+        _recurring_scheduler_spec(
             name="connectors_sync_sched_task",
             task_name="connectors_sync_scheduler",
             enabled=_env_enabled_predicate("CONNECTORS_SYNC_SCHEDULER_ENABLED"),
@@ -620,6 +627,22 @@ async def _stop_reminders_scheduler_service(task: Any | None) -> None:
     from tldw_Server_API.app.services.reminders_scheduler import stop_reminders_scheduler
 
     await stop_reminders_scheduler(task)
+
+
+async def _start_automation_scheduler_service() -> Any | None:
+    from tldw_Server_API.app.services.scheduled_task_automation_scheduler import (
+        start_automation_scheduler,
+    )
+
+    return await start_automation_scheduler()
+
+
+async def _stop_automation_scheduler_service(task: Any | None) -> None:
+    from tldw_Server_API.app.services.scheduled_task_automation_scheduler import (
+        stop_automation_scheduler,
+    )
+
+    await stop_automation_scheduler(task)
 
 
 async def _stop_connectors_sync_scheduler_service(task: Any | None) -> None:
