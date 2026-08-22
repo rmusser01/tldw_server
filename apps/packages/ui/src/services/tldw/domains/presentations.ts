@@ -11,6 +11,7 @@ import type {
   StandaloneHtmlPresentationStudioRecord,
   UnsupportedPresentationStudioRecord,
   PresentationDetailResult,
+  StandalonePresentationDetailResult,
   PresentationListResponse,
   PresentationSummary,
   PresentationMetadataResult,
@@ -135,6 +136,18 @@ const presentationNegotiationHeaders = (): Record<string, string> => ({
   [ACCEPT_CONTENT_KINDS_HEADER]: ACCEPT_CONTENT_KINDS_VALUE
 })
 
+const isRequiredString = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0
+
+const isNonBlankString = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0
+
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value > 0
+
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+
 const normalizePresentationBase = (record: Record<string, unknown>) => ({
   id: String(record.id ?? ""),
   title: String(record.title ?? ""),
@@ -174,12 +187,34 @@ const normalizeStandalonePresentation = (
 ): StandaloneHtmlPresentationStudioRecord => ({
   ...normalizePresentationBase(record),
   content_kind: "standalone_html",
-  html_document: typeof record.html_document === "string" ? record.html_document : "",
-  html_sha256: String(record.html_sha256 ?? ""),
-  html_bytes: toFiniteNumber(record.html_bytes, 0),
-  html_slide_count: toFiniteNumber(record.html_slide_count, 0),
-  generation_provenance: toRecord(record.generation_provenance)
+  html_document: record.html_document as string,
+  html_sha256: record.html_sha256 as string,
+  html_bytes: record.html_bytes as number,
+  html_slide_count: record.html_slide_count as number,
+  generation_provenance: record.generation_provenance as Record<string, unknown>
 })
+
+const validateStandalonePresentation = (record: Record<string, unknown>): void => {
+  const valid =
+    isRequiredString(record.id) &&
+    isRequiredString(record.title) &&
+    isRequiredString(record.theme) &&
+    isRequiredString(record.created_at) &&
+    isRequiredString(record.last_modified) &&
+    typeof record.deleted === "boolean" &&
+    isRequiredString(record.client_id) &&
+    isPositiveInteger(record.version) &&
+    typeof record.html_document === "string" &&
+    typeof record.html_sha256 === "string" &&
+    /^[0-9a-f]{64}$/.test(record.html_sha256) &&
+    isPositiveInteger(record.html_bytes) &&
+    isPositiveInteger(record.html_slide_count) &&
+    isRecordValue(record.generation_provenance)
+
+  if (!valid) {
+    throw new Error("Invalid presentation detail response")
+  }
+}
 
 const normalizeUnsupportedPresentation = (
   record: Record<string, unknown>,
@@ -201,9 +236,13 @@ export const normalizePresentationStudioRecord = (
       : {}
 
   if (record.content_kind === "structured_slides") {
+    if (!Array.isArray(record.slides)) {
+      throw new Error("Invalid presentation detail response")
+    }
     return normalizeStructuredPresentation(record)
   }
   if (record.content_kind === "standalone_html") {
+    validateStandalonePresentation(record)
     return normalizeStandalonePresentation(record)
   }
   if (record.content_kind == null && Array.isArray(record.slides)) {
@@ -292,18 +331,14 @@ const exactKeys = (
   )
 }
 
-const isFiniteNumber = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value)
-
 const hasExactNumericFields = (
   value: unknown,
   fields: readonly string[]
 ): value is Record<string, number> => {
   const record = toRecord(value)
-  return exactKeys(record, fields) && fields.every((field) => isFiniteNumber(record[field]))
+  return exactKeys(record, fields) && fields.every((field) => isPositiveInteger(record[field]))
 }
 
-const CONTENT_REASON_CODES = new Set(["validator_unavailable"])
 const GENERATION_REASON_CODES = new Set([
   "feature_disabled",
   "egress_disabled",
@@ -335,6 +370,28 @@ const validateSlidesCapabilities = (value: unknown): SlidesCapabilities => {
   const sourceKinds = htmlGeneration.source_kinds
   const contentReason = htmlKind.reason
   const generationReason = htmlGeneration.reason
+  const validContentVariant =
+    (contentReason === null && htmlKind.edit === true && htmlKind.export_attachment === true) ||
+    (contentReason === "validator_unavailable" &&
+      htmlKind.edit === false &&
+      htmlKind.export_attachment === false)
+  const generationTargets = [
+    htmlGeneration.provider,
+    htmlGeneration.model,
+    htmlGeneration.adapter_id,
+    htmlGeneration.endpoint_identity
+  ]
+  const validGenerationVariant =
+    (htmlGeneration.enabled === true &&
+      generationReason === null &&
+      generationTargets.every(isNonBlankString) &&
+      typeof htmlGeneration.generation_config_revision === "string" &&
+      /^sha256:[0-9a-f]{64}$/.test(htmlGeneration.generation_config_revision)) ||
+    (htmlGeneration.enabled === false &&
+      typeof generationReason === "string" &&
+      GENERATION_REASON_CODES.has(generationReason) &&
+      generationTargets.every((target) => target === null) &&
+      htmlGeneration.generation_config_revision === null)
 
   const valid =
     exactKeys(root, [
@@ -361,7 +418,7 @@ const validateSlidesCapabilities = (value: unknown): SlidesCapabilities => {
     typeof htmlKind.edit === "boolean" &&
     typeof htmlKind.export_attachment === "boolean" &&
     htmlKind.draft_attachment === true &&
-    (contentReason === null || CONTENT_REASON_CODES.has(String(contentReason))) &&
+    validContentVariant &&
     hasExactNumericFields(htmlLimits, [
       "max_document_bytes",
       "max_source_write_bytes",
@@ -386,19 +443,14 @@ const validateSlidesCapabilities = (value: unknown): SlidesCapabilities => {
       "input_limits",
       "output_limits"
     ]) &&
-    typeof htmlGeneration.enabled === "boolean" &&
-    (generationReason === null || GENERATION_REASON_CODES.has(String(generationReason))) &&
+    validGenerationVariant &&
     htmlGeneration.transport === "slides_generation_job" &&
     Array.isArray(sourceKinds) &&
     sourceKinds.length === GENERATION_SOURCE_KINDS.length &&
     sourceKinds.every((kind, index) => kind === GENERATION_SOURCE_KINDS[index]) &&
-    [
-      htmlGeneration.provider,
-      htmlGeneration.model,
-      htmlGeneration.adapter_id,
-      htmlGeneration.endpoint_identity,
-      htmlGeneration.generation_config_revision
-    ].every(isNullableString) &&
+    !(contentReason === "validator_unavailable" && htmlGeneration.enabled !== false) &&
+    !(generationReason === "validator_unavailable" &&
+      contentReason !== "validator_unavailable") &&
     hasExactNumericFields(inputLimits, [
       "max_request_bytes",
       "max_source_chars",
@@ -416,9 +468,6 @@ const validateSlidesCapabilities = (value: unknown): SlidesCapabilities => {
   }
   return value as SlidesCapabilities
 }
-
-const isRequiredString = (value: unknown): value is string =>
-  typeof value === "string" && value.length > 0
 
 const validateGenerationReceipt = (value: unknown): PresentationGenerationReceipt => {
   const record = toRecord(value)
@@ -528,6 +577,15 @@ const requireStructuredRecord = (
 ): StructuredPresentationStudioRecord => {
   if (record.content_kind !== "structured_slides") {
     throw new Error("Structured presentation required")
+  }
+  return record
+}
+
+const requireStandaloneRecord = (
+  record: PresentationStudioRecord
+): StandaloneHtmlPresentationStudioRecord => {
+  if (record.content_kind !== "standalone_html") {
+    throw new Error("Standalone presentation required")
   }
   return record
 }
@@ -947,7 +1005,7 @@ export const presentationsMethods = {
     presentationId: string,
     source: string,
     options: { ifMatch: string }
-  ): Promise<PresentationDetailResult> {
+  ): Promise<StandalonePresentationDetailResult> {
     validateIfMatch(options.ifMatch)
     validateStandaloneSource(source)
     const response = await this.request<unknown>({
@@ -962,7 +1020,9 @@ export const presentationsMethods = {
       returnResponse: true
     })
     return {
-      record: normalizePresentationStudioRecord(requireSuccessfulResponseData(response)),
+      record: requireStandaloneRecord(
+        normalizePresentationStudioRecord(requireSuccessfulResponseData(response))
+      ),
       etag: responseEtag(response)
     }
   },

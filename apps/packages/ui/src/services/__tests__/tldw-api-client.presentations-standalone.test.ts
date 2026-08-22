@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { tldwRequest } from "@/services/tldw/request-core"
 import { presentationsMethods, type TldwApiClientCore } from "@/services/tldw/domains/presentations"
+import type { StandaloneHtmlPresentationStudioRecord } from "@/services/tldw/TldwApiClient"
 
 const ACCEPTED_CONTENT_KINDS = "structured_slides,standalone_html"
 const ACCEPT_HEADER = "X-Slides-Accept-Content-Kinds"
@@ -173,6 +174,12 @@ const createCore = (requestImpl: (...args: any[]) => any): TldwApiClientCore => 
 const requestHeaders = (request: unknown): Record<string, string> =>
   (request as { headers?: Record<string, string> }).headers ?? {}
 
+const mutateCapabilities = (mutate: (value: any) => void): any => {
+  const value = JSON.parse(JSON.stringify(capabilities))
+  mutate(value)
+  return value
+}
+
 describe("standalone presentation client contracts", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -214,6 +221,55 @@ describe("standalone presentation client contracts", () => {
       etag: '"v7"'
     })
     expect(result.record).not.toHaveProperty("slides")
+  })
+
+  it.each([
+    ["missing slides", { ...structuredDetail, slides: undefined }],
+    ["non-array slides", { ...structuredDetail, slides: "not-an-array" }]
+  ])("rejects explicit structured detail with %s", async (_case, detail) => {
+    const client = createCore(async () => responseEnvelope(detail))
+
+    const error = await presentationsMethods.getPresentation
+      .call(client, "structured-1")
+      .then(
+        () => null,
+        (failure: unknown) => failure
+      )
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe("Invalid presentation detail response")
+  })
+
+  it.each([
+    ["missing HTML document", { ...standaloneDetail, html_document: undefined }],
+    ["non-string HTML document", { ...standaloneDetail, html_document: 42 }],
+    ["missing digest", { ...standaloneDetail, html_sha256: undefined }],
+    ["malformed digest", { ...standaloneDetail, html_sha256: "private-source-digest" }],
+    ["missing byte count", { ...standaloneDetail, html_bytes: undefined }],
+    ["non-integer byte count", { ...standaloneDetail, html_bytes: 1.5 }],
+    ["missing slide count", { ...standaloneDetail, html_slide_count: undefined }],
+    ["non-integer slide count", { ...standaloneDetail, html_slide_count: 1.5 }],
+    ["missing creation timestamp", { ...standaloneDetail, created_at: undefined }],
+    ["non-string modification timestamp", { ...standaloneDetail, last_modified: 7 }],
+    ["missing provenance", { ...standaloneDetail, generation_provenance: undefined }],
+    ["non-object provenance", { ...standaloneDetail, generation_provenance: [] }],
+    ["missing id", { ...standaloneDetail, id: undefined }],
+    ["missing title", { ...standaloneDetail, title: undefined }],
+    ["missing theme", { ...standaloneDetail, theme: undefined }],
+    ["missing client identity", { ...standaloneDetail, client_id: undefined }],
+    ["non-integer version", { ...standaloneDetail, version: "7" }],
+    ["missing deleted flag", { ...standaloneDetail, deleted: undefined }]
+  ])("rejects standalone detail with %s using a bounded error", async (_case, detail) => {
+    const client = createCore(async () => responseEnvelope(detail))
+
+    const error = await presentationsMethods.getPresentation.call(client, "html-1").then(
+      () => null,
+      (failure: unknown) => failure
+    )
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe("Invalid presentation detail response")
+    expect((error as Error).message).not.toContain("private-source-digest")
   })
 
   it("preserves unknown and missing-HTML discriminators as source-free read-only records", async () => {
@@ -396,18 +452,273 @@ describe("standalone presentation client contracts", () => {
     })
   })
 
-  it("fails closed for unapproved capability reasons and extra response fields", async () => {
-    const invalid = {
-      ...capabilities,
-      generation_modes: {
-        ...capabilities.generation_modes,
-        standalone_html: {
-          ...capabilities.generation_modes.standalone_html,
-          reason: "provider-secret-outage",
-          unexpected: true
-        }
+  it.each([
+    [
+      "available validator with editing disabled",
+      (value: any) => {
+        value.content_kinds.standalone_html.edit = false
       }
-    }
+    ],
+    [
+      "available validator with export disabled",
+      (value: any) => {
+        value.content_kinds.standalone_html.export_attachment = false
+      }
+    ],
+    [
+      "unavailable validator with editing enabled",
+      (value: any) => {
+        Object.assign(value.content_kinds.standalone_html, {
+          edit: true,
+          export_attachment: false,
+          reason: "validator_unavailable"
+        })
+      }
+    ],
+    [
+      "unavailable validator with export enabled",
+      (value: any) => {
+        Object.assign(value.content_kinds.standalone_html, {
+          edit: false,
+          export_attachment: true,
+          reason: "validator_unavailable"
+        })
+      }
+    ],
+    [
+      "standalone reads disabled",
+      (value: any) => {
+        value.content_kinds.standalone_html.read = false
+      }
+    ],
+    [
+      "draft recovery disabled",
+      (value: any) => {
+        value.content_kinds.standalone_html.draft_attachment = false
+      }
+    ]
+  ])("rejects impossible content capability state: %s", async (_case, mutate) => {
+    const client = createCore(async () =>
+      mutateCapabilities(mutate as (value: any) => void)
+    )
+
+    await expect((presentationsMethods as any).getSlidesCapabilities.call(client)).rejects.toThrow(
+      "Invalid Slides capabilities response"
+    )
+  })
+
+  it.each([
+    [
+      "enabled with a reason",
+      (value: any) => {
+        value.generation_modes.standalone_html.reason = "feature_disabled"
+      }
+    ],
+    [
+      "enabled without a provider",
+      (value: any) => {
+        value.generation_modes.standalone_html.provider = null
+      }
+    ],
+    [
+      "enabled with a blank model",
+      (value: any) => {
+        value.generation_modes.standalone_html.model = " "
+      }
+    ],
+    [
+      "enabled with a blank adapter",
+      (value: any) => {
+        value.generation_modes.standalone_html.adapter_id = ""
+      }
+    ],
+    [
+      "enabled with a blank endpoint",
+      (value: any) => {
+        value.generation_modes.standalone_html.endpoint_identity = "\t"
+      }
+    ],
+    [
+      "enabled with a malformed revision",
+      (value: any) => {
+        value.generation_modes.standalone_html.generation_config_revision = "sha256:ABC"
+      }
+    ],
+    [
+      "disabled without a reason",
+      (value: any) => {
+        Object.assign(value.generation_modes.standalone_html, {
+          enabled: false,
+          reason: null,
+          provider: null,
+          model: null,
+          adapter_id: null,
+          endpoint_identity: null,
+          generation_config_revision: null
+        })
+      }
+    ],
+    ...["provider", "model", "adapter_id", "endpoint_identity"].map((field) => [
+      `disabled with ${field}`,
+      (value: any) => {
+        Object.assign(value.generation_modes.standalone_html, {
+          enabled: false,
+          reason: "feature_disabled",
+          provider: null,
+          model: null,
+          adapter_id: null,
+          endpoint_identity: null,
+          generation_config_revision: null,
+          [field]: "must-be-null"
+        })
+      }
+    ]),
+    [
+      "disabled with a revision",
+      (value: any) => {
+        Object.assign(value.generation_modes.standalone_html, {
+          enabled: false,
+          reason: "feature_disabled",
+          provider: null,
+          model: null,
+          adapter_id: null,
+          endpoint_identity: null,
+          generation_config_revision: `sha256:${"e".repeat(64)}`
+        })
+      }
+    ],
+    [
+      "unknown safe reason",
+      (value: any) => {
+        Object.assign(value.generation_modes.standalone_html, {
+          enabled: false,
+          reason: "provider-secret-outage",
+          provider: null,
+          model: null,
+          adapter_id: null,
+          endpoint_identity: null,
+          generation_config_revision: null
+        })
+      }
+    ],
+    [
+      "missing source kind",
+      (value: any) => {
+        value.generation_modes.standalone_html.source_kinds = ["prompt", "chat", "media", "notes"]
+      }
+    ],
+    [
+      "duplicate source kind",
+      (value: any) => {
+        value.generation_modes.standalone_html.source_kinds = [
+          "prompt",
+          "chat",
+          "media",
+          "notes",
+          "notes"
+        ]
+      }
+    ],
+    [
+      "source kinds out of order",
+      (value: any) => {
+        value.generation_modes.standalone_html.source_kinds = [
+          "chat",
+          "prompt",
+          "media",
+          "notes",
+          "rag"
+        ]
+      }
+    ],
+    [
+      "extra response field",
+      (value: any) => {
+        value.generation_modes.standalone_html.unexpected = true
+      }
+    ]
+  ])("rejects impossible generation capability state: %s", async (_case, mutate) => {
+    const client = createCore(async () =>
+      mutateCapabilities(mutate as (value: any) => void)
+    )
+
+    await expect((presentationsMethods as any).getSlidesCapabilities.call(client)).rejects.toThrow(
+      "Invalid Slides capabilities response"
+    )
+  })
+
+  it.each([
+    [
+      "zero content limit",
+      (value: any) => {
+        value.content_kinds.standalone_html.limits.max_document_bytes = 0
+      }
+    ],
+    [
+      "negative content limit",
+      (value: any) => {
+        value.content_kinds.standalone_html.limits.max_nesting_depth = -1
+      }
+    ],
+    [
+      "fractional input limit",
+      (value: any) => {
+        value.generation_modes.standalone_html.input_limits.max_source_chars = 1.5
+      }
+    ],
+    [
+      "zero output limit",
+      (value: any) => {
+        value.generation_modes.standalone_html.output_limits.max_document_bytes = 0
+      }
+    ]
+  ])("rejects invalid effective capability limit: %s", async (_case, mutate) => {
+    const client = createCore(async () =>
+      mutateCapabilities(mutate as (value: any) => void)
+    )
+
+    await expect((presentationsMethods as any).getSlidesCapabilities.call(client)).rejects.toThrow(
+      "Invalid Slides capabilities response"
+    )
+  })
+
+  it.each([
+    ["feature disabled with validator available", false],
+    ["feature disabled with validator unavailable", true]
+  ])("accepts Task 11 disabled capabilities: %s", async (_case, validatorUnavailable) => {
+    const disabled = mutateCapabilities((value) => {
+      Object.assign(value.generation_modes.standalone_html, {
+        enabled: false,
+        reason: "feature_disabled",
+        provider: null,
+        model: null,
+        adapter_id: null,
+        endpoint_identity: null,
+        generation_config_revision: null
+      })
+      if (validatorUnavailable) {
+        Object.assign(value.content_kinds.standalone_html, {
+          edit: false,
+          export_attachment: false,
+          reason: "validator_unavailable"
+        })
+      }
+    })
+    const client = createCore(async () => disabled)
+
+    await expect(
+      (presentationsMethods as any).getSlidesCapabilities.call(client)
+    ).resolves.toEqual(disabled)
+  })
+
+  it("rejects generation enabled when the validator is unavailable", async () => {
+    const invalid = mutateCapabilities((value) => {
+      Object.assign(value.content_kinds.standalone_html, {
+        edit: false,
+        export_attachment: false,
+        reason: "validator_unavailable"
+      })
+    })
     const client = createCore(async () => invalid)
 
     await expect((presentationsMethods as any).getSlidesCapabilities.call(client)).rejects.toThrow(
@@ -570,6 +881,34 @@ describe("standalone presentation client contracts", () => {
       body: source,
       returnResponse: true
     })
+  })
+
+  it("rejects a structured raw-save response and keeps the return type standalone-specific", async () => {
+    const invalidClient = createCore(async () =>
+      responseEnvelope(structuredDetail, { headers: { etag: 'W/"v3"' } })
+    )
+
+    await expect(
+      presentationsMethods.saveStandaloneHtmlSource.call(
+        invalidClient,
+        "html-1",
+        "<!doctype html><title>Private source</title>",
+        { ifMatch: '"v7"' }
+      )
+    ).rejects.toThrow("Standalone presentation required")
+
+    const validClient = createCore(async () =>
+      responseEnvelope(standaloneDetail, { headers: { etag: '"v7"' } })
+    )
+    const result = await presentationsMethods.saveStandaloneHtmlSource.call(
+      validClient,
+      "html-1",
+      standaloneDetail.html_document,
+      { ifMatch: '"v7"' }
+    )
+
+    const standaloneRecord: StandaloneHtmlPresentationStudioRecord = result.record
+    expect(standaloneRecord.content_kind).toBe("standalone_html")
   })
 
   it.each([

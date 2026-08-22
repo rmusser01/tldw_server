@@ -530,8 +530,7 @@ export type PresentationStudioRecordBase = {
 }
 
 export type StructuredPresentationStudioRecord = PresentationStudioRecordBase & {
-  /** Missing only for direct legacy fixtures; network normalization always adds it. */
-  content_kind?: "structured_slides"
+  content_kind: "structured_slides"
   marp_theme?: string | null
   template_id?: string | null
   visual_style_id?: string | null
@@ -567,6 +566,11 @@ export type PresentationStudioRecord =
 
 export type PresentationDetailResult = {
   record: PresentationStudioRecord
+  etag: string | null
+}
+
+export type StandalonePresentationDetailResult = {
+  record: StandaloneHtmlPresentationStudioRecord
   etag: string | null
 }
 
@@ -643,56 +647,80 @@ export type StandaloneHtmlGenerationCapabilityReason =
   | "generation_reconciler_overloaded"
   | "validator_unavailable"
 
+type StandaloneHtmlContentCapability = {
+  read: true
+  draft_attachment: true
+  limits: {
+    max_document_bytes: number
+    max_source_write_bytes: number
+    max_draft_attachment_bytes: number
+    max_slides: number
+    max_nesting_depth: number
+  }
+} & (
+  | {
+      edit: true
+      export_attachment: true
+      reason: null
+    }
+  | {
+      edit: false
+      export_attachment: false
+      reason: StandaloneHtmlContentCapabilityReason
+    }
+)
+
+type StandaloneHtmlGenerationCapability = {
+  transport: "slides_generation_job"
+  source_kinds: ["prompt", "chat", "media", "notes", "rag"]
+  input_limits: {
+    max_request_bytes: number
+    max_source_chars: number
+    max_source_tokens: number
+    max_audience_chars: number
+    max_source_identifier_bytes: number
+    max_note_ids: number
+    max_rag_query_chars: number
+    max_rag_top_k: number
+  }
+  output_limits: {
+    max_provider_response_bytes: number
+    max_document_bytes: number
+  }
+} & (
+  | {
+      enabled: true
+      reason: null
+      provider: string
+      model: string
+      adapter_id: string
+      endpoint_identity: string
+      generation_config_revision: `sha256:${string}`
+    }
+  | {
+      enabled: false
+      reason: StandaloneHtmlGenerationCapabilityReason
+      provider: null
+      model: null
+      adapter_id: null
+      endpoint_identity: null
+      generation_config_revision: null
+    }
+)
+
 export type SlidesCapabilities = {
   schema_version: 1
   content_kind_request_header: "X-Slides-Accept-Content-Kinds"
   content_kinds: {
     structured_slides: { read: true; edit: true }
-    standalone_html: {
-      read: true
-      edit: boolean
-      export_attachment: boolean
-      draft_attachment: true
-      reason: StandaloneHtmlContentCapabilityReason | null
-      limits: {
-        max_document_bytes: number
-        max_source_write_bytes: number
-        max_draft_attachment_bytes: number
-        max_slides: number
-        max_nesting_depth: number
-      }
-    }
+    standalone_html: StandaloneHtmlContentCapability
   }
   generation_modes: {
     structured_slides: {
       enabled: true
       transport: "existing_source_endpoints"
     }
-    standalone_html: {
-      enabled: boolean
-      reason: StandaloneHtmlGenerationCapabilityReason | null
-      transport: "slides_generation_job"
-      source_kinds: Array<"prompt" | "chat" | "media" | "notes" | "rag">
-      provider: string | null
-      model: string | null
-      adapter_id: string | null
-      endpoint_identity: string | null
-      generation_config_revision: string | null
-      input_limits: {
-        max_request_bytes: number
-        max_source_chars: number
-        max_source_tokens: number
-        max_audience_chars: number
-        max_source_identifier_bytes: number
-        max_note_ids: number
-        max_rag_query_chars: number
-        max_rag_top_k: number
-      }
-      output_limits: {
-        max_provider_response_bytes: number
-        max_document_bytes: number
-      }
-    }
+    standalone_html: StandaloneHtmlGenerationCapability
   }
 }
 
