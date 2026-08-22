@@ -689,6 +689,50 @@ async def test_identity_overlay_dispatch_cancellation_at_either_stage_propagates
     assert caught.value is cancelled
 
 
+@pytest.mark.asyncio
+async def test_identity_overlay_rejects_conflicting_records_with_one_doi_fingerprint() -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    ids = ("31415926", "27182818")
+    same_doi = "10.5555/Shared.Discovery.2026"
+    summary = _esummary(
+        ids,
+        records={
+            ids[0]: _summary_record(
+                ids[0],
+                title="First conflicting DOI record",
+                articleids=(
+                    {"idtype": "pubmed", "value": ids[0]},
+                    {"idtype": "doi", "value": same_doi},
+                ),
+            ),
+            ids[1]: _summary_record(
+                ids[1],
+                title="Second conflicting DOI record",
+                articleids=(
+                    {"idtype": "pubmed", "value": ids[1]},
+                    {"idtype": "doi", "value": same_doi},
+                ),
+            ),
+        },
+    )
+    dispatch = _RecordingDispatch(
+        [
+            _response(route, group.intents[0], _esearch(ids)),
+            _response(route, group.intents[1], summary),
+        ]
+    )
+
+    with pytest.raises(executor_module.DiscoveryAdapterError) as caught:
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
+    assert group.adapter_version == "pubmed-v2-ncbi-identity"
+    assert [call[0] for call in dispatch.calls] == list(group.intents)
+    assert dispatch.calls[1][2] == (NumericCSVBindingValues("pubmed_esearch_ids", (31415926, 27182818)),)
+
+
 @pytest.mark.parametrize(
     "payload",
     (

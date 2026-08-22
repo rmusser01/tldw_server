@@ -187,6 +187,63 @@ def _registry_with_pubmed_route(route: AccessRoute) -> DiscoveryRegistry:
     )
 
 
+def _generic_registry_with_identity_component(component: str) -> tuple[DiscoveryRegistry, AccessRoute]:
+    foundation = foundation_registry()
+    source = foundation.get_source("arxiv")
+    original = foundation.get_route(source.route_references[0].route_id)
+    if component == "adapter_version":
+        mutated = replace(original, adapter_version=PUBMED_IDENTITY_ADAPTER_VERSION)
+    elif component == "policy_version":
+        mutated = replace(
+            original,
+            policy=replace(
+                original.policy,
+                policy_version=PUBMED_IDENTITY_POLICY_VERSION,
+                policy_digest="",
+            ),
+        )
+    else:
+        raise ValueError("unknown_identity_component")
+    registry = DiscoveryRegistry(
+        catalog_version=foundation.catalog_version,
+        registry_version="generic-identity-component-registry-v1",
+        sources=foundation.sources,
+        routes=tuple(mutated if route.route_id == original.route_id else route for route in foundation.routes),
+        backends=foundation.backends,
+    )
+    return registry, mutated
+
+
+def test_identity_adapter_version_on_generic_route_fails_closed_before_plan_emission() -> None:
+    registry, route = _generic_registry_with_identity_component("adapter_version")
+
+    assert route.route_id != "pubmed_ncbi_eutils_pubmed_direct"
+    assert route.backend_id != "ncbi_eutils_pubmed"
+    assert route.adapter_id != "pubmed_v2"
+    with pytest.raises(PlanningError, match="invalid_pubmed_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("arxiv",), "bounded discovery", (), 7),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(),
+        )
+
+
+def test_identity_policy_version_on_generic_route_fails_closed_before_plan_emission() -> None:
+    registry, route = _generic_registry_with_identity_component("policy_version")
+
+    assert route.route_id != "pubmed_ncbi_eutils_pubmed_direct"
+    assert route.backend_id != "ncbi_eutils_pubmed"
+    assert route.adapter_id != "pubmed_v2"
+    with pytest.raises(PlanningError, match="invalid_pubmed_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("arxiv",), "bounded discovery", (), 7),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(),
+        )
+
+
 @pytest.mark.parametrize(
     "route_change",
     (
