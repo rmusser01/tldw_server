@@ -6,6 +6,8 @@ import {
   setHistoryServerChatId,
   updateHistory
 } from "@/db/dexie/helpers"
+import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 type UseServerChatHistoryIdOptions = {
   serverChatId: string | null
@@ -45,8 +47,18 @@ export const useServerChatHistoryId = ({
   }, [serverChatId])
 
   const ensureServerChatHistoryId = React.useCallback(
-    async (chatId: string, title?: string) => {
+    async (
+      chatId: string,
+      title?: string,
+      scopeInvalidatedSignal?: AbortSignal
+    ) => {
       if (!chatId || temporaryChat) return null
+      const throwIfScopeInvalidated = () => {
+        if (scopeInvalidatedSignal?.aborted) {
+          throw createServicePromptScopeChangedError()
+        }
+      }
+      throwIfScopeInvalidated()
       const currentHistoryId = historyIdRef.current
       if (
         serverChatHistoryIdRef.current.chatId === chatId &&
@@ -59,51 +71,71 @@ export const useServerChatHistoryId = ({
         return existingId
       }
 
-      const existing = await getHistoryByServerChatId(chatId)
-      const trimmedTitle = (title || existing?.title || "").trim()
-      const resolvedTitle =
-        trimmedTitle ||
-        t("common:untitled", { defaultValue: "Untitled" })
+      const linkHistory = async () => {
+        const existing = await getHistoryByServerChatId(chatId)
+        const trimmedTitle = (title || existing?.title || "").trim()
+        const resolvedTitle =
+          trimmedTitle ||
+          t("common:untitled", { defaultValue: "Untitled" })
 
-      if (existing) {
-        if (resolvedTitle && resolvedTitle !== existing.title) {
-          await updateHistory(existing.id, resolvedTitle)
+        if (existing) {
+          if (resolvedTitle && resolvedTitle !== existing.title) {
+            await updateHistory(existing.id, resolvedTitle)
+          }
+          return {
+            historyId: existing.id,
+            shouldSetHistoryId: currentHistoryId !== existing.id
+          }
         }
-        serverChatHistoryIdRef.current = {
-          chatId,
-          historyId: existing.id
+
+        if (currentHistoryId && currentHistoryId !== "temp") {
+          await setHistoryServerChatId(currentHistoryId, chatId)
+          if (resolvedTitle) {
+            await updateHistory(currentHistoryId, resolvedTitle)
+          }
+          return {
+            historyId: currentHistoryId,
+            shouldSetHistoryId: false
+          }
         }
-        if (currentHistoryId !== existing.id) {
-          setHistoryId(existing.id, { preserveServerChatId: true })
+
+        const newHistory = await saveHistory(
+          resolvedTitle,
+          false,
+          "server",
+          undefined,
+          chatId
+        )
+        return {
+          historyId: newHistory.id,
+          shouldSetHistoryId: true
         }
-        return existing.id
       }
 
-      if (currentHistoryId && currentHistoryId !== "temp") {
-        await setHistoryServerChatId(currentHistoryId, chatId)
-        if (resolvedTitle) {
-          await updateHistory(currentHistoryId, resolvedTitle)
+      let linkedHistory: Awaited<ReturnType<typeof linkHistory>>
+      try {
+        linkedHistory = scopeInvalidatedSignal
+          ? await runChatPersistenceTransaction(
+              scopeInvalidatedSignal,
+              linkHistory
+            )
+          : await linkHistory()
+      } catch (error) {
+        if (scopeInvalidatedSignal?.aborted) {
+          throw createServicePromptScopeChangedError()
         }
-        serverChatHistoryIdRef.current = {
-          chatId,
-          historyId: currentHistoryId
-        }
-        return currentHistoryId
+        throw error
       }
 
-      const newHistory = await saveHistory(
-        resolvedTitle,
-        false,
-        "server",
-        undefined,
-        chatId
-      )
+      throwIfScopeInvalidated()
       serverChatHistoryIdRef.current = {
         chatId,
-        historyId: newHistory.id
+        historyId: linkedHistory.historyId
       }
-      setHistoryId(newHistory.id, { preserveServerChatId: true })
-      return newHistory.id
+      if (linkedHistory.shouldSetHistoryId) {
+        setHistoryId(linkedHistory.historyId, { preserveServerChatId: true })
+      }
+      return linkedHistory.historyId
     },
     [setHistoryId, t, temporaryChat]
   )

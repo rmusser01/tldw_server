@@ -298,6 +298,14 @@ const servicePromptSnapshot = {
   release: releaseServicePromptSnapshotMock
 }
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 describe("useChatActions persona integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -753,6 +761,80 @@ describe("useChatActions persona integration", () => {
         conversationId: "workspace-rag-chat"
       })
     )
+  })
+
+  it("does not publish workspace chat metadata when scope changes during history linking", async () => {
+    const scope = {
+      type: "workspace",
+      workspaceId: "workspace-scope-race"
+    } as const
+    const scopeController = new AbortController()
+    const scopedSnapshot = {
+      ...servicePromptSnapshot,
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: scopeController.signal
+    }
+    loadServicePromptSnapshotMock.mockResolvedValueOnce(scopedSnapshot)
+    createChatMock.mockResolvedValueOnce({
+      id: "workspace-scope-race-chat",
+      title: "Workspace scope race",
+      state: "resolved",
+      version: 5,
+      topic_label: "Race topic",
+      cluster_id: "race-cluster",
+      source: "workspace",
+      external_ref: "race-ref"
+    })
+    const historyLink = deferred<string | null>()
+    const options = {
+      ...createHookOptions(),
+      scope,
+      selectedAssistant: null,
+      ensureServerChatHistoryId: vi.fn(() => historyLink.promise)
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    let submission!: ReturnType<typeof result.current.onSubmit>
+    act(() => {
+      submission = result.current.onSubmit({
+        message: "Keep workspace state scoped",
+        image: "",
+        requestOverrides: {
+          fileRetrievalEnabled: true,
+          ragMediaIds: [101]
+        }
+      })
+    })
+    await vi.waitFor(() =>
+      expect(options.ensureServerChatHistoryId).toHaveBeenCalledTimes(1)
+    )
+    scopeController.abort()
+    historyLink.resolve("history-stale")
+
+    await act(async () => {
+      await submission
+    })
+
+    expect(options.ensureServerChatHistoryId).toHaveBeenCalledWith(
+      "workspace-scope-race-chat",
+      "Workspace scope race",
+      scopeController.signal
+    )
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+    expect(options.setServerChatTitle).not.toHaveBeenCalled()
+    expect(options.setServerChatCharacterId).not.toHaveBeenCalled()
+    expect(options.setServerChatAssistantKind).not.toHaveBeenCalled()
+    expect(options.setServerChatAssistantId).not.toHaveBeenCalled()
+    expect(options.setServerChatPersonaMemoryMode).not.toHaveBeenCalled()
+    expect(options.setServerChatMetaLoaded).not.toHaveBeenCalled()
+    expect(options.setServerChatState).not.toHaveBeenCalled()
+    expect(options.setServerChatVersion).not.toHaveBeenCalled()
+    expect(options.setServerChatTopic).not.toHaveBeenCalled()
+    expect(options.setServerChatClusterId).not.toHaveBeenCalled()
+    expect(options.setServerChatSource).not.toHaveBeenCalled()
+    expect(options.setServerChatExternalRef).not.toHaveBeenCalled()
+    expect(options.invalidateServerChatHistory).not.toHaveBeenCalled()
+    expect(ragModeMock).not.toHaveBeenCalled()
   })
 
   it("keeps plain global sends out of the workspace server-chat bootstrap path", async () => {

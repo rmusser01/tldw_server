@@ -1265,6 +1265,11 @@ describe("useChatActions Compare service prompt snapshot", () => {
     });
 
     expect(options.ensureServerChatHistoryId).toHaveBeenCalledTimes(1);
+    expect(options.ensureServerChatHistoryId).toHaveBeenCalledWith(
+      "server-chat-7",
+      undefined,
+      snapshot.scopeInvalidatedSignal,
+    );
     expect(events.indexOf("loadSnapshot")).toBeLessThan(
       events.indexOf("ensureHistory"),
     );
