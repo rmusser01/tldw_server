@@ -17,8 +17,8 @@ const OptionModal = createSettingsRoute(
   "ModelsBody"
 )
 const OptionPrompt = createSettingsRoute(
-  () => import("~/components/Option/Settings/WorkspaceLinks"),
-  "PromptWorkspaceSettings"
+  () => import("~/components/Option/Settings/ServicePromptsSettings"),
+  "ServicePromptsSettings"
 )
 const OptionShare = createSettingsRoute(
   () => import("~/components/Option/Share"),

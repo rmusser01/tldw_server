@@ -465,7 +465,7 @@ export const SETTINGS_INDEX: SettingDefinition[] = [
     labelKey: "settings:promptsNav",
     defaultLabel: "Prompt Library",
     defaultDescription: "Manage system prompts and templates",
-    route: "/settings/prompt",
+    route: "/prompts",
     section: "Workspace",
     keywords: ["prompts", "template", "system", "instruction", "preset"],
     controlType: "button",

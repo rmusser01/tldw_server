@@ -121,6 +121,7 @@
     "zustand": "^4.5.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
     "@playwright/test": "^1.57.0",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/chrome": "^0.0.280",

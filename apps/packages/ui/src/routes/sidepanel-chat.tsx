@@ -460,7 +460,7 @@ const SidepanelChat = () => {
   // Per-tab storage (Chrome side panel) or per-window/global (Firefox sidebar).
   // tabId: undefined = not resolved yet, null = resolved but unavailable.
   const [tabId, setTabId] = React.useState<number | null | undefined>(undefined)
-  const [isRestoringChat, setIsRestoringChat] = React.useState(false)
+  const [isRestoringChat, setIsRestoringChat] = React.useState(true)
   const storageRef = React.useRef(
     createSafeStorage({
       area: "local"
@@ -1102,6 +1102,7 @@ const SidepanelChat = () => {
   }
 
   const persistSidepanelState = React.useCallback(() => {
+    if (tabId === undefined || isRestoringChat) return
     const storage = storageRef.current
     const key = getTabsStorageKey(tabId)
     saveActiveTabSnapshot()
@@ -1115,7 +1116,7 @@ const SidepanelChat = () => {
     void storage.set(key, snapshot).catch(() => {
       // ignore persistence errors in sidepanel
     })
-  }, [saveActiveTabSnapshot, tabId])
+  }, [isRestoringChat, saveActiveTabSnapshot, tabId])
 
   React.useEffect(() => {
     void checkOnce()
@@ -2558,7 +2559,7 @@ const SidepanelChat = () => {
                 onTimelineActionHandled={() => setTimelineAction(null)}
               />
             )}
-            {!stickyChatInput && (
+            {!isRestoringChat && !stickyChatInput && (
               <div className="w-full min-w-0 pt-4 pb-6">
                 <SidepanelForm
                   key={activeTabId || "sidepanel-chat"}
@@ -2586,7 +2587,7 @@ const SidepanelChat = () => {
               </button>
             </div>
           )}
-          {stickyChatInput && (
+          {!isRestoringChat && stickyChatInput && (
             <div
               className="absolute bottom-0 left-0 right-0 z-10 w-full min-w-0"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}

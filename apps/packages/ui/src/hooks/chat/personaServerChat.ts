@@ -1,6 +1,8 @@
 import type { AssistantSelection } from "@/types/assistant-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { normalizeConversationState } from "@/utils/conversation-state"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 export const DEFAULT_PERSONA_MEMORY_MODE = "read_only" as const
 
@@ -28,9 +30,16 @@ type EnsurePersonaServerChatArgs = {
   historyId: string | null
   temporaryChat: boolean
   scope?: ChatScope
+  requestScope?: ServicePromptRequestScope
+  signal?: AbortSignal
+  scopeInvalidatedSignal?: AbortSignal
   createChat: (
     payload: Record<string, unknown>,
-    options?: { scope?: ChatScope }
+    options?: {
+      scope?: ChatScope
+      requestScope?: ServicePromptRequestScope
+      signal?: AbortSignal
+    }
   ) => Promise<any>
   ensureServerChatHistoryId: (
     chatId: string,
@@ -117,6 +126,9 @@ export const ensurePersonaServerChat = async ({
   historyId,
   temporaryChat,
   scope,
+  requestScope,
+  signal,
+  scopeInvalidatedSignal,
   createChat,
   ensureServerChatHistoryId,
   invalidateServerChatHistory,
@@ -138,6 +150,12 @@ export const ensurePersonaServerChat = async ({
   historyId: string | null
   personaMemoryMode: "read_only" | "read_write"
 }> => {
+  const throwIfScopeInvalidated = () => {
+    if (scopeInvalidatedSignal?.aborted) {
+      throw createServicePromptScopeChangedError()
+    }
+  }
+  throwIfScopeInvalidated()
   const overrideChatId =
     typeof serverChatIdOverride === "string" &&
     serverChatIdOverride.trim().length > 0
@@ -167,6 +185,7 @@ export const ensurePersonaServerChat = async ({
     !isMatchingPersonaChat
 
   if (shouldResetServerChat) {
+    throwIfScopeInvalidated()
     resetAssistantServerChatState({
       setServerChatId,
       setServerChatTitle,
@@ -195,7 +214,11 @@ export const ensurePersonaServerChat = async ({
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    }, scope ? { scope } : undefined)
+    }, scope || requestScope || signal
+      ? { scope, requestScope, signal }
+      : undefined)
+
+    throwIfScopeInvalidated()
 
     let rawId: string | number | undefined
     const createdMeta =
@@ -273,16 +296,22 @@ export const ensurePersonaServerChat = async ({
     setServerChatMetaLoaded(true)
     invalidateServerChatHistory()
   } else {
+    throwIfScopeInvalidated()
     setServerChatAssistantKind("persona")
     setServerChatAssistantId(assistantId)
     setServerChatPersonaMemoryMode(personaMemoryMode)
     setServerChatCharacterId(null)
   }
 
-  const resolvedHistoryId =
-    temporaryChat || !chatId
-      ? historyId
-      : await ensureServerChatHistoryId(chatId, serverChatTitle || undefined)
+  let resolvedHistoryId = historyId
+  if (!temporaryChat && chatId) {
+    throwIfScopeInvalidated()
+    resolvedHistoryId = await ensureServerChatHistoryId(
+      chatId,
+      serverChatTitle || undefined
+    )
+    throwIfScopeInvalidated()
+  }
 
   return {
     chatId,

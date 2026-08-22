@@ -1,9 +1,17 @@
 import { extractCompletedIngestJobMediaId } from "@/services/tldw/ingest-job-results"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { formatDocs } from "@/utils/format-docs"
 
 type WebsiteRagClient = {
   initialize: () => Promise<unknown>
-  addMedia: (url: string) => Promise<unknown>
+  addMedia: (
+    url: string,
+    options?: {
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
+  ) => Promise<unknown>
   ragSearch: (
     query: string,
     options: Record<string, unknown>
@@ -34,6 +42,8 @@ type ResolveWebsiteChatContextInput = {
   embedPDF: Array<{ content: string; page: number }>
   maxWebsiteContext: number
   query: string
+  signal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
 }
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -52,6 +62,8 @@ export const resolveWebsiteChatContext = async ({
   embedPDF,
   maxWebsiteContext,
   query,
+  signal,
+  requestScope,
 }: ResolveWebsiteChatContextInput): Promise<{
   context: string
   source: WebsiteContextSource[]
@@ -59,7 +71,11 @@ export const resolveWebsiteChatContext = async ({
   try {
     await client.initialize()
     if (!embedURL) throw new Error("Website URL is unavailable")
-    const ingestResponse = await client.addMedia(embedURL)
+    const requestOptions =
+      signal || requestScope ? { signal, requestScope } : undefined
+    const ingestResponse = requestOptions
+      ? await client.addMedia(embedURL, requestOptions)
+      : await client.addMedia(embedURL)
     const mediaId = Number(extractCompletedIngestJobMediaId(ingestResponse))
     if (!Number.isSafeInteger(mediaId) || mediaId <= 0) {
       throw new Error("Website ingest did not return a persisted media ID")
@@ -70,6 +86,8 @@ export const resolveWebsiteChatContext = async ({
         top_k: 4,
         sources: ["media_db"],
         include_media_ids: [mediaId],
+        ...(signal ? { signal } : {}),
+        ...(requestScope ? { requestScope } : {}),
       })
     )
     const candidateDocs =
@@ -100,6 +118,9 @@ export const resolveWebsiteChatContext = async ({
       }
     }
   } catch (error) {
+    if (signal?.aborted || isRequestConfigScopeChangedError(error)) {
+      throw error
+    }
     console.error(
       "tldw ragSearch failed, falling back to inline context",
       error

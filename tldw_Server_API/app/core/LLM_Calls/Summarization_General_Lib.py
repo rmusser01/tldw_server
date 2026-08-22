@@ -593,6 +593,7 @@ def analyze(
     chunked_summarization: bool = False, # Summarize chunks separately & combine
     chunk_options: Optional[dict] = None,
     model_override: Optional[str] = None,
+    input_is_literal_text: bool = False,
     *,
     app_config: Optional[dict[str, Any]] = None,
     credentials_resolved: bool = False,
@@ -618,6 +619,7 @@ def analyze(
                                Mutually exclusive with recursive_summarization.
         chunk_options: Dictionary of options for the chunking process (passed to improved_chunking_process).
                        Defaults: {'method': 'words', 'max_size': 1000, 'overlap': 100}.
+        input_is_literal_text: Treat string input as literal text instead of interpreting JSON-like content.
 
     Returns:
         - A string containing the final summary.
@@ -652,12 +654,17 @@ def analyze(
 
     try:
         # 1. Extract text content from input_data
-        text_content = extract_text_from_input(input_data)
+        if input_is_literal_text:
+            if not isinstance(input_data, str):
+                logging.error("Literal text analysis input must be a string.")
+                return "Error: Literal text analysis input must be a string."
+            text_content = input_data
+        else:
+            text_content = extract_text_from_input(input_data)
         if not text_content:
             logging.error("Could not extract text content from input data.")
             return "Error: Could not extract text content."
         logging.info(f"Extracted text content length: {len(text_content)} characters.")
-        logging.debug(f"Extracted text content (first 500 chars): {text_content[:500]}...")
 
         # --- Define helper to consume potential generators ---
         def consume_generator(gen):
@@ -673,9 +680,12 @@ def analyze(
                     final_string = "".join(result_list)
                     logging.debug("Generator consumed.")
                     return final_string
-                except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
-                     logging.error(f"Error consuming generator: {e}", exc_info=True)
-                     return f"Error consuming stream: {e}"
+                except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as exc:
+                     logging.error(
+                         "LLM stream consumption failed (error_type={}).",
+                         type(exc).__name__,
+                     )
+                     return "Error: Failed to consume LLM stream."
             return gen # Return as is if not a generator
 
         # --- Chunking and Summarization Logic ---
@@ -803,20 +813,22 @@ def analyze(
                 logging.error("Summarization resulted in None after processing.")
                 return "Error: Summarization failed unexpectedly."
             elif isinstance(final_string_summary, str) and final_string_summary.startswith("Error:"):
-                logging.error(f"Summarization failed: {final_string_summary}")
+                logging.error("Summarization failed.")
                 return final_string_summary
             elif isinstance(final_string_summary, str):
                 logging.info(f"Summarization completed successfully. Final Length: {len(final_string_summary)}")
-                logging.debug(f"Final Summary (first 500 chars): {final_string_summary[:500]}...")
                 return final_string_summary
             else:
                 # This case should ideally not be reached if consume_generator works correctly
                 logging.error(f"Unexpected final result type after processing: {type(final_string_summary)}")
                 return f"Error: Unexpected result type {type(final_string_summary)}"
 
-    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Critical error in summarize function: {str(e)}", exc_info=True)
-        return f"Error: An unexpected error occurred during summarization: {str(e)}"
+    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as exc:
+        logging.error(
+            "Unexpected summarization failure (error_type={}).",
+            type(exc).__name__,
+        )
+        return "Error: An unexpected error occurred during summarization."
 
 #
 # End of Analysis Function

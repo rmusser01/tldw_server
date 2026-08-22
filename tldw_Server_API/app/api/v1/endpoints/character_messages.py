@@ -27,7 +27,11 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     MessageResponse,
     MessageUpdate,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_request_user,
+    require_expected_user,
+    User,
+)
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
@@ -306,7 +310,8 @@ def _resolve_message_scope(
 
 @router.post("/chats/{chat_id}/messages", response_model=MessageResponse,
              status_code=status.HTTP_201_CREATED,
-             summary="Send a message in a chat", tags=["Messages"])
+             summary="Send a message in a chat", tags=["Messages"],
+             dependencies=[Depends(require_expected_user)])
 async def send_message(
     message_data: MessageCreate,
     chat_id: str = Path(..., description="Chat session ID"),

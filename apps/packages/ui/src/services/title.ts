@@ -2,6 +2,8 @@ import { pageAssistModel } from "@/models"
 import { HumanMessage } from "@/types/messages"
 import { removeReasoning } from "@/libs/reasoning"
 import { coerceBoolean, defineSetting, getSetting, setSetting } from "@/services/settings/registry"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 const TITLE_GEN_ENABLED_SETTING = defineSetting(
     "titleGenEnabled",
@@ -43,9 +45,29 @@ export const setTitleGenEnabled = async (enabled: boolean) => {
 }
 
 
-export const generateTitle = async (model: string, query: string, fallBackTitle: string) => {
+type TitleGenerationOptions = {
+    signal?: AbortSignal
+    requestScope?: ServicePromptRequestScope
+}
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+    if (!signal?.aborted) return
+    const error = new Error("Request scope changed")
+    error.name = "AbortError"
+    throw error
+}
+
+export const generateTitle = async (
+    model: string,
+    query: string,
+    fallBackTitle: string,
+    options: TitleGenerationOptions = {}
+) => {
+
+    throwIfAborted(options.signal)
 
     const isEnabled = await isTitleGenEnabled()
+    throwIfAborted(options.signal)
 
     if (!isEnabled) {
         return fallBackTitle
@@ -55,19 +77,29 @@ export const generateTitle = async (model: string, query: string, fallBackTitle:
         const titleModel = await pageAssistModel({
             model,
             toolChoice: "none",
-            saveToDb: false
+            saveToDb: false,
+            ...(options.requestScope
+                ? { requestScope: options.requestScope }
+                : {})
         })
+        throwIfAborted(options.signal)
 
         const prompt = DEFAULT_TITLE_GEN_PROMPT.replace("{{query}}", query)
 
-        const title = await titleModel.invoke([
-            new HumanMessage({
-                content: prompt
-            })
-        ])
+        const messages = [new HumanMessage({ content: prompt })]
+        const title = options.signal
+            ? await titleModel.invoke(messages, { signal: options.signal })
+            : await titleModel.invoke(messages)
+        throwIfAborted(options.signal)
 
         return removeReasoning(title.content.toString())
     } catch (error) {
+        if (options.signal?.aborted ||
+            (error as { name?: unknown } | null)?.name === "AbortError" ||
+            isRequestConfigScopeChangedError(error)
+        ) {
+            throw error
+        }
         console.error(`Error generating title: ${error}`)
         return fallBackTitle
     }

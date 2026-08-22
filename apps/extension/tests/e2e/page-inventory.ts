@@ -19,7 +19,7 @@ export const EXTENSION_ROUTES: ExtensionRouteEntry[] = [
   { kind: "options", path: "/settings", name: "Settings" },
   { kind: "options", path: "/settings/tldw", name: "Server Settings" },
   { kind: "options", path: "/settings/model", name: "Model Settings" },
-  { kind: "options", path: "/settings/prompt", name: "Prompt Settings" },
+  { kind: "options", path: "/settings/prompt", name: "Workflow prompts" },
   { kind: "options", path: "/settings/evaluations", name: "Evaluations Settings" },
   { kind: "options", path: "/settings/chat", name: "Chat Settings" },
   { kind: "options", path: "/settings/ui", name: "UI Settings" },

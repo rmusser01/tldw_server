@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
   sessionStorage: new Map<string, unknown>(),
   failDeviceWrite: false,
   failSessionWrite: false,
-  failClearWrite: false
+  failClearWrite: false,
+  beforeLocalConfigWrite: null as null | (() => void)
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -57,6 +58,11 @@ vi.mock("@/utils/safe-storage", () => ({
         ) {
           throw new Error("persistent clear unavailable")
         }
+        if (options?.area === "local" && key === "tldwConfig") {
+          const beforeWrite = mocks.beforeLocalConfigWrite
+          mocks.beforeLocalConfigWrite = null
+          beforeWrite?.()
+        }
         values.set(key, value)
       }),
       remove: vi.fn(async (key: string) => {
@@ -70,7 +76,11 @@ vi.mock("@/utils/safe-storage", () => ({
   }
 }))
 
-import { TldwApiClient } from "@/services/tldw/TldwApiClient"
+import {
+  TldwApiClient,
+  tldwClient
+} from "@/services/tldw/TldwApiClient"
+import { TldwAuthService } from "@/services/tldw/TldwAuth"
 
 describe("TldwApiClient connection storage sync", () => {
   beforeEach(() => {
@@ -84,6 +94,7 @@ describe("TldwApiClient connection storage sync", () => {
     mocks.failDeviceWrite = false
     mocks.failSessionWrite = false
     mocks.failClearWrite = false
+    mocks.beforeLocalConfigWrite = null
     window.localStorage.clear()
   })
 
@@ -120,6 +131,175 @@ describe("TldwApiClient connection storage sync", () => {
 
     expect(mocks.storage.has("tldwServerUrl")).toBe(false)
     expect(window.localStorage.getItem("tldw-api-host")).toBeNull()
+  })
+
+  it("makes a scoped rotation inert when logout clears tokens", async () => {
+    mocks.storage.set("tldwConfig", {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user",
+      authSource: "manual",
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    })
+    mocks.storage.set("tldwRefreshRotation", {
+      version: 1,
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user",
+      authSource: "manual",
+      sourceAccessToken: "raw-access",
+      sourceRefreshToken: "raw-refresh",
+      rotatedFromRefreshToken: "raw-refresh",
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+    const client = new TldwApiClient()
+    await client.initialize()
+
+    await client.updateConfig({
+      accessToken: undefined,
+      refreshToken: undefined
+    })
+
+    expect(mocks.storage.has("tldwRefreshRotation")).toBe(true)
+    expect(mocks.storage.get("tldwConfig")).toMatchObject({
+      accessToken: undefined,
+      refreshToken: undefined
+    })
+    await expect(client.getConfig()).resolves.toMatchObject({
+      accessToken: undefined,
+      refreshToken: undefined
+    })
+  })
+
+  it("consumes a scoped rotation before persisting an unrelated config update", async () => {
+    const rawConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    }
+    mocks.storage.set("tldwConfig", rawConfig)
+    const client = new TldwApiClient()
+    await client.initialize()
+    mocks.storage.set("tldwRefreshRotation", {
+      version: 1,
+      serverUrl: rawConfig.serverUrl,
+      authMode: rawConfig.authMode,
+      authSource: rawConfig.authSource,
+      sourceAccessToken: rawConfig.accessToken,
+      sourceRefreshToken: rawConfig.refreshToken,
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+
+    await client.updateConfig({ orgId: 9 })
+
+    expect(mocks.storage.get("tldwConfig")).toMatchObject({
+      orgId: 9,
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+    expect(mocks.storage.has("tldwRefreshRotation")).toBe(true)
+  })
+
+  it("preserves a concurrent rotation racing an unrelated config write", async () => {
+    const rawConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      orgId: 9,
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    }
+    mocks.storage.set("tldwConfig", rawConfig)
+    const client = new TldwApiClient()
+    await client.initialize()
+    mocks.beforeLocalConfigWrite = () => {
+      mocks.storage.set("tldwRefreshRotation", {
+        version: 1,
+        serverUrl: rawConfig.serverUrl,
+        authMode: rawConfig.authMode,
+        authSource: rawConfig.authSource,
+        orgId: rawConfig.orgId,
+        sourceAccessToken: rawConfig.accessToken,
+        sourceRefreshToken: rawConfig.refreshToken,
+        accessToken: "rotated-access",
+        refreshToken: "rotated-refresh"
+      })
+    }
+
+    await client.updateConfig({
+      serverUrl: rawConfig.serverUrl,
+      authMode: rawConfig.authMode,
+      orgId: rawConfig.orgId,
+      requestTimeoutMs: 12_000
+    } as Partial<Parameters<TldwApiClient["updateConfig"]>[0]>)
+
+    expect(mocks.storage.has("tldwRefreshRotation")).toBe(true)
+    await expect(client.getConfig()).resolves.toMatchObject({
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh",
+      requestTimeoutMs: 12_000
+    })
+  })
+
+  it("reloads a scoped rotation before returning current config", async () => {
+    const rawConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    }
+    mocks.storage.set("tldwConfig", rawConfig)
+    const client = new TldwApiClient()
+    await client.initialize()
+    mocks.storage.set("tldwRefreshRotation", {
+      version: 1,
+      serverUrl: rawConfig.serverUrl,
+      authMode: rawConfig.authMode,
+      authSource: rawConfig.authSource,
+      sourceAccessToken: rawConfig.accessToken,
+      sourceRefreshToken: rawConfig.refreshToken,
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+    await expect(client.getConfig()).resolves.toMatchObject({
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+  })
+
+  it("reloads a scoped rotation for cached auth-header consumers", async () => {
+    const rawConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    }
+    mocks.storage.set("tldwConfig", rawConfig)
+    await tldwClient.initialize()
+    await expect(tldwClient.getConfig()).resolves.toMatchObject({
+      accessToken: "raw-access"
+    })
+    mocks.storage.set("tldwRefreshRotation", {
+      version: 1,
+      serverUrl: rawConfig.serverUrl,
+      authMode: rawConfig.authMode,
+      authSource: rawConfig.authSource,
+      sourceAccessToken: rawConfig.accessToken,
+      sourceRefreshToken: rawConfig.refreshToken,
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+
+    const headers = new Headers(await new TldwAuthService().getAuthHeaders())
+    expect(headers.get("Authorization")).toBe("Bearer rotated-access")
+    await expect(tldwClient.getConfig()).resolves.toMatchObject({
+      refreshToken: "rotated-refresh"
+    })
   })
 
   it("migrates legacy sync config into device-local storage", async () => {
@@ -225,36 +405,32 @@ describe("TldwApiClient connection storage sync", () => {
     })
   })
 
-  it("uses the in-memory WebUI config for chat creation", async () => {
+  it("routes chat creation through the scoped request proxy", async () => {
     const client = new TldwApiClient()
     await client.updateConfig({
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user",
       apiKey: "test-api-key"
     })
-    mocks.tldwRequest.mockResolvedValue({
-      ok: true,
-      status: 201,
-      data: { id: "thread-1", title: "Knowledge thread" }
+    mocks.bgRequest.mockResolvedValue({
+      id: "thread-1",
+      title: "Knowledge thread"
     })
 
     await expect(
       client.createChat({ title: "Knowledge thread", source: "knowledge_qa" })
     ).resolves.toMatchObject({ id: "thread-1", title: "Knowledge thread" })
 
-    expect(mocks.bgRequest).not.toHaveBeenCalled()
-    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
-    const [request, runtime] = mocks.tldwRequest.mock.calls[0]
-    expect(request).toMatchObject({
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
       path: "/api/v1/chats/",
       method: "POST",
-      body: { title: "Knowledge thread", source: "knowledge_qa" }
-    })
-    await expect(runtime.getConfig()).resolves.toMatchObject({
-      serverUrl: "http://127.0.0.1:8000",
-      authMode: "single-user",
-      apiKey: "test-api-key"
-    })
+      body: expect.objectContaining({
+        title: "Knowledge thread",
+        source: "knowledge_qa"
+      })
+    }))
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
   it("uses the in-memory WebUI config for RAG search", async () => {

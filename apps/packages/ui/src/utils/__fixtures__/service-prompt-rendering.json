@@ -1,0 +1,96 @@
+{
+  "defaults": {
+    "chat.rag.answer": {
+      "template": "You are a helpful AI assistant. Use the following pieces of context to answer the question at the end. If you don't know the answer, just say you don't know. DO NOT try to make up an answer. If the question is not related to the context, politely respond that you are tuned to only answer questions that are related to the context.  {context}  Question: {question} Helpful answer:"
+    },
+    "chat.rag.question_rewrite": {
+      "template": "Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question.   Chat History: {chat_history} Follow Up Input: {question} Standalone question:"
+    },
+    "chat.web_search.answer": {
+      "template": "You are an AI model who is expert at searching the web and answering user's queries.\n\nGenerate a response that is informative and relevant to the user's query based on provided search results. the current date and time are {current_date_time}.\n\n`search-results` block provides knowledge from the web search results. You can use this information to generate a meaningful response.\n\n<search-results>\n {search_results}\n</search-results>\n"
+    },
+    "media.text.translation": {
+      "system": "You are an expert translator. Your task is to provide accurate,\nnatural-sounding translations that preserve the original meaning, tone, and formatting.\nDo not add explanations or notes - only provide the translation.",
+      "user_template": "Translate the following text to {target_language}.\nPreserve the original formatting, meaning, and tone.\nOnly output the translation, no explanations, notes, or additional text.\n\nText to translate:\n{text}"
+    }
+  },
+  "render_cases": [
+    {
+      "name": "ordinary substitution",
+      "definition_id": "chat.rag.answer",
+      "part_key": "template",
+      "authored_text": "Context: {context}\nQuestion: {question}",
+      "values": {
+        "context": "A stored fact",
+        "question": "What happened?"
+      },
+      "expected": "Context: A stored fact\nQuestion: What happened?"
+    },
+    {
+      "name": "escaped braces",
+      "definition_id": "chat.rag.answer",
+      "part_key": "template",
+      "authored_text": "Object: {{\"context\":\"{context}\"}}\nQuestion: {question}",
+      "values": {
+        "context": "alpha",
+        "question": "beta"
+      },
+      "expected": "Object: {\"context\":\"alpha\"}\nQuestion: beta"
+    },
+    {
+      "name": "unicode",
+      "definition_id": "media.text.translation",
+      "part_key": "user_template",
+      "authored_text": "Target {target_language}: {text}",
+      "values": {
+        "target_language": "日本語",
+        "text": "Café ☕ — Привет"
+      },
+      "expected": "Target 日本語: Café ☕ — Привет"
+    },
+    {
+      "name": "newlines",
+      "definition_id": "chat.rag.answer",
+      "part_key": "template",
+      "authored_text": "Context:\n{context}\n---\nQuestion:\n{question}",
+      "values": {
+        "context": "line one\nline two",
+        "question": "why?\nplease explain"
+      },
+      "expected": "Context:\nline one\nline two\n---\nQuestion:\nwhy?\nplease explain"
+    },
+    {
+      "name": "backslashes",
+      "definition_id": "chat.rag.answer",
+      "part_key": "template",
+      "authored_text": "Context={context}\nQuestion={question}",
+      "values": {
+        "context": "C:\\tmp\\notes\\file.txt",
+        "question": "Keep \\n as two characters"
+      },
+      "expected": "Context=C:\\tmp\\notes\\file.txt\nQuestion=Keep \\n as two characters"
+    },
+    {
+      "name": "dollar replacement metasequences",
+      "definition_id": "chat.rag.answer",
+      "part_key": "template",
+      "authored_text": "{context} / {question}",
+      "values": {
+        "context": "literal $&",
+        "question": "literal $' tail"
+      },
+      "expected": "literal $& / literal $' tail"
+    },
+    {
+      "name": "placeholder-looking inserted values",
+      "definition_id": "chat.rag.answer",
+      "part_key": "template",
+      "authored_text": "{context} then {question}",
+      "values": {
+        "context": "value contains {question}",
+        "question": "value contains {search_results}"
+      },
+      "expected": "value contains {question} then value contains {search_results}"
+    }
+  ]
+}

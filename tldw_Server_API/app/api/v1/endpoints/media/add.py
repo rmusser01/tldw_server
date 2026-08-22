@@ -3,29 +3,35 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    User,
+    get_request_user,
+    rbac_rate_limit,
+    require_expected_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
-from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_add_deps import get_add_media_form
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
+from tldw_Server_API.app.core.exceptions import (
+    ResearchDiscoveryBadRequestError,
+    ResearchDiscoveryValidationError,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     add_media_persist,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.research_discovery_handoff import (
     add_research_discovery_pdfs,
     is_research_discovery_handoff,
-)
-from tldw_Server_API.app.core.exceptions import (
-    ResearchDiscoveryBadRequestError,
-    ResearchDiscoveryValidationError,
 )
 
 router = APIRouter()
@@ -35,6 +41,7 @@ router = APIRouter()
     "/add",
     # Status code is determined dynamically based on per-item results.
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(MEDIA_CREATE)),
         Depends(rbac_rate_limit("media.create")),
         Depends(guard_storage_quota),

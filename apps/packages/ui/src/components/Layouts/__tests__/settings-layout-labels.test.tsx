@@ -88,4 +88,12 @@ describe("settings navigation labels", () => {
       "Settings"
     )
   })
+
+  it("labels the prompt settings destination as Workflow prompts", () => {
+    renderSettingsLayout("/settings/prompt")
+
+    expect(screen.getByRole("link", { name: "Workflow prompts" })).toBeVisible()
+    expect(screen.queryByRole("link", { name: "Manage Prompts" }))
+      .not.toBeInTheDocument()
+  })
 })

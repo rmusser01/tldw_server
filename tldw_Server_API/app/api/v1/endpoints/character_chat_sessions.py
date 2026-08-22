@@ -103,7 +103,11 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    require_expected_user,
+)
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
@@ -4329,7 +4333,8 @@ def _inject_message_steering_instruction(
 # ========================================================================
 
 @router.post("/", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED,
-             summary="Create a new chat session", tags=["Chat Sessions"])
+             summary="Create a new chat session", tags=["Chat Sessions"],
+             dependencies=[Depends(require_expected_user)])
 async def create_chat_session(
     session_data: ChatSessionCreate,
     response: Response,

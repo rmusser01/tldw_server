@@ -221,6 +221,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             tags=("prompts",),
             route_key="prompts",
         ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.service_prompts",
+            log_name="service_prompts",
+            prefix=API_V1_PREFIX,
+            tags=("service-prompts",),
+            route_key="",
+        ),
     ):
         append_imported_router_spec(specs, processing_spec)
 

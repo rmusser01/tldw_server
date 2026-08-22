@@ -112,7 +112,7 @@ test.describe("Settings", () => {
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("prompt workspace link settings and prompt studio settings stay distinct", async ({
+    test("workflow prompts and prompt studio settings stay distinct", async ({
       authedPage,
       diagnostics,
     }) => {
@@ -138,10 +138,10 @@ test.describe("Settings", () => {
 
       await expect(authedPage).toHaveURL(/\/settings\/prompt(?:\?.*)?$/)
       await expect(
-        authedPage.getByRole("heading", { name: "Prompts workspace" })
+        authedPage.getByRole("heading", { name: "Workflow prompts" }).first()
       ).toBeVisible({ timeout: 20_000 })
       await expect(
-        authedPage.getByRole("button", { name: /open prompts workspace/i })
+        authedPage.getByRole("link", { name: /open reusable prompts workspace/i })
       ).toBeVisible({ timeout: 20_000 })
       await expect(
         authedPage.getByRole("button", { name: /test prompt studio/i })
@@ -163,7 +163,7 @@ test.describe("Settings", () => {
         "settings-nav-link--settings-prompt-studio"
       )
 
-      await expect(promptSettingsLink).toContainText(/manage prompts/i)
+      await expect(promptSettingsLink).toContainText(/workflow prompts/i)
       await expect(promptSettingsLink).not.toContainText(/prompt studio/i)
       await expect(promptStudioSettingsLink).toContainText(/prompt studio/i)
 

@@ -52,6 +52,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "workspace_migrations",
     "workspaces",
     "workspace_memberships",
+    "service_prompts",
     "rpg",
     "admin",
     "workspace_eligibility",

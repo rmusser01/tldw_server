@@ -421,7 +421,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
           )}
           <div className="flex items-center justify-between gap-2 mt-2">
             <Link
-              to="/settings/prompt"
+              to="/prompts"
               className="text-xs underline text-primary hover:text-primaryStrong"
             >
               {t('promptSearch.manageLink') || 'View/Manage Prompts'}

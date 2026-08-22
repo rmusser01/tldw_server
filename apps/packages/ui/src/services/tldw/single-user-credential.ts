@@ -1,5 +1,10 @@
-import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import type {
+  ServicePromptTargetConfig,
+  TldwConfig
+} from "@/services/tldw/TldwApiClient"
 import { isExactOriginCookieSessionConfig } from "@/services/tldw/browser-networking"
+import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 export type ApiKeyPersistence = "device" | "session"
 export type CredentialSource = "manual" | "cookie-session"
@@ -22,6 +27,19 @@ export interface CredentialStorage {
 }
 
 export const MANUAL_SESSION_KEY = "tldwManualSessionApiKey"
+export const REFRESH_ROTATION_KEY = "tldwRefreshRotation"
+
+type RefreshRotationRecord = Readonly<{
+  version: 1
+  serverUrl?: string
+  authMode: "multi-user"
+  authSource?: TldwConfig["authSource"]
+  orgId?: number
+  sourceAccessToken: string
+  sourceRefreshToken: string
+  accessToken: string
+  refreshToken: string
+}>
 
 export const normalizeServerOrigin = (value: string): string | null => {
   try {
@@ -38,6 +56,223 @@ const nonEmptySecret = (value: unknown): string | null => {
   if (typeof value !== "string") return null
   const normalized = value.trim()
   return normalized || null
+}
+
+const asRefreshRotationRecord = (
+  value: unknown
+): RefreshRotationRecord | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const record = value as Partial<RefreshRotationRecord>
+  const sourceAccessToken = nonEmptySecret(record.sourceAccessToken)
+  const sourceRefreshToken = nonEmptySecret(record.sourceRefreshToken)
+  const accessToken = nonEmptySecret(record.accessToken)
+  const refreshToken = nonEmptySecret(record.refreshToken)
+  const serverUrl = nonEmptySecret(record.serverUrl)
+  if (
+    record.version !== 1 ||
+    record.authMode !== "multi-user" ||
+    (record.serverUrl != null && !serverUrl) ||
+    !sourceAccessToken ||
+    !sourceRefreshToken ||
+    !accessToken ||
+    !refreshToken
+  ) {
+    return null
+  }
+  return {
+    version: 1,
+    ...(serverUrl ? { serverUrl } : {}),
+    authMode: record.authMode,
+    authSource: record.authSource,
+    orgId: record.orgId,
+    sourceAccessToken,
+    sourceRefreshToken,
+    accessToken,
+    refreshToken
+  }
+}
+
+const applicableRefreshRotation = (
+  stored: TldwConfig,
+  value: unknown
+): RefreshRotationRecord | null => {
+  const record = asRefreshRotationRecord(value)
+  if (
+    !record ||
+    stored.authMode !== "multi-user" ||
+    !servicePromptTargetsMatch(stored, record) ||
+    nonEmptySecret(stored.accessToken) !== record.sourceAccessToken ||
+    nonEmptySecret(stored.refreshToken) !== record.sourceRefreshToken
+  ) {
+    return null
+  }
+  return record
+}
+
+const applyRefreshRotation = (
+  stored: TldwConfig,
+  value: unknown
+): TldwConfig => {
+  const record = applicableRefreshRotation(stored, value)
+  return record
+    ? {
+        ...stored,
+        accessToken: record.accessToken,
+        refreshToken: record.refreshToken
+      }
+    : stored
+}
+
+export const hasNewerCurrentRefreshRotation = async (
+  persistent: CredentialStorage,
+  checked: ServicePromptTargetConfig,
+  capturedAccessToken: string
+): Promise<boolean> => {
+  const captured = nonEmptySecret(capturedAccessToken)
+  if (!captured) return false
+  const stored = await persistent.get<TldwConfig>("tldwConfig")
+  if (
+    !stored ||
+    typeof stored !== "object" ||
+    !servicePromptTargetsMatch(stored, checked)
+  ) {
+    return false
+  }
+  const record = applicableRefreshRotation(
+    stored,
+    await persistent.get<unknown>(REFRESH_ROTATION_KEY)
+  )
+  return Boolean(record && record.accessToken !== captured)
+}
+
+export const hasNewerCurrentAccessToken = async (
+  persistent: CredentialStorage,
+  checked: ServicePromptTargetConfig,
+  capturedAccessToken: string
+): Promise<boolean> => {
+  const captured = nonEmptySecret(capturedAccessToken)
+  if (!captured) return false
+  const stored = await persistent.get<TldwConfig>("tldwConfig")
+  if (
+    !stored ||
+    typeof stored !== "object" ||
+    !servicePromptTargetsMatch(stored, checked)
+  ) {
+    return false
+  }
+  const record = applicableRefreshRotation(
+    stored,
+    await persistent.get<unknown>(REFRESH_ROTATION_KEY)
+  )
+  if (record && record.accessToken !== captured) {
+    return true
+  }
+  const current = nonEmptySecret(stored.accessToken)
+  if (!current || current === captured) return false
+  const unknownPrincipal = deriveScopedUserId({
+    userId: null,
+    authMode: "multi-user",
+    accessToken: null
+  })
+  const capturedPrincipal = deriveScopedUserId({
+    userId: null,
+    authMode: "multi-user",
+    accessToken: captured
+  })
+  return capturedPrincipal !== unknownPrincipal &&
+    deriveScopedUserId({
+      userId: null,
+      authMode: "multi-user",
+      accessToken: current
+    }) === capturedPrincipal
+}
+
+export const waitForNewerCurrentAccessToken = async (
+  persistent: CredentialStorage,
+  checked: ServicePromptTargetConfig,
+  capturedAccessToken: string,
+  options: Readonly<{
+    timeoutMs?: number
+    pollIntervalMs?: number
+  }> = {}
+): Promise<boolean> => {
+  const timeoutMs = Math.max(0, options.timeoutMs ?? 1_000)
+  const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? 25)
+  const deadline = Date.now() + timeoutMs
+  do {
+    if (await hasNewerCurrentAccessToken(
+      persistent,
+      checked,
+      capturedAccessToken
+    )) {
+      return true
+    }
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+  } while (Date.now() <= deadline)
+  return false
+}
+
+/**
+ * Store rotated tokens without rewriting the shared connection config.
+ *
+ * The record remains effective only while the raw target and its original
+ * refresh token still match. A target/account change racing the final write
+ * therefore makes the record inert instead of being overwritten.
+ */
+export const storeRefreshRotationIfCurrent = async (
+  persistent: CredentialStorage,
+  checked: ServicePromptTargetConfig & Readonly<{ accessToken?: string }>,
+  expectedRefreshToken: string,
+  tokens: Readonly<{ accessToken: string; refreshToken: string }>
+): Promise<boolean> => {
+  const expected = nonEmptySecret(expectedRefreshToken)
+  const accessToken = nonEmptySecret(tokens.accessToken)
+  const refreshToken = nonEmptySecret(tokens.refreshToken)
+  if (!expected || !accessToken || !refreshToken) return false
+
+  const stored = await persistent.get<TldwConfig>("tldwConfig")
+  if (
+    !stored ||
+    typeof stored !== "object" ||
+    stored.authMode !== "multi-user" ||
+    !servicePromptTargetsMatch(stored, checked)
+  ) {
+    return false
+  }
+
+  const previousValue = await persistent.get<unknown>(REFRESH_ROTATION_KEY)
+  const previous = applicableRefreshRotation(stored, previousValue)
+  const expectedAccessToken = nonEmptySecret(checked.accessToken)
+  const effectiveAccessToken = previous?.accessToken ??
+    nonEmptySecret(stored.accessToken)
+  const effectiveRefreshToken = previous?.refreshToken ??
+    nonEmptySecret(stored.refreshToken)
+  const sourceAccessToken = previous?.sourceAccessToken ??
+    nonEmptySecret(stored.accessToken)
+  const sourceRefreshToken = previous?.sourceRefreshToken ??
+    nonEmptySecret(stored.refreshToken)
+  if (
+    (expectedAccessToken && effectiveAccessToken !== expectedAccessToken) ||
+    effectiveRefreshToken !== expected ||
+    !sourceAccessToken ||
+    !sourceRefreshToken
+  ) return false
+
+  await persistent.set<RefreshRotationRecord>(REFRESH_ROTATION_KEY, {
+    version: 1,
+    ...(nonEmptySecret(stored.serverUrl)
+      ? { serverUrl: nonEmptySecret(stored.serverUrl)! }
+      : {}),
+    authMode: stored.authMode,
+    authSource: stored.authSource,
+    orgId: stored.orgId,
+    sourceAccessToken,
+    sourceRefreshToken,
+    accessToken,
+    refreshToken
+  })
+  return true
 }
 
 export const isCompleteDeviceCredential = (
@@ -132,7 +367,10 @@ export const resolveEffectiveTldwConfig = async (
 
   if (!stored || typeof stored !== "object") return null
 
-  const effective = { ...stored }
+  const refreshRotation = await stores.persistent
+    .get<unknown>(REFRESH_ROTATION_KEY)
+    .catch(() => null)
+  const effective = { ...applyRefreshRotation(stored, refreshRotation) }
   const apiKey = await resolveManualCredential(effective, {
     session: stores.session
   })
@@ -163,6 +401,11 @@ export const clearManualCredentials = async (
   }
   try {
     await session.remove(MANUAL_SESSION_KEY)
+  } catch (error) {
+    failures.push(error)
+  }
+  try {
+    await persistent.remove(REFRESH_ROTATION_KEY)
   } catch (error) {
     failures.push(error)
   }

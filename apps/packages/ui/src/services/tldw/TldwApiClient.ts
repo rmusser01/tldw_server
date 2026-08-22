@@ -27,6 +27,7 @@ import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { createJsonResponseLike } from "@/services/tldw/json-response-like"
 import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
+import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
 import {
@@ -60,11 +61,13 @@ import type {
 } from "@/services/tldw/single-user-credential"
 import {
   clearManualCredentials,
+  hasNewerCurrentAccessToken,
   isCompleteDeviceCredential,
   MANUAL_SESSION_KEY,
   normalizeServerOrigin,
   resolveEffectiveTldwConfig,
   resolveManualCredential,
+  storeRefreshRotationIfCurrent,
   toPersistedTldwConfig
 } from "@/services/tldw/single-user-credential"
 import {
@@ -200,6 +203,17 @@ export interface TldwConfig {
   apiKeyPersistence?: ApiKeyPersistence
   apiKeyServerOrigin?: string
 }
+
+export type ServicePromptTargetConfig = Readonly<
+  Pick<
+    TldwConfig,
+    "serverUrl" | "authMode" | "authSource" | "orgId"
+  > & {
+    expectedUserId?: string | number | null
+    expectedRefreshToken?: string
+    expectedSingleUserApiKeyScope?: string
+  }
+>
 
 export type ExplainerMode = "goal" | "sources"
 export type ExplainerOutputIntent = "explain" | "plan" | "both"
@@ -874,6 +888,7 @@ export type ChatCompletionRequestOptions = {
   signal?: AbortSignal
   timeoutMs?: number
   debugMetadata?: ChatRequestDebugMetadata
+  requestScope?: ServicePromptRequestScope
 }
 
 export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
@@ -1708,8 +1723,10 @@ export class TldwApiClientBase {
     init: any,
     requireAuth = true
   ): Promise<T> {
+    const useDirectWebRequest = getCurrentBrowserSurface() === "webui-page"
+    if (useDirectWebRequest) await this.initialize()
     const cfg = await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
-    if (getCurrentBrowserSurface() !== "webui-page") {
+    if (!useDirectWebRequest) {
       return await bgRequest<T>(init)
     }
 
@@ -2063,13 +2080,48 @@ export class TldwApiClientBase {
     ) {
       this.config = null
     }
-    if (this.config === null) {
+    const cachedConfig = this.config
+    const hasNewerAccessToken = Boolean(
+      cachedConfig?.authMode === "multi-user" &&
+      cachedConfig.accessToken &&
+      await hasNewerCurrentAccessToken(
+        this.storage,
+        cachedConfig,
+        cachedConfig.accessToken
+      ).catch(() => false)
+    )
+    if (this.config === null || hasNewerAccessToken) {
       await this.initialize().catch(() => null)
     }
     return this.config
   }
 
+  async commitTokenRefresh(
+    checked: TldwConfig,
+    expectedRefreshToken: string,
+    tokens: Readonly<{ accessToken: string; refreshToken: string }>
+  ): Promise<boolean> {
+    const stored = await storeRefreshRotationIfCurrent(
+      this.storage,
+      checked,
+      expectedRefreshToken,
+      tokens
+    )
+    this.config = null
+    await this.initialize().catch(() => null)
+    const current = this.config
+    return Boolean(
+      stored &&
+      current &&
+      current.authMode === "multi-user" &&
+      servicePromptTargetsMatch(current, checked) &&
+      String(current.accessToken || "").trim() === tokens.accessToken &&
+      String(current.refreshToken || "").trim() === tokens.refreshToken
+    )
+  }
+
   async updateConfig(config: Partial<TldwConfig>): Promise<void> {
+    await this.initialize()
     let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
     const targetAuthMode = config.authMode || currentConfig.authMode
     const submittedApiKey = Object.prototype.hasOwnProperty.call(config, "apiKey")
@@ -2958,13 +3010,17 @@ export class TldwApiClientBase {
       body: request,
       metadata: options?.debugMetadata
     })
+    const scopeFields = requestScopeFields(options?.requestScope)
     const res = await bgRequest<Response>({
       path: '/api/v1/chat/completions',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
       body: request,
       timeoutMs: options?.timeoutMs,
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })
     // bgRequest throws on any non-2xx response, so a resolved value here is
     // always a successful completion. Return the parsed body unmodified — the
@@ -2985,7 +3041,21 @@ export class TldwApiClientBase {
       body: request,
       metadata: options?.debugMetadata
     })
-    for await (const line of bgStream({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request, abortSignal: options?.signal, streamIdleTimeoutMs: options?.streamIdleTimeoutMs })) {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    for await (const line of bgStream({
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...scopeFields.headers
+      },
+      body: request,
+      abortSignal: options?.signal,
+      streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
+    })) {
       try {
         const parsed = JSON.parse(line)
         yield parsed
@@ -3024,14 +3094,31 @@ export class TldwApiClientBase {
 
   // Research / Web search
   async webSearch(options: any): Promise<any> {
-    const { timeoutMs, signal, ...rest } = options || {}
+    const {
+      timeoutMs,
+      signal,
+      requestScope,
+      ...rest
+    }: {
+      timeoutMs?: number
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+      [key: string]: unknown
+    } = options || {}
+    const scopeFields = requestScopeFields(requestScope)
     return await bgRequest<any>({
       path: "/api/v1/research/websearch",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...scopeFields.headers
+      },
       body: rest,
       timeoutMs,
-      abortSignal: signal
+      abortSignal: signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })
   }
 
@@ -3042,6 +3129,8 @@ export class TldwApiClientBase {
       timeoutMs,
       media_type,
       urls: rawUrls,
+      requestScope,
+      signal,
       ...rest
     } = metadata || {}
     const urls = Array.isArray(rawUrls)
@@ -3060,6 +3149,9 @@ export class TldwApiClientBase {
       typeof media_type === "string" && media_type.trim()
         ? media_type.trim()
         : inferUploadMediaTypeFromUrl(urls[0])
+    const scopeFields = requestScopeFields(
+      requestScope as ServicePromptRequestScope | undefined
+    )
 
     return await bgUpload<any>({
       path: "/api/v1/media/add",
@@ -3069,7 +3161,9 @@ export class TldwApiClientBase {
         media_type: resolvedMediaType,
         urls
       },
-      timeoutMs
+      timeoutMs,
+      abortSignal: signal as AbortSignal | undefined,
+      ...scopeFields
     })
   }
 
@@ -4654,7 +4748,6 @@ export class TldwApiClientBase {
     const requestCreateDirect = async (
       requestPath: string
     ): Promise<any> => {
-      const storage = createSafeStorage({ area: "local" })
       const response = await tldwRequest(
         {
           path: requestPath as AllowedPath,
@@ -4663,8 +4756,7 @@ export class TldwApiClientBase {
           body: payload
         },
         {
-          getConfig: () =>
-            storage.get<TldwConfig>("tldwConfig").catch(() => null)
+          getConfig: () => this.getConfig()
         }
       )
       if (response?.ok) {
@@ -5184,12 +5276,24 @@ export class TldwApiClientBase {
     }
   }
 
-  async createChat(payload: Record<string, any>, options?: { scope?: ChatScope }): Promise<ServerChatSummary> {
-    const res = await this.requestWithCurrentConfig<any>({
+  async createChat(
+    payload: Record<string, any>,
+    options?: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
+  ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const res = await bgRequest<any>({
       path: "/api/v1/chats/",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: { ...payload, ...toChatScopeParams(options?.scope) }
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      body: { ...payload, ...toChatScopeParams(options?.scope) },
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })
     return this.normalizeChatSummary(res)
   }
@@ -5590,15 +5694,24 @@ export class TldwApiClientBase {
   async addChatMessage(
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { scope?: ChatScope }
+    options?: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
   ): Promise<ServerChatMessage> {
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
+    const scopeFields = requestScopeFields(options?.requestScope)
     const res = await bgRequest<ServerChatMessage>({
       path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      body: payload,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })
     this.invalidateChatMessagesCache(cid)
     return res
@@ -8243,6 +8356,11 @@ import { setupOnboardingMethods } from "./domains/setup-onboarding"
 import { workspaceApiMethods } from "./domains/workspace-api"
 import { webClipperMethods } from "./domains/web-clipper"
 import { visualIdentityMethods } from "./domains/visual-identities"
+import {
+  requestScopeFields,
+  servicePromptMethods,
+  type ServicePromptRequestScope
+} from "./domains/service-prompts"
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class TldwApiClient extends TldwApiClientBase {}
@@ -8269,7 +8387,8 @@ export interface TldwApiClient
     TldwDomainMethods<typeof setupOnboardingMethods>,
     TldwDomainMethods<typeof workspaceApiMethods>,
     TldwDomainMethods<typeof webClipperMethods>,
-    TldwDomainMethods<typeof visualIdentityMethods> {}
+    TldwDomainMethods<typeof visualIdentityMethods>,
+    TldwDomainMethods<typeof servicePromptMethods> {}
 
 // Apply domain methods to the prototype
 Object.assign(
@@ -8285,7 +8404,8 @@ Object.assign(
   setupOnboardingMethods,
   workspaceApiMethods,
   webClipperMethods,
-  visualIdentityMethods
+  visualIdentityMethods,
+  servicePromptMethods
 )
 
 // createChatCompletion and synthesizeSpeech are implemented on

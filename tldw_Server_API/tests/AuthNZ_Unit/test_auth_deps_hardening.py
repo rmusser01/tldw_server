@@ -96,6 +96,33 @@ class _LockingPool:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("expected_user_id", [None, " 42 "])
+async def test_expected_user_guard_allows_absent_or_matching_header(
+    expected_user_id: str | None,
+) -> None:
+    principal = AuthPrincipal(kind="user", user_id=42)
+
+    result = await auth_deps.require_expected_user(expected_user_id, principal)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_expected_user_guard_rejects_mismatch_without_caching() -> None:
+    principal = AuthPrincipal(kind="user", user_id=42)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_deps.require_expected_user("99", principal)
+
+    assert exc_info.value.status_code == 412
+    assert exc_info.value.headers == {"Cache-Control": "no-store"}
+    assert exc_info.value.detail == {
+        "code": "request_config_scope_changed",
+        "message": "The server or authenticated account changed before the request was sent.",
+    }
+
+
+@pytest.mark.asyncio
 async def test_test_db_adapter_execute_propagates_sqlite_commit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fake_get_db_pool() -> _FakeDBPool:
         return _FakeDBPool()

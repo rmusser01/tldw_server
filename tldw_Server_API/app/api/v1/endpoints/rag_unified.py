@@ -27,6 +27,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_request_user,
     rbac_rate_limit,
+    require_expected_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
@@ -1363,6 +1364,7 @@ async def source_health_endpoint(
     """,
     response_description="Search results with all requested features applied",
     dependencies=[
+        Depends(require_expected_user),
         Depends(check_rate_limit),
         Depends(rbac_rate_limit("rag.search")),
         Depends(RequirePermission(MEDIA_READ)),

@@ -501,6 +501,14 @@ Generate a response that is informative and relevant to the user's query based o
 </search-results>
 `
 
+export const LEGACY_SERVICE_PROMPT_DEFAULTS = Object.freeze({
+  "chat.rag.answer": Object.freeze({ template: DEFAULT_RAG_SYSTEM_PROMPT }),
+  "chat.rag.question_rewrite": Object.freeze({
+    template: DEFAULT_RAG_QUESTION_PROMPT
+  }),
+  "chat.web_search.answer": Object.freeze({ template: DEFAULT_WEBSEARCH_PROMPT })
+})
+
 const DEFAULT_WEBSEARCH_FOLLOWUP_PROMPT = `You will rephrase follow-up questions into concise, standalone search queries optimized for internet search engines. Transform conversational questions into keyword-focused search terms by removing unnecessary words, question formats, and context dependencies while preserving the core information need.
 
 ONLY RETURN QUERY WITHOUT ANY TEXT

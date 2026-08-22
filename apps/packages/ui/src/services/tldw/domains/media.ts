@@ -33,6 +33,10 @@ import {
   type MediaCollectionItem,
   type MediaCollectionList
 } from "@/services/tldw/conference-collections"
+import {
+  requestScopeFields,
+  type ServicePromptRequestScope
+} from "@/services/tldw/domains/service-prompts"
 
 type ChatDocumentDraftCreateResponse = {
   draft_id: string
@@ -104,6 +108,8 @@ export const mediaMethods = {
       timeoutMs,
       media_type,
       urls: rawUrls,
+      requestScope,
+      signal,
       ...rest
     } = metadata || {}
     const urls = Array.isArray(rawUrls)
@@ -122,6 +128,9 @@ export const mediaMethods = {
       typeof media_type === "string" && media_type.trim()
         ? media_type.trim()
         : inferUploadMediaTypeFromUrl(urls[0])
+    const scopeFields = requestScopeFields(
+      requestScope as ServicePromptRequestScope | undefined
+    )
 
     return await bgUpload<any>({
       path: "/api/v1/media/add",
@@ -131,7 +140,9 @@ export const mediaMethods = {
         media_type: resolvedMediaType,
         urls
       },
-      timeoutMs
+      timeoutMs,
+      abortSignal: signal as AbortSignal | undefined,
+      ...scopeFields
     })
   },
 

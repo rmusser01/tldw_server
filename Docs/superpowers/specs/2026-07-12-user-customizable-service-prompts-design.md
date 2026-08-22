@@ -1,691 +1,422 @@
 # User-Customizable Service Prompts Design
 
-**Date:** 2026-07-12
+**Status:** Approved for implementation planning on 2026-07-15
 
-**Status:** Human-approved after three independent review passes
+**Date:** 2026-07-13
 
-**Backlog:** TASK-12955
+**Backlog:** TASK-13013 (reconciles historical TASK-12955, TASK-12956, and TASK-12958)
 
-**Related:** TASK-2341 (broader shared prompt-registry follow-up)
+**Authoritative source:** approved commit `1a038599753e780f32f62243871026ca9b6d2c06`
 
 ## Summary
 
-tldw_server should let each authenticated user customize a curated set of prompts that backend services apply automatically when creating or analyzing content. The capability will appear in a dedicated **Service Prompts** settings page shared by the WebUI and browser-extension options app.
+Service Prompts gives an authenticated user one Settings page where they can inspect and customize a curated set of content-generation prompts. A valid save becomes active immediately for that user and is used consistently by the supported WebUI, browser extension, and registered server consumers.
 
-The selected architecture is a typed `ServicePromptRegistry` backed by immutable server defaults and versioned per-user overrides. Services resolve prompts through one governed resolver rather than reading files or embedding strings directly. The design preserves existing explicit request overrides and deployment prompt files, validates prompt variables, supports deterministic previews, keeps revision history, pins queued work to an immutable full-bundle pin set, and integrates with the existing context-integrity system.
+The feature is intentionally small. It uses a static allowlist, one table in the existing per-user prompts database, one two-source resolver, four API operations, and a deterministic client-side preview. It does not introduce revision approval, signed manifests, OS-keyring requirements, deployment policy states, a second prompt database, or prompt-specific asynchronous machinery.
 
-This feature is deliberately separate from:
+## Product outcome
 
-- The reusable Prompt Library and Prompt workspace
-- Prompt Studio projects, experiments, and evaluations
-- Conversation-specific system prompts and `preferences.chat.system_prompt`
-- MCP prompt-catalog exposure
-- Security, authorization, routing, judge, and machine-protocol prompts
+A user can:
 
-The broad content-facing rollout is one product initiative but must be delivered as multiple Backlog tasks and reviewable pull requests.
+1. Open **Settings → Workflow prompts** in either the WebUI or extension options page.
+2. See which workflows a prompt affects and which variables it must contain.
+3. Edit and preview the prompt as plain text.
+4. Save it and have the change apply immediately to future requests prepared by supported consumers.
+5. Reset it to the packaged server default.
 
-## Context
-
-The current codebase has several overlapping prompt mechanisms:
-
-- `tldw_Server_API/Config_Files/Prompts` contains editable YAML and Markdown defaults loaded through `prompt_loader`.
-- `TLDW_PROMPT_FILE_<MODULE>__<KEY>` environment variables can replace individual prompt assets at deployment time.
-- User-authored reusable prompts live in per-user Prompts databases and are managed through `/api/v1/prompts` and the Prompt workspace.
-- Prompt Studio has a separate project, prompt, test, evaluation, and revision model.
-- Some service prompts remain embedded directly in Python or TypeScript.
-- Many request schemas already accept explicit `system_prompt` or `custom_prompt` values.
-- Context-integrity enforcement now protects prompt files and database prompt versions at use time.
-
-The WebUI and extension already share route, settings, service, and component code under `apps/packages/ui/src`. The extension options application and Next.js WebUI can therefore use one implementation. The narrow extension sidepanel should deep-link to the full options editor rather than host the editor itself.
+On a supported server, the same authenticated account sees the same effective prompt in the supported WebUI and extension. Browser-local prompt values are explicit migration input, not a second source of truth.
 
 ## Goals
 
-1. Give each user one active override for every eligible service-prompt definition.
-2. Apply that override to the user's WebUI, extension, API, synchronous, scheduled, and background activity on the same server.
-3. Keep shipped and deployment-managed defaults immutable from the user settings surface.
-4. Preserve explicit per-request prompts as the highest-precedence user choice.
-5. Validate required variables and locked output contracts before activation.
-6. Provide safe preview, comparison, reset, history, restore, and upstream-default awareness.
-7. Keep already queued work reproducible after later edits or server upgrades.
-8. Migrate the broad set of eligible content-facing prompts, including currently hardcoded prompts.
-9. Preserve multi-user isolation, context-integrity enforcement, and operational privacy.
-10. Maintain no-override behavior at byte-equivalent LLM-provider message boundaries unless a behavior change is separately approved.
+- Make selected content-generation prompts discoverable and editable without exposing security- or control-plane instructions.
+- Keep overrides owner-scoped in both single-user and multi-user deployments.
+- Preserve current default text and assembly semantics when no override exists. Intentional corrections are keeping placeholder-looking text and JavaScript replacement metasequences inside runtime data literal, plus isolating the Document Chat rewrite call from tools and persistence.
+- Make save, client-side preview, reset, conflict, corruption, disconnected, and legacy-migration behavior understandable.
+- Reuse the existing per-user prompt storage, authentication, database transactions, client scope key, and Settings shell.
+- Deliver one useful vertical slice before migrating more prompt domains.
 
-## Non-Goals
+## Non-goals
 
-- A user-facing editor for authentication, authorization, safety policy, tool permissions, provider routing, evaluator/judge, or prompt-enforced machine-protocol instructions
-- Administrator or organization-wide prompt overrides in this release
-- Multiple named variants per service slot
-- Binding service slots to reusable Prompt Library records
-- Editing Prompt Studio artifacts
-- Live LLM test calls or side-by-side model evaluations from the settings editor
-- Automatic merges between a user override and a changed server default
-- Persisting unsaved drafts automatically on a browser device
-- Treating prompt text as secret or credential storage
+- Editing authentication, authorization, moderation, safety, routing, tool-selection, tool-permission, judge, grading, or machine-protocol prompts.
+- Creating arbitrary prompt IDs at runtime.
+- Per-save administrator approval or a review inbox.
+- Signed mutable manifests, anti-rollback anchors, key rotation, or OS-keyring integration.
+- A prompt-specific deployment enable/disable state matrix in v1.
+- Full revision history, restore, diffing, bulk editing, or portable import/export.
+- A live LLM test from Settings. Preview is deterministic and makes no server or provider call.
+- Migrating every candidate in the existing inventory before release.
+- Registering an asynchronous consumer before that domain receives its own snapshot-persistence design.
 
-## Product Decisions
+## Eligibility boundary
 
-- Exposure uses a curated allowlist, not a denylist.
-- Ownership is per-user. Existing deployment-file overrides remain compatible but are not a new admin UI feature.
-- Each definition has one active user override.
-- Coordinated prompt parts are edited and versioned atomically.
-- Required variables are strict; softer quality diagnostics are warnings.
-- Preview uses deterministic safe sample values and never calls an LLM.
-- Saved overrides are server-side and account-scoped. Saving creates a pending revision; model use requires a separate explicit operator approval under the existing context-integrity policy.
-- Full revision history is retained subject to normal storage quotas and lifecycle policy.
-- User overrides remain pinned when the server default changes.
-- Queued work pins its prompt at enqueue time.
-- The first product release targets the broad content-facing eligibility set.
-- The settings route is `/settings/service-prompts`.
+A definition may be registered only when all of the following are true:
+
+- It changes user-visible generated or analyzed content.
+- Its entire editable template can be shown to the user.
+- Independent code—not prompt wording—enforces authorization, routing, tool availability and permissions, persistence, and output validation.
+- A concrete runtime consumer and owning workflow are identified.
+- Its variables and default template are finite and testable.
+
+A definition is excluded when it can grant or alter authorization, moderation, safety policy, provider or model selection, available tools, tool permissions, toolChoice, agent control, evaluation scores, retrieval grading, or a machine-readable protocol that is not independently enforced. Like ordinary user text, an eligible content prompt may influence a model's response within capabilities already enabled by code; it cannot change those capabilities. User-owned wording that rewrites the user's own search query is content transformation, not service routing; source access, provider selection, and retrieval policy remain locked in code.
+
+Prompts containing hidden or locked instruction fragments are not eligible for v1. They may be reconsidered only after the consumer has a clear boundary between editable content guidance and independently enforced control behavior.
+
+The static code registry is the allowlist. Database rows never create definitions.
+
+## V1 vertical slice
+
+V1 migrates the three existing browser-local prompt settings that have live runtime consumers and exposes one previously internal synchronous backend prompt:
+
+| Stable ID | Settings label | Editable parts and required variables | Current local key | Reachable runtime consumers |
+| --- | --- | --- | --- | --- |
+| chat.rag.answer | RAG answer | template: context, question | systemPromptForRag | Main Chat ragMode, tabChatMode, documentChatMode, and legacy Sidepanel RAG in useMessage |
+| chat.rag.question_rewrite | RAG follow-up rewrite | template: chat_history, question | questionPromptForRag | Main Chat ragMode, documentChatMode, and legacy Sidepanel RAG |
+| chat.web_search.answer | Web-search answer | template: current_date_time, search_results | webSearchPrompt | normalChatMode, including each branch of Compare when web search is enabled |
+| media.text.translation | Text translation | system: literal; user_template: target_language, text | — | Synchronous POST /translate |
+
+No-override compatibility preserves the current value supplied to each variable:
+
+| Consumer path | Compatibility rule |
+| --- | --- |
+| Main Chat ragMode final answer | question is the original current user message |
+| Tab Chat final answer | question is the original current user message; Tab Chat does not rewrite the question |
+| Document Chat final answer | question is the original current user message |
+| Legacy Sidepanel RAG final answer | question is the rewritten standalone retrieval query |
+| Main Chat, Document Chat, and legacy Sidepanel rewrite calls | question is the current follow-up and chat_history is that path's current serialized history |
+| Main and Compare web-search answers | current_date_time and normalized search_results keep their current formatting |
+| Translation | target_language and text keep their current values; provider/model fields remain code-controlled |
+
+These RAG-path differences are deliberate compatibility, not new semantic preferences. The implementation plan must either preserve each path with separate golden tests or prove a path unreachable and remove it before consolidation. Ordinary no-override messages remain byte-equivalent; fixtures containing placeholder-looking runtime data or JavaScript replacement metasequences assert the intentional single-pass correction.
+
+Before chat.rag.question_rewrite is eligible to activate, documentChatMode must match the existing isolated rewrite calls: toolChoice is forced to none, saveToDb is false, and the rewrite call cannot attach or invoke tools. Its output remains a string used only as the retrieval query. This is a required v1 hardening change, not optional cleanup.
+
+webSearchFollowUpPrompt is not included because repository-wide caller tracing found no runtime consumer; it is currently a no-op Settings value. It remains untouched in legacy storage and is not advertised or imported. A future definition requires a real consumer and the normal eligibility tests.
+
+The first slice does not migrate the broader server prompt inventory. That inventory remains research material and a prioritized backlog for later vertical slices.
 
 ## Architecture
 
-### ServicePromptRegistry
+### 1. Static registry
 
-`ServicePromptRegistry` is the canonical allowlist of editable service-prompt definitions. A definition represents one workflow contract, not necessarily one string. For example, `web.article_summary` may contain coordinated `system` and `user` parts.
+A plain immutable mapping of ServicePromptDefinition values describes each allowed prompt:
 
-Each typed definition declares:
+- stable dotted ID;
+- English fallback label and description;
+- stable affected-workflow IDs plus English fallback text;
+- packaged default parts;
+- an ordered set of editable parts, each with a stable key, fallback label, literal-or-template mode, and exact required variable names.
 
-- Stable definition ID and schema version
-- Localization label and description keys with English fallbacks
-- Primary category, searchable tags, and affected workflow identifiers
-- Named prompt parts and their assembly order
-- Immutable packaged/default asset references for each part
-- Compatibility mappings for existing prompt-loader module/key pairs and environment override variables
-- Required and optional variables
-- Safe deterministic sample values
-- Per-template, per-variable, repetition, and assembled-size budgets
-- Whether oversize runtime values are rejected or deterministically truncated
-- Editable sections and server-managed locked sections
-- Locked-section visibility: `visible` or `hidden`
-- Output-contract classification and eligibility evidence
-- Sensitivity, deprecation, and replacement metadata
+The client localizes known stable definition, part, and workflow IDs. It falls back to server-provided English text so a newer server definition remains understandable to an older supported client.
 
-Startup validation rejects duplicate IDs, missing assets, invalid part mappings, undeclared placeholders, invalid sample values, contradictory size budgets, or incomplete replacement metadata.
+The three Chat definitions contain one template part. Translation contains an atomic literal system part and templated user_template part. Consumer code owns provider-message roles and assembly; the registry does not invent a generic assembly language. It also does not include lifecycle modes, approval metadata, deployment sources, cryptographic digests, or arbitrary assembly policies.
 
-### Atomic definitions and locked assembly
+Defaults are canonical on a supported server. Because an updated extension may connect to an older server, the client retains clearly named legacy compatibility defaults solely for the explicit unsupported-server fallback. Supported servers never use those copies. Initial golden tests require server defaults and compatibility copies to match; later server-default changes do not alter old-server behavior.
 
-System/user pairs and other coordinated fragments are one definition and one revision. Users cannot save only half of a coordinated contract.
+### 2. Per-user override store
 
-Editable text is not always the complete prompt. The server may prepend or append locked fragments. Visible contract fragments are shown read-only. Hidden server-managed fragments are represented in preview and provenance without returning their bodies.
+Overrides live in the existing per-user prompts database returned by the standard authenticated prompts-database dependency. The API never accepts a target user ID or database path.
 
-A structured-output workflow is eligible only when the output schema is enforced independently, such as by provider response-format support or deterministic validation and retry. If downstream correctness relies primarily on prompt wording, the prompt remains fully locked.
+PromptsDatabase moves from schema v5 to v6. Fresh initialization and a new transactional _apply_schema_v6 migration both create exactly one table and advance schema_version from 5 to 6:
 
-### PromptExecutionContext
+    CREATE TABLE IF NOT EXISTS ServicePromptOverrides (
+        definition_id TEXT PRIMARY KEY,
+        parts_json TEXT NOT NULL,
+        revision TEXT NOT NULL
+    );
 
-Consumers resolve prompts using a typed context rather than a bare user ID. It contains:
+For each definition, parts_json contains exactly its registered keys; for example, a Chat row is {"template": "..."} and Translation contains system and user_template. Reads reject missing, extra, non-string, malformed, or otherwise invalid parts.
 
-- Canonical owner identity, when user-owned
-- Operation/workflow identifier
-- Optional explicit overrides keyed by named editable part
-- For each explicit part, its kind: `literal` or `template`
-- Optional immutable prompt pin set
-- Request, trace, and job identifiers as safe metadata
+Ownership is provided by the per-user database itself. Store methods use the existing database abstraction and transaction helper. Each content-changing save replaces revision with a new opaque UUID. An exact no-op or identical retry returns the existing row unchanged. Reset deletes the row. Compare-and-swap on revision prevents stale writes even when an override is reset and recreated. There are no revision-history, event, receipt, approval, or catalog-generation tables.
 
-Definitions declare which named parts map to legacy fields such as `system_prompt` and `custom_prompt`, whether each part accepts literal or template input, and how omitted parts are filled. A partial explicit override replaces only its named editable parts. Other editable parts continue through normal precedence, while locked parts can never be replaced.
+A corrupt parts_json value does not prevent reading the separate definition_id and revision columns needed for a safe reset.
 
-`literal` means the supplied text is used as the final value for that editable part without placeholder parsing. `template` means the constrained renderer substitutes the definition's declared variables. The migration inventory must preserve the semantics of every existing explicit field rather than guessing from its name.
+Physical backup of the per-user prompts database covers this table. Chatbooks and the current portable backup flow do not export Service Prompt overrides in v1. User-facing copy must say **Backup supported account data** and list Service Prompt overrides among the exclusions. The migration panel repeats that these overrides are server/account scoped and are not in the portable backup. Portable export/import remains deferred.
 
-Userless maintenance activity deliberately uses the server default. Store errors or missing ownership never cause an accidental cross-user or default fallback.
+### 3. Resolver, request snapshot, and rendering
 
-### Resolution precedence
+For a registered definition, the resolver has exactly two sources:
 
-The resolver selects each named editable part in this order:
+1. the authenticated user's valid saved override;
+2. the packaged registry default.
 
-1. Explicit request override
-2. Authorized pinned bundle snapshot
-3. Active per-user override
-4. Deployment default, including existing environment/file overrides
-5. Packaged default
+It returns the selected parts and non-sensitive provenance: definition ID, source (user or packaged), and revision when a saved override exists.
 
-An active user override is atomic: when selected, it supplies its complete set of editable parts. Explicit overrides may then replace a declared subset part by part. Locked parts always come from the resolved server-managed definition.
+Existing request-local controls keep their current semantics outside this resolver. For example, systemPromptAppendix remains a literal suffix; it is not another template source. The RAG template is rendered first and the literal appendix is appended afterward, so braces or placeholder-looking text in the appendix remain literal. Provider, model, source, retrieval, and tool controls stay in consumer code.
 
-All parts are resolved before the resolver computes the atomic server-default bundle digest. That bundle digest drives revision provenance and upstream-change detection. `bypass_stored_overrides` skips only stored user overrides; it does not suppress pre-existing explicit request fields. This preserves explicit overrides as the highest-precedence request choice.
+Server-side Translation calls the resolver directly. The shared TypeScript client obtains the three Chat definitions through authenticated detail reads. Before preflight, each top-level Chat invocation:
 
-The immutable `ResolvedServicePrompt` contains rendered or render-ready named parts plus safe provenance:
+1. determines the definitions needed by that mode;
+2. fetches those details concurrently once;
+3. freezes a small request-scoped snapshot in the invocation's existing context; and
+4. carries it through preflight, retrieval, and provider-message preparation.
 
-- Definition ID and schema version
-- Per-part source kinds
-- User revision and explicit-override provenance, when applicable
-- Server-default bundle digest
-- Canonical content digest
-- Assembly order and locked-section markers
+Pipeline modes carry the snapshot in ChatModeContext. Legacy useMessage keeps one local immutable snapshot because it does not use chatModePipeline. Main Chat ragMode, normalChatMode, tabChatMode, documentChatMode, and legacy Sidepanel RAG must consume their applicable definitions from those snapshots or be proven unreachable and removed. Repeated helpers within an invocation never reload a definition.
 
-The resolver runs once per request, batch, or job. Lower-level loops receive the immutable result and do not perform repeated database lookups.
+A Compare submission is one top-level invocation. It resolves the applicable normalChatMode definitions once before the Promise.all model fan-out and gives every branch the same snapshot; individual model branches do not resolve independently.
 
-### Constrained renderer
+Prompt resolution is outside best-effort provider/search catches. In particular, failure to resolve chat.web_search.answer from a supported server aborts request preflight; an ordinary web-search provider failure may retain its existing fallback behavior. A supported-server prompt failure is never silently converted into a Chat request without search context.
 
-The renderer accepts only simple declared placeholders such as `{context}`. It supports escaped literal braces but rejects:
+Detail responses use Cache-Control: no-store. Runtime prompt resolution performs fresh authenticated detail reads for each top-level invocation rather than reusing the Settings query cache. Client query keys, migration state, and editor drafts are additionally scoped by normalized server URL plus a resolved authenticated principal ID. Hosted WebUI sessions resolve /api/auth/session and pass its user ID into the existing scope-key builder; authenticated state must never fall back to user:anonymous merely because no access token is stored. Queries and mutations remain disabled until that identity resolves. A save invalidates the matching scoped Settings data. A server/account change aborts in-flight reads, invalidates the old queries, clears migration state, and makes any old-scope draft ineligible to save. HTTP cache headers alone are not treated as account isolation.
 
-- Attribute access
-- Indexing
-- Expressions
-- Format specifiers
-- Filters
-- Function calls
-- Arbitrary code or template control flow
+The renderer is deterministic and single-pass:
 
-It uses a linear parser, reports part/variable/line/column diagnostics without echoing surrounding prompt text, and enforces template, variable, repetition, and final assembly budgets. Save, preview, synchronous execution, and worker execution use the same validation and rendering implementation.
+- Parse only the authored template into literal and placeholder tokens.
+- Concatenate runtime values into those tokens exactly once.
+- Never parse or replace text inside an inserted value.
+- Preserve runtime values byte-for-byte, including braces, newlines, dollar-sign replacement metasequences, and placeholder-looking text.
+- Treat escaped braces as literal braces.
 
-## Persistence
+Sequential replacement loops are forbidden. The TypeScript implementation must not use replacement-string semantics that reinterpret $&, $', or similar sequences. Token concatenation or callback substitution is required.
 
-Persistent user-authored service-prompt state and revisions live behind a dedicated repository using each user's existing Prompts database boundary. Execution-only snapshots and pin sets live in a separate server-managed protected execution store because they may contain hidden deployment instructions or request-bound literal content. Neither record family appears in ordinary Prompt search, Prompt Studio, MCP prompt listings, or Prompt exports.
+Every required variable appears exactly once in an accepted v1 template. This prevents user-authored repetition from amplifying a bounded runtime input into a much larger provider prompt while preserving every current default. Existing consumer input/context limits still apply. If a future use case genuinely requires repeated variables, it must introduce and test an explicit rendered-size policy first.
 
-The conceptual data model contains the following record types. The implementation plan may consolidate physical tables if it preserves these contracts.
+No asynchronous definition is part of v1. Snapshot persistence for a future asynchronous consumer is designed with that concrete domain, using existing Jobs infrastructure only if it fits.
 
-### Service prompt state
+### 4. Template validation and client-side preview
 
-One mutable state record per definition contains:
+The server applies one validator to packaged defaults and saved overrides:
 
-- Definition ID
-- Active revision ID or null
-- Current pending revision ID or null
-- Monotonically increasing generation
-- Last acknowledged server-default digest
-- Updated timestamp
+- parts must contain exactly the keys declared by the definition;
+- each value must be a string, must contain at least one non-whitespace character, and must be at most 20,000 Unicode code points; the TypeScript client counts code points rather than UTF-16 code units;
+- literal parts do not parse braces;
+- Python string.Formatter.parse identifies replacement fields in template parts;
+- fields must be simple ASCII identifiers matching [A-Za-z_][A-Za-z0-9_]*;
+- attribute access, index access, conversions, and format specifications are rejected;
+- every registered variable must occur exactly once;
+- unknown, missing, and repeated variables are rejected;
+- escaped literal braces remain supported; and
+- invalid input is rejected, never truncated or silently repaired.
 
-The generation changes for pending save, approval, rejection/supersession, restore, reset, and default-change acknowledgement. It is the optimistic-concurrency token even when the active revision remains null. A user may have at most one current pending revision per definition; a newer pending save explicitly supersedes the previous pending revision without activating either one. After the resolver verifies a trusted server default, reset supersedes any pending revision and clears the active revision in the same repository transaction.
+The client mirrors those rules for immediate editor feedback, but PUT remains authoritative validation.
 
-A separate per-user `catalog_generation` metadata value increments in the same transaction as every definition-state or pending-state change. The catalog ETag combines the current registry/server-default catalog digest, capability/operator mode, and this user catalog generation. This gives the list endpoint an O(1) invalidation token without relying on timestamps or scanning every revision.
+Preview is local to the Settings client. It calls the production TypeScript renderer with visible [variable_name] marker values and returns an ordered display for each part. Literal-part content remains unchanged. Preview performs no API request and no LLM call.
 
-### Immutable revisions
+One language-neutral fixture set is consumed by Python and TypeScript tests. It covers escaped braces, Unicode, newlines, $&, $', backslashes, values containing {question} or other registered names, and exact rendered bytes. Packaged defaults must pass the same fixtures and validator during tests and registry initialization.
 
-Each revision contains:
+### 5. API
 
-- Revision ID and sequence number
-- Definition ID
-- Atomic editable parts
-- Origin action: save or restore
-- Registry schema version
-- Base server-default bundle digest
-- Canonical content digest
-- Creation timestamp
-- Creator identity metadata
+All operations use normal authentication and implicit current-user ownership. API-key requests require read scope for GET and write scope for PUT/DELETE; JWT behavior follows the existing authenticated-user rules.
 
-Revision content is immutable. Integrity/activation status is tracked separately so the content row never changes.
+| Method and path | Success response | Purpose |
+| --- | --- | --- |
+| GET /api/v1/service-prompts | 200 catalog | Return metadata summaries without prompt bodies |
+| GET /api/v1/service-prompts/{definition_id} | 200 detail | Return default, saved, and effective parts |
+| PUT /api/v1/service-prompts/{definition_id} | 200 detail | Validate, atomically save, and immediately activate |
+| DELETE /api/v1/service-prompts/{definition_id} | 200 detail | Atomically reset and return the packaged-default state |
 
-Reset clears the active pointer but preserves history. Reset, acknowledgement, approval, rejection, and supersession are immutable state-history events rather than content revisions. They are visible in combined history but are not restorable. Restore revalidates an older content revision against the current definition and creates a new pending revision; it never rewinds the pointer. An incompatible historical revision returns an actionable compatibility report.
+The router is always registered in supported builds and is not hidden by a generic route_key switch. A catalog 404 is therefore reserved for an older server that does not implement Service Prompts. Catalog 401, 403, 5xx, invalid responses, and network failures are explicit errors and never enable browser-local compatibility mode.
 
-### Content-addressed snapshots
+Catalog summaries contain IDs, localized-fallback metadata, part schemas, and affected-workflow metadata, but no prompt bodies.
 
-Every queued job logically pins the complete resolved template bundle, including editable parts, locked fragments, assembly order, and safe provenance. This is necessary because partial explicit overrides and locked server fragments can otherwise change independently after enqueue.
+The canonical detail representation contains:
 
-The physical snapshot is a protected component manifest:
+- id and definition metadata;
+- default_parts;
+- saved_parts, or null;
+- effective_parts;
+- source, either user or packaged; and
+- revision, or null when no saved row exists.
 
-- User-authored and explicit-request parts are stored as owner-scoped execution components.
-- Visible and hidden server-managed parts reference immutable protected server-asset snapshots by asset ID and digest.
-- The manifest records assembly order and one canonical full-bundle digest.
+PUT accepts {"parts": {...}, "expected_revision": <UUID-or-null>}. Null means the caller observed no saved row. Existing-row updates use one compare-and-swap statement whose WHERE clause includes revision. New-row inserts rely on the primary key and map a race to identical-retry success or 409 Conflict. If validated parts equal the parsed stored parts, PUT returns the current detail without generating a new revision.
 
-Server-managed components may be deduplicated globally by trusted asset digest. User-authored and explicit-request components may be deduplicated only within the same owner scope; APIs never reveal whether another owner has matching content. Hidden server-managed bytes are never copied into a per-user Prompts database.
+DELETE accepts optional expected_revision as a query parameter; omission means the caller observed no saved row. An absent row with omitted expected_revision is an idempotent success. Every other mismatch, including a UUID supplied after another client reset the row, returns 409. A matching revision can reset a corrupt row because revision is stored outside parts_json.
 
-Template snapshots do not contain rendered source documents or runtime variable values. A queued explicit `literal` override is an exception because the literal itself is the exact prompt part to reproduce; it is treated as sensitive request-bound job input, protected and retained under Jobs policy, and excluded from user prompt history and backups.
+Recognized Service Prompt endpoint/domain failures use the FastAPI envelope below:
 
-The protected execution store is not exposed through Service Prompts detail/history APIs or user exports. It uses the server's Jobs encryption-at-rest facility when enabled and retains components only as long as active/retained jobs reference them.
+    {
+      "detail": {
+        "code": "stable_machine_code",
+        "message": "user-safe message",
+        "...": "status-specific safe fields"
+      }
+    }
 
-Encryption is optional confidentiality, not the integrity boundary. Every execution component, component manifest, pin set, and later job-binding record must carry a signature, MAC, authenticated-encryption tag, or equivalent cryptographic authenticator whose key/trust anchor is held outside the protected execution store. A colocated digest alone is insufficient.
+This custom envelope applies to unknown definitions, semantic parts/template validation, revision conflicts, corrupt rows, and transactional store failures handled after dependency resolution. Authentication and scope denials, malformed request bodies or query values, and prompts-database dependency/initialization failures keep the repository's existing FastAPI contracts because they occur before domain handling. The client normalizes known domain failures from direct HTTP and extension-proxy transports while retaining a safe generic path for those existing framework/dependency errors. Prompt bodies never appear in error details.
 
-The canonical authenticated envelope covers owner, submission ID, definition/component identifiers, component digests, full-bundle/set digest, source flags, creation/expiry metadata, and key ID. Binding produces a second authenticated record covering the original envelope digest and exact job UUID. Workers verify the trust anchor, both authenticators, expiry, owner, job binding, and all content digests before using any item.
+Status-specific fields and behavior:
 
-Default mode may use an online execution-artifact signing/MAC key managed by context integrity or the existing Jobs key facility. Hardened mode requires that online key's identity/public verification material to be anchored by the external approved trust state; if no trusted execution-artifact signer is available, prompt-bearing queued work fails before job creation. Key rotation retains verification material for at least the maximum retained-job lifetime.
+- 404 service_prompt_unknown_definition for an unregistered definition;
+- 409 service_prompt_revision_conflict with current_revision, which may be null;
+- 422 service_prompt_validation_failed with field_errors keyed by part;
+- 500 service_prompt_corrupt_override with revision and can_reset: true when the stored row cannot be safely resolved; and
+- 500 service_prompt_store_failed for transactional store failures handled by the endpoint, with no partial write.
 
-Automatic authentication of a request-bound explicit override proves enqueue provenance and immutability; it does not grant reusable prompt approval or replace the operator approval required for persistent Service Prompt revisions.
+The field is named revision rather than revision_token so the extension proxy's generic secret redaction does not destroy the non-secret concurrency value. Extension transport tests must prove that detail, conflict, corrupt-row reset, and revision values survive the round trip.
 
-### Prompt pin sets and mutation receipts
+Invalid packaged defaults are code defects: registry initialization fails rather than marking a definition conditionally available or sending invalid text to a model.
 
-A prompt pin set atomically binds one or more logical full-bundle manifests, their owner, a one-time submission ID, and an overall set digest to queued work. Each item records the definition ID, protected manifest reference/digest, and source flags needed by operator modes. The whole set is committed in one protected-execution-store transaction before job creation.
+## Shared Settings experience
 
-Mutation receipts map a client mutation ID to the completed result so safe network retries do not create duplicate revisions or misleading concurrency errors.
+The existing /settings/prompt route remains under **Preferences & Workflow** and becomes **Workflow prompts** in both the hosted WebUI and extension options app. Existing Omni Search, Settings index, Prompt Search, and tests that currently describe /settings/prompt as the reusable Prompt Library are retargeted to /prompts. The new page retains a secondary **Open reusable Prompts workspace** link. The unreachable legacy editor is not resurrected.
 
-### Concurrency and integrity activation
+V1 uses the existing Settings content width. It does not add a navigation group or redesign the shell. The route provides:
 
-Mutations use `expected_generation`. A stale generation returns a conflict and preserves the client's draft.
+- a plain list of the four v1 definitions;
+- a detail view addressable with ?prompt=<definition_id>;
+- **Server default** or **Customized** status;
+- affected-workflow text and explicit server/account scope;
+- required-variable reference chips;
+- one labeled plain-text editor per registered part;
+- local **Preview**, **Save changes**, and **Reset to default** actions; and
+- an unsaved-change guard when navigating away.
 
-Activation follows the existing context-integrity approval policy:
+Known stable IDs are localized in the client, with server English text as fallback. On narrow layouts, selection navigates from list to detail. A permanent two-column editor and side-by-side diff are not required.
 
-1. Validate the draft against the current registry contract.
-2. Append an immutable pending revision.
-3. Present an escaped canonical diff for explicit non-model operator review.
-4. On approval, re-resolve the current definition schema, part contract, locked assembly, and server-default bundle digest; then revalidate the pending revision.
-5. If the registry schema, locked assembly, or server-default bundle digest changed since save, refuse activation with `pending_revision_stale`. The owner must preview and resubmit against the new baseline, creating a new pending revision.
-6. Re-check the revision digest and manifest version, sign/register the new approved manifest version, and record the approval event.
-7. Compare the pending revision ID and state generation again, then advance the active state and generation only after approval succeeds.
+Literal parts show no variable controls; template parts show only their registered variables. Dirty state, validation, save, reset, and conflict apply atomically to the complete parts object, including Translation's system and user_template fields. Reset requires confirmation naming the definition and stating that its saved customization will be permanently removed because v1 has no history or undo. The same confirmation is required when resetting a corrupt row.
 
-An owner save does not itself count as integrity approval. In single-user mode the same person is normally both owner and local operator, but activation still requires a distinct explicit confirmation. In multi-user mode, an authorized operator/admin approves the owner's pending revision through the context-integrity review flow; this governance action does not transfer ownership or create an administrator-wide override.
+The first-class states are loading, server default, customized, dirty, saving, validation error, edit conflict, corrupt/unavailable, unsupported older server, and disconnected. A conflict preserves the complete draft and offers to reload the current server value; it never overwrites automatically. A corrupt override offers reset using the safe revision returned by the API. An older-server notice explains that existing local runtime behavior remains active and that server-synced editing requires a server update; v1 does not resurrect a second local-only editor.
 
-Per-user ownership is therefore an execution and mutation boundary, not secrecy from an authorized integrity reviewer. The review surface may disclose the pending revision's escaped canonical diff only to principals holding the existing context-integrity approval privilege. Ordinary administrators and other users do not gain read access through the Service Prompts API.
+The editor's query, detail cache, draft, selected definition, migration panel, and mutations all include the current server/account scope. If that scope changes after a draft loads, saving is disabled until the page loads the new scope; the old draft is not silently rebound.
 
-If approval fails, the digest/baseline changes during review, or no authorized operator approves, the prior effective revision remains active and the new revision remains pending, stale, or rejected. This design follows, and does not supersede, `2026-06-25-context-integrity-skills-prompts-design.md`.
+Unsaved-change protection is host-aware. It covers Settings navigation, prompt selection through the query string, browser back/forward, and beforeunload in both hosts. The implementation must not assume the current Next router shim's no-op useBlocker provides this protection.
 
-### Cross-database enqueue protocol
+Prompt text is rendered only in text controls or escaped code blocks. The client does not interpret it as HTML or Markdown.
 
-Prompt storage and Jobs storage do not share a transaction. Enqueue therefore uses a one-time submission ID and compare-and-set binding:
+## Legacy browser-local migration
 
-1. Before enqueue, the job producer declares every service-prompt definition that the job can use.
-2. Resolve and snapshot all declared definitions, authenticate the canonical component manifests/pin-set envelope, then commit one complete pin set with owner, submission ID, item digests, set digest, and authenticator.
-3. Enqueue the owner-scoped job with the pin-set ID, submission ID, and set digest.
-4. Compare-and-set bind the pin set to the returned job UUID and persist an authenticated binding record.
+The server catalog is the capability boundary. Migration detection reads raw storage areas directly rather than calling default-producing helpers or the helper that automatically moves legacy sync data:
 
-If a worker acquires the job before step 4 finishes, the worker may atomically perform the same compare-and-set binding and authenticated binding record only when owner, submission ID, pin-set ID, set digest, and original envelope authentication all match. Execution begins only after the pin set is cryptographically bound to that exact job UUID. A second job cannot reuse the set.
+- On a supported catalog response, the three mapped local keys stop participating in runtime resolution. They are migration input only.
+- Only a catalog 404 activates existing local behavior for an older server.
+- Authentication, authorization, server, protocol, and network failures show an error or disconnected state and perform no migration or mutation.
+- For the RAG keys, current local storage wins when both local and legacy sync contain a value; sync is used only when local is absent. Web search reads its current local area.
+- Migration never synthesizes a compatibility default as if it were a saved value.
 
-A reconciler repairs binding failures and garbage-collects unreferenced pin sets only after a grace period and a check of active and retained jobs. Workers verify the set digest and every item before beginning any stage. If one item fails, no prompt in the set is used.
+When supported raw values exist, /settings/prompt shows a one-time migration panel naming the connected server/account and offering **Import to this server** or **Discard local values**. It states that imported Service Prompt overrides are server/account scoped and are not included in portable Backup supported account data.
 
-Jobs with data-dependent prompt selection must pin all possible registered candidates plus the versioned selection policy before enqueue. A queued workflow that cannot declare a finite prompt requirement set is not eligible for migration until refactored.
+Reaching any Chat path that would consume one of the three mapped local keys before resolving that panel stops request preflight and shows an actionable **Review workflow prompts** notice linked to /settings/prompt. This includes Main RAG, Tab Chat, Document Chat, legacy Sidepanel RAG, main web search, and Compare web search as applicable. It does not silently use the server default or legacy value. Translation is unaffected because it has no browser-local predecessor.
 
-Pinned jobs are retained according to Jobs retention. Referenced revisions and snapshots cannot be removed. Revision history is cursor-paginated and subject to account storage quotas.
+Import uses ordinary GET detail and PUT operations. If a target already has a different saved customization, confirmation names the prompts that will be replaced; no sampled or hidden diff is used. Legacy text that fails the new rules remains visible and editable per key so the user can repair, copy, or discard it. It is never destroyed by failed validation.
 
-## API Design
+Each successfully saved value is removed from both current local and legacy sync storage areas only after the server confirms it. A partial failure preserves every unconfirmed raw value and reports exactly which imports remain. Discard requires confirmation and removes only the three mapped keys from both areas.
 
-Add an authenticated `/api/v1/service-prompts` namespace. All ownership comes from the authenticated principal; endpoints never accept a target user ID.
+Migration state is keyed by server/account and is cleared when that scope changes. There is no automatic import because browser storage may have been created for a different server or account. There is no permanent local-precedence mode because it would make supported clients and the server disagree.
 
-### Capability contract
+## Security and privacy
 
-The server exposes:
+- Registry eligibility—not approval ceremony—is the primary safety boundary.
+- Standard authentication chooses the per-user database; callers cannot select another owner.
+- API-key read/write scopes protect reads and mutations in addition to owner resolution.
+- API schemas, strict part validation, bounded placeholder occurrence, and parameterized database operations protect the write boundary.
+- Service Prompt bodies are not logged, included in catalog summaries, or placed in error details.
+- The UI treats prompt bodies as plain text.
+- Workflows continue enforcing authorization, routing, provider/model selection, tool availability and permissions, retrieval scope, and output contracts outside prompt text.
+- Every question-rewrite model call, including Document Chat, forces toolChoice none, disables persistence with saveToDb false, and cannot attach or invoke tools. A hostile customized rewrite may change only the resulting query string. Authenticated corpus ownership, source IDs, retrieval options, provider/model, and tool configuration remain code-controlled and are verified by integration tests for every rewrite consumer.
+- Existing Context Integrity protection for packaged files is unchanged. User-owned overrides are ordinary authenticated user data, comparable to explicit prompt input already accepted by eligible workflows.
 
-```json
-{
-  "service_prompts": {
-    "enabled": true,
-    "mode": "enabled",
-    "availability": "experimental",
-    "contract_version": 1,
-    "can_approve_pending": false
-  }
-}
-```
+No new cryptographic trust infrastructure is justified for this feature.
 
-Clients use this to distinguish supported, unavailable, read-only, `bypass_stored_overrides`, incompatible, experimental, and general-availability servers.
+## Failure behavior
 
-### Endpoints
+| Condition | Required behavior |
+| --- | --- |
+| Unknown definition | Return structured 404; do not create a row |
+| Invalid, repeated-variable, or oversized template | Return field-specific 422; preserve the current override |
+| Concurrent edit/reset | Return 409 with current_revision; preserve both the server value and local draft |
+| Database write failure | Roll back; the previous override remains active |
+| Corrupt active override | Return a safe error with revision and allow conditional reset; never substitute the default silently |
+| Older server catalog 404 | Keep existing browser-local behavior |
+| Supported server with unresolved legacy value | Block only the affected Chat workflow and link to the migration panel |
+| Authentication, server, protocol, or network failure | Show the appropriate error/disconnected state; do not infer old-server capability or mutate storage |
+| Supported-server prompt detail failure | Fail request preflight with a retryable user-safe error; do not use stale or local text |
+| Web-search provider failure after prompt resolution | Preserve the current best-effort search fallback without swallowing prompt errors |
+| Server/account scope changes with a draft | Abort old work and disable save; never send the draft to the new scope |
 
-- `GET /catalog`
-  - Metadata and current-user state summaries
-  - Search/filter inputs as needed
-  - No prompt bodies
-  - Private composite ETag based on registry/server-default catalog digest, capability/operator mode, and per-user catalog generation
-
-- `GET /{definition_id}`
-  - Server-default, active, and effective editable parts when visible and trusted
-  - Structured provenance, validation contract, generation, and upstream-change state
-  - Hidden or quarantined bodies omitted
-  - `Cache-Control: private, no-store`
-
-- `POST /{definition_id}/preview`
-  - Validates draft parts
-  - Renders deterministic safe samples
-  - Returns named rendered parts, variable diagnostics, locked-section markers, and assembly order
-  - Never invokes an LLM
-
-- `PUT /{definition_id}/override`
-  - Saves all editable parts atomically as the current pending revision
-  - Requires expected generation and client mutation ID
-  - Does not activate the revision
-
-- `POST /{definition_id}/reset`
-  - First resolves and verifies the current server default
-  - Only then supersedes any pending revision and clears the active override after concurrency checks
-  - If the required server default is unavailable or quarantined, preserves active/pending state and returns a safe conflict/unavailable error
-
-- `POST /{definition_id}/acknowledge-default`
-  - Records acknowledgement only for the currently resolved trusted server-default digest without rewriting prompt content
-  - Rejects unavailable, quarantined, or stale digests
-
-- `GET /{definition_id}/history`
-  - Cursor-paginated combined content-revision and state-event history without bodies
-  - Reset and acknowledgement events are marked non-restorable
-
-- `GET /{definition_id}/revisions/{revision_id}`
-  - Owner-scoped revision detail with private/no-store caching
-
-- `POST /{definition_id}/revisions/{revision_id}/restore`
-  - Validates the historical revision against the current contract and creates a new pending revision
-
-Approval and rejection reuse the context-integrity review API and signed-manifest flow rather than introducing a second trust mechanism. The Service Prompts detail response links to the applicable pending asset and reports whether the current principal can approve it. In single-user mode the UI may offer a distinct **Review and approve** step, but it must remain a separate explicit action after save and must use the same integrity API.
-
-Preview and mutation endpoints share runtime validation, body limits, rate limits, idempotency behavior, and stable machine-readable error codes.
-
-### API failure semantics
-
-- `422`: invalid draft with part-specific diagnostics
-- `409`: stale generation, incompatible restore, pending-revision conflict/staleness, unsafe reset, or stale acknowledgement digest
-- `413`: template or request body too large
-- `403`: authenticated principal lacks access
-- `404`: capability/definition is unavailable to this principal
-- `429`: mutation or preview rate limit
-- `503`: expected prompt store or integrity service is temporarily unavailable
-
-Quarantined or incompatible expected content fails closed with a recovery code. Responses, logs, and telemetry do not echo prompt bodies.
-
-## Runtime and Job Behavior
-
-Synchronous services resolve once at their public service boundary. Existing explicit request prompt fields remain supported and take precedence. A migration must preserve whether an existing field is literal final text or a template.
-
-Explicit request overrides retain their existing request-authorization semantics. They are request data, not reusable saved prompt versions, and do not require the separate operator approval used for persistent Service Prompt overrides. For queued work, the authenticated enqueue request authorizes creation of a one-job execution component; the protected store binds it to the owner/submission/job and verifies its digest at use. It cannot be discovered, restored, rebound, or reused as a saved prompt.
-
-Queued endpoints declare their finite prompt requirements and commit one complete pin set before enqueue. Job payloads and job-status responses contain only safe references and digests, never raw prompt bodies. Workers bind the set to their exact job UUID before using any item and distinguish:
-
-- Temporary prompt-store unavailability: retryable
-- Missing or digest-mismatched pin set/item: permanent integrity failure
-- Stored-override execution held by operator mode: held/retryable without substituting a different prompt
-
-Editing, resetting, acknowledging, or upgrading defaults does not alter already pinned work.
-
-## WebUI and Browser Extension
-
-### Information architecture
-
-Add `/settings/service-prompts` as a dedicated advanced page under AI & Models. Keep `/settings/prompt` as the link to the reusable Prompt workspace.
-
-The page introduction explains the difference among:
-
-- Service Prompts: automatic backend workflow defaults
-- Prompt Library: reusable prompts selected by the user
-- Conversation system prompts: chat-specific behavior
-
-The implementation belongs in the shared UI package. The WebUI and extension options app render the same route. The narrow extension sidepanel uses the existing platform navigation abstraction to open the full options route.
-
-### Catalog experience
-
-The catalog provides:
-
-- Search across names, descriptions, tags, and affected workflows
-- Primary categories with secondary tags
-- Filters for Customized, Server default, Upstream changed, and Needs attention
-- Status summaries without loading prompt bodies
-- Clear workflow-impact descriptions
-
-Categories include summarization, RAG, media/audio, documents/web, extraction/chunking, and reports/digests, but eligibility is governed by the registry matrix rather than category alone.
-
-### Editor experience
-
-The editor shows:
-
-- Definition description and affected workflows
-- Named editable parts in lightweight accessible text areas
-- Required/optional variable chips with cursor insertion
-- Visible locked sections as read-only text
-- Hidden locked sections as labeled server-managed markers
-- Server-default, customized, and effective provenance
-- Part-by-part plain-text comparison of visible content with unchanged regions collapsed; hidden components expose only changed/unchanged markers and safe digests
-- Deterministic preview and assembly order
-- Save pending revision, reset, acknowledgement, history, restore, and approval-status actions
-
-The UI does not add a heavyweight code-editor dependency. Prompt text and diffs are escaped plain text and are never rendered as rich Markdown or HTML.
-
-### Interaction states
-
-- Inline validation plus an accessible error summary
-- Dirty-state navigation and native close protection
-- In-memory draft preservation during connection errors
-- Retry and Copy Draft actions; no automatic device persistence
-- Conflict handling that preserves the local draft and offers reload/copy, never automatic merge
-- Upstream-change banner with Compare, Keep override, and Use server default actions
-- Save messaging that the draft is pending explicit approval and does not yet affect runtime
-- Approval/reset messaging that active changes apply to new work while queued jobs keep their pin sets
-- Explicit disconnected, unsupported-server, read-only, bypass, pending-approval, quarantined, and incompatible states
-
-“Keep override” stores the acknowledged default digest. “Use server default” clears the override rather than copying the default, so later server-default updates continue to flow through.
-
-### Responsive and accessible behavior
-
-Desktop may use a master-detail layout. Narrow screens use list-first navigation followed by a full-width editor with a clear Back action. The route must not create page-level horizontal scrolling at 390 px or extension-option widths.
-
-Keyboard operation, focus restoration, labeled controls, screen-reader status updates, touch targets, and validation focus are required. Localization uses client translation keys with server fallbacks; placeholder identifiers remain literal and untranslated.
-
-## Eligibility and Security
-
-### Eligible prompts
-
-Eligible definitions are user-visible content-generation or content-analysis instructions whose modification does not control authorization or an unenforced machine protocol. The inventory must record:
-
-- Source and runtime consumer
-- Data owner and workflow owner
-- Variables and assembly behavior
-- Output dependency
-- Locked fragments
-- Visibility
-- Eligibility decision and reason
-
-### Excluded prompts
-
-The following remain locked:
-
-- Authentication and authorization instructions
-- Safety and moderation policy
-- Tool and MCP permission/policy prompts
-- Provider/model routing and tool-selection control prompts
-- Evaluator, judge, grader, and security-review prompts
-- Instructions whose output is parsed as a machine protocol without independent enforcement
-- Hidden provider- or deployment-sensitive instructions
-
-### Authorization boundary
-
-Prompt text never grants authority. Tools, MCP calls, network access, filesystem access, data retrieval, and provider actions remain governed by existing RBAC, scope, policy, and argument validation on every call.
-
-### Privacy
-
-Prompt content is not secret storage. The UI warns against credentials. Bodies and rendered values are excluded from:
-
-- Ordinary logs
-- Audit message text
-- Metrics labels
-- Job payload/status summaries
-- Notifications
-- Validation/error responses
-
-Audit metadata includes actor, definition ID, action, revision/digest, result, and timestamp.
-
-Private account backups include only user-authored service-prompt content revisions and state-history provenance. They exclude execution snapshots, pin sets, hidden server-managed bytes, mutation receipts, integrity-review artifacts, and transferable active/pending trust state.
-
-On import:
-
-1. Preserve every imported content revision as owner-visible historical content marked `unapproved_import`.
-2. Preserve exported state events only as non-operative provenance; do not replay activation, approval, reset, acknowledgement, or pending pointers.
-3. Initialize the local definition state with `active_revision_id = null`, `pending_revision_id = null`, no acknowledged default digest, and a fresh local generation.
-4. Do not automatically choose between the formerly active and formerly pending exported revisions.
-5. Let the owner select one imported historical revision, preview it against the current local registry/server default, and use restore/resubmit to create the sole current local pending revision.
-6. Require normal local explicit operator approval before activation.
-
-This avoids trusting another deployment's state, preserves all user-authored choices, and keeps the one-current-pending invariant deterministic.
-
-Shareable Chatbooks, ordinary Prompt exports, and MCP prompt catalogs exclude service prompts by default unless a later explicitly approved portability design changes that boundary.
-
-### Context integrity
-
-Server defaults use existing exact-byte file verification. Persistent user revisions use canonical asset identities scoped by owner, definition, and immutable version. At use time, the resolver verifies the exact bytes or row version consumed.
-
-Request-bound execution components are not reusable DB prompt versions. They preserve the existing ability to send explicit request prompts, while their externally anchored authenticated envelope, owner/submission/job binding, and canonical digest prevent post-enqueue mutation or cross-job reuse. Server-managed hidden components remain protected context assets and must be trusted before a pin set can reference them.
-
-Out-of-band mutations are quarantined. Every owner save remains pending until an explicit authorized operator approval updates the signed trust manifest. This requirement applies in normal and single-user modes; in single-user mode the owner/operator performs a separate non-model confirmation. Hardened deployments may additionally require an external trust decision. The previous effective revision remains active throughout review.
-
-Review and settings surfaces never render untrusted content as rich HTML or feed it into model-assisted review.
-
-## Compatibility
-
-### Existing prompt loader and deployment overrides
-
-The legacy `prompt_loader` remains for locked and not-yet-migrated prompts. A migrated workflow cannot mix registry-managed and direct-loaded versions of the same definition.
-
-Existing module/key and `TLDW_PROMPT_FILE_*` mappings become deployment-default providers for eligible parts. The registry computes the atomic bundle after resolving every part. Hidden deployment defaults reveal only safe provenance and digest state.
-
-Deployment-default failure behavior is intentionally stricter for migrated definitions than the legacy loader:
-
-- An unset or blank environment override is not configured, so resolution proceeds to the packaged default.
-- A configured nonblank override that is missing, unreadable, invalidly encoded, or integrity-blocked makes that required part and the atomic server-default bundle unavailable. The resolver does not fall through to packaged content.
-- The operator recovers by fixing/removing the configured override or approving the expected asset; the UI/API reports a safe unavailable state without the path or body.
-- Optional parts may be omitted only when the registry definition explicitly marks them optional.
-
-Locked and not-yet-migrated consumers retain legacy fallback behavior until their domain migration. Domain compatibility tests must assert the stricter behavior at the migration boundary.
-
-### Chat and reusable prompts
-
-`preferences.chat.system_prompt`, composer prompt selection, and conversation-specific system prompts remain under Chat settings. Prompt Library and Prompt Studio records retain their existing APIs and user experiences. No new precedence is introduced between those systems and Service Prompts.
-
-### Operator modes
-
-Expose an operator-controlled mode:
-
-- `enabled`: normal read/write and runtime behavior
-- `read_only`: existing overrides execute, but mutations are blocked
-- `bypass_stored_overrides`: explicit request fields still apply, but stored user overrides are skipped for new work and the remaining parts visibly use server defaults; existing pin sets containing stored-override content are held rather than silently substituted
-
-Mode changes are visible through capabilities, UI state, logs, and safe audit metadata. They never rewrite or delete history.
-
-## Rollout Plan
-
-This umbrella design is implemented through separate Backlog tasks and reviewable changes.
-
-### Slice 1: Inventory and eligibility matrix
-
-- Inventory centralized and hardcoded prompt sources.
-- Trace runtime consumers and prompt assembly.
-- Assign stable definition IDs.
-- Classify eligible, locked, or deferred with reasons.
-- Identify exact explicit-override compatibility behavior.
-
-### Slice 2: Registry and resolver foundation
-
-- Typed definitions and startup validation
-- Default-provider compatibility
-- Constrained renderer and budgets
-- Execution context and immutable resolver result
-- No-override provider-message goldens
-
-### Slice 3: Persistence, integrity, and API
-
-- Per-user repository and migrations
-- Revisions, generations, acknowledgement, and receipts in the per-user store
-- Protected execution components, manifests, pin sets, retention, and encryption boundaries
-- Two-phase integrity activation
-- Cross-database enqueue reconciliation
-- Authenticated API and capability contract
-
-### Slice 4: Shared settings experience
-
-- Shared route, catalog, editor, preview, compare, history, restore, conflicts, and capability states
-- WebUI and extension-options integration
-- Responsive, accessibility, and localization coverage
-
-### Slice 5: Broad domain migrations
-
-Migrate in independent domain units:
-
-1. Summarization and media/audio analysis
-2. Document and web analysis
-3. User-visible RAG generation
-4. Reports, digests, watchlists, and output creation
-5. Eligible extraction/chunking flows with independently enforced contracts
-
-Each domain change includes registry entries, consumer migrations, eligibility-matrix updates, default-message goldens, integration tests, and documentation together.
-
-### Launch and completion gates
-
-- Development deployments may expose the route with `availability: experimental` after the capability contract and at least one complete domain are available; the nav must label that state as experimental/beta.
-- The first general/public release uses `availability: general` only after every approved broad content-facing domain is complete, matching the selected broad-first-release scope.
-- A domain is complete only when every eligible call site uses the resolver and remaining prompt sources are explicitly locked or deferred.
-- Broad-release completion requires all approved content-facing domains.
-- Existing no-override provider messages are byte-equivalent unless separately approved.
-- Existing deployment file/environment overrides remain effective.
-- Rollback modes are visible and non-destructive.
-
-## Verification Strategy
+## Verification strategy
 
 ### Backend unit tests
 
-- Registry uniqueness, asset presence, definition schema, deprecation, and eligibility contracts
-- Placeholder parsing, escaped braces, invalid syntax, deterministic rendering, budgets, and locked assembly
-- Resolution precedence, literal/template explicit overrides, server-default bundles, userless activity, and hidden defaults
-- Revision immutability, generation conflicts, idempotency receipts, acknowledgement, reset, and compatible/incompatible restore
-- Approval-time registry/default revalidation, stale-pending refusal, two-phase integrity activation, and prior-effective-state preservation
-- Catalog-generation increments and composite ETag invalidation
-- Trusted-default preconditions for reset and acknowledgement
-- Protected snapshot/component creation, owner-scoped deduplication, authenticated envelopes/bindings, key rotation, reconciliation, retention, and garbage collection
-- Operator modes and stable failure codes
+- Registry IDs are unique and every packaged default passes its validator.
+- Placeholder parsing accepts escaped braces and rejects traversal, indexing, conversions, format specs, unknown, missing, and repeated variables.
+- Shared fixtures prove single-pass literal insertion for braces, newlines, Unicode, backslashes, $&, $', and placeholder-looking runtime values.
+- Resolver precedence is user override then packaged default.
+- PromptsDatabase fresh initialization creates v6 and an existing v5 database migrates to v6 without losing existing data.
+- Store create, identical retry, compare-and-swap update, insert race, conflict, reset, and corrupt-row behavior are deterministic.
 
-### Property-based tests
+### API and integration tests
 
-- Arbitrary brace and placeholder inputs never execute code or crash the parser
-- Rendering is deterministic for identical definitions and variables
-- Unknown or malformed expressions are always rejected
-- Size and repetition budgets hold across generated templates and values
-
-### API and isolation tests
-
-- Principal-derived ownership and cross-user denial
-- Catalog body omission and private composite ETags
-- Detail/revision no-store behavior
-- Preview/save validator parity
-- Stale generation, idempotent retry, limits, rate limits, and safe errors
-- Hidden, quarantined, pending, read-only, `bypass_stored_overrides`, and unsupported states
-- Experimental versus general capability availability
-
-### Runtime and job integration tests
-
-- Two users receive their own overrides for the same definition
-- Explicit request prompts retain precedence
-- Reset returns to the current server default
-- Default changes do not rewrite user revisions
-- Queued work stays pinned after edits, reset, acknowledgement, or upgrade
-- Missing/tampered pin sets or items fail permanently; temporary stores retry
-- Queued explicit request overrides remain request-authorized, job-bound, non-discoverable, and non-reusable
-- Hidden server-managed bytes never enter per-user Prompt databases, APIs, or backups
-- Offline protected-store tampering cannot succeed by changing content and a colocated digest together
-- Provider message arrays are byte-equivalent with no override
+- Read-only API keys can read but cannot PUT/DELETE; write-scoped keys and JWT users follow the normal contract.
+- User A cannot read, mutate, or reset User B's override through any request field.
+- Catalog 404 is the only old-server signal; supported routers are present in minimal route configurations.
+- Recognized GET/PUT/DELETE domain failures use the specified wire shapes; structural FastAPI, auth, and dependency failures retain and test their existing contracts.
+- Save is immediately visible through detail and the consuming workflow.
+- Translation resolves both editable parts atomically while provider/model request fields keep their current behavior.
+- Every RAG rewrite call is non-persistent and tool-disabled. A hostile rewrite can change only query text; corpus ownership, source IDs, retrieval options, provider/model, and tool configuration remain unchanged.
+- Single-user and multi-user authentication modes exercise the same owner-scoped contract.
 
 ### Frontend tests
 
-- Shared routing and capability detection
-- Search, categories, filters, and status summaries
-- Atomic multi-part editing, variable insertion, preview, and locked sections
-- Save, reset, acknowledgement, history, restore, conflict, and pending approval
-- Offline draft recovery without persistent storage
-- Escaped rendering and Copy Draft
-- No horizontal overflow at 390 px and extension widths
-- Keyboard, focus, screen-reader, and touch-target behavior
+- /settings/prompt is Workflow prompts in both hosts; former Prompt Library links target /prompts and the secondary workspace link remains.
+- The editor handles server-default, customized, dirty, conflict, corrupt, unavailable, unsupported-older-server, disconnected, and scope-changed states accessibly.
+- Local preview and reset do not invoke an LLM; preview also makes no Service Prompt API request.
+- The TypeScript renderer passes the shared single-pass fixtures and never reinterprets inserted values.
+- Main Chat modes, Tab Chat, Document Chat, and legacy Sidepanel RAG consume one immutable request snapshot per top-level invocation; shared modes use ChatModeContext and legacy useMessage uses a local snapshot.
+- Compare resolves one snapshot before model fan-out, and every branch receives that same revision.
+- Separate goldens preserve original-question semantics in Main RAG, Tab Chat, and Document Chat and rewritten-question semantics in legacy Sidepanel RAG.
+- Web-search prompt resolution errors abort preflight while ordinary search-provider failures retain their current fallback.
+- Query, draft, migration, and mutation state are isolated by normalized server and resolved session user ID; hosted authenticated sessions never share an anonymous key, and scope changes abort and invalidate old work.
+- Unsaved-change guards cover Settings links, query selection, browser history, and beforeunload in both hosts.
+- Normal and corrupt-row reset require the permanent-removal confirmation before DELETE.
+- Direct and extension-proxy transports normalize the same detail envelope and preserve revision for conflict and corrupt reset.
+- Migration probes raw local and legacy sync values, exposes invalid legacy text for repair, and clears only confirmed values.
+- Unresolved mapped values gate Main RAG, Tab Chat, Document Chat, legacy Sidepanel RAG, main web search, and Compare web search before prompt preparation.
+- Supported servers never allow legacy local values to shadow server state; non-404 capability failures never enable fallback.
+- Localized known IDs use client strings and unknown IDs fall back to safe server English.
+- Backup copy and migration disclosure explicitly exclude Service Prompt overrides.
+- webSearchFollowUpPrompt is not presented as effective without a consumer.
 
-### End-to-end tests
+### End-to-end checks
 
-- WebUI user edits a service prompt and the affected workflow uses it
-- Packaged extension options edits the same account override and WebUI observes it
-- Background job pins the selected revision and remains reproducible
-- Upstream server-default change produces compare/keep/reset behavior
-- Unsupported and disconnected extension states provide recovery actions
+- Saving in the WebUI is visible from the extension options app for the same account/server.
+- Changing server or account never exposes or saves the prior scope's prompt or draft.
+- Each of the four v1 definitions affects its named consumers.
+- With no override and ordinary runtime values, every reachable workflow's provider message remains golden-equivalent to pre-feature output; placeholder-looking runtime data and JavaScript replacement metasequences instead prove the deliberate single-pass correction.
+- Reset from either client returns both clients and the workflow to the packaged default.
+- A corrupt override can be reset through the extension without losing its revision in transport.
 
-### Security and operational validation
+Implementation completion also requires formatter/linter checks, focused backend and frontend tests, git diff --check, and Bandit on touched Python paths.
 
-- Cross-user access and path-like definition IDs
-- XSS and rich-rendering regression tests
-- Prompt-body log, metric, error, notification, and job-status redaction
-- Context-integrity tamper and quarantine behavior
-- Storage quota and mutation abuse
-- Fresh and migrated per-user Prompts databases
-- Private backup/restore and older-version ignore behavior
-- Imported revisions become unapproved history with no active/current-pending pointer; owner resubmission creates the one local pending revision
-- Execution snapshots/pin sets and cryptographic key material are not exported
-- Bounded-cardinality metrics for definition ID, source kind, validation outcome, and latency
-- Touched-scope Bandit, frontend lint/type checks, and focused test suites
+## Incremental rollout
 
-## Implementation Planning Decisions
+1. Ship the registry, v6 one-table store, two-source resolver, four API operations, shared Settings replacement, migration panel, three live Chat definitions, and synchronous Translation definition as one end-to-end slice.
+2. Observe actual use and fix cross-surface or resolution problems before adding another domain.
+3. Add later synchronous definitions one workflow at a time, with eligibility evidence, a named consumer, golden no-override coverage, and localized metadata.
+4. Design snapshot persistence only when the first concrete asynchronous definition is proposed.
 
-The implementation plan should decide, without changing this product contract:
+No release gate requires cataloging or migrating every internal prompt. The inventory is a discovery backlog, not runtime authority.
 
-- Exact Python module and repository class names
-- Physical table consolidation and migration numbering
-- Protected execution-store backend, mandatory authentication, optional encryption, component-manifest, tenant-scoped deduplication, and verification-key retention details
-- Default storage quota and snapshot-retention durations
-- Exact capability endpoint integration point
-- Domain-by-domain stable ID catalog from the completed eligibility inventory
-- Which existing diff component is reused by the settings editor
-- The concrete Jobs held/retry representation for `bypass_stored_overrides`
+## Rejected approaches
 
-## Acceptance Criteria
+- **Per-revision operator approval:** rejected because eligible prompt text grants no authority and equivalent explicit input already executes without approval.
+- **Mutable signed manifest and OS-keyring anchor:** rejected because it blocks recommended container deployments and solves a different high-assurance integrity problem.
+- **Explicit/deployment resolver tiers:** rejected from v1 because none of the four consumers has such a registered full-replacement source.
+- **Prompt-specific deployment switch:** rejected from v1 because it creates dormant and migration states without a concrete operator requirement.
+- **Server Preview endpoint:** rejected because the production client renderer can provide deterministic marker preview and PUT remains authoritative.
+- **Prompt-specific protected Jobs ledger or async policy:** rejected because v1 has no asynchronous definition; the first concrete domain should design only what it needs.
+- **Browser-local overrides as permanent precedence:** rejected because supported clients and server would disagree.
+- **Broad migration before first release:** rejected because it delays user value and multiplies integration risk.
+- **Revision history and portable backup product:** deferred until actual demand justifies more storage and UI.
 
-The design is successfully implemented when:
+## Acceptance criteria
 
-1. Authenticated users can discover and customize every approved service-prompt definition from the shared WebUI/extension settings route.
-2. Overrides are validated, previewed, versioned, restorable, server-side, owner-isolated, and context-integrity checked.
-3. Runtime resolution obeys the approved precedence and never silently falls back after an expected-source failure.
-4. Queued work references immutable prompt content and remains reproducible.
-5. Structured-output, security, routing, judge, and permission boundaries remain protected.
-6. Existing deployment defaults, explicit request overrides, chat system prompts, Prompt Library, Prompt Studio, and MCP prompt behavior remain compatible.
-7. Broad content-facing domains are migrated through documented eligibility decisions and byte-equivalent default-provider message tests.
-8. The settings experience is responsive, accessible, explicit about capability/failure states, and does not persist drafts locally without user action.
+- An authenticated user can inspect, preview locally, save, and reset each of the four v1 definitions from /settings/prompt in both supported hosts.
+- A valid save activates immediately for that user without administrator approval, signing, keyring setup, or a deployment policy state.
+- The same account/server resolves the same saved override from supported WebUI, extension, and registered server consumers.
+- No request accepts a target user ID or database path; unknown definition IDs cannot persist rows, undeclared parts are rejected, and API-key scopes protect mutations.
+- Rendering is single-pass and literal; each required variable occurs exactly once and inserted content is never reparsed.
+- Fresh and existing per-user prompt databases reach schema v6 safely.
+- Invalid templates, conflicts, corruption, disconnection, scope changes, and legacy migration are explicit and non-destructive.
+- Reset and legacy discard are the only intentional destructive actions and require prompt-specific confirmation.
+- Only catalog 404 enables old-server local compatibility; supported-server failures never fall back to local values.
+- Legacy mapped values are imported or discarded explicitly and cannot shadow server state on supported servers.
+- Every reachable Chat consumer uses one request snapshot, Compare shares one snapshot across its fan-out, and current no-override variable semantics are preserved.
+- Every RAG rewrite call is non-persistent and tool-disabled; customization cannot change authenticated source scope, provider/model selection, retrieval policy, or tool configuration.
+- Prompt Library links remain correct, Workflow prompts retains a reusable-workspace link, and portable-backup exclusions are honest.
+- webSearchFollowUpPrompt is not exposed as functional until it has a runtime consumer.
+- No-override provider messages remain golden-equivalent for ordinary runtime values, with the documented single-pass correction for placeholder-looking data and JavaScript replacement metasequences.
+- No new approval service, cryptographic manifest, deployment-state matrix, server Preview endpoint, Jobs status, Jobs table, or prompt-specific reconciler is introduced.
+- Additional synchronous domains can be added independently without making the complete inventory a release dependency.
+
+## Superseded planning artifacts
+
+The previous foundation, broad-domain, Context Integrity approval, and protected-job-pinning plans were based on the rejected architecture and must not be executed. They remain superseded. Human review approved this revision on 2026-07-15; the replacement implementation plan is tracked by TASK-13013.

@@ -93,6 +93,7 @@ export function usePromptPaletteCommands(
         label: p.name || p.title || "Untitled Prompt",
         description: (p.system_prompt || p.content || "").slice(0, 80),
         icon: createElement(NotebookPen, { className: "size-4" }),
+        targetPath: `/prompts?edit=${p.id}`,
         action: () => {
           navigate(`/prompts?edit=${p.id}`)
         },
@@ -136,6 +137,7 @@ export function usePromptPaletteCommands(
         label: p.name || p.title || "Untitled Prompt",
         description: "Local prompt",
         icon: createElement(NotebookPen, { className: "size-4" }),
+        targetPath: `/prompts?prompt=${p.id}`,
         action: () => {
           navigate(`/prompts?prompt=${p.id}`)
         },
@@ -159,6 +161,7 @@ export function usePromptPaletteCommands(
         label: item.name || "Untitled Prompt",
         description: "Server prompt",
         icon: createElement(Cloud, { className: "size-4" }),
+        targetPath: `/prompts?prompt=${item.id}&source=studio`,
         action: () => {
           navigate(`/prompts?prompt=${item.id}&source=studio`)
         },

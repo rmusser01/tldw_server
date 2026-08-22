@@ -71,6 +71,49 @@ describe("tldwRequest post-refresh retry", () => {
     expect(bodies[0]).toBe(form)
     expect(bodies[1]).toBe(form)
   })
+
+  it("does not dispatch the retry when the request aborts during refresh", async () => {
+    let releaseRefresh!: () => void
+    let signalRefreshStarted!: () => void
+    const refreshStarted = new Promise<void>((resolve) => {
+      signalRefreshStarted = resolve
+    })
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+    const fetchFn = vi.fn(async () =>
+      new Response("unauthorized", { status: 401 })) as unknown as typeof fetch
+    const abort = new AbortController()
+    const runtime = {
+      getConfig: async () => ({
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user",
+        accessToken: "stale-access",
+        refreshToken: "refresh-token"
+      }),
+      refreshAuth: async () => {
+        signalRefreshStarted()
+        await refreshGate
+      },
+      fetchFn
+    }
+
+    const pending = tldwRequest(
+      {
+        path: "https://api.example.com/api/v1/chat/completions",
+        method: "POST",
+        body: { messages: [] },
+        abortSignal: abort.signal
+      },
+      runtime
+    )
+    await refreshStarted
+    abort.abort()
+    releaseRefresh()
+
+    await expect(pending).resolves.toMatchObject({ ok: false, status: 0 })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("tldwRequest timeout bounds", () => {

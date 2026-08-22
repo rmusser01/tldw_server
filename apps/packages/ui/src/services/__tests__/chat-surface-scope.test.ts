@@ -1,14 +1,19 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   buildChatSurfaceScopeKey,
-  buildChatSurfaceScopeKeyFromConfig
+  buildChatSurfaceScopeKeyFromConfig,
+  deriveSingleUserApiKeyCredentialScope
 } from "@/services/chat-surface-scope"
 
 const JWT_WITH_SUB =
   "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ1c2VyLTQyIn0.signature"
 
 describe("chat-surface-scope", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it("changes the scope key when the server URL or auth mode changes", () => {
     expect(
       buildChatSurfaceScopeKey({
@@ -55,5 +60,13 @@ describe("chat-surface-scope", () => {
     expect(firstScope).not.toBe(secondScope)
     expect(firstScope).not.toContain("alpha-secret-key")
     expect(secondScope).not.toContain("beta-secret-key")
+  })
+
+  it("derives a collision-resistant credential scope without Web Crypto", () => {
+    vi.stubGlobal("crypto", undefined)
+
+    expect(
+      deriveSingleUserApiKeyCredentialScope("single-user", "lan-api-key")
+    ).toMatch(/^key:sha256:[0-9a-f]{64}$/)
   })
 })

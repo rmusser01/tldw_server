@@ -308,4 +308,5 @@ describe("useChatActions overlay integration", () => {
       allowScratchFallback: true
     })
   })
+
 })

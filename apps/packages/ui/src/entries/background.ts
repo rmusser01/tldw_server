@@ -7,7 +7,13 @@ import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
-import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential";
+import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode";
+import {
+  hasNewerCurrentAccessToken,
+  resolveEffectiveTldwConfig,
+  storeRefreshRotationIfCurrent,
+  waitForNewerCurrentAccessToken,
+} from "@/services/tldw/single-user-credential";
 import {
   getProcessPathForType,
   getProcessPathForUrl,
@@ -72,6 +78,15 @@ import {
   ABSOLUTE_URL_BLOCK_ERROR,
   evaluateAbsoluteUrlAccess,
 } from "@/utils/absolute-url-guard";
+import {
+  createServicePromptScopeChangedError,
+  isRequestConfigScopeChangedError,
+  isServicePromptRequestPath,
+  servicePromptPrincipalMatches,
+  servicePromptRefreshLineageMatches,
+  servicePromptSingleUserApiKeyScopeMatches,
+  servicePromptTargetsMatch,
+} from "@/services/tldw/service-prompt-scope-error";
 import { arrayBufferToBase64 } from "@/utils/compress";
 import {
   createSerializedSessionStateWriter,
@@ -130,6 +145,32 @@ const backgroundDiagnostics: BackgroundDiagnostics = {
 const logBackgroundError = (label: string, error: unknown) => {
   console.debug(`[tldw] background ${label} failed`, error);
 };
+
+type ServicePromptTargetLock = Readonly<{
+  serverUrl?: unknown;
+  authMode?: unknown;
+  authSource?: unknown;
+  orgId?: unknown;
+  expectedUserId?: unknown;
+  expectedRefreshToken?: unknown;
+  expectedSingleUserApiKeyScope?: unknown;
+}>;
+
+const readServicePromptTargetLock = (
+  value: unknown,
+): ServicePromptTargetLock | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? Object.freeze({
+        serverUrl: (value as Record<string, unknown>).serverUrl,
+        authMode: (value as Record<string, unknown>).authMode,
+        authSource: (value as Record<string, unknown>).authSource,
+        orgId: (value as Record<string, unknown>).orgId,
+        expectedUserId: (value as Record<string, unknown>).expectedUserId,
+        expectedRefreshToken: (value as Record<string, unknown>).expectedRefreshToken,
+        expectedSingleUserApiKeyScope:
+          (value as Record<string, unknown>).expectedSingleUserApiKeyScope,
+      })
+    : null;
 
 const waitFor = (delayMs: number): Promise<void> =>
   new Promise((resolve) => {
@@ -381,6 +422,51 @@ export default defineBackground({
         persistent: storage,
         session: sessionStorage,
       });
+    const resolveCurrentServicePromptConfig = async (
+      checked: ServicePromptTargetLock,
+    ) => {
+      const current = await getEffectiveConfig();
+      const singleUserApiKeyScopeMatches = current
+        ? servicePromptSingleUserApiKeyScopeMatches(
+            current,
+            checked.expectedSingleUserApiKeyScope,
+          )
+        : true;
+      if (
+        (!current && !isHostedTldwDeployment()) ||
+        (current && !servicePromptTargetsMatch(current, checked)) ||
+        (current &&
+          checked.expectedUserId !== null &&
+          checked.expectedUserId !== undefined &&
+          current.authMode === "multi-user" &&
+          !isHostedTldwDeployment() &&
+          current.authSource !== "cookie-session" &&
+          !servicePromptPrincipalMatches(current, checked.expectedUserId)) ||
+        (current &&
+          !servicePromptRefreshLineageMatches(
+            current,
+            checked.expectedRefreshToken,
+          )) ||
+        !singleUserApiKeyScopeMatches ||
+        (current?.authMode === "multi-user" &&
+          !isHostedTldwDeployment() &&
+          current.authSource !== "cookie-session" &&
+          !String(current.accessToken || "").trim())
+      ) {
+        throw createServicePromptScopeChangedError();
+      }
+      const effective = current || checked;
+      return {
+        ...effective,
+        serverUrl: checked.serverUrl,
+        authMode: checked.authMode,
+        authSource: checked.authSource,
+        orgId: checked.orgId,
+        apiKey: current?.apiKey,
+        accessToken: current?.accessToken,
+        refreshToken: current?.refreshToken,
+      };
+    };
     let handleRuntimeMessageRef:
       | ((message: any, sender: any) => Promise<any>)
       | null = null;
@@ -478,6 +564,104 @@ export default defineBackground({
     ).__tldwBackgroundDiagnostics = buildBackgroundDiagnostics;
 
     let refreshInFlight: Promise<any> | null = null;
+    const scopedRefreshes = new Map<string, Promise<void>>();
+    const refreshScopedAuth = async (
+      checked: ServicePromptTargetLock,
+      originalConfig?: Awaited<
+        ReturnType<typeof resolveCurrentServicePromptConfig>
+      >,
+    ): Promise<void> => {
+      const cfg = originalConfig ??
+        await resolveCurrentServicePromptConfig(checked);
+      const refreshToken = String(cfg.refreshToken || "").trim();
+      const capturedAccessToken = String(cfg.accessToken || "").trim();
+      if (!refreshToken) {
+        throw new Error("Token refresh failed: no refresh token available");
+      }
+      if (
+        originalConfig &&
+        await hasNewerCurrentAccessToken(
+          storage,
+          checked,
+          capturedAccessToken,
+        )
+      ) {
+        return;
+      }
+      const current = originalConfig
+        ? await resolveCurrentServicePromptConfig(checked)
+        : cfg;
+      if (String(current.refreshToken || "").trim() !== refreshToken) {
+        throw createServicePromptScopeChangedError();
+      }
+      const key = JSON.stringify([
+        checked.serverUrl ?? null,
+        checked.authMode ?? null,
+        checked.authSource ?? null,
+        checked.orgId ?? null,
+        refreshToken,
+      ]);
+      let refresh = scopedRefreshes.get(key);
+      if (!refresh) {
+        refresh = (async () => {
+          try {
+            const response = await tldwRequest(
+              {
+                path: "/api/v1/auth/refresh",
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: { refresh_token: refreshToken },
+                noAuth: true,
+              },
+              {
+                getConfig: async () => cfg,
+                useRuntimeAuthOverride: false,
+              },
+            );
+            const tokens = response.ok
+              ? (response.data as {
+                  access_token?: string;
+                  refresh_token?: string;
+                } | null)
+              : null;
+            if (!tokens?.access_token) {
+              throw new Error(
+                `Token refresh failed: ${response.error || `no access token in refresh response (status ${response.status ?? "unknown"})`}`,
+              );
+            }
+            const stored = await storeRefreshRotationIfCurrent(
+              storage,
+              { ...checked, accessToken: capturedAccessToken },
+              refreshToken,
+              {
+                accessToken: tokens.access_token,
+                refreshToken: tokens.refresh_token || refreshToken,
+              },
+            );
+            if (!stored) {
+              throw createServicePromptScopeChangedError();
+            }
+          } catch (error) {
+            if (isRequestConfigScopeChangedError(error)) throw error;
+            if (
+              originalConfig &&
+              await waitForNewerCurrentAccessToken(
+                storage,
+                checked,
+                capturedAccessToken,
+              )
+            ) {
+              return;
+            }
+            throw error;
+          } finally {
+            scopedRefreshes.delete(key);
+          }
+        })();
+        scopedRefreshes.set(key, refresh);
+      }
+      await refresh;
+    };
     let streamDebugEnabled = false;
     const ingestSessions = new Map<string, IngestSession>();
     const pendingAuthReplay = new Set<string>();
@@ -506,6 +690,38 @@ export default defineBackground({
     // in this worker; avoids a duplicate resume from the alarm/rehydrate backstop.
     const activeQuickIngestBatchSessionIds = new Set<string>();
     let sessionStateHydrated = false;
+
+    // Cancellation is meaningful only while this worker and its fetch are
+    // alive, so these controllers intentionally remain in memory rather than
+    // joining the durable ingest-session state above.
+    const runtimeRequestControllers = new Map<string, AbortController>();
+    const runCancelableRuntimeRequest = async (
+      rawRequestId: unknown,
+      run: (signal?: AbortSignal) => Promise<any>,
+    ): Promise<any> => {
+      const requestId =
+        typeof rawRequestId === "string" ? rawRequestId.trim() : "";
+      if (!requestId) return await run();
+
+      const controller = new AbortController();
+      runtimeRequestControllers.get(requestId)?.abort();
+      runtimeRequestControllers.set(requestId, controller);
+      try {
+        const response = await run(controller.signal);
+        if (controller.signal.aborted) {
+          return {
+            ok: false,
+            status: 499,
+            error: "Cancelled by user.",
+          };
+        }
+        return response;
+      } finally {
+        if (runtimeRequestControllers.get(requestId) === controller) {
+          runtimeRequestControllers.delete(requestId);
+        }
+      }
+    };
 
     // Serialize the actual storage writes so that the many rapid, fire-and-forget
     // persist calls below cannot land out of order (an older Map snapshot
@@ -1161,6 +1377,7 @@ export default defineBackground({
     const handleUpload = async (payload: {
       path?: string;
       method?: string;
+      headers?: Record<string, string>;
       fields?: Record<string, any>;
       file?: {
         fieldName?: string;
@@ -1188,17 +1405,53 @@ export default defineBackground({
       timeoutMs?: number;
       responseType?: "json" | "text" | "arrayBuffer";
       quickIngestSessionId?: string;
-    }) => {
+      servicePromptConfig?: ServicePromptTargetLock;
+      requestId?: string;
+    }, requestAbortSignal?: AbortSignal) => {
       const {
         path,
         method = "POST",
+        headers: requestHeaders = {},
         fields = {},
         file,
         files,
         fileFieldName,
         responseType,
       } = payload || {};
-      const cfg = await getEffectiveConfig();
+      const servicePromptConfig = readServicePromptTargetLock(
+        payload?.servicePromptConfig,
+      );
+      if (
+        servicePromptConfig &&
+        !isServicePromptRequestPath(path, method)
+      ) {
+        return {
+          ok: false,
+          status: 400,
+          error:
+            "A Service Prompt config can only be used with Service Prompt requests.",
+        };
+      }
+      let cfg: any;
+      try {
+        cfg = servicePromptConfig
+          ? await resolveCurrentServicePromptConfig(servicePromptConfig)
+          : await getEffectiveConfig();
+      } catch (error) {
+        if (
+          servicePromptConfig &&
+          (error as { status?: unknown })?.status === 412
+        ) {
+          const scopedError = createServicePromptScopeChangedError();
+          return {
+            ok: false,
+            status: 412,
+            error: scopedError.message,
+            data: scopedError.details,
+          };
+        }
+        throw error;
+      }
       const absoluteAccess = evaluateAbsoluteUrlAccess(path, cfg);
       const isAbsolute = absoluteAccess.isAbsolute;
       // Mirror the request-path guard: refuse cross-origin absolute URLs that
@@ -1293,7 +1546,17 @@ export default defineBackground({
             if (!result.ok) return result;
           }
         }
-        const headers: Record<string, string> = {};
+        const headers: Record<string, string> = { ...requestHeaders };
+        for (const key of Object.keys(headers)) {
+          const normalized = key.toLowerCase();
+          if (
+            normalized === "authorization" ||
+            normalized === "content-type" ||
+            normalized === "x-api-key"
+          ) {
+            delete headers[key];
+          }
+        }
         // Skip credentials for allowlisted-but-cross-origin absolute URLs,
         // matching request-core's `shouldSkipAuth` behavior.
         if (!absoluteAccess.skipAuth) {
@@ -1324,6 +1587,14 @@ export default defineBackground({
           }
         }
         const controller = new AbortController();
+        const onRequestAbort = () => controller.abort();
+        if (requestAbortSignal?.aborted) {
+          onRequestAbort();
+        } else {
+          requestAbortSignal?.addEventListener("abort", onRequestAbort, {
+            once: true,
+          });
+        }
         const quickIngestSessionId = String(
           payload?.quickIngestSessionId || "",
         ).trim();
@@ -1349,6 +1620,7 @@ export default defineBackground({
           });
         } finally {
           clearTimeout(timeout);
+          requestAbortSignal?.removeEventListener("abort", onRequestAbort);
           unregisterQuickIngestAbortController(
             quickIngestSessionId,
             controller,
@@ -1377,7 +1649,11 @@ export default defineBackground({
       } catch (e: any) {
         const raw = String(e?.message || "");
         const isAbort = raw.toLowerCase().includes("abort");
-        if (isAbort && isQuickIngestCancelled(payload?.quickIngestSessionId)) {
+        if (
+          isAbort &&
+          (requestAbortSignal?.aborted ||
+            isQuickIngestCancelled(payload?.quickIngestSessionId))
+        ) {
           return {
             ok: false,
             status: 499,
@@ -1394,39 +1670,100 @@ export default defineBackground({
       }
     };
 
-    const runTldwRequest = async (payload: any) => {
-      return tldwRequest(payload, {
-        // IMPORTANT: getConfig must fetch fresh config each time it's called
-        // (not pre-fetch once), because the config may not be seeded yet when
-        // runTldwRequest is first invoked, but may be available on retry.
-        getConfig: async () => {
-          return await getEffectiveConfig();
-        },
-        refreshAuth: async () => {
-          if (!refreshInFlight) {
-            refreshInFlight = (async () => {
-              try {
-                await tldwAuth.refreshToken();
-              } finally {
-                refreshInFlight = null;
+    const runTldwRequest = async (
+      payload: any,
+      requestAbortSignal?: AbortSignal,
+    ) => {
+      const rawServicePromptConfig = payload?.servicePromptConfig;
+      const requestPayload = { ...(payload || {}) };
+      delete requestPayload.servicePromptConfig;
+      delete requestPayload.requestId;
+      delete requestPayload.abortSignal;
+      if (requestAbortSignal) {
+        requestPayload.abortSignal = requestAbortSignal;
+      }
+      const servicePromptConfig = readServicePromptTargetLock(
+        rawServicePromptConfig,
+      );
+      if (servicePromptConfig) {
+        if (!isServicePromptRequestPath(requestPayload.path, requestPayload.method)) {
+          return {
+            ok: false,
+            status: 400,
+            error: "A Service Prompt config can only be used with Service Prompt requests.",
+          };
+        }
+      }
+      let originalScopedConfig: Awaited<
+        ReturnType<typeof resolveCurrentServicePromptConfig>
+      > | undefined;
+      try {
+        return await tldwRequest(requestPayload, {
+          // IMPORTANT: getConfig must fetch fresh config each time it's called
+          // (not pre-fetch once), because the config may not be seeded yet when
+          // runTldwRequest is first invoked, but may be available on retry. A
+          // scoped request freezes only the checked target and resolves current
+          // credentials at dispatch, while the expected-user header binds them.
+          getConfig: servicePromptConfig
+            ? async () => {
+                const current = await resolveCurrentServicePromptConfig(
+                  servicePromptConfig,
+                );
+                originalScopedConfig ??= current;
+                return current;
               }
-            })();
-          }
-          try {
-            await refreshInFlight;
-          } catch (error) {
-            logBackgroundError("refresh auth", error);
-          }
-        },
-      });
+            : async () => await getEffectiveConfig(),
+          ...(servicePromptConfig ? { useRuntimeAuthOverride: false } : {}),
+          refreshAuth: servicePromptConfig
+            ? () => refreshScopedAuth(
+                servicePromptConfig,
+                originalScopedConfig,
+              )
+            : async () => {
+                if (!refreshInFlight) {
+                  refreshInFlight = (async () => {
+                    try {
+                      await tldwAuth.refreshToken();
+                    } finally {
+                      refreshInFlight = null;
+                    }
+                  })();
+                }
+                try {
+                  await refreshInFlight;
+                } catch (error) {
+                  logBackgroundError("refresh auth", error);
+                }
+              },
+        });
+      } catch (error) {
+        if (servicePromptConfig && (error as { status?: unknown })?.status === 412) {
+          const message =
+            "The server or authenticated account changed before the request was sent.";
+          return {
+            ok: false,
+            status: 412,
+            error: message,
+            data: {
+              detail: { code: "request_config_scope_changed", message },
+            },
+          };
+        }
+        throw error;
+      }
     };
 
-    const handleTldwRequest = async (payload: any) => {
+    const handleTldwRequest = async (
+      payload: any,
+      requestAbortSignal?: AbortSignal,
+    ) => {
       const path = payload?.path;
       if (isChatEndpoint(String(path || ""))) {
-        return enqueueChatRequest(() => runTldwRequest(payload));
+        return enqueueChatRequest(() =>
+          runTldwRequest(payload, requestAbortSignal),
+        );
       }
-      return await runTldwRequest(payload);
+      return await runTldwRequest(payload, requestAbortSignal);
     };
 
     // Best-effort PATCH of a planned conference-collection item. Shared by the
@@ -3219,6 +3556,18 @@ export default defineBackground({
       if (message.type === "tldw:quick-ingest-batch") {
         return await runQuickIngestBatch(message.payload || {});
       }
+      if (message.type === "tldw:cancel-request") {
+        const requestId = String(message?.payload?.requestId || "").trim();
+        if (!requestId) {
+          return { ok: false, cancelled: false, error: "Missing requestId." };
+        }
+        const controller = runtimeRequestControllers.get(requestId);
+        if (controller) {
+          runtimeRequestControllers.delete(requestId);
+          controller.abort();
+        }
+        return { ok: true, cancelled: Boolean(controller) };
+      }
       if (message.type === "sidepanel") {
         try {
           const tabId = sender?.tab?.id ?? undefined;
@@ -3272,10 +3621,16 @@ export default defineBackground({
         return { ok: false, error: "Unsupported funnel event" };
       }
       if (message.type === "tldw:upload") {
-        return handleUpload(message.payload || {});
+        return runCancelableRuntimeRequest(
+          message?.payload?.requestId,
+          (signal) => handleUpload(message.payload || {}, signal),
+        );
       }
       if (message.type === "tldw:request") {
-        return handleTldwRequest(message.payload || {});
+        return runCancelableRuntimeRequest(
+          message?.payload?.requestId,
+          (signal) => handleTldwRequest(message.payload || {}, signal),
+        );
       }
       if (message.type === "tldw:ingest") {
         try {
@@ -3793,24 +4148,6 @@ export default defineBackground({
       }
     });
 
-    browser.commands?.onCommand?.addListener((command) => {
-      switch (command) {
-        case "execute_side_panel":
-          browser.tabs
-            .query({ active: true, currentWindow: true })
-            .then((tabs) => {
-              const tab = tabs[0];
-              ensureSidepanelOpen(tab?.id);
-            })
-            .catch(() => {
-              ensureSidepanelOpen();
-            });
-          break;
-        default:
-          break;
-      }
-    });
-
     // Stream handler via Port API
     browser.runtime.onConnect.addListener((port) => {
       if (!isTrustedRuntimeSender(port.sender)) {
@@ -3881,10 +4218,22 @@ export default defineBackground({
             safePost(safePayload);
           };
           try {
-            const cfg = await getEffectiveConfig();
+            const servicePromptConfig = readServicePromptTargetLock(
+              msg?.servicePromptConfig,
+            );
+            const path = msg.path as string;
+            if (servicePromptConfig && !isServicePromptRequestPath(path, msg.method)) {
+              const error = new Error(
+                "A Service Prompt config can only be used with Service Prompt requests.",
+              ) as Error & { status: number };
+              error.status = 400;
+              throw error;
+            }
+            const cfg = servicePromptConfig
+              ? await resolveCurrentServicePromptConfig(servicePromptConfig)
+              : await getEffectiveConfig();
             if (!cfg?.serverUrl) throw new Error("tldw server not configured");
             const baseUrl = String(cfg.serverUrl).replace(/\/$/, "");
-            const path = msg.path as string;
             const streamAccess = evaluateAbsoluteUrlAccess(path, cfg);
             // Mirror the request-path guard: refuse cross-origin absolute URLs
             // that are not explicitly allowlisted before opening the stream.
@@ -3934,7 +4283,8 @@ export default defineBackground({
             headers["Accept"] = "text/event-stream";
             headers["Cache-Control"] = headers["Cache-Control"] || "no-cache";
             headers["Connection"] = headers["Connection"] || "keep-alive";
-            abort = new AbortController();
+            const requestAbort = new AbortController();
+            abort = requestAbort;
             const idleMs = deriveStreamIdleTimeout(
               cfg,
               path,
@@ -3968,7 +4318,7 @@ export default defineBackground({
                 typeof msg.body === "string"
                   ? msg.body
                   : JSON.stringify(msg.body),
-              signal: abort.signal,
+              signal: requestAbort.signal,
             });
             if (
               !streamAccess.skipAuth &&
@@ -3976,24 +4326,43 @@ export default defineBackground({
               cfg.authMode === "multi-user" &&
               cfg.refreshToken
             ) {
-              if (!refreshInFlight) {
-                refreshInFlight = (async () => {
-                  try {
-                    await tldwAuth.refreshToken();
-                  } finally {
-                    refreshInFlight = null;
-                  }
-                })();
-              }
               try {
-                await refreshInFlight;
+                if (servicePromptConfig) {
+                  await refreshScopedAuth(servicePromptConfig, cfg);
+                } else {
+                  if (!refreshInFlight) {
+                    refreshInFlight = (async () => {
+                      try {
+                        await tldwAuth.refreshToken();
+                      } finally {
+                        refreshInFlight = null;
+                      }
+                    })();
+                  }
+                  await refreshInFlight;
+                }
               } catch (error) {
+                if (
+                  servicePromptConfig &&
+                  (error as { status?: unknown })?.status === 412
+                ) {
+                  throw error;
+                }
                 logBackgroundError("refresh auth (stream)", error);
               }
-              const updated = await getEffectiveConfig();
+              if (disconnected || closed || requestAbort.signal.aborted) {
+                return;
+              }
+              const updated = servicePromptConfig
+                ? await resolveCurrentServicePromptConfig(servicePromptConfig)
+                : await getEffectiveConfig();
               if (updated?.accessToken)
                 headers["Authorization"] = `Bearer ${updated.accessToken}`;
               const retryController = new AbortController();
+              if (disconnected || closed || requestAbort.signal.aborted) {
+                retryController.abort();
+                return;
+              }
               abort = retryController;
               resp = await fetch(url, {
                 method: msg.method || "POST",
@@ -4100,6 +4469,10 @@ export default defineBackground({
             if (idleTimer) clearTimeout(idleTimer);
             postStreamError({
               event: "error",
+              ...(typeof e?.status === "number" ? { status: e.status } : {}),
+              ...(typeof e?.details !== "undefined"
+                ? { details: e.details }
+                : {}),
               message: formatErrorMessage(e, "Stream error"),
             });
           }
