@@ -95,6 +95,11 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Fix Round 2 GREEN: focused provider/lease/target target `17 passed`; exact Task 7 suite `102 passed`; ordinary chat defaults/resolution `200 passed, 1 skipped`.
 - Fix Round 2 gates: Ruff passed the changed production/tests; Bandit reported zero findings/errors for `chat_target_resolution.py`; `git diff --check` passed.
 - Fix Round 2 environment: live PostgreSQL and live provider UAT were intentionally not run. No orchestration, receipt transition, adapter-readiness, frontend, route, schema, migration, RLS, or unrelated watchlist path changed. Parent remains In Progress; status is implementation complete and pending controller review.
+- Initial reviewer: `01a0281f-7d8f-72e3-9208-087a3e2df1b1` (`Copernicus`), `gpt-5.6-sol`, xhigh reasoning; review package `review-task-7-fa5ce0b..0307fc4.diff`.
+- Fix Round 1 re-reviewer: `01a0283f-be1d-7f53-bf76-df39250aa82f` (`Ramanujan`), `gpt-5.6-sol`, high reasoning; review package `review-task-7-fix1-0307fc4..9901d7a.diff`.
+- Final re-reviewer: `01a02853-9f72-7c52-bace-659b683ed023` (`Herschel`), `gpt-5.6-terra`, high reasoning; review package `review-task-7-fix2-9901d7a..410b860.diff`.
+- Final re-review verdict: all findings addressed; no new Critical or Important breakage. Live PostgreSQL and real provider/BYOK execution remain explicit Task 11 acceptance gaps.
+- Status: complete.
 
 ## Task 5 - Typed bounded recipient read APIs
 
