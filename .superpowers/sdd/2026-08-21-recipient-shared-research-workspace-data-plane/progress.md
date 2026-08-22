@@ -88,6 +88,13 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Fix Round 1 lifecycle: every operation now checks current controller identity as well as share generation; chat successes additionally require the response request ID to match the submitted UUID. Rate deadlines gate submit/retry and drive a bounded remaining-millisecond countdown. Pending submissions retain the exact raw draft and revision, and only a matching unchanged revision clears after stored success. Untyped received HTTP errors discard the UUID; only ambiguous fetch `TypeError` failures retain exact-payload replay.
 - Fix Round 1 TDD RED: focused controller target `11 failed, 15 passed`. GREEN: focused controller `27 passed`; exact Task 8 matrix `54 passed`; existing auth-fetch/domain-client/route-state regressions `42 passed`.
 - Fix Round 1 gates: ESLint passed all three touched TS/test files with only the UI library's shared missing-pages notice; focused production typecheck reached 14 existing imported `import.meta.env` diagnostics and no changed-file diagnostic; Bandit not applicable to frontend-only production; `git diff --check` passed. The two unrelated watchlist templates remained untouched and unstaged. Parent remains In Progress.
+- Initial reviewer: `01a0286f-5f29-7e13-a5f0-2805253f74b6` (`Bohr`), `gpt-5.6-sol`, high reasoning; review package `review-8c199fce37..231136f213.diff`.
+- Initial review findings: cross-page selection loss/incomplete initial scope; same-share stale operations and missing chat response correlation; unenforced rate-limit countdown; in-flight exact draft edits cleared by success; and untyped HTTP failures misclassified as ambiguous transport errors.
+- Fix Round 1 commit: `6e42b02dd4 fix(workspaces): harden shared recipient controller`.
+- Scoped re-reviewer: `01a02888-d40a-7df1-a5a2-ec4f8d79da8c` (`Jason`), `gpt-5.6-sol`, high reasoning; review package `review-231136f213..6e42b02dd4.diff`.
+- Task 8: fix round 1/5 (5 addressed, 0 open; commits `231136f..6e42b02`).
+- Final re-review verdict: all findings addressed; no new Critical, Important, or Minor breakage.
+- Task 8: complete (commits `8c199fc..6e42b02`, review clean).
 
 ## Task 7 - Provider resolution, grounded generation, and safe chat API
 
