@@ -15,7 +15,10 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     validate_provider_override,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
-from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_and_model
+from tldw_Server_API.app.core.Chat.chat_service import (
+    _split_inline_provider_model,
+    resolve_provider_and_model,
+)
 from tldw_Server_API.app.core.config import (
     load_and_log_configs,
     load_comprehensive_config,
@@ -125,6 +128,29 @@ def _configuration_error(provider: str | None = None) -> ChatConfigurationError:
     )
 
 
+def resolve_chat_provider_identity(
+    *,
+    requested_provider: str | None,
+    requested_model: str | None,
+) -> str:
+    """Resolve only the local canonical provider identity for a request."""
+
+    provider_input = (
+        requested_provider.strip()
+        if isinstance(requested_provider, str) and requested_provider.strip()
+        else None
+    )
+    if provider_input is None and isinstance(requested_model, str):
+        inline_provider, inline_model, _separator = _split_inline_provider_model(
+            requested_model
+        )
+        if inline_provider and inline_model:
+            provider_input = inline_provider
+    return _adapter_registry.get_registry().resolve_provider_name(
+        provider_input or get_default_provider()
+    )
+
+
 def resolve_chat_target(
     *,
     requested_provider: str | None,
@@ -145,8 +171,9 @@ def resolve_chat_target(
     default_provider = str(get_default_provider() or "").strip()
     registry = _adapter_registry.get_registry()
 
-    preliminary_provider = registry.resolve_provider_name(
-        provider_input or default_provider
+    preliminary_provider = resolve_chat_provider_identity(
+        requested_provider=provider_input,
+        requested_model=model_input,
     )
     if not model_input:
         model_input = get_default_model_for_provider(preliminary_provider)
@@ -173,6 +200,12 @@ def resolve_chat_target(
         raise _configuration_error(provider or None)
     if validate_provider_override(provider, model) is not None:
         raise _configuration_error(provider)
+    try:
+        adapter = registry.get_adapter(provider)
+    except Exception as exc:  # noqa: BLE001 - adapter diagnostics stay private.
+        raise _configuration_error(provider) from exc
+    if adapter is None:
+        raise _configuration_error(provider)
     return ResolvedChatTarget(provider=provider, model=model)
 
 
@@ -181,5 +214,6 @@ __all__ = [
     "config_default_llm_provider",
     "get_default_model_for_provider",
     "get_default_provider",
+    "resolve_chat_provider_identity",
     "resolve_chat_target",
 ]

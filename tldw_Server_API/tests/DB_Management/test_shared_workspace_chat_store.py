@@ -327,6 +327,26 @@ def test_claim_requires_aware_utc_now_and_bounds_retry_timing(db: CharactersRAGD
     assert 0 <= late.retry_after_ms <= 1_800_000
 
 
+def test_reload_claim_state_reads_active_and_completed_without_reclaim(
+    db: CharactersRAGDB,
+) -> None:
+    claim = _claim(db)
+
+    active = db.shared_workspace_chat_store.reload_claim_state(claim=claim, now=NOW)
+
+    assert active is not None
+    assert active.disposition == "in_progress"
+    assert active.lease_epoch == claim.lease_epoch
+    assert active.retry_after_ms == 600_000
+
+    completed_turn = _complete(db, claim)
+    completed = db.shared_workspace_chat_store.reload_claim_state(claim=claim, now=NOW)
+
+    assert completed is not None
+    assert completed.disposition == "replay"
+    assert completed.completed_turn == completed_turn
+
+
 @pytest.mark.parametrize(
     ("source_mode", "source_ids"),
     [

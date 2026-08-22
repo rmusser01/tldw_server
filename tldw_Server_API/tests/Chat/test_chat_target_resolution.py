@@ -10,8 +10,15 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 
 
 class _Registry:
-    def __init__(self, *providers: str) -> None:
+    def __init__(
+        self,
+        *providers: str,
+        unavailable: set[str] | None = None,
+        adapter_error: Exception | None = None,
+    ) -> None:
         self._providers = set(providers)
+        self._unavailable = unavailable or set()
+        self._adapter_error = adapter_error
 
     def list_providers(self) -> list[str]:
         return sorted(self._providers)
@@ -20,6 +27,14 @@ class _Registry:
         aliases = {"llamacpp": "llama.cpp", "llama": "llama.cpp"}
         normalized = str(name or "").strip().lower()
         return aliases.get(normalized, normalized)
+
+    def get_adapter(self, name: str):
+        if self._adapter_error is not None:
+            raise self._adapter_error
+        provider = self.resolve_provider_name(name)
+        if provider not in self._providers or provider in self._unavailable:
+            return None
+        return object()
 
 
 @pytest.fixture
@@ -121,6 +136,71 @@ def test_resolve_chat_target_rejects_unknown_adapter(target_module) -> None:
             requested_provider="unknown-provider",
             requested_model="model",
         )
+
+
+@pytest.mark.unit
+def test_resolve_chat_target_rejects_registered_but_disabled_adapter(
+    target_module,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        target_module._adapter_registry,
+        "get_registry",
+        lambda: _Registry("openai", unavailable={"openai"}),
+    )
+
+    with pytest.raises(ChatConfigurationError):
+        target_module.resolve_chat_target(
+            requested_provider="openai",
+            requested_model="gpt-model",
+        )
+
+
+@pytest.mark.unit
+def test_resolve_chat_target_rejects_adapter_load_failure(
+    target_module,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        target_module._adapter_registry,
+        "get_registry",
+        lambda: _Registry("openai", adapter_error=RuntimeError("private import error")),
+    )
+
+    with pytest.raises(ChatConfigurationError) as exc_info:
+        target_module.resolve_chat_target(
+            requested_provider="openai",
+            requested_model="gpt-model",
+        )
+
+    assert "private import error" not in str(exc_info.value)
+
+
+@pytest.mark.unit
+def test_request_provider_identity_uses_qualified_model_alias_and_default(
+    target_module,
+) -> None:
+    assert (
+        target_module.resolve_chat_provider_identity(
+            requested_provider=None,
+            requested_model="anthropic/claude-special",
+        )
+        == "anthropic"
+    )
+    assert (
+        target_module.resolve_chat_provider_identity(
+            requested_provider="llamacpp",
+            requested_model="local-model",
+        )
+        == "llama.cpp"
+    )
+    assert (
+        target_module.resolve_chat_provider_identity(
+            requested_provider=None,
+            requested_model=None,
+        )
+        == "openai"
+    )
 
 
 @pytest.mark.unit
@@ -329,3 +409,25 @@ async def test_bootstrap_fails_closed_without_configured_target(monkeypatch) -> 
         "reason_code": "no_provider_configured",
     }
     assert "diagnostics" not in repr(payload)
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_reports_stable_unready_for_disabled_adapter(
+    target_module,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        target_module._adapter_registry,
+        "get_registry",
+        lambda: _Registry("openai", unavailable={"openai"}),
+    )
+    monkeypatch.setattr(sharing, "resolve_chat_target", target_module.resolve_chat_target)
+
+    payload = await sharing._resolve_recipient_generation_default(_share_context())
+
+    assert payload == {
+        "provider": None,
+        "model": None,
+        "ready": False,
+        "reason_code": "no_provider_configured",
+    }

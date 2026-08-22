@@ -82,6 +82,13 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Report: `task-7-implementer-report.md`.
 - Residual boundary: Task 8 and controller-owned UAT still consume and validate the typed API. Parent task remains In Progress.
 - Status: implementation complete; pending controller review.
+- Fix Round 1 reviewed head: `0307fc49daac405dfcd2b63b300c929e66daf102`.
+- Fix Round 1: split recipient claim persistence from owner retrieval resources so replay/active/conflict dispositions never open owner data; mapped claimant owner context entry/exit failures through fenced typed recovery; re-resolved frozen targets under current adapter/override policy and required an exact canonical pair; derived leases from a narrow local provider identity that handles qualified models, aliases, and defaults without adapter/credential work; made retryable/conflicted transitions mandatory with read-only durable completed/newer-active winner classification; and required a loadable enabled adapter for canonical target readiness.
+- Fix Round 1 TDD RED: provider/readiness/lease target `4 failed, 2 passed`; replay owner-resource target `1 failed`; receipt-state/owner/frozen-target target `11 failed, 1 passed`.
+- Fix Round 1 GREEN: provider/readiness/lease target `6 passed`; replay/claim ordering target `3 passed`; receipt-state target `12 passed`; combined provider/endpoint/store target `75 passed`; final exact Task 7 suite `97 passed`; recipient/read/retrieval/security regressions `171 passed`; ordinary chat defaults/resolution `200 passed, 1 skipped`.
+- Fix Round 1 gates: Ruff passed all changed production/tests; Bandit reported zero findings/errors across the three changed production files; `git diff --check` passed.
+- Fix Round 1 environment: live PostgreSQL and real provider UAT were intentionally not run. No schema, migration, RLS, frontend, route alias, or noncanonical endpoint changed. The two unrelated watchlist templates remained untouched and unstaged.
+- Fix Round 1 report: appended to `task-7-implementer-report.md`. Parent task remains In Progress; status is implementation complete and pending controller review.
 
 ## Task 5 - Typed bounded recipient read APIs
 

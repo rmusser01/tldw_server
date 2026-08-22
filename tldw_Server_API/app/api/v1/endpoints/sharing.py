@@ -54,7 +54,7 @@ from tldw_Server_API.app.api.v1.utils.shared_workspace_recipient_route import (
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.Chat.chat_service import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_target_resolution import (
-    get_default_provider,
+    resolve_chat_provider_identity,
     resolve_chat_target,
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
@@ -619,13 +619,20 @@ async def _load_recipient_chat_history(
 
 @dataclass(frozen=True)
 class _RecipientChatResources:
-    store: Any
     chat_service: SharedWorkspaceChatService
+
+
+async def _load_recipient_chat_store(context: Any) -> Any:
+    """Open only recipient-owned persistence for thread and receipt handling."""
+    from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+
+    recipient_db = await get_chacha_db_for_user_id(context.recipient_user_id)
+    return recipient_db.shared_workspace_chat_store
 
 
 @asynccontextmanager
 async def _load_recipient_chat_resources(context: Any):
-    """Open recipient persistence and authorized owner data for one chat call."""
+    """Open authorized owner data only for a claimed generation call."""
     from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
         get_media_db_path_for_rag,
         managed_media_db_for_owner,
@@ -633,14 +640,11 @@ async def _load_recipient_chat_resources(context: Any):
 
     from ..API_Deps.ChaCha_Notes_DB_Deps import (
         get_chacha_db_for_owner,
-        get_chacha_db_for_user_id,
     )
 
-    recipient_db = await get_chacha_db_for_user_id(context.recipient_user_id)
     owner_db = await get_chacha_db_for_owner(context.owner_user_id)
     with managed_media_db_for_owner(context.owner_user_id) as media_db:
         yield _RecipientChatResources(
-            store=recipient_db.shared_workspace_chat_store,
             chat_service=SharedWorkspaceChatService(
                 owner_chacha_db=owner_db,
                 owner_media_db=media_db,
@@ -681,7 +685,10 @@ _SHARED_CHAT_PROVIDER_CONFIG_SECTIONS = {
 def _shared_chat_lease_seconds(body: SharedWorkspaceChatRequest) -> int:
     """Bound a receipt lease around the selected provider's call timeout."""
 
-    provider = str(body.provider or get_default_provider()).strip().lower()
+    provider = resolve_chat_provider_identity(
+        requested_provider=body.provider,
+        requested_model=body.model,
+    )
     custom_number = custom_openai_provider_number(provider)
     if custom_number is not None:
         section = custom_openai_section_name(custom_number)
@@ -778,12 +785,65 @@ def _shared_chat_response(turn: Any, *, replayed: bool) -> SharedWorkspaceChatRe
     )
 
 
-async def _mark_shared_chat_failure(store: Any, claim: Any, code: str) -> None:
+@dataclass(frozen=True)
+class _SharedChatFailureTransition:
+    completed_response: SharedWorkspaceChatResponse | None = None
+    replacement_error: HTTPException | None = None
+
+
+async def _mark_shared_chat_failure(
+    store: Any,
+    claim: Any,
+    code: str,
+) -> _SharedChatFailureTransition:
     method = store.mark_conflicted if code == "shared_source_changed" else store.mark_retryable
     try:
-        await run_in_threadpool(method, claim=claim, error_code=code)
+        transitioned = await run_in_threadpool(method, claim=claim, error_code=code)
     except Exception:
         logger.warning("Shared chat receipt failure transition failed")
+        transitioned = False
+    if transitioned:
+        return _SharedChatFailureTransition()
+
+    try:
+        winner = await run_in_threadpool(
+            store.reload_claim_state,
+            claim=claim,
+            now=datetime.now(timezone.utc),
+        )
+    except Exception:
+        logger.warning("Shared chat receipt winner reload failed")
+        winner = None
+
+    if (
+        winner is not None
+        and winner.disposition == "replay"
+        and winner.completed_turn is not None
+    ):
+        return _SharedChatFailureTransition(
+            completed_response=_shared_chat_response(
+                winner.completed_turn,
+                replayed=True,
+            )
+        )
+    if (
+        winner is not None
+        and winner.disposition == "in_progress"
+        and winner.lease_epoch > claim.lease_epoch
+    ):
+        return _SharedChatFailureTransition(
+            replacement_error=_recipient_http_error(
+                409,
+                "request_in_progress",
+                retry_after_ms=winner.retry_after_ms,
+            )
+        )
+    return _SharedChatFailureTransition(
+        replacement_error=_recipient_http_error(
+            503,
+            "shared_workspace_unavailable",
+        )
+    )
 
 
 async def _audit_shared_chat(
@@ -825,6 +885,7 @@ async def _orchestrate_shared_workspace_chat(
     request: Request | Any,
     recipient_user_id: int,
     access_service: Any,
+    store_loader: Any,
     resource_loader: Any,
     rate_limiter: Any,
     audit: Any,
@@ -836,90 +897,107 @@ async def _orchestrate_shared_workspace_chat(
         share_id=share_id,
         recipient_user_id=recipient_user_id,
     )
-    async with resource_loader(context) as resources:
-        store = resources.store
-        try:
-            thread = await run_in_threadpool(
-                store.get_or_create_thread,
-                share_id=share_id,
-                owner_user_id=str(context.owner_user_id),
-                workspace_id=context.workspace_id,
-                workspace_name=str(context.workspace.get("name") or "Shared workspace"),
-            )
-            claim = await run_in_threadpool(
-                store.claim_request,
-                share_id=share_id,
-                request_id=body.request_id,
-                request_fingerprint=_shared_chat_fingerprint(body),
-                conversation_id=thread.conversation_id,
-                lease_seconds=_shared_chat_lease_seconds(body),
-                now=datetime.now(timezone.utc),
-            )
-        except Exception as exc:
-            raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+    try:
+        store = await store_loader(context)
+        thread = await run_in_threadpool(
+            store.get_or_create_thread,
+            share_id=share_id,
+            owner_user_id=str(context.owner_user_id),
+            workspace_id=context.workspace_id,
+            workspace_name=str(context.workspace.get("name") or "Shared workspace"),
+        )
+        claim = await run_in_threadpool(
+            store.claim_request,
+            share_id=share_id,
+            request_id=body.request_id,
+            request_fingerprint=_shared_chat_fingerprint(body),
+            conversation_id=thread.conversation_id,
+            lease_seconds=_shared_chat_lease_seconds(body),
+            now=datetime.now(timezone.utc),
+        )
+    except Exception as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
 
-        if claim.disposition == "replay" and claim.completed_turn is not None:
-            response = _shared_chat_response(claim.completed_turn, replayed=True)
-            await _audit_shared_chat(
-                audit,
-                context=context,
-                provider=claim.completed_turn.provider,
-                model=claim.completed_turn.model,
-                source_count=claim.completed_turn.effective_source_count,
-                outcome="completed",
-                replay=True,
-                started_at=started_at,
-            )
-            return response
-        if claim.disposition == "in_progress":
-            error = _recipient_http_error(
-                409,
-                "request_in_progress",
-                retry_after_ms=claim.retry_after_ms,
-            )
-            await _audit_shared_chat(
-                audit,
-                context=context,
-                provider=claim.provider,
-                model=claim.model,
-                source_count=len(claim.source_ids),
-                outcome="request_in_progress",
-                replay=False,
-                started_at=started_at,
-            )
-            raise error
-        if claim.disposition == "request_id_conflict":
-            error = _recipient_http_error(409, "request_id_conflict")
-            await _audit_shared_chat(
-                audit,
-                context=context,
-                provider=None,
-                model=None,
-                source_count=0,
-                outcome="request_id_conflict",
-                replay=False,
-                started_at=started_at,
-            )
-            raise error
+    if claim.disposition == "replay" and claim.completed_turn is not None:
+        response = _shared_chat_response(claim.completed_turn, replayed=True)
+        await _audit_shared_chat(
+            audit,
+            context=context,
+            provider=claim.completed_turn.provider,
+            model=claim.completed_turn.model,
+            source_count=claim.completed_turn.effective_source_count,
+            outcome="completed",
+            replay=True,
+            started_at=started_at,
+        )
+        return response
+    if claim.disposition == "in_progress":
+        error = _recipient_http_error(
+            409,
+            "request_in_progress",
+            retry_after_ms=claim.retry_after_ms,
+        )
+        await _audit_shared_chat(
+            audit,
+            context=context,
+            provider=claim.provider,
+            model=claim.model,
+            source_count=len(claim.source_ids),
+            outcome="request_in_progress",
+            replay=False,
+            started_at=started_at,
+        )
+        raise error
+    if claim.disposition == "request_id_conflict":
+        error = _recipient_http_error(409, "request_id_conflict")
+        await _audit_shared_chat(
+            audit,
+            context=context,
+            provider=None,
+            model=None,
+            source_count=0,
+            outcome="request_id_conflict",
+            replay=False,
+            started_at=started_at,
+        )
+        raise error
 
-        target = None
-        snapshot = None
-        try:
-            if rate_limiter is not None:
-                allowed, _private_reason = await rate_limiter.check_rate_limit(
-                    user_id=str(recipient_user_id),
-                    conversation_id=f"shared:{recipient_user_id}:{share_id}",
-                    estimated_tokens=len(body.query.strip().encode("utf-8")),
+    target = None
+    snapshot = None
+    try:
+        if rate_limiter is not None:
+            allowed, _private_reason = await rate_limiter.check_rate_limit(
+                user_id=str(recipient_user_id),
+                conversation_id=f"shared:{recipient_user_id}:{share_id}",
+                estimated_tokens=len(body.query.strip().encode("utf-8")),
+            )
+            if not allowed:
+                raise _recipient_http_error(429, "shared_chat_rate_limited")
+
+        frozen_claim = bool(
+            claim.provider
+            and claim.model
+            and claim.source_ids
+            and claim.source_mode
+        )
+        if frozen_claim:
+            target = resolve_chat_target(
+                requested_provider=claim.provider,
+                requested_model=claim.model,
+            )
+            if (target.provider, target.model) != (claim.provider, claim.model):
+                raise ChatConfigurationError(
+                    provider=claim.provider,
+                    message="The frozen chat target is no longer available.",
                 )
-                if not allowed:
-                    raise _recipient_http_error(429, "shared_chat_rate_limited")
+        else:
+            target = resolve_chat_target(
+                requested_provider=body.provider,
+                requested_model=body.model,
+            )
 
-            if claim.provider and claim.model and claim.source_ids and claim.source_mode:
-                from tldw_Server_API.app.core.Chat.chat_target_resolution import (
-                    ResolvedChatTarget,
-                )
-
-                target = ResolvedChatTarget(claim.provider, claim.model)
+        async with resource_loader(context) as resources:
+            if frozen_claim:
                 snapshot = resources.chat_service.resolve_source_snapshot(
                     mode=claim.source_mode,
                     source_ids=claim.source_ids if claim.source_mode == "include" else (),
@@ -928,10 +1006,6 @@ async def _orchestrate_shared_workspace_chat(
                 if snapshot.snapshot_hash != claim.source_snapshot_hash:
                     raise SharedWorkspaceSourceChanged()
             else:
-                target = resolve_chat_target(
-                    requested_provider=body.provider,
-                    requested_model=body.model,
-                )
                 snapshot = resources.chat_service.resolve_source_snapshot(
                     mode=body.source_scope.mode,
                     source_ids=body.source_scope.source_ids,
@@ -976,41 +1050,57 @@ async def _orchestrate_shared_workspace_chat(
                 source_mode=snapshot.mode,
                 effective_source_count=len(snapshot.source_ids),
             )
-        except ChatConfigurationError:
-            error = _recipient_http_error(503, "no_provider_configured")
-        except SharedWorkspaceChatServiceError as exc:
-            error = _shared_chat_service_http_error(exc)
-        except HTTPException as exc:
-            error = exc
-        except Exception:
-            error = _recipient_http_error(503, "shared_workspace_unavailable")
-        else:
-            response = _shared_chat_response(turn, replayed=False)
-            await _audit_shared_chat(
-                audit,
-                context=context,
-                provider=target.provider,
-                model=target.model,
-                source_count=len(snapshot.source_ids),
-                outcome="completed",
-                replay=False,
-                started_at=started_at,
-            )
-            return response
-
-        code = str(error.detail.get("code") or "shared_workspace_unavailable")
-        await _mark_shared_chat_failure(store, claim, code)
+    except ChatConfigurationError:
+        error = _recipient_http_error(503, "no_provider_configured")
+    except SharedWorkspaceChatServiceError as exc:
+        error = _shared_chat_service_http_error(exc)
+    except HTTPException as exc:
+        error = exc
+    except Exception:
+        error = _recipient_http_error(503, "shared_workspace_unavailable")
+    else:
+        response = _shared_chat_response(turn, replayed=False)
         await _audit_shared_chat(
             audit,
             context=context,
-            provider=target.provider if target is not None else claim.provider,
-            model=target.model if target is not None else claim.model,
-            source_count=len(snapshot.source_ids) if snapshot is not None else len(claim.source_ids),
-            outcome=code,
+            provider=target.provider,
+            model=target.model,
+            source_count=len(snapshot.source_ids),
+            outcome="completed",
             replay=False,
             started_at=started_at,
         )
-        raise error
+        return response
+
+    code = str(error.detail.get("code") or "shared_workspace_unavailable")
+    transition = await _mark_shared_chat_failure(store, claim, code)
+    if transition.completed_response is not None:
+        completed = transition.completed_response
+        await _audit_shared_chat(
+            audit,
+            context=context,
+            provider=completed.generation.provider,
+            model=completed.generation.model,
+            source_count=completed.source_scope.effective_source_count,
+            outcome="completed",
+            replay=True,
+            started_at=started_at,
+        )
+        return completed
+    if transition.replacement_error is not None:
+        error = transition.replacement_error
+        code = str(error.detail.get("code") or "shared_workspace_unavailable")
+    await _audit_shared_chat(
+        audit,
+        context=context,
+        provider=target.provider if target is not None else claim.provider,
+        model=target.model if target is not None else claim.model,
+        source_count=len(snapshot.source_ids) if snapshot is not None else len(claim.source_ids),
+        outcome=code,
+        replay=False,
+        started_at=started_at,
+    )
+    raise error
 
 
 def _bounded_recipient_text(value: Any, limit: int, *, fallback: str = "") -> str:
@@ -2061,6 +2151,7 @@ async def create_shared_workspace_chat_turn(
         request=request,
         recipient_user_id=user.id,
         access_service=service,
+        store_loader=_load_recipient_chat_store,
         resource_loader=_load_recipient_chat_resources,
         rate_limiter=get_rate_limiter(),
         audit=_get_audit_service(),

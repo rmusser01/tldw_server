@@ -529,6 +529,40 @@ class SharedWorkspaceChatStore:
         except (sqlite3.Error, BackendDatabaseError) as exc:
             raise CharactersRAGDBError(f"Shared workspace replay load failed: {exc}") from exc
 
+    def reload_claim_state(
+        self,
+        *,
+        claim: SharedWorkspaceChatClaim,
+        now: datetime,
+    ) -> SharedWorkspaceChatClaim | None:
+        """Read the durable winner state for a stale transition without reclaiming."""
+
+        self._validate_claim(claim)
+        current_time = self._aware_utc(now, field="now", reject_naive=True)
+        try:
+            with self._db.transaction() as conn:
+                receipt = self._fetch_receipt_with_conn(
+                    conn,
+                    claim.share_id,
+                    claim.request_id,
+                )
+            if receipt is None:
+                return None
+            return self._classify_existing_claim_state(
+                receipt,
+                share_id=claim.share_id,
+                request_id=claim.request_id,
+                fingerprint=claim.request_fingerprint,
+                conversation_id=claim.conversation_id,
+                now=current_time,
+            )
+        except CharactersRAGDBError:
+            raise
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(
+                f"Shared workspace claim-state reload failed: {exc}"
+            ) from exc
+
     def list_messages(
         self,
         *,
