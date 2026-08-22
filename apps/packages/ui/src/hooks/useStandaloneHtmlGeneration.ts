@@ -17,6 +17,7 @@ const MIN_POLL_DELAY_MS = 1_000
 const IDEMPOTENCY_KEY_LENGTH = 32
 const IDEMPOTENCY_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-"
 const MAX_PROGRESS_TEXT_CHARS = 500
+const SLIDES_SCOPE_MISMATCH_EVENT = "tldw:slides-scope-mismatch"
 
 const PRESENTATION_TYPES = new Set([
   "pitch-deck", "tech-sharing", "product-launch", "weekly-report", "course-module",
@@ -356,8 +357,16 @@ export const useStandaloneHtmlRecoveryProbe = (): StandaloneHtmlRecoveryProbeRes
       setKind(null)
       setStatus("checking")
     }
+    const scopeMismatch = () => {
+      requestIdRef.current += 1
+      removeScopedRecoveryRecords(lastTrustedScopeRef.current)
+      lastTrustedScopeRef.current = null
+      setKind(null)
+      setStatus("unavailable")
+    }
     window.addEventListener("tldw:config-updated", restore)
     window.addEventListener("tldw:auth-principal-changed", authBoundary)
+    window.addEventListener(SLIDES_SCOPE_MISMATCH_EVENT, scopeMismatch)
     window.addEventListener("pagehide", invalidate)
     window.addEventListener("pageshow", restore)
     window.addEventListener("focus", restore)
@@ -366,6 +375,7 @@ export const useStandaloneHtmlRecoveryProbe = (): StandaloneHtmlRecoveryProbeRes
       lastTrustedScopeRef.current = null
       window.removeEventListener("tldw:config-updated", restore)
       window.removeEventListener("tldw:auth-principal-changed", authBoundary)
+      window.removeEventListener(SLIDES_SCOPE_MISMATCH_EVENT, scopeMismatch)
       window.removeEventListener("pagehide", invalidate)
       window.removeEventListener("pageshow", restore)
       window.removeEventListener("focus", restore)
@@ -668,11 +678,19 @@ export const useStandaloneHtmlGeneration = ({
       }
       invalidateScopeBoundary()
     }
+    const scopeMismatch = () => {
+      const trustedScope = scopeRef.current ?? lastTrustedScopeRef.current
+      invalidateScopeBoundary()
+      removeRecords(trustedScope)
+      lastTrustedScopeRef.current = null
+      setScopeError("Current server and account could not be confirmed.")
+    }
     const visibility = () => {
       if (document.visibilityState === "visible") restore()
     }
     window.addEventListener("tldw:config-updated", restore)
     window.addEventListener("tldw:auth-principal-changed", authBoundary)
+    window.addEventListener(SLIDES_SCOPE_MISMATCH_EVENT, scopeMismatch)
     window.addEventListener("pagehide", pagehide)
     window.addEventListener("pageshow", restore)
     window.addEventListener("focus", restore)
@@ -680,6 +698,7 @@ export const useStandaloneHtmlGeneration = ({
     return () => {
       window.removeEventListener("tldw:config-updated", restore)
       window.removeEventListener("tldw:auth-principal-changed", authBoundary)
+      window.removeEventListener(SLIDES_SCOPE_MISMATCH_EVENT, scopeMismatch)
       window.removeEventListener("pagehide", pagehide)
       window.removeEventListener("pageshow", restore)
       window.removeEventListener("focus", restore)

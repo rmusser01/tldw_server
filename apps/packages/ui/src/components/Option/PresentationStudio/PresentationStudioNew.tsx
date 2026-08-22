@@ -24,101 +24,75 @@ export const PresentationStudioNew: React.FC = () => {
     if (recoveryAvailable) setCreationMode("standalone_html")
   }, [recoveryAvailable])
 
+  const retryStandalone = React.useCallback(async () => {
+    await Promise.all([slides.retry(), recovery.retry()])
+  }, [recovery.retry, slides.retry])
+
   const standaloneContent = React.useMemo(() => {
-    if (slides.capabilities && slides.status === "loading") {
-      return (
-        <StandaloneHtmlGenerationForm
-          capabilities={slides.capabilities}
-          authorityConfirmed={false}
-          refreshing
-          onCapabilitiesChanged={slides.retry}
-          onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
-          onStopWaiting={() => navigate("/presentation-studio")}
-        />
-      )
-    }
-    if (recoveryAvailable && !slides.canGenerate) {
-      return (
-        <StandaloneHtmlGenerationForm
-          capabilities={slides.capabilities}
-          recoveryOnly
-          authorityConfirmed={false}
-          onCapabilitiesChanged={slides.retry}
-          onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
-          onStopWaiting={() => navigate("/presentation-studio")}
-        />
-      )
-    }
+    const retainedEnabledCapability =
+      slides.capabilities?.generation_modes.standalone_html.enabled === true
+    const keepFormMounted = retainedEnabledCapability || recoveryAvailable
+    let state: React.ReactNode = null
+
     if (slides.status === "loading") {
-      return (
-        <div role="status" aria-label="Loading generation capabilities" className="rounded-lg border border-border bg-surface p-4">
-          <LoadingState mode="skeleton" rows={3} />
-        </div>
-      )
-    }
-    if (slides.status === "offline") {
-      return <StatePanel state="unavailable" title="Presentation Studio is offline" message="Reconnect before starting generation." primaryAction={{ label: "Retry", onClick: () => void slides.retry() }} />
-    }
-    if (slides.status === "error" || slides.status === "auth_required" || slides.status === "forbidden") {
-      if (slides.capabilities) {
+      if (!keepFormMounted) {
         return (
-          <div className="space-y-4">
-            <StandaloneHtmlGenerationForm
-              capabilities={slides.capabilities}
-              authorityConfirmed={false}
-              onCapabilitiesChanged={slides.retry}
-              onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
-              onStopWaiting={() => navigate("/presentation-studio")}
-            />
-            <StatePanel
-              state="error"
-              title="Generation capabilities could not refresh"
-              message="The prior target is shown for reference only. Submission stays unavailable until the current server contract is confirmed."
-              primaryAction={{ label: "Retry", onClick: () => void slides.retry() }}
-              role="alert"
-            />
+          <div role="status" aria-label="Loading generation capabilities" className="rounded-lg border border-border bg-surface p-4">
+            <LoadingState mode="skeleton" rows={3} />
           </div>
         )
       }
-      return (
+    } else if (slides.status === "offline") {
+      state = <StatePanel state="unavailable" title="Presentation Studio is offline" message="Reconnect before starting generation." primaryAction={{ label: "Retry", onClick: () => void retryStandalone() }} />
+    } else if (slides.status === "error" || slides.status === "auth_required" || slides.status === "forbidden") {
+      state = (
         <StatePanel
           state="error"
-          title="Generation capabilities could not load"
-          message="Generation stays unavailable until the server contract is confirmed."
-          primaryAction={{ label: "Retry", onClick: () => void slides.retry() }}
+          title={slides.capabilities ? "Generation capabilities could not refresh" : "Generation capabilities could not load"}
+          message={slides.capabilities
+            ? "The prior target is shown for reference only. Submission stays unavailable until the current server contract is confirmed."
+            : "Generation stays unavailable until the server contract is confirmed."}
+          primaryAction={{ label: "Retry", onClick: () => void retryStandalone() }}
           role="alert"
         />
       )
-    }
-    if (slides.status === "validator_unavailable") {
-      return (
+    } else if (slides.status === "validator_unavailable") {
+      state = (
         <StatePanel
           state="blocked"
           title="Standalone validation is unavailable"
           message={<code className="break-all">{slides.reason ?? "validator_unavailable"}</code>}
-          primaryAction={{ label: "Retry", onClick: () => void slides.retry() }}
+          primaryAction={{ label: "Retry", onClick: () => void retryStandalone() }}
         />
       )
-    }
-    if (slides.status === "generation_disabled" || !slides.canGenerate || !slides.capabilities) {
-      return (
+    } else if (slides.status === "generation_disabled" || !slides.canGenerate || !slides.capabilities) {
+      state = (
         <StatePanel
           state="blocked"
           title="Standalone generation is disabled"
           message={<code className="break-all">{slides.reason ?? "generation_disabled"}</code>}
-          primaryAction={{ label: "Retry", onClick: () => void slides.retry() }}
+          primaryAction={{ label: "Retry", onClick: () => void retryStandalone() }}
         />
       )
     }
+
+    if (!keepFormMounted) return state
+
     return (
-      <StandaloneHtmlGenerationForm
-        capabilities={slides.capabilities}
-        onCapabilitiesChanged={slides.retry}
-        onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
-        onStopWaiting={() => navigate("/presentation-studio")}
-      />
+      <div className="space-y-4">
+        <StandaloneHtmlGenerationForm
+          capabilities={slides.capabilities}
+          recoveryOnly={recoveryAvailable && !slides.canGenerate}
+          authorityConfirmed={slides.canGenerate}
+          refreshing={slides.status === "loading"}
+          onCapabilitiesChanged={retryStandalone}
+          onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
+          onStopWaiting={() => navigate("/presentation-studio")}
+        />
+        {state}
+      </div>
     )
-  }, [navigate, recoveryAvailable, slides])
+  }, [navigate, recoveryAvailable, retryStandalone, slides])
 
   return (
     <div className="space-y-6 py-6">
@@ -169,10 +143,10 @@ export const PresentationStudioNew: React.FC = () => {
         </div>
       </fieldset>
 
-      {!htmlOptionEnabled && slides.status !== "loading" ? (
+      {!htmlOptionEnabled && slides.status !== "loading" && creationMode === "structured" ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4" role="status">
           <p className="text-sm text-text-muted">Standalone generation stays unavailable until the server contract is confirmed.</p>
-          <Button variant="outline" size="lg" onClick={() => void slides.retry()}>Retry generation capabilities</Button>
+          <Button variant="outline" size="lg" onClick={() => void retryStandalone()}>Retry generation capabilities</Button>
         </div>
       ) : null}
 

@@ -87,6 +87,7 @@ describe("PresentationStudioNew", () => {
     expect(screen.getByRole("radio", { name: /Standalone HTML/ })).toBeDisabled()
     fireEvent.click(screen.getByRole("button", { name: "Retry generation capabilities" }))
     expect(mocks.retry).toHaveBeenCalledTimes(1)
+    expect(mocks.retryRecovery).toHaveBeenCalledTimes(1)
   })
 
   it.each([
@@ -120,6 +121,7 @@ describe("PresentationStudioNew", () => {
     expect(screen.getByText(reason)).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(mocks.retry).toHaveBeenCalledTimes(1)
+    expect(mocks.retryRecovery).toHaveBeenCalledTimes(1)
   })
 
   it("auto-offers source-free recovery even when current capability is unavailable", async () => {
@@ -134,6 +136,9 @@ describe("PresentationStudioNew", () => {
       capabilities: null,
       recoveryOnly: true
     }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(mocks.retry).toHaveBeenCalledTimes(1)
+    expect(mocks.retryRecovery).toHaveBeenCalledTimes(1)
   })
 
   it("uses one top-level heading and accurately describes downloaded execution", async () => {
