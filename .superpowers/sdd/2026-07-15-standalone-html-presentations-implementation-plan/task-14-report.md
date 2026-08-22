@@ -294,6 +294,12 @@ No module/global/history/URL source cache, duplicated logout cleanup, automatic 
 - Bandit remains not applicable because round 4 touches no Python.
 - Static review found no HTML parser/insertion, `srcdoc`, Blob URL, iframe, popup, worker, dynamic import, eval, Function constructor, history/URL source state, analytics, or global-store sink in round-4 production changes. The shared logout utility contains one definition, two callers, `sessionStorage.key/removeItem`, and no `getItem`.
 
+### Controller verification correction
+
+The controller's fresh post-review package typecheck on 2026-08-22 exited 2 on the repository's inherited diagnostics in Notes, Audio Studio, Research Workspace, Scheduled Tasks, Setup, Skills, Dexie/background code, MCP Hub, and voice cloning. No diagnostic named a Task 14 production or test path. This supersedes the implementer's round-4 statement that the package typecheck completed without diagnostics; the touched-path result remains zero diagnostics.
+
+The controller also reran the amended canonical matrix (12 files, 202 tests) and the OpenAPI guard (317 client paths, 49 fallback fields); both exited 0. `git diff --check` remained clean.
+
 ### Round-4 files and concerns
 
 Production changes are limited to the shared session-record utility, both logout services, the recovery probe, and `PresentationStudioNew`. Direct logout, hook, and New/form tests were added or amended, plus this report. The protected `antd` artifact and both Watchlist templates remain untouched and unstaged. No functional concern remains; the only observed warnings are the established Vitest localStorage/i18next noise and repository formatter/linter-scope baselines described above.
