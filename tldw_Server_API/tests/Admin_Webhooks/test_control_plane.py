@@ -983,6 +983,11 @@ async def test_list_get_and_status_do_not_require_decryption(
 
     assert await service.get(registration.id) == registration
     assert await service.list(limit=50) == [registration]
+    page = await service.list_page(limit=25, offset=0)
+    assert page.items == (registration,)
+    assert page.total == 1
+    assert page.limit == 25
+    assert page.offset == 0
     assert (await service.catalog()).api_version == "2026-07-01"
     status = await service.status(now=NOW + timedelta(days=1))
     assert status.key_state == "admin_webhook_key_unavailable"

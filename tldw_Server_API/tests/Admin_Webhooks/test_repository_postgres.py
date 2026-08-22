@@ -179,6 +179,24 @@ async def test_postgres_commit_sequence_and_readback(
     assert sorted(allocated) == list(range(2, 12))
 
 
+async def test_postgres_registration_list_supports_bounded_offset(
+    pg_repo: PostgreSQLRepositoryFixture,
+) -> None:
+    async with pg_repo.repository.transaction() as tx:
+        for expected_id in range(1, 4):
+            webhook_id = await tx.allocate_registration_id()
+            assert webhook_id == expected_id
+            await tx.insert_registration(_registration_insert(webhook_id))
+
+    first_page = await pg_repo.repository.list_registrations(limit=2)
+    offset_page = await pg_repo.repository.list_registrations(limit=2, offset=1)
+
+    assert [item.id for item in first_page] == [3, 2]
+    assert [item.id for item in offset_page] == [2, 1]
+    with pytest.raises(ValueError, match="offset must be between 0 and 1000"):
+        await pg_repo.repository.list_registrations(limit=2, offset=1_001)
+
+
 async def test_postgres_counts_secret_rotation_required(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:

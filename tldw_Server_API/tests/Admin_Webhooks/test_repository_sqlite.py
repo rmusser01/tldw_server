@@ -180,6 +180,8 @@ async def test_insert_read_list_event_roundtrip_and_tombstone_exclusion(
 
     page = await sqlite_repo.repository.list_registrations(limit=2)
     assert [item.id for item in page] == [third.id, second.id]
+    offset_page = await sqlite_repo.repository.list_registrations(limit=2, offset=1)
+    assert [item.id for item in offset_page] == [second.id, first.id]
     assert (
         await sqlite_repo.repository.list_registrations(
             limit=2,
@@ -187,6 +189,8 @@ async def test_insert_read_list_event_roundtrip_and_tombstone_exclusion(
         )
     ) == [first]
     assert first.event_types == ("user.deleted", "user.created")
+    with pytest.raises(ValueError, match="offset"):
+        await sqlite_repo.repository.list_registrations(limit=2, offset=1_001)
 
     async with sqlite_repo.repository.transaction() as tx:
         deleted = await tx.soft_delete_registration(

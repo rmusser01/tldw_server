@@ -223,6 +223,16 @@ class WebhookCatalog:
 
 
 @dataclass(frozen=True)
+class WebhookRegistrationPage:
+    """One bounded offset page plus its server-side total."""
+
+    items: tuple[WebhookRegistration, ...]
+    total: int
+    limit: int
+    offset: int
+
+
+@dataclass(frozen=True)
 class _NormalizedCreate:
     description: str
     target: ValidatedWebhookTarget
@@ -1119,18 +1129,43 @@ class AdminWebhookControlPlane:
         *,
         limit: int,
         before_id: int | None = None,
+        offset: int = 0,
     ) -> list[WebhookRegistration]:
         try:
             await self._require_surface_available()
             return await self._repository.list_registrations(
                 limit=limit,
                 before_id=before_id,
+                offset=offset,
             )
         except Exception as exc:
             mapped = _map_exception(exc)
             if mapped is not None:
                 raise mapped from None
             raise
+
+    async def list_page(self, *, limit: int, offset: int) -> WebhookRegistrationPage:
+        """Return one public offset page without exposing repository primitives."""
+        if not 1 <= limit <= 100 or not 0 <= offset <= 1_000:
+            raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
+        try:
+            await self._require_surface_available()
+            items = await self._repository.list_registrations(
+                limit=limit,
+                offset=offset,
+            )
+            total = await self._repository.count_registrations()
+        except Exception as exc:
+            mapped = _map_exception(exc)
+            if mapped is not None:
+                raise mapped from None
+            raise
+        return WebhookRegistrationPage(
+            items=tuple(items),
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     async def get(self, webhook_id: int) -> WebhookRegistration:
         if isinstance(webhook_id, bool) or not isinstance(webhook_id, int) or webhook_id < 1:

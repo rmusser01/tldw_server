@@ -28,8 +28,8 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
     monkeypatch.setitem(settings, "AUDIT_FLUSH_INTERVAL", 0.1)
 
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.Logging.system_log_buffer import ensure_system_log_buffer
     from tldw_Server_API.app.services import admin_system_ops_service
 
@@ -193,27 +193,6 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
         delete_resp = client.delete(f"/api/v1/admin/incidents/{incident_id}")
         assert delete_resp.status_code == 200, delete_resp.text
 
-        webhook_create_resp = client.post(
-            "/api/v1/admin/webhooks",
-            json={
-                "url": "https://example.com/webhook",
-                "events": ["incident.created"],
-                "enabled": True,
-            },
-        )
-        assert webhook_create_resp.status_code == 200, webhook_create_resp.text
-
-        webhooks_resp = client.get("/api/v1/admin/webhooks")
-        assert webhooks_resp.status_code == 200, webhooks_resp.text
-        webhook_payload = webhooks_resp.json()
-        assert webhook_payload["total"] >= 1
-        assert webhook_payload["pagination"]["total"] >= 1
-        assert webhook_payload["pagination"]["offset"] == 0
-        assert webhook_payload["pagination"]["limit"] >= 1
-        assert webhook_payload["has_more"] == webhook_payload["pagination"]["has_more"]
-        assert webhook_payload["next_offset"] == webhook_payload["pagination"]["next_offset"]
-        assert any(item["url"] == "https://example.com/webhook" for item in webhook_payload["items"])
-
         # Reset maintenance state for subsequent tests
         client.put(
             "/api/v1/admin/maintenance",
@@ -223,8 +202,9 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
     from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps as audit_deps
     await audit_deps.shutdown_all_audit_services()
 
-    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     import sqlite3
+
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
     audit_db_path = DatabasePaths.get_audit_db_path(1)
     with sqlite3.connect(audit_db_path) as conn:

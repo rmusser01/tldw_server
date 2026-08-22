@@ -807,6 +807,7 @@ class AdminWebhookRepository:
         *,
         limit: int,
         before_id: int | None = None,
+        offset: int = 0,
         include_deleted: bool = False,
     ) -> list[WebhookRegistration]:
         async with self._read_connection() as connection:
@@ -814,6 +815,7 @@ class AdminWebhookRepository:
             return await unit.list_registrations(
                 limit=limit,
                 before_id=before_id,
+                offset=offset,
                 include_deleted=include_deleted,
             )
 
@@ -1088,10 +1090,13 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         *,
         limit: int,
         before_id: int | None = None,
+        offset: int = 0,
         include_deleted: bool = False,
     ) -> list[WebhookRegistration]:
         if not 1 <= limit <= _MAX_PAGE_SIZE:
             raise ValueError(f"limit must be between 1 and {_MAX_PAGE_SIZE}")
+        if not 0 <= offset <= 1_000:
+            raise ValueError("offset must be between 0 and 1000")
         clauses: list[str] = []
         params: list[object] = []
         if not include_deleted:
@@ -1104,8 +1109,8 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         query = "SELECT * FROM admin_webhook_registrations"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY id DESC LIMIT ?"
-        params.append(limit)
+        query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+        params.extend((limit, offset))
         return [_registration_from_row(row) for row in await self._fetch(query, params)]
 
     async def count_registrations(self) -> int:
