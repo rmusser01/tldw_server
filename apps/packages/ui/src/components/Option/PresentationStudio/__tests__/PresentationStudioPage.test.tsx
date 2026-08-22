@@ -108,6 +108,7 @@ describe("PresentationStudioPage", () => {
   it("creates a blank project from the precreate form and redirects to its detail route", async () => {
     clientMocks.createPresentation.mockResolvedValue({
       id: "presentation-1",
+      content_kind: "structured_slides",
       title: "Untitled Presentation",
       description: null,
       theme: "white",
@@ -219,6 +220,7 @@ describe("PresentationStudioPage", () => {
 
     resolveCreate?.({
       id: "presentation-strict",
+      content_kind: "structured_slides",
       title: "Untitled Presentation",
       description: null,
       theme: "white",
@@ -603,6 +605,7 @@ describe("PresentationStudioPage", () => {
     usePresentationStudioStore.getState().loadProject(
       {
         id: "presentation-1",
+        content_kind: "structured_slides",
         title: "Seeded deck",
         description: null,
         theme: "black",
@@ -645,6 +648,7 @@ describe("PresentationStudioPage", () => {
     usePresentationStudioStore.getState().loadProject(
       {
         id: "presentation-readiness",
+        content_kind: "structured_slides",
         title: "Readiness deck",
         description: null,
         theme: "black",
@@ -694,6 +698,7 @@ describe("PresentationStudioPage", () => {
     usePresentationStudioStore.getState().loadProject(
       {
         id: "presentation-ux",
+        content_kind: "structured_slides",
         title: "Narrated deck",
         description: null,
         theme: "black",
@@ -770,6 +775,7 @@ describe("PresentationStudioPage", () => {
     usePresentationStudioStore.getState().loadProject(
       {
         id: "presentation-timing",
+        content_kind: "structured_slides",
         title: "Timed deck",
         description: null,
         theme: "black",

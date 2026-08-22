@@ -158,4 +158,39 @@ describe("TldwApiClient presentations normalization", () => {
     expect(result.record).not.toHaveProperty("html_document")
     expect(result.etag).toBe('W/"v2"')
   })
+
+  it("does not treat a missing discriminator with non-array slides as structured", async () => {
+    const client: TldwApiClientCore = {
+      ensureConfigForRequest: vi.fn(async () => ({})),
+      request: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: { etag: 'W/"v2"' },
+        data: {
+          id: "legacy-invalid-1",
+          title: "Legacy invalid",
+          theme: "black",
+          slides: {},
+          created_at: "2026-07-15T00:00:00Z",
+          last_modified: "2026-07-15T00:00:01Z",
+          deleted: false,
+          client_id: "1",
+          version: 2
+        }
+      })) as unknown as TldwApiClientCore["request"],
+      resolveApiPath: vi.fn(),
+      fillPathParams: vi.fn()
+    }
+
+    const result = await presentationsMethods.getPresentation.call(client, "legacy-invalid-1")
+
+    expect(result.record).toEqual(
+      expect.objectContaining({
+        content_kind: "unsupported",
+        unsupported_content_kind: null,
+        read_only: true
+      })
+    )
+    expect(result.record).not.toHaveProperty("slides")
+  })
 })

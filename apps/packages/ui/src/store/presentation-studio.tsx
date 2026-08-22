@@ -532,7 +532,7 @@ const createInitialState = () => ({
 const assertStructuredPresentation = (project: StructuredPresentationStudioRecord): void => {
   const candidate = project as unknown as Record<string, unknown>
   if (
-    (candidate.content_kind != null && candidate.content_kind !== "structured_slides") ||
+    candidate.content_kind !== "structured_slides" ||
     Object.prototype.hasOwnProperty.call(candidate, "html_document")
   ) {
     throw new Error("Structured presentation required")
@@ -557,38 +557,38 @@ export const usePresentationStudioStore = createWithEqualityFn<PresentationStudi
     loadProject: (project, options) => {
       assertStructuredPresentation(project)
       set((state) => {
-      const slides = (project.slides || []).map((slide, index) => normalizeSlide(slide, index))
-      const previousSelected = state.selectedSlideId
-      const selectedSlideId =
-        slides.find((slide) => slide.metadata.studio.slideId === previousSelected)?.metadata.studio.slideId ||
-        slides[0]?.metadata.studio.slideId ||
-        null
-      const etag = Object.prototype.hasOwnProperty.call(options ?? {}, "etag")
-        ? options?.etag ?? null
-        : `W/"v${project.version}"`
-      return {
-        projectId: project.id,
-        title: project.title || "Untitled Presentation",
-        description: project.description || "",
-        theme: project.theme || "black",
-        visualStyleId: project.visual_style_id ?? null,
-        visualStyleScope: project.visual_style_scope ?? null,
-        visualStyleName:
-          project.visual_style_name ?? project.visual_style_snapshot?.name ?? null,
-        visualStyleVersion: project.visual_style_version ?? null,
-        visualStyleSnapshot: clonePresentationVisualStyleSnapshot(project.visual_style_snapshot),
-        studioData:
-          project.studio_data && typeof project.studio_data === "object"
-            ? { ...project.studio_data }
-            : null,
-        slides,
-        selectedSlideId,
-        etag,
-        isDirty: Boolean(options?.preserveDirty),
-        autosaveState: options?.preserveDirty ? state.autosaveState : "idle",
-        autosaveError: options?.preserveDirty ? state.autosaveError : null
-      }
-    })
+        const slides = (project.slides || []).map((slide, index) => normalizeSlide(slide, index))
+        const previousSelected = state.selectedSlideId
+        const selectedSlideId =
+          slides.find((slide) => slide.metadata.studio.slideId === previousSelected)?.metadata.studio.slideId ||
+          slides[0]?.metadata.studio.slideId ||
+          null
+        const etag = Object.prototype.hasOwnProperty.call(options ?? {}, "etag")
+          ? options?.etag ?? null
+          : `W/"v${project.version}"`
+        return {
+          projectId: project.id,
+          title: project.title || "Untitled Presentation",
+          description: project.description || "",
+          theme: project.theme || "black",
+          visualStyleId: project.visual_style_id ?? null,
+          visualStyleScope: project.visual_style_scope ?? null,
+          visualStyleName:
+            project.visual_style_name ?? project.visual_style_snapshot?.name ?? null,
+          visualStyleVersion: project.visual_style_version ?? null,
+          visualStyleSnapshot: clonePresentationVisualStyleSnapshot(project.visual_style_snapshot),
+          studioData:
+            project.studio_data && typeof project.studio_data === "object"
+              ? { ...project.studio_data }
+              : null,
+          slides,
+          selectedSlideId,
+          etag,
+          isDirty: Boolean(options?.preserveDirty),
+          autosaveState: options?.preserveDirty ? state.autosaveState : "idle",
+          autosaveError: options?.preserveDirty ? state.autosaveError : null
+        }
+      })
     },
 
     updateProjectMeta: (updates) =>

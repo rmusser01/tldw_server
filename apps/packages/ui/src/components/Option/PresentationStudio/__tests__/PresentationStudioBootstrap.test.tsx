@@ -111,6 +111,7 @@ describe("PresentationStudioPage bootstrap", () => {
 
     resolveCreate?.({
       id: "presentation-strict",
+      content_kind: "structured_slides",
       title: "Untitled Presentation",
       description: null,
       theme: "white",

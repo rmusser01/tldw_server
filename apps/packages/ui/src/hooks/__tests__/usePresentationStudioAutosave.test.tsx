@@ -1,8 +1,9 @@
 import React from "react"
 import { act, render } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest"
 
 import { usePresentationStudioAutosave } from "../usePresentationStudioAutosave"
+import type { StructuredPresentationStudioRecord } from "@/services/tldw/TldwApiClient"
 import { usePresentationStudioStore } from "@/store/presentation-studio"
 
 const clientMocks = vi.hoisted(() => ({
@@ -40,6 +41,7 @@ describe("usePresentationStudioAutosave", () => {
     usePresentationStudioStore.getState().loadProject(
       {
         id: "presentation-1",
+        content_kind: "structured_slides",
         title: "Deck",
         description: null,
         theme: "black",
@@ -86,6 +88,7 @@ describe("usePresentationStudioAutosave", () => {
       .mockRejectedValueOnce(new Error("412 precondition_failed"))
       .mockResolvedValueOnce({
         id: "presentation-1",
+        content_kind: "structured_slides",
         title: "Deck",
         description: null,
         theme: "black",
@@ -246,6 +249,10 @@ describe("usePresentationStudioAutosave", () => {
       content_kind: "unsupported",
       unsupported_content_kind: "future_canvas",
       read_only: true
+    },
+    {
+      content_kind: undefined,
+      slides: []
     }
   ])("does not retain a $content_kind record in the structured store", (record) => {
     const store = usePresentationStudioStore.getState()
@@ -267,6 +274,12 @@ describe("usePresentationStudioAutosave", () => {
     ).toThrow("Structured presentation required")
     expect(JSON.stringify(usePresentationStudioStore.getState())).toBe(before)
     expect(JSON.stringify(usePresentationStudioStore.getState())).not.toContain("Private draft")
+  })
+
+  it("requires the structured discriminator in the store input type", () => {
+    expectTypeOf<StructuredPresentationStudioRecord["content_kind"]>().toEqualTypeOf<
+      "structured_slides"
+    >()
   })
 
   it("stops structured conflict recovery when detail resolves to standalone HTML", async () => {
@@ -306,6 +319,61 @@ describe("usePresentationStudioAutosave", () => {
     expect(usePresentationStudioStore.getState().autosaveState).toBe("error")
     expect(JSON.stringify(usePresentationStudioStore.getState())).not.toContain(
       "Must stay out of store"
+    )
+  })
+
+  it("keeps the dirty draft and stops conflict recovery when detail has no ETag", async () => {
+    usePresentationStudioStore.getState().loadProject(
+      {
+        id: "presentation-1",
+        content_kind: "structured_slides",
+        title: "Deck",
+        description: null,
+        theme: "black",
+        slides: [],
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      { etag: 'W/"v1"' }
+    )
+    usePresentationStudioStore.getState().updateProjectMeta({ title: "Local edit" })
+    clientMocks.patchPresentation.mockRejectedValueOnce(new Error("412 precondition_failed"))
+    clientMocks.getPresentation.mockResolvedValue({
+      record: {
+        id: "presentation-1",
+        content_kind: "structured_slides",
+        title: "Remote edit",
+        description: null,
+        theme: "black",
+        slides: [],
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:01:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 2
+      },
+      etag: null
+    })
+
+    render(<AutosaveHarness />)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(900)
+    })
+
+    expect(clientMocks.patchPresentation).toHaveBeenCalledTimes(1)
+    expect(clientMocks.getPresentation).toHaveBeenCalledTimes(1)
+    expect(usePresentationStudioStore.getState()).toEqual(
+      expect.objectContaining({
+        title: "Local edit",
+        etag: 'W/"v1"',
+        isDirty: true,
+        autosaveState: "error",
+        autosaveError: "Presentation autosave conflict response missing ETag"
+      })
     )
   })
 })
