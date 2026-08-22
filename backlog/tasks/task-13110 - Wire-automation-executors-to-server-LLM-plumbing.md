@@ -31,7 +31,7 @@ Registered at worker startup (`run_agent_task_jobs_worker`) so a registered exec
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 A production executor for `recurring_question` builds one completion call from `input.question` (system prompt fixed, generation-only) and returns the assistant text
-- [x] #2 A production executor for `agent_task` builds the call from `input.message`/`input.prompt` with the same guardrails; both executors raise nothing on missing input except an honest error string recorded as a failed run
+- [x] #2 RESOLVED DIFFERENTLY (review #4 on PR #2804): `agent_task` is deliberately UNWIRED in phase 1 — the automation service redacts `input.message` at rest (metadata_only policy), so no runnable prompt survives persistence; persisting the raw message would reverse an owner-level privacy design. The consumer skips unwired families with `family_not_wired_for_execution:<family>` (status skipped, not failed), capabilities report agent_task execute as `planned` with the redaction reason, and recurring_question raises honest LookupError on missing input
 - [x] #3 Model/provider precedence: definition-level `model`(+`provider`) → automation config defaults (`executor_provider`/`executor_model`) → server default resolution; pinned by unit test over the resolution function
 - [x] #4 Executors are registered at worker startup, idempotently, before the first job is acquired
 - [x] #5 The call goes through `perform_chat_api_call_async` with bounded `max_tokens` (default 1000, definition-configurable, capped); no tools/tool_choice are ever passed
@@ -68,3 +68,5 @@ Implemented 2026-08-22 on `feat/executor-wiring` (branched from dev after PR #28
 **Env gates unchanged**: enable `SCHEDULED_TASKS_AUTOMATION_SCHEDULER_ENABLED` + `AGENT_TASK_JOBS_WORKER_ENABLED` together to run the wired chain end-to-end.
 
 **Files:** `core/Scheduled_Tasks/automation_executors.py` (new), `services/agent_task_jobs_worker.py` (startup registration), `tests/Notifications/test_automation_executors.py` (new), this task file.
+
+**Review round (PR #2804, 2026-08-22):** 5 findings — 3 fixed directly (config-read failure now logs; sanitize-before-precedence so blank/junk definition overrides cannot suppress config defaults; test docstrings), 1 resolved by scope correction (the agent_task `input.message` finding was real: the message is redacted at rest by the existing privacy design, so agent_task is unwired in phase 1 with skip-not-fail semantics and `planned` capability status rather than reversing that design), 1 declined with precedent (pytestmark=unit + @pytest.mark.asyncio is the exact combination the reminders-scheduler and feed test files ship, through two accepted review rounds; pytest-asyncio strict mode requires the execution marker). Notifications suite 234 passed after the round.

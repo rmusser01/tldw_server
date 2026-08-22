@@ -37,6 +37,7 @@ SLOT = "2026-08-22T09:00:00+00:00"
 def _definition(
     input_config: dict[str, Any], family: str = "recurring_question"
 ) -> DefinitionRow:
+    """Build a DefinitionRow for executor tests."""
     return DefinitionRow(
         id="def-1",
         owner_id=7,
@@ -67,6 +68,7 @@ def _definition(
 
 
 def test_resolution_definition_overrides_win() -> None:
+    """Definition-level provider/model/max_tokens beat config defaults."""
     definition = _definition(
         {"question": "q", "provider": "openai", "model": "gpt-x", "max_tokens": 512}
     )
@@ -77,6 +79,7 @@ def test_resolution_definition_overrides_win() -> None:
 
 
 def test_resolution_config_defaults_when_definition_silent() -> None:
+    """Config defaults apply when the definition carries no overrides."""
     definition = _definition({"question": "q"})
     target = resolve_execution_target(
         definition,
@@ -86,12 +89,14 @@ def test_resolution_config_defaults_when_definition_silent() -> None:
 
 
 def test_resolution_server_default_when_both_silent() -> None:
+    """Both silent -> server-default resolution (provider/model omitted)."""
     definition = _definition({"question": "q"})
     target = resolve_execution_target(definition, config_section={})
     assert target == {"provider": None, "model": None, "max_tokens": 1000}
 
 
 def test_resolution_caps_and_floors_max_tokens() -> None:
+    """max_tokens caps at 4000 and floors junk/negatives to the default."""
     assert resolve_execution_target(
         _definition({"question": "q", "max_tokens": 99999}), config_section={}
     )["max_tokens"] == 4000
@@ -110,6 +115,7 @@ def test_resolution_caps_and_floors_max_tokens() -> None:
 
 @pytest.mark.asyncio
 async def test_recurring_question_builds_one_generation_only_call(monkeypatch) -> None:
+    """One completion call: question as user message, no tools, bounded tokens."""
     captured: list[dict[str, Any]] = []
 
     async def _fake_call(**kwargs: Any) -> dict[str, Any]:
@@ -135,32 +141,21 @@ async def test_recurring_question_builds_one_generation_only_call(monkeypatch) -
     assert "api_provider" not in call and "model" not in call
 
 
-@pytest.mark.asyncio
-async def test_agent_task_uses_message_with_prompt_fallback(monkeypatch) -> None:
-    captured: list[dict[str, Any]] = []
-
-    async def _fake_call(**kwargs: Any) -> dict[str, Any]:
-        captured.append(kwargs)
-        return {"choices": [{"message": {"content": "ok"}}]}
-
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
-        _fake_call,
+def test_resolution_blank_overrides_fall_through() -> None:
+    """Whitespace definition overrides cannot suppress config defaults."""
+    definition = _definition(
+        {"question": "q", "provider": "   ", "model": "", "max_tokens": "junk"}
     )
-
-    via_message = _definition(
-        {"message": "summarize the feed"}, family="agent_task"
+    target = resolve_execution_target(
+        definition,
+        config_section={"executor_provider": "anthropic", "executor_model": "m2"},
     )
-    assert await _execute_generation_only(via_message, {}) == "ok"
-    assert captured[-1]["messages"][0]["content"] == "summarize the feed"
-
-    via_prompt = _definition({"prompt": "fallback prompt"}, family="agent_task")
-    assert await _execute_generation_only(via_prompt, {}) == "ok"
-    assert captured[-1]["messages"][0]["content"] == "fallback prompt"
+    assert target == {"provider": "anthropic", "model": "m2", "max_tokens": 1000}
 
 
 @pytest.mark.asyncio
 async def test_missing_prompt_raises_lookup_error() -> None:
+    """Missing usable prompt raises LookupError for an honest failed run."""
     with pytest.raises(LookupError):
         await _execute_generation_only(_definition({}), {})
     with pytest.raises(LookupError):
@@ -169,6 +164,7 @@ async def test_missing_prompt_raises_lookup_error() -> None:
 
 @pytest.mark.asyncio
 async def test_empty_completion_raises() -> None:
+    """An empty completion raises instead of recording a blank success."""
     async def _empty(**kwargs: Any) -> dict[str, Any]:
         return {"choices": [{"message": {"content": ""}}]}
 
@@ -189,11 +185,12 @@ async def test_empty_completion_raises() -> None:
 
 
 def test_registration_is_idempotent_and_fills_both_families(monkeypatch) -> None:
+    """Registration is idempotent and wires only recurring_question (phase 1)."""
     monkeypatch.setattr(atj, "_EXECUTORS", {})
     register_automation_executors()
     first = dict(atj._EXECUTORS)
     register_automation_executors()
-    assert set(atj._EXECUTORS) == {"recurring_question", "agent_task"}
+    assert set(atj._EXECUTORS) == {"recurring_question"}
     assert atj._EXECUTORS == first  # same callables, not re-created
 
 
@@ -263,7 +260,7 @@ async def test_registered_executor_flows_through_the_consumer(monkeypatch, tmp_p
             },
             scheduled_db=db,
         )
-        assert before["status"] == "failed"
+        assert before["status"] == "skipped"
         # A DIFFERENT slot for the wired attempt: the prior slot's terminal
         # run row would dedupe and replay the failed outcome.
         wired_slot = "2026-08-22T10:00:00+00:00"

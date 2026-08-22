@@ -254,18 +254,25 @@ async def handle_agent_task_job(
 
     executor = _EXECUTORS.get(definition.family)
     if executor is None:
+        # Not a failure: no executor is wired for this family in this
+        # deployment phase (phase 1 wires recurring_question only --
+        # agent_task messages are redacted at rest). The skip carries an
+        # actionable reason.
         _finish(
             sdb,
             cdb,
             definition=definition,
             run_id=run["id"],
-            status="failed",
-            error="no_executor_configured",
-            summary=None,
+            status="skipped",
+            error=f"family_not_wired_for_execution:{definition.family}",
+            summary=(
+                "No executor is wired for this family in this deployment "
+                "phase; the run was recorded and skipped without executing."
+            ),
             jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
             execution_timeout_seconds=execution_timeout_seconds,
         )
-        return {"status": "failed", "definition_id": definition_id, "run_id": run["id"]}
+        return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
 
     timed_out = False
     result_text: str | None = None

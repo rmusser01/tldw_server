@@ -51,7 +51,10 @@ def _config_section() -> dict[str, Any]:
 
         section = settings.get("Scheduled_Tasks_Automation")
         return section if isinstance(section, dict) else {}
-    except Exception:  # noqa: BLE001 - config read failure degrades to defaults
+    except Exception:  # noqa: BLE001 - degrade to defaults, never break a run
+        logger.warning(
+            "Automation executor config read failed; using built-in defaults"
+        )
         return {}
 
 
@@ -81,15 +84,28 @@ def resolve_execution_target(
         definition.input if isinstance(definition.input, dict) else {}
     )
 
-    provider = source.get("provider") or section.get("executor_provider")
-    model = source.get("model") or section.get("executor_model")
-    max_tokens = _as_positive_int(
-        source.get("max_tokens") or section.get("executor_max_tokens"),
-        _DEFAULT_MAX_TOKENS,
+    # Sanitize each layer BEFORE applying precedence, so a blank/junk
+    # definition override falls through to the config default instead of
+    # suppressing it (review #5 on PR #2804).
+    def _coerce_nonempty_str(value: Any) -> str | None:
+        if value is None or isinstance(value, bool):
+            return None
+        text = str(value).strip()
+        return text or None
+
+    provider = _coerce_nonempty_str(source.get("provider")) or _coerce_nonempty_str(
+        section.get("executor_provider")
+    )
+    model = _coerce_nonempty_str(source.get("model")) or _coerce_nonempty_str(
+        section.get("executor_model")
+    )
+    definition_max = _as_positive_int(source.get("max_tokens"), 0)
+    max_tokens = definition_max or _as_positive_int(
+        section.get("executor_max_tokens"), _DEFAULT_MAX_TOKENS
     )
     return {
-        "provider": str(provider).strip() or None if provider else None,
-        "model": str(model).strip() or None if model else None,
+        "provider": provider,
+        "model": model,
         "max_tokens": min(max_tokens, _MAX_TOKENS_CAP),
     }
 
@@ -97,23 +113,23 @@ def resolve_execution_target(
 def _definition_user_prompt(definition: DefinitionRow) -> str:
     """Extract the generation-only user prompt from a definition's input.
 
-    ``recurring_question`` definitions carry ``question``; ``agent_task``
-    definitions carry ``message`` (falling back to ``prompt``). Anything
-    missing raises ``LookupError`` — the consumer records it as an honest
-    failed run rather than generating from nothing.
+    Only ``recurring_question`` is wired in phase 1 — its ``question``
+    persists in full. ``agent_task`` input is redacted at rest by the
+    automation service (``message_redacted`` metadata replaces the raw
+    message), so a usable prompt surviving persistence is not a state
+    production can reach; if one ever appears it is used, otherwise the
+    LookupError records an honest failed run.
     """
     source: dict[str, Any] = (
         definition.input if isinstance(definition.input, dict) else {}
     )
-    if definition.family == "recurring_question":
-        question = str(source.get("question") or "").strip()
-        if question:
-            return question
-        raise LookupError("recurring_question definition has no input.question")
-    message = str(source.get("message") or source.get("prompt") or "").strip()
-    if message:
-        return message
-    raise LookupError(f"{definition.family} definition has no input.message/prompt")
+    question = str(source.get("question") or "").strip()
+    if question:
+        return question
+    raise LookupError(
+        f"{definition.family} definition has no usable persisted prompt "
+        "(input.question missing; agent_task messages are redacted at rest)"
+    )
 
 
 def _definition_system_prompt(definition: DefinitionRow) -> str:
@@ -151,17 +167,21 @@ async def _execute_generation_only(
 
 
 def register_automation_executors() -> None:
-    """Register the production executors for both phase-1 families.
+    """Register the production executor for the wired phase-1 family.
 
-    Idempotent: safe to call at every worker startup. The seam stays
-    test-overridable — tests replace entries in the consumer's registry
-    directly.
+    ``recurring_question`` only: ``agent_task`` is deliberately unwired in
+    phase 1 (its message is redacted at rest; the consumer skips those runs
+    with an actionable reason). Idempotent: safe at every worker startup.
+    The seam stays test-overridable — tests replace entries in the
+    consumer's registry directly.
     """
     global _REGISTERED
     register_executor("recurring_question", _execute_generation_only)
-    register_executor("agent_task", _execute_generation_only)
     _REGISTERED = True
-    logger.info("Automation LLM executors registered (phase-1 generation-only)")
+    logger.info(
+        "Automation LLM executor registered (recurring_question, "
+        "phase-1 generation-only; agent_task unwired: message redacted at rest)"
+    )
 
 
 __all__ = [
