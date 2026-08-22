@@ -925,6 +925,10 @@ test("required sources require exact core routes without excluding reviewed addi
 
 test("implemented sources require exact shadow evidence and report blockers for every drift", () => {
   const inventoryId = "sourclip-2026-07-13-0001";
+  const implementationRevision = "8bbff7820f0d05a2c25d0f2561b0241d0024d5d9";
+  const implementationPath = "tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py";
+  const implementationReference = `https://github.com/rmusser01/tldw_server/blob/${implementationRevision}/${implementationPath}`;
+  const implementationClaim = "The fixture-only adapter implements the reviewed bounded metadata projection.";
 
   const documents = () => {
     const { manifest, ledger } = validDocuments();
@@ -941,8 +945,8 @@ test("implemented sources require exact shadow evidence and report blockers for 
     row.evidence.push({
       kind: "implementation",
       reference_type: "https_url",
-      reference: "https://example.test/fixture-implementation",
-      claim: "The fixture-only adapter implements the reviewed bounded metadata projection.",
+      reference: implementationReference,
+      claim: implementationClaim,
     });
     refreshLedgerDigest(ledger);
     const requirement = {
@@ -964,6 +968,14 @@ test("implemented sources require exact shadow evidence and report blockers for 
       fixtureState: "passed",
       liveState: "not_run",
       certifications: [],
+      implementationEvidence: {
+        referenceType: "https_url",
+        host: "github.com",
+        path: implementationPath,
+        revision: implementationRevision,
+        reference: implementationReference,
+        claim: implementationClaim,
+      },
     };
     return { manifest, ledger, row, requirement };
   };
@@ -1000,6 +1012,27 @@ test("implemented sources require exact shadow evidence and report blockers for 
     live_state: "not_run",
     certifications: [],
     implementation_evidence: true,
+    implementation_evidence_identity: {
+      required: {
+        reference_type: "https_url",
+        host: "github.com",
+        path: implementationPath,
+        revision: implementationRevision,
+        reference: implementationReference,
+        claim: implementationClaim,
+      },
+      entries: [{
+        kind: "implementation",
+        reference_type: "https_url",
+        host: "github.com",
+        path: implementationPath,
+        revision: implementationRevision,
+        reference: implementationReference,
+        claim: implementationClaim,
+      }],
+      implementation_entry_count: 1,
+      exact_match_count: 1,
+    },
     substantively_triaged: true,
     implementation_satisfied: true,
   });
@@ -1081,6 +1114,99 @@ test("implemented sources require exact shadow evidence and report blockers for 
     assert.deepEqual(drift.required_implemented_source_blockers, [inventoryId], label);
     assert.equal(drift.required_implemented_sources[inventoryId].implementation_satisfied, false, label);
     assert.equal(drift.contract_freeze_ready, false, label);
+  }
+});
+
+
+test("authoritative implemented rows require one exact immutable implementation evidence entry", () => {
+  const inventoryDirectory = path.join(
+    ROOT,
+    "Docs/Design/research_source_inventory",
+  );
+  const manifest = JSON.parse(fs.readFileSync(path.join(
+    inventoryDirectory,
+    "sourclip-research-sources-2026-07-13.json",
+  ), "utf8"));
+  const authoritativeLedger = JSON.parse(fs.readFileSync(path.join(
+    inventoryDirectory,
+    "research-source-coverage-ledger-2026-07-13.json",
+  ), "utf8"));
+  const inventoryIds = [
+    "sourclip-2026-07-13-0026",
+    "sourclip-2026-07-13-0027",
+  ];
+  const mutations = [
+    ["reference type", (row, entry) => {
+      entry.reference_type = "repo_path";
+    }, 1, 0],
+    ["host", (row, entry) => {
+      entry.reference = entry.reference.replace("github.com", "gitlab.com");
+    }, 1, 0],
+    ["path", (row, entry) => {
+      entry.reference = entry.reference.replace(
+        "test_research_discovery_clinicaltrials_pubmed_central.py",
+        "test_research_discovery_contracts.py",
+      );
+    }, 1, 0],
+    ["revision", (row, entry) => {
+      entry.reference = entry.reference.replace(
+        "8bbff7820f0d05a2c25d0f2561b0241d0024d5d9",
+        "0000000000000000000000000000000000000000",
+      );
+    }, 1, 0],
+    ["claim", (row, entry) => {
+      entry.claim = `${entry.claim} This is not the frozen row-specific claim.`;
+    }, 1, 0],
+    ["duplicate", (row, entry) => {
+      row.evidence.push(structuredClone(entry));
+    }, 2, 2],
+    ["unrelated implementation evidence", (row) => {
+      row.evidence.push({
+        kind: "implementation",
+        reference_type: "https_url",
+        reference: "https://github.com/rmusser01/tldw_server/blob/8bbff7820f0d05a2c25d0f2561b0241d0024d5d9/README.md",
+        claim: "An unrelated checked-in artifact cannot certify this implemented inventory row.",
+      });
+    }, 2, 1],
+  ];
+
+  for (const inventoryId of inventoryIds) {
+    for (const [label, mutate, expectedEntries, expectedMatches] of mutations) {
+      const ledger = structuredClone(authoritativeLedger);
+      const row = ledger.rows.find((candidate) => candidate.inventory_id === inventoryId);
+      const entry = row.evidence.find((candidate) => candidate.kind === "implementation");
+      mutate(row, entry);
+      refreshLedgerDigest(ledger);
+
+      const report = validateInventoryDocuments(manifest, ledger, {
+        asOf: "2026-07-15",
+        schemaValidated: true,
+        trustedReviewerIds: [
+          "codex-task-12968.1-source-triage",
+          "codex-task-12968.5-inventory-review",
+        ],
+      });
+      const state = report.required_implemented_sources[inventoryId];
+
+      assert.deepEqual(
+        report.required_implemented_source_blockers,
+        [inventoryId],
+        `${inventoryId}: ${label}`,
+      );
+      assert.equal(state.implementation_evidence, false, `${inventoryId}: ${label}`);
+      assert.equal(
+        state.implementation_evidence_identity.implementation_entry_count,
+        expectedEntries,
+        `${inventoryId}: ${label}`,
+      );
+      assert.equal(
+        state.implementation_evidence_identity.exact_match_count,
+        expectedMatches,
+        `${inventoryId}: ${label}`,
+      );
+      assert.equal(state.implementation_satisfied, false, `${inventoryId}: ${label}`);
+      assert.equal(report.contract_freeze_ready, false, `${inventoryId}: ${label}`);
+    }
   }
 });
 

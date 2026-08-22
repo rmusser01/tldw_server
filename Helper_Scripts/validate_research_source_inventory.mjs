@@ -19,6 +19,9 @@ const FROZEN_SEED = Object.freeze({
   items_sha256: "cef8c83a2f6cf0640d88e6300f54205363654d800927263c2d918060e6a28339",
   page_sha256: "170f16c7bbb34a41d3a1f5ed33e3e411d38288dbc9b9cd636b31d005c1fb0221",
 });
+const CLINICALTRIALS_PMC_IMPLEMENTATION_REVISION = "8bbff7820f0d05a2c25d0f2561b0241d0024d5d9";
+const CLINICALTRIALS_PMC_IMPLEMENTATION_PATH = "tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py";
+const CLINICALTRIALS_PMC_IMPLEMENTATION_REFERENCE = `https://github.com/rmusser01/tldw_server/blob/${CLINICALTRIALS_PMC_IMPLEMENTATION_REVISION}/${CLINICALTRIALS_PMC_IMPLEMENTATION_PATH}`;
 const REQUIRED_SOURCES = Object.freeze({
   "sourclip-2026-07-13-0021": Object.freeze({
     canonicalTarget: "biorxiv",
@@ -115,6 +118,14 @@ const REQUIRED_IMPLEMENTED_SOURCES = Object.freeze({
     fixtureState: "passed",
     liveState: "not_run",
     certifications: Object.freeze([]),
+    implementationEvidence: Object.freeze({
+      referenceType: "https_url",
+      host: "github.com",
+      path: CLINICALTRIALS_PMC_IMPLEMENTATION_PATH,
+      revision: CLINICALTRIALS_PMC_IMPLEMENTATION_REVISION,
+      reference: CLINICALTRIALS_PMC_IMPLEMENTATION_REFERENCE,
+      claim: "Checked-in synthetic fixtures prove the bounded ClinicalTrials.gov adapter and modified metadata projection without live or product-surface certification.",
+    }),
   }),
   "sourclip-2026-07-13-0027": Object.freeze({
     sourceSnapshotSha256: "34d7fc36d4b64b2dca99c0472ad3d804c7ed9ff5a96574a8146947133913b32b",
@@ -135,6 +146,14 @@ const REQUIRED_IMPLEMENTED_SOURCES = Object.freeze({
     fixtureState: "passed",
     liveState: "not_run",
     certifications: Object.freeze([]),
+    implementationEvidence: Object.freeze({
+      referenceType: "https_url",
+      host: "github.com",
+      path: CLINICALTRIALS_PMC_IMPLEMENTATION_PATH,
+      revision: CLINICALTRIALS_PMC_IMPLEMENTATION_REVISION,
+      reference: CLINICALTRIALS_PMC_IMPLEMENTATION_REFERENCE,
+      claim: "Checked-in synthetic fixtures prove bounded PMC ESearch and ESummary metadata execution without live, abstract, full-text, or product-surface certification.",
+    }),
   }),
 });
 const RESOLUTIONS = new Set([
@@ -428,6 +447,62 @@ function routeMatchesRequirement(candidate, requirement) {
 function hasEvidence(row, kind) {
   return Array.isArray(row?.evidence)
     && row.evidence.some((entry) => isObject(entry) && entry.kind === kind);
+}
+
+
+function implementationEvidenceIdentity(entry) {
+  let host = null;
+  let implementationPath = null;
+  let revision = null;
+  if (isHttpsUrl(entry?.reference)) {
+    const parsed = new URL(entry.reference);
+    host = parsed.hostname.toLowerCase();
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length >= 5 && segments[2] === "blob") {
+      revision = segments[3];
+      implementationPath = segments.slice(4).join("/");
+    }
+  }
+  return {
+    kind: entry?.kind ?? null,
+    reference_type: entry?.reference_type ?? null,
+    host,
+    path: implementationPath,
+    revision,
+    reference: entry?.reference ?? null,
+    claim: entry?.claim ?? null,
+  };
+}
+
+
+function exactImplementationEvidenceState(row, requirement) {
+  const entries = Array.isArray(row?.evidence)
+    ? row.evidence.filter((entry) => isObject(entry) && entry.kind === "implementation")
+    : [];
+  const entryIdentities = entries.map(implementationEvidenceIdentity);
+  const required = {
+    reference_type: requirement?.referenceType ?? null,
+    host: requirement?.host ?? null,
+    path: requirement?.path ?? null,
+    revision: requirement?.revision ?? null,
+    reference: requirement?.reference ?? null,
+    claim: requirement?.claim ?? null,
+  };
+  const exactMatches = entryIdentities.filter((identity) => (
+    identity.kind === "implementation"
+      && identity.reference_type === required.reference_type
+      && identity.host === required.host
+      && identity.path === required.path
+      && identity.revision === required.revision
+      && identity.reference === required.reference
+      && identity.claim === required.claim
+  ));
+  return {
+    required,
+    entries: entryIdentities,
+    implementation_entry_count: entries.length,
+    exact_match_count: exactMatches.length,
+  };
 }
 
 
@@ -1336,7 +1411,13 @@ export function validateInventoryDocuments(
     const substantiveTriage = row
       ? isSubstantivelyTriaged(row, asOf, trustedReviewers)
       : false;
-    const implementationEvidence = hasEvidence(row, "implementation");
+    const implementationEvidenceIdentity = exactImplementationEvidenceState(
+      row,
+      requirement.implementationEvidence,
+    );
+    const implementationEvidence = implementationEvidenceIdentity
+      .implementation_entry_count === 1
+      && implementationEvidenceIdentity.exact_match_count === 1;
     const implementationSatisfied = row?.resolution === "mapped"
       && row?.source_snapshot_sha256 === requirement.sourceSnapshotSha256
       && sameStringArray(row?.canonical_targets, [requirement.canonicalTarget])
@@ -1363,6 +1444,7 @@ export function validateInventoryDocuments(
       live_state: row?.live_state ?? null,
       certifications: Array.isArray(row?.certifications) ? [...row.certifications] : [],
       implementation_evidence: implementationEvidence,
+      implementation_evidence_identity: implementationEvidenceIdentity,
       substantively_triaged: substantiveTriage,
       implementation_satisfied: implementationSatisfied,
     };

@@ -57,6 +57,7 @@
 - `tldw_Server_API/tests/Security/test_http_hop_contract.py` — repr-only request-target redaction and unchanged equality/wire semantics.
 - `tldw_Server_API/tests/Research/test_research_discovery_planner.py` — generic opaque first-page planning, exact identity pairs, PMC two-intent planning, and foundation goldens.
 - `tldw_Server_API/tests/Research/test_research_discovery_gateway.py` — strict opaque validation, encoding, request-target bound, empty suffix, and binding redaction.
+- `tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py` — post-rebase exact parsing-profile registry lock for the PubMed identity overlay and foundation profile alias.
 - `tldw_Server_API/tests/Research/test_research_discovery_executor.py` — opaque continuation, exact-repeat rejection, cancellation, reservations, diagnostics, and numeric compatibility.
 - `tldw_Server_API/tests/Research/test_research_discovery_pubmed_gateway_adapter.py` — unchanged foundation PubMed plus runtime-certified identity overlay.
 - `tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py` — exact multi-family closure configuration and runtime tripwires.
@@ -2249,6 +2250,7 @@ git add \
   tldw_Server_API/tests/Research/test_research_discovery_contracts.py \
   tldw_Server_API/tests/Research/test_research_discovery_planner.py \
   tldw_Server_API/tests/Research/test_research_discovery_gateway.py \
+  tldw_Server_API/tests/Research/test_research_discovery_gateway_adapters.py \
   tldw_Server_API/tests/Research/test_research_discovery_executor.py \
   tldw_Server_API/tests/Research/test_research_discovery_pubmed_gateway_adapter.py \
   tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py \
