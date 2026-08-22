@@ -1,17 +1,21 @@
 """Security contracts for recipient retrieval over shared workspace sources."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import inspect
 import json
 import math
+import textwrap
 from dataclasses import FrozenInstanceError
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
+    _serialize_result_document,
     unified_rag_pipeline,
 )
 from tldw_Server_API.app.core.Sharing.shared_workspace_chat_service import (
@@ -19,6 +23,7 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_chat_service import (
     SharedSourceSnapshot,
     SharedSourceSnapshotItem,
     SharedWorkspaceChatService,
+    SharedWorkspaceChatServiceError,
     SharedWorkspaceNoRelevantEvidence,
     SharedWorkspaceRetrievalUnavailable,
     SharedWorkspaceSourceChanged,
@@ -140,17 +145,54 @@ class _Pipeline:
 def _result(
     documents: list[Any],
     *,
+    query: str = "Question",
+    expanded_queries: list[str] | None = None,
     errors: list[str] | None = None,
     generated_answer: Any = None,
     metadata: dict[str, Any] | None = None,
     cache_hit: bool = False,
-) -> SimpleNamespace:
-    return SimpleNamespace(
+    citations: list[dict[str, Any]] | None = None,
+    academic_citations: list[str] | None = None,
+    chunk_citations: list[dict[str, Any]] | None = None,
+    feedback_id: str | None = None,
+    security_report: dict[str, Any] | None = None,
+    claims: list[dict[str, Any]] | None = None,
+    factuality: dict[str, Any] | None = None,
+    verification_report: dict[str, Any] | None = None,
+    retrieval_metrics: dict[str, Any] | None = None,
+    faithfulness: dict[str, Any] | None = None,
+    query_classification: dict[str, Any] | None = None,
+    reformulated_query: str | None = None,
+    research_summary: dict[str, Any] | None = None,
+    suggestions: list[str] | None = None,
+    images: list[dict[str, Any]] | None = None,
+    videos: list[dict[str, Any]] | None = None,
+) -> UnifiedRAGResponse:
+    return UnifiedRAGResponse(
         documents=documents,
+        query=query,
+        expanded_queries=expanded_queries or [],
+        timings={},
+        citations=citations or [],
+        academic_citations=academic_citations or [],
+        chunk_citations=chunk_citations or [],
+        feedback_id=feedback_id,
         errors=errors or [],
         generated_answer=generated_answer,
         metadata=metadata or {},
         cache_hit=cache_hit,
+        security_report=security_report,
+        claims=claims,
+        factuality=factuality,
+        verification_report=verification_report,
+        retrieval_metrics=retrieval_metrics,
+        faithfulness=faithfulness,
+        query_classification=query_classification,
+        reformulated_query=reformulated_query,
+        research_summary=research_summary,
+        suggestions=suggestions,
+        images=images,
+        videos=videos,
     )
 
 
@@ -174,14 +216,16 @@ def _document(
         "end_char": end_char,
         "title": title,
     }
-    if source is not None:
-        metadata["source"] = source
-    return {
+    document = {
         "id": document_id,
         "content": content,
         "score": score,
         "metadata": metadata,
     }
+    if source is not None:
+        document["source"] = source
+        metadata["source"] = source
+    return document
 
 
 def _service(
@@ -346,6 +390,52 @@ def test_exactly_500_effective_sources_are_allowed() -> None:
 
 
 @pytest.mark.parametrize(
+    "sources",
+    [
+        [_source(" source-a", 1)],
+        [_source("source-a", 1), _source("source-a", 2)],
+    ],
+    ids=["noncanonical-source-id", "duplicate-source-id"],
+)
+def test_all_maps_malformed_authoritative_rows_to_sanitized_data_unavailable(
+    sources: list[dict[str, Any]],
+) -> None:
+    service, _chacha, _media_db, _pipeline = _service(
+        sources,
+        {1: _media(1), 2: _media(2)},
+    )
+
+    with pytest.raises(SharedWorkspaceChatServiceError) as exc_info:
+        service.resolve_source_snapshot(mode="all")
+
+    assert exc_info.value.code == "shared_workspace_unavailable"
+    assert type(exc_info.value) is not ValueError
+
+
+@pytest.mark.parametrize("field", ["uuid", "content_hash"])
+def test_initial_snapshot_rejects_noncanonical_exact_media_identity(field: str) -> None:
+    media = _media(1)
+    media[field] = f" {media[field]}"
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: media},
+    )
+
+    with pytest.raises(SharedWorkspaceSourceScopeInvalid):
+        service.resolve_source_snapshot(mode="include", source_ids=("source-a",))
+
+
+def test_requested_source_ids_must_be_exact_canonical_values() -> None:
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+    )
+
+    with pytest.raises(SharedWorkspaceSourceScopeInvalid):
+        service.resolve_source_snapshot(mode="include", source_ids=(" source-a",))
+
+
+@pytest.mark.parametrize(
     "mutation",
     [
         "source_removed",
@@ -390,6 +480,19 @@ def test_revalidation_detects_authorization_content_and_readiness_changes(
     assert "replacement" not in str(exc_info.value)
 
 
+@pytest.mark.parametrize("field", ["uuid", "content_hash"])
+def test_revalidation_rejects_noncanonical_identity_whitespace(field: str) -> None:
+    service, _chacha, media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+    media_db.rows[1][field] = f"{media_db.rows[1][field]} "
+
+    with pytest.raises(SharedWorkspaceSourceChanged):
+        service.revalidate_source_snapshot(snapshot=snapshot)
+
+
 def test_include_revalidation_ignores_unrelated_and_non_authorization_source_changes() -> None:
     service, chacha, media_db, _pipeline = _service(
         [_source("source-a", 1, title="Original", position=1)],
@@ -427,9 +530,17 @@ def test_frozen_all_retry_reuses_original_ids_and_does_not_expand() -> None:
 
 @pytest.mark.asyncio
 async def test_duplicate_canonical_sources_retrieve_media_once_and_map_to_smallest_id() -> None:
-    pipeline = _Pipeline(_result([_document(7, title="Shared report")]))
+    pipeline = _Pipeline(
+        _result(
+            [_document(7, title="Spoofed RAG title")],
+            query="What is supported?",
+        )
+    )
     service, _chacha, media_db, _pipeline = _service(
-        [_source("source-z", 7), _source("source-a", 7)],
+        [
+            _source("source-z", 7, title="Alias Z"),
+            _source("source-a", 7, title="Canonical A"),
+        ],
         {7: _media(7)},
         pipeline=pipeline,
     )
@@ -443,7 +554,25 @@ async def test_duplicate_canonical_sources_retrieve_media_once_and_map_to_smalle
     assert media_db.by_id_calls == [(7, True, True)]
     assert pipeline.calls[0]["include_media_ids"] == [7]
     assert evidence[0].source_id == "source-a"
-    assert evidence[0].source_title == "Shared report"
+    assert evidence[0].source_title == "Canonical A"
+
+
+@pytest.mark.asyncio
+async def test_evidence_title_uses_current_authoritative_source_without_changing_hash() -> None:
+    pipeline = _Pipeline(_result([_document(1, title="Spoofed title")]))
+    service, chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1, title="Original title")],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+    original_hash = snapshot.snapshot_hash
+    chacha.sources[0]["title"] = "Current authoritative title"
+
+    evidence = await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+    assert snapshot.snapshot_hash == original_hash
+    assert evidence[0].source_title == "Current authoritative title"
 
 
 @pytest.mark.asyncio
@@ -472,6 +601,10 @@ async def test_retrieval_call_is_media_only_owner_scoped_and_locked() -> None:
     assert call["search_mode"] == "fts"
     assert call["fts_level"] == "chunk"
     assert call["top_k"] == 20
+    assert call["min_score"] == 0.0
+    assert call["chunk_type_filter"] is None
+    assert call["ocr_confidence_threshold"] is None
+    assert call["timeout_seconds"] is None
     assert call["reranking_strategy"] == "none"
     assert call["search_depth_mode"] is None
     assert call["rag_profile"] is None
@@ -485,6 +618,62 @@ async def test_retrieval_call_is_media_only_owner_scoped_and_locked() -> None:
     for name, value in call.items():
         if name.startswith("enable_"):
             assert value is False, name
+
+
+def _literal_outer_pipeline_kwargs_reads() -> set[str]:
+    tree = ast.parse(textwrap.dedent(inspect.getsource(unified_rag_pipeline)))
+    root = tree.body[0]
+    assert isinstance(root, ast.AsyncFunctionDef)
+    keys: set[str] = set()
+
+    class KwargsReadVisitor(ast.NodeVisitor):
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            names = {
+                argument.arg
+                for argument in (
+                    *node.args.posonlyargs,
+                    *node.args.args,
+                    *node.args.kwonlyargs,
+                )
+            }
+            if node.args.vararg is not None:
+                names.add(node.args.vararg.arg)
+            if node.args.kwarg is not None:
+                names.add(node.args.kwarg.arg)
+            if "kwargs" not in names:
+                self.generic_visit(node)
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node: ast.Call) -> None:
+            function = node.func
+            if (
+                isinstance(function, ast.Attribute)
+                and isinstance(function.value, ast.Name)
+                and function.value.id == "kwargs"
+                and function.attr in {"get", "pop", "setdefault"}
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                keys.add(node.args[0].value)
+            self.generic_visit(node)
+
+        def visit_Subscript(self, node: ast.Subscript) -> None:
+            if (
+                isinstance(node.ctx, ast.Load)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "kwargs"
+                and isinstance(node.slice, ast.Constant)
+                and isinstance(node.slice.value, str)
+            ):
+                keys.add(node.slice.value)
+            self.generic_visit(node)
+
+    visitor = KwargsReadVisitor()
+    for statement in root.body:
+        visitor.visit(statement)
+    return keys
 
 
 def test_signature_sentinel_pins_or_reviews_every_pipeline_parameter() -> None:
@@ -543,6 +732,220 @@ def test_signature_sentinel_pins_or_reviews_every_pipeline_parameter() -> None:
     assert "kwargs" not in inspect.signature(
         SharedWorkspaceChatService.retrieve_verified_evidence
     ).parameters
+
+
+def test_hidden_pipeline_kwargs_reads_are_explicitly_reviewed_absent() -> None:
+    expected_absent = {
+        "metadata",
+        "workspace_id",
+        "prompts_db_path",
+        "world_books_db_path",
+        "chat_dictionaries_db_path",
+        "include_sources",
+        "include_metadata",
+        "prompts_db",
+        "enable_expansion",
+        "claims_budget_usd",
+        "claims_budget_tokens",
+        "claims_budget_strict",
+        "faithfulness_llm",
+    }
+
+    assert _literal_outer_pipeline_kwargs_reads() == expected_absent
+    assert SHARED_RETRIEVAL_POLICY.reviewed_absent_kwarg_names == expected_absent
+    assert not (
+        SHARED_RETRIEVAL_POLICY.reviewed_absent_kwarg_names
+        & SHARED_RETRIEVAL_POLICY.pinned_parameter_names
+    )
+
+
+@pytest.mark.asyncio
+async def test_actual_notes_document_cannot_spoof_media_provenance_through_metadata() -> None:
+    serialized = _serialize_result_document(
+        Document(
+            id="note-chunk-1",
+            content="OWNER_NOTE_SENTINEL",
+            source=DataSource.NOTES,
+            score=0.9,
+            metadata={"source": "media_db", "media_id": 1},
+        )
+    )
+    pipeline = _Pipeline(_result([serialized]))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with pytest.raises(SharedWorkspaceRetrievalUnavailable):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "document",
+    [
+        {
+            "id": "chunk-1",
+            "content": "Metadata-only marker",
+            "score": 0.8,
+            "metadata": {"source": "media_db", "media_id": 1, "chunk_id": "chunk-1"},
+        },
+        {
+            "id": "chunk-1",
+            "content": "Conflicting marker",
+            "score": 0.8,
+            "source": "media_db",
+            "metadata": {"source": "notes", "media_id": 1, "chunk_id": "chunk-1"},
+        },
+    ],
+    ids=["missing-top-level-source", "conflicting-source-markers"],
+)
+async def test_shared_retrieval_requires_consistent_authoritative_top_level_source(
+    document: dict[str, Any],
+) -> None:
+    pipeline = _Pipeline(_result([document]))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with pytest.raises(SharedWorkspaceRetrievalUnavailable):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response_changes",
+    [
+        {"query": "transformed query"},
+        {"expanded_queries": ["expanded"]},
+        {"generated_answer": {}},
+        {"citations": [{"id": "citation"}]},
+        {"academic_citations": ["citation"]},
+        {"chunk_citations": [{"id": "chunk-citation"}]},
+        {"feedback_id": "feedback-1"},
+        {"security_report": {"pii_detected": False}},
+        {"claims": [{"claim": "provider output"}]},
+        {"factuality": {"score": 1.0}},
+        {"verification_report": {"verified": True}},
+        {"retrieval_metrics": {"precision": 1.0}},
+        {"faithfulness": {"score": 1.0}},
+        {"query_classification": {"intent": "external"}},
+        {"reformulated_query": "rewritten"},
+        {"research_summary": {"iterations": 1}},
+        {"suggestions": ["Follow up"]},
+        {"images": [{"url": "https://example.test/image"}]},
+        {"videos": [{"url": "https://example.test/video"}]},
+        {"errors": ["raw error"]},
+        {"cache_hit": True},
+    ],
+    ids=[
+        "query-mismatch",
+        "expanded-query",
+        "dict-answer",
+        "citation",
+        "academic-citation",
+        "chunk-citation",
+        "feedback",
+        "security-report",
+        "claims",
+        "factuality",
+        "verification",
+        "retrieval-metrics",
+        "faithfulness",
+        "classification",
+        "reformulation",
+        "research",
+        "suggestions",
+        "images",
+        "videos",
+        "errors",
+        "cache",
+    ],
+)
+async def test_actual_unified_response_rejects_every_non_retrieval_output(
+    response_changes: dict[str, Any],
+) -> None:
+    pipeline = _Pipeline(_result([_document(1)], **response_changes))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with pytest.raises(SharedWorkspaceRetrievalUnavailable):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"provider_output": {"model": "external"}},
+        {"original_query": "different"},
+        {"sources_requested": ["media_db", "notes"]},
+        {"generation_executed": "false"},
+    ],
+    ids=["unknown-key", "query-mismatch", "broadened-source", "non-boolean-flag"],
+)
+async def test_metadata_is_allowlisted_and_validated_fail_closed(
+    metadata: dict[str, Any],
+) -> None:
+    pipeline = _Pipeline(_result([_document(1)], metadata=metadata))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with pytest.raises(SharedWorkspaceRetrievalUnavailable):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+
+@pytest.mark.asyncio
+async def test_actual_pipeline_metadata_allowlist_accepts_locked_media_only_shape() -> None:
+    metadata = {
+        "original_query": "Question",
+        "retrieval_cache_hit": False,
+        "generation_executed": False,
+        "explicit_source_selection": {
+            "enabled": True,
+            "requested_sources": ["media_db"],
+            "resolved_sources": ["media_db"],
+            "include_media_ids_count": 1,
+            "include_note_ids_count": 0,
+            "scope_intersection_empty": False,
+            "cache_disabled": False,
+        },
+        "sources_requested": ["media_db"],
+        "sources_searched": ["media_db"],
+        "documents_retrieved": 1,
+        "retrieval_guidance": "Internal retrieval guidance",
+        "retrieval_plan": {
+            "query": "Question",
+            "sources": ["media_db"],
+            "search_mode": "fts",
+            "top_k": 20,
+            "index_namespace": "user_7_media_embeddings",
+        },
+    }
+    pipeline = _Pipeline(_result([_document(1)], metadata=metadata))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1, title="Canonical")],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    evidence = await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+    assert evidence[0].source_title == "Canonical"
 
 
 @pytest.mark.asyncio
@@ -629,6 +1032,125 @@ async def test_out_of_scope_document_after_retention_limit_still_rejects_full_re
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "document",
+    [
+        _document(1, document_id=""),
+        _document(1, document_id=" chunk-1"),
+        _document(1, document_id=["chunk-1"]),
+        _document(1, document_id="x" * 513),
+        _document(1, document_id="chunk-1", chunk_index=" 1"),
+        _document(1, document_id="chunk-1", start_char=-1),
+        _document(1, document_id="chunk-1", end_char=2_147_483_648),
+        _document(1, document_id="chunk-1", start_char=20, end_char=10),
+    ],
+    ids=[
+        "empty-identity",
+        "noncanonical-identity",
+        "nonscalar-identity",
+        "oversized-identity",
+        "noncanonical-chunk-index",
+        "negative-start",
+        "oversized-end",
+        "reversed-range",
+    ],
+)
+async def test_malformed_chunk_identity_or_locator_rejects_complete_result(
+    document: dict[str, Any],
+) -> None:
+    pipeline = _Pipeline(_result([document]))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with pytest.raises(SharedWorkspaceRetrievalUnavailable):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+
+@pytest.mark.asyncio
+async def test_contentless_document_still_requires_valid_locators() -> None:
+    pipeline = _Pipeline(
+        _result([_document(1, content="   ", start_char="invalid")])
+    )
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with pytest.raises(SharedWorkspaceRetrievalUnavailable):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+
+@pytest.mark.asyncio
+async def test_conflicting_top_level_and_metadata_chunk_identity_fails_closed() -> None:
+    document = _document(1, document_id="chunk-top")
+    document["metadata"]["chunk_id"] = "chunk-metadata"
+    pipeline = _Pipeline(_result([document]))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with pytest.raises(SharedWorkspaceRetrievalUnavailable):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changed_field",
+    ["content", "content_whitespace", "score", "chunk_index", "start_char", "end_char"],
+)
+async def test_conflicting_duplicate_chunk_records_reject_complete_result(
+    changed_field: str,
+) -> None:
+    original = _document(
+        1,
+        document_id="chunk-identity",
+        content="original",
+        score=0.8,
+        chunk_index=1,
+        start_char=10,
+        end_char=18,
+    )
+    conflicting = {**original, "metadata": dict(original["metadata"])}
+    if changed_field in {"content", "content_whitespace", "score"}:
+        if changed_field == "score":
+            conflicting["score"] = 0.7
+        elif changed_field == "content_whitespace":
+            conflicting["content"] = " original"
+        else:
+            conflicting["content"] = "changed"
+    else:
+        conflicting["metadata"][changed_field] = {
+            "chunk_index": 2,
+            "start_char": 11,
+            "end_char": 19,
+        }[changed_field]
+    documents = [
+        _document(1, document_id=f"allowed-{index}", content=f"allowed {index}")
+        for index in range(20)
+    ]
+    documents.extend([original, conflicting])
+    pipeline = _Pipeline(_result(documents))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with pytest.raises(SharedWorkspaceRetrievalUnavailable):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+
+@pytest.mark.asyncio
 async def test_empty_or_contentless_retrieval_returns_stable_no_evidence_error() -> None:
     for documents in ([], [_document(1, content="   ")]):
         pipeline = _Pipeline(_result(documents))
@@ -675,10 +1197,39 @@ async def test_evidence_is_deduplicated_deterministically_labeled_and_bounded() 
     assert len(evidence) == 20
     assert [item.label for item in evidence] == [f"E{index}" for index in range(1, 21)]
     assert len({(item.source_id, item.chunk_index, item.content) for item in evidence}) == 20
-    assert all(len(item.content) <= 1_000 for item in evidence)
-    assert sum(len(item.content) for item in evidence) <= 16_000
+    assert all(len(item.content) <= 4_000 for item in evidence)
+    assert sum(len(item.content) for item in evidence) <= 48_000
     assert all(len(item.source_title) <= 512 for item in evidence)
     assert all(math.isfinite(item.score) for item in evidence)
+
+
+@pytest.mark.asyncio
+async def test_evidence_capacity_is_4000_per_item_and_48000_aggregate() -> None:
+    documents = [
+        _document(
+            1,
+            document_id=f"chunk-{index:02d}",
+            content=str(index) + ("x" * 4_999),
+            chunk_index=index,
+            start_char=index * 5_000,
+            end_char=(index + 1) * 5_000,
+        )
+        for index in range(13)
+    ]
+    pipeline = _Pipeline(_result(documents))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    evidence = await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+    assert len(evidence) == 12
+    assert all(len(item.content) == 4_000 for item in evidence)
+    assert sum(len(item.content) for item in evidence) == 48_000
+    assert [item.label for item in evidence] == [f"E{index}" for index in range(1, 13)]
 
 
 @pytest.mark.asyncio

@@ -114,46 +114,64 @@ def _serialize_result_document(doc: Any) -> dict[str, Any]:
     if isinstance(doc, dict):
         metadata = dict(doc.get("metadata") or {})
         source = doc.get("source")
+        serialized_source = None
         if source is not None:
-            metadata.setdefault(
-                "source",
-                source.value if hasattr(source, "value") else str(source),
-            )
-        for field_name in ("media_id", "note_id", "chunk_id", "record_id", "start", "end"):
+            serialized_source = source.value if hasattr(source, "value") else str(source)
+            metadata["source"] = serialized_source
+        for field_name in (
+            "media_id",
+            "note_id",
+            "chunk_id",
+            "record_id",
+            "chunk_index",
+            "start",
+            "end",
+            "start_char",
+            "end_char",
+        ):
             value = doc.get(field_name)
             if value is not None:
-                metadata.setdefault(field_name, value)
+                metadata[field_name] = value
         doc_id = doc.get("id")
         if doc_id is not None:
-            metadata.setdefault("chunk_id", str(doc_id))
-        return {
+            metadata["chunk_id"] = str(doc_id)
+        serialized = {
             "id": doc_id,
             "content": doc.get("content") or doc.get("text") or doc.get("body"),
             "score": doc.get("score", 0.0),
             "metadata": metadata,
         }
+        if serialized_source is not None:
+            serialized["source"] = serialized_source
+        return serialized
 
     metadata = dict(getattr(doc, "metadata", {}) or {})
+    serialized_source = None
     try:
         source = getattr(doc, "source", None)
         if source is not None:
-            metadata.setdefault(
-                "source",
-                source.value if hasattr(source, "value") else str(source),
-            )
+            serialized_source = source.value if hasattr(source, "value") else str(source)
+            metadata["source"] = serialized_source
     except (AttributeError, TypeError, ValueError):
         pass
 
     doc_id = getattr(doc, "id", None)
     if doc_id is not None:
-        metadata.setdefault("chunk_id", str(doc_id))
+        metadata["chunk_id"] = str(doc_id)
+    for field_name in ("chunk_index", "start_char", "end_char"):
+        value = getattr(doc, field_name, None)
+        if value is not None:
+            metadata[field_name] = value
 
-    return {
+    serialized = {
         "id": doc_id,
         "content": getattr(doc, "content", None),
         "score": getattr(doc, "score", 0.0),
         "metadata": metadata,
     }
+    if serialized_source is not None:
+        serialized["source"] = serialized_source
+    return serialized
 
 
 def _clone_cached_document(doc: Any) -> Any:

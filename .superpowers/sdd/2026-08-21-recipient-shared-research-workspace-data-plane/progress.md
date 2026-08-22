@@ -101,6 +101,11 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - PostgreSQL state: untouched and not started. Task 6 adds no schema, policy, migration, fixture, or PostgreSQL query.
 - Report: `task-6-implementer-report.md`.
 - Residual boundary: Task 7 still owns API orchestration, receipt integration, generation, and citation serialization.
+- Fix Round 1 reviewed head: `53665b9a979608964a2066d2a63f1ab064fc3c00`.
+- Fix Round 1: preserved authoritative top-level RAG provenance, tightened actual `UnifiedRAGResponse` postconditions and metadata allowlisting, pinned active retrieval controls plus an AST hidden-kwargs sentinel, sourced canonical titles from current workspace rows, enforced exact snapshot identities and strict chunk/locator/conflict validation, sanitized malformed `all` rows, and raised the immutable evidence budget to 4,000 characters per item/48,000 aggregate.
+- Fix Round 1 TDD RED: serializer `3 failed, 1 passed`; response/policy `28 failed, 3 passed`; snapshot/title `9 failed`; identity/capacity `15 failed`; timeout policy `1 failed`; contentless locator self-review `1 failed`.
+- Fix Round 1 GREEN: serializer and focused Task 6 `94 passed`; final Task 4/5/6 regression matrix `258 passed`; Ruff passed; Bandit reported zero findings across 9,003 touched production LOC; `git diff --check` passed.
+- Fix Round 1 PostgreSQL state: untouched and not started; no schema, migration, policy, fixture, or PostgreSQL query changed.
 - Status: complete.
 
 ## Task 4 - Authoritative access and reusable read helpers

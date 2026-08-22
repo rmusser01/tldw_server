@@ -89,3 +89,62 @@ Task 6 changed no PostgreSQL schema, migration, policy, fixture, or query. Postg
 ## Residual Risks
 
 The policy sentinel is intentionally coupled to the current `unified_rag_pipeline` signature and will fail when that signature changes until each new parameter is reviewed. Task 7 must revalidate the frozen snapshot at its orchestration boundary and must consume only `VerifiedSharedEvidence` for generation and citations.
+
+## Fix Round 1
+
+Reviewed head: `53665b9a979608964a2066d2a63f1ab064fc3c00`
+
+### Changes
+
+- Changed `_serialize_result_document` so authoritative top-level source provenance survives serialization and overrides conflicting metadata while dict-backed documents without a top-level source retain general compatibility.
+- Required exact submitted query, empty expansion/errors, strict `generated_answer is None`, `cache_hit is False`, empty derived outputs, and allowlisted media-only metadata on actual `UnifiedRAGResponse` results.
+- Pinned `min_score`, `chunk_type_filter`, `ocr_confidence_threshold`, and the active-path `timeout_seconds`; added an AST sentinel for recognized literal hidden `kwargs` reads and an explicit reviewed-absent set.
+- Reloaded current authoritative workspace-source rows for canonical source ID/title mapping. Same-media aliases use the lexicographically smallest selected source ID and its bounded title; RAG titles are ignored and titles remain outside the snapshot hash.
+- Enforced bounded canonical chunk identities, exact nonnegative locators, full-document validation before E20 retention, and media/chunk deduplication that rejects conflicting content, score, or locators. Contentless records are still fully validated and participate in conflict detection.
+- Enforced exact stored source IDs, media UUIDs, and content hashes without strip normalization; malformed `all` rows now return a disclosure-safe service error.
+- Raised evidence retention to 4,000 characters per item and 48,000 aggregate while retaining deterministic `E1` through `E20` labels.
+
+### TDD Evidence
+
+RED results, captured before each production correction:
+
+```text
+serializer: 3 failed, 1 passed
+response/policy: 28 failed, 3 passed
+snapshot/title: 9 failed
+identity/capacity: 15 failed
+active retrieval timeout: 1 failed
+contentless malformed locator self-review: 1 failed
+```
+
+Final focused command:
+
+```text
+TLDW_TEST_NO_DOCKER=1 .venv/bin/python -m pytest tldw_Server_API/tests/RAG/test_unified_pipeline_document_serialization.py tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py -q --timeout=60 -o log_cli=false
+```
+
+Result: `94 passed, 4 warnings in 7.60s`.
+
+Final bounded Task 4/5/6 regression matrix used the serializer, Task 6 retrieval, access/repository, workspace status/preview, recipient endpoints/security, sharing endpoints, and cross-user access files with `-n 4 --dist=loadfile --timeout=60`.
+
+Result: `258 passed, 30 warnings in 196.70s`.
+
+Ruff passed all four touched Python files. Bandit scanned both touched production files and reported zero findings across 9,003 LOC. `git diff --check` passed.
+
+### Files
+
+- `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`
+- `tldw_Server_API/app/core/Sharing/shared_workspace_chat_service.py`
+- `tldw_Server_API/tests/RAG/test_unified_pipeline_document_serialization.py`
+- `tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py`
+- Task 6 backlog, progress, and implementer report tracking.
+
+### Self-Review And Residual Risk
+
+The shared caller still accepts no caller-owned plan/profile/metadata/kwargs and passes only explicit owner media scope. Every returned document, including contentless records and records after E20, is validated before evidence can escape. The serializer change is intentionally general and covered for dict-backed and production `Document` objects. The policy signature and hidden-kwargs sentinels intentionally require explicit review when the unified pipeline grows.
+
+Task 7 still owns API orchestration, receipt persistence, generation, and persisted citation quote budgeting. No Task 5 route/schema behavior changed, and the unrelated watchlist templates were not touched or staged.
+
+### PostgreSQL State
+
+PostgreSQL was not started or touched. Fix Round 1 changed no PostgreSQL schema, migration, RLS policy, fixture, or query.

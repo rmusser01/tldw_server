@@ -22,9 +22,10 @@ RAGPipeline = Callable[..., Awaitable[Any]]
 _MAX_SOURCES = 500
 _MAX_SOURCE_ID_CHARS = 512
 _MAX_EVIDENCE = 20
-_MAX_EVIDENCE_TEXT_CHARS = 1_000
-_MAX_EVIDENCE_TEXT_TOTAL_CHARS = 16_000
+_MAX_EVIDENCE_TEXT_CHARS = 4_000
+_MAX_EVIDENCE_TEXT_TOTAL_CHARS = 48_000
 _MAX_SOURCE_TITLE_CHARS = 512
+_MAX_CHUNK_ID_CHARS = 512
 _MAX_LOCATOR = 2_147_483_647
 
 
@@ -143,6 +144,7 @@ class SharedRetrievalPolicy:
     pinned_parameters: tuple[tuple[str, Any], ...]
     dynamic_parameter_names: frozenset[str]
     reviewed_inert_parameter_names: frozenset[str]
+    reviewed_absent_kwarg_names: frozenset[str]
 
     @property
     def pinned_parameter_names(self) -> frozenset[str]:
@@ -183,6 +185,7 @@ _PINNED_RETRIEVAL_PARAMETERS: tuple[tuple[str, Any], ...] = (
     ("enable_intent_routing", False),
     ("auto_temporal_filters", False),
     ("top_k", _MAX_EVIDENCE),
+    ("min_score", 0.0),
     ("expand_query", False),
     ("spell_check", False),
     ("enable_prf", False),
@@ -201,6 +204,7 @@ _PINNED_RETRIEVAL_PARAMETERS: tuple[tuple[str, Any], ...] = (
     ("enable_table_processing", False),
     ("enable_vlm_late_chunking", False),
     ("enable_enhanced_chunking", False),
+    ("chunk_type_filter", None),
     ("enable_parent_expansion", False),
     ("include_sibling_chunks", False),
     ("include_parent_document", False),
@@ -244,6 +248,7 @@ _PINNED_RETRIEVAL_PARAMETERS: tuple[tuple[str, Any], ...] = (
     ("enable_observability", False),
     ("trace_id", None),
     ("enable_performance_analysis", False),
+    ("timeout_seconds", None),
     ("enable_streaming", False),
     ("retrieval_plan", None),
     ("resolved_request", None),
@@ -256,6 +261,7 @@ _PINNED_RETRIEVAL_PARAMETERS: tuple[tuple[str, Any], ...] = (
     ("enable_injection_filter", False),
     ("enable_content_policy_filter", False),
     ("enable_html_sanitizer", False),
+    ("ocr_confidence_threshold", None),
     ("require_hard_citations", False),
     ("enable_numeric_fidelity", False),
     ("enable_claims", False),
@@ -321,7 +327,6 @@ _REVIEWED_INERT_RETRIEVAL_PARAMETERS = frozenset(
         "chunk_overlap",
         "chunk_language",
         "hybrid_alpha",
-        "min_score",
         "expansion_strategies",
         "max_query_variations",
         "prf_terms",
@@ -336,7 +341,6 @@ _REVIEWED_INERT_RETRIEVAL_PARAMETERS = frozenset(
         "vlm_detect_tables_only",
         "vlm_max_pages",
         "vlm_late_chunk_top_k_docs",
-        "chunk_type_filter",
         "parent_context_size",
         "sibling_window",
         "parent_max_tokens",
@@ -363,13 +367,11 @@ _REVIEWED_INERT_RETRIEVAL_PARAMETERS = frozenset(
         "graph_version",
         "graph_neighbors_k",
         "graph_alpha",
-        "timeout_seconds",
         "injection_filter_strength",
         "content_policy_types",
         "content_policy_mode",
         "html_allowed_tags",
         "html_allowed_attrs",
-        "ocr_confidence_threshold",
         "numeric_fidelity_behavior",
         "claim_extractor",
         "claim_verifier",
@@ -408,10 +410,29 @@ _REVIEWED_INERT_RETRIEVAL_PARAMETERS = frozenset(
     }
 )
 
+_REVIEWED_ABSENT_PIPELINE_KWARGS = frozenset(
+    {
+        "metadata",
+        "workspace_id",
+        "prompts_db_path",
+        "world_books_db_path",
+        "chat_dictionaries_db_path",
+        "include_sources",
+        "include_metadata",
+        "prompts_db",
+        "enable_expansion",
+        "claims_budget_usd",
+        "claims_budget_tokens",
+        "claims_budget_strict",
+        "faithfulness_llm",
+    }
+)
+
 SHARED_RETRIEVAL_POLICY = SharedRetrievalPolicy(
     pinned_parameters=_PINNED_RETRIEVAL_PARAMETERS,
     dynamic_parameter_names=_DYNAMIC_RETRIEVAL_PARAMETERS,
     reviewed_inert_parameter_names=_REVIEWED_INERT_RETRIEVAL_PARAMETERS,
+    reviewed_absent_kwarg_names=_REVIEWED_ABSENT_PIPELINE_KWARGS,
 )
 
 
@@ -500,7 +521,10 @@ class SharedWorkspaceChatService:
                 changed_on_mismatch=False,
             )
 
-        queryable_items = self._queryable_items(rows)
+        try:
+            queryable_items = self._queryable_items(rows)
+        except ValueError:
+            raise _SharedWorkspaceDataUnavailable() from None
         if len(queryable_items) > _MAX_SOURCES:
             raise SharedWorkspaceSourceSubsetRequired()
         if not queryable_items:
@@ -541,6 +565,7 @@ class SharedWorkspaceChatService:
         media_ids = snapshot.media_ids
         if not media_ids or len(snapshot.items) > _MAX_SOURCES:
             raise SharedWorkspaceRetrievalUnavailable()
+        canonical_source_by_media = self._canonical_source_by_media(snapshot)
 
         call = SHARED_RETRIEVAL_POLICY.build_call(
             media_ids=media_ids,
@@ -560,36 +585,42 @@ class SharedWorkspaceChatService:
         cache_hit = _result_value(result, "cache_hit", False)
         if (
             not isinstance(documents, list)
-            or _is_nonempty(errors)
-            or _is_nonempty(generated_answer)
-            or bool(cache_hit)
-            or _metadata_reports_forbidden_execution(metadata)
+            or _result_value(result, "query", None) != query
+            or _result_value(result, "expanded_queries", None) != []
+            or errors != []
+            or generated_answer is not None
+            or cache_hit is not False
+            or _result_has_derived_outputs(result)
+            or not _metadata_is_locked_retrieval(
+                metadata,
+                query=query,
+                media_count=len(media_ids),
+                document_count=len(documents),
+                index_namespace=f"user_{self.owner_user_id}_media_embeddings",
+            )
         ):
             raise SharedWorkspaceRetrievalUnavailable()
 
-        canonical_source_by_media: dict[int, str] = {}
-        for item in snapshot.items:
-            current = canonical_source_by_media.get(item.media_id)
-            if current is None or item.source_id < current:
-                canonical_source_by_media[item.media_id] = item.source_id
-
-        validated: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        validated: list[dict[str, Any]] = []
+        record_by_identity: dict[tuple[int, str], dict[str, Any]] = {}
         for document in documents:
-            normalized = _validate_document(document, canonical_source_by_media)
-            if normalized is None:
+            identity, normalized = _validate_document(document, canonical_source_by_media)
+            previous = record_by_identity.get(identity)
+            if previous is not None:
+                if previous != normalized:
+                    raise SharedWorkspaceRetrievalUnavailable()
                 continue
+            record_by_identity[identity] = normalized
             validated.append(normalized)
 
         retained: list[dict[str, Any]] = []
-        seen: set[tuple[Any, ...]] = set()
         remaining_chars = _MAX_EVIDENCE_TEXT_TOTAL_CHARS
-        for dedup_key, item in validated:
-            if dedup_key in seen:
-                continue
-            seen.add(dedup_key)
+        for item in validated:
             if len(retained) >= _MAX_EVIDENCE or remaining_chars <= 0:
                 continue
-            content = item["content"][: min(_MAX_EVIDENCE_TEXT_CHARS, remaining_chars)]
+            content = item["content"].strip()[
+                : min(_MAX_EVIDENCE_TEXT_CHARS, remaining_chars)
+            ]
             if not content:
                 continue
             remaining_chars -= len(content)
@@ -601,6 +632,25 @@ class SharedWorkspaceChatService:
             VerifiedSharedEvidence(label=f"E{index}", **item)
             for index, item in enumerate(retained, start=1)
         )
+
+    def _canonical_source_by_media(
+        self,
+        snapshot: SharedSourceSnapshot,
+    ) -> dict[int, tuple[str, str]]:
+        try:
+            rows = _index_source_rows(self._load_source_rows())
+            canonical: dict[int, tuple[str, str]] = {}
+            for item in snapshot.items:
+                row = rows[item.source_id]
+                if _positive_int(row.get("media_id")) != item.media_id:
+                    raise ValueError("source remapped")
+                current = canonical.get(item.media_id)
+                candidate = (item.source_id, _safe_title(row.get("title")))
+                if current is None or candidate[0] < current[0]:
+                    canonical[item.media_id] = candidate
+            return canonical
+        except (KeyError, ValueError):
+            raise SharedWorkspaceRetrievalUnavailable() from None
 
     def _load_source_rows(self) -> list[dict[str, Any]]:
         try:
@@ -679,8 +729,8 @@ class SharedWorkspaceChatService:
                 media is None
                 or _truthy(media.get("deleted"))
                 or _truthy(media.get("is_trash"))
-                or not _bounded_required_text(media.get("uuid"), 512)
-                or not _bounded_required_text(media.get("content_hash"), 512)
+                or not _bounded_exact_text(media.get("uuid"), 512)
+                or not _bounded_exact_text(media.get("content_hash"), 512)
             ):
                 invalid_sources.add(source_id)
                 continue
@@ -715,8 +765,8 @@ class SharedWorkspaceChatService:
                 SharedSourceSnapshotItem(
                     source_id=source_id,
                     media_id=media_id,
-                    media_uuid=_bounded_required_text(media.get("uuid"), 512),
-                    content_hash=_bounded_required_text(media.get("content_hash"), 512),
+                    media_uuid=_bounded_exact_text(media.get("uuid"), 512),
+                    content_hash=_bounded_exact_text(media.get("content_hash"), 512),
                     readiness_class=readiness_class,
                 )
             )
@@ -730,8 +780,8 @@ def _normalize_source_ids(values: Sequence[str]) -> tuple[str, ...]:
     for value in values:
         if not isinstance(value, str):
             raise SharedWorkspaceSourceScopeInvalid()
-        source_id = value.strip()
-        if not source_id or len(source_id) > _MAX_SOURCE_ID_CHARS:
+        source_id = _bounded_exact_text(value, _MAX_SOURCE_ID_CHARS)
+        if not source_id:
             raise SharedWorkspaceSourceScopeInvalid()
         normalized.append(source_id)
     if len(normalized) != len(set(normalized)):
@@ -740,11 +790,8 @@ def _normalize_source_ids(values: Sequence[str]) -> tuple[str, ...]:
 
 
 def _source_row_id(row: dict[str, Any]) -> str:
-    value = row.get("id")
-    if not isinstance(value, str):
-        raise ValueError("invalid source row")
-    source_id = value.strip()
-    if not source_id or len(source_id) > _MAX_SOURCE_ID_CHARS:
+    source_id = _bounded_exact_text(row.get("id"), _MAX_SOURCE_ID_CHARS)
+    if not source_id:
         raise ValueError("invalid source row")
     return source_id
 
@@ -773,13 +820,17 @@ def _positive_int(value: Any) -> int:
     return result
 
 
-def _bounded_required_text(value: Any, limit: int) -> str:
+def _bounded_exact_text(value: Any, limit: int) -> str:
     if not isinstance(value, str):
         return ""
-    normalized = value.strip()
-    if not normalized or len(normalized) > limit:
+    if (
+        not value
+        or value != value.strip()
+        or len(value) > limit
+        or not value.isprintable()
+    ):
         return ""
-    return normalized
+    return value
 
 
 def _readiness_class(status: dict[str, Any] | None) -> str | None:
@@ -841,13 +892,13 @@ def _snapshot_is_internally_valid(snapshot: Any) -> bool:
     for item in snapshot.items:
         if (
             not isinstance(item, SharedSourceSnapshotItem)
-            or not _bounded_required_text(item.source_id, _MAX_SOURCE_ID_CHARS)
+            or not _bounded_exact_text(item.source_id, _MAX_SOURCE_ID_CHARS)
             or item.source_id in source_ids
             or not isinstance(item.media_id, int)
             or isinstance(item.media_id, bool)
             or item.media_id <= 0
-            or not _bounded_required_text(item.media_uuid, 512)
-            or not _bounded_required_text(item.content_hash, 512)
+            or not _bounded_exact_text(item.media_uuid, 512)
+            or not _bounded_exact_text(item.content_hash, 512)
             or item.readiness_class not in {"queryable", "partially_queryable"}
         ):
             return False
@@ -870,89 +921,178 @@ def _is_nonempty(value: Any) -> bool:
     return bool(value)
 
 
-def _metadata_reports_forbidden_execution(metadata: Any) -> bool:
+_ALLOWED_RETRIEVAL_METADATA = frozenset(
+    {
+        "original_query",
+        "retrieval_cache_hit",
+        "generation_executed",
+        "explicit_source_selection",
+        "sources_requested",
+        "sources_searched",
+        "documents_retrieved",
+        "retrieval_guidance",
+        "retrieval_plan",
+        "answer_generation_skipped",
+    }
+)
+
+_DERIVED_RESULT_FIELDS = (
+    "citations",
+    "academic_citations",
+    "chunk_citations",
+    "feedback_id",
+    "security_report",
+    "claims",
+    "factuality",
+    "verification_report",
+    "retrieval_metrics",
+    "faithfulness",
+    "query_classification",
+    "reformulated_query",
+    "research_summary",
+    "suggestions",
+    "images",
+    "videos",
+)
+
+
+def _result_has_derived_outputs(result: Any) -> bool:
+    return any(
+        _is_nonempty(_result_value(result, field_name, None))
+        for field_name in _DERIVED_RESULT_FIELDS
+    )
+
+
+def _metadata_is_locked_retrieval(
+    metadata: Any,
+    *,
+    query: str,
+    media_count: int,
+    document_count: int,
+    index_namespace: str,
+) -> bool:
     if not isinstance(metadata, dict):
-        return True
-    if _truthy(metadata.get("generation_executed")) or _truthy(
-        metadata.get("retrieval_cache_hit")
-    ):
-        return True
-    for key in (
-        "generation",
-        "generated_answer",
-        "classification_external_prefetch",
-        "external_sources",
-        "web_fallback",
-        "discussion_search",
-        "research",
-    ):
-        if _is_nonempty(metadata.get(key)):
-            return True
+        return False
+    if set(metadata) - _ALLOWED_RETRIEVAL_METADATA:
+        return False
+    if "original_query" in metadata and metadata["original_query"] != query:
+        return False
+    for key in ("generation_executed", "retrieval_cache_hit"):
+        if key in metadata and metadata[key] is not False:
+            return False
     for key in ("sources_requested", "sources_searched"):
         reported = metadata.get(key)
-        if reported is not None and (
-            not isinstance(reported, list)
-            or any(str(source) != "media_db" for source in reported)
-        ):
-            return True
-    return False
+        if reported is not None and reported != ["media_db"]:
+            return False
+    if "documents_retrieved" in metadata and (
+        not isinstance(metadata["documents_retrieved"], int)
+        or isinstance(metadata["documents_retrieved"], bool)
+        or metadata["documents_retrieved"] != document_count
+    ):
+        return False
+    if "retrieval_guidance" in metadata and not isinstance(
+        metadata["retrieval_guidance"], str
+    ):
+        return False
+    if "answer_generation_skipped" in metadata and (
+        document_count != 0 or metadata["answer_generation_skipped"] != "no_documents"
+    ):
+        return False
+
+    explicit_scope = metadata.get("explicit_source_selection")
+    if explicit_scope is not None and explicit_scope != {
+        "enabled": True,
+        "requested_sources": ["media_db"],
+        "resolved_sources": ["media_db"],
+        "include_media_ids_count": media_count,
+        "include_note_ids_count": 0,
+        "scope_intersection_empty": False,
+        "cache_disabled": False,
+    }:
+        return False
+    retrieval_plan = metadata.get("retrieval_plan")
+    return retrieval_plan is None or retrieval_plan == {
+        "query": query,
+        "sources": ["media_db"],
+        "search_mode": "fts",
+        "top_k": _MAX_EVIDENCE,
+        "index_namespace": index_namespace,
+    }
 
 
 def _validate_document(
     document: Any,
-    canonical_source_by_media: dict[int, str],
-) -> tuple[tuple[Any, ...], dict[str, Any]] | None:
+    canonical_source_by_media: dict[int, tuple[str, str]],
+) -> tuple[tuple[int, str], dict[str, Any]]:
     metadata = _document_value(document, "metadata", {})
     if not isinstance(metadata, dict):
         raise SharedWorkspaceRetrievalUnavailable()
-    source = _document_value(document, "source", metadata.get("source"))
+    source = _document_value(document, "source", None)
     if hasattr(source, "value"):
         source = source.value
     if source != "media_db":
+        raise SharedWorkspaceRetrievalUnavailable()
+    metadata_source = metadata.get("source")
+    if hasattr(metadata_source, "value"):
+        metadata_source = metadata_source.value
+    if metadata_source is not None and metadata_source != source:
         raise SharedWorkspaceRetrievalUnavailable()
     try:
         media_id = _positive_int(metadata.get("media_id"))
     except ValueError:
         raise SharedWorkspaceRetrievalUnavailable() from None
-    source_id = canonical_source_by_media.get(media_id)
-    if not source_id:
+    canonical_source = canonical_source_by_media.get(media_id)
+    if not canonical_source:
+        raise SharedWorkspaceRetrievalUnavailable()
+    source_id, source_title = canonical_source
+
+    top_identity = _document_value(document, "id", None)
+    metadata_identity = metadata.get("chunk_id")
+    if top_identity is None and metadata_identity is None:
+        raise SharedWorkspaceRetrievalUnavailable()
+    canonical_top_identity = (
+        _canonical_chunk_identity(top_identity) if top_identity is not None else None
+    )
+    canonical_metadata_identity = (
+        _canonical_chunk_identity(metadata_identity)
+        if metadata_identity is not None
+        else None
+    )
+    if (
+        canonical_top_identity is not None
+        and canonical_metadata_identity is not None
+        and canonical_top_identity != canonical_metadata_identity
+    ):
+        raise SharedWorkspaceRetrievalUnavailable()
+    chunk_identity = canonical_top_identity or canonical_metadata_identity
+    if chunk_identity is None:
         raise SharedWorkspaceRetrievalUnavailable()
 
     raw_content = _document_value(document, "content", None)
     if not isinstance(raw_content, str):
         raise SharedWorkspaceRetrievalUnavailable()
-    content = raw_content.strip()
-    if not content:
-        return None
     score = _finite_float(_document_value(document, "score", 0.0))
-    chunk_index = _optional_locator(
-        metadata.get("chunk_index", _document_value(document, "chunk_index", None))
+    chunk_index = _strict_document_locator(
+        document,
+        metadata,
+        ("chunk_index",),
     )
-    start_char = _optional_locator(
-        metadata.get("start_char", metadata.get("start", _document_value(document, "start_char", None)))
+    start_char = _strict_document_locator(
+        document,
+        metadata,
+        ("start_char", "start"),
     )
-    end_char = _optional_locator(
-        metadata.get("end_char", metadata.get("end", _document_value(document, "end_char", None)))
+    end_char = _strict_document_locator(
+        document,
+        metadata,
+        ("end_char", "end"),
     )
-    title = _safe_title(
-        metadata.get("source_title")
-        or metadata.get("title")
-        or metadata.get("document_title")
-        or "Shared source"
-    )
-    chunk_identity = metadata.get("chunk_id", _document_value(document, "id", None))
-    dedup_key = (
-        media_id,
-        str(chunk_identity or ""),
-        chunk_index,
-        start_char,
-        end_char,
-        content,
-    )
-    return dedup_key, {
+    if start_char is not None and end_char is not None and end_char < start_char:
+        raise SharedWorkspaceRetrievalUnavailable()
+    return (media_id, chunk_identity), {
         "source_id": source_id,
-        "source_title": title,
-        "content": content,
+        "source_title": source_title,
+        "content": raw_content,
         "score": score,
         "chunk_index": chunk_index,
         "start_char": start_char,
@@ -978,14 +1118,42 @@ def _finite_float(value: Any) -> float:
     return score
 
 
-def _optional_locator(value: Any) -> int | None:
-    if value is None:
-        return None
+def _canonical_chunk_identity(value: Any) -> str:
+    if isinstance(value, bool):
+        raise SharedWorkspaceRetrievalUnavailable()
+    if isinstance(value, int):
+        if value < 0:
+            raise SharedWorkspaceRetrievalUnavailable()
+        identity = str(value)
+    elif isinstance(value, str):
+        identity = _bounded_exact_text(value, _MAX_CHUNK_ID_CHARS)
+    else:
+        raise SharedWorkspaceRetrievalUnavailable()
+    if not identity or len(identity) > _MAX_CHUNK_ID_CHARS:
+        raise SharedWorkspaceRetrievalUnavailable()
+    return identity
+
+
+def _strict_document_locator(
+    document: Any,
+    metadata: dict[str, Any],
+    names: tuple[str, ...],
+) -> int | None:
+    values: list[int] = []
     try:
-        locator = _positive_or_zero_int(value)
+        for name in names:
+            if metadata.get(name) is not None:
+                values.append(_positive_or_zero_int(metadata[name]))
+            document_value = _document_value(document, name, None)
+            if document_value is not None:
+                values.append(_positive_or_zero_int(document_value))
     except ValueError:
+        raise SharedWorkspaceRetrievalUnavailable() from None
+    if not values:
         return None
-    return min(locator, _MAX_LOCATOR)
+    if any(value != values[0] for value in values[1:]):
+        raise SharedWorkspaceRetrievalUnavailable()
+    return values[0]
 
 
 def _positive_or_zero_int(value: Any) -> int:
@@ -993,11 +1161,13 @@ def _positive_or_zero_int(value: Any) -> int:
         raise ValueError("invalid locator")
     if isinstance(value, int):
         result = value
-    elif isinstance(value, str) and value.strip().isdigit():
-        result = int(value.strip())
+    elif isinstance(value, str) and value.isdigit():
+        result = int(value)
+        if str(result) != value:
+            raise ValueError("invalid locator")
     else:
         raise ValueError("invalid locator")
-    if result < 0:
+    if result < 0 or result > _MAX_LOCATOR:
         raise ValueError("invalid locator")
     return result
 
