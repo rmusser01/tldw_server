@@ -111,7 +111,11 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Fix Round 2 TDD RED: real-pipeline diagnostics `1 failed`; owner namespace integration `1 failed, 2 passed`; malformed all-mode identities `14 failed, 6 passed`; kwargs analyzer negative fixtures `8 failed, 1 passed`; serializer/shared actual-shape regressions `3 failed`.
 - Fix Round 2 GREEN: serializer plus focused Task 6 `126 passed`; focused Task 4 access `9 passed`; focused Task 5 recipient/security `40 passed`. The 290-item xdist aggregate reached `pytest_sessionfinish` without an assertion failure but exceeded the established cleanup profile in `xdist`/`execnet` node teardown and was interrupted once with exit 130; it was not repeated. Ruff passed; Bandit reported zero findings across 9,006 touched production LOC; `git diff --check` passed.
 - Fix Round 2 PostgreSQL state: untouched and not started; no schema, migration, RLS policy, fixture, or PostgreSQL query changed.
-- Status: complete.
+- Fix Round 3 reviewed head: `91b278aef3102ebcbc87e670d147e00f26057734`.
+- Fix Round 3: made the test-only hidden-kwargs AST sentinel inspect nested callable decorators, defaults, argument/return annotations, and optional runtime type parameters in the enclosing scope before skipping only a body with independently bound `kwargs`; preserved approved literal header reads and added bypass/allowed fixtures.
+- Fix Round 3 TDD RED: required header fixtures `6 failed, 10 passed`; expanded rejection plus approved-literal header selection `9 failed`. GREEN: focused sentinel `20 passed`; full Task 6 plus serializer `136 passed`; Ruff passed the touched test; `git diff --check` passed. Bandit was not rerun because production code was unchanged.
+- Fix Round 3 PostgreSQL state: untouched and not started; no production code, schema, migration, RLS policy, fixture, or query changed.
+- Status: implementation complete; final review pending.
 
 ## Task 4 - Authoritative access and reusable read helpers
 

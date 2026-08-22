@@ -755,38 +755,63 @@ def _literal_outer_pipeline_kwargs_reads(source: str | None = None) -> set[str]:
     }
 
     class KwargsReadVisitor(ast.NodeVisitor):
-        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        @staticmethod
+        def _bound_argument_names(arguments: ast.arguments) -> set[str]:
             names = {
                 argument.arg
                 for argument in (
-                    *node.args.posonlyargs,
-                    *node.args.args,
-                    *node.args.kwonlyargs,
+                    *arguments.posonlyargs,
+                    *arguments.args,
+                    *arguments.kwonlyargs,
                 )
             }
-            if node.args.vararg is not None:
-                names.add(node.args.vararg.arg)
-            if node.args.kwarg is not None:
-                names.add(node.args.kwarg.arg)
-            if "kwargs" not in names:
+            if arguments.vararg is not None:
+                names.add(arguments.vararg.arg)
+            if arguments.kwarg is not None:
+                names.add(arguments.kwarg.arg)
+            return names
+
+        def _visit_argument_header(self, arguments: ast.arguments) -> None:
+            declared_arguments = [
+                *arguments.posonlyargs,
+                *arguments.args,
+                *arguments.kwonlyargs,
+            ]
+            if arguments.vararg is not None:
+                declared_arguments.append(arguments.vararg)
+            if arguments.kwarg is not None:
+                declared_arguments.append(arguments.kwarg)
+            for argument in declared_arguments:
+                if argument.annotation is not None:
+                    self.visit(argument.annotation)
+            for default in (*arguments.defaults, *arguments.kw_defaults):
+                if default is not None:
+                    self.visit(default)
+
+        def _visit_function_header(
+            self,
+            node: ast.FunctionDef | ast.AsyncFunctionDef,
+        ) -> None:
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for type_parameter in getattr(node, "type_params", ()):
+                self.visit(type_parameter)
+            self._visit_argument_header(node.args)
+            if node.returns is not None:
+                self.visit(node.returns)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            if "kwargs" in self._bound_argument_names(node.args):
+                self._visit_function_header(node)
+            else:
                 self.generic_visit(node)
 
         visit_AsyncFunctionDef = visit_FunctionDef
 
         def visit_Lambda(self, node: ast.Lambda) -> None:
-            names = {
-                argument.arg
-                for argument in (
-                    *node.args.posonlyargs,
-                    *node.args.args,
-                    *node.args.kwonlyargs,
-                )
-            }
-            if node.args.vararg is not None:
-                names.add(node.args.vararg.arg)
-            if node.args.kwarg is not None:
-                names.add(node.args.kwarg.arg)
-            if "kwargs" not in names:
+            if "kwargs" in self._bound_argument_names(node.args):
+                self._visit_argument_header(node.args)
+            else:
                 self.generic_visit(node)
 
         def visit_Name(self, node: ast.Name) -> None:
@@ -956,6 +981,69 @@ def test_outer_kwargs_analyzer_ignores_nested_function_kwargs() -> None:
                 return kwargs.get(dynamic_key)
             return value, nested
     """
+
+    assert _literal_outer_pipeline_kwargs_reads(source) == {"metadata"}
+
+
+@pytest.mark.parametrize(
+    "nested_callable",
+    [
+        "def nested(value=kwargs, **kwargs):\n    return None",
+        "def nested(*, value=kwargs, **kwargs):\n    return None",
+        "@decorate(options=kwargs)\ndef nested(**kwargs):\n    return None",
+        "def nested(value: kwargs, **kwargs):\n    return None",
+        "def nested(**kwargs) -> kwargs:\n    return None",
+        "nested = lambda value=kwargs, **kwargs: None",
+    ],
+    ids=[
+        "function-positional-default",
+        "function-keyword-default",
+        "function-decorator",
+        "function-parameter-annotation",
+        "function-return-annotation",
+        "lambda-default",
+    ],
+)
+def test_outer_kwargs_analyzer_rejects_nested_callable_header_loads(
+    nested_callable: str,
+) -> None:
+    source = "async def unified_rag_pipeline(**kwargs):\n" + textwrap.indent(
+        nested_callable,
+        "    ",
+    )
+
+    with pytest.raises(AssertionError, match="unapproved outer kwargs load"):
+        _literal_outer_pipeline_kwargs_reads(source)
+
+
+def test_outer_kwargs_analyzer_ignores_independently_bound_nested_body() -> None:
+    source = """
+        async def unified_rag_pipeline(**kwargs):
+            def nested(**kwargs):
+                options = kwargs
+                return kwargs.get(dynamic_key)
+            return nested
+    """
+
+    assert _literal_outer_pipeline_kwargs_reads(source) == set()
+
+
+@pytest.mark.parametrize(
+    "nested_callable",
+    [
+        'def nested(value=kwargs.get("metadata"), **kwargs):\n    return None',
+        '@decorate(kwargs["metadata"])\ndef nested(**kwargs):\n    return None',
+        'nested = lambda value=kwargs.get("metadata"), **kwargs: None',
+    ],
+    ids=["function-default", "function-decorator", "lambda-default"],
+)
+def test_outer_kwargs_analyzer_collects_approved_nested_header_reads(
+    nested_callable: str,
+) -> None:
+    source = "async def unified_rag_pipeline(**kwargs):\n" + textwrap.indent(
+        nested_callable,
+        "    ",
+    )
 
     assert _literal_outer_pipeline_kwargs_reads(source) == {"metadata"}
 

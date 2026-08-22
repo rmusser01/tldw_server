@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE. Task 6 freezes authoritative owner source scope and permits only fully verified, media-only retrieval evidence. Task 7 remains responsible for API orchestration and generation.
+IMPLEMENTATION COMPLETE; FINAL REVIEW PENDING. Task 6 freezes authoritative owner source scope and permits only fully verified, media-only retrieval evidence. Task 7 remains responsible for API orchestration and generation.
 
 Starting commit: `e09af9a232a3a606cf2117f684bff73e9c8d0d60`
 
@@ -211,3 +211,61 @@ Task 7 remains responsible for API orchestration, generation, receipts, and pers
 ### PostgreSQL State
 
 PostgreSQL was not started or touched. Fix Round 2 changed no PostgreSQL schema, migration, RLS policy, fixture, or query.
+
+## Fix Round 3
+
+Reviewed head: `91b278aef3102ebcbc87e670d147e00f26057734`
+
+### Changes
+
+- Corrected the test-only hidden-kwargs AST sentinel so nested functions and lambdas that bind their own `kwargs` still expose enclosing-scope loads from callable headers.
+- Explicitly traversed function decorators, positional and keyword-only defaults, all argument annotations, return annotations, and the runtime's optional `type_params` field before skipping an independently bound nested body.
+- Preserved approved direct literal `get` and constant-subscript reads in callable headers, while raw/dynamic outer loads still fail.
+- Added rejection coverage for function defaults, decorators, parameter/return annotations, and lambda defaults, plus allowed coverage for literal header reads and independently bound nested-body use.
+
+### TDD Evidence
+
+Initial required RED:
+
+```text
+outer kwargs analyzer selection: 6 failed, 10 passed
+```
+
+After adding complementary approved-literal header coverage:
+
+```text
+nested callable header selection: 9 failed
+```
+
+Focused GREEN command:
+
+```text
+TLDW_TEST_NO_DOCKER=1 .venv/bin/python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py -q --timeout=60 -o log_cli=false -k 'outer_kwargs_analyzer or hidden_pipeline_kwargs'
+```
+
+Result: `20 passed, 111 deselected, 4 warnings in 7.96s`.
+
+Full Task 6 plus serializer command:
+
+```text
+TLDW_TEST_NO_DOCKER=1 .venv/bin/python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py tldw_Server_API/tests/RAG/test_unified_pipeline_document_serialization.py -q --timeout=60 -o log_cli=false
+```
+
+Result: `136 passed, 4 warnings in 8.16s`.
+
+Ruff passed the touched test file. `git diff --check` passed. Bandit was not rerun because no production file changed.
+
+### Files
+
+- `tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py`
+- Task 6 backlog, progress, and implementer report tracking.
+
+### Self-Review And Residual Risk
+
+The visitor now models the relevant Python 3.11 callable scope split: header expressions are inspected in the enclosing context and only the body is skipped when `kwargs` is independently parameter-bound. The guarded `type_params` traversal keeps the same boundary when running on a Python AST that exposes that field. Production retrieval, serializer, API, and Task 7 behavior are unchanged.
+
+Task 6 is implementation-complete but remains pending final review. The sentinel remains intentionally coupled to unified-pipeline source structure.
+
+### PostgreSQL State
+
+PostgreSQL was not started or touched. Fix Round 3 changed no production code, schema, migration, RLS policy, fixture, or query.
