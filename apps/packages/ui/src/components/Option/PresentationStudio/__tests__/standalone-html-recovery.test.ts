@@ -129,6 +129,26 @@ describe("standalone HTML workspace recovery records", () => {
     ).resolves.toEqual({ kind: "none" })
   })
 
+  it("reports recovery unavailable when storage cannot be read", async () => {
+    const recovery = await loadRecovery()
+    const scope = recovery.createPresentationPrincipalScope("https://tldw.example", "42")
+    const storage = {
+      getItem: vi.fn(() => {
+        throw new DOMException("Storage access denied", "SecurityError")
+      }),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    }
+
+    await expect(
+      recovery.readStandaloneHtmlRecovery(storage, scope, "html-1", Date.now())
+    ).resolves.toEqual({
+      kind: "unavailable",
+      code: "recovery_unavailable",
+      message: "Recovery unavailable. Keep this tab open or download your draft."
+    })
+  })
+
   it("expires and clears records older than exactly 24 hours before returning source", async () => {
     const recovery = await loadRecovery()
     const source = await loadSource()
@@ -183,6 +203,77 @@ describe("standalone HTML workspace recovery records", () => {
         value: RealEncoder
       })
     }
+  })
+
+  it("reports recovery unavailable when an oversized record cannot be removed", async () => {
+    const recovery = await loadRecovery()
+    const scope = recovery.createPresentationPrincipalScope("https://tldw.example", "42")
+    const storage = {
+      getItem: vi.fn(() => "x".repeat(6 * 1_048_576 + 8_193)),
+      setItem: vi.fn(),
+      removeItem: vi.fn(() => {
+        throw new DOMException("cleanup blocked", "SecurityError")
+      })
+    }
+
+    await expect(
+      recovery.readStandaloneHtmlRecovery(storage, scope, "html-1", Date.now())
+    ).resolves.toEqual({
+      kind: "unavailable",
+      code: "recovery_unavailable",
+      message: "Recovery unavailable. Keep this tab open or download your draft."
+    })
+  })
+
+  it("reports recovery unavailable when a malformed record cannot be removed", async () => {
+    const recovery = await loadRecovery()
+    const scope = recovery.createPresentationPrincipalScope("https://tldw.example", "42")
+    const storage = {
+      getItem: vi.fn(() => "{"),
+      setItem: vi.fn(),
+      removeItem: vi.fn(() => {
+        throw new DOMException("cleanup blocked", "SecurityError")
+      })
+    }
+
+    await expect(
+      recovery.readStandaloneHtmlRecovery(storage, scope, "html-1", Date.now())
+    ).resolves.toEqual({
+      kind: "unavailable",
+      code: "recovery_unavailable",
+      message: "Recovery unavailable. Keep this tab open or download your draft."
+    })
+  })
+
+  it("reports recovery unavailable when an expired record cannot be removed", async () => {
+    const recovery = await loadRecovery()
+    const scope = recovery.createPresentationPrincipalScope("https://tldw.example", "42")
+    const now = 1_900_000_000_000
+    const storage = {
+      getItem: vi.fn(() =>
+        JSON.stringify({
+          schemaVersion: 1,
+          principalScope: scope.principalScope,
+          presentationId: "html-1",
+          baseEtag: '"v7"',
+          baseDigest: "c".repeat(64),
+          source: SOURCE,
+          updatedAt: now - 86_400_001
+        })
+      ),
+      setItem: vi.fn(),
+      removeItem: vi.fn(() => {
+        throw new DOMException("cleanup blocked", "SecurityError")
+      })
+    }
+
+    await expect(
+      recovery.readStandaloneHtmlRecovery(storage, scope, "html-1", now)
+    ).resolves.toEqual({
+      kind: "unavailable",
+      code: "recovery_unavailable",
+      message: "Recovery unavailable. Keep this tab open or download your draft."
+    })
   })
 
   it.each([
@@ -253,6 +344,24 @@ describe("standalone HTML workspace recovery records", () => {
     })
     expect(accepted.source).toBe(SOURCE)
     expect(result.message.length).toBeLessThanOrEqual(100)
+  })
+
+  it("synchronously stores a preflight-valid latest editor candidate before its digest resolves", async () => {
+    const recovery = await loadRecovery()
+    const scope = recovery.createPresentationPrincipalScope("https://tldw.example", "42")
+    const storage = { setItem: vi.fn(), getItem: vi.fn(), removeItem: vi.fn() }
+
+    const result = recovery.writeStandaloneHtmlRecovery(storage, scope, {
+      presentationId: "html-1",
+      baseEtag: '"v7"',
+      baseDigest: "f".repeat(64),
+      acceptedSource: { source: SOURCE },
+      updatedAt: 1_900_000_000_000
+    })
+
+    expect(result).toEqual(expect.objectContaining({ ok: true }))
+    expect(storage.setItem).toHaveBeenCalledTimes(1)
+    expect(storage.setItem.mock.calls[0][1]).toContain(SOURCE)
   })
 
   it("clears only the matching scoped record after a matching save or confirmed discard", async () => {
@@ -354,5 +463,23 @@ describe("usePresentationPrincipalScope", () => {
     act(() => document.dispatchEvent(new Event("visibilitychange")))
     await waitFor(() => expect(mocks.getCurrentUser.mock.calls.length).toBeGreaterThan(afterFocus))
     if (descriptor) Object.defineProperty(document, "visibilityState", descriptor)
+  })
+
+  it("synchronously enters a guarded epoch on a definitive slides capability scope mismatch", async () => {
+    const subject = await loadScopeHook()
+    const boundary = vi.fn()
+    const { result } = renderHook(() =>
+      subject.usePresentationPrincipalScope({ onBoundary: boundary })
+    )
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    const scopeCalls = mocks.getConfig.mock.calls.length
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:slides-scope-mismatch")))
+
+    expect(boundary).toHaveBeenCalledWith("mismatch")
+    expect(result.current.status).toBe("guarded")
+    expect(result.current.scope).toBeNull()
+    await act(async () => Promise.resolve())
+    expect(mocks.getConfig).toHaveBeenCalledTimes(scopeCalls)
   })
 })

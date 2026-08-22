@@ -36,8 +36,10 @@ const createBlankSlideId = (): string =>
 const DEFAULT_VISUAL_STYLE_ID = "minimal-academic"
 
 type InFlightProjectRequest = {
-  projectId: string | null
-  promise: Promise<DetailLoadResult>
+  projectId: string
+  authorityEpoch: number
+  controller: AbortController
+  promise: Promise<DetailLoadResult | null>
 }
 
 type DetailLoadResult =
@@ -47,8 +49,21 @@ type DetailLoadResult =
   | { kind: "metadata_unavailable" }
 
 type DetailSurfaceState =
-  | { kind: "structured" }
-  | Exclude<DetailLoadResult, { kind: "structured" }>
+  ({ kind: "structured" } | Exclude<DetailLoadResult, { kind: "structured" }>) & {
+    projectId: string
+    authorityEpoch: number
+  }
+
+type BufferedDetailOutcome = {
+  projectId: string
+  authorityEpoch: number
+  outcome:
+    | { kind: "result"; result: DetailLoadResult }
+    | { kind: "error"; message: string }
+}
+
+const detailOutcomeRequiresRelease = (buffered: BufferedDetailOutcome): boolean =>
+  buffered.outcome.kind === "error" || buffered.outcome.result.kind !== "standalone_html"
 
 const errorStatus = (error: unknown): number | null => {
   const status = error && typeof error === "object" ? (error as { status?: unknown }).status : null
@@ -122,7 +137,82 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   const [draftVisualStyleValue, setDraftVisualStyleValue] = React.useState("")
   const [isCreatingProject, setIsCreatingProject] = React.useState(false)
   const [detailState, setDetailState] = React.useState<DetailSurfaceState | null>(null)
+  const [authorityEpoch, setAuthorityEpoch] = React.useState(0)
+  const [kindAuthorityReleaseRequired, setKindAuthorityReleaseRequired] =
+    React.useState(false)
   const detailRequestRef = React.useRef<InFlightProjectRequest | null>(null)
+  const bufferedDetailOutcomeRef = React.useRef<BufferedDetailOutcome | null>(null)
+  const authorityEpochRef = React.useRef(authorityEpoch)
+  const standaloneAuthoritySettlementRef = React.useRef<{
+    authorityEpoch: number
+    releaseSafe: boolean
+  } | null>(null)
+  const detailStateRef = React.useRef(detailState)
+  authorityEpochRef.current = authorityEpoch
+  detailStateRef.current = detailState
+  const detailContextRef = React.useRef({ mode, projectId, authorityEpoch })
+  const detailErrorContextRef = React.useRef<string | null>(null)
+  const detailContextKey = JSON.stringify([projectId, authorityEpoch])
+  const currentDetailState =
+    detailState?.projectId === projectId && detailState.authorityEpoch === authorityEpoch
+      ? detailState
+      : null
+  const retainedStandaloneState =
+    mode === "detail" &&
+    projectId &&
+    detailState?.projectId === projectId &&
+    detailState.kind === "standalone_html"
+      ? detailState
+      : null
+  const canRetainStandaloneSurface =
+    Boolean(retainedStandaloneState) && !isExtensionRuntime()
+  const standaloneKindRevalidationPending = Boolean(
+    canRetainStandaloneSurface &&
+    retainedStandaloneState &&
+    retainedStandaloneState.authorityEpoch !== authorityEpoch
+  )
+  const currentDetailError = detailErrorContextRef.current === detailContextKey ? loadError : null
+
+  const invalidateDetailRequest = React.useCallback(() => {
+    detailRequestRef.current?.controller.abort()
+    detailRequestRef.current = null
+    bufferedDetailOutcomeRef.current = null
+    setKindAuthorityReleaseRequired(false)
+  }, [])
+
+  React.useLayoutEffect(() => {
+    const previous = detailContextRef.current
+    if (
+      previous.mode !== mode ||
+      previous.projectId !== projectId ||
+      previous.authorityEpoch !== authorityEpoch
+    ) {
+      invalidateDetailRequest()
+      standaloneAuthoritySettlementRef.current = null
+      detailContextRef.current = { mode, projectId, authorityEpoch }
+    }
+  }, [authorityEpoch, invalidateDetailRequest, mode, projectId])
+
+  React.useEffect(() => {
+    const handleAuthorityBoundary = () => {
+      invalidateDetailRequest()
+      detailErrorContextRef.current = null
+      setLoadError(null)
+      if (mode === "detail") setIsProjectLoading(true)
+      const nextEpoch = authorityEpochRef.current + 1
+      authorityEpochRef.current = nextEpoch
+      standaloneAuthoritySettlementRef.current = null
+      setAuthorityEpoch(nextEpoch)
+    }
+    window.addEventListener("tldw:config-updated", handleAuthorityBoundary)
+    window.addEventListener("tldw:auth-principal-changed", handleAuthorityBoundary)
+    window.addEventListener("tldw:slides-scope-mismatch", handleAuthorityBoundary)
+    return () => {
+      window.removeEventListener("tldw:config-updated", handleAuthorityBoundary)
+      window.removeEventListener("tldw:auth-principal-changed", handleAuthorityBoundary)
+      window.removeEventListener("tldw:slides-scope-mismatch", handleAuthorityBoundary)
+    }
+  }, [invalidateDetailRequest, mode])
 
   const refreshVisualStyles = React.useCallback(async (): Promise<VisualStyleRecord[]> => {
     const styles = await tldwClient.listVisualStyles()
@@ -130,11 +220,104 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     return Array.isArray(styles) ? styles : []
   }, [])
 
+  const adoptDetailOutcome = React.useCallback(
+    (buffered: BufferedDetailOutcome) => {
+      const context = detailContextRef.current
+      if (
+        context.mode !== "detail" ||
+        context.projectId !== buffered.projectId ||
+        context.authorityEpoch !== buffered.authorityEpoch ||
+        authorityEpochRef.current !== buffered.authorityEpoch
+      ) {
+        return
+      }
+      bufferedDetailOutcomeRef.current = null
+      setKindAuthorityReleaseRequired(false)
+      if (buffered.outcome.kind === "error") {
+        detailErrorContextRef.current = JSON.stringify([
+          buffered.projectId,
+          buffered.authorityEpoch
+        ])
+        setLoadError(buffered.outcome.message)
+        setDetailState(null)
+        setIsProjectLoading(false)
+        return
+      }
+      detailErrorContextRef.current = null
+      setLoadError(null)
+      const result = buffered.outcome.result
+      if (result.kind === "structured") {
+        loadProject(result.detail.record, {
+          etag: result.detail.etag
+        })
+        setDetailState({
+          projectId: buffered.projectId,
+          authorityEpoch: buffered.authorityEpoch,
+          kind: "structured"
+        })
+      } else {
+        setDetailState({
+          projectId: buffered.projectId,
+          authorityEpoch: buffered.authorityEpoch,
+          ...result
+        })
+      }
+      setIsProjectLoading(false)
+    },
+    [loadProject]
+  )
+
+  const queueOrAdoptDetailOutcome = React.useCallback(
+    (buffered: BufferedDetailOutcome) => {
+      const retained = detailStateRef.current
+      const settlement = standaloneAuthoritySettlementRef.current
+      const waitsForRetainedWorkspace =
+        retained?.projectId === buffered.projectId &&
+        retained.kind === "standalone_html" &&
+        retained.authorityEpoch !== buffered.authorityEpoch &&
+        (settlement?.authorityEpoch !== buffered.authorityEpoch ||
+          (detailOutcomeRequiresRelease(buffered) && !settlement.releaseSafe))
+      if (waitsForRetainedWorkspace) {
+        bufferedDetailOutcomeRef.current = buffered
+        setKindAuthorityReleaseRequired(detailOutcomeRequiresRelease(buffered))
+        return
+      }
+      adoptDetailOutcome(buffered)
+    },
+    [adoptDetailOutcome]
+  )
+
+  const handleStandaloneAuthoritySettled = React.useCallback(
+    (settledEpoch: number, releaseSafe: boolean) => {
+      if (authorityEpochRef.current !== settledEpoch) return
+      const retained = detailStateRef.current
+      if (
+        retained?.projectId !== detailContextRef.current.projectId ||
+        retained.kind !== "standalone_html" ||
+        retained.authorityEpoch === settledEpoch
+      ) {
+        return
+      }
+      standaloneAuthoritySettlementRef.current = {
+        authorityEpoch: settledEpoch,
+        releaseSafe
+      }
+      const buffered = bufferedDetailOutcomeRef.current
+      if (
+        buffered?.authorityEpoch === settledEpoch &&
+        (!detailOutcomeRequiresRelease(buffered) || releaseSafe)
+      ) {
+        adoptDetailOutcome(buffered)
+      }
+    },
+    [adoptDetailOutcome]
+  )
+
   React.useEffect(() => {
     const shouldLoadStyles =
       mode === "new" ||
       (mode === "detail" &&
-        detailState?.kind === "structured" &&
+        currentDetailState?.kind === "structured" &&
         currentProjectId === projectId &&
         !isProjectLoading)
     if (!shouldLoadStyles || !isOnline) {
@@ -169,31 +352,50 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     return () => {
       cancelled = true
     }
-  }, [currentProjectId, detailState?.kind, isOnline, isProjectLoading, mode, projectId, refreshVisualStyles])
+  }, [currentDetailState?.kind, currentProjectId, isOnline, isProjectLoading, mode, projectId, refreshVisualStyles])
 
   React.useEffect(() => {
     if (mode !== "detail" || !projectId) {
       return
     }
-    // This store accepts structured records only, so an exact ID hit is already a
-    // source-free kind decision and cannot bypass the standalone metadata boundary.
-    if (currentProjectId === projectId) {
-      setDetailState({ kind: "structured" })
-      setIsProjectLoading(false)
-      return
-    }
     let cancelled = false
     setIsProjectLoading(true)
     setLoadError(null)
-    setDetailState(null)
-    if (!detailRequestRef.current || detailRequestRef.current.projectId !== projectId) {
-      detailRequestRef.current = {
+    detailErrorContextRef.current = null
+    if (
+      !detailRequestRef.current ||
+      detailRequestRef.current.projectId !== projectId ||
+      detailRequestRef.current.authorityEpoch !== authorityEpoch
+    ) {
+      const controller = new AbortController()
+      const request: InFlightProjectRequest = {
         projectId,
-        promise: (async () => {
+        authorityEpoch,
+        controller,
+        promise: Promise.resolve(null)
+      }
+      detailRequestRef.current = request
+      const requestIsCurrent = () =>
+        detailRequestRef.current === request && !controller.signal.aborted
+      request.promise = (async () => {
           try {
             const metadata = await tldwClient.getPresentationMetadata(projectId)
+            if (!requestIsCurrent()) return null
+            if (metadata.record.id !== projectId) {
+              throw new Error("Presentation metadata could not be verified.")
+            }
             if (metadata.record.content_kind === "structured_slides") {
-              return { kind: "structured", detail: await tldwClient.getPresentation(projectId) }
+              const detail = await tldwClient.getPresentation(projectId, {
+                abortSignal: controller.signal
+              })
+              if (!requestIsCurrent()) return null
+              if (
+                detail.record.content_kind !== "structured_slides" ||
+                detail.record.id !== projectId
+              ) {
+                throw new Error("Structured presentation could not be verified.")
+              }
+              return { kind: "structured", detail }
             }
             if (metadata.record.content_kind === "standalone_html") {
               return { kind: "standalone_html" }
@@ -205,59 +407,60 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
                 : null
             }
           } catch (error) {
+            if (!requestIsCurrent()) return null
             if (errorStatus(error) !== 404) throw error
             try {
-              await tldwClient.getSlidesCapabilities()
+              await tldwClient.getSlidesCapabilities({ abortSignal: controller.signal })
+              if (!requestIsCurrent()) return null
               return { kind: "metadata_unavailable" }
             } catch (capabilityError) {
+              if (!requestIsCurrent()) return null
               if (errorStatus(capabilityError) !== 404) {
                 return { kind: "metadata_unavailable" }
               }
               if (isExtensionRuntime()) {
                 return { kind: "metadata_unavailable" }
               }
-              const detail = await tldwClient.getPresentation(projectId)
-              if (detail.record.content_kind !== "structured_slides") {
+              const detail = await tldwClient.getPresentation(projectId, {
+                abortSignal: controller.signal
+              })
+              if (!requestIsCurrent()) return null
+              if (
+                detail.record.content_kind !== "structured_slides" ||
+                detail.record.id !== projectId
+              ) {
                 return { kind: "metadata_unavailable" }
               }
               return { kind: "structured", detail }
             }
           }
-        })() as Promise<DetailLoadResult>
-      }
+        })()
     }
 
-    void detailRequestRef.current.promise
+    const request = detailRequestRef.current
+    void request.promise
       .then((result) => {
-        if (cancelled) {
-          return
-        }
-        if (result.kind === "structured") {
-          if (result.detail.record.content_kind !== "structured_slides") {
-            throw new Error("Structured presentation required")
-          }
-          loadProject(result.detail.record, {
-            etag: result.detail.etag
-          })
-          setDetailState({ kind: "structured" })
-        } else {
-          setDetailState(result)
-        }
-        setIsProjectLoading(false)
-        detailRequestRef.current = null
+        if (cancelled || detailRequestRef.current !== request || !result) return
+        queueOrAdoptDetailOutcome({
+          projectId,
+          authorityEpoch,
+          outcome: { kind: "result", result }
+        })
+        if (detailRequestRef.current === request) detailRequestRef.current = null
       })
       .catch((error) => {
-        if (cancelled) {
-          return
-        }
+        if (cancelled || detailRequestRef.current !== request) return
         detailRequestRef.current = null
-        setLoadError(toErrorMessage(error))
-        setIsProjectLoading(false)
+        queueOrAdoptDetailOutcome({
+          projectId,
+          authorityEpoch,
+          outcome: { kind: "error", message: toErrorMessage(error) }
+        })
       })
     return () => {
       cancelled = true
     }
-  }, [currentProjectId, loadProject, mode, projectId])
+  }, [authorityEpoch, detailContextKey, mode, projectId, queueOrAdoptDetailOutcome])
 
   const styleOptions = React.useMemo(() => {
     const options = [...availableStyles]
@@ -415,6 +618,21 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     [styleOptions, theme, updateProjectMeta]
   )
 
+  const retainedStandaloneWorkspace = canRetainStandaloneSurface && projectId ? (
+    <StandaloneHtmlWorkspace
+      key={projectId}
+      presentationId={projectId}
+      kindAuthorityPending={standaloneKindRevalidationPending}
+      kindAuthorityEpoch={authorityEpoch}
+      kindAuthorityReleaseRequired={kindAuthorityReleaseRequired}
+      onKindAuthoritySettled={handleStandaloneAuthoritySettled}
+    />
+  ) : null
+
+  if (retainedStandaloneWorkspace && (!isOnline || standaloneKindRevalidationPending)) {
+    return retainedStandaloneWorkspace
+  }
+
   if (!isOnline) {
     const Heading = embedded ? "h2" : "h1"
     return (
@@ -529,7 +747,18 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     )
   }
 
-  if (isProjectLoading) {
+  if (retainedStandaloneWorkspace) return retainedStandaloneWorkspace
+
+  if (currentDetailError) {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <h1 className="text-2xl font-semibold text-slate-900">Presentation Studio</h1>
+        <p className="mt-2 text-sm text-rose-600">{currentDetailError}</p>
+      </section>
+    )
+  }
+
+  if (isProjectLoading || !currentDetailState) {
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <p className="text-sm text-slate-600">Loading presentation…</p>
@@ -537,16 +766,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     )
   }
 
-  if (loadError) {
-    return (
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h1 className="text-2xl font-semibold text-slate-900">Presentation Studio</h1>
-        <p className="mt-2 text-sm text-rose-600">{loadError}</p>
-      </section>
-    )
-  }
-
-  if (detailState?.kind === "standalone_html" && isExtensionRuntime()) {
+  if (currentDetailState.kind === "standalone_html" && isExtensionRuntime()) {
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h1 className="text-2xl font-semibold text-slate-900">Standalone HTML presentation</h1>
@@ -557,23 +777,19 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     )
   }
 
-  if (detailState?.kind === "standalone_html" && projectId) {
-    return <StandaloneHtmlWorkspace presentationId={projectId} />
-  }
-
-  if (detailState?.kind === "unsupported") {
+  if (currentDetailState.kind === "unsupported") {
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h1 className="text-2xl font-semibold text-slate-900">Unsupported presentation kind</h1>
         <p className="mt-2 text-sm text-slate-600">
           This presentation type is read only in this version.
         </p>
-        {detailState.contentKind ? <code className="mt-3 block break-all text-sm text-slate-700">{detailState.contentKind}</code> : null}
+        {currentDetailState.contentKind ? <code className="mt-3 block break-all text-sm text-slate-700">{currentDetailState.contentKind}</code> : null}
       </section>
     )
   }
 
-  if (detailState?.kind === "metadata_unavailable") {
+  if (currentDetailState.kind === "metadata_unavailable") {
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h1 className="text-2xl font-semibold text-slate-900">Presentation metadata is unavailable</h1>

@@ -30,31 +30,58 @@ export class StandaloneHtmlDownloadManager {
     if (typeof window !== "undefined") window.addEventListener("pagehide", this.handlePagehide)
   }
 
-  private handlePagehide = () => {
-    this.requestController?.abort()
+  private abortRequest = () => {
+    const controller = this.requestController
     this.requestController = null
+    try {
+      controller?.abort()
+    } catch {
+      // Cleanup remains source-free and continues through platform failures.
+    }
+  }
+
+  private handlePagehide = () => {
+    this.abortRequest()
     this.revokeActiveUrl()
   }
 
   private revokeActiveUrl = () => {
     if (this.revokeTimer !== null) {
-      clearTimeout(this.revokeTimer)
+      const timer = this.revokeTimer
       this.revokeTimer = null
+      try {
+        clearTimeout(timer)
+      } catch {
+        // The URL is still detached and revoked below.
+      }
     }
     if (this.activeUrl !== null) {
-      URL.revokeObjectURL(this.activeUrl)
+      const url = this.activeUrl
       this.activeUrl = null
+      try {
+        URL.revokeObjectURL(url)
+      } catch {
+        // Ref ownership is cleared even when browser revocation is unavailable.
+      }
     }
   }
 
   private scheduleRevoke = (url: string) => {
-    this.revokeTimer = setTimeout(() => {
-      this.revokeTimer = null
-      if (this.activeUrl === url) {
-        URL.revokeObjectURL(url)
-        this.activeUrl = null
-      }
-    }, 0)
+    try {
+      this.revokeTimer = setTimeout(() => {
+        this.revokeTimer = null
+        if (this.activeUrl === url) {
+          this.activeUrl = null
+          try {
+            URL.revokeObjectURL(url)
+          } catch {
+            // The scheduled cleanup cannot reintroduce the detached URL reference.
+          }
+        }
+      }, 0)
+    } catch {
+      this.revokeActiveUrl()
+    }
   }
 
   async download(input: { presentationId: string; source: string }): Promise<void> {
@@ -63,7 +90,7 @@ export class StandaloneHtmlDownloadManager {
     if (!accepted.ok) throw accepted
     if (this.disposed) throw new DOMException("Aborted", "AbortError")
 
-    this.requestController?.abort()
+    this.abortRequest()
     const controller = new AbortController()
     this.requestController = controller
     let bytes: Uint8Array
@@ -95,7 +122,15 @@ export class StandaloneHtmlDownloadManager {
       this.revokeActiveUrl()
       throw error
     } finally {
-      anchor?.remove()
+      try {
+        anchor?.remove()
+      } catch {
+        try {
+          if (anchor?.parentNode) anchor.parentNode.removeChild(anchor)
+        } catch {
+          // URL cleanup remains independent when DOM removal is unavailable.
+        }
+      }
     }
     this.scheduleRevoke(objectUrl)
   }
@@ -103,9 +138,14 @@ export class StandaloneHtmlDownloadManager {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    this.requestController?.abort()
-    this.requestController = null
+    this.abortRequest()
     this.revokeActiveUrl()
-    if (typeof window !== "undefined") window.removeEventListener("pagehide", this.handlePagehide)
+    if (typeof window !== "undefined") {
+      try {
+        window.removeEventListener("pagehide", this.handlePagehide)
+      } catch {
+        // All sensitive refs have already been cleared.
+      }
+    }
   }
 }

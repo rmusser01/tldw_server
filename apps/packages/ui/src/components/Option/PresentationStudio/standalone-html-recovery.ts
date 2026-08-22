@@ -42,6 +42,21 @@ const recoveryFailure = {
   message: "Recovery unavailable. Keep this tab open or download your draft."
 }
 
+const recoveryUnavailable = {
+  kind: "unavailable" as const,
+  code: recoveryFailure.code,
+  message: recoveryFailure.message
+}
+
+export const acquireStandaloneHtmlRecoveryStorage = () => {
+  try {
+    if (typeof window === "undefined") return recoveryFailure
+    return { ok: true as const, storage: window.sessionStorage as StorageLike }
+  } catch {
+    return recoveryFailure
+  }
+}
+
 export const createPresentationPrincipalScope = (
   serverUrl: string,
   principalId: string | number
@@ -61,6 +76,15 @@ const recoveryKey = (scope: PresentationPrincipalScope, presentationId: string):
   `${RECOVERY_PREFIX}${encodeURIComponent(scope.serverOrigin)}:${encodeURIComponent(
     scope.principalId
   )}:${encodeURIComponent(presentationId)}`
+
+const removeRecoveryRecord = (storage: StorageLike, key: string): boolean => {
+  try {
+    storage.removeItem(key)
+    return true
+  } catch {
+    return false
+  }
+}
 
 const isClosedRecoveryRecord = (
   value: unknown,
@@ -101,8 +125,8 @@ export const writeStandaloneHtmlRecovery = (
   const preflight = preflightStandaloneHtmlSource(source)
   if (
     !preflight.ok ||
-    typeof accepted?.digest !== "string" ||
-    !/^[0-9a-f]{64}$/.test(accepted.digest) ||
+    (accepted?.digest !== undefined &&
+      (typeof accepted.digest !== "string" || !/^[0-9a-f]{64}$/.test(accepted.digest))) ||
     typeof input.presentationId !== "string" ||
     !input.presentationId ||
     typeof input.baseEtag !== "string" ||
@@ -141,41 +165,46 @@ export const readStandaloneHtmlRecovery = async (
   try {
     raw = storage.getItem(key)
   } catch {
-    return { kind: "none" as const }
+    return recoveryUnavailable
   }
   if (!raw) return { kind: "none" as const }
   if (raw.length > MAX_RECOVERY_SERIALIZED_CODE_UNITS) {
-    try {
-      storage.removeItem(key)
-    } catch {
-      // A failed cleanup must not expose or parse the oversized record.
-    }
-    return { kind: "none" as const }
+    return removeRecoveryRecord(storage, key)
+      ? { kind: "none" as const }
+      : recoveryUnavailable
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return removeRecoveryRecord(storage, key)
+      ? { kind: "none" as const }
+      : recoveryUnavailable
+  }
+  if (!isClosedRecoveryRecord(parsed, scope, presentationId)) {
+    return removeRecoveryRecord(storage, key)
+      ? { kind: "none" as const }
+      : recoveryUnavailable
+  }
+  if (parsed.updatedAt > now || now - parsed.updatedAt > RECOVERY_TTL_MS) {
+    return removeRecoveryRecord(storage, key)
+      ? { kind: "none" as const }
+      : recoveryUnavailable
   }
 
   try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!isClosedRecoveryRecord(parsed, scope, presentationId)) {
-      storage.removeItem(key)
-      return { kind: "none" as const }
-    }
-    if (parsed.updatedAt > now || now - parsed.updatedAt > RECOVERY_TTL_MS) {
-      storage.removeItem(key)
-      return { kind: "none" as const }
-    }
     const acceptedSource = await validateStandaloneHtmlSource(parsed.source)
-    if (!acceptedSource.ok) {
-      storage.removeItem(key)
-      return { kind: "none" as const }
+    if (acceptedSource.ok === false) {
+      return removeRecoveryRecord(storage, key)
+        ? { kind: "none" as const }
+        : recoveryUnavailable
     }
     return { kind: "available" as const, record: parsed, acceptedSource }
   } catch {
-    try {
-      storage.removeItem(key)
-    } catch {
-      // A failed cleanup must not expose or apply the record.
-    }
-    return { kind: "none" as const }
+    return removeRecoveryRecord(storage, key)
+      ? { kind: "none" as const }
+      : recoveryUnavailable
   }
 }
 
@@ -183,11 +212,4 @@ export const clearStandaloneHtmlRecovery = (
   storage: StorageLike,
   scope: PresentationPrincipalScope,
   presentationId: string
-): boolean => {
-  try {
-    storage.removeItem(recoveryKey(scope, presentationId))
-    return true
-  } catch {
-    return false
-  }
-}
+): boolean => removeRecoveryRecord(storage, recoveryKey(scope, presentationId))
