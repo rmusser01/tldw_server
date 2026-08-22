@@ -157,6 +157,9 @@ async def test_successful_run_records_and_notifies(consumer_env) -> None:
     assert notification is not None
     assert notification.kind == "automation_run_succeeded"
     assert "Daily Digest" in str(notification.title)
+    # Traceability: source_job_id references the JOBS pipeline id, not the
+    # run row id (review #6).
+    assert str(notification.source_job_id) == "77"
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,9 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
+    RUN_EXECUTION_TIMEOUT_SECONDS,
+)
+from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
     AUTOMATION_DOMAIN,
     AUTOMATION_JOB_TYPE,
     handle_agent_task_job,
@@ -51,7 +54,18 @@ async def run_agent_task_jobs_worker(stop_event: asyncio.Event | None = None) ->
             logger.info("Stopping Agent Task Jobs worker on shutdown signal")
             return
         try:
-            lease_seconds = int(os.getenv("JOBS_LEASE_SECONDS", "120") or "120")
+            try:
+                env_lease = int(os.getenv("JOBS_LEASE_SECONDS", "120") or "120")
+            except ValueError:
+                env_lease = 120
+            # The lease must outlive the longest execution this worker can
+            # run (review #4 on PR #2801): the Jobs manager requeues
+            # 'processing' jobs whose lease expired, so a lease shorter
+            # than the execution deadline would let a second worker start
+            # a duplicate run mid-flight. Env can only RAISE the floor.
+            lease_seconds = max(
+                env_lease, int(RUN_EXECUTION_TIMEOUT_SECONDS) + 30
+            )
             job = jm.acquire_next_job(
                 domain=AUTOMATION_DOMAIN,
                 queue=queue,
