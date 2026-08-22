@@ -54,6 +54,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     RouteLimits,
     RouteReadiness,
     SourceConstraint,
+    canonical_policy_digest,
 )
 from tldw_Server_API.app.core.Research.discovery.executor import (
     AttemptJournal,
@@ -185,7 +186,12 @@ def test_shadow_registry_preserves_every_non_pubmed_route_exactly() -> None:
     assert tuple(
         route
         for route in shadow.routes
-        if route.route_id not in {"pubmed_ncbi_eutils_pubmed_direct", "clinicaltrials_gov_studies_search_direct"}
+        if route.route_id
+        not in {
+            "pubmed_ncbi_eutils_pubmed_direct",
+            "clinicaltrials_gov_studies_search_direct",
+            "pubmed_central_esearch_summary_direct",
+        }
     ) == tuple(route for route in foundation.routes if route.route_id != "pubmed_ncbi_eutils_pubmed_direct")
 
 
@@ -1505,3 +1511,1155 @@ def test_clinicaltrials_fixtures_are_exact_wholly_synthetic_shapes() -> None:
     assert "contact@" not in serialized
     assert "location" not in serialized.casefold()
     assert "document" not in serialized.casefold()
+
+
+def _pmc_fixture_bytes(name: str) -> bytes:
+    return (_FIXTURE_ROOT / f"pmc_{name}.json").read_bytes()
+
+
+def _pmc_fixture_payload(name: str) -> dict[str, Any]:
+    return json.loads(_pmc_fixture_bytes(name))
+
+
+def _pmc_budget(*, route_attempts: int = 1, result_limit: int = 100) -> BudgetCeilings:
+    return BudgetCeilings(
+        route_attempts,
+        route_attempts * 2,
+        2,
+        0,
+        0,
+        route_attempts * 40_000,
+        result_limit,
+    )
+
+
+def _pmc_plan(*, result_limit: int = 100):
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    readiness = _module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE)
+    plan = compile_discovery_plan(
+        PlanningRequest(
+            ("pubmed_central",),
+            GeneralFreeTextQuery("  alpha beta  "),
+            (),
+            result_limit,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=_pmc_budget(result_limit=result_limit),
+    )
+    return registry, plan
+
+
+def _family_plan():
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    readiness = _module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE)
+    plan = compile_discovery_plan(
+        PlanningRequest(
+            ("clinicaltrials_gov", "pubmed_central"),
+            GeneralFreeTextQuery("alpha beta"),
+            (),
+            100,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=_pmc_budget(route_attempts=2),
+    )
+    return registry, plan
+
+
+def _cloned_pmc_group() -> PlannedDispatchGroup:
+    """Return an independent valid PMC group for post-construction mutations."""
+    _registry, plan = _pmc_plan()
+    original = plan.dispatch_groups[0]
+    limits = replace(original.limits)
+    search = replace(
+        original.intents[0],
+        limits=replace(limits),
+        query_pairs=tuple(replace(pair) for pair in original.intents[0].query_pairs),
+    )
+    summary = replace(
+        original.intents[1],
+        limits=replace(limits),
+        query_pairs=tuple(replace(pair) for pair in original.intents[1].query_pairs),
+        query_bindings=tuple(replace(binding) for binding in original.intents[1].query_bindings),
+    )
+    return replace(
+        original,
+        limits=limits,
+        filters=tuple(replace(pair) for pair in original.filters),
+        intents=(search, summary),
+        allowance=replace(original.allowance),
+    )
+
+
+def _pmc_guard():
+    return _module()._ParseGuard(_module()._PMC_PROFILE, _CountingClock())
+
+
+async def _invoke_pmc_bodies(
+    bodies: list[Any],
+    *,
+    result_limit: int = 100,
+    clock: MonotonicClock | None = None,
+    status_code: Any = 200,
+    content_type: str | None = "application/json",
+    retry_after: Any = None,
+):
+    registry, plan = _pmc_plan(result_limit=result_limit)
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    responses: list[object] = []
+    for index, body in enumerate(bodies):
+        if isinstance(body, BaseException):
+            responses.append(body)
+            continue
+        intent = group.intents[min(index, len(group.intents) - 1)]
+        responses.append(
+            _clinical_response(
+                route,
+                intent,
+                body,
+                status_code=status_code,
+                content_type=content_type,
+                retry_after=retry_after,
+            )
+        )
+    dispatch = _RecordingDispatch(responses)
+    result = await _module()._execute_pubmed_central_adapter(
+        group,
+        dispatch,
+        clock or _CountingClock(),
+    )
+    return result, dispatch, group
+
+
+def _registry_with_pmc_route(route: AccessRoute) -> DiscoveryRegistry:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    original_route_id = "pubmed_central_esearch_summary_direct"
+    return DiscoveryRegistry(
+        catalog_version=registry.catalog_version,
+        registry_version="pmc-planner-mutation-registry-v1",
+        sources=tuple(
+            replace(
+                source,
+                route_references=tuple(
+                    (
+                        replace(reference, route_id=route.route_id)
+                        if reference.route_id == original_route_id
+                        else reference
+                    )
+                    for reference in source.route_references
+                ),
+            )
+            for source in registry.sources
+        ),
+        routes=tuple(route if item.route_id == original_route_id else item for item in registry.routes),
+        backends=registry.backends,
+    )
+
+
+def test_pmc_constructor_profile_and_two_intent_plan_are_exact() -> None:
+    registry, plan = _pmc_plan()
+    source = registry.get_source("pubmed_central")
+    route = registry.get_route("pubmed_central_esearch_summary_direct")
+    group = plan.dispatch_groups[0]
+    search, summary = group.intents
+    profile = _FAMILY_PARSING_PROFILES[(PUBMED_CENTRAL_ADAPTER_ID, PUBMED_CENTRAL_ADAPTER_VERSION)]
+
+    assert (
+        source.catalog_source_id,
+        source.display_name,
+        source.site_hosts,
+        source.aliases,
+        source.categories,
+        source.content_types,
+        source.surfaces,
+        tuple((reference.route_id, reference.source_predicate) for reference in source.route_references),
+        source.priority,
+        source.catalog_version,
+    ) == (
+        "pubmed_central",
+        "PubMed Central",
+        ("pmc.ncbi.nlm.nih.gov",),
+        ("pmc", "pub_med_central"),
+        ("biomedical", "open_access"),
+        ("papers", "full_text_archive", "biomedical_metadata"),
+        ("standalone_search", "deep_research"),
+        (("pubmed_central_esearch_summary_direct", None),),
+        120,
+        SHADOW_CATALOG_VERSION,
+    )
+    assert registry.backends[-1] == BackendDefinition(
+        "ncbi_eutils_pmc",
+        "NCBI Entrez E-utilities for PMC",
+    )
+    assert (
+        route.route_kind,
+        route.query_modes,
+        route.source_constraint,
+        route.attribution_basis,
+        route.credential_requirement,
+        route.fallback_order,
+        route.max_physical_dispatches,
+        route.adapter_id,
+        route.adapter_version,
+    ) == (
+        RouteKind.DIRECT,
+        (QueryMode.GENERAL_FREE_TEXT,),
+        SourceConstraint.NATIVE_CORPUS,
+        "ncbi_pmc_database",
+        CredentialRequirement.NONE,
+        0,
+        2,
+        PUBMED_CENTRAL_ADAPTER_ID,
+        PUBMED_CENTRAL_ADAPTER_VERSION,
+    )
+    assert (
+        route.policy.policy_version,
+        route.policy.origin,
+        route.policy.methods,
+        route.policy.paths,
+        route.policy.allowed_query_keys,
+        route.policy.pagination_query_key,
+        route.policy.query_value_policies,
+        route.policy.limits,
+    ) == (
+        ROUTE_POLICY_VERSION,
+        ExactOrigin("https", "eutils.ncbi.nlm.nih.gov", 443),
+        ("GET",),
+        ("/entrez/eutils/esearch.fcgi", "/entrez/eutils/esummary.fcgi"),
+        ("db", "term", "retstart", "retmax", "retmode", "tool", "email", "id"),
+        "retstart",
+        (),
+        RouteLimits(1, 0, 0, 20_000, 2_097_152, 100, 16_384),
+    )
+    assert (
+        profile.max_input_bytes,
+        profile.max_records,
+        profile.max_depth,
+        profile.max_nodes,
+        profile.max_string_chars,
+        profile.max_numeric_token_chars,
+        profile.parse_deadline_ms,
+    ) == (2_097_152, 100, 16, 50_000, 65_536, 32, 500)
+    assert (
+        group.route_id,
+        group.backend_id,
+        group.adapter_id,
+        group.adapter_version,
+        group.policy_digest,
+        group.allowance.physical_dispatches,
+        group.allowance.pages,
+        group.allowance.redirects,
+        group.allowance.retries,
+    ) == (
+        route.route_id,
+        route.backend_id,
+        PUBMED_CENTRAL_ADAPTER_ID,
+        PUBMED_CENTRAL_ADAPTER_VERSION,
+        route.policy.policy_digest,
+        2,
+        1,
+        0,
+        0,
+    )
+    assert search.query_pairs == (
+        QueryPair("db", "pmc"),
+        QueryPair("term", '"alpha" AND "beta"'),
+        QueryPair("retstart", "0"),
+        QueryPair("retmax", "100"),
+        QueryPair("retmode", "json"),
+        QueryPair("tool", "tldw_server"),
+        QueryPair("email", "contact@tldwproject.com"),
+    )
+    assert summary.query_pairs == (
+        QueryPair("db", "pmc"),
+        QueryPair("retmode", "json"),
+        QueryPair("tool", "tldw_server"),
+        QueryPair("email", "contact@tldwproject.com"),
+    )
+    assert summary.query_bindings == (DeferredNumericCSVQueryBinding("pmc_esearch_ids", "id", 100, 16),)
+    assert search.operation_kind is OperationKind.SEARCH
+    assert summary.operation_kind is OperationKind.CONDITIONAL_SUMMARY
+    assert search.json_body_pairs == summary.json_body_pairs == ()
+    assert search.query_bindings == ()
+    assert plan.allowance.aggregate_wall_time_ms == 40_000
+
+
+def test_family_two_route_plan_has_exact_aggregate_wall_time_and_no_coalescing() -> None:
+    _registry, plan = _family_plan()
+
+    assert tuple(group.route_id for group in plan.dispatch_groups) == (
+        "clinicaltrials_gov_studies_search_direct",
+        "pubmed_central_esearch_summary_direct",
+    )
+    assert plan.allowance.aggregate_wall_time_ms == 80_000
+    assert plan.allowance.physical_dispatches == 4
+
+
+@pytest.mark.parametrize(
+    "route_change",
+    (
+        {"route_id": "pubmed_central_esearch_summary_partial"},
+        {"backend_id": "ncbi_eutils_pubmed"},
+        {"adapter_id": "pubmed_v2"},
+        {"adapter_version": "foundation-v2"},
+        {"policy_version": "research-discovery-route-policy-v2-foundation"},
+        {"sort": True},
+        {"one_path": True},
+        {"limit_type": True},
+    ),
+)
+def test_partial_pmc_planner_identity_or_generic_shape_fails_closed(route_change: dict[str, object]) -> None:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_central_esearch_summary_direct")
+    policy = route.policy
+    if "policy_version" in route_change:
+        policy = replace(
+            policy,
+            policy_version=str(route_change["policy_version"]),
+            policy_digest="",
+        )
+    if route_change.get("sort"):
+        policy = replace(
+            policy,
+            allowed_query_keys=policy.allowed_query_keys + ("sort",),
+            policy_digest="",
+        )
+    if route_change.get("one_path"):
+        policy = replace(policy, paths=(policy.paths[0],), policy_digest="")
+    if route_change.get("limit_type"):
+        object.__setattr__(policy.limits, "timeout_ms", 20_000.0)
+        object.__setattr__(policy, "policy_digest", canonical_policy_digest(policy))
+    mutated = replace(
+        route,
+        route_id=str(route_change.get("route_id", route.route_id)),
+        backend_id=str(route_change.get("backend_id", route.backend_id)),
+        adapter_id=str(route_change.get("adapter_id", route.adapter_id)),
+        adapter_version=str(route_change.get("adapter_version", route.adapter_version)),
+        policy=policy,
+    )
+    readiness = _module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.SYNTHETIC)
+    if mutated.route_id != route.route_id:
+        readiness = replace(
+            readiness,
+            routes=tuple(
+                replace(entry, route_id=mutated.route_id) if entry.route_id == route.route_id else entry
+                for entry in readiness.routes
+            ),
+        )
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("pubmed_central",), GeneralFreeTextQuery("alpha beta"), (), 10),
+            registry=_registry_with_pmc_route(mutated),
+            readiness=readiness,
+            budget=_pmc_budget(result_limit=10),
+        )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    (
+        (QueryPair("tool", "attacker"),),
+        (QueryPair("email", "attacker@example.test"),),
+        (QueryPair("sort", "relevance"),),
+    ),
+)
+def test_pmc_typed_request_rejects_user_identity_or_sort_filters_before_planning(
+    filters: tuple[QueryPair, ...],
+) -> None:
+    with pytest.raises(ValueError, match="typed_query_filters_not_supported"):
+        PlanningRequest(
+            ("pubmed_central",),
+            GeneralFreeTextQuery("alpha beta"),
+            filters,
+            10,
+        )
+
+
+def test_family_readiness_deliberately_replaces_pubmed_and_appends_only_fixture_ready_routes() -> None:
+    foundation = foundation_readiness(ExecutionMode.OFFLINE_FIXTURE)
+    readiness = _module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE)
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+
+    assert readiness.overlay_version == SHADOW_READINESS_VERSION
+    assert readiness.execution_mode is ExecutionMode.OFFLINE_FIXTURE
+    assert tuple(entry.route_id for entry in readiness.routes[:-2]) == tuple(
+        entry.route_id for entry in foundation.routes
+    )
+    foundation_pubmed = foundation.get("pubmed_ncbi_eutils_pubmed_direct")
+    shadow_pubmed = readiness.get("pubmed_ncbi_eutils_pubmed_direct")
+    assert shadow_pubmed == foundation_pubmed
+    assert shadow_pubmed is not foundation_pubmed
+    assert tuple(entry.route_id for entry in readiness.routes[-2:]) == (
+        "clinicaltrials_gov_studies_search_direct",
+        "pubmed_central_esearch_summary_direct",
+    )
+    assert all(
+        entry.state is ReadinessState.READY
+        and entry.credential_status is CredentialStatus.NOT_REQUIRED
+        and entry.reason == "offline_fixture_ready"
+        for entry in readiness.routes[-2:]
+    )
+    pubmed_route = registry.get_route("pubmed_ncbi_eutils_pubmed_direct")
+    assert (
+        pubmed_route.adapter_version,
+        pubmed_route.policy.policy_version,
+    ) == (PUBMED_IDENTITY_ADAPTER_VERSION, PUBMED_IDENTITY_POLICY_VERSION)
+
+
+def test_family_adapter_map_is_exact_immutable_and_duplicate_safe() -> None:
+    adapters = _module().clinicaltrials_pubmed_central_gateway_adapters()
+
+    assert type(adapters) is MappingProxyType
+    assert tuple(adapters) == (CLINICALTRIALS_GOV_ADAPTER_ID, PUBMED_CENTRAL_ADAPTER_ID)
+    assert all(callable(adapter) for adapter in adapters.values())
+    with pytest.raises(TypeError):
+        adapters["other"] = adapters[CLINICALTRIALS_GOV_ADAPTER_ID]  # type: ignore[index]
+    with pytest.raises(ValueError, match="duplicate_adapter_id:duplicate"):
+        _module()._compose_adapter_maps(
+            {"duplicate": adapters[CLINICALTRIALS_GOV_ADAPTER_ID]},
+            {"duplicate": adapters[PUBMED_CENTRAL_ADAPTER_ID]},
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "mirror_intents"),
+    (
+        ("route_id", "pubmed_central_esearch_summary_alternate", True),
+        ("backend_id", "ncbi_eutils_pubmed", False),
+        ("adapter_id", "pubmed_v2", False),
+        ("adapter_version", "foundation-v2", False),
+        ("policy_digest", "0" * 64, True),
+        ("fallback_order", 1, False),
+        ("filters", (QueryPair("sort", "relevance"),), False),
+    ),
+)
+def test_pmc_trusted_inputs_reject_group_identity_policy_and_filter_drift(
+    field: str,
+    value: object,
+    mirror_intents: bool,
+) -> None:
+    group = _cloned_pmc_group()
+    object.__setattr__(group, field, value)
+    if mirror_intents:
+        for intent in group.intents:
+            object.__setattr__(intent, field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize("intents", ((), "duplicate", "list"))
+def test_pmc_trusted_inputs_require_two_intents_in_an_exact_tuple(intents: object) -> None:
+    group = _cloned_pmc_group()
+    mutated = (
+        (group.intents[0], group.intents[0])
+        if intents == "duplicate"
+        else list(group.intents) if intents == "list" else intents
+    )
+    object.__setattr__(group, "intents", mutated)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("physical_dispatches", 1),
+        ("pages", 2),
+        ("redirects", 1),
+        ("retries", 1),
+    ),
+)
+def test_pmc_trusted_inputs_reject_every_allowance_drift(field: str, value: int) -> None:
+    group = _cloned_pmc_group()
+    object.__setattr__(group.allowance, field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("max_pages", 2),
+        ("max_redirects", 1),
+        ("max_retries", 1),
+        ("timeout_ms", 19_999),
+        ("max_response_bytes", 2_097_151),
+        ("max_results", 99),
+        ("max_request_body_bytes", 16_383),
+    ),
+)
+def test_pmc_trusted_inputs_reject_every_group_and_mirrored_intent_limit_drift(field: str, value: int) -> None:
+    group = _cloned_pmc_group()
+    object.__setattr__(group.limits, field, value)
+    for intent in group.intents:
+        object.__setattr__(intent.limits, field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize("intent_index", (0, 1))
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("max_pages", 2),
+        ("max_redirects", 1),
+        ("max_retries", 1),
+        ("timeout_ms", 19_999),
+        ("max_response_bytes", 2_097_151),
+        ("max_results", 99),
+        ("max_request_body_bytes", 16_383),
+    ),
+)
+def test_pmc_trusted_inputs_reject_each_independent_intent_limit_drift(
+    intent_index: int,
+    field: str,
+    value: int,
+) -> None:
+    group = _cloned_pmc_group()
+    object.__setattr__(group.intents[intent_index].limits, field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("intent_index", "field", "value"),
+    (
+        (0, "route_id", "pubmed_central_search_alternate"),
+        (1, "route_id", "pubmed_central_summary_alternate"),
+        (0, "policy_digest", "0" * 64),
+        (1, "policy_digest", "0" * 64),
+        (0, "operation_kind", OperationKind.CONDITIONAL_SUMMARY),
+        (1, "operation_kind", OperationKind.SEARCH),
+        (0, "method", "POST"),
+        (1, "method", "POST"),
+        (0, "path", "/entrez/eutils/efetch.fcgi"),
+        (1, "path", "/entrez/eutils/efetch.fcgi"),
+        (0, "json_body_pairs", (JSONBodyPair("id", 1),)),
+        (1, "json_body_pairs", (JSONBodyPair("id", 1),)),
+        (0, "query_bindings", (DeferredNumericCSVQueryBinding("ids", "id", 1, 16),)),
+        (1, "query_bindings", ()),
+    ),
+)
+def test_pmc_trusted_inputs_reject_each_intent_identity_operation_and_material_drift(
+    intent_index: int,
+    field: str,
+    value: object,
+) -> None:
+    group = _cloned_pmc_group()
+    object.__setattr__(group.intents[intent_index], field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("intent_index", "field"),
+    (
+        (0, "query_pairs"),
+        (0, "json_body_pairs"),
+        (0, "query_bindings"),
+        (1, "query_pairs"),
+        (1, "json_body_pairs"),
+        (1, "query_bindings"),
+    ),
+)
+def test_pmc_trusted_inputs_reject_every_post_construction_intent_container_list(
+    intent_index: int,
+    field: str,
+) -> None:
+    group = _cloned_pmc_group()
+    object.__setattr__(group.intents[intent_index], field, list(getattr(group.intents[intent_index], field)))
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("intent_index", "pair_index", "replacement"),
+    (
+        (0, 0, QueryPair("db", "pubmed")),
+        (0, 1, QueryPair("term", "alpha beta")),
+        (0, 1, QueryPair("term", '"alpha-beta"')),
+        (0, 2, QueryPair("retstart", "1")),
+        (0, 3, QueryPair("retmax", "0")),
+        (0, 3, QueryPair("retmax", "101")),
+        (0, 3, QueryPair("retmax", "010")),
+        (0, 4, QueryPair("retmode", "xml")),
+        (0, 5, QueryPair("tool", "other")),
+        (0, 6, QueryPair("email", "other@example.test")),
+        (1, 0, QueryPair("db", "pubmed")),
+        (1, 1, QueryPair("retmode", "xml")),
+        (1, 2, QueryPair("tool", "other")),
+        (1, 3, QueryPair("email", "other@example.test")),
+    ),
+)
+def test_pmc_trusted_inputs_reject_every_ordered_query_key_or_value_drift(
+    intent_index: int,
+    pair_index: int,
+    replacement: QueryPair,
+) -> None:
+    group = _cloned_pmc_group()
+    pairs = list(group.intents[intent_index].query_pairs)
+    pairs[pair_index] = replacement
+    object.__setattr__(group.intents[intent_index], "query_pairs", tuple(pairs))
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize("intent_index", (0, 1))
+def test_pmc_trusted_inputs_reject_query_pair_order_or_non_pair_member(intent_index: int) -> None:
+    group = _cloned_pmc_group()
+    intent = group.intents[intent_index]
+    pairs: tuple[object, ...] = intent.query_pairs[1::-1] + intent.query_pairs[2:]
+    object.__setattr__(intent, "query_pairs", pairs)
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+    group = _cloned_pmc_group()
+    intent = group.intents[intent_index]
+    object.__setattr__(intent, "query_pairs", (object(),) + intent.query_pairs[1:])
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("binding_id", "pubmed_esearch_ids"),
+        ("query_name", "uid"),
+        ("max_items", 99),
+        ("max_item_chars", 15),
+    ),
+)
+def test_pmc_trusted_inputs_reject_every_binding_field_drift(field: str, value: object) -> None:
+    group = _cloned_pmc_group()
+    object.__setattr__(group.intents[1].query_bindings[0], field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "fallback_bool",
+        "allowance_bool",
+        "mirrored_limit_float",
+        "independent_limit_float",
+        "binding_items_float",
+        "binding_chars_float",
+    ),
+)
+def test_pmc_trusted_inputs_reject_numeric_values_with_non_integer_exact_types(case: str) -> None:
+    group = _cloned_pmc_group()
+    if case == "fallback_bool":
+        object.__setattr__(group, "fallback_order", False)
+    elif case == "allowance_bool":
+        object.__setattr__(group.allowance, "pages", True)
+    elif case == "mirrored_limit_float":
+        object.__setattr__(group.limits, "timeout_ms", 20_000.0)
+        for intent in group.intents:
+            object.__setattr__(intent.limits, "timeout_ms", 20_000.0)
+    elif case == "independent_limit_float":
+        object.__setattr__(group.intents[0].limits, "max_results", 100.0)
+    elif case == "binding_items_float":
+        object.__setattr__(group.intents[1].query_bindings[0], "max_items", 100.0)
+    else:
+        object.__setattr__(group.intents[1].query_bindings[0], "max_item_chars", 16.0)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        ("1", ("1", 1)),
+        ("9000001", ("9000001", 9_000_001)),
+        ("9" * 16, ("9" * 16, int("9" * 16))),
+    ),
+)
+def test_pmc_uid_accepts_only_canonical_positive_transport_values(
+    value: str,
+    expected: tuple[str, int],
+) -> None:
+    assert _module()._pmc_uid(value, 16) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    (0, "", "0", "+1", "-1", " 1", "1 ", "01", "1.0", "1e1", "１", "9" * 17),
+)
+def test_pmc_uid_rejects_noncanonical_or_overbound_values(value: object) -> None:
+    with pytest.raises(_PayloadInvalid):
+        _module()._pmc_uid(value, 16)
+
+
+@pytest.mark.parametrize("field", ("count", "retstart", "retmax"))
+@pytest.mark.parametrize("value", (0, -1, "", "+1", "-1", " 1", "1 ", "01", "1e1", "１", "9" * 33))
+def test_pmc_esearch_decimal_envelope_rejects_noncanonical_scalars(field: str, value: object) -> None:
+    payload = _pmc_fixture_payload("esearch_success")
+    payload["esearchresult"][field] = value
+    binding = _cloned_pmc_group().intents[1].query_bindings[0]
+
+    with pytest.raises(_PayloadInvalid):
+        _module()._pmc_esearch_ids(
+            payload,
+            profile=_module()._PMC_PROFILE,
+            guard=_pmc_guard(),
+            retstart=0,
+            retmax=100,
+            binding=binding,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("returned_start", "returned_len", "beyond_count", "positive_empty", "duplicate_uid", "too_many"),
+)
+def test_pmc_esearch_arithmetic_uid_uniqueness_and_binding_ceiling_are_exact(mutation: str) -> None:
+    payload = _pmc_fixture_payload("esearch_success")
+    result = payload["esearchresult"]
+    binding = _cloned_pmc_group().intents[1].query_bindings[0]
+    if mutation == "returned_start":
+        result["retstart"] = "1"
+    elif mutation == "returned_len":
+        result["retmax"] = "1"
+    elif mutation == "beyond_count":
+        result["count"] = "1"
+    elif mutation == "positive_empty":
+        result["retmax"] = "0"
+        result["idlist"] = []
+    elif mutation == "duplicate_uid":
+        result["idlist"] = ["9000001", "9000001"]
+    else:
+        object.__setattr__(binding, "max_items", 1)
+
+    with pytest.raises(_PayloadInvalid):
+        _module()._pmc_esearch_ids(
+            payload,
+            profile=_module()._PMC_PROFILE,
+            guard=_pmc_guard(),
+            retstart=0,
+            retmax=100,
+            binding=binding,
+        )
+
+
+def test_pmc_esearch_accepts_bounded_diagnostics_and_unfetched_remainder_without_continuation() -> None:
+    payload = _pmc_fixture_payload("esearch_success")
+    payload["esearchresult"]["count"] = "200"
+    payload["esearchresult"]["warninglist"] = {"phrasesignored": ["synthetic"]}
+    binding = _cloned_pmc_group().intents[1].query_bindings[0]
+
+    assert _module()._pmc_esearch_ids(
+        payload,
+        profile=_module()._PMC_PROFILE,
+        guard=_pmc_guard(),
+        retstart=0,
+        retmax=100,
+        binding=binding,
+    ) == (("9000001", 9_000_001), ("9000002", 9_000_002))
+
+
+def test_pmc_identifier_scalar_accepts_doi_url_material_but_no_whitespace_or_markup() -> None:
+    doi_url = "https://doi.org/10.5555/pmc.synthetic"
+
+    assert _module()._pmc_identifier_scalar(doi_url, max_chars=512) == doi_url
+    for value in (None, "", " value", "value ", "two words", "x\x00y", "x\u200dy", "<doi>", "x" * 513):
+        with pytest.raises(_PayloadInvalid):
+            _module()._pmc_identifier_scalar(value, max_chars=512)
+
+
+def test_pmc_article_ids_require_exact_pmcid_and_canonicalize_optional_doi_and_pmid() -> None:
+    raw = [
+        {"idtype": "pmcid", "value": "PMC9000001"},
+        {"idtype": "doi", "value": "https://doi.org/10.5555/pmc.synthetic"},
+        {"idtype": "pmid", "value": "12345678"},
+        {"idtype": "other", "value": "synthetic"},
+    ]
+
+    assert _module()._pmc_article_ids(raw, "9000001", _pmc_guard()) == (
+        "PMC9000001",
+        "10.5555/pmc.synthetic",
+        "12345678",
+    )
+    assert _module()._pmc_article_ids(
+        [{"idtype": "pmcid", "value": "PMC9000001"}, {"idtype": "pmid", "value": "0"}],
+        "9000001",
+        _pmc_guard(),
+    ) == ("PMC9000001", None, None)
+
+
+@pytest.mark.parametrize(
+    "articleids",
+    (
+        [],
+        [{"idtype": "pmcid", "value": "PMC9000002"}],
+        [{"idtype": "pmcid", "id": "PMC9000001"}],
+        [{"idtype": "pmcid", "value": "PMC9000001", "extra": "x"}],
+        [
+            {"idtype": "pmcid", "value": "PMC9000001"},
+            {"idtype": "pmcid", "value": "PMC9000001"},
+        ],
+        [
+            {"idtype": "pmcid", "value": "PMC9000001"},
+            {"idtype": "doi", "value": "not-a-doi"},
+        ],
+        [
+            {"idtype": "pmcid", "value": "PMC9000001"},
+            {"idtype": "pmid", "value": "01"},
+        ],
+    ),
+)
+def test_pmc_article_ids_reject_missing_mismatched_alias_extra_duplicate_or_invalid_values(
+    articleids: list[dict[str, str]],
+) -> None:
+    with pytest.raises(_PayloadInvalid):
+        _module()._pmc_article_ids(articleids, "9000001", _pmc_guard())
+
+
+def test_plain_pmc_text_normalizes_safe_unicode_whitespace() -> None:
+    assert _module()._plain_pmc_text(" Synthetic\u2003PMC Title ", max_chars=64, required=True) == "Synthetic PMC Title"
+    assert _module()._plain_pmc_text("", max_chars=64, required=False) is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "",
+        "x\x00y",
+        "x\u200dy",
+        "x\ud800y",
+        "<em>PMC</em>",
+        "https://example.org/article",
+        "https://doi.org/10.5555/pmc.synthetic",
+        "mailto:synthetic@example.test",
+    ),
+)
+def test_plain_pmc_required_human_text_rejects_controls_markup_and_any_url(value: str) -> None:
+    with pytest.raises(_PayloadInvalid):
+        _module()._plain_pmc_text(value, max_chars=512, required=True)
+
+
+def test_pmc_record_normalizes_only_bounded_metadata_and_drops_numeric_uid() -> None:
+    raw = _pmc_fixture_payload("esummary_success")["result"]["9000001"]
+    raw["title"] = " Synthetic\u2003PMC metadata record one "
+    raw["journal"] = "Ignored journal"
+    raw["pubdate"] = "Ignored date"
+
+    assert _module()._pmc_record(raw, "9000001", _pmc_guard()) == {
+        "title": "Synthetic PMC metadata record one",
+        "authors": ("Synthetic Author One",),
+        "abstract": None,
+        "snippet": None,
+        "doi": "10.5555/synthetic.pmc.1",
+        "pmid": "12345678",
+        "pmcid": "PMC9000001",
+        "arxiv_id": None,
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9000001/",
+        "pdf_url": None,
+        "provider": "pubmed_central",
+        "provider_ids": {
+            "pmcid": "PMC9000001",
+            "doi": "10.5555/synthetic.pmc.1",
+            "pmid": "12345678",
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("uid", "9000002"),
+        ("uid", 9_000_001),
+        ("title", ""),
+        ("title", "x" * 4_097),
+        ("title", "https://example.org/article"),
+        ("authors", "Synthetic Author"),
+        ("authors", [{"name": "https://doi.org/10.5555/pmc.synthetic"}]),
+        ("authors", [{"name": "x" * 513}]),
+        ("authors", [{}]),
+        ("authors", [{"name": "Synthetic"}] * 65),
+        ("articleids", None),
+    ),
+)
+def test_pmc_record_rejects_uid_title_author_and_article_id_drift(field: str, value: object) -> None:
+    raw = _pmc_fixture_payload("esummary_success")["result"]["9000001"]
+    raw[field] = value
+
+    with pytest.raises((_PayloadInvalid, _module()._ParseLimitExceeded)):
+        _module()._pmc_record(raw, "9000001", _pmc_guard())
+
+
+@pytest.mark.parametrize("mutation", ("missing", "extra", "partial_uids", "duplicate_uids", "numeric_uid"))
+def test_pmc_summary_requires_exact_uid_set_and_keys(mutation: str) -> None:
+    payload = _pmc_fixture_payload("esummary_success")
+    result = payload["result"]
+    if mutation == "missing":
+        result.pop("9000002")
+    elif mutation == "extra":
+        result["9000003"] = result["9000002"]
+    elif mutation == "partial_uids":
+        result["uids"] = ["9000001"]
+    elif mutation == "duplicate_uids":
+        result["uids"] = ["9000001", "9000001"]
+    else:
+        result["uids"] = [9_000_001, "9000002"]
+
+    with pytest.raises(_PayloadInvalid):
+        _module()._pmc_summary_records(
+            payload,
+            expected_ids=("9000001", "9000002"),
+            guard=_pmc_guard(),
+        )
+
+
+def test_pmc_summary_restores_esearch_order_not_result_object_or_uid_order() -> None:
+    payload = _pmc_fixture_payload("esummary_success")
+    payload["result"]["uids"] = ["9000002", "9000001"]
+
+    records = _module()._pmc_summary_records(
+        payload,
+        expected_ids=("9000001", "9000002"),
+        guard=_pmc_guard(),
+    )
+
+    assert tuple(record["pmcid"] for record in records) == ("PMC9000001", "PMC9000002")
+
+
+@pytest.mark.asyncio
+async def test_pmc_nonempty_fixture_is_one_logical_page_two_physical_hops_and_exact_projection() -> None:
+    result, dispatch, group = await _invoke_pmc_bodies(
+        [_pmc_fixture_bytes("esearch_success"), _pmc_fixture_bytes("esummary_success")]
+    )
+
+    assert len(result.candidates) == 2
+    assert tuple(candidate.record["pmcid"] for candidate in result.candidates) == (
+        "PMC9000001",
+        "PMC9000002",
+    )
+    assert all("pubmed_central_id" not in candidate.record["provider_ids"] for candidate in result.candidates)
+    assert len(dispatch.calls) == 2
+    assert tuple(call[0].path for call in dispatch.calls) == (
+        "/entrez/eutils/esearch.fcgi",
+        "/entrez/eutils/esummary.fcgi",
+    )
+    assert dispatch.calls[0][2] == ()
+    binding_values = dispatch.calls[1][2]
+    assert len(binding_values) == 1
+    assert binding_values[0].binding_id == "pmc_esearch_ids"
+    assert binding_values[0].values == (9_000_001, 9_000_002)
+    assert group.allowance.pages == 1
+    assert not any(
+        token in call[0].path.casefold()
+        for call in dispatch.calls
+        for token in ("efetch", "oai", "html", "jats", "pdf")
+    )
+
+
+@pytest.mark.asyncio
+async def test_pmc_empty_esearch_is_one_call_and_no_summary_reservation() -> None:
+    registry, plan = _pmc_plan()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    calls = 0
+
+    async def gateway(route_arg, intent, *, is_policy_active):
+        nonlocal calls
+        assert route_arg == route
+        calls += 1
+        return _clinical_response(route, intent, _pmc_fixture_bytes("esearch_empty"))
+
+    journal = AttemptJournal(physical_ceiling=2)
+    execution = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters=_module().clinicaltrials_pubmed_central_gateway_adapters(monotonic_clock=_CountingClock()),
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("pmc-empty-search", "must-not-be-used")).__next__,
+        journal=journal,
+    )
+
+    assert calls == 1
+    assert execution.candidates == ()
+    assert execution.logical_outcomes[0].state is LogicalOutcomeState.VALID_EMPTY
+    assert execution.usage.pages == 1
+    assert journal.accounting.created == journal.accounting.debited == 1
+    assert journal.accounting.released == journal.accounting.outstanding == 0
+
+
+@pytest.mark.asyncio
+async def test_pmc_unfetched_remainder_makes_no_continuation_or_third_call() -> None:
+    search = _pmc_fixture_payload("esearch_success")
+    search["esearchresult"]["count"] = "200"
+
+    result, dispatch, _group = await _invoke_pmc_bodies(
+        [_payload_bytes(search), _pmc_fixture_bytes("esummary_success")]
+    )
+
+    assert len(result.candidates) == 2
+    assert len(dispatch.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_pmc_same_doi_conflicting_records_fail_atomically() -> None:
+    summary = _pmc_fixture_payload("esummary_success")
+    summary["result"]["9000002"]["articleids"].append({"idtype": "doi", "value": "10.5555/synthetic.pmc.1"})
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        await _invoke_pmc_bodies([_pmc_fixture_bytes("esearch_success"), _payload_bytes(summary)])
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_code"),
+    (
+        ({"error": "API rate limit exceeded", "count": "3"}, "provider_rate_limited"),
+        ({"error": "API rate limit exceeded", "count": 3}, "provider_payload_invalid"),
+        ({"error": "API rate limit exceeded", "count": "03"}, "provider_payload_invalid"),
+        ({"error": "API rate limit exceeded", "count": "3", "extra": "x"}, "provider_payload_invalid"),
+        ({"error": "other", "count": "3"}, "provider_payload_invalid"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_pmc_strict_ncbi_rate_envelope_and_malformed_lookalikes(
+    payload: dict[str, object],
+    expected_code: str,
+) -> None:
+    with pytest.raises(DiscoveryAdapterError) as caught:
+        await _invoke_pmc_bodies([_payload_bytes(payload)])
+
+    _assert_adapter_error(caught.value, expected_code)
+
+
+@pytest.mark.asyncio
+async def test_pmc_summary_rate_envelope_is_typed_without_retry_or_sleep() -> None:
+    rate = _payload_bytes({"error": "API rate limit exceeded", "count": "3"})
+    with pytest.raises(DiscoveryAdapterError) as caught:
+        await _invoke_pmc_bodies([_pmc_fixture_bytes("esearch_success"), rate])
+
+    _assert_adapter_error(caught.value, "provider_rate_limited")
+
+
+@pytest.mark.asyncio
+async def test_pmc_http_429_timeout_and_malformed_json_are_typed_and_never_retried() -> None:
+    with pytest.raises(DiscoveryAdapterError) as caught:
+        await _invoke_pmc_bodies([b"{}"], status_code=429, retry_after="120")
+    _assert_adapter_error(caught.value, "provider_rate_limited")
+
+    with pytest.raises(TimeoutError):
+        await _invoke_pmc_bodies([TimeoutError("synthetic timeout")])
+
+    with pytest.raises(DiscoveryAdapterError) as caught:
+        await _invoke_pmc_bodies([b"{"])
+    _assert_adapter_error(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_pmc_cancellation_after_esearch_has_one_debit_and_no_summary_call() -> None:
+    registry, plan = _pmc_plan()
+    parser_clock = _CountingClock()
+    calls = 0
+
+    async def gateway(route, intent, *, is_policy_active):
+        nonlocal calls
+        calls += 1
+        return _clinical_response(route, intent, _pmc_fixture_bytes("esearch_success"))
+
+    journal = AttemptJournal(physical_ceiling=2)
+    execution = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters=_module().clinicaltrials_pubmed_central_gateway_adapters(monotonic_clock=parser_clock),
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("pmc-cancel-search", "must-not-be-used")).__next__,
+        journal=journal,
+        cancellation_check=lambda: parser_clock.calls >= 1,
+    )
+
+    assert calls == 1
+    assert execution.candidates == ()
+    assert execution.logical_outcomes[0].state is LogicalOutcomeState.CANCELLED
+    assert execution.usage.pages == 1
+    assert journal.accounting.created == 1
+    assert journal.accounting.debited == 1
+    assert journal.accounting.released == journal.accounting.outstanding == 0
+
+
+@pytest.mark.asyncio
+async def test_family_partial_outcome_retains_pmc_when_clinical_page_two_is_malformed() -> None:
+    registry, plan = _family_plan()
+    calls = {"clinicaltrials_gov": 0, "pubmed_central": 0}
+
+    async def gateway(route, intent, *, is_policy_active):
+        source = "clinicaltrials_gov" if route.route_id.startswith("clinicaltrials") else "pubmed_central"
+        calls[source] += 1
+        if source == "clinicaltrials_gov":
+            body = _fixture_bytes("success_page_1") if calls[source] == 1 else b"{"
+        elif intent.operation_kind is OperationKind.SEARCH:
+            body = _pmc_fixture_bytes("esearch_success")
+        else:
+            body = _pmc_fixture_bytes("esummary_success")
+        return _clinical_response(route, intent, body)
+
+    journal = AttemptJournal(physical_ceiling=4)
+    execution = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters=_module().clinicaltrials_pubmed_central_gateway_adapters(monotonic_clock=_CountingClock()),
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("family-1", "family-2", "family-3", "family-4")).__next__,
+        journal=journal,
+    )
+    outcomes = {outcome.catalog_source_id: outcome for outcome in execution.logical_outcomes}
+
+    assert calls == {"clinicaltrials_gov": 2, "pubmed_central": 2}
+    assert outcomes["clinicaltrials_gov"].state is LogicalOutcomeState.FAILED
+    assert outcomes["clinicaltrials_gov"].code == "provider_payload_invalid"
+    assert outcomes["pubmed_central"].state is LogicalOutcomeState.SUCCEEDED
+    assert tuple(candidate.catalog_source_ids for candidate in execution.candidates) == (
+        ("pubmed_central",),
+        ("pubmed_central",),
+    )
+    assert execution.usage.pages == 3
+    assert journal.accounting.created == journal.accounting.debited == 4
+    assert journal.accounting.released == journal.accounting.outstanding == 0
+
+
+def test_pmc_fixtures_are_exact_synthetic_contract_shapes() -> None:
+    assert _pmc_fixture_payload("esearch_success") == {
+        "header": {"type": "esearch", "version": "0.3"},
+        "esearchresult": {
+            "count": "2",
+            "retmax": "2",
+            "retstart": "0",
+            "idlist": ["9000001", "9000002"],
+        },
+    }
+    assert _pmc_fixture_payload("esearch_empty") == {
+        "header": {"type": "esearch", "version": "0.3"},
+        "esearchresult": {"count": "0", "retmax": "0", "retstart": "0", "idlist": []},
+    }
+    summary = _pmc_fixture_payload("esummary_success")
+    assert summary["result"]["uids"] == ["9000001", "9000002"]
+    assert summary["result"]["9000001"]["articleids"] == [
+        {"idtype": "pmcid", "value": "PMC9000001"},
+        {"idtype": "doi", "value": "10.5555/synthetic.pmc.1"},
+        {"idtype": "pmid", "value": "12345678"},
+    ]
+    assert summary["result"]["9000002"]["articleids"] == [
+        {"idtype": "pmcid", "value": "PMC9000002"},
+        {"idtype": "pmid", "value": "0"},
+    ]

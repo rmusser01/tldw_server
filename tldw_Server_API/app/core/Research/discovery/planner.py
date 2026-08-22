@@ -21,6 +21,7 @@ from .contracts import (
     DiscoveryPlan,
     DispatchAllowance,
     DispatchIntent,
+    ExactOrigin,
     ExactQueryValuePolicy,
     JSONBodyPair,
     LiteralTermsQueryValuePolicy,
@@ -59,6 +60,12 @@ _PUBMED_IDENTITY_POLICY_VERSION = "research-discovery-route-policy-v2-foundation
 _PUBMED_IDENTITY_ADAPTER_VERSION = "pubmed-v2-ncbi-identity"
 _NCBI_TOOL = "tldw_server"
 _NCBI_EMAIL = "contact@tldwproject.com"
+_PUBMED_CENTRAL_ROUTE_ID = "pubmed_central_esearch_summary_direct"
+_PUBMED_CENTRAL_BACKEND_ID = "ncbi_eutils_pmc"
+_PUBMED_CENTRAL_ADAPTER_ID = "pubmed_central_v2"
+_PUBMED_CENTRAL_ADAPTER_VERSION = "pubmed-central-v2"
+_PUBMED_CENTRAL_POLICY_VERSION = "research-discovery-route-policy-v2-clinicaltrials-pmc"
+_PUBMED_CENTRAL_BINDING_ID = "pmc_esearch_ids"
 
 
 def _is_identity_pubmed_route(route: AccessRoute) -> bool:
@@ -69,6 +76,77 @@ def _is_identity_pubmed_route(route: AccessRoute) -> bool:
         and route.adapter_id == "pubmed_v2"
         and route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION
         and route.policy.policy_version == _PUBMED_IDENTITY_POLICY_VERSION
+    )
+
+
+def _is_pubmed_central_route(route: AccessRoute) -> bool:
+    """Return whether one route has the complete sealed PMC identity tuple."""
+    return (
+        route.route_id == _PUBMED_CENTRAL_ROUTE_ID
+        and route.backend_id == _PUBMED_CENTRAL_BACKEND_ID
+        and route.adapter_id == _PUBMED_CENTRAL_ADAPTER_ID
+        and route.adapter_version == _PUBMED_CENTRAL_ADAPTER_VERSION
+        and route.policy.policy_version == _PUBMED_CENTRAL_POLICY_VERSION
+    )
+
+
+def _has_pubmed_central_identity_component(route: AccessRoute) -> bool:
+    return any(
+        (
+            route.route_id == _PUBMED_CENTRAL_ROUTE_ID,
+            route.backend_id == _PUBMED_CENTRAL_BACKEND_ID,
+            route.adapter_id == _PUBMED_CENTRAL_ADAPTER_ID,
+            route.adapter_version == _PUBMED_CENTRAL_ADAPTER_VERSION,
+        )
+    )
+
+
+def _has_exact_pubmed_central_policy(route: AccessRoute) -> bool:
+    policy = route.policy
+    origin = policy.origin
+    return (
+        type(route.max_physical_dispatches) is int
+        and route.max_physical_dispatches == 2
+        and type(route.fallback_order) is int
+        and route.fallback_order == 0
+        and type(origin) is ExactOrigin
+        and origin.scheme == "https"
+        and origin.host == "eutils.ncbi.nlm.nih.gov"
+        and type(origin.port) is int
+        and origin.port == 443
+        and policy.methods == ("GET",)
+        and policy.paths == ("/entrez/eutils/esearch.fcgi", "/entrez/eutils/esummary.fcgi")
+        and policy.path_template is None
+        and policy.allowed_query_keys == ("db", "term", "retstart", "retmax", "retmode", "tool", "email", "id")
+        and policy.pagination_query_key == "retstart"
+        and policy.pagination_json_body_key is None
+        and policy.allowed_json_body_keys == ()
+        and policy.integer_json_body_keys == ()
+        and policy.query_value_policies == ()
+        and _has_exact_pubmed_central_limits(policy.limits)
+    )
+
+
+def _has_exact_pubmed_central_limits(limits: object) -> bool:
+    if type(limits) is not RouteLimits:
+        return False
+    values = (
+        limits.max_pages,
+        limits.max_redirects,
+        limits.max_retries,
+        limits.timeout_ms,
+        limits.max_response_bytes,
+        limits.max_results,
+        limits.max_request_body_bytes,
+    )
+    return all(type(value) is int for value in values) and values == (
+        1,
+        0,
+        0,
+        20_000,
+        2_097_152,
+        100,
+        16_384,
     )
 
 
@@ -247,6 +325,10 @@ def compile_discovery_plan(
                 continue
             if _is_identity_pubmed_route(route) and any(filter_.name in {"tool", "email"} for filter_ in filters):
                 raise _planning_error(f"identity_query_filter_not_allowed:{route.route_id}")
+            if _is_pubmed_central_route(route) and any(
+                filter_.name in {"tool", "email", "sort"} for filter_ in filters
+            ):
+                raise _planning_error(f"pmc_query_filter_not_allowed:{route.route_id}")
 
             intents = (
                 _build_intents(route, normalized_query, request.result_limit)
@@ -437,6 +519,46 @@ def _build_typed_intents(
     if route.policy.allowed_json_body_keys:
         raise _planning_error(f"typed_intent_json_body_not_supported:{route.route_id}")
     if query.mode is QueryMode.GENERAL_FREE_TEXT:
+        if _has_pubmed_central_identity_component(route):
+            if not _is_pubmed_central_route(route) or not _has_exact_pubmed_central_policy(route):
+                raise _planning_error(f"invalid_pubmed_central_route_identity:{route.route_id}")
+            limit = min(result_limit, route.policy.limits.max_results)
+            expression = " AND ".join(f'"{term}"' for term in query.terms)
+            return (
+                _intent(
+                    route,
+                    OperationKind.SEARCH,
+                    route.policy.paths[0],
+                    (
+                        QueryPair("db", "pmc"),
+                        QueryPair("term", expression),
+                        QueryPair("retstart", "0"),
+                        QueryPair("retmax", str(limit)),
+                        QueryPair("retmode", "json"),
+                        QueryPair("tool", _NCBI_TOOL),
+                        QueryPair("email", _NCBI_EMAIL),
+                    ),
+                ),
+                _intent(
+                    route,
+                    OperationKind.CONDITIONAL_SUMMARY,
+                    route.policy.paths[1],
+                    (
+                        QueryPair("db", "pmc"),
+                        QueryPair("retmode", "json"),
+                        QueryPair("tool", _NCBI_TOOL),
+                        QueryPair("email", _NCBI_EMAIL),
+                    ),
+                    query_bindings=(
+                        DeferredNumericCSVQueryBinding(
+                            binding_id=_PUBMED_CENTRAL_BINDING_ID,
+                            query_name="id",
+                            max_items=limit,
+                            max_item_chars=16,
+                        ),
+                    ),
+                ),
+            )
         if route.policy.path_template is not None or len(route.policy.paths) != 1:
             raise _planning_error(f"invalid_general_query_path_policy:{route.route_id}")
         policies = {policy.name: policy for policy in route.policy.query_value_policies}
