@@ -225,7 +225,9 @@ already delivered or saved before revocation.
 | `GET` | `/api/v1/sharing/shared-with-me/{share_id}/chat/messages` | Read the recipient's shared chat transcript |
 | `POST` | `/api/v1/sharing/shared-with-me/{share_id}/chat` | Ask against the frozen shared source scope |
 
-These are the only recipient workspace operations. There is no redirect,
+These are the recipient shared Research Workspace data-plane operations. The
+separate clone operation is outside this data-plane set and remains governed by
+the share's clone policy. There is no redirect,
 alias, local fallback, or raw full-media recipient operation.
 
 ## Searching Shared Content

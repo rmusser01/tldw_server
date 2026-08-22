@@ -157,7 +157,7 @@ export function startSharedRecipientRequestLedger(
   const pageErrors: string[] = []
   const consoleErrors: string[] = []
   const expectedHttpErrors = new Set<string>()
-  let expected404ConsoleErrors = 0
+  const expectedConsoleDiagnosticUrls = new Set<string>()
   const onRequest = (request: Request) => {
     const url = request.url()
     const method = request.method().toUpperCase()
@@ -196,18 +196,18 @@ export function startSharedRecipientRequestLedger(
         `${request.method().toUpperCase()} ${pathname} -> ${response.status()}`
       )
     } else if (response.status() === 404) {
-      expected404ConsoleErrors += 1
+      expectedConsoleDiagnosticUrls.add(response.url())
     }
   }
   const onPageError = (error: Error) => pageErrors.push(error.message)
   const onConsole = (message: ConsoleMessage) => {
     if (message.type() !== "error") return
+    const locationUrl = message.location().url
     if (
-      expected404ConsoleErrors > 0 &&
       message.text() ===
-        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        "Failed to load resource: the server responded with a status of 404 (Not Found)" &&
+      expectedConsoleDiagnosticUrls.delete(locationUrl)
     ) {
-      expected404ConsoleErrors -= 1
       return
     }
     consoleErrors.push(message.text())
@@ -610,6 +610,12 @@ export class ResearchWorkspacePage {
     await this.sharedComposer.fill(query)
     await this.sharedChatPanel
       .getByRole("button", { name: "Ask shared workspace" })
+      .click()
+  }
+
+  async loadOlderSharedMessages(): Promise<void> {
+    await this.sharedChatPanel
+      .getByRole("button", { name: "Load older messages" })
       .click()
   }
 

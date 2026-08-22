@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
@@ -22,7 +23,20 @@ from tldw_Server_API.app.api.v1.API_Deps import (
     jobs_deps,
 )
 from tldw_Server_API.app.api.v1.endpoints import sharing
+from tldw_Server_API.app.core.AuthNZ import byok_runtime
 from tldw_Server_API.app.core.AuthNZ.repos import users_repo
+from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+    AuthnzOrgProviderSecretsRepo,
+)
+from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+    AuthnzUserProviderSecretsRepo,
+)
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+    build_secret_payload,
+    dumps_envelope,
+    encrypt_byok_payload,
+)
 from tldw_Server_API.app.core.Chat import chat_target_resolution
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_state import (
@@ -37,6 +51,7 @@ OWNER_ID = 1
 MEMBER_ID = 2
 NONMEMBER_ID = 3
 TEAM_ID = 10
+ORG_ID = 20
 WORKSPACE_ID = "shared-security-workspace"
 OWNER_NOTE_SENTINEL = "OWNER-NOTE-SENTINEL-DO-NOT-LEAK"
 OWNER_CHAT_SENTINEL = "OWNER-CHAT-SENTINEL-DO-NOT-LEAK"
@@ -56,29 +71,92 @@ class _UsersRepo:
         return None
 
 
-@dataclass
-class _Credential:
-    api_key: str = "recipient-test-key"
-    app_config: dict[str, str] = field(
-        default_factory=lambda: {"organization": "recipient"}
+def _credential_row(api_key: str, project_id: str) -> dict[str, Any]:
+    encrypted = encrypt_byok_payload(
+        build_secret_payload(api_key, {"project_id": project_id})
     )
-    touched: int = 0
+    return {
+        "encrypted_blob": dumps_envelope(encrypted),
+        "revoked_at": None,
+        "last_used_at": None,
+    }
 
-    async def touch_last_used(self) -> None:
-        self.touched += 1
+
+class _UserCredentialRepo(AuthnzUserProviderSecretsRepo):
+    def __init__(self, rows: dict[int, dict[str, Any]]) -> None:
+        self.rows = rows
+        self.calls: list[tuple[str, int, str]] = []
+        self.touches: list[tuple[int, str]] = []
+
+    async def fetch_secret_for_active_user(
+        self,
+        user_id: int,
+        provider: str,
+        *,
+        include_revoked: bool = False,
+    ) -> dict[str, Any] | None:
+        assert include_revoked is True
+        self.calls.append(("active", user_id, provider))
+        return self.rows.get(user_id)
+
+    async def fetch_secret_for_user(
+        self,
+        user_id: int,
+        provider: str,
+        *,
+        include_revoked: bool = False,
+    ) -> dict[str, Any] | None:
+        assert include_revoked is True
+        self.calls.append(("unrestricted", user_id, provider))
+        return self.rows.get(user_id)
+
+    async def touch_last_used(
+        self,
+        user_id: int,
+        provider: str,
+        _last_used_at: datetime,
+    ) -> None:
+        self.touches.append((user_id, provider))
+
+
+class _SharedCredentialRepo(AuthnzOrgProviderSecretsRepo):
+    def __init__(self, rows: dict[tuple[str, int], dict[str, Any]]) -> None:
+        self.rows = rows
+        self.calls: list[tuple[str, int, str]] = []
+        self.touches: list[tuple[str, int, str]] = []
+
+    async def fetch_secret(
+        self,
+        scope_type: str,
+        scope_id: int,
+        provider: str,
+        *,
+        include_revoked: bool = False,
+    ) -> dict[str, Any] | None:
+        assert include_revoked is True
+        self.calls.append((scope_type, scope_id, provider))
+        return self.rows.get((scope_type, scope_id))
+
+    async def touch_last_used(
+        self,
+        scope_type: str,
+        scope_id: int,
+        provider: str,
+        _last_used_at: datetime,
+    ) -> None:
+        self.touches.append((scope_type, scope_id, provider))
 
 
 @dataclass
 class _ExternalTransports:
     media_db: MediaDatabase
     retrieval_calls: list[dict[str, Any]] = field(default_factory=list)
-    credential_calls: list[dict[str, Any]] = field(default_factory=list)
     generation_calls: int = 0
+    generation_requests: list[dict[str, Any]] = field(default_factory=list)
     after_retrieval: Hook | None = None
     after_generation: Hook | None = None
     generation_entered: asyncio.Event | None = None
     release_generation: asyncio.Event | None = None
-    credential: _Credential = field(default_factory=_Credential)
 
     async def _run_hook(self, hook: Hook | None) -> None:
         if hook is None:
@@ -144,12 +222,9 @@ class _ExternalTransports:
             },
         }
 
-    async def resolve_credentials(self, provider: str, **kwargs: Any) -> _Credential:
-        self.credential_calls.append({"provider": provider, **kwargs})
-        return self.credential
-
-    async def generate(self, **_kwargs: Any) -> dict[str, Any]:
+    async def generate(self, **kwargs: Any) -> dict[str, Any]:
         self.generation_calls += 1
+        self.generation_requests.append(dict(kwargs))
         if self.generation_entered is not None:
             self.generation_entered.set()
         if self.release_generation is not None:
@@ -184,6 +259,8 @@ class RecipientSecurityHarness:
     owner_db_calls: list[int]
     recipient_db_calls: list[int]
     media_db_calls: list[int]
+    user_credential_repo: _UserCredentialRepo
+    shared_credential_repo: _SharedCredentialRepo
     clock_now: datetime
 
     def app(self, user_id: int, *, can_read: bool = True) -> FastAPI:
@@ -413,6 +490,44 @@ async def recipient_security_harness(
 
     monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "openai")
     monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "shared-test-model")
+    monkeypatch.setenv(
+        "BYOK_ENCRYPTION_KEY",
+        base64.b64encode(b"r" * 32).decode("ascii"),
+    )
+    reset_settings()
+    user_credential_repo = _UserCredentialRepo(
+        {
+            OWNER_ID: _credential_row("owner-private-key", "owner-private-project"),
+        }
+    )
+    shared_credential_repo = _SharedCredentialRepo(
+        {
+            ("team", TEAM_ID): _credential_row(
+                "recipient-team-key",
+                "recipient-team-project",
+            ),
+            ("org", ORG_ID): _credential_row(
+                "recipient-org-key",
+                "recipient-org-project",
+            ),
+        }
+    )
+
+    async def get_user_credential_repo() -> _UserCredentialRepo:
+        return user_credential_repo
+
+    async def get_shared_credential_repo() -> _SharedCredentialRepo:
+        return shared_credential_repo
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", get_user_credential_repo)
+    monkeypatch.setattr(byok_runtime, "_get_org_repo", get_shared_credential_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(
+        byok_runtime,
+        "load_server_config_snapshot",
+        lambda: {"openai_api": {"model": "shared-test-model"}},
+    )
     monkeypatch.setattr(
         chat_target_resolution,
         "get_override_default_model",
@@ -437,8 +552,6 @@ async def recipient_security_harness(
     monkeypatch.setattr(sharing, "_get_audit_service", lambda: None)
     monkeypatch.setattr(users_repo, "AuthnzUsersRepo", _UsersRepo)
     monkeypatch.setattr(sharing, "SharedWorkspaceChatService", build_chat_service)
-    monkeypatch.setattr(sharing, "resolve_byok_credentials", transports.resolve_credentials)
-    monkeypatch.setattr(shared_chat, "resolve_byok_credentials", transports.resolve_credentials)
     monkeypatch.setattr(shared_chat, "perform_chat_api_call_async", transports.generate)
     monkeypatch.setattr(auth_deps, "enforce_rbac_rate_limit", allow_rate_limit)
     monkeypatch.setattr(ChaCha_Notes_DB_Deps, "get_chacha_db_for_owner", get_owner_db)
@@ -468,6 +581,8 @@ async def recipient_security_harness(
         owner_db_calls=owner_db_calls,
         recipient_db_calls=recipient_db_calls,
         media_db_calls=media_db_calls,
+        user_credential_repo=user_credential_repo,
+        shared_credential_repo=shared_credential_repo,
         clock_now=clock_now,
     )
     try:
@@ -477,6 +592,7 @@ async def recipient_security_harness(
         member_db.close_all_connections()
         owner_recipient_db.close_all_connections()
         media_db.close_connection()
+        reset_settings()
 
 
 def _assert_no_sentinels(payload: Any) -> None:
@@ -485,6 +601,14 @@ def _assert_no_sentinels(payload: Any) -> None:
     assert OWNER_CHAT_SENTINEL not in serialized
     assert OWNER_MEDIA_SENTINEL not in serialized
     assert RECIPIENT_LOCAL_SENTINEL not in serialized
+
+
+def test_matrix_keeps_production_credential_resolver_active(
+    recipient_security_harness: RecipientSecurityHarness,
+) -> None:
+    assert recipient_security_harness.share_id > 0
+    assert sharing.resolve_byok_credentials is byok_runtime.resolve_byok_credentials
+    assert shared_chat.resolve_byok_credentials is byok_runtime.resolve_byok_credentials
 
 
 def test_owner_and_member_reads_use_production_db_selection_and_projections(
@@ -530,18 +654,78 @@ def test_owner_and_member_reads_use_production_db_selection_and_projections(
     assert harness.media_db_calls
     assert set(harness.media_db_calls) == {OWNER_ID}
     assert set(harness.recipient_db_calls) == {OWNER_ID, MEMBER_ID}
-    default_credential_calls = harness.transports.credential_calls[:2]
-    assert [call["user_id"] for call in default_credential_calls] == [
-        OWNER_ID,
-        MEMBER_ID,
-    ]
-    assert all(call["team_ids"] == [TEAM_ID] for call in default_credential_calls)
+    assert ("active", OWNER_ID, "openai") in harness.user_credential_repo.calls
+    assert ("active", MEMBER_ID, "openai") in harness.user_credential_repo.calls
+    assert ("unrestricted", MEMBER_ID, "openai") in harness.user_credential_repo.calls
+    assert ("team", TEAM_ID, "openai") in harness.shared_credential_repo.calls
 
     missing = harness.client(MEMBER_ID).get(
         f"/api/v1/sharing/shared-with-me/{harness.share_id}/sources/owner-sentinel/preview"
     )
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "shared_workspace_not_found"
+
+
+@pytest.mark.asyncio
+async def test_production_credential_resolver_preserves_recipient_precedence_and_scope(
+    recipient_security_harness: RecipientSecurityHarness,
+) -> None:
+    harness = recipient_security_harness
+    harness.user_credential_repo.calls.clear()
+    harness.shared_credential_repo.calls.clear()
+    harness.user_credential_repo.rows[MEMBER_ID] = _credential_row(
+        "recipient-user-key",
+        "recipient-user-project",
+    )
+
+    user_credentials = await byok_runtime.resolve_byok_credentials(
+        "openai",
+        user_id=MEMBER_ID,
+        team_ids=[TEAM_ID],
+        org_ids=[ORG_ID],
+        trusted_base_url_override=False,
+    )
+    del harness.user_credential_repo.rows[MEMBER_ID]
+    team_credentials = await byok_runtime.resolve_byok_credentials(
+        "openai",
+        user_id=MEMBER_ID,
+        team_ids=[TEAM_ID],
+        org_ids=[ORG_ID],
+        trusted_base_url_override=False,
+    )
+    del harness.shared_credential_repo.rows[("team", TEAM_ID)]
+    org_credentials = await byok_runtime.resolve_byok_credentials(
+        "openai",
+        user_id=MEMBER_ID,
+        team_ids=[TEAM_ID],
+        org_ids=[ORG_ID],
+        trusted_base_url_override=False,
+    )
+
+    assert [
+        (credentials.source, credentials.api_key)
+        for credentials in (user_credentials, team_credentials, org_credentials)
+    ] == [
+        ("user", "recipient-user-key"),
+        ("team", "recipient-team-key"),
+        ("org", "recipient-org-key"),
+    ]
+    assert {
+        credentials.app_config["openai_api"]["project_id"]
+        for credentials in (user_credentials, team_credentials, org_credentials)
+    } == {
+        "recipient-user-project",
+        "recipient-team-project",
+        "recipient-org-project",
+    }
+    assert {
+        user_id for _lookup, user_id, _provider in harness.user_credential_repo.calls
+    } == {MEMBER_ID}
+    assert harness.shared_credential_repo.calls == [
+        ("team", TEAM_ID, "openai"),
+        ("team", TEAM_ID, "openai"),
+        ("org", ORG_ID, "openai"),
+    ]
 
 
 def test_nonmember_and_missing_share_are_neutral_before_owner_data(
@@ -618,6 +802,8 @@ async def test_chat_uses_production_snapshot_credentials_persistence_and_replay(
     expected_sources: set[str],
 ) -> None:
     harness = recipient_security_harness
+    harness.user_credential_repo.calls.clear()
+    harness.shared_credential_repo.calls.clear()
     body = harness.chat_body(
         "de305d54-75b4-431b-adb2-eb6b9e546014",
         mode=mode,
@@ -647,10 +833,17 @@ async def test_chat_uses_production_snapshot_credentials_persistence_and_replay(
         harness.media_ids[source_id] for source_id in expected_sources
     }
     assert harness.media_ids["owner-sentinel"] not in retrieval["include_media_ids"]
-    generation_credential = harness.transports.credential_calls[-1]
-    assert generation_credential["user_id"] == MEMBER_ID
-    assert generation_credential["team_ids"] == [TEAM_ID]
-    assert generation_credential["org_ids"] == []
+    assert harness.user_credential_repo.calls == [
+        ("active", MEMBER_ID, "openai"),
+        ("unrestricted", MEMBER_ID, "openai"),
+    ]
+    assert harness.shared_credential_repo.calls == [("team", TEAM_ID, "openai")]
+    generation_request = harness.transports.generation_requests[-1]
+    assert generation_request["api_key"] == "recipient-team-key"
+    assert generation_request["app_config"]["openai_api"]["project_id"] == (
+        "recipient-team-project"
+    )
+    assert generation_request["user_identifier"] == str(MEMBER_ID)
     _assert_no_sentinels(first.json())
 
 
@@ -743,3 +936,6 @@ async def test_authority_and_frozen_scope_changes_fail_before_persistence(
     }
     assert harness.saved_messages() == ()
     assert harness.receipt_rows()[0]["status"] in {"retryable", "conflicted"}
+    assert harness.transports.generation_calls == (
+        0 if boundary == "after_retrieval" else 1
+    )

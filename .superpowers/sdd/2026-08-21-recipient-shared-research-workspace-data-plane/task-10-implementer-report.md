@@ -275,3 +275,102 @@ OpenAPI regeneration caused no additional tracked artifact change.
 - `tldw_Server_API/tests/Sharing/test_sharing_endpoints.py`
 
 The unrelated watchlist templates remain untouched and unstaged.
+
+## Fix Round 2/5 - Reviewed Head `a4e78b3ca2`
+
+This round addresses every Important and both Minor findings in
+`task-10-rereview-round-1.md`. No production backend or frontend source changed.
+Docker was not attempted, and the prior authoritative Task 10 aggregate remains
+`512 passed, 11 standard fixture-unavailable PostgreSQL skips, 22 warnings`.
+
+### Production BYOK and lifecycle boundaries
+
+The security fixture no longer replaces either imported
+`resolve_byok_credentials` reference. It keeps the production resolver active
+and replaces only deterministic user/shared credential repositories and config
+lookups. Repository rows use the production encrypted BYOK envelope. The owner
+has a distinct private user key; the recipient resolves user, then team, then
+organization credentials under explicit recipient scope. Assertions require
+every repository identity to be the recipient for chat, exact team/org scope
+inputs, and provider transport propagation of the recipient team API key,
+project config, and `user_identifier="2"`.
+
+The lifecycle matrix now independently requires zero provider calls after every
+post-retrieval authority/source mutation and exactly one provider call after
+every post-generation mutation. Both groups retain empty persistence and
+retryable/conflicted receipt assertions.
+
+TDD evidence:
+
+```text
+RED production-resolver sentinel: 1 failed, 15 deselected; the active fixture
+still replaced sharing.resolve_byok_credentials with its test double.
+GREEN exact matrix: 17 passed, 7 warnings in 31.21s.
+Focused lifecycle checkpoint selection: 8 passed, 9 deselected in 17.21s.
+```
+
+### Browser ledger, fallback, and history
+
+The global 404 counter is gone. Expected Chromium diagnostics are accepted only
+when the console source URL exactly equals a declared expected 404 response URL.
+The regression observes both the API-sourced diagnostic and an unrelated generic
+diagnostic with a different source, then requires `assertClean()` to fail.
+
+Three initial pre-fix probe attempts did not produce a valid RED because
+Chromium itself emitted the expected 404 diagnostic, leaving the injected error
+visible even to the old counter. The probe series stopped at the required limit.
+After removing the counter, the full browser run produced the useful integration
+RED: `1 failed, 4 passed`, with the revoked expected 404 diagnostic rejected.
+Exact URL/source correlation made that flow green. A later focused diagnostic
+assertion RED (`1 failed`) recorded Chromium's injected-console source as the
+empty source rather than the document URL; the corrected exact-source assertion
+passed (`1 passed`).
+
+The browser seed now uses the real `tldw-workspace` split-storage index and
+workspace snapshot key with a recipient-local workspace, source, note, and
+sentinel. Revoked bootstrap requires the canonical shared URL while excluding
+the local workspace header, sources panel, chat main content, Studio panel,
+workspace name, source/note sentinel, and every shared shell/message surface.
+
+Bootstrap now supplies `next_before=older-history-cursor`. Desktop and mobile
+both invoke **Load older messages**, receive a page with unique message IDs,
+observe the older assistant message, and assert the canonical
+`GET .../chat/messages` operation and cursor.
+
+Final exact browser gate:
+
+```text
+bunx playwright test e2e/workflows/research-workspace.shared-recipient.spec.ts --project=chromium --reporter=line --workers=1
+5 passed in 30.4s.
+```
+
+### Documentation and focused gates
+
+Both sharing-guide copies now describe the table as the recipient shared
+Research Workspace data-plane operation set and explicitly keep clone outside
+that set under the share clone policy. `cmp` confirms byte identity.
+
+```text
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_security_matrix.py -q
+17 passed, 7 warnings in 31.21s.
+
+TLDW_TEST_NO_DOCKER=1 python -m pytest tldw_Server_API/tests/Sharing/test_sharing_endpoints.py -q -k 'openapi or removed'
+5 passed, 52 deselected, 6 warnings in 7.00s.
+
+python -m ruff check tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_security_matrix.py
+All checks passed.
+
+bunx eslint e2e/workflows/research-workspace.shared-recipient.spec.ts e2e/utils/page-objects/ResearchWorkspacePage.ts
+Exit 0.
+
+cmp Docs/User_Guides/Server/Organizations_and_Sharing.md Docs/Published/User_Guides/Server/Organizations_and_Sharing.md
+Exit 0.
+
+Generated-client obsolete-operation scan for SharedMediaResponse and removed
+recipient media/full-media paths: no matches.
+```
+
+Bandit was not rerun because this round changes no production Python. The exact
+Task 10 production scope remains covered by the prior zero-finding, zero-error
+46,442-LOC Bandit result. Task 11 remains the live PostgreSQL/provider/browser
+truth gate. The two unrelated watchlist templates remain untouched and unstaged.
