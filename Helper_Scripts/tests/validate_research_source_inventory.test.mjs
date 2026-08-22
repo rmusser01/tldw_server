@@ -909,6 +909,7 @@ test("required sources require exact core routes without excluding reviewed addi
     const predicateMismatch = validateInventoryDocuments(manifest, ledger, {
       freeze: freezeFor(manifest),
       requiredSources,
+      requiredImplementedSources: {},
       schemaValidated: true,
       trustedReviewerIds: ["research-maintainer"],
     });
@@ -917,6 +918,7 @@ test("required sources require exact core routes without excluding reviewed addi
         .mapping_satisfied,
       false,
     );
+    assert.deepEqual(predicateMismatch.required_implemented_source_blockers, []);
   }
 });
 
