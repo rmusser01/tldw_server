@@ -209,11 +209,11 @@ class AuthService {
       void apiClient.post('/auth/logout').catch(() => undefined);
     }
     if (typeof window !== 'undefined') {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user');
       window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed', {
         detail: { kind: 'logout' },
       }));
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('user');
       dispatchAuthCredentialsChanged(false);
       // Purge any credentials/tokens that may have been captured in the
       // request-history ring so they cannot survive logout.

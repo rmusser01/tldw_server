@@ -154,3 +154,62 @@ The canonical RED collected all 10 files and all 179 tests: 57 failed and 122 pa
 The review covered loading, offline, unavailable, disabled, validator-blocked, source-free recovery, idle, submitting, polling, ambiguous, stopped, auth-lost, missing, throttled, outage, rejected, configuration-changed, failed, cancelled, missing-binding, completed handoff, pagination error, standalone detail, unknown detail, and legacy structured states against `PRODUCT.md` and `DESIGN.md`.
 
 The implementation keeps one top-level heading in the New route, visible labels and focus styles, shared 44px buttons and form targets, semantic `fieldset`/`legend`/`dl`/status/alert structure, reduced-motion-safe transitions, and single-column narrow-screen fallbacks. It reuses the existing restrained surface, border, text, focus, badge, loading, and state-panel system. No gradients, glass, card grid, decorative motion, em-dash copy, provider picker, or bespoke visual system was added. Browser automation remains intentionally deferred to Task 17.
+
+## Authority-gap fix round 2
+
+### Review verification and RED
+
+The round-2 findings were verified against the committed round-1 implementation before production changes. The coherent six-file matrix was extended first and run with:
+
+```bash
+cd apps/tldw-frontend
+bun run test:run -- \
+  __tests__/auth.logout.test.ts \
+  ../packages/ui/src/hooks/__tests__/useSlidesCapabilities.test.tsx \
+  ../packages/ui/src/hooks/__tests__/useStandaloneHtmlGeneration.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/StandaloneHtmlGenerationForm.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/StandaloneHtmlGeneration.integration.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/PresentationStudioNew.integration.test.tsx \
+  --maxWorkers=1 --no-file-parallelism
+```
+
+The canonical RED collected all six files and all 72 tests: 14 intended tests failed and 58 passed. There were no unrelated baseline or harness failures. The failures covered logout ordering and no-refetch fencing, null and mismatched post-response scope confirmation, source-free draft presence and disabled-capability recovery, last-trusted namespace cleanup after verification outage, retained quota-failed form state during 409 authority refresh, and stale progress clearing.
+
+After the first focused GREEN, one missing explicit recovery-controller boundary case was added. It produced a genuine one-test RED in a 40-test hook suite: logout did not yet delete the recovery probe's last trusted namespace while an older scope check was deferred. The minimal source-free last-trusted-scope fix made it GREEN. An intermediate assertion in the source-free probe test was also corrected after direct evidence showed it contradicted its own setup: the test removed the resume record to create draft-only state, then asserted that the removed resume record remained. The corrected assertion checks the draft record that the outage must preserve.
+
+### Fix implementation
+
+- Frontend logout now clears the local token and user before emitting the narrow `tldw:auth-principal-changed` logout event.
+- Capability and recovery listeners treat logout as an invalidation-only boundary. They abort or fence older work, publish no old authority or recovery, and wait for a later trusted login, configuration, or lifecycle boundary before resolving again.
+- Missing or mismatched post-response scope confirmation now becomes an explicit retryable error instead of remaining indefinitely in loading state.
+- The recovery presence probe distinguishes resume and draft-only records. It enumerates scoped storage key names and reads only capped resume metadata; it never reads or parses source-bearing draft values before the trusted generation hook mounts.
+- Both the recovery controller and generation hook retain a non-source-bearing last trusted scope across transient verification outages. A later confirmed switch or definitive logout removes the old scoped draft and resume keys synchronously.
+- Draft-only hydration is exposed separately from receipt recovery, so preserved direct material and Forget remain available when current generation capability is disabled or unavailable.
+- A 409 configuration revision refresh retains the mounted form and its in-memory source even when storage quota writes fail. Prior provider, model, and revision details are reference-only, all submission authority is disabled during refresh, and only a freshly confirmed revision enables a deliberate new submission.
+- Receipt progress is replaced on every receipt, so omitted or empty progress cannot survive into a later or terminal state.
+
+No module or global source cache, history state, URL state, token estimator, request `Cache-Control` header, provider picker, execution sink, new dependency, or cross-route quota-failure recovery was added.
+
+### Round-2 verification
+
+- First logout/capability GREEN: 2 files and 17 tests passed.
+- First complete six-file GREEN: 6 files and 72 tests passed.
+- Explicit deferred recovery-controller boundary: one intended RED in a 40-test suite, followed by 40 tests passed.
+- Final six-file focused matrix after that boundary case: 6 files and 73 tests passed.
+- Final amended canonical matrix, including the real New-to-form integration: 11 files and 189 tests passed.
+- Adjacent Presentation Studio and route regressions: 14 files and 73 tests passed.
+- Direct auth, configuration, connectivity, request, background proxy, connection sync, and standalone client regressions: 10 files and 165 tests passed.
+- OpenAPI guard: 317 client paths and 49 fallback fields verified; the same 10 reviewed OSS exception paths were reported and allowed.
+- Required package typecheck used `NODE_OPTIONS=--max-old-space-size=8192`. It reports zero diagnostics in Task 14 production or test paths. It exits nonzero on the same 47 inherited diagnostics documented in round 1, grouped under Notes, Audio Studio, Research Workspace, Scheduled Tasks, Setup, Skills, Dexie/background entry code, MCP Hub, and voice cloning.
+- Targeted ESLint reports zero errors; the four package UI files are ignored by the frontend base-path configuration. Targeted Prettier reports the existing package/frontend formatting baseline, so no bulk formatter rewrite expanded the review scope.
+- `git diff --check` passed before the final report update and is rerun after staging.
+- Static execution-sink scan found no HTML parsing or insertion, `srcdoc`, Blob URL, iframe, popup, worker, dynamic import, eval, or Function constructor in round-2 production paths.
+- Static source/key sink review found source and replay keys only in component/hook memory, bounded principal-and-origin-scoped `sessionStorage`, request bodies, ordinary React text nodes, and client request options. They remain absent from logs, analytics, URLs, history state, and global stores.
+
+One exploratory broad-test command included `__tests__/hooks/useConfig.fetch-mode.test.ts` from the frontend working directory. That test constructs a repository-root-relative path and failed only because the selected working directory duplicated `apps/tldw-frontend` in the path; the other 10 suites and 165 tests passed. The corrected directly impacted command omitted that unrelated static-path harness and passed 10 files and 165 tests.
+
+### Round-2 visual and accessibility self-review
+
+The retained-refresh and preserved-draft states reuse the existing surface, border, text, degraded-state, button, and state-panel system. Stale target data is explicitly identified as non-authoritative, submission stays disabled until fresh confirmation, and Retry remains a shared large button action. The preserved-draft state uses a labelled section and an explicit Forget action without reading draft source in the controller.
+
+The form keeps visible labels, semantic `form`, `fieldset`, `legend`, `dl`, status, and alert structure; shared large actions retain approximately 44px targets and visible focus. Existing responsive grids collapse to one column without hiding recovery actions. No gradients, glass, card grid, decorative motion, em-dash copy, or bespoke visual system was introduced. The flow remains non-executing and browser automation remains deferred to Task 17.

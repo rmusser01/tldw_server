@@ -271,62 +271,108 @@ const retryAfterMs = (error: unknown): number | null => {
     : null
 }
 
-export const probeStandaloneHtmlRecovery = async (): Promise<boolean | null> => {
-  const scope = await resolveScope()
-  if (!scope) return null
-  const key = buildStandaloneHtmlStorageKeys(scope).resume
+export type StandaloneHtmlRecoveryKind = "resume" | "draft"
+
+const inspectStandaloneHtmlRecovery = (scope: Scope): { kind: StandaloneHtmlRecoveryKind | "none" } | null => {
+  const keys = buildStandaloneHtmlStorageKeys(scope)
   try {
-    const record = parseResumeRecord(window.sessionStorage.getItem(key))
-    if (!record) {
-      window.sessionStorage.removeItem(key)
-      return false
+    let hasDraft = false
+    let hasResume = false
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index)
+      if (key === keys.draft) hasDraft = true
+      if (key === keys.resume) hasResume = true
     }
-    return true
+    if (hasResume) {
+      const record = parseResumeRecord(window.sessionStorage.getItem(keys.resume))
+      if (record) return { kind: "resume" }
+      window.sessionStorage.removeItem(keys.resume)
+    }
+    return hasDraft ? { kind: "draft" } : { kind: "none" }
   } catch {
     return null
   }
 }
 
+const removeScopedRecoveryRecords = (scope: Scope | null) => {
+  if (!scope) return
+  const keys = buildStandaloneHtmlStorageKeys(scope)
+  try {
+    window.sessionStorage.removeItem(keys.draft)
+    window.sessionStorage.removeItem(keys.resume)
+  } catch {}
+}
+
+export const probeStandaloneHtmlRecovery = async (): Promise<{ kind: StandaloneHtmlRecoveryKind | "none" } | null> => {
+  const scope = await resolveScope()
+  return scope ? inspectStandaloneHtmlRecovery(scope) : null
+}
+
 export type StandaloneHtmlRecoveryProbeResult = {
   status: "checking" | "available" | "none" | "unavailable"
+  kind: StandaloneHtmlRecoveryKind | null
   retry: () => Promise<void>
 }
 
 export const useStandaloneHtmlRecoveryProbe = (): StandaloneHtmlRecoveryProbeResult => {
   const [status, setStatus] = React.useState<StandaloneHtmlRecoveryProbeResult["status"]>("checking")
+  const [kind, setKind] = React.useState<StandaloneHtmlRecoveryKind | null>(null)
   const requestIdRef = React.useRef(0)
+  const lastTrustedScopeRef = React.useRef<Scope | null>(null)
 
   const check = React.useCallback(async () => {
     const requestId = ++requestIdRef.current
     setStatus("checking")
-    const result = await probeStandaloneHtmlRecovery()
+    const scope = await resolveScope()
     if (requestId !== requestIdRef.current) return
-    setStatus(result === true ? "available" : result === false ? "none" : "unavailable")
+    const result = scope ? inspectStandaloneHtmlRecovery(scope) : null
+    if (requestId !== requestIdRef.current) return
+    if (scope && result) {
+      if (lastTrustedScopeRef.current && !sameScope(lastTrustedScopeRef.current, scope)) {
+        removeScopedRecoveryRecords(lastTrustedScopeRef.current)
+      }
+      lastTrustedScopeRef.current = scope
+    }
+    setKind(result?.kind === "resume" || result?.kind === "draft" ? result.kind : null)
+    setStatus(result === null ? "unavailable" : result.kind === "none" ? "none" : "available")
   }, [])
 
   React.useEffect(() => {
     void check()
     const restore = () => { void check() }
+    const authBoundary = (event: Event) => {
+      if ((event as CustomEvent<{ kind?: string }>).detail?.kind === "logout") {
+        requestIdRef.current += 1
+        removeScopedRecoveryRecords(lastTrustedScopeRef.current)
+        lastTrustedScopeRef.current = null
+        setKind(null)
+        setStatus("unavailable")
+        return
+      }
+      restore()
+    }
     const invalidate = () => {
       requestIdRef.current += 1
+      setKind(null)
       setStatus("checking")
     }
     window.addEventListener("tldw:config-updated", restore)
-    window.addEventListener("tldw:auth-principal-changed", restore)
+    window.addEventListener("tldw:auth-principal-changed", authBoundary)
     window.addEventListener("pagehide", invalidate)
     window.addEventListener("pageshow", restore)
     window.addEventListener("focus", restore)
     return () => {
       requestIdRef.current += 1
+      lastTrustedScopeRef.current = null
       window.removeEventListener("tldw:config-updated", restore)
-      window.removeEventListener("tldw:auth-principal-changed", restore)
+      window.removeEventListener("tldw:auth-principal-changed", authBoundary)
       window.removeEventListener("pagehide", invalidate)
       window.removeEventListener("pageshow", restore)
       window.removeEventListener("focus", restore)
     }
   }, [check])
 
-  return { status, retry: check }
+  return { status, kind, retry: check }
 }
 
 export type UseStandaloneHtmlGenerationOptions = {
@@ -360,10 +406,12 @@ export const useStandaloneHtmlGeneration = ({
   const [progressText, setProgressText] = React.useState<string | null>(null)
   const [safeError, setSafeError] = React.useState<string | null>(null)
   const [recoveryAvailable, setRecoveryAvailable] = React.useState(false)
+  const [draftRecoveryAvailable, setDraftRecoveryAvailable] = React.useState(false)
   const [storageWarning, setStorageWarning] = React.useState<string | null>(null)
   const [pendingAttempt, setPendingAttempt] = React.useState<PendingAttempt | null>(null)
 
   const scopeRef = React.useRef<Scope | null>(null)
+  const lastTrustedScopeRef = React.useRef<Scope | null>(null)
   const draftRef = React.useRef(draft)
   const snapshotRef = React.useRef<PresentationGenerationRequest | null>(null)
   const resumeRef = React.useRef<ResumeRecord | null>(null)
@@ -420,6 +468,7 @@ export const useStandaloneHtmlGeneration = ({
     if (sameScope(scopeRef.current, scope)) {
       resumeRef.current = null
       setRecoveryAvailable(false)
+      setDraftRecoveryAvailable(false)
     }
   }, [])
 
@@ -444,6 +493,7 @@ export const useStandaloneHtmlGeneration = ({
     }
     try {
       window.sessionStorage.setItem(buildStandaloneHtmlStorageKeys(scope).draft, serialized)
+      setDraftRecoveryAvailable(true)
       return true
     } catch {
       setStorageWarning("Reload recovery is unavailable.")
@@ -480,6 +530,7 @@ export const useStandaloneHtmlGeneration = ({
     resumeRef.current = null
     setPendingAttempt(null)
     setRecoveryAvailable(false)
+    setDraftRecoveryAvailable(false)
     setDraft(initialDraft)
     setSnapshot(null)
     setBackendStatus(null)
@@ -523,8 +574,10 @@ export const useStandaloneHtmlGeneration = ({
     if (!storedDraft) {
       resumeRef.current = null
       setRecoveryAvailable(false)
+      setDraftRecoveryAvailable(false)
       return
     }
+    setDraftRecoveryAvailable(true)
     draftRevisionRef.current = storedDraft.generationConfigRevision
     draftRef.current = cloneDraft(storedDraft.values)
     setDraft(cloneDraft(storedDraft.values))
@@ -544,12 +597,11 @@ export const useStandaloneHtmlGeneration = ({
     }
   }, [])
 
-  const revalidateScope = React.useCallback(async (clearFirst: boolean, definitiveLogout = false) => {
-    const previous = scopeRef.current
+  const revalidateScope = React.useCallback(async (clearFirst: boolean) => {
+    const previous = scopeRef.current ?? lastTrustedScopeRef.current
     if (clearFirst) {
       invalidateScopeBoundary()
     }
-    if (definitiveLogout) removeRecords(previous)
     const validationId = ++scopeValidationIdRef.current
     setScopeError(null)
     const next = await resolveScope()
@@ -563,6 +615,7 @@ export const useStandaloneHtmlGeneration = ({
       removeRecords(previous)
     }
     scopeRef.current = next
+    lastTrustedScopeRef.current = next
     setScopeReady(true)
     hydrateForScope(next)
   }, [hydrateForScope, invalidateScopeBoundary, removeRecords])
@@ -578,6 +631,7 @@ export const useStandaloneHtmlGeneration = ({
       scopeEpochRef.current += 1
       scopeValidationIdRef.current += 1
       scopeRef.current = null
+      lastTrustedScopeRef.current = null
       submitAbortRef.current?.abort()
       submitAbortRef.current = null
       pollAbortRef.current?.abort()
@@ -594,8 +648,15 @@ export const useStandaloneHtmlGeneration = ({
   React.useEffect(() => {
     const restore = () => { void revalidateScope(true) }
     const authBoundary = (event: Event) => {
-      const definitive = (event as CustomEvent<{ kind?: string }>).detail?.kind === "logout"
-      void revalidateScope(true, definitive)
+      if ((event as CustomEvent<{ kind?: string }>).detail?.kind === "logout") {
+        const trustedScope = scopeRef.current ?? lastTrustedScopeRef.current
+        invalidateScopeBoundary()
+        removeRecords(trustedScope)
+        lastTrustedScopeRef.current = null
+        setScopeError("Current server and account could not be confirmed.")
+        return
+      }
+      void revalidateScope(true)
     }
     const pagehide = () => {
       const values = draftRef.current
@@ -691,9 +752,9 @@ export const useStandaloneHtmlGeneration = ({
   const finishReceipt = React.useCallback((receipt: PresentationGenerationReceipt, capture: ScopeCapture): boolean => {
     if (!isCaptureCurrent(capture)) return true
     setBackendStatus(receipt.status)
-    if ("progress_text" in receipt && receipt.progress_text) {
-      setProgressText(receipt.progress_text.slice(0, MAX_PROGRESS_TEXT_CHARS))
-    }
+    setProgressText("progress_text" in receipt && receipt.progress_text
+      ? receipt.progress_text.slice(0, MAX_PROGRESS_TEXT_CHARS)
+      : null)
     if (receipt.status === "completed") {
       if (!receipt.presentation_id) {
         setPhase("completed_missing_binding")
@@ -928,6 +989,7 @@ export const useStandaloneHtmlGeneration = ({
     progressText,
     safeError,
     recoveryAvailable,
+    draftRecoveryAvailable,
     storageWarning,
     updateField,
     replaceDraft,

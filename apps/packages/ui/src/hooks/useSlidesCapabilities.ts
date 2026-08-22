@@ -58,11 +58,13 @@ export const useSlidesCapabilities = (): UseSlidesCapabilitiesResult => {
   const mountedRef = React.useRef(true)
   const requestIdRef = React.useRef(0)
   const abortRef = React.useRef<AbortController | null>(null)
+  const capabilitiesRef = React.useRef<SlidesCapabilities | null>(null)
 
   const invalidate = React.useCallback((nextStatus: SlidesCapabilityStatus) => {
     requestIdRef.current += 1
     abortRef.current?.abort()
     abortRef.current = null
+    capabilitiesRef.current = null
     setCapabilities(null)
     setFailureReason(null)
     setStatus(nextStatus)
@@ -74,6 +76,7 @@ export const useSlidesCapabilities = (): UseSlidesCapabilitiesResult => {
     abortRef.current = null
     if (!online) {
       if (mountedRef.current && requestId === requestIdRef.current) {
+        capabilitiesRef.current = null
         setCapabilities(null)
         setFailureReason(null)
         setStatus("offline")
@@ -81,7 +84,6 @@ export const useSlidesCapabilities = (): UseSlidesCapabilitiesResult => {
       return
     }
 
-    setCapabilities(null)
     setFailureReason(null)
     setStatus("loading")
     const expectedScope = await resolveCapabilityScope()
@@ -103,7 +105,16 @@ export const useSlidesCapabilities = (): UseSlidesCapabilitiesResult => {
         controller.signal.aborted ||
         !confirmedScope ||
         !sameScope(expectedScope, confirmedScope)
-      ) return
+      ) {
+        if (mountedRef.current && requestId === requestIdRef.current && !controller.signal.aborted) {
+          capabilitiesRef.current = null
+          setCapabilities(null)
+          setFailureReason("scope_confirmation_failed")
+          setStatus("error")
+        }
+        return
+      }
+      capabilitiesRef.current = next
       setCapabilities(next)
       const htmlContent = next.content_kinds.standalone_html
       const generation = next.generation_modes.standalone_html
@@ -116,7 +127,7 @@ export const useSlidesCapabilities = (): UseSlidesCapabilitiesResult => {
       }
     } catch (error) {
       if (!mountedRef.current || requestId !== requestIdRef.current || controller.signal.aborted) return
-      setCapabilities(null)
+      if (!capabilitiesRef.current) setCapabilities(null)
       const nextStatus = errorStatus(error)
       if (nextStatus === 401) {
         setFailureReason("authentication_required")
@@ -144,20 +155,36 @@ export const useSlidesCapabilities = (): UseSlidesCapabilitiesResult => {
   }, [fetchCapabilities])
 
   React.useEffect(() => {
-    const restore = () => { void fetchCapabilities() }
+    const restore = () => {
+      invalidate(online ? "loading" : "offline")
+      if (online) void fetchCapabilities()
+    }
+    const authBoundary = (event: Event) => {
+      if ((event as CustomEvent<{ kind?: string }>).detail?.kind === "logout") {
+        requestIdRef.current += 1
+        abortRef.current?.abort()
+        abortRef.current = null
+        capabilitiesRef.current = null
+        setCapabilities(null)
+        setFailureReason("authentication_required")
+        setStatus("auth_required")
+        return
+      }
+      restore()
+    }
     const pagehide = () => invalidate(online ? "loading" : "offline")
     const visibility = () => {
       if (document.visibilityState === "visible") restore()
     }
     window.addEventListener("tldw:config-updated", restore)
-    window.addEventListener("tldw:auth-principal-changed", restore)
+    window.addEventListener("tldw:auth-principal-changed", authBoundary)
     window.addEventListener("pagehide", pagehide)
     window.addEventListener("pageshow", restore)
     window.addEventListener("focus", restore)
     document.addEventListener("visibilitychange", visibility)
     return () => {
       window.removeEventListener("tldw:config-updated", restore)
-      window.removeEventListener("tldw:auth-principal-changed", restore)
+      window.removeEventListener("tldw:auth-principal-changed", authBoundary)
       window.removeEventListener("pagehide", pagehide)
       window.removeEventListener("pageshow", restore)
       window.removeEventListener("focus", restore)

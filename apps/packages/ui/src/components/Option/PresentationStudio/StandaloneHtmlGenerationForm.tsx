@@ -8,6 +8,8 @@ import type { SlidesCapabilities } from "@/services/tldw/TldwApiClient"
 type StandaloneHtmlGenerationFormProps = {
   capabilities: SlidesCapabilities | null
   recoveryOnly?: boolean
+  authorityConfirmed?: boolean
+  refreshing?: boolean
   onCapabilitiesChanged?: () => Promise<unknown> | unknown
   onCompleted?: (presentationId: string) => void
   onStopWaiting?: () => void
@@ -70,19 +72,24 @@ const phaseLabel = (phase: string): string | null => {
 export const StandaloneHtmlGenerationForm: React.FC<StandaloneHtmlGenerationFormProps> = ({
   capabilities,
   recoveryOnly = false,
+  authorityConfirmed = true,
+  refreshing = false,
   onCapabilitiesChanged = () => undefined,
   onCompleted = () => undefined,
   onStopWaiting = () => undefined
 }) => {
   const generation = capabilities?.generation_modes.standalone_html ?? null
-  const capability = generation?.enabled ? generation : null
+  const displayCapability = generation?.enabled ? generation : null
+  const capability = authorityConfirmed ? displayCapability : null
   const contentMaxSlides = capabilities?.content_kinds.standalone_html.limits.max_slides ?? 30
 
   return (
     <EnabledStandaloneHtmlGenerationForm
       capability={capability}
+      displayCapability={displayCapability}
       contentMaxSlides={contentMaxSlides}
       recoveryOnly={recoveryOnly}
+      refreshing={refreshing}
       onCapabilitiesChanged={onCapabilitiesChanged}
       onCompleted={onCompleted}
       onStopWaiting={onStopWaiting}
@@ -97,12 +104,14 @@ type EnabledCapability = Extract<
 
 const EnabledStandaloneHtmlGenerationForm: React.FC<{
   capability: EnabledCapability | null
+  displayCapability: EnabledCapability | null
   contentMaxSlides: number
   recoveryOnly: boolean
+  refreshing: boolean
   onCapabilitiesChanged: () => Promise<unknown> | unknown
   onCompleted: (presentationId: string) => void
   onStopWaiting: () => void
-}> = ({ capability, contentMaxSlides, recoveryOnly, onCapabilitiesChanged, onCompleted, onStopWaiting }) => {
+}> = ({ capability, displayCapability, contentMaxSlides, recoveryOnly, refreshing, onCapabilitiesChanged, onCompleted, onStopWaiting }) => {
   const generation = useStandaloneHtmlGeneration({
     capability,
     contentMaxSlides,
@@ -122,6 +131,7 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
     progressText,
     safeError,
     recoveryAvailable,
+    draftRecoveryAvailable,
     storageWarning
   } = generation
 
@@ -152,12 +162,18 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
         </div>
 
         <dl className="mt-4 grid gap-x-6 gap-y-2 border-t border-border pt-4 text-sm sm:grid-cols-2">
-          <div><dt className="text-text-muted">Provider</dt><dd className="break-all font-medium text-text">{capability?.provider ?? "Unavailable"}</dd></div>
-          <div><dt className="text-text-muted">Model</dt><dd className="break-all font-medium text-text">{capability?.model ?? "Unavailable"}</dd></div>
-          <div><dt className="text-text-muted">Adapter</dt><dd className="break-all font-medium text-text">{capability?.adapter_id ?? "Unavailable"}</dd></div>
-          <div><dt className="text-text-muted">Endpoint</dt><dd className="break-all font-medium text-text">{capability?.endpoint_identity ?? "Unavailable"}</dd></div>
-          <div className="sm:col-span-2"><dt className="text-text-muted">Generation configuration revision</dt><dd className="break-all font-mono text-xs text-text">{capability?.generation_config_revision ?? "Unavailable"}</dd></div>
+          <div><dt className="text-text-muted">Provider</dt><dd className="break-all font-medium text-text">{displayCapability?.provider ?? "Unavailable"}</dd></div>
+          <div><dt className="text-text-muted">Model</dt><dd className="break-all font-medium text-text">{displayCapability?.model ?? "Unavailable"}</dd></div>
+          <div><dt className="text-text-muted">Adapter</dt><dd className="break-all font-medium text-text">{displayCapability?.adapter_id ?? "Unavailable"}</dd></div>
+          <div><dt className="text-text-muted">Endpoint</dt><dd className="break-all font-medium text-text">{displayCapability?.endpoint_identity ?? "Unavailable"}</dd></div>
+          <div className="sm:col-span-2"><dt className="text-text-muted">Generation configuration revision</dt><dd className="break-all font-mono text-xs text-text">{displayCapability?.generation_config_revision ?? "Unavailable"}</dd></div>
         </dl>
+
+        {refreshing ? (
+          <p role="status" className="mt-4 text-sm text-state-degraded">
+            Refreshing generation capabilities. Submission remains disabled until the new revision is confirmed.
+          </p>
+        ) : null}
 
         <form className="mt-6 space-y-5" autoComplete="off" onSubmit={(event) => { event.preventDefault(); void generation.submit() }}>
           <div>
@@ -278,6 +294,16 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
           </Button>
         </form>
       </section>
+
+      {!snapshot && draftRecoveryAvailable && (recoveryOnly || !capability) ? (
+        <section className="rounded-lg border border-border bg-surface p-4 sm:p-6" aria-labelledby="preserved-draft-heading">
+          <h2 id="preserved-draft-heading" className="text-lg font-semibold text-text">Preserved draft</h2>
+          <p className="mt-2 text-sm text-text-muted">
+            Direct material is preserved for this server and account. Generation remains unavailable until current capabilities are confirmed.
+          </p>
+          <Button className="mt-4" variant="outline" size="lg" onClick={generation.forget}>Forget preserved draft</Button>
+        </section>
+      ) : null}
 
       {snapshot ? (
         <section className="rounded-lg border border-border bg-surface p-4 sm:p-6" aria-labelledby="submitted-request-heading">

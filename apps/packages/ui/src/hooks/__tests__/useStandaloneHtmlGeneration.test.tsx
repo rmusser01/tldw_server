@@ -310,16 +310,55 @@ describe("useStandaloneHtmlGeneration", () => {
     })
     const getSpy = vi.spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "getItem")
 
-    await expect((first.module as any).probeStandaloneHtmlRecovery()).resolves.toBe(true)
+    await expect((first.module as any).probeStandaloneHtmlRecovery()).resolves.toEqual({ kind: "resume" })
     expect(getSpy).toHaveBeenCalledWith(keys.resume)
+    expect(getSpy).not.toHaveBeenCalledWith(keys.draft)
+
+    sessionStorage.removeItem(keys.resume)
+    getSpy.mockClear()
+    await expect((first.module as any).probeStandaloneHtmlRecovery()).resolves.toEqual({ kind: "draft" })
     expect(getSpy).not.toHaveBeenCalledWith(keys.draft)
 
     getSpy.mockClear()
     mocks.getConfig.mockRejectedValue(new Error("temporary outage"))
     await expect((first.module as any).probeStandaloneHtmlRecovery()).resolves.toBeNull()
     expect(getSpy).not.toHaveBeenCalled()
-    expect(sessionStorage.getItem(keys.resume)).not.toBeNull()
+    expect(sessionStorage.getItem(keys.draft)).not.toBeNull()
     getSpy.mockRestore()
+  })
+
+  it("invalidates deferred recovery probing on logout and deletes its last trusted namespace", async () => {
+    mocks.submit.mockResolvedValue(pendingReceipt)
+    mocks.status.mockReturnValue(new Promise(() => undefined))
+    const first = await setup()
+    await act(async () => first.result.current.submit())
+    first.result.current.stopWaiting()
+    first.unmount()
+    const keys = first.module.buildStandaloneHtmlStorageKeys({
+      serverOrigin: "https://tldw.example",
+      principalId: "42"
+    })
+    const probe = renderHook(() => first.module.useStandaloneHtmlRecoveryProbe())
+    await waitFor(() => expect(probe.result.current.status).toBe("available"))
+
+    let resolveOldScope: ((value: unknown) => void) | undefined
+    mocks.getConfig.mockReturnValue(new Promise((resolve) => { resolveOldScope = resolve }))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+    await waitFor(() => expect(probe.result.current.status).toBe("checking"))
+    const callsBeforeLogout = mocks.getConfig.mock.calls.length
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "logout" }
+    })))
+
+    expect(probe.result.current.status).toBe("unavailable")
+    expect(mocks.getConfig).toHaveBeenCalledTimes(callsBeforeLogout)
+    expect(sessionStorage.getItem(keys.draft)).toBeNull()
+    expect(sessionStorage.getItem(keys.resume)).toBeNull()
+
+    resolveOldScope?.({ serverUrl: "https://tldw.example/base" })
+    await act(async () => Promise.resolve())
+    expect(probe.result.current.status).toBe("unavailable")
+    probe.unmount()
   })
 
   it.each([
@@ -430,13 +469,14 @@ describe("useStandaloneHtmlGeneration", () => {
     first.unmount()
 
     const second = renderHook(() => first.module.useStandaloneHtmlGeneration({
-      capability: capability as any,
+      capability: null,
       onCompleted: mocks.onCompleted,
       onStopWaiting: mocks.onStopWaiting
     }))
     await waitFor(() => expect(second.result.current.scopeReady).toBe(true))
     expect(second.result.current.draft.source).toBe("Bounded source")
     expect(second.result.current.recoveryAvailable).toBe(false)
+    expect(second.result.current.draftRecoveryAvailable).toBe(true)
     second.unmount()
   })
 
@@ -453,13 +493,14 @@ describe("useStandaloneHtmlGeneration", () => {
     first.unmount()
 
     const second = renderHook(() => first.module.useStandaloneHtmlGeneration({
-      capability: capability as any,
+      capability: null,
       onCompleted: mocks.onCompleted,
       onStopWaiting: mocks.onStopWaiting
     }))
     await waitFor(() => expect(second.result.current.scopeReady).toBe(true))
     expect(second.result.current.draft.source).toBe("Edited after failure")
     expect(second.result.current.recoveryAvailable).toBe(false)
+    expect(second.result.current.draftRecoveryAvailable).toBe(true)
     second.unmount()
   })
 
@@ -514,6 +555,75 @@ describe("useStandaloneHtmlGeneration", () => {
     expect(mocks.onCompleted).not.toHaveBeenCalled()
     expect(storedValues()).not.toContain("old-poll-presentation")
     expect(result.current.snapshot).toBeNull()
+  })
+
+  it("logout invalidates deferred old-session scope work and deletes the last trusted namespace", async () => {
+    const first = await setup()
+    const oldKeys = first.module.buildStandaloneHtmlStorageKeys({
+      serverOrigin: "https://tldw.example",
+      principalId: "42"
+    })
+    expect(sessionStorage.getItem(oldKeys.draft)).toContain("Bounded source")
+
+    let resolveOldScope: ((value: unknown) => void) | undefined
+    mocks.getConfig.mockReturnValue(new Promise((resolve) => { resolveOldScope = resolve }))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+    const callsBeforeLogout = mocks.getConfig.mock.calls.length
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "logout" }
+    })))
+
+    expect(first.result.current.draft.source).toBe("")
+    expect(sessionStorage.getItem(oldKeys.draft)).toBeNull()
+    expect(sessionStorage.getItem(oldKeys.resume)).toBeNull()
+    expect(mocks.getConfig).toHaveBeenCalledTimes(callsBeforeLogout)
+
+    resolveOldScope?.({ serverUrl: "https://tldw.example/base" })
+    await act(async () => Promise.resolve())
+    expect(first.result.current.draft.source).toBe("")
+    expect(sessionStorage.getItem(oldKeys.draft)).toBeNull()
+  })
+
+  it("deletes the last trusted namespace when a switch follows a verification outage", async () => {
+    const first = await setup()
+    const oldKeys = first.module.buildStandaloneHtmlStorageKeys({
+      serverOrigin: "https://tldw.example",
+      principalId: "42"
+    })
+    mocks.getConfig.mockRejectedValueOnce(new Error("temporary verification outage"))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+    await waitFor(() => expect(first.result.current.scopeError).toBe("Current server and account could not be confirmed."))
+    expect(sessionStorage.getItem(oldKeys.draft)).not.toBeNull()
+
+    mocks.getConfig.mockResolvedValue({ serverUrl: "https://other.example/base" })
+    mocks.getCurrentUser.mockResolvedValue({ id: 77, username: "other", is_active: true })
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "login" }
+    })))
+    await waitFor(() => expect(first.result.current.scopeReady).toBe(true))
+    expect(sessionStorage.getItem(oldKeys.draft)).toBeNull()
+    expect(sessionStorage.getItem(oldKeys.resume)).toBeNull()
+  })
+
+  it("deletes the last trusted namespace when logout follows a verification outage", async () => {
+    const first = await setup()
+    const oldKeys = first.module.buildStandaloneHtmlStorageKeys({
+      serverOrigin: "https://tldw.example",
+      principalId: "42"
+    })
+    mocks.getConfig.mockRejectedValue(new Error("temporary verification outage"))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+    await waitFor(() => expect(first.result.current.scopeError).toBe("Current server and account could not be confirmed."))
+    expect(sessionStorage.getItem(oldKeys.draft)).not.toBeNull()
+    const callsBeforeLogout = mocks.getConfig.mock.calls.length
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "logout" }
+    })))
+    expect(sessionStorage.getItem(oldKeys.draft)).toBeNull()
+    expect(sessionStorage.getItem(oldKeys.resume)).toBeNull()
+    expect(mocks.getConfig).toHaveBeenCalledTimes(callsBeforeLogout)
+    expect(first.result.current.draft.source).toBe("")
   })
 
   it("invalidates deferred POST work on pagehide while preserving pre-admission recovery", async () => {
@@ -678,7 +788,7 @@ describe("useStandaloneHtmlGeneration", () => {
     const { result } = await setup()
     await act(async () => result.current.submit())
 
-    expect(result.current.progressText?.length).toBeLessThanOrEqual(500)
+    expect(result.current.progressText).toBeNull()
     expect(result.current.safeError).toBe("generation_failed")
     expect(JSON.stringify(result.current)).not.toContain("PRIVATE SOURCE")
   })

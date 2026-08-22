@@ -265,4 +265,76 @@ describe("useSlidesCapabilities", () => {
     expect(result.current.capabilities).toBeNull()
     expect(mocks.getSlidesCapabilities).not.toHaveBeenCalled()
   })
+
+  it("surfaces a retryable error when post-response scope confirmation is unavailable", async () => {
+    mocks.getConfig
+      .mockResolvedValueOnce({ serverUrl: "https://tldw.example/base" })
+      .mockRejectedValueOnce(new Error("confirmation unavailable"))
+    mocks.getSlidesCapabilities.mockResolvedValue(enabledCapabilities)
+    const { useSlidesCapabilities } = await loadSubject()
+    const { result } = renderHook(() => useSlidesCapabilities())
+
+    await waitFor(() => expect(result.current.status).toBe("error"))
+    expect(result.current.capabilities).toBeNull()
+    expect(result.current.canGenerate).toBe(false)
+    expect(typeof result.current.retry).toBe("function")
+  })
+
+  it("surfaces a retryable error when post-response scope confirmation mismatches", async () => {
+    mocks.getConfig
+      .mockResolvedValueOnce({ serverUrl: "https://tldw.example/base" })
+      .mockResolvedValueOnce({ serverUrl: "https://other.example/base" })
+    mocks.getSlidesCapabilities.mockResolvedValue(enabledCapabilities)
+    const { useSlidesCapabilities } = await loadSubject()
+    const { result } = renderHook(() => useSlidesCapabilities())
+
+    await waitFor(() => expect(result.current.status).toBe("error"))
+    expect(result.current.capabilities).toBeNull()
+    expect(result.current.canGenerate).toBe(false)
+    expect(typeof result.current.retry).toBe("function")
+  })
+
+  it("invalidates logout without resolving old authority and waits for a later trusted boundary", async () => {
+    let resolveOld: ((value: unknown) => void) | undefined
+    const newCapabilities = {
+      ...enabledCapabilities,
+      generation_modes: {
+        ...enabledCapabilities.generation_modes,
+        standalone_html: {
+          ...enabledCapabilities.generation_modes.standalone_html,
+          model: "post-login-model",
+          generation_config_revision: `sha256:${"c".repeat(64)}`
+        }
+      }
+    }
+    mocks.getSlidesCapabilities
+      .mockResolvedValueOnce(enabledCapabilities)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve }))
+      .mockResolvedValue(newCapabilities)
+    const { useSlidesCapabilities } = await loadSubject()
+    const { result } = renderHook(() => useSlidesCapabilities())
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+    await waitFor(() => expect(mocks.getSlidesCapabilities).toHaveBeenCalledTimes(2))
+    const scopeCallsBeforeLogout = mocks.getConfig.mock.calls.length
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "logout" }
+    })))
+
+    expect(result.current.status).toBe("auth_required")
+    expect(result.current.capabilities).toBeNull()
+    await act(async () => Promise.resolve())
+    expect(mocks.getConfig).toHaveBeenCalledTimes(scopeCallsBeforeLogout)
+    expect(mocks.getSlidesCapabilities).toHaveBeenCalledTimes(2)
+
+    resolveOld?.(enabledCapabilities)
+    await act(async () => Promise.resolve())
+    expect(result.current.capabilities).toBeNull()
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "login" }
+    })))
+    await waitFor(() => expect(result.current.capabilities?.generation_modes.standalone_html.model).toBe("post-login-model"))
+  })
 })
