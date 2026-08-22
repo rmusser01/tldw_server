@@ -551,6 +551,23 @@ async def test_ncbi_trusted_input_callback_attribute_error_normalizes_but_adapte
         )
 
     _assert_typed_error(caught.value, "provider_payload_invalid")
+
+    def indexed_failure(_group: object):
+        raise IndexError("synthetic indexed trusted-input failure")
+
+    with pytest.raises(_adapter_error_type()) as indexed_trusted_input:
+        await module._execute_ncbi_esearch_summary(
+            object(),
+            forbidden_dispatch,
+            _CountingClock(),
+            trusted_inputs=indexed_failure,
+            parse_esearch_ids=lambda *_args, **_kwargs: (),
+            parse_summary_records=lambda *_args, **_kwargs: (),
+            strict_rate_envelope=False,
+        )
+
+    _assert_typed_error(indexed_trusted_input.value, "provider_payload_invalid")
+
     expected = _adapter_error_type()("provider_response_rejected")
 
     def typed_failure(_group: object):
