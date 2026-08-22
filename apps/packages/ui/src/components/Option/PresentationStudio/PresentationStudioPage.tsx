@@ -2,6 +2,7 @@ import React from "react"
 import { useNavigate } from "react-router-dom"
 
 import { ProjectWorkspace } from "./ProjectWorkspace"
+import { PresentationStudioIndex } from "./PresentationStudioIndex"
 import { VisualStylePicker } from "./VisualStylePicker"
 import { VisualStyleManager } from "./VisualStyleManager"
 import {
@@ -158,7 +159,12 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     if (!detailRequestRef.current || detailRequestRef.current.projectId !== projectId) {
       detailRequestRef.current = {
         projectId,
-        promise: tldwClient.getPresentation(projectId)
+        promise: tldwClient.getPresentationMetadata(projectId).then((metadata) => {
+          if (metadata.record.content_kind !== "structured_slides") {
+            throw new Error("Structured presentation required")
+          }
+          return tldwClient.getPresentation(projectId)
+        })
       }
     }
 
@@ -369,15 +375,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   }
 
   if (mode === "index") {
-    return (
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h1 className="text-2xl font-semibold text-slate-900">Presentation Studio</h1>
-        <p className="mt-2 max-w-2xl text-sm text-slate-600">
-          Create structured narrated slide decks, stage media per slide, and publish a
-          rendered presentation video when the server advertises render support.
-        </p>
-      </section>
-    )
+    return <PresentationStudioIndex />
   }
 
   if (mode === "new") {

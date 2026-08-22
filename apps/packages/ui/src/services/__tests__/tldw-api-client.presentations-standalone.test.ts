@@ -786,6 +786,40 @@ describe("standalone presentation client contracts", () => {
     )
   })
 
+  it("returns a validated receipt with bounded Retry-After metadata without changing the receipt-only method", async () => {
+    const client = createCore(async (request) => {
+      if (request.returnResponse) {
+        return {
+          ...responseEnvelope(pendingReceipt),
+          retryAfterMs: 90_000
+        }
+      }
+      return pendingReceipt
+    })
+
+    await expect(
+      (presentationsMethods as any).getPresentationGenerationStatus.call(
+        client,
+        pendingReceipt.generation_id
+      )
+    ).resolves.toEqual({
+      receipt: pendingReceipt,
+      retryAfterMs: 60_000
+    })
+    expect((client.request as any).mock.calls[0][0]).toEqual({
+      path: `/api/v1/slides/generations/${pendingReceipt.generation_id}`,
+      method: "GET",
+      returnResponse: true
+    })
+
+    await expect(
+      (presentationsMethods as any).getPresentationGeneration.call(
+        client,
+        pendingReceipt.generation_id
+      )
+    ).resolves.toEqual(pendingReceipt)
+  })
+
   it("fails closed for unknown or widened generation receipt shapes", async () => {
     const client = createCore(async () => ({
       ...pendingReceipt,

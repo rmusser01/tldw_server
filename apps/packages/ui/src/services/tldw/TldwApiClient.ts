@@ -792,6 +792,11 @@ export type PresentationGenerationReceipt =
       error_code: "generation_cancelled"
     })
 
+export type PresentationGenerationStatusResult = {
+  receipt: PresentationGenerationReceipt
+  retryAfterMs: number | null
+}
+
 export type PresentationRenderFormat = "mp4" | "webm"
 
 export type PresentationRenderJob = {

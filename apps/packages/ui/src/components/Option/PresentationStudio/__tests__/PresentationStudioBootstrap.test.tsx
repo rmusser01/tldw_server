@@ -19,6 +19,7 @@ const routerMocks = vi.hoisted(() => ({
 
 const clientMocks = vi.hoisted(() => ({
   createPresentation: vi.fn(),
+  getPresentationMetadata: vi.fn(),
   getPresentation: vi.fn(),
   listVisualStyles: vi.fn()
 }))
@@ -47,6 +48,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     style ? { ...style } : null,
   tldwClient: {
     createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args),
+    getPresentationMetadata: (...args: unknown[]) => clientMocks.getPresentationMetadata(...args),
     getPresentation: (...args: unknown[]) => clientMocks.getPresentation(...args),
     listVisualStyles: (...args: unknown[]) => clientMocks.listVisualStyles(...args)
   }
@@ -57,6 +59,7 @@ describe("PresentationStudioPage bootstrap", () => {
     usePresentationStudioStore.getState().reset()
     routerMocks.navigate.mockReset()
     clientMocks.createPresentation.mockReset()
+    clientMocks.getPresentationMetadata.mockReset()
     clientMocks.getPresentation.mockReset()
     clientMocks.listVisualStyles.mockReset()
     onlineMocks.useServerOnline.mockReturnValue(true)
@@ -81,6 +84,10 @@ describe("PresentationStudioPage bootstrap", () => {
         version: 1
       }
     ])
+    clientMocks.getPresentationMetadata.mockImplementation(async (presentationId: string) => ({
+      record: { id: presentationId, content_kind: "structured_slides" },
+      etag: null
+    }))
   })
 
   it("loads the precreate form in strict mode without creating until submit", async () => {

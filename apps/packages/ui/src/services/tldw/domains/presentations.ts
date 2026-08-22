@@ -18,6 +18,7 @@ import type {
   SlidesCapabilities,
   PresentationGenerationRequest,
   PresentationGenerationReceipt,
+  PresentationGenerationStatusResult,
   PresentationRenderJob,
   PresentationRenderFormat,
   PresentationRenderArtifactList,
@@ -131,6 +132,7 @@ const ACCEPT_CONTENT_KINDS_VALUE = "structured_slides,standalone_html"
 const MAX_STANDALONE_HTML_BYTES = 1_048_576
 const HTML_ATTACHMENT_CONTENT_TYPE = "application/octet-stream"
 const HTML_ATTACHMENT_DISPOSITION = 'attachment; filename="presentation.html"'
+const MAX_GENERATION_RETRY_AFTER_MS = 60_000
 
 const presentationNegotiationHeaders = (): Record<string, string> => ({
   [ACCEPT_CONTENT_KINDS_HEADER]: ACCEPT_CONTENT_KINDS_VALUE
@@ -843,6 +845,26 @@ export const presentationsMethods = {
       method: "GET"
     })
     return validateGenerationReceipt(response)
+  },
+
+  async getPresentationGenerationStatus(
+    this: TldwApiClientCore,
+    generationId: string
+  ): Promise<PresentationGenerationStatusResult> {
+    const response = await this.request<unknown>({
+      path: `/api/v1/slides/generations/${encodeURIComponent(generationId)}`,
+      method: "GET",
+      returnResponse: true
+    })
+    const record = toRecord(response)
+    const retryAfter = record.retryAfterMs
+    return {
+      receipt: validateGenerationReceipt(requireSuccessfulResponseData(response)),
+      retryAfterMs:
+        typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0
+          ? Math.min(MAX_GENERATION_RETRY_AFTER_MS, Math.floor(retryAfter))
+          : null
+    }
   },
 
   async createPresentation(

@@ -19,6 +19,7 @@ const routerMocks = vi.hoisted(() => ({
 
 const clientMocks = vi.hoisted(() => ({
   createPresentation: vi.fn(),
+  getPresentationMetadata: vi.fn(),
   getPresentation: vi.fn(),
   listVisualStyles: vi.fn(),
   createVisualStyle: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     style ? { ...style } : null,
   tldwClient: {
     createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args),
+    getPresentationMetadata: (...args: unknown[]) => clientMocks.getPresentationMetadata(...args),
     getPresentation: (...args: unknown[]) => clientMocks.getPresentation(...args),
     listVisualStyles: (...args: unknown[]) => clientMocks.listVisualStyles(...args),
     createVisualStyle: (...args: unknown[]) => clientMocks.createVisualStyle(...args),
@@ -88,6 +90,7 @@ describe("PresentationStudioPage", () => {
     usePresentationStudioStore.getState().reset()
     routerMocks.navigate.mockReset()
     clientMocks.createPresentation.mockReset()
+    clientMocks.getPresentationMetadata.mockReset()
     clientMocks.getPresentation.mockReset()
     clientMocks.listVisualStyles.mockReset()
     clientMocks.createVisualStyle.mockReset()
@@ -103,6 +106,10 @@ describe("PresentationStudioPage", () => {
       }
     })
     clientMocks.listVisualStyles.mockResolvedValue(visualStyles)
+    clientMocks.getPresentationMetadata.mockImplementation(async (presentationId: string) => ({
+      record: { id: presentationId, content_kind: "structured_slides" },
+      etag: null
+    }))
   })
 
   it("creates a blank project from the precreate form and redirects to its detail route", async () => {
@@ -330,6 +337,19 @@ describe("PresentationStudioPage", () => {
     await waitFor(() => {
       expect(usePresentationStudioStore.getState().theme).toBe("beige")
     })
+  })
+
+  it("checks source-free metadata before refusing a standalone HTML detail", async () => {
+    clientMocks.getPresentationMetadata.mockResolvedValue({
+      record: { id: "presentation-html", content_kind: "standalone_html" },
+      etag: null
+    })
+
+    render(<PresentationStudioPage mode="detail" projectId="presentation-html" />)
+
+    expect(await screen.findByText("Structured presentation required")).toBeVisible()
+    expect(clientMocks.getPresentationMetadata).toHaveBeenCalledWith("presentation-html")
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
   })
 
   it("updates the deck visual style preference on the detail page without mutating slides", async () => {
