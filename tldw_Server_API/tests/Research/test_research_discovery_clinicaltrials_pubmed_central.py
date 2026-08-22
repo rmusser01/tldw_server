@@ -53,6 +53,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     ReadinessState,
     RouteKind,
     RouteLimits,
+    RoutePolicy,
     RouteReadiness,
     SourceConstraint,
     canonical_policy_digest,
@@ -131,12 +132,59 @@ class _StringSubclass(str):
     """Equal-to-string mutation used to prove exact scalar type checks."""
 
 
+class _TupleSubclass(tuple):
+    """Equal-to-tuple mutation used to prove exact container checks."""
+
+
+class _RoutePolicySubclass(RoutePolicy):
+    """Structurally valid RoutePolicy lookalike with a non-exact type."""
+
+
+class _AccessRouteSubclass(AccessRoute):
+    """Structurally valid AccessRoute lookalike with a non-exact type."""
+
+
 def _module():
     return importlib.import_module(_MODULE)
 
 
 def _budget() -> BudgetCeilings:
     return BudgetCeilings(1, 2, 1, 0, 0, 40_000, 10)
+
+
+def _route_policy_subclass(policy: RoutePolicy) -> RoutePolicy:
+    return _RoutePolicySubclass(
+        policy_version=policy.policy_version,
+        origin=policy.origin,
+        methods=policy.methods,
+        paths=policy.paths,
+        allowed_query_keys=policy.allowed_query_keys,
+        limits=policy.limits,
+        pagination_query_key=policy.pagination_query_key,
+        pagination_json_body_key=policy.pagination_json_body_key,
+        allowed_json_body_keys=policy.allowed_json_body_keys,
+        integer_json_body_keys=policy.integer_json_body_keys,
+        policy_digest=policy.policy_digest,
+        path_template=policy.path_template,
+        query_value_policies=policy.query_value_policies,
+    )
+
+
+def _access_route_subclass(route: AccessRoute) -> AccessRoute:
+    return _AccessRouteSubclass(
+        route_id=route.route_id,
+        backend_id=route.backend_id,
+        adapter_id=route.adapter_id,
+        route_kind=route.route_kind,
+        query_modes=route.query_modes,
+        source_constraint=route.source_constraint,
+        attribution_basis=route.attribution_basis,
+        credential_requirement=route.credential_requirement,
+        fallback_order=route.fallback_order,
+        max_physical_dispatches=route.max_physical_dispatches,
+        adapter_version=route.adapter_version,
+        policy=route.policy,
+    )
 
 
 def test_shadow_registry_replaces_only_pubmed_with_the_identity_overlay() -> None:
@@ -842,6 +890,20 @@ def test_clinicaltrials_trusted_inputs_reject_group_identity_policy_and_filter_d
         _module()._trusted_clinicaltrials_inputs(group)
 
 
+@pytest.mark.parametrize(
+    "field",
+    ("route_id", "backend_id", "adapter_id", "adapter_version", "policy_digest"),
+)
+def test_clinicaltrials_trusted_inputs_reject_equal_valued_group_identity_string_subclasses(
+    field: str,
+) -> None:
+    group = _cloned_clinical_group()
+    object.__setattr__(group, field, _StringSubclass(getattr(group, field)))
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
 def test_clinicaltrials_trusted_inputs_reject_intent_route_identity_drift() -> None:
     group = _cloned_clinical_group()
     intent = group.intents[0]
@@ -937,6 +999,32 @@ def test_clinicaltrials_trusted_inputs_reject_independent_intent_limit_drift(fie
 def test_clinicaltrials_trusted_inputs_reject_independent_intent_material_drift(field: str, value: object) -> None:
     group = _cloned_clinical_group()
     object.__setattr__(group.intents[0], field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+@pytest.mark.parametrize("field", ("route_id", "policy_digest", "method", "path"))
+def test_clinicaltrials_trusted_inputs_reject_equal_valued_intent_identity_string_subclasses(
+    field: str,
+) -> None:
+    group = _cloned_clinical_group()
+    intent = group.intents[0]
+    object.__setattr__(intent, field, _StringSubclass(getattr(intent, field)))
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+@pytest.mark.parametrize("pair_index", range(6))
+@pytest.mark.parametrize("field", ("name", "value"))
+def test_clinicaltrials_trusted_inputs_require_exact_strings_for_every_query_pair_field(
+    pair_index: int,
+    field: str,
+) -> None:
+    group = _cloned_clinical_group()
+    pair = group.intents[0].query_pairs[pair_index]
+    object.__setattr__(pair, field, _StringSubclass(getattr(pair, field)))
 
     with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
         _module()._trusted_clinicaltrials_inputs(group)
@@ -2079,6 +2167,128 @@ def test_partial_pmc_planner_identity_or_generic_shape_fails_closed(route_change
         )
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "route_type",
+        "route_id",
+        "backend_id",
+        "adapter_id",
+        "adapter_version",
+        "attribution_basis",
+        "policy_type",
+        "policy_version",
+        "origin_scheme",
+        "origin_host",
+        "methods_tuple",
+        "method_member",
+        "paths_tuple",
+        "path_member",
+        "allowed_query_keys_tuple",
+        "allowed_query_key_member",
+        "pagination_query_key",
+        "allowed_json_body_keys",
+        "integer_json_body_keys",
+        "query_value_policies",
+    ),
+)
+def test_pmc_planner_rejects_equal_valued_route_policy_type_lookalikes(mutation: str) -> None:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_central_esearch_summary_direct")
+    policy = route.policy
+    if mutation == "route_type":
+        registry = _registry_with_pmc_route(_access_route_subclass(route))
+    elif mutation in {"route_id", "backend_id", "adapter_id", "adapter_version", "attribution_basis"}:
+        object.__setattr__(route, mutation, _StringSubclass(getattr(route, mutation)))
+    elif mutation == "policy_type":
+        object.__setattr__(route, "policy", _route_policy_subclass(policy))
+    elif mutation == "policy_version":
+        object.__setattr__(policy, "policy_version", _StringSubclass(policy.policy_version))
+    elif mutation in {"origin_scheme", "origin_host"}:
+        field = mutation.removeprefix("origin_")
+        object.__setattr__(policy.origin, field, _StringSubclass(getattr(policy.origin, field)))
+    elif mutation == "methods_tuple":
+        object.__setattr__(policy, "methods", _TupleSubclass(policy.methods))
+    elif mutation == "method_member":
+        object.__setattr__(policy, "methods", (_StringSubclass(policy.methods[0]),))
+    elif mutation == "paths_tuple":
+        object.__setattr__(policy, "paths", _TupleSubclass(policy.paths))
+    elif mutation == "path_member":
+        object.__setattr__(
+            policy,
+            "paths",
+            (_StringSubclass(policy.paths[0]), policy.paths[1]),
+        )
+    elif mutation == "allowed_query_keys_tuple":
+        object.__setattr__(policy, "allowed_query_keys", _TupleSubclass(policy.allowed_query_keys))
+    elif mutation == "allowed_query_key_member":
+        object.__setattr__(
+            policy,
+            "allowed_query_keys",
+            (_StringSubclass(policy.allowed_query_keys[0]),) + policy.allowed_query_keys[1:],
+        )
+    elif mutation == "pagination_query_key":
+        object.__setattr__(
+            policy,
+            "pagination_query_key",
+            _StringSubclass(policy.pagination_query_key),
+        )
+    else:
+        object.__setattr__(policy, mutation, _TupleSubclass())
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("pubmed_central",), GeneralFreeTextQuery("alpha beta"), (), 10),
+            registry=registry,
+            readiness=_module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.SYNTHETIC),
+            budget=_pmc_budget(result_limit=10),
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "route_type",
+        "route_id",
+        "backend_id",
+        "adapter_id",
+        "adapter_version",
+        "policy_type",
+        "policy_version",
+    ),
+)
+def test_clinicaltrials_shared_policy_owner_requires_exact_identity_types(mutation: str) -> None:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("clinicaltrials_gov_studies_search_direct")
+    if mutation == "route_type":
+        mutated = _access_route_subclass(route)
+        registry = DiscoveryRegistry(
+            catalog_version=registry.catalog_version,
+            registry_version="clinicaltrials-owner-type-mutation-v1",
+            sources=registry.sources,
+            routes=tuple(mutated if item.route_id == route.route_id else item for item in registry.routes),
+            backends=registry.backends,
+        )
+    elif mutation == "policy_type":
+        object.__setattr__(route, "policy", _route_policy_subclass(route.policy))
+    elif mutation == "policy_version":
+        object.__setattr__(
+            route.policy,
+            "policy_version",
+            _StringSubclass(route.policy.policy_version),
+        )
+    else:
+        object.__setattr__(route, mutation, _StringSubclass(getattr(route, mutation)))
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("clinicaltrials_gov",), GeneralFreeTextQuery("alpha beta"), (), 10),
+            registry=registry,
+            readiness=_clinicaltrials_test_readiness(ExecutionMode.SYNTHETIC),
+            budget=_clinical_budget(result_limit=10),
+        )
+
+
 def test_generic_route_with_only_pmc_policy_marker_fails_closed() -> None:
     foundation = foundation_registry()
     original = foundation.get_route("arxiv_arxiv_api_direct")
@@ -2288,6 +2498,20 @@ def test_pmc_trusted_inputs_reject_group_identity_policy_and_filter_drift(
 
 
 @pytest.mark.parametrize(
+    "field",
+    ("route_id", "backend_id", "adapter_id", "adapter_version", "policy_digest"),
+)
+def test_pmc_trusted_inputs_reject_equal_valued_group_identity_string_subclasses(
+    field: str,
+) -> None:
+    group = _cloned_pmc_group()
+    object.__setattr__(group, field, _StringSubclass(getattr(group, field)))
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     (
         ("logical_attempt_id", ""),
@@ -2420,6 +2644,20 @@ def test_pmc_trusted_inputs_reject_each_intent_identity_operation_and_material_d
         _module()._trusted_pubmed_central_inputs(group)
 
 
+@pytest.mark.parametrize("intent_index", (0, 1))
+@pytest.mark.parametrize("field", ("route_id", "policy_digest", "method", "path"))
+def test_pmc_trusted_inputs_reject_equal_valued_intent_identity_string_subclasses(
+    intent_index: int,
+    field: str,
+) -> None:
+    group = _cloned_pmc_group()
+    intent = group.intents[intent_index]
+    object.__setattr__(intent, field, _StringSubclass(getattr(intent, field)))
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
 @pytest.mark.parametrize(
     ("intent_index", "field"),
     (
@@ -2492,6 +2730,24 @@ def test_pmc_trusted_inputs_reject_query_pair_order_or_non_pair_member(intent_in
 
 
 @pytest.mark.parametrize(
+    ("intent_index", "pair_index"),
+    tuple((0, index) for index in range(7)) + tuple((1, index) for index in range(4)),
+)
+@pytest.mark.parametrize("field", ("name", "value"))
+def test_pmc_trusted_inputs_require_exact_strings_for_every_query_pair_field(
+    intent_index: int,
+    pair_index: int,
+    field: str,
+) -> None:
+    group = _cloned_pmc_group()
+    pair = group.intents[intent_index].query_pairs[pair_index]
+    object.__setattr__(pair, field, _StringSubclass(getattr(pair, field)))
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     (
         ("binding_id", "pubmed_esearch_ids"),
@@ -2503,6 +2759,16 @@ def test_pmc_trusted_inputs_reject_query_pair_order_or_non_pair_member(intent_in
 def test_pmc_trusted_inputs_reject_every_binding_field_drift(field: str, value: object) -> None:
     group = _cloned_pmc_group()
     object.__setattr__(group.intents[1].query_bindings[0], field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_pubmed_central_inputs(group)
+
+
+@pytest.mark.parametrize("field", ("binding_id", "query_name"))
+def test_pmc_trusted_inputs_reject_equal_valued_binding_identity_string_subclasses(field: str) -> None:
+    group = _cloned_pmc_group()
+    binding = group.intents[1].query_bindings[0]
+    object.__setattr__(binding, field, _StringSubclass(getattr(binding, field)))
 
     with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
         _module()._trusted_pubmed_central_inputs(group)

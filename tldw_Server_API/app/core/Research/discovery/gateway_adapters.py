@@ -1398,8 +1398,7 @@ def _is_sealed_identity_pubmed_group(group: PlannedDispatchGroup) -> bool:
         or group.policy_digest != _PUBMED_IDENTITY_POLICY_DIGEST
         or type(group.normalized_query) is not str
         or not group.normalized_query
-        or type(group.filters) is not tuple
-        or group.filters != ()
+        or not _is_sealed_identity_pubmed_filters(group.filters)
         or type(group.fallback_order) is not int
         or group.fallback_order != 0
         or type(group.limits) is not RouteLimits
@@ -1485,6 +1484,17 @@ def _is_exact_identity_pubmed_allowance(allowance: DispatchAllowance) -> bool:
         allowance.retries,
     )
     return all(type(value) is int for value in values) and values == (2, 1, 0, 0)
+
+
+def _is_sealed_identity_pubmed_filters(filters: object) -> bool:
+    """Preserve legacy filter metadata without permitting identity overrides."""
+    return type(filters) is tuple and all(
+        type(pair) is QueryPair
+        and type(pair.name) is str
+        and pair.name not in {"tool", "email"}
+        and type(pair.value) is str
+        for pair in filters
+    )
 
 
 def _trusted_pubmed_inputs(

@@ -342,22 +342,34 @@ def _exact_route_limits(value: object, expected: RouteLimits) -> bool:
     return all(type(item) is int for item in actual_values) and actual_values == expected_values
 
 
+def _is_exact_string(value: object, expected: str) -> bool:
+    """Match one frozen string value without accepting a subclass."""
+    return type(value) is str and value == expected
+
+
+def _query_pairs_have_exact_strings(pairs: tuple[QueryPair, ...]) -> bool:
+    """Require exact string scalars for every trusted query pair."""
+    return all(type(pair.name) is str and type(pair.value) is str for pair in pairs)
+
+
 def _trusted_clinicaltrials_inputs(
     group: object,
 ) -> tuple[PlannedDispatchGroup, _ParsingProfile, int, int]:
     """Return exact group, profile, max input bytes, and requested page size."""
-    if type(group) is not PlannedDispatchGroup:
+    if (
+        type(group) is not PlannedDispatchGroup
+        or not _is_exact_string(group.route_id, "clinicaltrials_gov_studies_search_direct")
+        or not _is_exact_string(group.backend_id, "clinicaltrials_gov_api_v2")
+        or not _is_exact_string(group.adapter_id, CLINICALTRIALS_GOV_ADAPTER_ID)
+        or not _is_exact_string(group.adapter_version, CLINICALTRIALS_GOV_ADAPTER_VERSION)
+    ):
         raise DiscoveryAdapterError("provider_payload_invalid")
     profile = _FAMILY_PARSING_PROFILES.get((group.adapter_id, group.adapter_version))
     exact_policy = _clinicaltrials_route().policy
     exact_limits = RouteLimits(2, 0, 0, 20_000, 2_097_152, 100, 16_384)
     if (
-        group.route_id != "clinicaltrials_gov_studies_search_direct"
-        or group.backend_id != "clinicaltrials_gov_api_v2"
-        or group.adapter_id != CLINICALTRIALS_GOV_ADAPTER_ID
-        or group.adapter_version != CLINICALTRIALS_GOV_ADAPTER_VERSION
-        or profile is None
-        or group.policy_digest != exact_policy.policy_digest
+        profile is None
+        or not _is_exact_string(group.policy_digest, exact_policy.policy_digest)
         or not _exact_route_limits(group.limits, exact_limits)
         or type(group.normalized_query) is not str
         or not group.normalized_query
@@ -402,6 +414,7 @@ def _trusted_clinicaltrials_inputs(
         type(intent) is not DispatchIntent
         or type(intent.query_pairs) is not tuple
         or any(type(pair) is not QueryPair for pair in intent.query_pairs)
+        or not _query_pairs_have_exact_strings(intent.query_pairs)
         or type(intent.json_body_pairs) is not tuple
         or intent.json_body_pairs != ()
         or type(intent.query_bindings) is not tuple
@@ -411,12 +424,11 @@ def _trusted_clinicaltrials_inputs(
         raise DiscoveryAdapterError("provider_payload_invalid")
     pairs = tuple((pair.name, pair.value) for pair in intent.query_pairs)
     if (
-        intent.route_id != group.route_id
-        or intent.route_id != "clinicaltrials_gov_studies_search_direct"
+        not _is_exact_string(intent.route_id, group.route_id)
         or intent.operation_kind is not OperationKind.SEARCH
-        or intent.method != "GET"
-        or intent.path != "/api/v2/studies"
-        or intent.policy_digest != group.policy_digest
+        or not _is_exact_string(intent.method, "GET")
+        or not _is_exact_string(intent.path, "/api/v2/studies")
+        or not _is_exact_string(intent.policy_digest, group.policy_digest)
         or len(pairs) != 6
         or tuple(name for name, _value in pairs)
         != ("query.term", "format", "markupFormat", "fields", "pageSize", "countTotal")
@@ -872,11 +884,11 @@ def _trusted_pubmed_central_inputs(
     exact_limits = RouteLimits(1, 0, 0, 20_000, 2_097_152, 100, 16_384)
     if (
         type(group) is not PlannedDispatchGroup
-        or group.route_id != "pubmed_central_esearch_summary_direct"
-        or group.backend_id != "ncbi_eutils_pmc"
-        or group.adapter_id != PUBMED_CENTRAL_ADAPTER_ID
-        or group.adapter_version != PUBMED_CENTRAL_ADAPTER_VERSION
-        or group.policy_digest != exact_policy.policy_digest
+        or not _is_exact_string(group.route_id, "pubmed_central_esearch_summary_direct")
+        or not _is_exact_string(group.backend_id, "ncbi_eutils_pmc")
+        or not _is_exact_string(group.adapter_id, PUBMED_CENTRAL_ADAPTER_ID)
+        or not _is_exact_string(group.adapter_version, PUBMED_CENTRAL_ADAPTER_VERSION)
+        or not _is_exact_string(group.policy_digest, exact_policy.policy_digest)
         or not _exact_route_limits(group.limits, exact_limits)
         or type(group.normalized_query) is not str
         or not group.normalized_query
@@ -923,6 +935,8 @@ def _trusted_pubmed_central_inputs(
         type(search.query_pairs) is not tuple
         or type(summary.query_pairs) is not tuple
         or any(type(pair) is not QueryPair for pair in search.query_pairs + summary.query_pairs)
+        or not _query_pairs_have_exact_strings(search.query_pairs)
+        or not _query_pairs_have_exact_strings(summary.query_pairs)
         or type(search.json_body_pairs) is not tuple
         or search.json_body_pairs != ()
         or type(summary.json_body_pairs) is not tuple
@@ -939,16 +953,16 @@ def _trusted_pubmed_central_inputs(
     search_pairs = tuple((pair.name, pair.value) for pair in search.query_pairs)
     summary_pairs = tuple((pair.name, pair.value) for pair in summary.query_pairs)
     if (
-        search.route_id != group.route_id
-        or summary.route_id != group.route_id
-        or search.policy_digest != group.policy_digest
-        or summary.policy_digest != group.policy_digest
+        not _is_exact_string(search.route_id, group.route_id)
+        or not _is_exact_string(summary.route_id, group.route_id)
+        or not _is_exact_string(search.policy_digest, group.policy_digest)
+        or not _is_exact_string(summary.policy_digest, group.policy_digest)
         or search.operation_kind is not OperationKind.SEARCH
         or summary.operation_kind is not OperationKind.CONDITIONAL_SUMMARY
-        or search.method != "GET"
-        or summary.method != "GET"
-        or search.path != "/entrez/eutils/esearch.fcgi"
-        or summary.path != "/entrez/eutils/esummary.fcgi"
+        or not _is_exact_string(search.method, "GET")
+        or not _is_exact_string(summary.method, "GET")
+        or not _is_exact_string(search.path, "/entrez/eutils/esearch.fcgi")
+        or not _is_exact_string(summary.path, "/entrez/eutils/esummary.fcgi")
         or len(search_pairs) != 7
         or len(summary_pairs) != 4
         or search_pairs[0] != ("db", "pmc")
@@ -991,8 +1005,8 @@ def _trusted_pubmed_central_inputs(
     binding = summary.query_bindings[0]
     if (
         type(binding) is not DeferredNumericCSVQueryBinding
-        or binding.binding_id != "pmc_esearch_ids"
-        or binding.query_name != "id"
+        or not _is_exact_string(binding.binding_id, "pmc_esearch_ids")
+        or not _is_exact_string(binding.query_name, "id")
         or type(binding.max_items) is not int
         or type(binding.max_item_chars) is not int
         or binding.max_item_chars != 16

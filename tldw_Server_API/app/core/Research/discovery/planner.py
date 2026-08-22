@@ -38,6 +38,7 @@ from .contracts import (
     ReadinessOverlay,
     ReadinessState,
     RouteLimits,
+    RoutePolicy,
     SkippedCode,
     SkippedStatus,
     SkippedTarget,
@@ -127,11 +128,18 @@ def _has_pubmed_identity_component(route: AccessRoute) -> bool:
 
 def _is_pubmed_central_route(route: AccessRoute) -> bool:
     """Return whether one route has the complete sealed PMC identity tuple."""
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
     return (
-        route.route_id == _PUBMED_CENTRAL_ROUTE_ID
+        type(route.route_id) is str
+        and route.route_id == _PUBMED_CENTRAL_ROUTE_ID
+        and type(route.backend_id) is str
         and route.backend_id == _PUBMED_CENTRAL_BACKEND_ID
+        and type(route.adapter_id) is str
         and route.adapter_id == _PUBMED_CENTRAL_ADAPTER_ID
+        and type(route.adapter_version) is str
         and route.adapter_version == _PUBMED_CENTRAL_ADAPTER_VERSION
+        and type(route.policy.policy_version) is str
         and route.policy.policy_version == _PUBMED_CENTRAL_POLICY_VERSION
     )
 
@@ -151,11 +159,18 @@ def _has_pubmed_central_identity_component(route: AccessRoute) -> bool:
 
 def _is_clinicaltrials_shared_policy_owner(route: AccessRoute) -> bool:
     """Exclude the one exact sibling route that owns the shared policy marker."""
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
     return (
-        route.route_id == "clinicaltrials_gov_studies_search_direct"
+        type(route.route_id) is str
+        and route.route_id == "clinicaltrials_gov_studies_search_direct"
+        and type(route.backend_id) is str
         and route.backend_id == "clinicaltrials_gov_api_v2"
+        and type(route.adapter_id) is str
         and route.adapter_id == "clinicaltrials_gov_v2"
+        and type(route.adapter_version) is str
         and route.adapter_version == "clinicaltrials-gov-v2"
+        and type(route.policy.policy_version) is str
         and route.policy.policy_version == _PUBMED_CENTRAL_POLICY_VERSION
     )
 
@@ -281,10 +296,13 @@ def _has_exact_pubmed_identity_limits(limits: object) -> bool:
 
 
 def _has_exact_pubmed_central_policy(route: AccessRoute) -> bool:
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
     policy = route.policy
     origin = policy.origin
     return (
-        _is_exact_contract_enum_member(
+        _is_pubmed_central_route(route)
+        and _is_exact_contract_enum_member(
             route.route_kind,
             enum_name="RouteKind",
             member_name="DIRECT",
@@ -306,21 +324,35 @@ def _has_exact_pubmed_central_policy(route: AccessRoute) -> bool:
         and route.max_physical_dispatches == 2
         and type(route.fallback_order) is int
         and route.fallback_order == 0
+        and type(policy.policy_version) is str
+        and policy.policy_version == _PUBMED_CENTRAL_POLICY_VERSION
         and type(origin) is ExactOrigin
+        and type(origin.scheme) is str
         and origin.scheme == "https"
+        and type(origin.host) is str
         and origin.host == "eutils.ncbi.nlm.nih.gov"
         and type(origin.port) is int
         and origin.port == 443
         and type(policy.policy_digest) is str
         and policy.policy_digest == _PUBMED_CENTRAL_POLICY_DIGEST
-        and policy.methods == ("GET",)
-        and policy.paths == ("/entrez/eutils/esearch.fcgi", "/entrez/eutils/esummary.fcgi")
+        and _is_exact_string_tuple(policy.methods, ("GET",))
+        and _is_exact_string_tuple(
+            policy.paths,
+            ("/entrez/eutils/esearch.fcgi", "/entrez/eutils/esummary.fcgi"),
+        )
         and policy.path_template is None
-        and policy.allowed_query_keys == ("db", "term", "retstart", "retmax", "retmode", "tool", "email", "id")
+        and _is_exact_string_tuple(
+            policy.allowed_query_keys,
+            ("db", "term", "retstart", "retmax", "retmode", "tool", "email", "id"),
+        )
+        and type(policy.pagination_query_key) is str
         and policy.pagination_query_key == "retstart"
         and policy.pagination_json_body_key is None
+        and type(policy.allowed_json_body_keys) is tuple
         and policy.allowed_json_body_keys == ()
+        and type(policy.integer_json_body_keys) is tuple
         and policy.integer_json_body_keys == ()
+        and type(policy.query_value_policies) is tuple
         and policy.query_value_policies == ()
         and _has_exact_pubmed_central_limits(policy.limits)
     )

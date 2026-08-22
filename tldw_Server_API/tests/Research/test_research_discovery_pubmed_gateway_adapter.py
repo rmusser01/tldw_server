@@ -80,6 +80,10 @@ _NORMALIZED_KEYS = {
 }
 
 
+class _StringSubclass(str):
+    pass
+
+
 def _module():
     return importlib.import_module(_ADAPTER_MODULE)
 
@@ -114,13 +118,18 @@ def _registry_with_response_limit(max_response_bytes: int | None) -> DiscoveryRe
     )
 
 
-def _plan_for(*, result_limit: int = 2, max_response_bytes: int | None = None):
+def _plan_for(
+    *,
+    result_limit: int = 2,
+    max_response_bytes: int | None = None,
+    filters: tuple[QueryPair, ...] = (),
+):
     registry = _registry_with_response_limit(max_response_bytes)
     plan = compile_discovery_plan(
         PlanningRequest(
             source_ids=("pubmed",),
             query="  BOUNDED   Discovery  ",
-            filters=(),
+            filters=filters,
             result_limit=result_limit,
         ),
         registry=registry,
@@ -288,6 +297,7 @@ async def _invoke(
     *,
     result_limit: int = 2,
     max_response_bytes: int | None = None,
+    filters: tuple[QueryPair, ...] = (),
     statuses: list[object] | None = None,
     content_types: list[str | None] | None = None,
     retry_afters: list[object] | None = None,
@@ -296,6 +306,7 @@ async def _invoke(
     registry, plan = _plan_for(
         result_limit=result_limit,
         max_response_bytes=max_response_bytes,
+        filters=filters,
     )
     group = plan.dispatch_groups[0]
     route = registry.get_route(group.route_id)
@@ -533,13 +544,17 @@ async def test_executor_empty_search_creates_only_one_dispatch_id() -> None:
     assert result.usage.accounting.created == result.usage.accounting.debited == 1
 
 
-def _overlay_plan_for(*, result_limit: int = 2):
+def _overlay_plan_for(
+    *,
+    result_limit: int = 2,
+    filters: tuple[QueryPair, ...] = (),
+):
     registry = clinicaltrials_pubmed_central_shadow_registry()
     plan = compile_discovery_plan(
         PlanningRequest(
             source_ids=("pubmed",),
             query="  BOUNDED   Discovery  ",
-            filters=(),
+            filters=filters,
             result_limit=result_limit,
         ),
         registry=registry,
@@ -574,7 +589,21 @@ def _mutated_overlay_group(mutation: str):
         attempts = tuple(replace(attempt, catalog_source_id="pubmed_forged") for attempt in group.logical_attempts)
         return replace(group, logical_attempts=attempts)
     if mutation == "filters":
-        return replace(group, filters=(QueryPair("provider", "forged"),))
+        object.__setattr__(group, "filters", (object(),))
+        return group
+    if mutation == "filters_container":
+        object.__setattr__(group, "filters", [QueryPair("year", "2025")])
+        return group
+    if mutation in {"filters_tool", "filters_email"}:
+        name = "tool" if mutation == "filters_tool" else "email"
+        object.__setattr__(group, "filters", (QueryPair(name, "attacker"),))
+        return group
+    if mutation in {"filters_name_type", "filters_value_type"}:
+        pair = QueryPair("year", "2025")
+        field = "name" if mutation == "filters_name_type" else "value"
+        object.__setattr__(pair, field, _StringSubclass(getattr(pair, field)))
+        object.__setattr__(group, "filters", (pair,))
+        return group
     if mutation == "fallback_order":
         return replace(group, fallback_order=1)
     if mutation == "intent_route_alignment":
@@ -624,6 +653,11 @@ def _forge_plan_group_for_policy(plan, policy_digest: str):
         "allowance",
         "logical_source",
         "filters",
+        "filters_container",
+        "filters_tool",
+        "filters_email",
+        "filters_name_type",
+        "filters_value_type",
         "fallback_order",
         "intent_route_alignment",
         "intent_policy_alignment",
@@ -642,6 +676,36 @@ async def test_identity_overlay_adapter_rejects_group_trust_drift_before_dispatc
 
     _assert_typed_error(caught.value, "provider_payload_invalid")
     assert dispatch.calls == []
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_preserves_legacy_non_identity_filters() -> None:
+    filters = (QueryPair("year", "2025"), QueryPair("language", "eng"))
+    canonical_filters = tuple(sorted(filters, key=lambda pair: (pair.name, pair.value)))
+    foundation_result, _foundation_dispatch, foundation_group = await _invoke(
+        [_fixture("esearch_success"), _fixture("esummary_success")],
+        filters=filters,
+    )
+    registry, plan = _overlay_plan_for(filters=filters)
+    overlay_group = plan.dispatch_groups[0]
+    route = registry.get_route(overlay_group.route_id)
+    overlay_dispatch = _RecordingDispatch(
+        [
+            _response(route, overlay_group.intents[0], _fixture("esearch_success")),
+            _response(route, overlay_group.intents[1], _fixture("esummary_success")),
+        ]
+    )
+
+    overlay_result = await _module().foundation_gateway_adapters()[_ADAPTER_ID](
+        overlay_group,
+        overlay_dispatch,
+    )
+
+    assert foundation_group.filters == overlay_group.filters == canonical_filters
+    assert tuple(candidate.record for candidate in overlay_result.candidates) == tuple(
+        candidate.record for candidate in foundation_result.candidates
+    )
+    assert len(overlay_dispatch.calls) == 2
 
 
 @pytest.mark.asyncio
