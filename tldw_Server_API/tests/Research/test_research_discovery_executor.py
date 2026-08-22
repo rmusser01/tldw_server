@@ -7,7 +7,7 @@ import asyncio
 import gc
 import inspect
 import weakref
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, asdict, replace
 from typing import Any
 from urllib.parse import urlencode
 
@@ -16,22 +16,36 @@ import pytest
 from tldw_Server_API.app.core.Research.discovery import executor as executor_module
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     QUERY_MODE_NOT_SUPPORTED_SKIP_REASON,
+    AccessRoute,
+    BackendDefinition,
+    BoundedDecimalQueryValuePolicy,
     BoundedTextQueryValuePolicy,
     BudgetCeilings,
+    CredentialRequirement,
     CredentialStatus,
     DispatchIntent,
+    ExactOrigin,
+    ExactQueryValuePolicy,
     ExecutionMode,
+    LiteralTermsQueryValuePolicy,
+    OpaqueCursorQueryValuePolicy,
     OperationKind,
     PathSlot,
     PathSlotKind,
     PathTemplate,
     PredicateOperator,
     QueryMode,
+    ReadinessOverlay,
     ReadinessState,
+    RouteKind,
+    RouteLimits,
+    RoutePolicy,
+    RouteReadiness,
     SkippedCode,
     SkippedStatus,
     SkippedTarget,
     SourceConstraint,
+    SourceDefinition,
     SourcePredicate,
     SourceRouteReference,
 )
@@ -50,6 +64,7 @@ from tldw_Server_API.app.core.Research.discovery.gateway import (
     DiscoveryGatewayError,
     DiscoveryGatewayResponse,
     DiscoveryGatewayTrace,
+    dispatch_once,
 )
 from tldw_Server_API.app.core.Research.discovery.planner import (
     DateIntervalQuery,
@@ -64,7 +79,11 @@ from tldw_Server_API.app.core.Research.discovery.registry import (
     foundation_readiness,
     foundation_registry,
 )
-from tldw_Server_API.app.core.Security.http_hop import HTTPHopLimits
+from tldw_Server_API.app.core.Security.http_hop import (
+    HTTPHopLimits,
+    HTTPHopResponse,
+    NormalizedHTTPHopRequest,
+)
 
 pytestmark = pytest.mark.unit
 ASYNC_HANDSHAKE_TIMEOUT_SEC = 5.0
@@ -312,6 +331,88 @@ def _paginated_figshare_plan(*, max_pages: int = 2):
         registry=registry,
         readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
         budget=BudgetCeilings(1, max_pages, max_pages, 0, 0, 20_000 * max_pages, 3),
+    )
+    return registry, plan
+
+
+def _opaque_query_registry() -> tuple[DiscoveryRegistry, ReadinessOverlay]:
+    limits = RouteLimits(2, 0, 0, 250, 65_536, 100, 16_384)
+    policy = RoutePolicy(
+        policy_version="opaque-query-policy-v1",
+        origin=ExactOrigin("https", "clinical.example.test", 443),
+        methods=("GET",),
+        paths=("/api/v2/studies",),
+        allowed_query_keys=("query.term", "pageToken", "format", "pageSize"),
+        limits=limits,
+        pagination_query_key="pageToken",
+        query_value_policies=(
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            OpaqueCursorQueryValuePolicy("pageToken", 1_024, required=False),
+            ExactQueryValuePolicy("format", "json"),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+    )
+    route = AccessRoute(
+        route_id="opaque_query_search",
+        backend_id="opaque_query_backend",
+        adapter_id="opaque_query_adapter",
+        route_kind=RouteKind.DIRECT,
+        query_modes=(QueryMode.GENERAL_FREE_TEXT,),
+        source_constraint=SourceConstraint.NATIVE_CORPUS,
+        attribution_basis="native_response",
+        credential_requirement=CredentialRequirement.NONE,
+        fallback_order=0,
+        max_physical_dispatches=2,
+        adapter_version="opaque-v1",
+        policy=policy,
+    )
+    registry = DiscoveryRegistry(
+        catalog_version="opaque-query-catalog-v1",
+        registry_version="opaque-query-registry-v1",
+        sources=(
+            SourceDefinition(
+                catalog_source_id="opaque_query_source",
+                display_name="Opaque Query Source",
+                aliases=(),
+                categories=("synthetic",),
+                content_types=("records",),
+                surfaces=("standalone_search",),
+                route_references=(SourceRouteReference(route.route_id, None),),
+                site_hosts=("clinical.example.test",),
+                priority=10,
+                catalog_version="opaque-query-catalog-v1",
+            ),
+        ),
+        routes=(route,),
+        backends=(BackendDefinition("opaque_query_backend", "Opaque Query Backend"),),
+    )
+    readiness = ReadinessOverlay(
+        overlay_version="opaque-query-readiness-v1",
+        execution_mode=ExecutionMode.SYNTHETIC,
+        routes=(
+            RouteReadiness(
+                route.route_id,
+                ReadinessState.READY,
+                CredentialStatus.NOT_REQUIRED,
+                "synthetic_ready",
+            ),
+        ),
+    )
+    return registry, readiness
+
+
+def _opaque_query_paginated_plan():
+    registry, readiness = _opaque_query_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest(
+            ("opaque_query_source",),
+            GeneralFreeTextQuery("alpha beta"),
+            (),
+            100,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
     )
     return registry, plan
 
@@ -3144,6 +3245,314 @@ async def test_initial_search_and_one_typed_page_are_independently_accounted() -
         result.usage.redirects,
         result.usage.retries,
     ) == (1, 2, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_opaque_query_cursor_is_inserted_in_policy_order_and_fully_accounted() -> None:
+    registry, plan = _opaque_query_paginated_plan()
+    group = plan.dispatch_groups[0]
+    opaque_cursor = executor_module.OpaqueCursor("second-token")
+    gateway_intents: list[DispatchIntent] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_intents.append(intent)
+        return _gateway_response(route, intent)
+
+    async def opaque_adapter(group, dispatch):
+        await dispatch(group.intents[0])
+        await dispatch(group.intents[0], cursor=opaque_cursor)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: opaque_adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("opaque-initial", "opaque-continuation")).__next__,
+    )
+
+    assert tuple(intent.query_pairs for intent in gateway_intents) == (
+        (
+            executor_module.QueryPair("query.term", '"alpha" AND "beta"'),
+            executor_module.QueryPair("format", "json"),
+            executor_module.QueryPair("pageSize", "50"),
+        ),
+        (
+            executor_module.QueryPair("query.term", '"alpha" AND "beta"'),
+            executor_module.QueryPair("pageToken", "second-token"),
+            executor_module.QueryPair("format", "json"),
+            executor_module.QueryPair("pageSize", "50"),
+        ),
+    )
+    assert group.intents[0].query_pairs == gateway_intents[0].query_pairs
+    assert "pageToken" not in {pair.name for pair in group.intents[0].query_pairs}
+    assert result.usage.accounting == DispatchAccounting(2, 2, 0, 0, 2)
+    assert result.usage.pages == 2
+
+
+@pytest.mark.asyncio
+async def test_opaque_query_cursor_reaches_exactly_one_encoded_hop_per_page() -> None:
+    registry, plan = _opaque_query_paginated_plan()
+    group = plan.dispatch_groups[0]
+    hop_requests: list[NormalizedHTTPHopRequest] = []
+    gateway_intents: list[DispatchIntent] = []
+    journal = AttemptJournal(physical_ceiling=2)
+    cursor = executor_module.OpaqueCursor("second+token")
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        hop_requests.append(request)
+        return HTTPHopResponse(
+            status_code=200,
+            headers=(("content-type", "application/json"),),
+            body=b'{"data":[]}',
+            resolved_ips=("93.184.216.34",),
+            connected_ip="93.184.216.34",
+            response_header_bytes=512,
+            wire_bytes=11,
+        )
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_intents.append(intent)
+        return await dispatch_once(
+            route,
+            intent,
+            is_policy_active=is_policy_active,
+            one_hop=one_hop,
+        )
+
+    async def opaque_adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=cursor)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: opaque_adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("opaque-initial", "opaque-continuation")).__next__,
+        journal=journal,
+    )
+
+    assert tuple(request.target for request in hop_requests) == (
+        "/api/v2/studies?query.term=%22alpha%22%20AND%20%22beta%22&format=json&pageSize=50",
+        "/api/v2/studies?query.term=%22alpha%22%20AND%20%22beta%22&pageToken=second%2Btoken&format=json&pageSize=50",
+    )
+    assert result.usage.pages == 2
+    assert result.usage.accounting == DispatchAccounting(2, 2, 0, 0, 2)
+    assert all(
+        "second+token" not in repr(value)
+        for value in (cursor, gateway_intents[1], hop_requests[1], result, result.usage, journal)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route_kind", ("opaque", "numeric"))
+async def test_query_cursor_type_must_match_declared_policy_before_reservation(route_kind: str) -> None:
+    if route_kind == "opaque":
+        registry, plan = _opaque_query_paginated_plan()
+        cursor = NumericCursor(1)
+    else:
+        registry, plan = _paginated_semantic_scholar_plan()
+        cursor = executor_module.OpaqueCursor("second-token")
+    group = plan.dispatch_groups[0]
+    gateway_calls: list[DispatchIntent] = []
+    dispatch_ids: list[str] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return _gateway_response(route, intent)
+
+    def dispatch_id_factory() -> str:
+        dispatch_id = f"dispatch-{len(dispatch_ids) + 1}"
+        dispatch_ids.append(dispatch_id)
+        return dispatch_id
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=cursor)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=dispatch_id_factory,
+    )
+
+    assert result.logical_outcomes[0].code == "invalid_pagination_cursor"
+    assert len(dispatch_ids) == len(gateway_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_opaque_query_cursor_rejects_repeat_without_imposing_order() -> None:
+    registry, readiness = _opaque_query_registry()
+    route = registry.get_route("opaque_query_search")
+    registry = replace(
+        registry,
+        routes=(
+            replace(
+                route,
+                max_physical_dispatches=3,
+                policy=replace(route.policy, limits=replace(route.policy.limits, max_pages=3), policy_digest=""),
+            ),
+        ),
+    )
+    plan = compile_discovery_plan(
+        PlanningRequest(("opaque_query_source",), GeneralFreeTextQuery("alpha beta"), (), 100),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 3, 3, 0, 0, 750, 100),
+    )
+    group = plan.dispatch_groups[0]
+    gateway_intents: list[DispatchIntent] = []
+
+    async def gateway(bound_route, intent, *, is_policy_active):
+        gateway_intents.append(intent)
+        return _gateway_response(bound_route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=executor_module.OpaqueCursor("z-token"))
+        await dispatch(bound_group.intents[0], cursor=executor_module.OpaqueCursor("a-token"))
+        await dispatch(bound_group.intents[0], cursor=executor_module.OpaqueCursor("z-token"))
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("opaque-initial", "opaque-z", "opaque-a")).__next__,
+    )
+
+    assert tuple(
+        next(pair.value for pair in intent.query_pairs if pair.name == "pageToken") for intent in gateway_intents[1:]
+    ) == ("z-token", "a-token")
+    assert result.logical_outcomes[0].code == "pagination_cursor_repeated"
+    assert result.usage.accounting == DispatchAccounting(3, 3, 0, 0, 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_value", ("", "control\n", "caf\u00e9", "x" * 1_025))
+async def test_opaque_query_cursor_rejects_mutated_invalid_values_before_reservation(invalid_value: str) -> None:
+    registry, plan = _opaque_query_paginated_plan()
+    group = plan.dispatch_groups[0]
+    cursor = executor_module.OpaqueCursor("second-token")
+    object.__setattr__(cursor, "value", invalid_value)
+    dispatch_ids: list[str] = []
+    gateway_calls: list[DispatchIntent] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return _gateway_response(route, intent)
+
+    def dispatch_id_factory() -> str:
+        dispatch_id = f"dispatch-{len(dispatch_ids) + 1}"
+        dispatch_ids.append(dispatch_id)
+        return dispatch_id
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=cursor)
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=dispatch_id_factory,
+    )
+
+    assert result.logical_outcomes[0].code == "invalid_pagination_cursor"
+    assert len(dispatch_ids) == len(gateway_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_opaque_query_cursor_cannot_mutate_bound_intent_material() -> None:
+    registry, plan = _opaque_query_paginated_plan()
+    group = plan.dispatch_groups[0]
+    planned_intent = group.intents[0]
+    gateway_intents: list[DispatchIntent] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_intents.append(intent)
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=executor_module.OpaqueCursor("second-token"))
+        return DiscoveryAdapterResult(candidates=())
+
+    await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("opaque-initial", "opaque-continuation")).__next__,
+    )
+
+    assert group.intents[0] == planned_intent
+    assert group.intents[0].query_pairs == planned_intent.query_pairs
+    assert "pageToken" not in {pair.name for pair in group.intents[0].query_pairs}
+    assert next(pair.value for pair in gateway_intents[1].query_pairs if pair.name == "pageToken") == "second-token"
+
+
+@pytest.mark.asyncio
+async def test_opaque_continuation_cancellation_leaves_no_unused_reservation() -> None:
+    registry, plan = _opaque_query_paginated_plan()
+    group = plan.dispatch_groups[0]
+    journal = AttemptJournal(physical_ceiling=2)
+    cancelled = False
+
+    async def gateway(route, intent, *, is_policy_active):
+        nonlocal cancelled
+        cancelled = True
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        await dispatch(bound_group.intents[0], cursor=executor_module.OpaqueCursor("second-token"))
+        return DiscoveryAdapterResult(candidates=())
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("opaque-initial", "must-not-reserve")).__next__,
+        journal=journal,
+        cancellation_check=lambda: cancelled,
+    )
+
+    assert result.logical_outcomes[0].code == "execution_cancelled"
+    assert journal.accounting == DispatchAccounting(
+        created=1,
+        debited=1,
+        released=0,
+        outstanding=0,
+        physical_ceiling=2,
+    )
+
+
+def test_opaque_and_deferred_binding_values_are_diagnostic_only() -> None:
+    token = "opaque-token-sentinel"
+    opaque_cursor = executor_module.OpaqueCursor(token)
+    binding = NumericCSVBindingValues("pubmed_ids", (101, 202))
+
+    assert token not in repr(opaque_cursor)
+    assert "101" not in repr(binding)
+    assert binding == NumericCSVBindingValues("pubmed_ids", (101, 202))
+    assert asdict(binding) == {"binding_id": "pubmed_ids", "values": (101, 202)}
 
 
 @pytest.mark.asyncio
