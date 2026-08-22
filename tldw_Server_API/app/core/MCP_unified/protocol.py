@@ -94,6 +94,9 @@ from .tool_execution.models import PreparedExecutionPolicy
 from .tool_execution.runtime import ToolExecutionRuntime
 from .tool_execution.security import ToolExecutionSecurity
 from .tool_observability import ensure_tool_definition_eval_metadata
+from .transport.guarded_slides_websocket import (
+    is_guarded_slides_websocket_metadata,
+)
 
 
 # JSON-RPC 2.0 Error Codes
@@ -1950,6 +1953,8 @@ class MCPProtocol:
             allowed_modules = {str(m).strip() for m in module_filter if str(m).strip()}
 
         for module_id, module in modules.items():
+            if module_id.lower() == "slides" and not self._slides_tools_allowed(context):
+                continue
             if allowed_modules is not None and module_id not in allowed_modules:
                 continue
             if catalog_filter is not None:
@@ -2166,7 +2171,25 @@ class MCPProtocol:
         context: RequestContext
     ) -> dict[str, Any]:
         """Execute a tool."""
+        tool_name = params.get("name") if isinstance(params, dict) else None
+        if isinstance(tool_name, str) and tool_name.startswith("slides.") and not self._slides_tools_allowed(context):
+            return {
+                "success": False,
+                "error": {
+                    "code": "slides_websocket_guard_required",
+                    "operation": tool_name,
+                },
+            }
         return await self._tool_execution.handle_tools_call(params, context)
+
+    @staticmethod
+    def _slides_tools_allowed(context: RequestContext) -> bool:
+        """Allow Slides normally except on WebSockets lacking the trusted guard."""
+
+        metadata = context.metadata if isinstance(context.metadata, dict) else {}
+        if metadata.get("mcp_transport") != "websocket":
+            return True
+        return is_guarded_slides_websocket_metadata(metadata)
 
     async def prepare_tool_call(
         self,

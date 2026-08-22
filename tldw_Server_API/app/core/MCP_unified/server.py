@@ -39,6 +39,7 @@ from .module_surface import describe_module_surface
 from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
+from .transport.guarded_slides_websocket import guarded_slides_websocket_metadata
 
 _MCP_SERVER_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -117,6 +118,12 @@ async def _await_owned_shutdown_task(
             return cancellation, exc
         else:
             return cancellation, None
+
+
+def _websocket_transport_metadata(scope: dict[str, Any]) -> dict[str, Any]:
+    """Copy trusted guarded-protocol state from an ASGI WebSocket scope."""
+
+    return guarded_slides_websocket_metadata(scope)
 
 
 def _is_authnz_exception(exc: Exception) -> bool:
@@ -268,7 +275,9 @@ class WebSocketConnection:
             self.message_count += 1
             return data
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
-            logger.bind(connection_id=self.connection_id).error(f"Error receiving from WebSocket {self.connection_id}: {e}")
+            logger.bind(connection_id=self.connection_id).error(
+                f"Error receiving from WebSocket {self.connection_id}: {e}"
+            )
             self.error_count += 1
             raise
 
@@ -283,6 +292,7 @@ class WebSocketConnection:
 @dataclass
 class SessionData:
     """Lightweight in-memory session state for HTTP/WS MCP sessions."""
+
     session_id: str
     user_id: Optional[str] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -562,15 +572,9 @@ class MCPServer:
         """Create the host websocket stream wrapper for an accepted MCP session."""
         return self.websocket_stream_factory(
             websocket,
-            heartbeat_interval_s=(
-                float(self.config.ws_ping_interval)
-                if self.config.ws_ping_interval
-                else None
-            ),
+            heartbeat_interval_s=(float(self.config.ws_ping_interval) if self.config.ws_ping_interval else None),
             idle_timeout_s=(
-                float(self.config.ws_idle_timeout_seconds)
-                if self.config.ws_idle_timeout_seconds
-                else None
+                float(self.config.ws_idle_timeout_seconds) if self.config.ws_idle_timeout_seconds else None
             ),
             close_on_done=True,
             labels={"component": "mcp", "endpoint": "mcp_ws"},
@@ -600,6 +604,7 @@ class MCPServer:
             if not text:
                 return text
             import re as _re
+
             text = _re.sub(r"(Bearer)\s+[A-Za-z0-9._\-~+/=]+", r"\1 ****", text, flags=_re.IGNORECASE)
             patterns = [
                 r"(api[_-]?key)\s*[:=]\s*([^\s,;]+)",
@@ -719,7 +724,9 @@ class MCPServer:
                 # Warn if demo auth is enabled in a non-debug environment
                 try:
                     if self._env_flag_enabled("MCP_ENABLE_DEMO_AUTH") and not self.config.debug_mode:
-                        logger.warning("MCP_ENABLE_DEMO_AUTH is enabled - for development only; DO NOT USE IN PRODUCTION")
+                        logger.warning(
+                            "MCP_ENABLE_DEMO_AUTH is enabled - for development only; DO NOT USE IN PRODUCTION"
+                        )
                 except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
                     pass
                 # Start module health monitoring
@@ -970,6 +977,7 @@ class MCPServer:
         # Autoload modules from YAML config and/or MCP_MODULES env var
         try:
             import importlib
+
             # Lazy import yaml to avoid hard dependency during tests if not installed
             try:
                 import yaml  # type: ignore
@@ -994,9 +1002,7 @@ class MCPServer:
                 except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                     logger.error(f"Failed to read MCP modules YAML {cfg_path}: {e}")
             elif os.path.exists(cfg_path) and yaml is None:
-                logger.warning(
-                    f"MCP modules config found at {cfg_path} but PyYAML not installed; skipping"
-                )
+                logger.warning(f"MCP modules config found at {cfg_path} but PyYAML not installed; skipping")
 
             # 2) Environment variable list (comma-separated)
             # Example: MCP_MODULES="media=tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule"
@@ -1005,11 +1011,13 @@ class MCPServer:
                 for item in [s for s in env_spec.split(",") if s.strip()]:
                     try:
                         mod_id, class_ref = item.split("=", 1)
-                        modules_to_load.append({
-                            "id": mod_id.strip(),
-                            "class": class_ref.strip(),
-                            "enabled": True,
-                        })
+                        modules_to_load.append(
+                            {
+                                "id": mod_id.strip(),
+                                "class": class_ref.strip(),
+                                "enabled": True,
+                            }
+                        )
                     except ValueError:
                         logger.warning(f"Invalid MCP_MODULES item format: '{item}'")
 
@@ -1018,25 +1026,8 @@ class MCPServer:
             test_mode = self._is_test_mode()
             if enable_media_flag and not modules_to_load:
                 default_media_path = self._default_media_db_path()
-                modules_to_load.append({
-                    "id": "media",
-                    "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule",
-                    "enabled": True,
-                    "name": "Media",
-                    "version": "1.0.0",
-                    "department": "media",
-                    "settings": {
-                        "db_path": default_media_path,
-                        "cache_ttl": 300,
-                    },
-                })
-                logger.info("MCP_ENABLE_MEDIA_MODULE=true; queuing MediaModule for registration")
-
-            # 4) Test convenience: default-enable media module when TEST_MODE unless explicitly disabled
-            if test_mode and not any(m.get("id") == "media" for m in modules_to_load):
-                if not self._env_flag_explicitly_disabled("MCP_ENABLE_MEDIA_MODULE"):
-                    default_media_path = self._default_media_db_path()
-                    modules_to_load.append({
+                modules_to_load.append(
+                    {
                         "id": "media",
                         "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule",
                         "enabled": True,
@@ -1047,101 +1038,138 @@ class MCPServer:
                             "db_path": default_media_path,
                             "cache_ttl": 300,
                         },
-                    })
+                    }
+                )
+                logger.info("MCP_ENABLE_MEDIA_MODULE=true; queuing MediaModule for registration")
+
+            # 4) Test convenience: default-enable media module when TEST_MODE unless explicitly disabled
+            if test_mode and not any(m.get("id") == "media" for m in modules_to_load):
+                if not self._env_flag_explicitly_disabled("MCP_ENABLE_MEDIA_MODULE"):
+                    default_media_path = self._default_media_db_path()
+                    modules_to_load.append(
+                        {
+                            "id": "media",
+                            "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule",
+                            "enabled": True,
+                            "name": "Media",
+                            "version": "1.0.0",
+                            "department": "media",
+                            "settings": {
+                                "db_path": default_media_path,
+                                "cache_ttl": 300,
+                            },
+                        }
+                    )
                     logger.info("TEST_MODE auto-enabled MediaModule for deterministic tool catalogs")
 
             # 5) Filesystem module requires explicit opt-in for workspace-bounded fs primitives.
             if not any(m.get("id") == "filesystem" for m in modules_to_load if isinstance(m, dict)):
                 if self._env_flag_enabled("MCP_ENABLE_FILESYSTEM_MODULE"):
-                    modules_to_load.append({
-                        "id": "filesystem",
-                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule",
-                        "enabled": True,
-                        "name": "Filesystem",
-                        "version": "1.0.0",
-                        "department": "management",
-                        "settings": {},
-                    })
+                    modules_to_load.append(
+                        {
+                            "id": "filesystem",
+                            "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule",
+                            "enabled": True,
+                            "name": "Filesystem",
+                            "version": "1.0.0",
+                            "department": "management",
+                            "settings": {},
+                        }
+                    )
                     logger.info("MCP_ENABLE_FILESYSTEM_MODULE=true; queuing FilesystemModule for registration")
                 else:
-                    modules_to_load.append({
-                        "id": "filesystem",
-                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule",
-                        "enabled": False,
-                        "name": "Filesystem",
-                        "version": "1.0.0",
-                        "department": "management",
-                        "settings": {},
-                    })
-                    logger.info("MCP filesystem module available but disabled; set MCP_ENABLE_FILESYSTEM_MODULE=true or enable it in YAML to opt in")
+                    modules_to_load.append(
+                        {
+                            "id": "filesystem",
+                            "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule",
+                            "enabled": False,
+                            "name": "Filesystem",
+                            "version": "1.0.0",
+                            "department": "management",
+                            "settings": {},
+                        }
+                    )
+                    logger.info(
+                        "MCP filesystem module available but disabled; set MCP_ENABLE_FILESYSTEM_MODULE=true or enable it in YAML to opt in"
+                    )
 
             # 6) Optional: Git module - disabled by default
             if self._env_flag_enabled("MCP_ENABLE_GIT_MODULE"):
                 if not any(m.get("id") == "git" for m in modules_to_load if isinstance(m, dict)):
-                    modules_to_load.append({
-                        "id": "git",
-                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.git_module:GitModule",
-                        "enabled": True,
-                        "name": "Git",
-                        "version": "1.0.0",
-                        "department": "management",
-                        "settings": {},
-                    })
+                    modules_to_load.append(
+                        {
+                            "id": "git",
+                            "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.git_module:GitModule",
+                            "enabled": True,
+                            "name": "Git",
+                            "version": "1.0.0",
+                            "department": "management",
+                            "settings": {},
+                        }
+                    )
                     logger.info("MCP_ENABLE_GIT_MODULE=true; queuing GitModule for registration")
 
             # 6b) Optional: Web fetch module - disabled by default (external network).
             if self._env_flag_enabled("MCP_ENABLE_WEB_FETCH_MODULE"):
                 if not any(m.get("id") == "web_fetch" for m in modules_to_load if isinstance(m, dict)):
-                    modules_to_load.append({
-                        "id": "web_fetch",
-                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_fetch_module:WebFetchModule",
-                        "enabled": True,
-                        "name": "WebFetch",
-                        "version": "1.0.0",
-                        "department": "research",
-                        "settings": {},
-                    })
+                    modules_to_load.append(
+                        {
+                            "id": "web_fetch",
+                            "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_fetch_module:WebFetchModule",
+                            "enabled": True,
+                            "name": "WebFetch",
+                            "version": "1.0.0",
+                            "department": "research",
+                            "settings": {},
+                        }
+                    )
                     logger.info("MCP_ENABLE_WEB_FETCH_MODULE=true; queuing WebFetchModule for registration")
 
             # 6c) Optional: Web search module - disabled by default (external network).
             if self._env_flag_enabled("MCP_ENABLE_WEB_SEARCH_MODULE"):
                 if not any(m.get("id") == "web_search" for m in modules_to_load if isinstance(m, dict)):
-                    modules_to_load.append({
-                        "id": "web_search",
-                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_search_module:WebSearchModule",
-                        "enabled": True,
-                        "name": "WebSearch",
-                        "version": "1.0.0",
-                        "department": "research",
-                        "settings": {},
-                    })
+                    modules_to_load.append(
+                        {
+                            "id": "web_search",
+                            "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_search_module:WebSearchModule",
+                            "enabled": True,
+                            "name": "WebSearch",
+                            "version": "1.0.0",
+                            "department": "research",
+                            "settings": {},
+                        }
+                    )
                     logger.info("MCP_ENABLE_WEB_SEARCH_MODULE=true; queuing WebSearchModule for registration")
 
             # 6d) Optional: Web research module - disabled by default (composes search + fetch).
             if self._env_flag_enabled("MCP_ENABLE_WEB_RESEARCH_MODULE"):
                 if not any(m.get("id") == "web_research" for m in modules_to_load if isinstance(m, dict)):
-                    modules_to_load.append({
-                        "id": "web_research",
-                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_research_module:WebResearchModule",
-                        "enabled": True,
-                        "name": "WebResearch",
-                        "version": "1.0.0",
-                        "department": "research",
-                        "settings": {},
-                    })
+                    modules_to_load.append(
+                        {
+                            "id": "web_research",
+                            "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_research_module:WebResearchModule",
+                            "enabled": True,
+                            "name": "WebResearch",
+                            "version": "1.0.0",
+                            "department": "research",
+                            "settings": {},
+                        }
+                    )
                     logger.info("MCP_ENABLE_WEB_RESEARCH_MODULE=true; queuing WebResearchModule for registration")
 
             # 7) Optional: Sandbox module (code interpreter) - disabled by default
             if self._env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):
-                modules_to_load.append({
-                    "id": "sandbox",
-                    "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.sandbox_module:SandboxModule",
-                    "enabled": True,
-                    "name": "Sandbox Engine",
-                    "version": "1.0.0",
-                    "department": "management",
-                    "settings": {},
-                })
+                modules_to_load.append(
+                    {
+                        "id": "sandbox",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.sandbox_module:SandboxModule",
+                        "enabled": True,
+                        "name": "Sandbox Engine",
+                        "version": "1.0.0",
+                        "department": "management",
+                        "settings": {},
+                    }
+                )
                 logger.info("MCP_ENABLE_SANDBOX_MODULE=true; queuing SandboxModule for registration")
 
             # 8) Optional: Browser CDP module - enabled by explicit flag or configured CDP URL.
@@ -1150,24 +1178,26 @@ class MCPServer:
             browser_cdp_enabled = self._env_flag_enabled("MCP_ENABLE_BROWSER_CDP_MODULE")
             if not browser_cdp_disabled and (browser_cdp_enabled or browser_cdp_url):
                 if not any(m.get("id") == "browser_cdp" for m in modules_to_load if isinstance(m, dict)):
-                    modules_to_load.append({
-                        "id": "browser_cdp",
-                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.browser_cdp_module:BrowserCDPModule",
-                        "enabled": True,
-                        "name": "Browser CDP",
-                        "version": "1.0.0",
-                        "department": "browser",
-                        "settings": {
-                            "debugger_url": "${MCP_BROWSER_CDP_URL:-}",
-                            "request_timeout_seconds": "${MCP_BROWSER_CDP_REQUEST_TIMEOUT_SECONDS:-3.0}",
-                            "observation_window_ms": "${MCP_BROWSER_CDP_OBSERVATION_WINDOW_MS:-250}",
-                            "max_observation_window_ms": "${MCP_BROWSER_CDP_MAX_OBSERVATION_WINDOW_MS:-5000}",
-                            "max_events": "${MCP_BROWSER_CDP_MAX_EVENTS:-100}",
-                            "max_snapshot_nodes": "${MCP_BROWSER_CDP_MAX_SNAPSHOT_NODES:-200}",
-                            "screenshot_max_bytes": "${MCP_BROWSER_CDP_SCREENSHOT_MAX_BYTES:-2000000}",
-                            "allow_non_loopback": "${MCP_BROWSER_CDP_ALLOW_NON_LOOPBACK:-false}",
-                        },
-                    })
+                    modules_to_load.append(
+                        {
+                            "id": "browser_cdp",
+                            "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.browser_cdp_module:BrowserCDPModule",
+                            "enabled": True,
+                            "name": "Browser CDP",
+                            "version": "1.0.0",
+                            "department": "browser",
+                            "settings": {
+                                "debugger_url": "${MCP_BROWSER_CDP_URL:-}",
+                                "request_timeout_seconds": "${MCP_BROWSER_CDP_REQUEST_TIMEOUT_SECONDS:-3.0}",
+                                "observation_window_ms": "${MCP_BROWSER_CDP_OBSERVATION_WINDOW_MS:-250}",
+                                "max_observation_window_ms": "${MCP_BROWSER_CDP_MAX_OBSERVATION_WINDOW_MS:-5000}",
+                                "max_events": "${MCP_BROWSER_CDP_MAX_EVENTS:-100}",
+                                "max_snapshot_nodes": "${MCP_BROWSER_CDP_MAX_SNAPSHOT_NODES:-200}",
+                                "screenshot_max_bytes": "${MCP_BROWSER_CDP_SCREENSHOT_MAX_BYTES:-2000000}",
+                                "allow_non_loopback": "${MCP_BROWSER_CDP_ALLOW_NON_LOOPBACK:-false}",
+                            },
+                        }
+                    )
                     logger.info("MCP browser CDP module enabled/configured; queuing BrowserCDPModule for registration")
 
             # 9) Optional: RPG module for campaign/session orchestration tools.
@@ -1188,6 +1218,7 @@ class MCPServer:
 
             # Register all specified modules
             from .modules.base import ModuleConfig  # Local import to avoid cycles
+
             for m in modules_to_load:
                 if not m or not isinstance(m, dict):
                     continue
@@ -1199,13 +1230,9 @@ class MCPServer:
                     class_ref = m["class"]
                     module_path, class_name = class_ref.split(":", 1)
                     # Restrict module autoload to allowed namespace for safety
-                    allowed_prefixes = (
-                        "tldw_Server_API.app.core.MCP_unified.modules.implementations",
-                    )
+                    allowed_prefixes = ("tldw_Server_API.app.core.MCP_unified.modules.implementations",)
                     if not any(module_path.startswith(p) for p in allowed_prefixes):
-                        logger.warning(
-                            f"Blocked module autoload for '{class_ref}': outside allowed namespace"
-                        )
+                        logger.warning(f"Blocked module autoload for '{class_ref}': outside allowed namespace")
                         continue
                     cls = getattr(importlib.import_module(module_path), class_name)
 
@@ -1436,7 +1463,10 @@ class MCPServer:
         cwd_key = _normalize_optional_text(cwd)
 
         controller = get_ip_access_controller()
-        metadata: dict[str, Any] = {}
+        scope = getattr(websocket, "scope", {})
+        metadata = _websocket_transport_metadata(
+            scope if isinstance(scope, dict) else {}
+        )
         if user_id is not None:
             principal = getattr(websocket_state, "auth_principal", None)
             metadata["auth_via"] = "single_user_session"
@@ -1456,9 +1486,7 @@ class MCPServer:
         resolved_ip = controller.resolve_client_ip(raw_remote_ip, forwarded_for, real_ip)
         # Test harness mapping and bypass: allow WS in pytest/TEST_MODE and map 'testclient' to loopback
         try:
-            _is_test_env = bool(
-                self._is_explicit_pytest_runtime() or self._is_test_mode()
-            )
+            _is_test_env = bool(self._is_explicit_pytest_runtime() or self._is_test_mode())
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             _is_test_env = False
         if resolved_ip == "testclient" or resolved_ip is None and _is_test_env:
@@ -1500,7 +1528,9 @@ class MCPServer:
         if (auth_token or api_key) and not self.config.ws_allow_query_auth:
             try:
                 # Emit a deprecation warning; ignore query tokens unless explicitly allowed
-                logger.warning("WS query-parameter authentication is disabled; pass Authorization bearer token or X-API-KEY header instead")
+                logger.warning(
+                    "WS query-parameter authentication is disabled; pass Authorization bearer token or X-API-KEY header instead"
+                )
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
                 pass
             auth_token = None
@@ -1606,22 +1636,22 @@ class MCPServer:
                         api_key,
                         ip_address=client_ip,
                     )
-                    if info and info.get('user_id'):
-                        user_id = str(info['user_id'])
+                    if info and info.get("user_id"):
+                        user_id = str(info["user_id"])
                         # Attach org/team context
-                        if info.get('org_id') is not None:
-                            metadata['org_id'] = info.get('org_id')
-                        if info.get('team_id') is not None:
-                            metadata['team_id'] = info.get('team_id')
-                        roles = metadata.setdefault('roles', [])
-                        if 'api_client' not in roles:
-                            roles.append('api_client')
+                        if info.get("org_id") is not None:
+                            metadata["org_id"] = info.get("org_id")
+                        if info.get("team_id") is not None:
+                            metadata["team_id"] = info.get("team_id")
+                        roles = metadata.setdefault("roles", [])
+                        if "api_client" not in roles:
+                            roles.append("api_client")
                         try:
                             scopes = self._extract_api_key_permissions(info)
                             if scopes:
                                 metadata["api_key_scopes"] = list(scopes)
                                 metadata["auth_via"] = "api_key"
-                                perms = metadata.setdefault('permissions', [])
+                                perms = metadata.setdefault("permissions", [])
                                 for scope in scopes:
                                     if scope not in perms:
                                         perms.append(scope)
@@ -1642,6 +1672,7 @@ class MCPServer:
             if _is_test_env:
                 # Honor test env override to avoid stale cached config in pytest.
                 import os as _os
+
                 override = _os.getenv("MCP_WS_AUTH_REQUIRED")
                 if override is not None:
                     override_val = self._is_truthy(override)
@@ -1850,6 +1881,7 @@ class MCPServer:
                         elif isinstance(cfg, str):
                             import base64
                             import json as _json
+
                             try:
                                 decoded = base64.b64decode(cfg).decode("utf-8")
                                 safe_incoming = _json.loads(decoded)
@@ -1928,9 +1960,7 @@ class MCPServer:
                             error=MCPError(
                                 code=-32002,
                                 message=f"Rate limit exceeded. Retry after {e.retry_after} seconds",
-                                data={
-                                    "hint": "Reduce request frequency or wait before retrying."
-                                },
+                                data={"hint": "Reduce request frequency or wait before retrying."},
                             ),
                             id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
                         )
@@ -1968,7 +1998,7 @@ class MCPServer:
         request: MCPRequest,
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
     ) -> MCPResponse:
         """
         Handle an HTTP MCP request.
@@ -2022,6 +2052,7 @@ class MCPServer:
 
         # Create request context
         metadata_map = dict(metadata or {})
+        metadata_map["mcp_transport"] = "http"
         try:
             if sess and sess.safe_config:
                 metadata_map["safe_config"] = dict(sess.safe_config)
@@ -2059,8 +2090,8 @@ class MCPServer:
                 status_code=429,
                 detail={
                     "message": f"Rate limit exceeded. Retry after {e.retry_after} seconds",
-                    "hint": "Throttle tool calls or wait for the cooldown before retrying."
-                }
+                    "hint": "Throttle tool calls or wait for the cooldown before retrying.",
+                },
             ) from e
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error processing HTTP request: {self._mask_secrets(str(e))}")
@@ -2071,7 +2102,7 @@ class MCPServer:
         requests: list[MCPRequest],
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
     ) -> Optional[list[MCPResponse]]:
         """
         Handle a batch of HTTP MCP requests with consistent session semantics.
@@ -2121,6 +2152,7 @@ class MCPServer:
 
         # Create request context
         metadata_map = dict(metadata or {})
+        metadata_map["mcp_transport"] = "http"
         try:
             if sess and sess.safe_config:
                 metadata_map["safe_config"] = dict(sess.safe_config)
@@ -2162,8 +2194,8 @@ class MCPServer:
                 status_code=429,
                 detail={
                     "message": f"Rate limit exceeded. Retry after {e.retry_after} seconds",
-                    "hint": "Throttle tool calls or wait for the cooldown before retrying."
-                }
+                    "hint": "Throttle tool calls or wait for the cooldown before retrying.",
+                },
             ) from e
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error processing HTTP batch request: {self._mask_secrets(str(e))}")
@@ -2174,9 +2206,7 @@ class MCPServer:
         async with self.connection_lock:
             tasks = []
             for connection in self.connections.values():
-                tasks.append(
-                    connection.close(code=1001, reason="Server shutdown")
-                )
+                tasks.append(connection.close(code=1001, reason="Server shutdown"))
 
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
@@ -2207,7 +2237,7 @@ class MCPServer:
         connection_stats = {
             "total": len(self.connections),
             "authenticated": sum(1 for c in self.connections.values() if c.user_id),
-            "anonymous": sum(1 for c in self.connections.values() if not c.user_id)
+            "anonymous": sum(1 for c in self.connections.values() if not c.user_id),
         }
 
         return {
@@ -2219,7 +2249,7 @@ class MCPServer:
                 "total": len(health_results),
                 "healthy": sum(1 for h in health_results.values() if h.is_healthy),
                 "degraded": sum(1 for h in health_results.values() if h.is_operational and not h.is_healthy),
-                "unhealthy": sum(1 for h in health_results.values() if not h.is_operational)
+                "unhealthy": sum(1 for h in health_results.values() if not h.is_operational),
             },
             "surface": module_surface,
             "problem_modules": problem_modules,
@@ -2238,7 +2268,7 @@ class MCPServer:
                 "requests": metrics.total_requests,
                 "errors": metrics.failed_requests,
                 "error_rate": metrics.error_rate,
-                "avg_latency_ms": metrics.avg_latency_ms
+                "avg_latency_ms": metrics.avg_latency_ms,
             }
 
         # Connection metrics
@@ -2249,9 +2279,9 @@ class MCPServer:
             "connections": {
                 "active": len(self.connections),
                 "total_messages": total_messages,
-                "total_errors": total_errors
+                "total_errors": total_errors,
             },
-            "modules": module_metrics
+            "modules": module_metrics,
         }
 
 
@@ -2276,6 +2306,7 @@ async def reset_mcp_server() -> None:
     _server = None
     try:
         from .modules.registry import reset_module_registry
+
         await reset_module_registry()
     except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
         pass
