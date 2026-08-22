@@ -22,6 +22,9 @@ from ....Slides.presentation_service import (
     presentation_summary,
 )
 from ....Slides.slides_db import ConflictError
+from ....Slides.standalone_html_validation_pool import (
+    STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
+)
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
 
@@ -515,6 +518,8 @@ class SlidesModule(BaseModule):
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any = None) -> Any:
         args = self.sanitize_input(arguments)
+        if self._has_unknown_discriminator(args):
+            return self._unsupported_content_kind(tool_name, content_kind="unknown")
         if self._requests_standalone_html(args):
             return self._unsupported_content_kind(tool_name)
         try:
@@ -581,7 +586,11 @@ class SlidesModule(BaseModule):
         raise ValueError(f"Unknown tool: {tool_name}")
 
     @staticmethod
-    def _unsupported_content_kind(tool_name: str) -> dict[str, Any]:
+    def _unsupported_content_kind(
+        tool_name: str,
+        *,
+        content_kind: str = STANDALONE_HTML,
+    ) -> dict[str, Any]:
         """Return the exact bounded MCP content-kind rejection."""
 
         return {
@@ -589,25 +598,46 @@ class SlidesModule(BaseModule):
             "error": {
                 "code": "operation_not_supported_for_content_kind",
                 "operation": tool_name,
-                "content_kind": STANDALONE_HTML,
+                "content_kind": content_kind,
             },
         }
 
     @staticmethod
-    def _requests_standalone_html(args: dict[str, Any]) -> bool:
-        """Recognize the shallow standalone discriminators guarded by transport."""
-
+    def _shallow_discriminator_containers(args: dict[str, Any]) -> list[dict[str, Any]]:
         containers = [args]
         for key in ("updates", "patch"):
             value = args.get(key)
             if isinstance(value, dict):
                 containers.append(value)
+        return containers
+
+    @classmethod
+    def _has_unknown_discriminator(cls, args: dict[str, Any]) -> bool:
+        """Reject supplied shallow discriminators outside the closed kind set."""
+
+        return any(
+            field in container and container[field] not in KNOWN_CONTENT_KINDS
+            for container in cls._shallow_discriminator_containers(args)
+            for field in ("content_kind", "generation_mode")
+        )
+
+    @staticmethod
+    def _requests_standalone_html(args: dict[str, Any]) -> bool:
+        """Recognize the shallow standalone discriminators guarded by transport."""
+
         return any(
             "html_document" in container
             or container.get("content_kind") == STANDALONE_HTML
             or container.get("generation_mode") == STANDALONE_HTML
-            for container in containers
+            for container in SlidesModule._shallow_discriminator_containers(args)
         )
+
+    @staticmethod
+    def _validation_pool_from_context(context: Any) -> Any:
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        return metadata.get(STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY)
 
     def _reject_html_target_sync(
         self,
@@ -695,7 +725,21 @@ class SlidesModule(BaseModule):
                 sort_column=args.get("sort_column", "last_modified"),
                 sort_direction=args.get("sort_direction", "DESC"),
             )
-            presentations = [presentation_summary(row) for row in rows]
+            include_deleted = bool(args.get("include_deleted", False))
+            presentations = [
+                (
+                    presentation_summary(row)
+                    if row.content_kind == STANDALONE_HTML
+                    else self._presentation_to_dict(
+                        service.get_detail(
+                            row.id,
+                            KNOWN_CONTENT_KINDS,
+                            include_deleted=include_deleted,
+                        )
+                    )
+                )
+                for row in rows
+            ]
             offset = int(args.get("offset", 0))
             has_more = offset + len(presentations) < total
             return {
@@ -721,7 +765,21 @@ class SlidesModule(BaseModule):
                 offset=int(args.get("offset", 0)),
                 include_deleted=bool(args.get("include_deleted", False)),
             )
-            presentations = [presentation_summary(row) for row in rows]
+            include_deleted = bool(args.get("include_deleted", False))
+            presentations = [
+                (
+                    presentation_summary(row)
+                    if row.content_kind == STANDALONE_HTML
+                    else self._presentation_to_dict(
+                        service.get_detail(
+                            row.id,
+                            KNOWN_CONTENT_KINDS,
+                            include_deleted=include_deleted,
+                        )
+                    )
+                )
+                for row in rows
+            ]
             offset = int(args.get("offset", 0))
             has_more = offset + len(presentations) < total
             return {
@@ -975,21 +1033,24 @@ class SlidesModule(BaseModule):
             db.close_connection()
 
     async def _restore_presentation(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
-        return await asyncio.to_thread(self._restore_presentation_sync, context, args)
-
-    def _restore_presentation_sync(self, context: Any, args: dict[str, Any]) -> dict[str, Any]:
         db = self._open_db(context)
         try:
             pid = args.get("presentation_id")
             expected_version = args.get("expected_version")
-            service = PresentationService(db)
+            service = PresentationService(
+                db,
+                validation_pool=self._validation_pool_from_context(context),
+            )
             kind = service.guard_target(
                 pid,
                 KNOWN_CONTENT_KINDS,
                 include_deleted=True,
             )
             PresentationService.require_operation(kind.content_kind, "restore")
-            row = db.restore_presentation(pid, expected_version)
+            row = await service.restore_presentation(
+                presentation_id=pid,
+                expected_version=expected_version,
+            )
             presentation = (
                 presentation_summary(service.get_metadata(pid, include_deleted=True))
                 if kind.content_kind == STANDALONE_HTML
@@ -1158,20 +1219,28 @@ class SlidesModule(BaseModule):
                 include_deleted=True,
             )
             PresentationService.require_operation(kind.content_kind, "versions")
-            rows, total = db.list_presentation_version_metadata(
-                presentation_id=presentation_id,
-                limit=int(args.get("limit", 20)),
-                offset=int(args.get("offset", 0)),
-            )
-            versions = [
-                {
-                    "presentation_id": row.presentation_id,
-                    "version": row.version,
-                    "content_kind": kind.content_kind,
-                    "created_at": row.created_at,
-                }
-                for row in rows
-            ]
+            if kind.content_kind == STANDALONE_HTML:
+                rows, total = db.list_presentation_version_metadata(
+                    presentation_id=presentation_id,
+                    limit=int(args.get("limit", 20)),
+                    offset=int(args.get("offset", 0)),
+                )
+                versions = [
+                    {
+                        "presentation_id": row.presentation_id,
+                        "version": row.version,
+                        "content_kind": kind.content_kind,
+                        "created_at": row.created_at,
+                    }
+                    for row in rows
+                ]
+            else:
+                rows, total = db.list_presentation_versions(
+                    presentation_id=presentation_id,
+                    limit=int(args.get("limit", 20)),
+                    offset=int(args.get("offset", 0)),
+                )
+                versions = [self._version_to_dict(row) for row in rows]
             offset = int(args.get("offset", 0))
             has_more = offset + len(versions) < total
             return {

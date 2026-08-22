@@ -72,7 +72,7 @@ class GuardedSlidesWebSocketProtocol(WebSocketsSansIOProtocol):
         """Create the base scope, then mark only MCP scopes under this protocol."""
 
         super().handle_connect(event)
-        path = event.path.partition("?")[0]
+        path = self.scope.get("path") if hasattr(self, "scope") else None
         self._guard_enabled = path in _MCP_WEBSOCKET_PATHS
         if self._guard_enabled and hasattr(self, "scope"):
             _mark_guarded_slides_websocket_scope(self.scope)

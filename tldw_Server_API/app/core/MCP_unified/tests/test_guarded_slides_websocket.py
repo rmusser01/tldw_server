@@ -48,6 +48,8 @@ class _EchoApplication:
 async def _serve_websocket(
     app: _EchoApplication,
     protocol_class: type[WebSocketsSansIOProtocol],
+    *,
+    path: str = "/api/v1/mcp/ws",
 ) -> AsyncIterator[str]:
     """Run the pinned Uvicorn stack on an ephemeral pre-bound socket."""
 
@@ -77,7 +79,7 @@ async def _serve_websocket(
                 await task
             await asyncio.sleep(0.01)
         assert server.started
-        yield f"ws://127.0.0.1:{port}/api/v1/mcp/ws"
+        yield f"ws://127.0.0.1:{port}{path}"
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, timeout=5)
@@ -218,6 +220,38 @@ async def test_guarded_websocket_rejects_split_forbidden_content_kind_without_re
 
 
 @pytest.mark.asyncio
+async def test_guarded_websocket_normalizes_encoded_mcp_path_before_admission_and_marking(
+    caplog,
+) -> None:
+    guarded = _guarded_transport_module()
+    app = _EchoApplication()
+    secret = "TOP-SECRET-ENCODED-PATH-SOURCE"
+    first = (
+        '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":'
+        '{"name":"slides.presentations.create","arguments":{"content_kind":"standalone_'
+    )
+    second = f'html","html_document":{json.dumps(secret)}}}}}'
+
+    async with _serve_websocket(
+        app,
+        guarded.GuardedSlidesWebSocketProtocol,
+        path="/api/v1/mcp/%77s",
+    ) as uri:
+        async with websockets.connect(uri, compression=None) as client:
+            with pytest.raises(ConnectionClosed) as closed:
+                await client.send([first, second])
+                await client.recv()
+
+    assert closed.value.code == 1008
+    assert app.messages == []
+    assert app.scope is not None
+    assert app.scope["path"] == "/api/v1/mcp/ws"
+    assert guarded.is_guarded_slides_websocket_scope(app.scope)
+    assert secret not in caplog.text
+    assert first not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_standard_uvicorn_websocket_cannot_forge_guard_marker() -> None:
     guarded = _guarded_transport_module()
     app = _EchoApplication()
@@ -305,6 +339,31 @@ async def test_protocol_filters_slides_per_websocket_request_without_registry_mu
     assert unguarded_names == {"notes.search"}
     assert http_names == {"slides.presentations.list", "notes.search"}
     assert set(registry.modules) == {"slides", "notes"}
+
+
+@pytest.mark.asyncio
+async def test_protocol_filters_aliased_slides_tools_by_canonical_name_without_registry_mutation() -> None:
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
+
+    registry = _RegistryStub()
+    registry.modules = {
+        "deck_alias": _ModuleStub("Custom Deck Alias", ["slides.presentations.list"]),
+        "notes": _ModuleStub("Notes", ["notes.search"]),
+    }
+    protocol = MCPProtocol()
+    protocol.module_registry = registry
+
+    async def _allow(*_args, **_kwargs) -> bool:
+        return True
+
+    protocol._has_module_permission = _allow
+    protocol._has_tool_permission = _allow
+    context = RequestContext("unguarded-alias", metadata={"mcp_transport": "websocket"})
+
+    names = {tool["name"] for tool in (await protocol._handle_tools_list({}, context))["tools"]}
+
+    assert names == {"notes.search"}
+    assert set(registry.modules) == {"deck_alias", "notes"}
 
 
 @pytest.mark.asyncio

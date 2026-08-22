@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess  # nosec B404
@@ -841,6 +842,74 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
     assert "ERROR: Admin bootstrap failed; refusing to continue startup." in result.stderr
 
 
+def test_production_docker_command_runs_first_use_auth_before_guarded_launcher(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("Production Docker command is POSIX shell-specific")
+
+    dockerfile = Path("Dockerfiles/Dockerfile.prod").read_text(encoding="utf-8")
+    cmd_line = next(line for line in dockerfile.splitlines() if line.startswith("CMD ["))
+    docker_command = json.loads(cmd_line.removeprefix("CMD "))
+    assert "tldw_Server_API.scripts.run_server_guarded_mcp" in docker_command[-1]
+
+    env_file = tmp_path / ".env"
+    marker_dir = tmp_path / "markers"
+    wrapper_dir = tmp_path / "bin"
+    call_log = tmp_path / "python-calls.log"
+    marker_dir.mkdir()
+    wrapper_dir.mkdir()
+    _write_text_lf(
+        env_file,
+        "\n".join(
+            (
+                "AUTH_MODE=single_user",
+                "SINGLE_USER_API_KEY=secure-entrypoint-key-1234567890",
+                "MCP_JWT_SECRET=mcp_jwt_secret_for_entrypoint_test_32_chars",
+                "MCP_API_KEY_SALT=mcp_api_salt_for_entrypoint_test_32_chars",
+                "BYOK_ENCRYPTION_KEY=byok_secret_for_entrypoint_test_32_chars",
+            )
+        )
+        + "\n",
+    )
+    python_wrapper = wrapper_dir / "python"
+    _write_text_lf(
+        python_wrapper,
+        "\n".join(
+            (
+                "#!/bin/sh",
+                'echo "$*" >> "$TLDW_TEST_PYTHON_CALL_LOG"',
+                'if [ "$1" = "-m" ] && [ "$2" = "tldw_Server_API.app.core.AuthNZ.initialize" ]; then',
+                "  exit 0",
+                "fi",
+                'if [ "$1" = "-m" ] && [ "$2" = "tldw_Server_API.scripts.run_server_guarded_mcp" ]; then',
+                "  exit 0",
+                "fi",
+                'exec "$TLDW_TEST_REAL_PYTHON" "$@"',
+            )
+        )
+        + "\n",
+    )
+    python_wrapper.chmod(0o700)
+    env = _entrypoint_process_env(env_file, marker_dir)
+    env["PATH"] = f"{wrapper_dir}:{env['PATH']}"
+    env["PYTHON_BIN"] = str(python_wrapper)
+    env["TLDW_TEST_REAL_PYTHON"] = sys.executable
+    env["TLDW_TEST_PYTHON_CALL_LOG"] = str(call_log)
+
+    result = subprocess.run(  # nosec B603
+        _entrypoint_command(*docker_command),
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (marker_dir / ".authnz_initialized_single_user").is_file()
+    calls = call_log.read_text(encoding="utf-8")
+    assert "-m tldw_Server_API.app.core.AuthNZ.initialize --non-interactive" in calls
+    assert "-m tldw_Server_API.scripts.run_server_guarded_mcp" in calls
+
+
 def test_multi_user_entrypoint_rejects_stale_env_database_url_when_structured_postgres_exists() -> None:
     script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
 
@@ -896,9 +965,7 @@ def test_multi_user_entrypoint_requires_postgres_or_explicit_database_override()
 def test_dockerignore_excludes_public_setup_env_secrets() -> None:
     dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
     patterns = {
-        line.strip()
-        for line in dockerignore.splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
+        line.strip() for line in dockerignore.splitlines() if line.strip() and not line.lstrip().startswith("#")
     }
 
     for expected in (
