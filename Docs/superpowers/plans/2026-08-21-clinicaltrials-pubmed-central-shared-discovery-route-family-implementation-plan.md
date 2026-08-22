@@ -79,7 +79,7 @@
 
 **Tests:** Focused contract, planner, gateway, executor, HTTP-hop, network-boundary digest, and v2-compatibility tests after each commit.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1: Closed opaque policy and repr-safe request contracts
 
@@ -96,7 +96,7 @@
 - Consumes: Existing `_validate_query_value_policy_common(name, required)`, `QueryValuePolicy`, `_QUERY_VALUE_POLICY_TYPES`, `QueryPair`, `NormalizedHTTPHopRequest`, and `canonical_policy_digest()`.
 - Produces: `MAX_OPAQUE_CURSOR_CHARS: Final[int] = 1_024`; `OpaqueCursorQueryValuePolicy(name: str, max_chars: int, required: bool = False)`; empty-string `LiteralTermsQueryValuePolicy.fixed_suffix`; repr-hidden `QueryPair.value` and `NormalizedHTTPHopRequest.target`.
 
-- [ ] **Step 1: Write contract RED tests**
+- [x] **Step 1: Write contract RED tests**
 
 Add explicit constructor cases and repr/equality/digest locks:
 
@@ -132,7 +132,7 @@ def test_empty_literal_suffix_is_contract_valid_and_digest_bound() -> None:
 
 Move `LiteralTermsQueryValuePolicy("query", "", 16, 64)` out of the existing invalid-constructor tuple at `test_research_discovery_contracts.py:212-220` and into the valid frozen-policy cases; otherwise the old test contradicts the new contract. Add `OpaqueCursorQueryValuePolicy` to the exact public-contract and closed-policy assertions. In `test_http_hop_contract.py`, construct two equal requests and assert the target remains readable and wire-valid but is absent from `repr(request)`; do not assert against `repr(asdict(request))` because `asdict()` intentionally retains contract material.
 
-- [ ] **Step 2: Run the focused tests and witness RED**
+- [x] **Step 2: Run the focused tests and witness RED**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -143,7 +143,7 @@ python -m pytest -q \
 
 Expected: failures because `OpaqueCursorQueryValuePolicy` does not exist, empty suffix is rejected, and values/targets appear in repr.
 
-- [ ] **Step 3: Implement the minimum closed contract**
+- [x] **Step 3: Implement the minimum closed contract**
 
 Use the existing constructor ordering and add no `RoutePolicy` field:
 
@@ -177,7 +177,7 @@ if type(self.fixed_suffix) is not str or "\x00" in self.fixed_suffix:
     raise ValueError("invalid_literal_terms_fixed_suffix")
 ```
 
-- [ ] **Step 4: Refresh the changed shared-module semantic/import digests and run GREEN compatibility**
+- [x] **Step 4: Refresh the changed shared-module semantic/import digests and run GREEN compatibility**
 
 Update only the `contracts.py` and `Security/http_hop.py` import/AST entries required by `test_research_discovery_network_boundary.py`; do not add raw shared-module digests.
 
@@ -192,7 +192,7 @@ python -m pytest -q \
 
 Expected: PASS, including legacy positional `RoutePolicy` construction and exact legacy digest `8ec7b6572f32690e1425390518077742607bee40f87224c45913d7c5f54e7865`.
 
-- [ ] **Step 5: Commit the isolated contract change**
+- [x] **Step 5: Commit the isolated contract change**
 
 ```bash
 git add \
@@ -218,7 +218,7 @@ git commit -m "feat(research): add opaque query policy and repr-safe request con
 - Consumes: `OpaqueCursorQueryValuePolicy`, existing general-query normalization, `RoutePolicy.allowed_query_keys`, `RoutePolicy.pagination_query_key`, and `DispatchIntent`.
 - Produces: `_build_typed_intents()` support for a named literal policy, empty suffix, clamped decimal value, and omission of exactly one optional opaque pagination key on page one.
 
-- [ ] **Step 1: Add a separate opaque-route planner fixture and RED tests**
+- [x] **Step 1: Add a separate opaque-route planner fixture and RED tests**
 
 Keep the existing `_typed_query_registry()` unchanged. Add `_opaque_query_registry()` with allowed keys in this order so the omitted cursor is nonterminal:
 
@@ -314,7 +314,7 @@ assert plan.dispatch_groups[0].intents[0].query_pairs == (
 
 Add `test_general_query_clamps_decimal_to_route_and_rule_ceilings` and parameterize invalid shapes: required opaque policy, opaque policy not named by `pagination_query_key`, and two attempted optional omissions.
 
-- [ ] **Step 2: Run planner RED tests**
+- [x] **Step 2: Run planner RED tests**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -325,7 +325,7 @@ python -m pytest -q \
 
 Expected: the named literal/empty suffix and omitted opaque pair are rejected by current planning.
 
-- [ ] **Step 3: Generalize only the typed-general loop**
+- [x] **Step 3: Generalize only the typed-general loop**
 
 Preserve allowed-key order and use a single omission counter:
 
@@ -355,7 +355,7 @@ Require exactly one literal policy and full coverage after accounting for the on
 
 Add a RED assertion that one 33-character term fails the Clinical-shaped policy before an intent is emitted; retain the existing per-policy term-length guard for every typed general route.
 
-- [ ] **Step 4: Lock foundation bytes and run GREEN**
+- [x] **Step 4: Lock foundation bytes and run GREEN**
 
 Assert the existing foundation request retains:
 
@@ -375,7 +375,7 @@ python -m pytest -q \
 
 Expected: PASS with the exact foundation plan digest, canonical-byte digest, and byte length above unchanged.
 
-- [ ] **Step 5: Commit the planner change**
+- [x] **Step 5: Commit the planner change**
 
 ```bash
 git add \
@@ -399,7 +399,7 @@ git commit -m "feat(research): plan optional opaque query pagination (TASK-12968
 - Consumes: `OpaqueCursorQueryValuePolicy`, a planned intent that may omit the optional token, and the existing one-hop request builder.
 - Produces: strict exact visible-ASCII validation for present opaque pairs, correct whole-value validation for empty literal suffixes, and repr-hidden `_BindingSnapshot.query_pairs`.
 
-- [ ] **Step 1: Add table-driven gateway RED tests**
+- [x] **Step 1: Add table-driven gateway RED tests**
 
 Create `_opaque_query_route_and_intent()` rather than modifying existing digest-bound fixtures. Test:
 
@@ -464,7 +464,7 @@ async def test_opaque_query_value_fails_before_one_hop(token: str) -> None:
 
 Also assert: missing optional token succeeds on page one; `!$&'()*+,;=:@/?` is preserved as one percent-encoded value; duplicate/unknown keys and a reconstructed mutated policy fail pre-hop; empty-suffix literals accept only the canonical quoted-term expression; `_BindingSnapshot` repr omits a sentinel; and a worst-case 8×32 four-byte-term query plus 1,024 reserved punctuation characters remains under `HTTPHopLimits.max_request_target_bytes == 8192`.
 
-- [ ] **Step 2: Run gateway RED tests**
+- [x] **Step 2: Run gateway RED tests**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -473,7 +473,7 @@ python -m pytest -q tldw_Server_API/tests/Research/test_research_discovery_gatew
 
 Expected: opaque policy reconstruction/validation is unsupported and empty suffix uses the incorrect `[:-0]` slice.
 
-- [ ] **Step 3: Extend the closed gateway snapshot and validation**
+- [x] **Step 3: Extend the closed gateway snapshot and validation**
 
 Add the exact policy type to `_snapshot_query_value_policies()` and validate without normalization:
 
@@ -500,7 +500,7 @@ query_pairs: tuple[tuple[str, str], ...] = field(repr=False)
 
 Do not reorder, sort, normalize, or otherwise rewrite gateway query pairs. `_build_target()` must preserve the planner/executor tuple and encode each value once.
 
-- [ ] **Step 4: Refresh gateway boundary digests and run GREEN**
+- [x] **Step 4: Refresh gateway boundary digests and run GREEN**
 
 Run gateway, contract, HTTP-hop, and network-boundary tests. Confirm equality, field access, canonical material, and the wire request are unchanged except for valid new opaque inputs.
 
@@ -515,7 +515,7 @@ python -m pytest -q \
 
 Expected: PASS with legacy request construction and diagnostic equality unchanged.
 
-- [ ] **Step 5: Commit the gateway change**
+- [x] **Step 5: Commit the gateway change**
 
 ```bash
 git add \
@@ -538,7 +538,7 @@ git commit -m "feat(research): validate opaque query bindings at gateway (TASK-1
 - Consumes: An optional opaque policy named by `pagination_query_key`, first-page intent without the token, and the existing dispatch reservation/cancellation machinery.
 - Produces: `OpaqueCursor(value: str)`; `NumericCursor | OpaqueCursor | None` accepted by `BoundDispatch` and internal dispatch/controller call sites; ordered continuation reconstruction; exact-repeat rejection; page cursor `str` accounting; repr-hidden `NumericCSVBindingValues.values` with equality/asdict/wire behavior unchanged.
 
-- [ ] **Step 1: Build an opaque paginated plan and add executor RED tests**
+- [x] **Step 1: Build an opaque paginated plan and add executor RED tests**
 
 Add `_opaque_query_paginated_plan()` through the real planner and assert these named behaviors:
 
@@ -585,7 +585,7 @@ async def opaque_adapter(
 
 Assert exact query-pair order against `allowed_query_keys` after insertion; an opaque cursor is a `BoundDispatch` argument, never an adapter return value.
 
-- [ ] **Step 2: Run executor RED tests**
+- [x] **Step 2: Run executor RED tests**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -594,7 +594,7 @@ python -m pytest -q tldw_Server_API/tests/Research/test_research_discovery_execu
 
 Expected: cursor protocol annotations and `_effective_intent()` accept only `NumericCursor`.
 
-- [ ] **Step 3: Implement the closed cursor and continuation branch**
+- [x] **Step 3: Implement the closed cursor and continuation branch**
 
 Add beside `NumericCursor`:
 
@@ -635,7 +635,7 @@ In `_effective_intent()`:
 
 Track `dict[int, set[int | str]]`, or keep separate integer and string sets if that produces a smaller diff; in either case, record a token only after `mark_dispatching`/physical debit at the same point numeric cursors are recorded.
 
-- [ ] **Step 4: Run GREEN plus numeric-pagination regression locks**
+- [x] **Step 4: Run GREEN plus numeric-pagination regression locks**
 
 Run the executor file and confirm these existing tests remain green:
 
@@ -659,7 +659,7 @@ python -m pytest -q \
 
 Expected: PASS, including every named numeric-pagination regression lock above.
 
-- [ ] **Step 5: Commit the executor change**
+- [x] **Step 5: Commit the executor change**
 
 ```bash
 git add \
@@ -679,7 +679,7 @@ git commit -m "feat(research): account opaque cursor continuations (TASK-12968.6
 
 **Tests:** Planner overlay goldens, PubMed adapter foundation regressions, overlay runtime success/empty/rate/malformed/cancellation, v2 compatibility, and boundary digests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 5: Add the identity-bearing PubMed overlay and private NCBI two-hop seam
 
@@ -699,7 +699,7 @@ git commit -m "feat(research): account opaque cursor continuations (TASK-12968.6
 - Consumes: `foundation_registry()`, current exact PubMed route and adapter callable, `DeferredNumericCSVQueryBinding`, strict JSON helpers, executor dispatch callback, and gateway result types.
 - Produces: frozen family constants; `clinicaltrials_pubmed_central_shadow_registry()` with only the PubMed route replaced at this stage; parsing profile `("pubmed_v2", "pubmed-v2-ncbi-identity")`; private `_validate_identity_ncbi_error_envelope(...)`; private `_execute_ncbi_esearch_summary(...)`; exact overlay planner branch and runtime evidence.
 
-- [ ] **Step 1: Add declarative registry and planner RED tests**
+- [x] **Step 1: Add declarative registry and planner RED tests**
 
 Define and test these constants exactly:
 
@@ -779,7 +779,7 @@ _NCBI_TOOL = "tldw_server"
 _NCBI_EMAIL = "contact@tldwproject.com"
 ```
 
-- [ ] **Step 2: Run planner/constructor RED tests**
+- [x] **Step 2: Run planner/constructor RED tests**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -791,7 +791,7 @@ python -m pytest -q \
 
 Expected: family module/overlay branch absent.
 
-- [ ] **Step 3: Implement exact registry replacement and overlay intent branch**
+- [x] **Step 3: Implement exact registry replacement and overlay intent branch**
 
 Keep the current foundation branch byte-identical and classify by exact tuple:
 
@@ -814,7 +814,7 @@ identity_pubmed = (
 
 Only `identity_pubmed` appends `QueryPair("tool", _NCBI_TOOL)` and `QueryPair("email", _NCBI_EMAIL)` to both intents; any route that resembles PubMed but matches neither exact tuple fails planning.
 
-- [ ] **Step 4: Add shared-adapter RED tests before extracting the helper**
+- [x] **Step 4: Add shared-adapter RED tests before extracting the helper**
 
 Through `foundation_gateway_adapters()["pubmed_v2"]`, execute a nonempty overlay plan and assert:
 
@@ -838,7 +838,7 @@ python -m pytest -q \
 
 Expected: the named overlay profile, private two-hop seam, and strict identity error-envelope cases fail because the shared runtime path is not implemented yet; foundation PubMed cases remain green.
 
-- [ ] **Step 5: Extract only the private two-hop execution seam**
+- [x] **Step 5: Extract only the private two-hop execution seam**
 
 Register the overlay explicitly in `_PARSING_PROFILES` using a local literal/private `_PUBMED_IDENTITY_ADAPTER_VERSION = "pubmed-v2-ncbi-identity"`; `gateway_adapters.py` must not import the family module. Extract a private helper with closed callback parameters, not a public framework. Define these exact private aliases from types already present in `gateway_adapters.py`:
 
@@ -960,7 +960,7 @@ This replaces only the old exact `len(search_pairs) == 6` / two-summary-pair sha
 
 The helper sequence is exact: dispatch/search → `_checked_response` → `_strict_json`; when `strict_rate_envelope`, invoke `_validate_identity_ncbi_error_envelope(search_payload, profile)` before the ESearch callback; short-circuit with empty candidates when IDs are empty; build one `NumericCSVBindingValues(binding.binding_id, numeric_ids)`; dispatch the conditional summary with that binding; strict-parse and prevalidate its error envelope; call the summary callback with ordered text IDs; fingerprint/deduplicate complete normalized records; conflicting same-fingerprint records fail; return candidates. It creates no retry, sleep, page loop, or third call. `_execute_pubmed_adapter()` remains an exact wrapper using `_trusted_pubmed_inputs`, `_pubmed_esearch_ids`, and `_pubmed_summary_records`; it passes `strict_rate_envelope=True` only for the exact overlay adapter version and `False` for `foundation-v2`. The family PMC wrapper passes `True`. Foundation PubMed therefore retains legacy classification.
 
-- [ ] **Step 6: Run GREEN and commit**
+- [x] **Step 6: Run GREEN and commit**
 
 Refresh only the existing shared `planner.py` and `gateway_adapters.py` import/AST digest entries. Do not add the new family root to the singular boundary harness yet: Task 8 performs that harness generalization once the complete family factories and runtime shapes exist. Run planner, PubMed adapter, family, compatibility, and the still-legacy boundary harness.
 
@@ -999,7 +999,7 @@ git commit -m "feat(research): add NCBI identity overlay and two-hop seam (TASK-
 
 **Tests:** New family test module, wholly synthetic fixtures, parser mutation tables, planner/adapter/accounting/cancellation/partial-outcome tests, and no-network tripwires.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 6: Add the fixture-only ClinicalTrials.gov adapter
 
@@ -1014,7 +1014,7 @@ git commit -m "feat(research): add NCBI identity overlay and two-hop seam (TASK-
 - Consumes: shared opaque cursor path, strict JSON/gateway helpers, `DiscoveryAdapterResult`, normalized candidate contracts, foundation registry composition.
 - Produces: exact ClinicalTrials.gov backend/source/route; `_trusted_clinicaltrials_inputs`; `_clinicaltrials_page`; `_clinicaltrials_record`; `_LegacySummaryParser`; `_contains_url_material`; `_plain_clinical_text`; `_legacy_summary_text`; `_partial_date`; `_execute_clinicaltrials_adapter`.
 
-- [ ] **Step 1: Check in wholly synthetic valid-shape fixtures and RED constructor tests**
+- [x] **Step 1: Check in wholly synthetic valid-shape fixtures and RED constructor tests**
 
 Use invented values only. The valid pair must have frozen `totalCount=2`, one study per page, a visible-ASCII `nextPageToken` only on page one, distinct unused-looking IDs such as `NCT90000001`/`NCT90000002`, and hostile-but-synthetic markup in the summary. The empty fixture is exactly:
 
@@ -1106,7 +1106,7 @@ Pin the exact source constructor: ID `clinicaltrials_gov`; display name `Clinica
 
 Pin the route as `direct`, query modes `('general_free_text',)`, source constraint `native_corpus`, attribution basis `native_nct_record`, credential requirement `none`, fallback order `0`, adapter ID/version `clinicaltrials_gov_v2` / `clinicaltrials-gov-v2`, origin/path/method, no body, zero retries/redirects, 20,000 ms, request-body ceiling 16,384, response ceiling 2,097,152, `format=json`, `markupFormat=legacy`, frozen projection, `pageSize=50`, `countTotal=true`, and absent first-page token. Pin its parser profile to input bytes `2_097_152`, records `50`, depth `16`, nodes `50_000`, string chars `65_536`, numeric-token chars `32`, and deadline `500` ms. Assert the compiled single-route plan has `max_wall_time_ms=40_000`; Task 7 adds the two-route `80_000` assertion after PMC exists.
 
-- [ ] **Step 2: Add parser/execution RED matrices**
+- [x] **Step 2: Add parser/execution RED matrices**
 
 Table-drive bounded mutations rather than adding one file per error. Cover:
 
@@ -1123,7 +1123,7 @@ Table-drive bounded mutations rather than adding one file per error. Cover:
 - page-two failure publishes no trial candidate;
 - cancellation after token parsing but before continuation produces journal `1/1/0/0` and no second reservation/call.
 
-- [ ] **Step 3: Run family RED tests**
+- [x] **Step 3: Run family RED tests**
 
 Until Task 7 exposes the complete two-adapter production family factory, use test-only composition in `test_research_discovery_clinicaltrials_pubmed_central.py`:
 
@@ -1164,7 +1164,7 @@ python -m pytest -q tldw_Server_API/tests/Research/test_research_discovery_clini
 
 Expected: route/parser/adapter symbols and runtime behavior are absent.
 
-- [ ] **Step 4: Implement the exact route, parser, sanitizer, and adapter**
+- [x] **Step 4: Implement the exact route, parser, sanitizer, and adapter**
 
 Use these exact internal state/signature boundaries:
 
@@ -1364,7 +1364,7 @@ async def _execute_clinicaltrials_adapter(
 
 Wrap `_PayloadInvalid`, `_ParseLimitExceeded`, and `_ParseDeadlineExceeded` through `_raise_adapter_error`; preserve `DiscoveryAdapterError`; collapse unexpected `KeyError`, `TypeError`, `ValueError`, and `OverflowError` to `provider_payload_invalid`. The page/token biconditional is validated before `capacity_remains`; therefore a valid page-two token at the 100-record/two-page ceiling is discarded without constructing a third reservation or call. Candidates are constructed only after every dispatched page validates, preserving route atomicity.
 
-- [ ] **Step 5: Run GREEN, inspect fixture isolation, and commit**
+- [x] **Step 5: Run GREEN, inspect fixture isolation, and commit**
 
 Run the family tests with `-k clinicaltrials` plus executor/gateway regressions. Inspect fixtures for copied provider values, URLs, contacts, and raw source records. The generalized cross-family import/runtime/network/auth boundary is deliberately deferred to Task 8; do not add a temporary ClinicalTrials-only branch to the singular harness here.
 
@@ -1405,7 +1405,7 @@ git commit -m "feat(research): add fixture-only ClinicalTrials.gov adapter (TASK
 - Consumes: `_execute_ncbi_esearch_summary`, exact family registry constants, `DeferredNumericCSVQueryBinding`, foundation readiness, gateway adapter callable contract.
 - Produces: exact PMC backend/source/route; `_trusted_pubmed_central_inputs`; `_pmc_uid`; `_pmc_identifier_scalar`; `_plain_pmc_text`; `_pmc_esearch_ids`; `_pmc_article_ids`; `_pmc_record`; `_pmc_summary_records`; `_execute_pubmed_central_adapter`; `_compose_adapter_maps(*adapter_maps: Mapping[str, DiscoveryAdapter]) -> Mapping[str, DiscoveryAdapter]`; `clinicaltrials_pubmed_central_shadow_readiness(execution_mode)`; `clinicaltrials_pubmed_central_gateway_adapters(*, monotonic_clock=time.monotonic)`.
 
-- [ ] **Step 1: Add synthetic PMC fixtures and exact planner RED tests**
+- [x] **Step 1: Add synthetic PMC fixtures and exact planner RED tests**
 
 Use canonical string UIDs such as `"9000001"` and `"9000002"`. ESearch fixture root is `header` + `esearchresult` with string `count`, `retmax`, `retstart`, and ordered `idlist`; ESummary root is `header` + `result`, exact `uids`, and UID-keyed records whose PMCID is exactly `PMC` plus the UID.
 
@@ -1508,7 +1508,7 @@ _MISSING = object()
 
 Do not import the shared module's private sentinel or give `_MISSING` any diagnostic representation path.
 
-- [ ] **Step 2: Add PMC parser/execution RED matrices**
+- [x] **Step 2: Add PMC parser/execution RED matrices**
 
 Cover:
 
@@ -1525,7 +1525,7 @@ Cover:
 - no EFetch/OAI/HTML/JATS/PDF/third call;
 - independently successful PMC survives a malformed ClinicalTrials.gov page two with explicit partial status and exact physical accounting.
 
-- [ ] **Step 3: Run PMC RED tests**
+- [x] **Step 3: Run PMC RED tests**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -1534,7 +1534,7 @@ python -m pytest -q tldw_Server_API/tests/Research/test_research_discovery_clini
 
 Expected: PMC planner/parser/adapter/maps/readiness symbols are absent.
 
-- [ ] **Step 4: Implement the exact PMC branch and parser callbacks**
+- [x] **Step 4: Implement the exact PMC branch and parser callbacks**
 
 Place the closed PMC planner branch before generic one-path typed-general handling. Use these exact callback signatures:
 
@@ -1736,7 +1736,7 @@ Reject duplicate IDs before freezing; return only these two family entries. The 
 
 Build readiness by reconstructing foundation entries, deliberately replacing the same-ID PubMed entry, then appending ClinicalTrials.gov and PMC only after fixture-backed runtime tests pass. Reconciliation must bind ready PubMed to both `pubmed-v2-ncbi-identity` and the full overlay policy version—not route ID alone.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 Run the complete family test module, planner, PubMed adapter, executor, registry reconciliation, and the current legacy boundary tests. Update only the shared `planner.py` import/AST digest at this commit. Do not add the new family root/config/runtime cases until Task 8 generalizes the singular harness.
 
@@ -1775,7 +1775,7 @@ git commit -m "feat(research): add fixture-only PMC discovery adapter (TASK-1296
 
 **Tests:** Network boundary, v2 compatibility, registry reconciliation, Node inventory unit tests, Python schema tests, and fixed-as-of validator gates.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 8: Generalize the boundary harness and reconcile exact inventory rows
 
@@ -1794,7 +1794,7 @@ git commit -m "feat(research): add fixture-only PMC discovery adapter (TASK-1296
 - Consumes: public family registry/readiness/adapter factories, foundation adapter map for the PubMed overlay, checked-in fixtures, inventory manifest/ledger schema, authoritative validator report generator.
 - Produces: exact `_FAMILY_CONFIGS` boundary table; consumer factory/module tripwires; constructor/readiness/inventory reconciliation; exact implemented-source gate for rows 0026/0027; regenerated canonical digests/report.
 
-- [ ] **Step 1: Write boundary and compatibility RED cases**
+- [x] **Step 1: Write boundary and compatibility RED cases**
 
 Replace singular family constants and filename branches with these exact test-only data contracts:
 
@@ -1949,7 +1949,7 @@ python -m pytest -q \
 
 Expected: the new config-driven family closure/runtime and consumer-denial cases fail against the still-singular harness.
 
-- [ ] **Step 2: Implement exact per-family closure configuration and pin digests**
+- [x] **Step 2: Implement exact per-family closure configuration and pin digests**
 
 Parameterize `_family_module`, `_family_plan`, fixture loading/transform, route/readiness/factory equality, scanner mutation cases, unrecorded-ready-route checks, and runtime execution over `_FAMILY_CONFIGS`. For bioRxiv/medRxiv, assert the six route identities, queries, fixture transforms, paths, pages, physical records, candidates, and accounting remain exactly equal to the pre-refactor assertions. For the new family, compare full `(route_id, adapter_id, adapter_version, policy_version)` identities so the same-ID PubMed overlay is not subtracted as foundation.
 
@@ -1989,7 +1989,7 @@ Reconciliation must preserve the deliberate two-level attribution vocabulary. As
 
 For each provider-family root, pin raw/import/semantic AST digests. For changed shared modules, pin only import/semantic AST digests, including `Security/http_hop.py`; do not add raw shared-module digests. Add `_EXPECTED_IMPORTED_ATTRIBUTE_PATHS["clinicaltrials_pubmed_central.py"] = _CLINICALTRIALS_PMC_IMPORTED_ATTRIBUTE_PATHS`; the scanner must use `.get(filename, set())` only for explicitly configured bootstrap modules, never to silently permit a family root. `_EXPECTED_GATEWAY_IMPORTS` and `_EXPECTED_HTTP_HOP_IMPORTS` give the new family an empty set; `_EXPECTED_IDENTITY_IMPORTS` gives it exactly `build_fingerprint`, `has_unsafe_url_material`, and `normalize_doi`. Enforce that only `gateway.py` imports/uses the HTTP hop.
 
-- [ ] **Step 3: Write authoritative inventory RED cases**
+- [x] **Step 3: Write authoritative inventory RED cases**
 
 Add a separate exact `REQUIRED_IMPLEMENTED_SOURCES` gate, rather than weakening the existing bioRxiv/medRxiv three-route contract. Pin rows:
 
@@ -2057,7 +2057,7 @@ node --test Helper_Scripts/tests/validate_research_source_inventory.test.mjs
 
 Expected: the new implemented-source state/blocker/report-gate assertions fail because the authoritative validator does not yet expose or enforce them.
 
-- [ ] **Step 4: Migrate only rows 0026/0027 and regenerate authoritative artifacts**
+- [x] **Step 4: Migrate only rows 0026/0027 and regenerate authoritative artifacts**
 
 Update the ledger evidence honestly:
 
@@ -2103,7 +2103,7 @@ cmp \
 
 Never hand-edit generated report fields.
 
-- [ ] **Step 5: Run inventory, schema, registry, compatibility, and boundary GREEN gates**
+- [x] **Step 5: Run inventory, schema, registry, compatibility, and boundary GREEN gates**
 
 ```bash
 node --test Helper_Scripts/tests/validate_research_source_inventory.test.mjs
@@ -2123,7 +2123,7 @@ python -m pytest -q \
 
 Expected: all tests/gates pass; generated report remains `inventory_delivery_ready=false` because consumer/live certification is intentionally absent.
 
-- [ ] **Step 6: Commit boundary and evidence reconciliation**
+- [x] **Step 6: Commit boundary and evidence reconciliation**
 
 ```bash
 git add \
@@ -2147,7 +2147,7 @@ git commit -m "test(research): seal clinicaltrials PMC shadow evidence (TASK-129
 
 **Tests:** Full Research suite, touched Security transport tests, Node validator suite, schema/contract gate, compile, Ruff, Black, Bandit, and `git diff --check`.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 9: Run final gates, independent reviews, tracking, and PR handoff
 
@@ -2162,7 +2162,7 @@ git commit -m "test(research): seal clinicaltrials PMC shadow evidence (TASK-129
 - Consumes: completed Tasks 1–8 and their focused RED/GREEN evidence.
 - Produces: clean verification evidence, no unresolved high-priority review findings, updated TASK-12968.6 tracking, final commits, and a provider-only PR ready for the repository's human-written Change summary merge gate.
 
-- [ ] **Step 1: Run the complete functional test matrix**
+- [x] **Step 1: Run the complete functional test matrix**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -2183,7 +2183,7 @@ node Helper_Scripts/validate_research_source_inventory.mjs \
 
 Record exact pass counts and elapsed times in TASK-12968.6. Do not describe `inventory_delivery_ready=false` as a failure; it is the required shadow-only state.
 
-- [ ] **Step 2: Run syntax, format, static, security, and diff gates**
+- [x] **Step 2: Run syntax, format, static, security, and diff gates**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -2226,7 +2226,7 @@ git diff --check
 
 Inspect `/tmp/bandit_task_12968_6.json`; fix every new finding in touched production code before proceeding.
 
-- [ ] **Step 3: Perform three independent review gates**
+- [x] **Step 3: Perform three independent review gates**
 
 Dispatch fresh reviewers with exact scopes:
 
@@ -2320,13 +2320,13 @@ Confirm the draft PR now contains the tracking commit. Do not mark it ready or m
 
 ## Final Self-Review Checklist
 
-- [ ] Every requirement in the approved design maps to one of Tasks 1–9.
-- [ ] Every instruction names its exact behavior, error outcome, and interface.
-- [ ] `OpaqueCursorQueryValuePolicy`, `OpaqueCursor`, NCBI helper callbacks, family factories, adapter IDs/versions, and inventory identities use one exact spelling everywhere.
-- [ ] Foundation plan/digest/version locks are explicit and unchanged.
-- [ ] PubMed overlay readiness is backed by a real fixture runtime path, not route-ID inheritance.
-- [ ] ClinicalTrials.gov fixtures are wholly synthetic and PMC verification makes no live call.
-- [ ] Network-boundary tests cover ClinicalTrials.gov `2/2`, PMC nonempty `1/2`, PMC empty `1/1`, and PubMed overlay `1/2`.
-- [ ] Inventory states stop at `implemented/passed/not_run`, certifications remain empty, and `inventory_delivery_ready=false`.
-- [ ] Production Search and Deep Research import no family symbol and issue zero family requests.
-- [ ] TASK-12968.3 remains the owner of pacing, registration proof, notices/currentness, long-query routing, and Standalone cutover; TASK-12968.4 remains consumer-only and waits for TASK-13014.
+- [x] Every requirement in the approved design maps to one of Tasks 1–9.
+- [x] Every instruction names its exact behavior, error outcome, and interface.
+- [x] `OpaqueCursorQueryValuePolicy`, `OpaqueCursor`, NCBI helper callbacks, family factories, adapter IDs/versions, and inventory identities use one exact spelling everywhere.
+- [x] Foundation plan/digest/version locks are explicit and unchanged.
+- [x] PubMed overlay readiness is backed by a real fixture runtime path, not route-ID inheritance.
+- [x] ClinicalTrials.gov fixtures are wholly synthetic and PMC verification makes no live call.
+- [x] Network-boundary tests cover ClinicalTrials.gov `2/2`, PMC nonempty `1/2`, PMC empty `1/1`, and PubMed overlay `1/2`.
+- [x] Inventory states stop at `implemented/passed/not_run`, certifications remain empty, and `inventory_delivery_ready=false`.
+- [x] Production Search and Deep Research import no family symbol and issue zero family requests.
+- [x] TASK-12968.3 remains the owner of pacing, registration proof, notices/currentness, long-query routing, and Standalone cutover; TASK-12968.4 remains consumer-only and waits for TASK-13014.
