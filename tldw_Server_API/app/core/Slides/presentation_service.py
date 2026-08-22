@@ -311,6 +311,18 @@ class PresentationService:
     def search_summaries(self, *, accepted_content_kinds: Iterable[str], **kwargs: Any):
         return self.db.search_presentation_summaries(accepted_content_kinds=accepted_content_kinds, **kwargs)
 
+    def get_metadata(
+        self,
+        presentation_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> PresentationSummaryRow:
+        """Return the closed source-free metadata projection for one presentation."""
+        return self.db.get_presentation_summary(
+            presentation_id,
+            include_deleted=include_deleted,
+        )
+
     def get_detail(
         self,
         presentation_id: str,

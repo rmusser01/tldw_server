@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
@@ -21,6 +23,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import (
     get_slides_db_for_user,
 )
+from tldw_Server_API.app.api.v1.endpoints import slides_standalone_html
 from tldw_Server_API.app.api.v1.endpoints.slides import (
     _load_version_payload,
     _slides_lifespan,
@@ -31,6 +34,7 @@ from tldw_Server_API.app.api.v1.endpoints.slides import (
 from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     ExportFormat,
     PresentationPatchRequest,
+    SlidesCapabilitiesResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -40,6 +44,16 @@ from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
     standalone_response_invalid_response,
 )
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
+from tldw_Server_API.app.core.Slides.standalone_html_config import (
+    SlidesStandaloneHtmlConfig,
+)
+from tldw_Server_API.app.core.Slides.standalone_html_registry import (
+    DigestKeyAvailability,
+    DigestKeyMetadata,
+    DigestKeySnapshot,
+    DigestKeyState,
+    StandaloneHtmlHmacKeyring,
+)
 from tldw_Server_API.app.core.Slides.standalone_html_service import (
     StandaloneHtmlGenerationError,
     StandaloneHtmlGenerationSubmission,
@@ -65,21 +79,40 @@ _GENERATION_REQUEST = {
 }
 
 
-def _runtime_config(*, enabled: bool = True, reason: str | None = None):
-    return SimpleNamespace(
+def _runtime_config(
+    *,
+    enabled: bool = True,
+    reason: str | None = None,
+    revision: str = _REVISION,
+):
+    target = (
+        SimpleNamespace(
+            provider="openai",
+            model="allowed-model",
+            adapter_id="openai_official_chat_v1",
+            endpoint_identity="https://api.openai.com:443/v1/chat/completions",
+        )
+        if enabled
+        else None
+    )
+    return SlidesStandaloneHtmlConfig(
+        feature_enabled=enabled,
+        egress_enabled=enabled,
         enabled=enabled,
         disabled_reason=reason,
-        target=(
+        target=target,
+        prompt=(
             SimpleNamespace(
-                provider="openai",
-                model="allowed-model",
-                adapter_id="openai_official_chat_v1",
-                endpoint_identity="https://api.openai.com:443/v1/chat/completions",
+                text="Build a standalone presentation.",
+                sha256="b" * 64,
+                contract_version="slides.standalone_html.v1",
+                byte_count=32,
             )
             if enabled
             else None
         ),
-        generation_config_revision=_REVISION if enabled else None,
+        allowed_targets=((target,) if target is not None else ()),
+        generation_config_revision=revision if enabled else None,
         input_limits=SimpleNamespace(
             max_request_bytes=4_194_304,
             max_source_chars=200_000,
@@ -94,11 +127,148 @@ def _runtime_config(*, enabled: bool = True, reason: str | None = None):
             max_provider_response_bytes=8_388_608,
             max_document_bytes=1_048_576,
         ),
+        provider_limits=SimpleNamespace(
+            connect_timeout_seconds=10.0,
+            read_timeout_seconds=120.0,
+            overall_timeout_seconds=180.0,
+            max_output_tokens=16_384,
+        ),
+        _revision_manifest="test-manifest" if enabled else "",
     )
+
+
+@pytest.mark.asyncio
+async def test_request_runtime_reuses_lifecycle_owned_fenced_transport(
+    tmp_path,
+):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="1")
+    app = FastAPI()
+    shared_jobs = object()
+    shared_keyring = object()
+
+    async def _digest_snapshot_loader():
+        return object()
+
+    context = SimpleNamespace(
+        local_only=False,
+        job_manager=shared_jobs,
+        keyring=shared_keyring,
+        digest_snapshot_loader=_digest_snapshot_loader,
+        current_config_loader=lambda: _runtime_config(),
+        reconciler=object(),
+        admission_gate=SimpleNamespace(open=True),
+        validator_available=True,
+    )
+    app.state.standalone_html_transport_context = context
+    runtime = await slides_standalone_html._build_runtime(SimpleNamespace(app=app), db)
+
+    assert runtime.job_manager is shared_jobs
+    assert runtime.generation_service.slides_db is db
+    assert runtime.generation_service.job_manager is shared_jobs
+    assert runtime.generation_service.keyring is shared_keyring
+    db.close_connection()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("local_only", [None, True], ids=["absent", "local-only"])
+async def test_request_runtime_without_full_lifecycle_context_fails_closed_without_resources(
+    tmp_path,
+    local_only,
+):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="1")
+    app = FastAPI()
+    if local_only is not None:
+        app.state.standalone_html_transport_context = SimpleNamespace(
+            local_only=local_only,
+            job_manager=object(),
+        )
+
+    try:
+        runtime = await slides_standalone_html._build_runtime(
+            SimpleNamespace(app=app),
+            db,
+        )
+        config = runtime.config_loader()
+        assert runtime.job_manager is None
+        assert runtime.generation_service.job_manager is None
+        assert runtime.generation_service.keyring is None
+        assert config.enabled is False
+        assert config.disabled_reason in {
+            "feature_disabled",
+            "digest_key_unavailable",
+            "generation_worker_unavailable",
+        }
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_runtime_checks_digest_fence_before_stale_config_and_source(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="1")
+    app = FastAPI()
+    events: list[str] = []
+    keyring = StandaloneHtmlHmacKeyring(
+        secrets={"key-v1": b"k" * 32},
+        current_key_id="key-v1",
+    )
+    snapshot = DigestKeySnapshot(
+        records=(
+            DigestKeyMetadata(
+                key_id="key-v1",
+                state=DigestKeyState.CURRENT,
+                activated_at=datetime(2026, 8, 20, tzinfo=timezone.utc),
+                retired_at=None,
+            ),
+        ),
+        config_epoch="expected-epoch",
+        configured_current_key_id="key-v1",
+        availability=DigestKeyAvailability(missing_key_ids=()),
+    )
+
+    async def _digest_snapshot_loader():
+        events.append("digest")
+        return snapshot
+
+    def _current_config_loader():
+        events.append("config")
+        return _runtime_config(revision="sha256:" + "b" * 64)
+
+    context = SimpleNamespace(
+        local_only=False,
+        job_manager=object(),
+        keyring=keyring,
+        digest_snapshot_loader=_digest_snapshot_loader,
+        current_config_loader=_current_config_loader,
+        reconciler=object(),
+        admission_gate=SimpleNamespace(open=True),
+        validator_available=True,
+        config_epoch="expected-epoch",
+    )
+    app.state.standalone_html_transport_context = context
+    runtime = await slides_standalone_html._build_runtime(SimpleNamespace(app=app), db)
+
+    async def _source_resolver(_source, _limits):
+        events.append("source")
+        raise AssertionError("stale configuration must not resolve source")
+
+    try:
+        with pytest.raises(StandaloneHtmlGenerationError) as exc_info:
+            await runtime.generation_service.submit(
+                owner_user_id="1",
+                idempotency_key="task11-stale-config-key",
+                request=_GENERATION_REQUEST,
+                config_loader=runtime.config_loader,
+                source_resolver=_source_resolver,
+            )
+        assert exc_info.value.code == "generation_configuration_changed"
+        assert events == ["digest", "config"]
+    finally:
+        db.close_connection()
 
 
 class _FakeGenerationService:
     def __init__(self) -> None:
+        self.owner_user_id = "1"
         self.submission = StandaloneHtmlGenerationSubmission(
             receipt_id="018f2f4a-6f79-7a27-a1aa-7bb60777d9f1",
             status="queued",
@@ -118,7 +288,7 @@ class _FakeGenerationService:
 
     def get_generation(self, *, owner_user_id: str, receipt_id: str):
         self.status_calls.append((owner_user_id, receipt_id))
-        if receipt_id != self.submission.receipt_id:
+        if owner_user_id != self.owner_user_id or receipt_id != self.submission.receipt_id:
             raise StandaloneHtmlGenerationError("generation_not_found", status_code=404)
         return self.submission
 
@@ -126,6 +296,7 @@ class _FakeGenerationService:
 class _FakeStandaloneRuntime:
     def __init__(self) -> None:
         self.config = _runtime_config()
+        self.validator_available = True
         self.generation_service = _FakeGenerationService()
         self.reconcile_calls: list[str] = []
         self.receipt_error: tuple[str | None, str | None] = (None, None)
@@ -274,9 +445,20 @@ class _Collections:
         return [], 0
 
 
+class _SourceDbCalls:
+    media = 0
+    chacha = 0
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.media = 0
+        cls.chacha = 0
+
+
 @pytest.fixture()
 def html_client(tmp_path):
     _Collections.list_calls = 0
+    _SourceDbCalls.reset()
     db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="1")
     structured = _create_structured(db)
     html = _create_html(db)
@@ -349,10 +531,12 @@ def html_client(tmp_path):
         return _Collections()
 
     async def _override_media_db():
-        yield SimpleNamespace()
+        _SourceDbCalls.media += 1
+        yield SimpleNamespace(source_db="media")
 
     async def _override_chacha_db():
-        return SimpleNamespace()
+        _SourceDbCalls.chacha += 1
+        return SimpleNamespace(source_db="chacha")
 
     app.dependency_overrides[get_request_user] = _override_user
     app.dependency_overrides[get_auth_principal] = _override_principal
@@ -549,6 +733,44 @@ def test_list_negotiation_filters_before_pagination_and_returns_source_free_unio
     assert len(dual.json()["presentations"]) == 1
     for response in (legacy, structured_only, html_only, dual):
         assert _ACCEPT.lower() in {item.strip().lower() for item in response.headers["Vary"].split(",")}
+
+
+def test_presentation_metadata_route_is_source_free_without_content_opt_in(html_client):
+    client, db, _structured, html = html_client
+    statements: list[str] = []
+    db.get_connection().set_trace_callback(statements.append)
+
+    response = client.get(f"/api/v1/slides/presentations/{html.id}/metadata")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "id": html.id,
+        "title": "HTML Deck",
+        "description": None,
+        "theme": "black",
+        "created_at": html.created_at.replace("+00:00", "Z"),
+        "last_modified": html.last_modified.replace("+00:00", "Z"),
+        "deleted": False,
+        "version": 1,
+        "provenance": {
+            "source_kind": "prompt",
+            "provider": "openai",
+            "model": "test-model",
+        },
+        "content_kind": "standalone_html",
+        "html_slide_count": 1,
+        "html_bytes": len(_document().encode("utf-8")),
+    }
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.headers["ETag"] == '"v1"'
+    assert response.headers["Last-Modified"] == html.last_modified
+    assert "authorization" in response.headers["Vary"].lower()
+    selected = "\n".join(
+        statement for statement in statements if statement.lstrip().upper().startswith("SELECT")
+    ).lower()
+    assert "html_document" not in selected
+    assert "payload_json" not in selected
+    assert not any(column in selected for column in (" slides ", " slides,", ".slides "))
 
 
 def test_structured_version_list_preserves_legacy_title_and_deleted_values(html_client):
@@ -1262,6 +1484,7 @@ def test_validator_unavailable_capability_keeps_read_and_draft_only(html_client)
     client, _db, _structured, _html = html_client
     runtime = client.app.state.standalone_html_api_runtime
     runtime.config = _runtime_config(enabled=False, reason="validator_unavailable")
+    runtime.validator_available = False
 
     response = client.get("/api/v1/slides/capabilities")
 
@@ -1280,6 +1503,80 @@ def test_validator_unavailable_capability_keeps_read_and_draft_only(html_client)
     assert generation["reason"] == "validator_unavailable"
     assert generation["generation_config_revision"] is None
     assert all(generation[field] is None for field in ("provider", "model", "adapter_id", "endpoint_identity"))
+
+
+def test_validator_unavailable_is_independent_from_generation_disabled_reason(html_client):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    runtime.config = _runtime_config(enabled=False, reason="feature_disabled")
+    runtime.validator_available = False
+
+    response = client.get("/api/v1/slides/capabilities")
+
+    assert response.status_code == 200, response.text
+    html_kind = response.json()["content_kinds"]["standalone_html"]
+    generation = response.json()["generation_modes"]["standalone_html"]
+    assert html_kind["edit"] is False
+    assert html_kind["export_attachment"] is False
+    assert html_kind["reason"] == "validator_unavailable"
+    assert generation["enabled"] is False
+    assert generation["reason"] == "feature_disabled"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "feature_disabled",
+        "egress_disabled",
+        "default_model_not_configured",
+        "default_model_not_allowed",
+        "default_endpoint_not_allowed",
+        "prompt_asset_unavailable",
+        "digest_key_unavailable",
+        "generation_worker_unavailable",
+        "generation_reconciler_overloaded",
+        "validator_unavailable",
+    ],
+)
+def test_capabilities_project_each_approved_disabled_reason_safely(html_client, reason):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    runtime.config = _runtime_config(enabled=False, reason=reason)
+    runtime.validator_available = reason != "validator_unavailable"
+
+    response = client.get("/api/v1/slides/capabilities")
+
+    assert response.status_code == 200, response.text
+    html_kind = response.json()["content_kinds"]["standalone_html"]
+    generation = response.json()["generation_modes"]["standalone_html"]
+    assert generation["enabled"] is False
+    assert generation["reason"] == reason
+    assert generation["generation_config_revision"] is None
+    assert all(generation[field] is None for field in ("provider", "model", "adapter_id", "endpoint_identity"))
+    assert html_kind["reason"] == ("validator_unavailable" if reason == "validator_unavailable" else None)
+    assert html_kind["edit"] is (reason != "validator_unavailable")
+    assert html_kind["export_attachment"] is (reason != "validator_unavailable")
+
+
+@pytest.mark.parametrize(
+    ("section", "reason"),
+    [
+        pytest.param("content", "feature_disabled", id="content-reason"),
+        pytest.param("generation", "not_an_approved_reason", id="generation-reason"),
+    ],
+)
+def test_capability_schemas_reject_unapproved_reason_literals(section, reason):
+    payload = slides_standalone_html._capability_payload(
+        _runtime_config(enabled=False, reason="feature_disabled"),
+        validator_available=True,
+    )
+    if section == "content":
+        payload["content_kinds"]["standalone_html"]["reason"] = reason
+    else:
+        payload["generation_modes"]["standalone_html"]["reason"] = reason
+
+    with pytest.raises(ValidationError):
+        SlidesCapabilitiesResponse.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -1312,6 +1609,67 @@ def test_generation_accepts_each_closed_source_variant(html_client, source):
     call = client.app.state.standalone_html_api_runtime.generation_service.submit_calls[-1]
     assert call["owner_user_id"] == "1"
     assert call["request"] == payload
+
+
+def test_generation_replay_does_not_acquire_unrelated_source_databases(html_client):
+    client, _db, _structured, _html = html_client
+
+    response = client.post(
+        "/api/v1/slides/generations",
+        json=_GENERATION_REQUEST,
+        headers={"Idempotency-Key": "task11-generation-replay"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert (_SourceDbCalls.media, _SourceDbCalls.chacha) == (0, 0)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_calls"),
+    [
+        pytest.param({"kind": "prompt", "prompt": "Material"}, (0, 0), id="prompt"),
+        pytest.param({"kind": "chat", "conversation_id": "chat-1"}, (0, 1), id="chat"),
+        pytest.param({"kind": "media", "media_id": 1}, (1, 0), id="media"),
+        pytest.param({"kind": "notes", "note_ids": ["note-1"]}, (0, 1), id="notes"),
+        pytest.param({"kind": "rag", "query": "bounded query", "top_k": 8}, (1, 1), id="rag"),
+    ],
+)
+def test_new_generation_acquires_only_selected_source_databases(
+    html_client,
+    monkeypatch,
+    source,
+    expected_calls,
+):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    service = runtime.generation_service
+
+    async def _resolve_submit(**kwargs):
+        await kwargs["source_resolver"](kwargs["request"]["source"], SimpleNamespace())
+        return service.submission
+
+    async def _resolved_source(
+        _source,
+        *,
+        owner_user_id,
+        limits,
+        media_db,
+        chacha_db,
+    ):
+        del owner_user_id, limits, media_db, chacha_db
+        return SimpleNamespace()
+
+    monkeypatch.setattr(service, "submit", _resolve_submit)
+    monkeypatch.setattr(slides_standalone_html, "resolve_standalone_html_source", _resolved_source)
+
+    response = client.post(
+        "/api/v1/slides/generations",
+        json={**_GENERATION_REQUEST, "source": source},
+        headers={"Idempotency-Key": "task11-generation-new"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert (_SourceDbCalls.media, _SourceDbCalls.chacha) == expected_calls
 
 
 @pytest.mark.parametrize(
@@ -1409,6 +1767,16 @@ def test_generation_status_malformed_and_unknown_are_equivalent_404(html_client,
     assert response.json() == {"detail": "generation_not_found"}
 
 
+def test_generation_status_unknown_remains_404_without_lifecycle_context(html_client):
+    client, _db, _structured, _html = html_client
+    del client.app.state.standalone_html_api_runtime
+
+    response = client.get("/api/v1/slides/generations/018f2f4a-6f79-7a27-a1aa-7bb60777d900")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "generation_not_found"}
+
+
 def test_generation_status_reconciles_and_returns_bounded_progress_without_html(html_client):
     client, _db, _structured, _html = html_client
     runtime = client.app.state.standalone_html_api_runtime
@@ -1462,6 +1830,132 @@ def test_generation_status_jobs_failure_is_retryable_and_redacted(html_client):
     assert response.json() == {"detail": "generation_receipt_unresolved"}
     assert response.headers["Retry-After"] == "1"
     assert "SECRET-JOBS-OUTAGE" not in response.text
+
+
+def test_generation_status_other_owner_is_indistinguishable_from_unknown(html_client):
+    client, _db, _structured, _html = html_client
+    generation_id = client.app.state.standalone_html_api_runtime.generation_service.submission.receipt_id
+
+    async def _other_owner():
+        return User(
+            id=2,
+            username="other-owner",
+            email=None,
+            is_active=True,
+            is_admin=False,
+        )
+
+    client.app.dependency_overrides[get_request_user] = _other_owner
+    response = client.get(f"/api/v1/slides/generations/{generation_id}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "generation_not_found"}
+
+
+@pytest.mark.parametrize(
+    ("status", "receipt_error", "expected"),
+    [
+        pytest.param(
+            "completed",
+            (None, None),
+            {
+                "presentation_id": "presentation-1",
+                "content_kind": "standalone_html",
+            },
+            id="completed",
+        ),
+        pytest.param(
+            "failed",
+            ("provider_timeout", "The provider timed out."),
+            {
+                "presentation_id": None,
+                "error_code": "provider_timeout",
+                "error_message": "The provider timed out.",
+            },
+            id="failed",
+        ),
+        pytest.param(
+            "failed",
+            ("generation_quarantined", "Generation was quarantined."),
+            {
+                "presentation_id": None,
+                "error_code": "generation_quarantined",
+                "error_message": "Generation was quarantined.",
+            },
+            id="quarantined",
+        ),
+        pytest.param(
+            "cancelled",
+            (None, None),
+            {
+                "presentation_id": None,
+                "error_code": "generation_cancelled",
+            },
+            id="cancelled",
+        ),
+    ],
+)
+def test_generation_status_returns_each_closed_terminal_variant(
+    html_client,
+    status,
+    receipt_error,
+    expected,
+):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    generation_id = runtime.generation_service.submission.receipt_id
+    runtime.generation_service.submission = StandaloneHtmlGenerationSubmission(
+        receipt_id=generation_id,
+        status=status,
+        job_uuid=None,
+        presentation_id="presentation-1" if status == "completed" else None,
+        replayed=True,
+    )
+    runtime.receipt_error = receipt_error
+
+    response = client.get(f"/api/v1/slides/generations/{generation_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "generation_id": generation_id,
+        "status": status,
+        "status_url": f"/api/v1/slides/generations/{generation_id}",
+        **expected,
+    }
+
+
+def test_generation_status_bounds_terminal_error_fields(html_client):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    generation_id = runtime.generation_service.submission.receipt_id
+    runtime.generation_service.submission = StandaloneHtmlGenerationSubmission(
+        receipt_id=generation_id,
+        status="failed",
+        job_uuid=None,
+        presentation_id=None,
+        replayed=True,
+    )
+    runtime.receipt_error = ("Unsafe Secret Value", "X" * 257)
+
+    response = client.get(f"/api/v1/slides/generations/{generation_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["error_code"] == "generation_failed"
+    assert response.json()["error_message"] == "Generation failed."
+    assert "Unsafe Secret Value" not in response.text
+    assert "X" * 257 not in response.text
+
+
+def test_generation_status_omits_unbounded_progress_text(html_client):
+    client, _db, _structured, _html = html_client
+    runtime = client.app.state.standalone_html_api_runtime
+    generation_id = runtime.generation_service.submission.receipt_id
+    runtime.job = {"progress_message": "X" * 257, "progress_percent": 25.0}
+
+    response = client.get(f"/api/v1/slides/generations/{generation_id}")
+
+    assert response.status_code == 200, response.text
+    assert "progress_text" not in response.json()
 
 
 def _assert_html_attachment_headers(response) -> None:

@@ -1388,6 +1388,25 @@ class SlidesDatabase:
             raise KeyError("presentation_not_found")
         return PresentationSourceIdentityRow(**dict(row))
 
+    def get_presentation_summary(
+        self,
+        presentation_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> PresentationSummaryRow:
+        """Fetch one source-free presentation metadata projection by owner-local ID."""
+        query = f"""
+            SELECT {_PRESENTATION_SUMMARY_PROJECTION}
+            FROM presentations
+            WHERE id = ?
+        """  # nosec B608 - projection is a module constant
+        if not include_deleted:
+            query += " AND deleted = 0"
+        row = self.get_connection().execute(query, (presentation_id,)).fetchone()
+        if not row:
+            raise KeyError("presentation_not_found")
+        return PresentationSummaryRow(**dict(row))
+
     def list_presentations(
         self,
         *,

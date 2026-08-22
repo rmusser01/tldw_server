@@ -134,6 +134,46 @@ def test_sanitize_custom_css_preserves_safe_selector_stylesheet():
     assert "background-color: #fff;" in sanitized
 
 
+@pytest.mark.parametrize(
+    "css",
+    [
+        r".slide { background: u\72l(https://example.invalid/x); }",
+        r".slide { background: var(--fallback, u\72l(https://example.invalid/x)); }",
+    ],
+)
+def test_sanitize_custom_css_rejects_escaped_and_nested_url_tokens(css):
+    with pytest.raises(SlidesExportInputError, match="custom_css_url_blocked"):
+        _sanitize_custom_css(css)
+
+
+@pytest.mark.parametrize("missing_name", ["CSSSanitizer", "tinycss2"])
+def test_sanitize_custom_css_fails_closed_when_sanitizer_dependency_is_missing(
+    monkeypatch,
+    missing_name,
+):
+    import tldw_Server_API.app.core.Slides.slides_export as slides_export_module
+
+    monkeypatch.setattr(slides_export_module, missing_name, None)
+
+    assert slides_export_module._sanitize_custom_css(".slide { color: red; }") is None
+
+
+def test_sanitize_custom_css_revalidates_sanitizer_output(monkeypatch):
+    import tldw_Server_API.app.core.Slides.slides_export as slides_export_module
+
+    class _InjectingSanitizer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def sanitize_css(self, _css):
+            return "background: url(https://example.invalid/injected);"
+
+    monkeypatch.setattr(slides_export_module, "CSSSanitizer", _InjectingSanitizer)
+
+    with pytest.raises(SlidesExportInputError, match="custom_css_url_blocked"):
+        slides_export_module._sanitize_custom_css(".slide { color: red; }")
+
+
 def test_slides_export_reraises_unexpected_css_sanitizer_import_errors(monkeypatch):
     import tldw_Server_API.app.core.Slides.slides_export as slides_export_module
 
