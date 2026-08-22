@@ -11,6 +11,11 @@ import {
 } from "@/services/tldw/TldwApiClient"
 
 const PAGE_SIZE = 25
+const AUTHORITY_EVENTS = [
+  "tldw:config-updated",
+  "tldw:auth-principal-changed",
+  "tldw:slides-scope-mismatch"
+] as const
 
 const formatBytes = (bytes: number): string =>
   `${(Math.max(0, bytes) / 1024).toFixed(1)} KB`
@@ -42,7 +47,27 @@ export const PresentationStudioIndex: React.FC = () => {
   const [loadingMore, setLoadingMore] = React.useState(false)
   const [error, setError] = React.useState<"initial" | "pagination" | null>(null)
   const [nextOffset, setNextOffset] = React.useState<number | null>(0)
+  const [authorityEpoch, setAuthorityEpoch] = React.useState(0)
   const requestIdRef = React.useRef(0)
+
+  React.useEffect(() => {
+    const invalidate = () => {
+      requestIdRef.current += 1
+      setPresentations([])
+      setNextOffset(0)
+      setError(null)
+      setAuthorityEpoch((current) => current + 1)
+    }
+    for (const eventName of AUTHORITY_EVENTS) {
+      window.addEventListener(eventName, invalidate)
+    }
+    return () => {
+      requestIdRef.current += 1
+      for (const eventName of AUTHORITY_EVENTS) {
+        window.removeEventListener(eventName, invalidate)
+      }
+    }
+  }, [])
 
   const load = React.useCallback(async (offset: number, append: boolean) => {
     if (!online) return
@@ -90,7 +115,7 @@ export const PresentationStudioIndex: React.FC = () => {
       return
     }
     void load(0, false)
-  }, [load, online])
+  }, [authorityEpoch, load, online])
 
   if (!online) {
     return (

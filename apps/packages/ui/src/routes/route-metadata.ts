@@ -80,6 +80,7 @@ type RouteMetadataInput = Omit<
 
 const web = ["web"] as const
 const webAndExtension = ["web", "extension_options"] as const
+const extensionOptions = ["extension_options"] as const
 const sidepanel = ["extension_sidepanel"] as const
 
 const headingExceptionSurfaces = new Set<RouteSurface>([
@@ -467,6 +468,37 @@ export const ROUTE_METADATA = [
     availability: webAndExtension,
     requiresBackend: true,
     rationale: "Presentation creation and editing route."
+  }),
+  defineRoute({
+    path: "/presentation-studio/new",
+    label: "New Presentation",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: web,
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "WebUI-only presentation authoring entry point."
+  }),
+  defineRoute({
+    path: "/presentation-studio/start",
+    label: "Presentation Studio Quick Start",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: extensionOptions,
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Extension-safe structured presentation quick start."
+  }),
+  defineRoute({
+    path: "/presentation-studio/:projectId",
+    label: "Presentation Studio Project",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    smoke: "manual",
+    requiresBackend: true,
+    rationale:
+      "Kind-first project route with a source-free extension handoff for non-structured presentations."
   }),
   defineRoute({
     path: "/audio-studio",

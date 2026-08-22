@@ -1,11 +1,16 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { useParams } from "react-router-dom"
 
+import { Button } from "@/components/Common/Button"
+import { PageShell } from "@/components/Common/PageShell"
+import { Badge, LoadingState, StatePanel } from "@/components/ui"
 import { useConnectionState } from "@/hooks/useConnectionState"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { getScreenshotFromCurrentTab } from "@/libs/get-screenshot"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { resolveSidepanelChatWebUiBaseUrl } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { EMPTY_STATE_LABEL, READY_STATE_LABEL } from "@/design-system"
 
 type SeedImage = {
@@ -48,10 +53,309 @@ const resolveServerOrigin = (serverUrl: string | null | undefined): string | nul
     return null
   }
   try {
-    return new URL(serverUrl).origin
+    const parsed = new URL(serverUrl)
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.origin
+      : null
   } catch {
     return null
   }
+}
+
+const AUTHORITY_EVENTS = [
+  "tldw:config-updated",
+  "tldw:auth-principal-changed",
+  "tldw:slides-scope-mismatch"
+] as const
+
+const MAX_PROJECT_ID_SCALARS = 256
+const MAX_METADATA_KIND_SCALARS = 256
+const MAX_METADATA_PROVENANCE_SCALARS = 256
+const MAX_METADATA_TITLE_SCALARS = 512
+const MAX_METADATA_DESCRIPTION_SCALARS = 2_048
+
+type SafeProvenance = {
+  sourceKind: string | null
+  provider: string | null
+  model: string | null
+}
+
+type SafePresentationMetadata = {
+  id: string
+  title: string
+  description: string | null
+  provenance: SafeProvenance
+} & (
+  | {
+      contentKind: "structured_slides"
+      slideCount: number
+    }
+  | {
+      contentKind: "standalone_html"
+      slideCount: number
+      htmlBytes: number
+    }
+  | {
+      contentKind: "unsupported"
+      unsupportedKind: string
+    }
+)
+
+type MetadataView =
+  | { projectId: string; status: "loading" }
+  | { projectId: string; status: "load_error" | "invalid" }
+  | { projectId: string; status: "ready"; record: SafePresentationMetadata }
+
+type TrustedReadyMetadata = {
+  projectId: string
+  metadataEpoch: number
+  record: SafePresentationMetadata
+}
+
+type SourceFreeWebUiConfig = {
+  serverUrl?: string | null
+  webUiUrl?: string | null
+  webuiUrl?: string | null
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const isBidiControl = (codePoint: number): boolean =>
+  codePoint === 0x061c ||
+  codePoint === 0x200e ||
+  codePoint === 0x200f ||
+  (codePoint >= 0x202a && codePoint <= 0x202e) ||
+  (codePoint >= 0x2066 && codePoint <= 0x206f)
+
+const isBoundedMetadataString = (
+  value: unknown,
+  maximumScalars: number,
+  required: boolean
+): value is string => {
+  if (typeof value !== "string") return false
+  if (required && value.trim().length === 0) return false
+
+  let scalars = 0
+  for (let index = 0; index < value.length; index += 1) {
+    const first = value.charCodeAt(index)
+    let codePoint = first
+    if (first >= 0xd800 && first <= 0xdbff) {
+      const second = value.charCodeAt(index + 1)
+      if (!Number.isInteger(second) || second < 0xdc00 || second > 0xdfff) {
+        return false
+      }
+      codePoint = 0x10000 + ((first - 0xd800) << 10) + (second - 0xdc00)
+      index += 1
+    } else if (first >= 0xdc00 && first <= 0xdfff) {
+      return false
+    }
+
+    if (
+      codePoint <= 0x1f ||
+      (codePoint >= 0x7f && codePoint <= 0x9f) ||
+      isBidiControl(codePoint)
+    ) {
+      return false
+    }
+    scalars += 1
+    if (scalars > maximumScalars) return false
+  }
+  return true
+}
+
+const isTrustedProjectId = (value: unknown): value is string =>
+  isBoundedMetadataString(value, MAX_PROJECT_ID_SCALARS, true) &&
+  value !== "." &&
+  value !== ".."
+
+const readNullableMetadataString = (
+  value: unknown,
+  maximumScalars: number
+): string | null | undefined => {
+  if (value === null) return null
+  return isBoundedMetadataString(value, maximumScalars, false)
+    ? value
+    : undefined
+}
+
+const isBoundedCount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+
+const projectPresentationMetadata = (
+  response: unknown,
+  routeProjectId: string
+): SafePresentationMetadata | null => {
+  if (!isRecord(response) || !isRecord(response.record)) return null
+  const record = response.record
+  if (
+    !isTrustedProjectId(record.id) ||
+    record.id !== routeProjectId ||
+    !isBoundedMetadataString(record.title, MAX_METADATA_TITLE_SCALARS, true) ||
+    !isBoundedMetadataString(record.theme, MAX_METADATA_KIND_SCALARS, true) ||
+    !isBoundedMetadataString(record.created_at, MAX_METADATA_PROVENANCE_SCALARS, true) ||
+    !isBoundedMetadataString(record.last_modified, MAX_METADATA_PROVENANCE_SCALARS, true) ||
+    typeof record.deleted !== "boolean" ||
+    !isBoundedCount(record.version) ||
+    !isRecord(record.provenance)
+  ) {
+    return null
+  }
+
+  const description = readNullableMetadataString(
+    record.description,
+    MAX_METADATA_DESCRIPTION_SCALARS
+  )
+  const sourceKind = readNullableMetadataString(
+    record.provenance.source_kind,
+    MAX_METADATA_PROVENANCE_SCALARS
+  )
+  const provider = readNullableMetadataString(
+    record.provenance.provider,
+    MAX_METADATA_PROVENANCE_SCALARS
+  )
+  const model = readNullableMetadataString(
+    record.provenance.model,
+    MAX_METADATA_PROVENANCE_SCALARS
+  )
+  if (
+    description === undefined ||
+    sourceKind === undefined ||
+    provider === undefined ||
+    model === undefined ||
+    !isBoundedMetadataString(
+      record.content_kind,
+      MAX_METADATA_KIND_SCALARS,
+      true
+    )
+  ) {
+    return null
+  }
+
+  const base = {
+    id: record.id,
+    title: record.title,
+    description,
+    provenance: { sourceKind, provider, model }
+  }
+
+  if (record.content_kind === "structured_slides") {
+    return isBoundedCount(record.slide_count)
+      ? { ...base, contentKind: "structured_slides", slideCount: record.slide_count }
+      : null
+  }
+  if (record.content_kind === "standalone_html") {
+    return isBoundedCount(record.html_slide_count) && isBoundedCount(record.html_bytes)
+      ? {
+          ...base,
+          contentKind: "standalone_html",
+          slideCount: record.html_slide_count,
+          htmlBytes: record.html_bytes
+        }
+      : null
+  }
+  if (record.content_kind === "unsupported") {
+    return record.read_only === true &&
+      isBoundedMetadataString(
+        record.unsupported_content_kind,
+        MAX_METADATA_KIND_SCALARS,
+        true
+      )
+      ? {
+          ...base,
+          contentKind: "unsupported",
+          unsupportedKind: record.unsupported_content_kind
+        }
+      : null
+  }
+  return null
+}
+
+const isConfiguredHttpUrl = (value: unknown): value is string => {
+  if (typeof value !== "string" || value.trim().length === 0) return false
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
+const projectSourceFreeWebUiConfig = (
+  value: unknown
+): SourceFreeWebUiConfig | null => {
+  if (!isRecord(value)) return null
+  const config: SourceFreeWebUiConfig = {}
+  for (const key of ["serverUrl", "webUiUrl", "webuiUrl"] as const) {
+    const candidate = value[key]
+    if (typeof candidate === "string" || candidate === null) {
+      config[key] = candidate
+    }
+  }
+  return Object.values(config).some(isConfiguredHttpUrl) ? config : null
+}
+
+const buildPresentationWebUiTarget = (
+  rawConfig: unknown,
+  trustedProjectId: string
+): string | null => {
+  if (!isTrustedProjectId(trustedProjectId)) return null
+  const config = projectSourceFreeWebUiConfig(rawConfig)
+  if (!config) return null
+  const base = resolveSidepanelChatWebUiBaseUrl(config)
+  try {
+    const baseUrl = new URL(`${base.replace(/\/+$/, "")}/`)
+    if (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:") return null
+    return new URL(
+      `presentation-studio/${encodeURIComponent(trustedProjectId)}`,
+      baseUrl
+    ).toString()
+  } catch {
+    return null
+  }
+}
+
+const useAuthorityFence = (onInvalidate: () => void) => {
+  const mountedRef = React.useRef(true)
+  const epochRef = React.useRef(0)
+  const onInvalidateRef = React.useRef(onInvalidate)
+  const [boundaryEpoch, setBoundaryEpoch] = React.useState(0)
+  onInvalidateRef.current = onInvalidate
+
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      epochRef.current += 1
+    }
+  }, [])
+
+  React.useEffect(() => {
+    const invalidate = () => {
+      epochRef.current += 1
+      onInvalidateRef.current()
+      setBoundaryEpoch((current) => current + 1)
+    }
+    for (const eventName of AUTHORITY_EVENTS) {
+      window.addEventListener(eventName, invalidate)
+    }
+    return () => {
+      for (const eventName of AUTHORITY_EVENTS) {
+        window.removeEventListener(eventName, invalidate)
+      }
+    }
+  }, [])
+
+  const isCurrent = React.useCallback(
+    (epoch: number) => mountedRef.current && epochRef.current === epoch,
+    []
+  )
+  const capture = React.useCallback(() => epochRef.current, [])
+  const retire = React.useCallback(() => {
+    epochRef.current += 1
+  }, [])
+
+  return { boundaryEpoch, capture, isCurrent, retire }
 }
 
 const getActiveTabTitle = async (): Promise<string | null> => {
@@ -92,6 +396,10 @@ export const ExtensionStartPanel: React.FC = () => {
   const [captureError, setCaptureError] = React.useState<string | null>(null)
   const [submitError, setSubmitError] = React.useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const authority = useAuthorityFence(() => {
+    setIsSubmitting(false)
+    setSubmitError(null)
+  })
 
   React.useEffect(() => {
     let active = true
@@ -160,17 +468,6 @@ export const ExtensionStartPanel: React.FC = () => {
     setImageSeed(parsed)
   }
 
-  const openWebUiProject = (projectId: string): void => {
-    if (!serverOrigin) {
-      throw new Error("Configure a valid server URL before starting Presentation Studio.")
-    }
-    const destination = new URL(
-      `/presentation-studio/${encodeURIComponent(projectId)}`,
-      serverOrigin
-    ).toString()
-    window.open(destination, "_blank", "noopener,noreferrer")
-  }
-
   const createProject = async (mode: "blank" | "seeded"): Promise<void> => {
     if (!serverOrigin) {
       setSubmitError("Configure your server URL under Settings → tldw server first.")
@@ -208,8 +505,11 @@ export const ExtensionStartPanel: React.FC = () => {
 
     setIsSubmitting(true)
     setSubmitError(null)
+    const operationEpoch = authority.capture()
+    let projectResponse: unknown = null
+    let configResponse: unknown = null
     try {
-      const project = await tldwClient.createPresentation({
+      projectResponse = await tldwClient.createPresentation({
         title: finalTitle,
         description: null,
         theme: "black",
@@ -230,13 +530,41 @@ export const ExtensionStartPanel: React.FC = () => {
           }
         ]
       })
-      openWebUiProject(project.id)
-    } catch (error) {
-      setSubmitError(
-        error instanceof Error ? error.message || "Failed to create project." : "Failed to create project."
+      if (!authority.isCurrent(operationEpoch)) return
+      if (
+        !isRecord(projectResponse) ||
+        !isTrustedProjectId(projectResponse.id)
+      ) {
+        projectResponse = null
+        setSubmitError("Presentation project ID could not be verified")
+        return
+      }
+      const trustedProjectId = projectResponse.id
+      projectResponse = null
+
+      configResponse = await tldwClient.getConfig()
+      if (!authority.isCurrent(operationEpoch)) return
+      const destination = buildPresentationWebUiTarget(
+        configResponse,
+        trustedProjectId
       )
+      configResponse = null
+      if (!destination) {
+        setSubmitError("A valid WebUI address is not configured")
+        return
+      }
+      if (!authority.isCurrent(operationEpoch)) return
+      window.open(destination, "_blank", "noopener,noreferrer")
+    } catch {
+      if (authority.isCurrent(operationEpoch)) {
+        setSubmitError("Failed to create project.")
+      }
     } finally {
-      setIsSubmitting(false)
+      projectResponse = null
+      configResponse = null
+      if (authority.isCurrent(operationEpoch)) {
+        setIsSubmitting(false)
+      }
     }
   }
 
@@ -416,5 +744,351 @@ export const ExtensionStartPanel: React.FC = () => {
         </aside>
       </div>
     </section>
+  )
+}
+
+type ExtensionPresentationProjectPanelProps = {
+  structuredDetail: React.ReactNode
+}
+
+const provenanceLabel = (value: string | null): string => {
+  if (!value) return "Not provided"
+  const normalized = value.replace(/_/g, " ")
+  return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`
+}
+
+const presentationKindLabel = (record: SafePresentationMetadata): string => {
+  if (record.contentKind === "standalone_html") {
+    return "Standalone HTML + JavaScript"
+  }
+  if (record.contentKind === "structured_slides") return "Structured slides"
+  return `Unknown kind: ${record.unsupportedKind}`
+}
+
+export const ExtensionPresentationProjectPanel: React.FC<
+  ExtensionPresentationProjectPanelProps
+> = ({ structuredDetail }) => {
+  const { projectId: routeProjectId = "" } = useParams<{ projectId: string }>()
+  const trustedProjectId = isTrustedProjectId(routeProjectId)
+    ? routeProjectId
+    : null
+  const online = useServerOnline()
+  const capabilityState = useServerCapabilities()
+  const [retryEpoch, setRetryEpoch] = React.useState(0)
+  const [view, setView] = React.useState<MetadataView | null>(null)
+  const [opening, setOpening] = React.useState(false)
+  const [handoffError, setHandoffError] = React.useState<string | null>(null)
+  const trustedReadyRef = React.useRef<TrustedReadyMetadata | null>(null)
+  const currentProjectIdRef = React.useRef<string | null>(trustedProjectId)
+  if (currentProjectIdRef.current !== trustedProjectId) {
+    currentProjectIdRef.current = trustedProjectId
+    trustedReadyRef.current = null
+  }
+  const { boundaryEpoch, capture, isCurrent, retire } = useAuthorityFence(() => {
+    trustedReadyRef.current = null
+    setOpening(false)
+    setHandoffError(null)
+    if (trustedProjectId) {
+      setView({ projectId: trustedProjectId, status: "loading" })
+    }
+  })
+
+  React.useEffect(() => {
+    if (
+      !trustedProjectId ||
+      !online ||
+      capabilityState.loading ||
+      capabilityState.capabilities?.hasPresentationStudio !== true
+    ) {
+      return
+    }
+
+    const operationEpoch = capture()
+    let response: unknown = null
+    trustedReadyRef.current = null
+    setView({ projectId: trustedProjectId, status: "loading" })
+    setHandoffError(null)
+    setOpening(false)
+
+    void (async () => {
+      try {
+        response = await tldwClient.getPresentationMetadata(trustedProjectId)
+        if (!isCurrent(operationEpoch)) {
+          response = null
+          return
+        }
+        const record = projectPresentationMetadata(response, trustedProjectId)
+        response = null
+        if (!isCurrent(operationEpoch)) return
+        if (record) {
+          trustedReadyRef.current = {
+            projectId: trustedProjectId,
+            metadataEpoch: operationEpoch,
+            record
+          }
+          setView({ projectId: trustedProjectId, status: "ready", record })
+        } else {
+          trustedReadyRef.current = null
+          setView({ projectId: trustedProjectId, status: "invalid" })
+        }
+      } catch {
+        response = null
+        if (isCurrent(operationEpoch)) {
+          trustedReadyRef.current = null
+          setView({ projectId: trustedProjectId, status: "load_error" })
+        }
+      }
+    })()
+
+    return () => {
+      response = null
+      if (trustedReadyRef.current?.metadataEpoch === operationEpoch) {
+        trustedReadyRef.current = null
+      }
+      retire()
+    }
+  }, [
+    boundaryEpoch,
+    capabilityState.capabilities?.hasPresentationStudio,
+    capabilityState.loading,
+    capture,
+    isCurrent,
+    online,
+    retire,
+    retryEpoch,
+    trustedProjectId
+  ])
+
+  const handleOpenInWebUi = async (): Promise<void> => {
+    const readyMetadata = trustedReadyRef.current
+    if (
+      !readyMetadata ||
+      readyMetadata.projectId !== trustedProjectId ||
+      currentProjectIdRef.current !== readyMetadata.projectId ||
+      !isCurrent(readyMetadata.metadataEpoch) ||
+      readyMetadata.record.contentKind === "structured_slides"
+    ) {
+      return
+    }
+
+    const operationEpoch = capture()
+    let configResponse: unknown = null
+    setOpening(true)
+    setHandoffError(null)
+    try {
+      configResponse = await tldwClient.getConfig()
+      if (!isCurrent(operationEpoch)) {
+        configResponse = null
+        return
+      }
+      const destination = buildPresentationWebUiTarget(
+        configResponse,
+        readyMetadata.record.id
+      )
+      configResponse = null
+      if (!destination) {
+        setHandoffError("A valid WebUI address is not configured")
+        return
+      }
+      if (
+        !isCurrent(operationEpoch) ||
+        currentProjectIdRef.current !== readyMetadata.projectId ||
+        trustedReadyRef.current?.metadataEpoch !== readyMetadata.metadataEpoch ||
+        trustedReadyRef.current.record !== readyMetadata.record
+      ) {
+        return
+      }
+      window.open(destination, "_blank", "noopener,noreferrer")
+    } catch {
+      configResponse = null
+      if (isCurrent(operationEpoch)) {
+        setHandoffError("The WebUI handoff could not be prepared")
+      }
+    } finally {
+      configResponse = null
+      if (isCurrent(operationEpoch)) setOpening(false)
+    }
+  }
+
+  const renderState = (
+    title: string,
+    message: string,
+    state: "loading" | "unavailable" | "error" | "blocked",
+    action?: { label: string; onClick: () => void }
+  ) => (
+    <PageShell className="py-6" maxWidthClassName="max-w-3xl">
+      <StatePanel
+        state={state}
+        title={title}
+        titleHeadingLevel={1}
+        message={message}
+        primaryAction={action}
+        role={state === "loading" ? "status" : state === "error" ? "alert" : undefined}
+        aria-live="polite"
+      >
+        {state === "loading" ? <LoadingState mode="skeleton" rows={3} /> : null}
+      </StatePanel>
+    </PageShell>
+  )
+
+  if (!trustedProjectId) {
+    return renderState(
+      "Presentation metadata could not be verified",
+      "The requested presentation identifier is not safe to use.",
+      "blocked"
+    )
+  }
+  if (!online) {
+    return renderState(
+      "Presentation handoff is offline",
+      "Reconnect to verify this presentation before continuing.",
+      "unavailable"
+    )
+  }
+  if (capabilityState.loading) {
+    return renderState(
+      "Checking Presentation Studio availability",
+      "Waiting for a source-free capability check.",
+      "loading"
+    )
+  }
+  if (!capabilityState.capabilities) {
+    return renderState(
+      "Presentation Studio availability could not load",
+      "Retry the capability check before opening this presentation.",
+      "error",
+      {
+        label: "Retry",
+        onClick: () => {
+          setRetryEpoch((current) => current + 1)
+          void capabilityState.refresh?.()
+        }
+      }
+    )
+  }
+  if (capabilityState.capabilities.hasPresentationStudio !== true) {
+    return renderState(
+      "Presentation Studio is not available",
+      "This server does not advertise Presentation Studio support.",
+      "unavailable"
+    )
+  }
+
+  const currentView = view?.projectId === trustedProjectId ? view : null
+  if (!currentView || currentView.status === "loading") {
+    return (
+      <PageShell className="py-6" maxWidthClassName="max-w-3xl">
+        <section
+          role="status"
+          aria-label="Loading presentation metadata"
+          className="rounded-lg border border-border bg-surface p-4"
+        >
+          <h1 className="text-base font-semibold text-text">
+            Loading presentation metadata
+          </h1>
+          <div className="mt-3">
+            <LoadingState mode="skeleton" rows={3} />
+          </div>
+        </section>
+      </PageShell>
+    )
+  }
+  if (currentView.status === "load_error") {
+    return renderState(
+      "Presentation metadata could not load",
+      "Check the server connection, then retry the source-free metadata request.",
+      "error",
+      {
+        label: "Retry",
+        onClick: () => setRetryEpoch((current) => current + 1)
+      }
+    )
+  }
+  if (currentView.status === "invalid") {
+    return renderState(
+      "Presentation metadata could not be verified",
+      "The server returned metadata that is unsafe or does not match this route.",
+      "blocked"
+    )
+  }
+  if (currentView.record.contentKind === "structured_slides") {
+    return <>{structuredDetail}</>
+  }
+
+  const record = currentView.record
+  return (
+    <PageShell className="space-y-6 py-6" maxWidthClassName="max-w-3xl">
+      <section className="space-y-5 rounded-lg border border-border bg-surface p-6">
+        <header className="space-y-3">
+          <Badge
+            variant={record.contentKind === "unsupported" ? "warning" : "secondary"}
+          >
+            {presentationKindLabel(record)}
+          </Badge>
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold text-text">{record.title}</h1>
+            {record.description ? (
+              <p className="text-sm text-text-muted">{record.description}</p>
+            ) : null}
+          </div>
+        </header>
+
+        <p className="text-sm text-text-muted">
+          This presentation is read only in this extension. Open it in the WebUI to
+          continue.
+        </p>
+
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          {record.contentKind === "standalone_html" ? (
+            <>
+              <div>
+                <dt className="font-medium text-text">Slides</dt>
+                <dd className="text-text-muted">{record.slideCount}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-text">Size</dt>
+                <dd className="text-text-muted">{record.htmlBytes} bytes</dd>
+              </div>
+            </>
+          ) : null}
+          <div>
+            <dt className="font-medium text-text">Source</dt>
+            <dd className="text-text-muted">
+              {provenanceLabel(record.provenance.sourceKind)}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-text">Provider</dt>
+            <dd className="text-text-muted">
+              {record.provenance.provider || "Not provided"}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-text">Model</dt>
+            <dd className="text-text-muted">
+              {record.provenance.model || "Not provided"}
+            </dd>
+          </div>
+        </dl>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="primary"
+            size="lg"
+            loading={opening}
+            onClick={() => {
+              void handleOpenInWebUi()
+            }}
+          >
+            Open in WebUI
+          </Button>
+          {handoffError ? (
+            <p role="alert" className="text-sm text-state-error">
+              {handoffError}
+            </p>
+          ) : null}
+        </div>
+      </section>
+    </PageShell>
   )
 }
