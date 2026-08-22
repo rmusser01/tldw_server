@@ -4,7 +4,7 @@ title: Prevent stale server-chat history persistence after request scope changes
 status: Done
 assignee: []
 created_date: '2026-08-22 07:08'
-updated_date: '2026-08-22 07:26'
+updated_date: '2026-08-22 07:41'
 labels:
   - chat
   - scope-isolation
@@ -43,12 +43,18 @@ RED: five focused regressions reproduced stale Dexie/ref and workspace/persona p
 GREEN: 81 focused/adjacent Vitest tests passed; extension compile passed; focused ESLint reported 0 errors; git diff --check passed.
 
 Known baseline: the mixed image-event suite retains four unrelated character-stream failures; package-wide UI test typecheck retains an unrelated docs fixture error at useChatActions.service-prompts.test.tsx:1030. All five image-sync tests passed. Bandit is not applicable because the touched implementation is TypeScript only; no documentation change was needed.
+
+Independent pre-publication review of 8d83b6d3..ed57d8aa found no Critical, Important, or Minor issues and assessed the change ready to merge.
+
+Published as draft PR #2799: https://github.com/rmusser01/tldw_server/pull/2799. The repository-required human-authored Change summary remains the only known manual merge gate at publication time.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Made server-chat history linking scope-aware: scoped Dexie work now runs transactionally and publishes refs/history state only after scope validation. Workspace, persona create/reuse, existing-chat preflight, Compare, and per-model paths pass the dedicated invalidation signal and defer shared server-chat metadata until history linking succeeds. Added RED/GREEN regressions for rollback/cache isolation and deferred workspace/persona publication.
+
+The reviewed branch was rebased onto current dev and published as draft PR #2799.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
