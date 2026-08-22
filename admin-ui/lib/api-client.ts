@@ -70,10 +70,6 @@ import type {
   WebhookRegistration,
   WebhookSecretResponse,
   WebhookStatus,
-  AdminWebhook,
-  AdminWebhooksResponse,
-  AdminWebhookDeliveryLogResponse,
-  AdminWebhookTestResult,
 } from '@/types';
 export { ApiError };
 
@@ -594,87 +590,6 @@ export const detectWebhookApi = async (): Promise<DetectedWebhookApi> => {
   }
   return { kind: 'legacy', status, client: legacyWebhookApi };
 };
-
-type DeprecatedWebhookCreateInput = {
-  url: string;
-  event_types?: string[];
-  description?: string;
-  secret?: string;
-  active?: boolean;
-  retry_count?: number;
-  timeout_seconds?: number;
-};
-
-function getWebhooksForCurrentPage(): Promise<AdminWebhooksResponse>;
-function getWebhooksForCurrentPage(
-  params: Record<string, QueryParamValue>,
-  options?: RequestInit,
-): Promise<WebhookListResponse>;
-function getWebhooksForCurrentPage(
-  params?: Record<string, QueryParamValue>,
-  options?: RequestInit,
-): Promise<AdminWebhooksResponse | WebhookListResponse> {
-  if (params === undefined && options === undefined) {
-    return requestJson<AdminWebhooksResponse>('/admin/webhooks');
-  }
-  const query = buildQueryString(params);
-  return requestJson<WebhookListResponse>(`/admin/webhooks${query ? `?${query}` : ''}`, options);
-}
-
-function createWebhookForCurrentPage(data: DeprecatedWebhookCreateInput): Promise<AdminWebhook>;
-function createWebhookForCurrentPage(
-  data: WebhookCreateRequest,
-  key: string,
-): Promise<StrongWebhookResponse<WebhookSecretResponse>>;
-function createWebhookForCurrentPage(
-  data: DeprecatedWebhookCreateInput | WebhookCreateRequest,
-  key?: string,
-): Promise<AdminWebhook | StrongWebhookResponse<WebhookSecretResponse>> {
-  if (key === undefined) {
-    return requestJson<AdminWebhook>('/admin/webhooks', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-  return createCanonicalWebhook(data as WebhookCreateRequest, key);
-}
-
-function updateWebhookForCurrentPage(
-  id: number,
-  data: Partial<DeprecatedWebhookCreateInput>,
-): Promise<AdminWebhook>;
-function updateWebhookForCurrentPage(
-  id: number,
-  data: WebhookPatchRequest,
-  etag: string,
-): Promise<StrongWebhookResponse<WebhookRegistration>>;
-function updateWebhookForCurrentPage(
-  id: number,
-  data: Partial<DeprecatedWebhookCreateInput> | WebhookPatchRequest,
-  etag?: string,
-): Promise<AdminWebhook | StrongWebhookResponse<WebhookRegistration>> {
-  if (etag === undefined) {
-    return requestJson<AdminWebhook>(`/admin/webhooks/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
-  return updateCanonicalWebhook(id, data as WebhookPatchRequest, etag);
-}
-
-function deleteWebhookForCurrentPage(id: number): Promise<{ deleted: boolean; id: number }>;
-function deleteWebhookForCurrentPage(id: number, etag: string): Promise<WebhookDeleteResponse>;
-function deleteWebhookForCurrentPage(
-  id: number,
-  etag?: string,
-): Promise<{ deleted: boolean; id: number }> {
-  if (etag === undefined) {
-    return requestJson<{ deleted: boolean; id: number }>(`/admin/webhooks/${id}`, {
-      method: 'DELETE',
-    });
-  }
-  return deleteCanonicalWebhook(id, etag);
-}
 
 function requestRouterAnalytics(path: string, params?: Record<string, string>) {
   const queryParams = params ? new URLSearchParams(params).toString() : '';
@@ -2090,19 +2005,12 @@ export const api = {
   // Admin Webhooks
   getWebhookStatus,
   getWebhookCatalog: canonicalWebhookApi.getWebhookCatalog,
-  getWebhooks: getWebhooksForCurrentPage,
-  createWebhook: createWebhookForCurrentPage,
+  getWebhooks: getCanonicalWebhooks,
+  createWebhook: createCanonicalWebhook,
   getWebhook: getCanonicalWebhook,
-  updateWebhook: updateWebhookForCurrentPage,
-  deleteWebhook: deleteWebhookForCurrentPage,
+  updateWebhook: updateCanonicalWebhook,
+  deleteWebhook: deleteCanonicalWebhook,
   rotateWebhookSecret: rotateCanonicalWebhookSecret,
-  // Deprecated page-only compatibility calls are removed in Task 10.
-  testWebhook: (id: number) =>
-    requestJson<AdminWebhookTestResult>(`/admin/webhooks/${id}/test`, { method: 'POST' }),
-  getWebhookDeliveries: (id: number, params?: Record<string, QueryParamValue>) => {
-    const qs = buildQueryString(params);
-    return requestJson<AdminWebhookDeliveryLogResponse>(`/admin/webhooks/${id}/deliveries${qs ? `?${qs}` : ''}`);
-  },
 };
 
 export default api;

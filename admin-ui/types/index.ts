@@ -519,11 +519,6 @@ export interface VoiceAnalyticsSummary {
 
 export type { IncidentEvent, IncidentItem, IncidentNotifyResponse, IncidentsResponse } from './incidents';
 export type {
-  AdminWebhook,
-  AdminWebhookDeliveryLogEntry,
-  AdminWebhookDeliveryLogResponse,
-  AdminWebhooksResponse,
-  AdminWebhookTestResult,
   WebhookCatalog,
   WebhookCatalogItem,
   WebhookCreateRequest,

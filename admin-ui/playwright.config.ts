@@ -6,6 +6,9 @@ const rawBaseUrl = process.env.TLDW_ADMIN_UI_URL || 'http://127.0.0.1:3001';
 const baseURL = rawBaseUrl.replace('localhost', '127.0.0.1');
 const webCommand = process.env.TLDW_ADMIN_UI_CMD || 'bun run dev -- --hostname 127.0.0.1';
 const shouldAutoStart = process.env.TLDW_ADMIN_UI_AUTOSTART !== 'false';
+const shouldStartRealBackendUiServers = process.argv.some((arg) => (
+  arg.includes('real-backend') || arg.includes('chromium-real-')
+));
 
 const realJwtProject = getProjectEnv('chromium-real-jwt');
 const realSingleUserProject = getProjectEnv('chromium-real-single-user');
@@ -19,7 +22,7 @@ const baseUiEnv = {
   NEXT_TELEMETRY_DISABLED: '1',
 };
 
-const realBackendUiServers = shouldAutoStart
+const realBackendUiServers = shouldAutoStart && shouldStartRealBackendUiServers
   ? [
       {
         command: `bunx next dev -p ${realJwtProject.uiPort} --hostname 127.0.0.1`,
