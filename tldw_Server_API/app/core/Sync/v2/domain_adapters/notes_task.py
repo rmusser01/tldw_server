@@ -178,6 +178,8 @@ def _get_head(
     envelope: SyncEnvelopeCreate,
     context: SyncAdapterContext,
 ) -> SyncHead | None:
+    """Return the current object head from the context's preferred lookup."""
+
     if context.get_head is not None:
         return context.get_head(envelope.domain, envelope.object_id)
     matches = (
@@ -189,6 +191,8 @@ def _get_head(
 
 
 def _literal_replay(head: SyncHead, envelope: SyncEnvelopeCreate) -> bool:
+    """Return whether an incoming envelope exactly replays the stored head."""
+
     return all(
         getattr(head, field_name) == getattr(envelope, field_name)
         for field_name in _REPLAY_FIELDS
@@ -196,6 +200,8 @@ def _literal_replay(head: SyncHead, envelope: SyncEnvelopeCreate) -> bool:
 
 
 def _has_base(envelope: SyncEnvelopeCreate) -> bool:
+    """Return whether any optimistic lineage token was supplied."""
+
     return any(
         value is not None
         for value in (
@@ -207,6 +213,8 @@ def _has_base(envelope: SyncEnvelopeCreate) -> bool:
 
 
 def _same_identity(head: SyncHead, task_id: str, note_id: str) -> bool:
+    """Return whether head metadata and payload preserve task-note identity."""
+
     return bool(
         head.object_id == task_id
         and head.parent_id == note_id
@@ -216,6 +224,8 @@ def _same_identity(head: SyncHead, task_id: str, note_id: str) -> bool:
 
 
 def _is_deleted(head: SyncHead) -> bool:
+    """Return whether a head represents a tombstoned task."""
+
     return head.operation == "tombstone" or head.deleted
 
 
@@ -223,6 +233,8 @@ def _trusted_task_bootstrap(
     envelope: SyncEnvelopeCreate,
     context: SyncAdapterContext | None,
 ) -> bool:
+    """Return whether routing and context authorize private bootstrap capture."""
+
     bootstrap_id = envelope.routing_metadata.get("bootstrap_id")
     return bool(
         context is not None
@@ -240,6 +252,8 @@ def _rejected(
     envelope: SyncEnvelopeCreate,
     error_code: str,
 ) -> AdapterRejected:
+    """Build a bounded task validation rejection."""
+
     return AdapterRejected(
         client_envelope_id=envelope.client_envelope_id,
         error_code=error_code,
@@ -251,6 +265,8 @@ def _conflict(
     envelope: SyncEnvelopeCreate,
     conflict_type: str,
 ) -> AdapterConflict:
+    """Build a bounded task lineage conflict."""
+
     return AdapterConflict(
         client_envelope_id=envelope.client_envelope_id,
         domain=envelope.domain,

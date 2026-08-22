@@ -134,6 +134,8 @@ def _parse_envelope(
     *,
     owner_user_id: str,
 ) -> NotesTaskV1Payload:
+    """Parse and verify one canonical task envelope against its lineage hash."""
+
     if (
         envelope.adapter_version != 1
         or envelope.schema_version != 1
@@ -161,6 +163,8 @@ def _parse_envelope(
 
 
 def _expected_projection_status(envelope: SyncEnvelope) -> str | None:
+    """Return the projection status required after the envelope is applied."""
+
     if envelope.operation == "tombstone":
         return "deleted"
     if envelope.object_revision == 1 or envelope.routing_metadata.get("restore_intent") is True:
@@ -172,6 +176,8 @@ def _state_conflict(
     envelope: SyncEnvelope,
     current_state: SyncObjectState | None,
 ) -> MaterializationResult | None:
+    """Return a deterministic conflict when the Sync base is not current."""
+
     has_base = all(
         value is not None
         for value in (
@@ -202,6 +208,8 @@ def _record_applied(
     envelope: SyncEnvelope,
     store: SyncV2Store,
 ) -> MaterializationResult:
+    """Record the applied object state and envelope status."""
+
     try:
         store.upsert_object_state(
             SyncObjectState(
@@ -228,6 +236,8 @@ def _mark_conflict(
     store: SyncV2Store,
     result: MaterializationResult,
 ) -> MaterializationResult:
+    """Persist a deterministic conflict status without replacing its result."""
+
     try:
         store.mark_envelope_apply_status(
             envelope.server_cursor,
@@ -249,6 +259,8 @@ def _mark_failed(
     store: SyncV2Store,
     message: str,
 ) -> MaterializationResult:
+    """Persist and return a bounded replayable projection failure."""
+
     try:
         store.mark_envelope_apply_status(
             envelope.server_cursor,
@@ -270,6 +282,8 @@ def _mark_failed(
 
 
 def _conflict_result(reason: str) -> MaterializationResult:
+    """Build the stable product-state conflict result."""
+
     return MaterializationResult(
         status="conflict",
         conflict_type=_CONFLICT_TYPE,
@@ -279,6 +293,8 @@ def _conflict_result(reason: str) -> MaterializationResult:
 
 
 def _safe_error_message(exc: Exception) -> str:
+    """Map internal projection failures to bounded public messages."""
+
     if isinstance(exc, NotesTaskContractError):
         return "notes.task envelope validation failed"
     if isinstance(exc, InputError):

@@ -358,7 +358,11 @@ def _evaluate_plan(
     step_count = len(canonical_steps)
     for index, step in enumerate(canonical_steps):
         prior_head = get_head(step.domain, step.object_id)
-        object_revision = step.object_revision or _next_object_revision(prior_head)
+        object_revision = (
+            _next_object_revision(prior_head)
+            if step.object_revision is None
+            else step.object_revision
+        )
         payload_hash, payload_size = canonical_payload_hash(dict(step.payload))
         if notes_attachment_bootstrap and step.domain == "attachment.ref":
             payload_hash = attachment_ref_v2_object_hash(
@@ -670,9 +674,30 @@ def _validate_stored_group(
         raise SyncIdempotencyConflictError(
             "Sync stored mutation group shape is invalid"
         ) from exc
-    expected_plan_matches = expected_steps is None or _mutation_plan_hash(
-        tuple(_canonical_step_from_envelope(envelope) for envelope in envelopes)
-    ) == _mutation_plan_hash(expected_steps)
+    stored_steps = tuple(
+        _canonical_step_from_envelope(envelope) for envelope in envelopes
+    )
+    if expected_steps is not None and len(stored_steps) == len(expected_steps):
+        stored_steps = tuple(
+            replace(
+                stored,
+                client_envelope_id=(
+                    stored.client_envelope_id
+                    if expected.client_envelope_id is not None
+                    else None
+                ),
+                object_revision=(
+                    stored.object_revision
+                    if expected.object_revision is not None
+                    else None
+                ),
+            )
+            for stored, expected in zip(stored_steps, expected_steps, strict=True)
+        )
+    expected_plan_matches = expected_steps is None or (
+        len(stored_steps) == len(expected_steps)
+        and _mutation_plan_hash(stored_steps) == _mutation_plan_hash(expected_steps)
+    )
     if not expected_plan_matches:
         raise SyncIdempotencyConflictError(
             "Sync stored mutation group fingerprint does not match its plan hash"
@@ -685,6 +710,10 @@ def _canonical_step(
     source: str,
     user_id: str,
 ) -> ServerOriginMutationStep:
+    if step.object_revision is not None and (
+        type(step.object_revision) is not int or step.object_revision < 1
+    ):
+        raise SyncStoreError("Sync server-origin object revision must be positive")
     routing_metadata = dict(step.routing_metadata)
     if not (step.domain == "attachment.ref" and step.adapter_version == 2):
         routing_metadata.update(

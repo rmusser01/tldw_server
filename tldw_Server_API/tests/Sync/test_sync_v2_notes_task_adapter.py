@@ -1,3 +1,5 @@
+"""Contracts for strict dormant ``notes.task`` adapter lineage."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -34,7 +36,7 @@ DEVICE_ID = "44444444-4444-4444-8444-444444444444"
 NOW = "2026-08-13T10:00:00+00:00"
 
 
-def _adapter():
+def _adapter() -> domain_adapters.NotesTaskDomainAdapter:
     adapter_type = getattr(domain_adapters, "NotesTaskDomainAdapter", None)
     assert adapter_type is not None, "NotesTaskDomainAdapter is not implemented"
     return adapter_type()

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Bounded, resumable private bootstrap for canonical Notes tasks."""
+
+from __future__ import annotations
 
 import hashlib
 import json
@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import NotesTaskBootstrapInterrupted
 
 from .errors import SyncStoreError
 from .models import SyncDataset, SyncEnvelope
@@ -21,16 +22,12 @@ _SOURCE = "notes-task-bootstrap"
 _EMPTY_FINGERPRINT = hashlib.sha256(b"notes.task.bootstrap.v1").hexdigest()
 
 
-class NotesTaskBootstrapInterrupted(RuntimeError):
-    """Intentional test/worker interruption after a durable Sync append."""
-
-
 class _SourceInvalid(RuntimeError):
-    pass
+    """Internal marker for an unreadable or noncanonical task source."""
 
 
 class _SourceChanged(RuntimeError):
-    pass
+    """Internal marker for source progress that no longer matches its digest."""
 
 
 class NotesTaskBootstrapper:
@@ -45,6 +42,8 @@ class NotesTaskBootstrapper:
         page_limit: int = PAGE_LIMIT,
         after_page: Callable[[int], None] | None = None,
     ) -> None:
+        """Configure one bounded bootstrap worker over a canonical task store."""
+
         if isinstance(page_limit, bool) or not 1 <= page_limit <= self.PAGE_LIMIT:
             raise ValueError("Notes task bootstrap page limit must be 1..500")
         self._db = note_db
@@ -174,6 +173,8 @@ class NotesTaskBootstrapper:
         service: SyncV2Service,
         dataset: SyncDataset,
     ) -> SyncDataset:
+        """Enter or resume the task bootstrapping phase for one dataset."""
+
         state = dataset.metadata.get("notes_task_v1")
         if isinstance(state, Mapping) and state.get("state") in {
             "bootstrapping",
@@ -234,6 +235,8 @@ class NotesTaskBootstrapper:
         )
 
     def _source_summary(self, owner: str, dataset_id: str) -> _SourceSummary:
+        """Read the full canonical source identity using bounded keyset pages."""
+
         rows: list[tuple[str, str, int, str, str]] = []
         cursor: str | None = None
         fingerprint = _EMPTY_FINGERPRINT
@@ -277,6 +280,8 @@ class NotesTaskBootstrapper:
         bootstrap_id: str,
         row: Mapping[str, object],
     ) -> None:
+        """Capture one source-verified task row through the server-origin path."""
+
         task_id = str(row["id"])
         canonical_hash = str(row["canonical_hash"])
         payload = row.get("sync_payload")
@@ -299,6 +304,8 @@ class NotesTaskBootstrapper:
         )
 
         def source_matches(envelope: SyncEnvelope) -> bool:
+            """Return whether the product row still matches the planned envelope."""
+
             try:
                 current = self._tasks.get_task(
                     owner_user_id=dataset.owner_user_id,
@@ -349,6 +356,8 @@ def _verify_stored_progress(
     state: Mapping[str, object],
     source: _SourceSummary,
 ) -> None:
+    """Reject stored progress that is not an exact prefix of the source."""
+
     count = int(state["source_count"])
     cursor = _optional_string(state.get("source_cursor"))
     fingerprint = str(state.get("source_fingerprint") or _EMPTY_FINGERPRINT)
@@ -372,6 +381,8 @@ def _sync_bootstrap_matches_source(
     bootstrap_id: str,
     source: _SourceSummary,
 ) -> bool:
+    """Return whether accepted applied envelopes exactly cover the source."""
+
     found: dict[str, tuple[str, int, str, str | None, str | None]] = {}
     cursor = 0
     while True:
@@ -426,6 +437,8 @@ def _block(
     *,
     reason: str,
 ) -> SyncDataset:
+    """Persist a bounded blocked state while retaining verified progress."""
+
     state = _readiness(dataset)
     return service.store.transition_notes_task_readiness(
         dataset.dataset_id,
@@ -445,6 +458,8 @@ def _block(
 
 
 def _readiness(dataset: SyncDataset) -> Mapping[str, object]:
+    """Return the strict task readiness record for a dataset."""
+
     state = dataset.metadata.get("notes_task_v1")
     if not isinstance(state, Mapping):
         raise SyncStoreError("notes_task_readiness_state_invalid")
@@ -452,10 +467,14 @@ def _readiness(dataset: SyncDataset) -> Mapping[str, object]:
 
 
 def _optional_string(value: object) -> str | None:
+    """Return a string value or ``None`` without coercion."""
+
     return value if isinstance(value, str) else None
 
 
 def _bootstrap_id(owner_user_id: str, dataset_id: str) -> str:
+    """Derive the stable private bootstrap identity for one owner dataset."""
+
     digest = hashlib.sha256(
         f"notes.task.bootstrap.v1:{owner_user_id}:{dataset_id}".encode()
     ).hexdigest()
@@ -467,6 +486,8 @@ def _task_bootstrap_envelope_id(
     task_id: str,
     canonical_hash: str,
 ) -> str:
+    """Derive the stable envelope identity for one canonical task version."""
+
     digest = hashlib.sha256(
         json.dumps(
             [bootstrap_id, task_id, canonical_hash],
@@ -477,6 +498,8 @@ def _task_bootstrap_envelope_id(
 
 
 def _task_bootstrap_routing(bootstrap_id: str) -> dict[str, object]:
+    """Build the minimal trusted routing metadata for task bootstrap."""
+
     return {"bootstrap_capture": True, "bootstrap_id": bootstrap_id}
 
 
@@ -485,6 +508,8 @@ def _task_bootstrap_fingerprint(
     task_id: str,
     canonical_hash: str,
 ) -> str:
+    """Extend the ordered source fingerprint with one canonical task row."""
+
     seed = previous_fingerprint or _EMPTY_FINGERPRINT
     return hashlib.sha256(
         json.dumps(

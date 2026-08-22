@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from psycopg import sql as psycopg_sql
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import (
@@ -26,6 +27,19 @@ from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
 pytestmark = pytest.mark.integration
 
 _DATASET_ID = "local-unbound"
+
+
+def _execute_role_statement(
+    connection: Any,
+    statement: str,
+    role_name: str,
+) -> None:
+    """Execute a fixed PostgreSQL role statement with a quoted identifier."""
+    raw_connection = getattr(connection, "_connection", connection)
+    with raw_connection.cursor() as cursor:
+        cursor.execute(
+            psycopg_sql.SQL(statement).format(psycopg_sql.Identifier(role_name))
+        )
 
 
 def _payload(
@@ -61,7 +75,7 @@ def _apply_lifecycle(
     db: CharactersRAGDB,
     *,
     owner: str,
-    role_identifier: str,
+    role_name: str,
 ) -> dict[str, Any]:
     note_id = str(uuid4())
     task_id = str(uuid4())
@@ -79,7 +93,7 @@ def _apply_lifecycle(
         deleted=False,
     )
     with db.transaction() as conn:
-        conn.execute(f"SET LOCAL ROLE {role_identifier}")  # nosec B608
+        _execute_role_statement(conn, "SET LOCAL ROLE {}", role_name)
         conn.execute(
             "SELECT set_config('app.current_user_id', ?, true)",
             (owner,),
@@ -107,7 +121,7 @@ def _apply_lifecycle(
         deleted=False,
     )
     with db.transaction() as conn:
-        conn.execute(f"SET LOCAL ROLE {role_identifier}")  # nosec B608
+        _execute_role_statement(conn, "SET LOCAL ROLE {}", role_name)
         conn.execute(
             "SELECT set_config('app.current_user_id', ?, true)",
             (owner,),
@@ -129,7 +143,7 @@ def _apply_lifecycle(
         deleted=True,
     )
     with db.transaction() as conn:
-        conn.execute(f"SET LOCAL ROLE {role_identifier}")  # nosec B608
+        _execute_role_statement(conn, "SET LOCAL ROLE {}", role_name)
         conn.execute(
             "SELECT set_config('app.current_user_id', ?, true)",
             (owner,),
@@ -151,7 +165,7 @@ def _apply_lifecycle(
         deleted=False,
     )
     with db.transaction() as conn:
-        conn.execute(f"SET LOCAL ROLE {role_identifier}")  # nosec B608
+        _execute_role_statement(conn, "SET LOCAL ROLE {}", role_name)
         conn.execute(
             "SELECT set_config('app.current_user_id', ?, true)",
             (owner,),
@@ -202,41 +216,45 @@ def test_postgres_task_lifecycle_is_rls_isolated_and_index_backed_for_two_owners
     backend_b = DatabaseBackendFactory.create_backend(pg_database_config)
     db_a = CharactersRAGDB(":memory:", client_id=owner_a, backend=backend_a)
     db_b = CharactersRAGDB(":memory:", client_id=owner_b, backend=backend_b)
-    ident = backend_a.escape_identifier  # type: ignore[attr-defined]
     role_name = f"notes_task_lifecycle_{uuid4().hex[:8]}"
-    role_identifier = ident(role_name)
     role_created = False
 
     try:
         with backend_a.transaction() as conn:
-            backend_a.execute(
-                f"CREATE ROLE {role_identifier} NOLOGIN NOSUPERUSER NOBYPASSRLS",
-                connection=conn,
+            _execute_role_statement(
+                conn,
+                "CREATE ROLE {} NOLOGIN NOSUPERUSER NOBYPASSRLS",
+                role_name,
             )
-            backend_a.execute(
-                f"GRANT USAGE ON SCHEMA public TO {role_identifier}",
-                connection=conn,
+            _execute_role_statement(
+                conn,
+                "GRANT USAGE ON SCHEMA public TO {}",
+                role_name,
             )
-            backend_a.execute(
-                f"GRANT SELECT ON notes TO {role_identifier}",
-                connection=conn,
+            _execute_role_statement(
+                conn,
+                "GRANT SELECT ON notes TO {}",
+                role_name,
             )
-            backend_a.execute(
-                f"GRANT SELECT, INSERT, UPDATE ON note_tasks TO {role_identifier}",
-                connection=conn,
+            _execute_role_statement(
+                conn,
+                "GRANT SELECT, INSERT, UPDATE ON note_tasks TO {}",
+                role_name,
             )
-            backend_a.execute(
-                f"GRANT SELECT, UPDATE ON note_task_scope_authority TO {role_identifier}",
-                connection=conn,
+            _execute_role_statement(
+                conn,
+                "GRANT SELECT, UPDATE ON note_task_scope_authority TO {}",
+                role_name,
             )
-            backend_a.execute(
-                f"GRANT {role_identifier} TO CURRENT_USER",
-                connection=conn,
+            _execute_role_statement(
+                conn,
+                "GRANT {} TO CURRENT_USER",
+                role_name,
             )
         role_created = True
 
         with db_a.transaction() as conn:
-            conn.execute(f"SET LOCAL ROLE {role_identifier}")  # nosec B608
+            _execute_role_statement(conn, "SET LOCAL ROLE {}", role_name)
             role = conn.execute(
                 "SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user"
             ).fetchone()
@@ -247,12 +265,12 @@ def test_postgres_task_lifecycle_is_rls_isolated_and_index_backed_for_two_owners
         task_a = _apply_lifecycle(
             db_a,
             owner=owner_a,
-            role_identifier=role_identifier,
+            role_name=role_name,
         )
         task_b = _apply_lifecycle(
             db_b,
             owner=owner_b,
-            role_identifier=role_identifier,
+            role_name=role_name,
         )
 
         assert db_a.get_task(
@@ -282,17 +300,20 @@ def test_postgres_task_lifecycle_is_rls_isolated_and_index_backed_for_two_owners
     finally:
         if role_created:
             with backend_a.transaction() as conn:
-                backend_a.execute(
-                    f"REVOKE {role_identifier} FROM CURRENT_USER",
-                    connection=conn,
+                _execute_role_statement(
+                    conn,
+                    "REVOKE {} FROM CURRENT_USER",
+                    role_name,
                 )
-                backend_a.execute(
-                    f"DROP OWNED BY {role_identifier}",
-                    connection=conn,
+                _execute_role_statement(
+                    conn,
+                    "DROP OWNED BY {}",
+                    role_name,
                 )
-                backend_a.execute(
-                    f"DROP ROLE {role_identifier}",
-                    connection=conn,
+                _execute_role_statement(
+                    conn,
+                    "DROP ROLE {}",
+                    role_name,
                 )
         db_b.close_all_connections()
         db_a.close_all_connections()

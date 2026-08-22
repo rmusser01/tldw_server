@@ -234,6 +234,22 @@ def test_trusted_bootstrap_id_requires_source_step_verifier(
     assert service.store.list_envelopes_after("dataset-1", 0) == []
 
 
+def test_batch_rejects_explicit_nonpositive_object_revision(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+) -> None:
+    service, materializer = batch_service
+
+    with pytest.raises(SyncStoreError, match="object revision must be positive"):
+        _capture(
+            service,
+            [replace(_step("invalid-revision"), object_revision=0)],
+            key="invalid-revision",
+        )
+
+    assert materializer.calls == []
+    assert service.store.list_envelopes_after("dataset-1", 0) == []
+
+
 def test_batch_evaluates_updates_parents_and_relationships_against_planned_heads(
     batch_service: tuple[SyncV2Service, _RecordingMaterializer],
 ) -> None:
