@@ -185,3 +185,16 @@ class ScheduledTaskDuplicateRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
+
+
+class ScheduledTaskRunNowResponse(BaseModel):
+    """Response for a manual definition run trigger (TASK-13022).
+
+    The run reference lets the caller correlate the trigger with its
+    eventual result notification and run row.
+    """
+
+    definition_id: str
+    run_slot_utc: str
+    job_id: int | str | None = None
+    deduped: bool = False

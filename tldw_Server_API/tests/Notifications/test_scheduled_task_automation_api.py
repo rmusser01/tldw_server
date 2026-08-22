@@ -176,8 +176,12 @@ def test_capabilities_report_definition_actions_but_no_execution(scheduled_tasks
         actions = families[family]["actions"]
         assert actions["preview"]["status"] == "available"  # nosec B101
         assert actions["create_definition"]["status"] == "available"  # nosec B101
-        assert actions["execute"]["status"] == "unavailable"  # nosec B101
-        assert actions["execute"]["reason"] == "execution_not_implemented"  # nosec B101
+        # TASK-13022: execution truth -- phase-1 generation-only runs are
+        # executable; the run_now action is available; tools are planned.
+        assert actions["execute"]["status"] == "available"  # nosec B101
+        assert actions["execute"]["reason"] == "phase1_generation_only"  # nosec B101
+        assert actions["run_now"]["status"] == "available"  # nosec B101
+        assert actions["execute_tools"]["status"] == "planned"  # nosec B101
 
 
 def test_preview_create_list_and_detail_return_valid_and_invalid_statuses(scheduled_tasks_client, auth_headers):
@@ -683,3 +687,82 @@ def test_sync_automation_handlers_do_not_run_sqlite_work_on_event_loop():
     assert all(not inspect.iscoroutinefunction(handler) for handler in automation_handlers)  # nosec B101
     assert inspect.iscoroutinefunction(scheduled_tasks_control_plane.list_scheduled_tasks)  # nosec B101
     assert inspect.iscoroutinefunction(scheduled_tasks_control_plane.create_scheduled_task_reminder)  # nosec B101
+
+
+@pytest.mark.integration
+def test_run_now_triggers_real_dispatch_and_returns_run_reference(
+    scheduled_tasks_client, auth_headers, monkeypatch
+):
+    definition = _create_definition(scheduled_tasks_client, auth_headers)
+
+    created: list[dict[str, Any]] = []
+
+    def _capture_create_job(_self=None, **kwargs):
+        created.append(kwargs)
+        return {"id": 555, "deduped": False}
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager_module
+
+    monkeypatch.setattr(jobs_manager_module.JobManager, "create_job", _capture_create_job)
+
+    response = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/run",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.text  # nosec B101
+    body = response.json()
+    assert body["definition_id"] == definition["id"]  # nosec B101
+    assert body["job_id"] == 555  # nosec B101
+    assert body["deduped"] is False  # nosec B101
+    assert body["run_slot_utc"]  # nosec B101
+
+    # Real dispatch through the standard Jobs path (TASK-13022 AC#1):
+    # the same domain/type the feed enqueues, with the same key shape.
+    assert len(created) == 1  # nosec B101
+    assert created[0]["domain"] == "scheduled_tasks"  # nosec B101
+    assert created[0]["job_type"] == "agent_task_run"  # nosec B101
+    assert created[0]["queue"] == "default"  # nosec B101
+    assert created[0]["owner_user_id"] is not None  # nosec B101
+    assert created[0]["idempotency_key"] == (
+        f"definition:{definition['id']}:{body['run_slot_utc']}"
+    )  # nosec B101
+    assert created[0]["payload"]["manual"] is True  # nosec B101
+
+
+@pytest.mark.integration
+def test_run_now_paused_definition_refuses_with_existing_code(
+    scheduled_tasks_client, auth_headers, monkeypatch
+):
+    definition = _create_definition(scheduled_tasks_client, auth_headers)
+    pause = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/pause",
+        headers=auth_headers,
+    )
+    assert pause.status_code == 200, pause.text  # nosec B101
+
+    def _fail_if_called(**kwargs):  # pragma: no cover - must not run
+        raise AssertionError("run_now must not enqueue for a paused definition")
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager_module
+
+    monkeypatch.setattr(jobs_manager_module.JobManager, "create_job", _fail_if_called)
+
+    response = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/run",
+        headers=auth_headers,
+    )
+    _assert_error_envelope(
+        response, code="scheduled_task_lifecycle_transition_invalid", status_code=409
+    )
+
+
+@pytest.mark.integration
+def test_run_now_unknown_definition_404(scheduled_tasks_client, auth_headers):
+    response = scheduled_tasks_client.post(
+        "/api/v1/scheduled-tasks/definitions/no-such-definition/run",
+        headers=auth_headers,
+    )
+    _assert_error_envelope(
+        response, code="scheduled_task_definition_not_found", status_code=404
+    )

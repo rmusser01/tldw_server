@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskDefinitionResponse,
     ScheduledTaskDefinitionUpdateRequest,
     ScheduledTaskDuplicateRequest,
+    ScheduledTaskRunNowResponse,
     ScheduledTaskPreviewCreateRequest,
     ScheduledTaskPreviewListResponse,
     ScheduledTaskPreviewMode,
@@ -33,6 +34,7 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas im
     ScheduledTaskListResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL, TASKS_READ
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services.scheduled_task_automation_service import (
     ScheduledTaskAutomationError,
     ScheduledTaskAutomationService,
@@ -208,6 +210,11 @@ _AUTOMATION_ERROR_MAP: dict[str, tuple[int, str, str]] = {
         status.HTTP_409_CONFLICT,
         "scheduled_task_lifecycle_transition_invalid",
         "Scheduled task definition is locked by policy.",
+    ),
+    "definition_paused": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_lifecycle_transition_invalid",
+        "Scheduled task definition is paused.",
     ),
 }
 
@@ -622,6 +629,39 @@ def duplicate_scheduled_task_automation_definition(
             actor=_actor_from_principal(principal, current_user),
             definition_id=definition_id,
             payload=payload,
+            idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
+        )
+    except ScheduledTaskAutomationError as exc:
+        _raise_automation_error(request, exc)
+
+
+
+@router.post(
+    "/definitions/{definition_id}/run",
+    response_model=ScheduledTaskRunNowResponse,
+    dependencies=[Depends(rbac_rate_limit("tasks.control"))],
+)
+def run_now_scheduled_task_automation_definition(
+    request: Request,
+    definition_id: str = Path(..., min_length=1),
+    current_user: User = Depends(get_request_user),
+    principal: AuthPrincipal = Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
+    service: ScheduledTaskAutomationService = Depends(get_scheduled_task_automation_service),
+) -> ScheduledTaskRunNowResponse:
+    """Trigger one immediate execution through the standard Jobs path.
+
+    A real dispatch (TASK-13022 / tldw_chatbook ADR-077 decision 7): the
+    same ``agent_task_run`` pipeline the scheduler feed enqueues into,
+    with the same run-slot idempotency semantics. Lifecycle refusals
+    reuse the existing error codes; the response carries the created run
+    reference for correlating with the eventual result notification.
+    """
+    try:
+        return service.run_now(
+            owner_id=int(current_user.id),
+            actor=_actor_from_principal(principal, current_user),
+            definition_id=definition_id,
             idempotency_key=_idempotency_key(request),
             request_id=_request_id(request),
         )
