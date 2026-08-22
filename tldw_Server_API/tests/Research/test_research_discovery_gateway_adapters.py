@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
     DiscoveryOutcomeIdentity,
     ExecutionMode,
+    PlannedDispatchGroup,
 )
 from tldw_Server_API.app.core.Research.discovery.executor import (
     DiscoveryAdapterResult,
@@ -56,6 +57,12 @@ pytestmark = pytest.mark.unit
 
 _FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "research_discovery_gateway_adapters"
 _ADAPTER_MODULE = "tldw_Server_API.app.core.Research.discovery.gateway_adapters"
+
+
+class _EqualStringSubclass(str):
+    """String subclass used to prove exact scalar type checks."""
+
+
 _NORMALIZED_KEYS = {
     "title",
     "authors",
@@ -322,7 +329,8 @@ def _plan_for(
     return registry, plan
 
 
-def _pubmed_group():
+def _pubmed_group() -> PlannedDispatchGroup:
+    """Build one valid foundation PubMed dispatch group for adapter tests."""
     registry = foundation_registry()
     plan = compile_discovery_plan(
         PlanningRequest(("pubmed",), "bounded discovery", (), 1),
@@ -606,9 +614,44 @@ async def test_ncbi_trusted_input_callback_attribute_error_normalizes_but_adapte
 
     _assert_typed_error(indexed.value, "provider_payload_invalid")
 
+    summary_dispatch = _RecordingDispatch(
+        [
+            _response(route, group.intents[0], b"{}"),
+            _response(route, group.intents[1], b"{}"),
+        ]
+    )
+
+    def indexed_summary_parser(*_args, **_kwargs):
+        raise IndexError("synthetic indexed summary callback failure")
+
+    with pytest.raises(_adapter_error_type()) as indexed_summary:
+        await module._execute_ncbi_esearch_summary(
+            group,
+            summary_dispatch,
+            _CountingClock(),
+            trusted_inputs=module._trusted_pubmed_inputs,
+            parse_esearch_ids=lambda *_args, **_kwargs: (("123", 1),),
+            parse_summary_records=indexed_summary_parser,
+            strict_rate_envelope=False,
+        )
+
+    _assert_typed_error(indexed_summary.value, "provider_payload_invalid")
+
 
 @pytest.mark.parametrize(
-    "mutation", ("intent", "query_container", "query_member", "binding_container", "binding_member", "limits")
+    "mutation",
+    (
+        "intent",
+        "query_container",
+        "query_member",
+        "binding_container",
+        "binding_member",
+        "binding_id_scalar_type",
+        "binding_query_name_scalar_type",
+        "binding_max_item_chars_scalar_type",
+        "binding_max_items_scalar_type",
+        "limits",
+    ),
 )
 def test_pubmed_trusted_inputs_reject_malformed_containers_before_dereference(mutation: str) -> None:
     module = _gateway_adapters_module()
@@ -624,6 +667,22 @@ def test_pubmed_trusted_inputs_reject_malformed_containers_before_dereference(mu
         object.__setattr__(summary, "query_bindings", [])
     elif mutation == "binding_member":
         object.__setattr__(summary.query_bindings[0], "binding_id", object())
+    elif mutation == "binding_id_scalar_type":
+        object.__setattr__(
+            summary.query_bindings[0],
+            "binding_id",
+            _EqualStringSubclass(summary.query_bindings[0].binding_id),
+        )
+    elif mutation == "binding_query_name_scalar_type":
+        object.__setattr__(
+            summary.query_bindings[0],
+            "query_name",
+            _EqualStringSubclass(summary.query_bindings[0].query_name),
+        )
+    elif mutation == "binding_max_item_chars_scalar_type":
+        object.__setattr__(summary.query_bindings[0], "max_item_chars", 16.0)
+    elif mutation == "binding_max_items_scalar_type":
+        object.__setattr__(summary.query_bindings[0], "max_items", 1.0)
     else:
         object.__setattr__(group, "limits", object())
 

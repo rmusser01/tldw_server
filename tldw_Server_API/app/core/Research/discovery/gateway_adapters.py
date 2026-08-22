@@ -1584,9 +1584,13 @@ def _trusted_pubmed_inputs(
     binding = summary.query_bindings[0]
     if (
         type(binding) is not DeferredNumericCSVQueryBinding
+        or type(binding.binding_id) is not str
         or binding.binding_id != _PUBMED_BINDING_ID
+        or type(binding.query_name) is not str
         or binding.query_name != "id"
+        or type(binding.max_item_chars) is not int
         or binding.max_item_chars != 16
+        or type(binding.max_items) is not int
     ):
         raise DiscoveryAdapterError("provider_payload_invalid")
     try:

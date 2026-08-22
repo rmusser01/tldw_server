@@ -130,7 +130,7 @@ _EXPECTED_AST_DIGESTS = {
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
     "planner.py": "b9e0bc18e4e523cd87e1fd2652818483e0355c7bdac30a8100f9c60e0ed65520",
     "executor.py": "9b50ab4e6b7971ec8fa371a705175ee4ee0d81030136b1a6ccb44d33f7aad87c",
-    "gateway_adapters.py": "f02ac5723e263f557a19540b5adcda659651bd20732a8ce798fcb98be1876167",
+    "gateway_adapters.py": "809bc6e27b6ccebeaac25108ef34823c9b2da53509cb74b7dc0c091ecb44947a",
     "gateway.py": "9fa3be4b099e4beb519e63bee037873d55fcd8425c7ec939520ea100cd896654",
     "identity.py": "f59640d8f793fd3ebd11df49d333f73ebee9e59efb549393116bee2a241f5f06",
     "catalog.py": "6f89e526a0cee3f934fc04da6adc5698800842e9f798ac45e35847d859e08ba6",
