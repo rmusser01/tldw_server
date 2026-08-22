@@ -736,23 +736,43 @@ class TestSharedWithMe:
         assert data["allowed_actions"]["inspect_sources"]["allowed"] is True
         assert "owner_user_id" not in str(data)
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/sharing/shared-with-me/12/media",
+            "/api/v1/sharing/shared-with-me/12/media/99",
+            "/api/v1/sharing/shared-with-me/12/full-media",
+            "/api/v1/sharing/shared-with-me/12/full-media/99",
+        ],
+    )
+    def test_removed_recipient_media_routes_are_plain_404s(
+        self,
+        client,
+        mock_repo,
+        path,
+    ):
+        response = client.get(path, follow_redirects=False)
+
+        assert response.status_code == 404
+        assert "location" not in response.headers
+
     def test_recipient_openapi_has_no_owner_media_operation(self, client, mock_repo):
         schema = client.get("/openapi.json").json()
-        recipient_prefix = "/api/v1/sharing/shared-with-me/{share_id}/"
+        removed_paths = {
+            "/api/v1/sharing/shared-with-me/{share_id}/media",
+            "/api/v1/sharing/shared-with-me/{share_id}/media/{media_id}",
+            "/api/v1/sharing/shared-with-me/{share_id}/full-media",
+            "/api/v1/sharing/shared-with-me/{share_id}/full-media/{media_id}",
+        }
 
-        media_operations = [
-            operation
-            for path, path_item in schema["paths"].items()
-            if path.startswith(recipient_prefix)
+        assert removed_paths.isdisjoint(schema["paths"])
+        assert all(
+            "SharedMediaResponse" not in operation.get("operationId", "")
+            for path_item in schema["paths"].values()
             for method, operation in path_item.items()
-            if method == "get"
-            and any(
-                parameter.get("name") == "media_id"
-                for parameter in operation.get("parameters", [])
-            )
-        ]
-
-        assert media_operations == []
+            if method in {"get", "post", "put", "patch", "delete"}
+        )
+        assert "SharedMediaResponse" not in schema["components"]["schemas"]
 
 
 class TestClone:

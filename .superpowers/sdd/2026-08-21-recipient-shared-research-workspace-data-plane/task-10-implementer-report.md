@@ -141,3 +141,137 @@ Generated OpenAPI obsolete-operation scan: no matches.
 - Repository-wide Vitest, typecheck, ESLint command composition, and design-state baselines remain non-green as classified above. No Task 10 touched-scope failure remains.
 - `/research` remains separate. No redirect, alias, local fallback, owner sentinel, recipient local sentinel, source mutation, or extension writable-destination contract was added.
 - The unrelated watchlist templates remain untouched and unstaged.
+
+## Fix Round 1/5 - Reviewed Head `ba0b3e02f9a6`
+
+This round addresses all six blocking findings in `task-10-review.md`. It supersedes the initial report's description of the backend matrix and browser ledger where that description implied production-boundary coverage that the reviewed implementation did not provide. No production code changed and no production defect was found.
+
+### Production-boundary matrix
+
+`test_shared_workspace_recipient_security_matrix.py` now drives the real FastAPI sharing routes and production recipient services. The fixture uses the production access-service builder, `SharedWorkspaceAccessService`, `SharedWorkspaceChatService`, real `CharactersRAGDB` owner/recipient stores, and real `MediaDatabase` source rows. Production helpers perform source list/status/default/history/preview reads, frozen snapshot resolution and revalidation, owner/recipient ChaCha selection, owner media selection, canonical target resolution, recipient credential resolution, receipt transitions, and chat persistence.
+
+Only external retrieval/provider transport is deterministic. The fixture also supplies deterministic user and BYOK/default-model stores because the repository-global stores are unavailable in the isolated fixture; production target normalization, adapter validation, credential scoping, and route/service orchestration remain active. Assertions prove the recipient identity is used for credentials and recipient persistence, the owner identity is used for source/media retrieval, and owner-note/chat, unrelated-owner-media, and recipient-local-workspace sentinels never appear.
+
+The matrix covers all/include source scope, completed replay, mismatched fingerprints, revocation, membership suspension, source deletion, and media hash/version changes after retrieval or generation. Each lifecycle mutation fails before persistence and leaves the receipt in the contractually correct retryable/conflicted state.
+
+TDD evidence:
+
+```text
+Initial production-boundary GREEN attempt: 12 failed, 3 passed.
+Cause: production builder reached the global AuthNZ user repository, which is incompatible with the deterministic fixture pool.
+
+Second attempt: 6 failed, 9 passed.
+Causes: external BYOK override-store resolution remained active and a direct media-hash update violated the production version trigger.
+
+Third focused cycle exposed one remaining default-model store lookup; after constraining only that external store seam and using versioned media updates, the final focused matrix passed:
+15 passed, 6 warnings in 30.23s.
+```
+
+The concurrency case now launches two matching requests that genuinely overlap. A deterministic provider barrier holds the first request after claim; the second arrives while the first lease is active. The clock and lease are current and controlled rather than fixed historical values. Assertions require one generation, one persisted user/assistant pair, one completed receipt, a conflict/active result for the loser, and a completed replay after the winner releases the barrier.
+
+### Removed route runtime and schema absence
+
+`test_sharing_endpoints.py` directly requests every removed recipient media URL with redirect following disabled:
+
+```text
+GET /api/v1/sharing/shared-with-me/12/media
+GET /api/v1/sharing/shared-with-me/12/media/99
+GET /api/v1/sharing/shared-with-me/12/full-media
+GET /api/v1/sharing/shared-with-me/12/full-media/99
+```
+
+Each returns exact 404 with no `Location` header. The OpenAPI test separately asserts absence of all four templated paths, any `SharedMediaResponse` schema, and any operation ID containing that obsolete response name.
+
+Focused verification:
+
+```text
+python -m pytest tldw_Server_API/tests/Sharing/test_sharing_endpoints.py -q -k 'openapi or removed'
+5 passed, 52 deselected.
+```
+
+### Strict browser ledger and mobile/revoked flow
+
+The page-object ledger now records from explicit `startRequestLedger()` until disposal even if navigation removes `shared` from the current URL. It detects removed recipient media paths independently of share ID and classifies the real production destinations, including `/api/v1/research-workspace/artifacts/generate` and `/api/v1/web-clipper/save`, plus artifact, web-clipper/capture, local workspace, Studio, notes, MCP, ACP, sandbox, source/media mutation, ingestion, and extension writable-destination families.
+
+An explicit method/path allowlist is mandatory. Every undeclared API request, `requestfailed`, unexpected HTTP response at or above 400, page error, and console error fails the ledger. The revoked workspace 404 is declared explicitly; unknown stubs abort rather than quietly returning 404. A regression changes the address bar with `history.replaceState` and proves the ledger still rejects a real artifact-generation probe afterward.
+
+The mobile project now performs source selection, search/filter/clear, preview sheet inspection, chat and citation interaction, reload transcript persistence, and revoked bootstrap. Revocation assertions require the exact canonical `/research-workspace?shared={share_id}` URL to remain, while shared shell/source/message content and local fallback/sentinels are absent and the request ledger remains clean.
+
+Browser TDD and exact gate:
+
+```text
+RED: the initial production-path classifier did not reject the real artifact-generation URL.
+Subsequent strict runs exposed undeclared ambient shell reads, aborted superseded source requests, notification-poll cancellation, and the expected revoked-404 console diagnostic; each was resolved without weakening unknown-request/error handling.
+
+bunx playwright test e2e/workflows/research-workspace.shared-recipient.spec.ts --project=chromium --reporter=line --workers=1
+4 passed in 32.6s.
+```
+
+This remains stubbed CI interaction coverage only. Task 11 remains live backend/provider/browser truth.
+
+### Authoritative backend completion and Docker ruling
+
+Docker was unavailable after the repository fixture's earlier auto-start timeout and was not attempted again. The controller-interrupted prior `TLDW_TEST_NO_DOCKER=1` run stopped at 58% and has no valid completion result.
+
+The exact Task 10 backend selection was rerun once to completion with `TLDW_TEST_NO_DOCKER=1`:
+
+```text
+523 collected
+512 passed, 11 skipped, 22 warnings in 2466.53s (41m06s)
+```
+
+All 11 skips are the standard repository fixture-unavailable signals. The exact supplemental reason audit completed `3 passed, 11 skipped`:
+
+- 3 skips in `test_chacha_postgres_migration_v61.py`: `Postgres not reachable; skipping Postgres-backed tests`.
+- 2 skips in `test_shared_workspace_chat_store_postgres.py`: `Postgres not reachable; skipping Postgres-backed tests`.
+- 6 skips in `test_authnz_sharing_postgres.py`: `PostgreSQL not available; attempted docker start; skipping AuthNZ integration tests. Set TLDW_TEST_POSTGRES_REQUIRED=1 to enforce.` This is fixed fixture wording; the command set `TLDW_TEST_NO_DOCKER=1` and no Docker command was run.
+
+### Exact and final gates
+
+OpenAPI generation and verification:
+
+```text
+source ../../.venv/bin/activate && bun run generate:api-types
+2011 paths, 2961 schemas; fingerprint sha256 9ae55783aa50...; passed.
+
+bun run verify:openapi
+328 ClientPath entries and 49 media-add fallback fields verified; passed.
+
+Generated scan for SharedMediaResponse, full-media, and removed recipient media paths: no matches.
+```
+
+Frontend gates:
+
+```text
+Exact Vitest: 62 files passed, 3 failed; 835 tests passed, 13 failed.
+The failures exactly reproduce the untouched baseline: 7 SourceViewControls, 5 Stage 12 source-list-view-state, and 1 incomplete SourcesPane Stage 2 fixture. Shared recipient, route gate, responsive/accessibility, safe Markdown, domain client, and locale tests passed.
+
+Exact typecheck: existing PromptDiff missing `diff` module and skills-certification script diagnostics only; no touched-file diagnostic.
+
+Exact ESLint: repository ESLint 9 rejects the external ../packages/ui ResearchWorkspace directory as wholly ignored.
+Focused ESLint on the two changed E2E files: exit 0.
+
+Exact design-state: existing blocked/stale baseline outside this round; no product UI source changed.
+```
+
+Security and final checks:
+
+```text
+Required Bandit scope: 46,442 LOC, 0 findings, 0 errors.
+Ruff on both changed backend tests: passed.
+git diff --check: passed.
+Current contract scan: no active obsolete recipient operation.
+OpenAPI regeneration caused no additional tracked artifact change.
+```
+
+### Fix-round files
+
+- `.superpowers/sdd/2026-08-21-recipient-shared-research-workspace-data-plane/progress.md`
+- `.superpowers/sdd/2026-08-21-recipient-shared-research-workspace-data-plane/task-10-implementer-report.md`
+- `apps/tldw-frontend/e2e/utils/page-objects/ResearchWorkspacePage.ts`
+- `apps/tldw-frontend/e2e/workflows/research-workspace.shared-recipient.spec.ts`
+- `backlog/tasks/task-12020.40 - Bind-recipient-shared-workspace-sources-and-chat-to-the-canonical-share.md`
+- `tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_security_matrix.py`
+- `tldw_Server_API/tests/Sharing/test_sharing_endpoints.py`
+
+The unrelated watchlist templates remain untouched and unstaged.

@@ -37,10 +37,27 @@ export type SharedRecipientRequestLedgerEntry = {
   url: string
   pathname: string
   forbiddenKind: SharedRecipientForbiddenRequestKind | null
+  allowed: boolean
+}
+
+export type SharedRecipientAllowedOperation = {
+  method: string
+  pathname: string | RegExp
+}
+
+export type SharedRecipientExpectedHttpError = {
+  method: string
+  pathname: string
+  status: number
+}
+
+export type SharedRecipientRequestLedgerOptions = {
+  allowedOperations: readonly SharedRecipientAllowedOperation[]
 }
 
 export type SharedRecipientRequestLedger = {
   snapshot: () => SharedRecipientRequestLedgerEntry[]
+  allowExpectedHttpError: (error: SharedRecipientExpectedHttpError) => void
   assertClean: () => void
   dispose: () => void
 }
@@ -53,6 +70,7 @@ export function classifySharedRecipientForbiddenRequest(
   method: string,
   shareId: number
 ): SharedRecipientForbiddenRequestKind | null {
+  void shareId
   let pathname: string
   try {
     pathname = new URL(rawUrl).pathname.toLowerCase()
@@ -60,12 +78,10 @@ export function classifySharedRecipientForbiddenRequest(
     return "local_workspace"
   }
 
-  const canonicalRoot = `/api/v1/sharing/shared-with-me/${shareId}`
   if (
-    pathname === `${canonicalRoot}/media` ||
-    pathname.startsWith(`${canonicalRoot}/media/`) ||
-    pathname === `${canonicalRoot}/full-media` ||
-    pathname.startsWith(`${canonicalRoot}/full-media/`)
+    /^\/api\/v1\/sharing\/shared-with-me\/[^/]+\/(?:media|full-media)(?:\/|$)/.test(
+      pathname
+    )
   ) {
     return "removed_full_media"
   }
@@ -75,7 +91,10 @@ export function classifySharedRecipientForbiddenRequest(
   ) {
     return "local_workspace"
   }
-  if (/\/api\/v1\/(?:prompt-)?studio(?:\/|$)/.test(pathname)) {
+  if (
+    /\/api\/v1\/(?:prompt-)?studio(?:\/|$)/.test(pathname) ||
+    /\/api\/v1\/research-workspace\/studio(?:\/|$)/.test(pathname)
+  ) {
     return "studio"
   }
   if (/\/api\/v1\/notes?(?:\/|$)/.test(pathname)) {
@@ -90,7 +109,10 @@ export function classifySharedRecipientForbiddenRequest(
   if (/\/api\/v1\/sandbox(?:\/|$)/.test(pathname)) {
     return "sandbox"
   }
-  if (/\/api\/v1\/artifacts?(?:\/|$)/.test(pathname)) {
+  if (
+    /\/api\/v1\/artifacts?(?:\/|$)/.test(pathname) ||
+    /\/api\/v1\/research-workspace\/artifacts?(?:\/|$)/.test(pathname)
+  ) {
     return "artifact"
   }
   if (isMutatingMethod(method) && /\/sources(?:\/|$)/.test(pathname)) {
@@ -98,29 +120,45 @@ export function classifySharedRecipientForbiddenRequest(
   }
   if (
     isMutatingMethod(method) &&
-    /\/api\/v1\/(?:media|ingestion|web-clips?|clips?|capture)(?:\/|$)/.test(
+    /\/api\/v1\/(?:media|ingestion|web-clips?|web-clipper|clips?|capture)(?:\/|$)/.test(
       pathname
     )
   ) {
     return "extension_writable_destination"
   }
+  if (/^\/api\/v1\/research-workspace(?:\/|$)/.test(pathname)) {
+    return "local_workspace"
+  }
   return null
 }
 
+const operationMatches = (
+  operation: SharedRecipientAllowedOperation,
+  method: string,
+  pathname: string
+): boolean => {
+  if (operation.method.toUpperCase() !== method) return false
+  return typeof operation.pathname === "string"
+    ? operation.pathname === pathname
+    : operation.pathname.test(pathname)
+}
+
+const expectedErrorKey = (error: SharedRecipientExpectedHttpError): string =>
+  `${error.method.toUpperCase()} ${error.pathname} ${error.status}`
+
 export function startSharedRecipientRequestLedger(
   page: Page,
-  shareId: number
+  shareId: number,
+  options: SharedRecipientRequestLedgerOptions
 ): SharedRecipientRequestLedger {
   const entries: SharedRecipientRequestLedgerEntry[] = []
+  const requestFailures: string[] = []
+  const unexpectedResponses: string[] = []
+  const pageErrors: string[] = []
+  const consoleErrors: string[] = []
+  const expectedHttpErrors = new Set<string>()
+  let expected404ConsoleErrors = 0
   const onRequest = (request: Request) => {
-    let sharedIsActive = false
-    try {
-      sharedIsActive = new URL(page.url()).searchParams.get("shared") === String(shareId)
-    } catch {
-      sharedIsActive = false
-    }
-    if (!sharedIsActive) return
-
     const url = request.url()
     const method = request.method().toUpperCase()
     let pathname = url
@@ -133,15 +171,67 @@ export function startSharedRecipientRequestLedger(
       method,
       url,
       pathname,
-      forbiddenKind: classifySharedRecipientForbiddenRequest(url, method, shareId)
+      forbiddenKind: classifySharedRecipientForbiddenRequest(url, method, shareId),
+      allowed: options.allowedOperations.some((operation) =>
+        operationMatches(operation, method, pathname)
+      )
     })
+  }
+  const onRequestFailed = (request: Request) => {
+    requestFailures.push(
+      `${request.method().toUpperCase()} ${request.url()} (${request.failure()?.errorText || "request failed"})`
+    )
+  }
+  const onResponse = (response: Response) => {
+    if (response.status() < 400) return
+    const request = response.request()
+    const pathname = new URL(response.url()).pathname
+    const error = {
+      method: request.method(),
+      pathname,
+      status: response.status()
+    }
+    if (!expectedHttpErrors.has(expectedErrorKey(error))) {
+      unexpectedResponses.push(
+        `${request.method().toUpperCase()} ${pathname} -> ${response.status()}`
+      )
+    } else if (response.status() === 404) {
+      expected404ConsoleErrors += 1
+    }
+  }
+  const onPageError = (error: Error) => pageErrors.push(error.message)
+  const onConsole = (message: ConsoleMessage) => {
+    if (message.type() !== "error") return
+    if (
+      expected404ConsoleErrors > 0 &&
+      message.text() ===
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ) {
+      expected404ConsoleErrors -= 1
+      return
+    }
+    consoleErrors.push(message.text())
   }
 
   page.on("request", onRequest)
+  page.on("requestfailed", onRequestFailed)
+  page.on("response", onResponse)
+  page.on("pageerror", onPageError)
+  page.on("console", onConsole)
   return {
     snapshot: () => entries.map((entry) => ({ ...entry })),
+    allowExpectedHttpError: (error) => {
+      expectedHttpErrors.add(expectedErrorKey(error))
+    },
     assertClean: () => {
       const forbidden = entries.filter((entry) => entry.forbiddenKind !== null)
+      const unexpectedApi = entries.filter((entry) => {
+        try {
+          return new URL(entry.url).pathname.startsWith("/api/") && !entry.allowed
+        } catch {
+          return true
+        }
+      })
       expect(
         forbidden,
         `Shared recipient request ledger contained forbidden requests:\n${forbidden
@@ -151,8 +241,26 @@ export function startSharedRecipientRequestLedger(
           )
           .join("\n")}`
       ).toEqual([])
+      expect(
+        unexpectedApi,
+        `Shared recipient request ledger contained unclassified API requests:\n${unexpectedApi
+          .map((entry) => `${entry.method} ${entry.pathname}`)
+          .join("\n")}`
+      ).toEqual([])
+      expect(requestFailures, "Shared recipient requests failed").toEqual([])
+      expect(unexpectedResponses, "Shared recipient API responses failed").toEqual(
+        []
+      )
+      expect(pageErrors, "Shared recipient page errors").toEqual([])
+      expect(consoleErrors, "Shared recipient console errors").toEqual([])
     },
-    dispose: () => page.off("request", onRequest)
+    dispose: () => {
+      page.off("request", onRequest)
+      page.off("requestfailed", onRequestFailed)
+      page.off("response", onResponse)
+      page.off("pageerror", onPageError)
+      page.off("console", onConsole)
+    }
   }
 }
 
@@ -436,13 +544,37 @@ export class ResearchWorkspacePage {
       name: "Search shared sources"
     })
     await expect(search).toBeVisible({ timeout: 10_000 })
+    const response = this.page.waitForResponse((candidate) => {
+      const url = new URL(candidate.url())
+      return (
+        candidate.request().method() === "GET" &&
+        /\/api\/v1\/sharing\/shared-with-me\/\d+\/sources$/.test(
+          url.pathname
+        ) &&
+        (url.searchParams.get("q") || "") === query &&
+        candidate.status() === 200
+      )
+    })
     await search.fill(query)
+    await response
   }
 
   async filterSharedSourcesByState(state: string): Promise<void> {
+    const response = this.page.waitForResponse((candidate) => {
+      const url = new URL(candidate.url())
+      return (
+        candidate.request().method() === "GET" &&
+        /\/api\/v1\/sharing\/shared-with-me\/\d+\/sources$/.test(
+          url.pathname
+        ) &&
+        url.searchParams.get("state") === state &&
+        candidate.status() === 200
+      )
+    })
     await this.page
       .getByRole("combobox", { name: "Filter shared sources by state" })
       .selectOption(state)
+    await response
   }
 
   async clearSharedSourceSelection(): Promise<void> {

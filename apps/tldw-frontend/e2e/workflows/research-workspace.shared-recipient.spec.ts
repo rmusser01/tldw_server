@@ -10,6 +10,22 @@ import {
 const SHARE_ID = 42
 const API_ROOT = `/api/v1/sharing/shared-with-me/${SHARE_ID}`
 const GENERATED_AT = "2026-08-22T17:00:00Z"
+const ALLOWED_OPERATIONS = [
+  { method: "GET", pathname: "/api/_tldw-webui/runtime-config" },
+  { method: "GET", pathname: "/api/v1/persona/profiles" },
+  { method: "GET", pathname: "/api/v1/notifications/unread-count" },
+  { method: "GET", pathname: "/api/v1/notifications" },
+  { method: "GET", pathname: "/api/v1/llm/providers" },
+  { method: "GET", pathname: "/api/v1/llm/models/metadata" },
+  { method: "GET", pathname: `${API_ROOT}/workspace` },
+  { method: "GET", pathname: `${API_ROOT}/sources` },
+  {
+    method: "GET",
+    pathname: new RegExp(`^${API_ROOT}/sources/source-[12]/preview$`)
+  },
+  { method: "GET", pathname: `${API_ROOT}/chat/messages` },
+  { method: "POST", pathname: `${API_ROOT}/chat` }
+] as const
 
 type StubState = {
   revoked: boolean
@@ -122,11 +138,59 @@ const bootstrap = (state: StubState) => ({
 })
 
 const installSharedApi = async (page: Page, state: StubState): Promise<void> => {
+  await page.addInitScript(() => {
+    const originalFetch = globalThis.fetch.bind(globalThis)
+    globalThis.fetch = async (input, init) => {
+      const rawUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url
+      const url = new URL(rawUrl, globalThis.location.origin)
+      if (url.pathname === "/api/v1/notifications/unread-count") {
+        return new Response(JSON.stringify({ unread_count: 0 }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      }
+      return await originalFetch(input, init)
+    }
+  })
+
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request()
     const url = new URL(request.url())
     const path = url.pathname
     const method = request.method().toUpperCase()
+
+    if (
+      method === "GET" &&
+      [
+        "/api/v1/persona/profiles",
+        "/api/v1/notifications/unread-count",
+        "/api/v1/notifications",
+        "/api/v1/llm/providers"
+      ].includes(path)
+    ) {
+      const bodyByPath: Record<string, Record<string, unknown>> = {
+        "/api/v1/persona/profiles": { profiles: [] },
+        "/api/v1/notifications/unread-count": { unread_count: 0 },
+        "/api/v1/notifications": {
+          notifications: [],
+          total: 0,
+          limit: 1,
+          offset: 0
+        },
+        "/api/v1/llm/providers": { providers: [] }
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(bodyByPath[path])
+      })
+      return
+    }
 
     if (path === "/api/v1/llm/models/metadata") {
       await route.fulfill({
@@ -286,11 +350,7 @@ const installSharedApi = async (page: Page, state: StubState): Promise<void> => 
       return
     }
 
-    await route.fulfill({
-      status: 404,
-      contentType: "application/json",
-      body: JSON.stringify({ detail: "Unexpected API request in shared stub" })
-    })
+    await route.abort("failed")
   })
 }
 
@@ -308,11 +368,14 @@ test("desktop recipient flow uses only canonical shared reads and chat", async (
     chatRequests: []
   }
   await installSharedApi(page, state)
-  const ledger = startSharedRecipientRequestLedger(page, SHARE_ID)
+  const ledger = startSharedRecipientRequestLedger(page, SHARE_ID, {
+    allowedOperations: ALLOWED_OPERATIONS
+  })
   const workspace = new ResearchWorkspacePage(page)
 
   await workspace.gotoShared(SHARE_ID)
   await workspace.waitForSharedReady("Recipient evidence review")
+  await page.waitForLoadState("networkidle")
   await expect(page.getByText("First shared source", { exact: true })).toBeVisible()
   await expect(page.getByText("Second shared source", { exact: true })).toBeVisible()
 
@@ -342,6 +405,7 @@ test("desktop recipient flow uses only canonical shared reads and chat", async (
   )
   await workspace.closeSharedSourcePreview()
 
+  await page.waitForLoadState("networkidle")
   await page.reload({ waitUntil: "domcontentloaded" })
   await workspace.waitForSharedReady("Recipient evidence review")
   await expect(page.getByText("The second source contains the selected evidence.")).toBeVisible()
@@ -369,20 +433,65 @@ test("mobile tabs remain scoped and revoked reload fails closed", async ({ page 
     chatRequests: []
   }
   await installSharedApi(page, state)
-  const ledger = startSharedRecipientRequestLedger(page, SHARE_ID)
+  const ledger = startSharedRecipientRequestLedger(page, SHARE_ID, {
+    allowedOperations: ALLOWED_OPERATIONS
+  })
   const workspace = new ResearchWorkspacePage(page)
 
   await workspace.gotoShared(SHARE_ID)
   await workspace.waitForSharedReady("Recipient evidence review")
+  await page.waitForLoadState("networkidle")
+  await workspace.searchSharedSources("Second")
+  await expect(page.getByText("First shared source", { exact: true })).toBeHidden()
+  await workspace.searchSharedSources("")
+  await workspace.filterSharedSourcesByState("ready")
+  await workspace.clearSharedSourceSelection()
+  await workspace.selectSharedSource("Second shared source")
+  await workspace.previewSharedSource("Second shared source")
+  await expect(page.getByRole("dialog", { name: "Source preview" })).toContainText(
+    "Preview evidence for Second shared source."
+  )
+  await workspace.closeSharedSourcePreview()
+
   await workspace.activateSharedMobilePane("chat")
-  await expect(page.getByTestId("shared-workspace-chat-pane")).toBeVisible()
-  await workspace.activateSharedMobilePane("sources")
-  await expect(page.getByTestId("shared-workspace-sources-pane")).toBeVisible()
+  await workspace.askSharedWorkspace("What does the selected source show on mobile?")
+  await expect(page.getByText("The second source contains the selected evidence.")).toBeVisible()
+  expect(state.chatRequests).toHaveLength(1)
+  expect(state.chatRequests[0]?.source_scope).toEqual({
+    mode: "include",
+    source_ids: ["source-2"]
+  })
+  await workspace.openSharedCitation("Second shared source")
+  await expect(page.getByRole("dialog", { name: "Source preview" })).toContainText(
+    "Second shared source"
+  )
+  await workspace.closeSharedSourcePreview()
+
+  await page.waitForLoadState("networkidle")
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await workspace.waitForSharedReady("Recipient evidence review")
+  await workspace.activateSharedMobilePane("chat")
+  await expect(page.getByText("The second source contains the selected evidence.")).toBeVisible()
 
   state.revoked = true
+  await page.waitForLoadState("networkidle")
+  ledger.allowExpectedHttpError({
+    method: "GET",
+    pathname: `${API_ROOT}/workspace`,
+    status: 404
+  })
   await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(page).toHaveURL(`/research-workspace?shared=${SHARE_ID}`)
   await expect(page.getByText("This shared workspace isn't available.")).toBeVisible()
   await expect(page.getByRole("link", { name: "Return to Shared with me" })).toBeVisible()
+  await expect(page.getByTestId("shared-workspace-shell")).toHaveCount(0)
+  await expect(page.getByTestId("shared-workspace-sources-pane")).toHaveCount(0)
+  await expect(page.getByTestId("shared-workspace-chat-pane")).toHaveCount(0)
+  await expect(page.getByText("First shared source", { exact: true })).toHaveCount(0)
+  await expect(
+    page.getByText("The second source contains the selected evidence.")
+  ).toHaveCount(0)
+  await expect(page.getByText("RECIPIENT-LOCAL-WORKSPACE-SENTINEL")).toHaveCount(0)
   ledger.assertClean()
   ledger.dispose()
 })
@@ -397,9 +506,12 @@ test("request ledger classifies every prohibited shared-mode destination", () =>
     ["POST", "/api/v1/acp/sessions"],
     ["POST", "/api/v1/sandbox/run"],
     ["GET", "/api/v1/artifacts/123"],
+    ["POST", "/api/v1/research-workspace/artifacts/generate"],
     ["POST", `${API_ROOT}/sources`],
     ["POST", "/api/v1/media/process-documents"],
-    ["GET", `${API_ROOT}/media/99`]
+    ["POST", "/api/v1/web-clipper/save"],
+    ["GET", `${API_ROOT}/media/99`],
+    ["GET", "/api/v1/sharing/shared-with-me/999/full-media/99"]
   ]
 
   for (const [method, pathname] of probes) {
@@ -412,4 +524,44 @@ test("request ledger classifies every prohibited shared-mode destination", () =>
       `${method} ${pathname}`
     ).not.toBeNull()
   }
+})
+
+test("request ledger stays active after shared navigation state is removed", async ({
+  page
+}) => {
+  const state: StubState = {
+    revoked: false,
+    messages: [...initialMessages],
+    chatRequests: []
+  }
+  await installSharedApi(page, state)
+  const ledger = startSharedRecipientRequestLedger(page, SHARE_ID, {
+    allowedOperations: ALLOWED_OPERATIONS
+  })
+
+  await page.goto(`/research-workspace?shared=${SHARE_ID}`, {
+    waitUntil: "domcontentloaded"
+  })
+  await page.evaluate(() => {
+    globalThis.history.replaceState({}, "", "/research-workspace")
+  })
+  await page.evaluate(async () => {
+    await fetch("/api/v1/research-workspace/artifacts/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    }).catch(() => undefined)
+  })
+
+  expect(ledger.snapshot()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        method: "POST",
+        pathname: "/api/v1/research-workspace/artifacts/generate",
+        forbiddenKind: "artifact"
+      })
+    ])
+  )
+  expect(() => ledger.assertClean()).toThrow()
+  ledger.dispose()
 })

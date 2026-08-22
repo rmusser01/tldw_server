@@ -1,41 +1,35 @@
-"""Integrated owner/member/nonmember recipient shared-workspace security matrix."""
+"""Integrated recipient security matrix over production shared-workspace routes."""
 
 from __future__ import annotations
 
-import hashlib
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import UUID
 
+import httpx
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.API_Deps import (
+    ChaCha_Notes_DB_Deps,
+    DB_Deps,
+    auth_deps,
+    jobs_deps,
+)
 from tldw_Server_API.app.api.v1.endpoints import sharing
-from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas import (
-    SharedWorkspaceChatRequest,
-)
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-from tldw_Server_API.app.core.Chat.chat_target_resolution import ResolvedChatTarget
+from tldw_Server_API.app.core.AuthNZ.repos import users_repo
+from tldw_Server_API.app.core.Chat import chat_target_resolution
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
-    SharedWorkspaceAccessService,
+from tldw_Server_API.app.core.DB_Management.media_db.legacy_state import (
+    mark_media_as_processed,
 )
-from tldw_Server_API.app.core.Sharing.shared_workspace_chat_service import (
-    SharedSourceSnapshot,
-    SharedSourceSnapshotItem,
-    SharedWorkspaceGeneratedAnswer,
-    SharedWorkspacePromptBudget,
-    SharedWorkspaceSourceChanged,
-    VerifiedSharedEvidence,
-)
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.Sharing import shared_workspace_chat_service as shared_chat
 
 pytestmark = pytest.mark.integration
 
@@ -48,40 +42,43 @@ OWNER_NOTE_SENTINEL = "OWNER-NOTE-SENTINEL-DO-NOT-LEAK"
 OWNER_CHAT_SENTINEL = "OWNER-CHAT-SENTINEL-DO-NOT-LEAK"
 OWNER_MEDIA_SENTINEL = "OWNER-UNRELATED-MEDIA-SENTINEL-DO-NOT-LEAK"
 RECIPIENT_LOCAL_SENTINEL = "RECIPIENT-LOCAL-WORKSPACE-SENTINEL-DO-NOT-LEAK"
-NOW = datetime(2026, 8, 22, 17, 0, tzinfo=timezone.utc)
+
+Hook = Callable[[], Awaitable[None] | None]
 
 
 class _UsersRepo:
+    def __init__(self, **_kwargs: Any) -> None:
+        pass
+
     async def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         if user_id == OWNER_ID:
             return {"id": OWNER_ID, "username": "Research owner"}
         return None
 
 
-class _AllowLimiter:
-    async def check_rate_limit(
-        self,
-        user_id: str,
-        conversation_id: str,
-        estimated_tokens: int,
-    ) -> tuple[bool, None]:
-        assert user_id in {str(OWNER_ID), str(MEMBER_ID)}
-        assert conversation_id.startswith(f"shared:{user_id}:")
-        assert estimated_tokens > 0
-        return True, None
+@dataclass
+class _Credential:
+    api_key: str = "recipient-test-key"
+    app_config: dict[str, str] = field(
+        default_factory=lambda: {"organization": "recipient"}
+    )
+    touched: int = 0
 
-
-Hook = Callable[[], Awaitable[None] | None]
+    async def touch_last_used(self) -> None:
+        self.touched += 1
 
 
 @dataclass
-class _DeterministicChatService:
-    owner_db: CharactersRAGDB
-    media: dict[int, dict[str, str]]
+class _ExternalTransports:
+    media_db: MediaDatabase
+    retrieval_calls: list[dict[str, Any]] = field(default_factory=list)
+    credential_calls: list[dict[str, Any]] = field(default_factory=list)
     generation_calls: int = 0
     after_retrieval: Hook | None = None
     after_generation: Hook | None = None
-    _evidence: tuple[VerifiedSharedEvidence, ...] = field(default_factory=tuple)
+    generation_entered: asyncio.Event | None = None
+    release_generation: asyncio.Event | None = None
+    credential: _Credential = field(default_factory=_Credential)
 
     async def _run_hook(self, hook: Hook | None) -> None:
         if hook is None:
@@ -90,137 +87,88 @@ class _DeterministicChatService:
         if result is not None:
             await result
 
-    def resolve_source_snapshot(
-        self,
-        *,
-        mode: str,
-        source_ids: list[str] | tuple[str, ...],
-        frozen_source_ids: tuple[str, ...] | None = None,
-    ) -> SharedSourceSnapshot:
-        sources = {
-            str(source["id"]): source
-            for source in self.owner_db.list_workspace_sources(WORKSPACE_ID)
-            if source.get("selected", True)
-        }
-        requested = (
-            tuple(frozen_source_ids)
-            if frozen_source_ids is not None
-            else tuple(sorted(sources))
-            if mode == "all"
-            else tuple(source_ids)
-        )
-        if not requested or any(source_id not in sources for source_id in requested):
-            raise SharedWorkspaceSourceChanged()
-
-        items = []
-        for source_id in requested:
-            source = sources[source_id]
-            media_id = int(source["media_id"])
-            media = self.media.get(media_id)
-            if media is None:
-                raise SharedWorkspaceSourceChanged()
-            items.append(
-                SharedSourceSnapshotItem(
-                    source_id=source_id,
-                    media_id=media_id,
-                    media_uuid=media["uuid"],
-                    content_hash=media["content_hash"],
-                    readiness_class="ready",
-                )
+    async def retrieve(self, *, query: str, **kwargs: Any) -> dict[str, Any]:
+        self.retrieval_calls.append({"query": query, **kwargs})
+        documents: list[dict[str, Any]] = []
+        for index, media_id in enumerate(kwargs["include_media_ids"], start=1):
+            media = self.media_db.get_media_by_id(media_id)
+            assert media is not None
+            content = str(media["content"])
+            documents.append(
+                {
+                    "id": f"chunk-{media_id}",
+                    "content": content,
+                    "source": "media_db",
+                    "score": 0.9,
+                    "metadata": {
+                        "source": "media_db",
+                        "media_id": media_id,
+                        "chunk_id": f"chunk-{media_id}",
+                        "chunk_index": index,
+                        "start_char": 0,
+                        "end_char": len(content),
+                    },
+                }
             )
-        serialized = json.dumps(
-            [
-                (
-                    item.source_id,
-                    item.media_id,
-                    item.media_uuid,
-                    item.content_hash,
-                    item.readiness_class,
-                )
-                for item in items
-            ],
-            separators=(",", ":"),
-        )
-        return SharedSourceSnapshot(
-            mode=mode,
-            items=tuple(items),
-            snapshot_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
-        )
-
-    async def retrieve_verified_evidence(
-        self,
-        *,
-        query: str,
-        snapshot: SharedSourceSnapshot,
-    ) -> tuple[VerifiedSharedEvidence, ...]:
-        assert query
-        self._evidence = tuple(
-            VerifiedSharedEvidence(
-                label=f"E{index}",
-                source_id=item.source_id,
-                source_title=f"Shared source {item.source_id[-1]}",
-                content=f"Evidence from {item.source_id}",
-                score=0.9,
-                chunk_index=index,
-                start_char=0,
-                end_char=24,
-            )
-            for index, item in enumerate(snapshot.items, start=1)
-        )
         await self._run_hook(self.after_retrieval)
-        return self._evidence
-
-    def revalidate_source_snapshot(
-        self,
-        *,
-        snapshot: SharedSourceSnapshot,
-    ) -> SharedSourceSnapshot:
-        current = self.resolve_source_snapshot(
-            mode=snapshot.mode,
-            source_ids=snapshot.source_ids,
-            frozen_source_ids=snapshot.source_ids if snapshot.mode == "all" else None,
-        )
-        if current.snapshot_hash != snapshot.snapshot_hash:
-            raise SharedWorkspaceSourceChanged()
-        return current
-
-    async def generate_grounded_answer(
-        self,
-        *,
-        query: str,
-        evidence: tuple[VerifiedSharedEvidence, ...],
-        **_kwargs: Any,
-    ) -> SharedWorkspaceGeneratedAnswer:
-        assert query
-        self.generation_calls += 1
-        citations = tuple(
-            {
-                "citation_id": f"citation-{item.label.lower()}",
-                "source_id": item.source_id,
-                "source_title": item.source_title,
-                "locator": {
-                    "chunk": item.chunk_index,
-                    "start_char": item.start_char,
-                    "end_char": item.end_char,
+        return {
+            "documents": documents,
+            "query": query,
+            "expanded_queries": [],
+            "errors": [],
+            "generated_answer": None,
+            "cache_hit": False,
+            "metadata": {
+                "original_query": query,
+                "retrieval_cache_hit": False,
+                "generation_executed": False,
+                "explicit_source_selection": {
+                    "enabled": True,
+                    "requested_sources": ["media_db"],
+                    "resolved_sources": ["media_db"],
+                    "include_media_ids_count": len(kwargs["include_media_ids"]),
+                    "include_note_ids_count": 0,
+                    "scope_intersection_empty": False,
+                    "cache_disabled": False,
                 },
-                "quote": item.content,
-                "score": item.score,
-            }
-            for item in evidence
-        )
+                "sources_requested": ["media_db"],
+                "sources_searched": ["media_db"],
+                "documents_retrieved": len(documents),
+                "retrieval_plan": {
+                    "query": query,
+                    "sources": ["media_db"],
+                    "search_mode": "fts",
+                    "top_k": 20,
+                    "index_namespace": f"user_{OWNER_ID}_media_embeddings",
+                },
+            },
+        }
+
+    async def resolve_credentials(self, provider: str, **kwargs: Any) -> _Credential:
+        self.credential_calls.append({"provider": provider, **kwargs})
+        return self.credential
+
+    async def generate(self, **_kwargs: Any) -> dict[str, Any]:
+        self.generation_calls += 1
+        if self.generation_entered is not None:
+            self.generation_entered.set()
+        if self.release_generation is not None:
+            await self.release_generation.wait()
         await self._run_hook(self.after_generation)
-        return SharedWorkspaceGeneratedAnswer(
-            answer="Grounded recipient answer",
-            citations=citations,
-            budgeted_evidence=evidence,
-            prompt_budget=SharedWorkspacePromptBudget(
-                context_window=8192,
-                max_output_tokens=1200,
-                safety_tokens=400,
-                prompt_tokens=800,
-                counter="utf8_bytes",
-            ),
-        )
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "answer": "Grounded recipient answer",
+                                "citations": ["E1", "E2"],
+                            }
+                        )
+                    }
+                }
+            ]
+        }
 
 
 @dataclass
@@ -229,188 +177,115 @@ class RecipientSecurityHarness:
     sharing_db: Any
     owner_db: CharactersRAGDB
     recipient_dbs: dict[int, CharactersRAGDB]
+    media_db: MediaDatabase
+    media_ids: dict[str, int]
     share_id: int
-    media: dict[int, dict[str, str]]
-    owner_loader_calls: list[int]
-    chat_service: _DeterministicChatService
+    transports: _ExternalTransports
+    owner_db_calls: list[int]
+    recipient_db_calls: list[int]
+    media_db_calls: list[int]
+    clock_now: datetime
 
-    @property
-    def access_service(self) -> SharedWorkspaceAccessService:
-        async def load_owner(owner_user_id: int) -> CharactersRAGDB:
-            self.owner_loader_calls.append(owner_user_id)
-            return self.owner_db
+    def app(self, user_id: int, *, can_read: bool = True) -> FastAPI:
+        async def get_principal():
+            from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
-        return SharedWorkspaceAccessService(self.repo, _UsersRepo(), load_owner)
+            return AuthPrincipal(
+                kind="user",
+                user_id=user_id,
+                username=f"user-{user_id}",
+                permissions=["sharing.read"] if can_read else [],
+            )
 
-    def user(self, user_id: int) -> User:
-        return User(
-            id=user_id,
-            username=f"user-{user_id}",
-            email=f"user-{user_id}@example.test",
-            password_hash="hash",
-        )
+        async def get_user():
+            from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
-    def principal(self, user_id: int, *, can_read: bool = True) -> AuthPrincipal:
-        return AuthPrincipal(
-            kind="user",
-            user_id=user_id,
-            username=f"user-{user_id}",
-            permissions=["sharing.read"] if can_read else [],
-        )
-
-    def client(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        user_id: int,
-        *,
-        can_read: bool = True,
-    ) -> TestClient:
-        async def get_principal() -> AuthPrincipal:
-            return self.principal(user_id, can_read=can_read)
-
-        async def get_user() -> User:
-            return self.user(user_id)
-
-        async def allow_rate_limit(*_args: Any, **_kwargs: Any) -> None:
-            return None
-
-        async def load_sources(context: Any) -> list[dict[str, Any]]:
-            assert context.owner_user_id == OWNER_ID
-            return [dict(item) for item in self.owner_db.list_workspace_sources(WORKSPACE_ID)]
-
-        async def project_sources(
-            context: Any,
-            sources: list[dict[str, Any]],
-        ) -> dict[str, Any]:
-            assert context.owner_user_id == OWNER_ID
-            return {
-                "sources": [
-                    {
-                        "id": source["id"],
-                        "state": "queryable",
-                        "status_reason": "source_queryable",
-                        "readiness": {
-                            "text_extracted": True,
-                            "fts_ready": True,
-                            "citation_ready": True,
-                            "tool_accessible": True,
-                        },
-                    }
-                    for source in sources
-                ],
-                "summary": {
-                    "total": len(sources),
-                    "queryable": len(sources),
-                    "processing": 0,
-                    "failed": 0,
-                },
-                "partial_errors": [],
-            }
-
-        async def generation_default(_context: Any) -> dict[str, Any]:
-            return {
-                "provider": "openai",
-                "model": "shared-test-model",
-                "ready": True,
-                "reason_code": None,
-            }
-
-        async def history(
-            context: Any,
-            *,
-            before: str | None,
-            limit: int,
-        ) -> tuple[Any, str | None]:
-            store = self.recipient_dbs[context.recipient_user_id].shared_workspace_chat_store
-            page = store.list_messages(share_id=self.share_id, before=before, limit=limit)
-            thread = store.get_thread(share_id=self.share_id)
-            return page, thread.conversation_id if thread is not None else None
-
-        async def preview(
-            context: Any,
-            source: dict[str, Any],
-            **_kwargs: Any,
-        ) -> dict[str, Any]:
-            media_id = int(source["media_id"])
-            media = self.media[media_id]
-            return {
-                "source_id": source["id"],
-                "title": source["title"],
-                "source_type": source["source_type"],
-                "origin_url": "https://evidence.example.test",
-                "origin_host": "evidence.example.test",
-                "state": "queryable",
-                "reason_code": "source_queryable",
-                "content_available": True,
-                "preview_mode": "content_excerpt",
-                "unavailable_reason": None,
-                "text_preview": media["content"],
-                "text_total_chars": len(media["content"]),
-                "text_truncated": False,
-                "snippets": [],
-                "generated_at": NOW.isoformat(),
-            }
-
-        monkeypatch.setattr(auth_deps, "enforce_rbac_rate_limit", allow_rate_limit)
-        monkeypatch.setattr(sharing, "_load_recipient_workspace_sources", load_sources)
-        monkeypatch.setattr(sharing, "_project_recipient_source_status", project_sources)
-        monkeypatch.setattr(sharing, "_resolve_recipient_generation_default", generation_default)
-        monkeypatch.setattr(sharing, "_load_recipient_chat_history", history)
-        monkeypatch.setattr(sharing, "_build_recipient_source_preview", preview)
+            return User(
+                id=user_id,
+                username=f"user-{user_id}",
+                email=f"user-{user_id}@example.test",
+                password_hash="hash",
+            )
 
         app = FastAPI()
         app.include_router(sharing.router, prefix="/api/v1")
         app.dependency_overrides[auth_deps.get_auth_principal] = get_principal
         app.dependency_overrides[sharing.get_request_user] = get_user
-        app.dependency_overrides[sharing.get_shared_workspace_access_service] = (
-            lambda: self.access_service
-        )
-        return TestClient(app, raise_server_exceptions=False)
+        return app
 
-    def body(
+    def client(self, user_id: int, *, can_read: bool = True) -> TestClient:
+        return TestClient(
+            self.app(user_id, can_read=can_read),
+            raise_server_exceptions=False,
+        )
+
+    def chat_body(
         self,
         request_id: str,
         *,
         mode: str = "all",
         source_ids: tuple[str, ...] = (),
         query: str = "What does the shared evidence support?",
-    ) -> SharedWorkspaceChatRequest:
-        return SharedWorkspaceChatRequest(
-            request_id=UUID(request_id),
-            query=query,
-            source_scope={"mode": mode, "source_ids": list(source_ids)},
-            provider="openai",
-            model="shared-test-model",
-        )
+    ) -> dict[str, Any]:
+        return {
+            "request_id": request_id,
+            "query": query,
+            "source_scope": {"mode": mode, "source_ids": list(source_ids)},
+            "provider": "openai",
+            "model": "shared-test-model",
+        }
 
-    async def chat(self, body: SharedWorkspaceChatRequest):
-        async def store_loader(context: Any):
-            return self.recipient_dbs[context.recipient_user_id].shared_workspace_chat_store
+    async def post_chat(self, body: dict[str, Any]) -> httpx.Response:
+        transport = httpx.ASGITransport(app=self.app(MEMBER_ID))
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            return await client.post(
+                f"/api/v1/sharing/shared-with-me/{self.share_id}/chat",
+                json=body,
+            )
 
-        @asynccontextmanager
-        async def resource_loader(context: Any):
-            assert context.owner_user_id == OWNER_ID
-            yield SimpleNamespace(chat_service=self.chat_service)
-
-        return await sharing._orchestrate_shared_workspace_chat(
-            share_id=self.share_id,
-            body=body,
-            request=SimpleNamespace(),
-            recipient_user_id=MEMBER_ID,
-            access_service=self.access_service,
-            store_loader=store_loader,
-            resource_loader=resource_loader,
-            rate_limiter=_AllowLimiter(),
-            audit=None,
-        )
-
-    def saved_messages(self) -> tuple[Any, ...]:
-        page = self.recipient_dbs[MEMBER_ID].shared_workspace_chat_store.list_messages(
+    def saved_messages(self, recipient_id: int = MEMBER_ID) -> tuple[Any, ...]:
+        page = self.recipient_dbs[recipient_id].shared_workspace_chat_store.list_messages(
             share_id=self.share_id,
             before=None,
             limit=100,
         )
         return page.messages
+
+    def receipt_rows(self) -> list[dict[str, Any]]:
+        with self.recipient_dbs[MEMBER_ID].transaction() as connection:
+            return [
+                dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT request_id, status, lease_epoch, lease_expires_at,
+                           user_message_id, assistant_message_id, completed_at
+                      FROM shared_workspace_chat_requests
+                     WHERE recipient_user_id = ? AND share_id = ?
+                    """,
+                    (str(MEMBER_ID), self.share_id),
+                ).fetchall()
+            ]
+
+    def mutate_media_hash(self, source_id: str) -> None:
+        media_id = self.media_ids[source_id]
+        with self.media_db.transaction() as connection:
+            connection.execute(
+                """
+                UPDATE Media
+                   SET content_hash = ?, version = version + 1,
+                       last_modified = ?, client_id = ?
+                 WHERE id = ?
+                """,
+                (
+                    f"changed-{media_id}",
+                    self.media_db._get_current_utc_timestamp_str(),
+                    self.media_db.client_id,
+                    media_id,
+                ),
+            )
 
 
 @pytest.fixture
@@ -442,17 +317,41 @@ async def recipient_security_harness(
     owner_db = CharactersRAGDB(tmp_path / "owner.db", client_id=str(OWNER_ID))
     member_db = CharactersRAGDB(tmp_path / "member.db", client_id=str(MEMBER_ID))
     owner_recipient_db = CharactersRAGDB(
-        tmp_path / "owner-recipient.db", client_id=str(OWNER_ID)
+        tmp_path / "owner-recipient.db",
+        client_id=str(OWNER_ID),
     )
+    media_db = MediaDatabase(
+        db_path=str(tmp_path / "owner-media.db"),
+        client_id=str(OWNER_ID),
+    )
+    media_db.initialize_db()
+    media_ids: dict[str, int] = {}
+    for source_id, title, content in (
+        ("source-1", "Shared source 1", "First shared source evidence."),
+        ("source-2", "Shared source 2", "Second shared source evidence."),
+        ("owner-sentinel", "Owner sentinel", OWNER_MEDIA_SENTINEL),
+    ):
+        media_id, _media_uuid, _status = media_db.add_media_with_keywords(
+            url=f"https://evidence.example.test/{source_id}",
+            title=title,
+            media_type="pdf",
+            content=content,
+            keywords=None,
+        )
+        assert media_id is not None
+        mark_media_as_processed(media_db, media_id)
+        media_ids[source_id] = media_id
+
     owner_db.upsert_workspace(WORKSPACE_ID, "Shared security review")
     for index in (1, 2):
         owner_db.add_workspace_source(
             WORKSPACE_ID,
             {
                 "id": f"source-{index}",
-                "media_id": 100 + index,
+                "media_id": media_ids[f"source-{index}"],
                 "title": f"Shared source {index}",
                 "source_type": "pdf",
+                "url": f"https://evidence.example.test/source-{index}",
                 "position": index - 1,
                 "selected": True,
             },
@@ -468,42 +367,108 @@ async def recipient_security_harness(
     )
     member_db.upsert_workspace("recipient-local", RECIPIENT_LOCAL_SENTINEL)
 
-    media = {
-        101: {
-            "uuid": "media-uuid-101",
-            "content_hash": "hash-101",
-            "content": "First shared source evidence.",
-        },
-        102: {
-            "uuid": "media-uuid-102",
-            "content_hash": "hash-102",
-            "content": "Second shared source evidence.",
-        },
-        999: {
-            "uuid": "owner-unrelated-media",
-            "content_hash": "owner-unrelated-hash",
-            "content": OWNER_MEDIA_SENTINEL,
-        },
-    }
+    owner_db_calls: list[int] = []
+    recipient_db_calls: list[int] = []
+    media_db_calls: list[int] = []
+    recipient_dbs = {OWNER_ID: owner_recipient_db, MEMBER_ID: member_db}
+
+    async def get_owner_db(owner_user_id: int) -> CharactersRAGDB:
+        owner_db_calls.append(owner_user_id)
+        assert owner_user_id == OWNER_ID
+        return owner_db
+
+    async def get_recipient_db(
+        recipient_user_id: int,
+        client_id: str | None = None,
+    ) -> CharactersRAGDB:
+        del client_id
+        recipient_db_calls.append(recipient_user_id)
+        return recipient_dbs[recipient_user_id]
+
+    @contextmanager
+    def get_owner_media(owner_user_id: int):
+        media_db_calls.append(owner_user_id)
+        assert owner_user_id == OWNER_ID
+        yield media_db
+
+    transports = _ExternalTransports(media_db=media_db)
+
+    def build_chat_service(**kwargs: Any) -> shared_chat.SharedWorkspaceChatService:
+        return shared_chat.SharedWorkspaceChatService(
+            **kwargs,
+            rag_pipeline=transports.retrieve,
+        )
+
+    async def allow_rate_limit(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    clock_now = datetime.now(timezone.utc)
+
+    class _ControlledDateTime(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            if tz is None:
+                return clock_now.replace(tzinfo=None)
+            return clock_now.astimezone(tz)
+
+    monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "shared-test-model")
+    monkeypatch.setattr(
+        chat_target_resolution,
+        "get_override_default_model",
+        lambda _provider: None,
+    )
+    monkeypatch.setattr(
+        chat_target_resolution,
+        "get_default_model_for_provider",
+        lambda _provider: "shared-test-model",
+    )
+    monkeypatch.setattr(
+        chat_target_resolution,
+        "get_llm_provider_override",
+        lambda _provider: None,
+    )
+    monkeypatch.setattr(
+        chat_target_resolution,
+        "validate_provider_override",
+        lambda _provider, _model: None,
+    )
+    monkeypatch.setattr(sharing, "_get_repo", lambda: repo)
+    monkeypatch.setattr(sharing, "_get_audit_service", lambda: None)
+    monkeypatch.setattr(users_repo, "AuthnzUsersRepo", _UsersRepo)
+    monkeypatch.setattr(sharing, "SharedWorkspaceChatService", build_chat_service)
+    monkeypatch.setattr(sharing, "resolve_byok_credentials", transports.resolve_credentials)
+    monkeypatch.setattr(shared_chat, "resolve_byok_credentials", transports.resolve_credentials)
+    monkeypatch.setattr(shared_chat, "perform_chat_api_call_async", transports.generate)
+    monkeypatch.setattr(auth_deps, "enforce_rbac_rate_limit", allow_rate_limit)
+    monkeypatch.setattr(ChaCha_Notes_DB_Deps, "get_chacha_db_for_owner", get_owner_db)
+    monkeypatch.setattr(
+        ChaCha_Notes_DB_Deps,
+        "get_chacha_db_for_user_id",
+        get_recipient_db,
+    )
+    monkeypatch.setattr(DB_Deps, "managed_media_db_for_owner", get_owner_media)
+    monkeypatch.setattr(
+        DB_Deps,
+        "get_media_db_path_for_rag",
+        lambda db: str(db.db_path_str),
+    )
+    monkeypatch.setattr(jobs_deps, "try_get_job_manager", lambda: None)
+    monkeypatch.setattr(sharing, "datetime", _ControlledDateTime)
+
     harness = RecipientSecurityHarness(
         repo=repo,
         sharing_db=sharing_db,
         owner_db=owner_db,
-        recipient_dbs={OWNER_ID: owner_recipient_db, MEMBER_ID: member_db},
+        recipient_dbs=recipient_dbs,
+        media_db=media_db,
+        media_ids=media_ids,
         share_id=int(share["id"]),
-        media=media,
-        owner_loader_calls=[],
-        chat_service=_DeterministicChatService(owner_db=owner_db, media=media),
-    )
-    monkeypatch.setattr(
-        sharing,
-        "resolve_chat_target",
-        lambda **_kwargs: ResolvedChatTarget("openai", "shared-test-model"),
-    )
-    monkeypatch.setattr(
-        sharing,
-        "load_and_log_configs",
-        lambda: {"openai_api": {"api_timeout": "30"}},
+        transports=transports,
+        owner_db_calls=owner_db_calls,
+        recipient_db_calls=recipient_db_calls,
+        media_db_calls=media_db_calls,
+        clock_now=clock_now,
     )
     try:
         yield harness
@@ -511,6 +476,7 @@ async def recipient_security_harness(
         owner_db.close_all_connections()
         member_db.close_all_connections()
         owner_recipient_db.close_all_connections()
+        media_db.close_connection()
 
 
 def _assert_no_sentinels(payload: Any) -> None:
@@ -521,13 +487,12 @@ def _assert_no_sentinels(payload: Any) -> None:
     assert RECIPIENT_LOCAL_SENTINEL not in serialized
 
 
-def test_owner_and_member_reads_project_only_shared_sources_and_recipient_history(
+def test_owner_and_member_reads_use_production_db_selection_and_projections(
     recipient_security_harness: RecipientSecurityHarness,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = recipient_security_harness
     for user_id in (OWNER_ID, MEMBER_ID):
-        client = harness.client(monkeypatch, user_id)
+        client = harness.client(user_id)
         bootstrap = client.get(
             f"/api/v1/sharing/shared-with-me/{harness.share_id}/workspace"
         )
@@ -537,39 +502,60 @@ def test_owner_and_member_reads_project_only_shared_sources_and_recipient_histor
         preview = client.get(
             f"/api/v1/sharing/shared-with-me/{harness.share_id}/sources/source-1/preview"
         )
+        history = client.get(
+            f"/api/v1/sharing/shared-with-me/{harness.share_id}/chat/messages"
+        )
 
-        assert bootstrap.status_code == 200
-        assert sources.status_code == 200
-        assert preview.status_code == 200
+        assert bootstrap.status_code == sources.status_code == preview.status_code == 200
+        assert history.status_code == 200
         assert [item["source_id"] for item in sources.json()["items"]] == [
             "source-1",
             "source-2",
         ]
         assert preview.json()["text_preview"] == "First shared source evidence."
+        assert bootstrap.json()["generation_default"] == {
+            "provider": "openai",
+            "model": "shared-test-model",
+            "ready": True,
+            "reason_code": None,
+        }
         assert bootstrap.json()["conversation"]["messages"] == []
+        assert history.json()["messages"] == []
         _assert_no_sentinels(bootstrap.json())
         _assert_no_sentinels(sources.json())
         _assert_no_sentinels(preview.json())
 
-    missing = harness.client(monkeypatch, MEMBER_ID).get(
-        f"/api/v1/sharing/shared-with-me/{harness.share_id}/sources/owner-unrelated-media/preview"
+    assert harness.owner_db_calls
+    assert set(harness.owner_db_calls) == {OWNER_ID}
+    assert harness.media_db_calls
+    assert set(harness.media_db_calls) == {OWNER_ID}
+    assert set(harness.recipient_db_calls) == {OWNER_ID, MEMBER_ID}
+    default_credential_calls = harness.transports.credential_calls[:2]
+    assert [call["user_id"] for call in default_credential_calls] == [
+        OWNER_ID,
+        MEMBER_ID,
+    ]
+    assert all(call["team_ids"] == [TEAM_ID] for call in default_credential_calls)
+
+    missing = harness.client(MEMBER_ID).get(
+        f"/api/v1/sharing/shared-with-me/{harness.share_id}/sources/owner-sentinel/preview"
     )
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "shared_workspace_not_found"
 
 
-def test_nonmember_and_missing_share_are_neutral_equivalent_before_owner_data(
+def test_nonmember_and_missing_share_are_neutral_before_owner_data(
     recipient_security_harness: RecipientSecurityHarness,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = recipient_security_harness
-    nonmember = harness.client(monkeypatch, NONMEMBER_ID).get(
+    harness.owner_db_calls.clear()
+    harness.media_db_calls.clear()
+    nonmember = harness.client(NONMEMBER_ID).get(
         f"/api/v1/sharing/shared-with-me/{harness.share_id}/workspace"
     )
-    missing = harness.client(monkeypatch, MEMBER_ID).get(
+    missing = harness.client(MEMBER_ID).get(
         "/api/v1/sharing/shared-with-me/999999/workspace"
     )
-    assert harness.owner_loader_calls == []
 
     assert nonmember.status_code == missing.status_code == 404
     assert nonmember.json() == missing.json() == {
@@ -579,37 +565,42 @@ def test_nonmember_and_missing_share_are_neutral_equivalent_before_owner_data(
             "retryable": False,
         }
     }
+    assert harness.owner_db_calls == []
+    assert harness.media_db_calls == []
+
 
 @pytest.mark.asyncio
 async def test_revoked_share_matches_neutral_denial(
     recipient_security_harness: RecipientSecurityHarness,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = recipient_security_harness
     await harness.repo.revoke_share(harness.share_id)
-    revoked = harness.client(monkeypatch, MEMBER_ID).get(
+    harness.owner_db_calls.clear()
+    response = harness.client(MEMBER_ID).get(
         f"/api/v1/sharing/shared-with-me/{harness.share_id}/workspace"
     )
-    assert revoked.status_code == 404
-    assert revoked.json()["detail"] == {
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == {
         "code": "shared_workspace_not_found",
         "message": "Shared workspace not found.",
         "retryable": False,
     }
-    assert harness.owner_loader_calls == []
+    assert harness.owner_db_calls == []
 
 
-def test_sharing_read_permission_is_required_before_share_resolution(
+def test_sharing_read_is_required_before_share_resolution(
     recipient_security_harness: RecipientSecurityHarness,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = recipient_security_harness
-    response = harness.client(monkeypatch, MEMBER_ID, can_read=False).get(
+    harness.owner_db_calls.clear()
+    response = harness.client(MEMBER_ID, can_read=False).get(
         f"/api/v1/sharing/shared-with-me/{harness.share_id}/workspace"
     )
+
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "sharing_permission_required"
-    assert harness.owner_loader_calls == []
+    assert harness.owner_db_calls == []
 
 
 @pytest.mark.asyncio
@@ -620,68 +611,89 @@ def test_sharing_read_permission_is_required_before_share_resolution(
         ("include", ("source-2",), {"source-2"}),
     ],
 )
-async def test_all_and_subset_chat_freeze_only_workspace_sources_and_replay(
+async def test_chat_uses_production_snapshot_credentials_persistence_and_replay(
     recipient_security_harness: RecipientSecurityHarness,
     mode: str,
     source_ids: tuple[str, ...],
     expected_sources: set[str],
 ) -> None:
     harness = recipient_security_harness
-    body = harness.body(
+    body = harness.chat_body(
         "de305d54-75b4-431b-adb2-eb6b9e546014",
         mode=mode,
         source_ids=source_ids,
     )
 
-    first = await harness.chat(body)
-    replay = await harness.chat(body)
+    first = await harness.post_chat(body)
+    replay = await harness.post_chat(body)
+    conflict = await harness.post_chat(
+        {**body, "query": "A different request body"}
+    )
 
-    assert {citation.source_id for citation in first.citations} == expected_sources
-    assert first.replay.replayed is False
-    assert replay.replay.replayed is True
-    assert harness.chat_service.generation_calls == 1
+    assert first.status_code == replay.status_code == 200
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "request_id_conflict"
+    assert {
+        citation["source_id"] for citation in first.json()["citations"]
+    } == expected_sources
+    assert first.json()["replay"]["replayed"] is False
+    assert replay.json()["replay"]["replayed"] is True
+    assert harness.transports.generation_calls == 1
     assert len(harness.saved_messages()) == 2
-    _assert_no_sentinels(first.model_dump(mode="json"))
+    assert len(harness.receipt_rows()) == 1
+    assert harness.receipt_rows()[0]["status"] == "completed"
+    retrieval = harness.transports.retrieval_calls[0]
+    assert set(retrieval["include_media_ids"]) == {
+        harness.media_ids[source_id] for source_id in expected_sources
+    }
+    assert harness.media_ids["owner-sentinel"] not in retrieval["include_media_ids"]
+    generation_credential = harness.transports.credential_calls[-1]
+    assert generation_credential["user_id"] == MEMBER_ID
+    assert generation_credential["team_ids"] == [TEAM_ID]
+    assert generation_credential["org_ids"] == []
+    _assert_no_sentinels(first.json())
 
 
 @pytest.mark.asyncio
-async def test_matching_concurrent_claim_and_mismatched_fingerprint_fail_without_messages(
+async def test_matching_requests_overlap_with_one_winner_and_durable_replay(
     recipient_security_harness: RecipientSecurityHarness,
 ) -> None:
     harness = recipient_security_harness
-    body = harness.body("de305d54-75b4-431b-adb2-eb6b9e546015")
-    store = harness.recipient_dbs[MEMBER_ID].shared_workspace_chat_store
-    context = await harness.access_service.resolve(
-        share_id=harness.share_id,
-        recipient_user_id=MEMBER_ID,
-    )
-    thread = store.get_or_create_thread(
-        share_id=harness.share_id,
-        owner_user_id=str(context.owner_user_id),
-        workspace_id=context.workspace_id,
-        workspace_name=context.workspace["name"],
-    )
-    claimed = store.claim_request(
-        share_id=harness.share_id,
-        request_id=body.request_id,
-        request_fingerprint=sharing._shared_chat_fingerprint(body),
-        conversation_id=thread.conversation_id,
-        lease_seconds=300,
-        now=NOW,
-    )
-    assert claimed.disposition == "claimed"
+    body = harness.chat_body("de305d54-75b4-431b-adb2-eb6b9e546015")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    harness.transports.generation_entered = entered
+    harness.transports.release_generation = release
 
-    with pytest.raises(HTTPException) as matching_info:
-        await harness.chat(body)
-    assert matching_info.value.status_code == 409
-    assert matching_info.value.detail["code"] == "request_in_progress"
+    winner_task = asyncio.create_task(harness.post_chat(body))
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    active_receipt = harness.receipt_rows()[0]
+    lease_expires_at = datetime.fromisoformat(active_receipt["lease_expires_at"])
+    assert active_receipt["status"] == "in_progress"
+    assert active_receipt["lease_epoch"] == 1
+    assert harness.clock_now + timedelta(minutes=5) <= lease_expires_at
+    assert lease_expires_at <= harness.clock_now + timedelta(minutes=30)
+    overlapping_task = asyncio.create_task(harness.post_chat(body))
+    overlapping = await asyncio.wait_for(overlapping_task, timeout=5)
+    release.set()
+    winner = await asyncio.wait_for(winner_task, timeout=5)
+    replay = await harness.post_chat(body)
 
-    mismatched = body.model_copy(update={"query": "A different request body"})
-    with pytest.raises(HTTPException) as mismatch_info:
-        await harness.chat(mismatched)
-    assert mismatch_info.value.status_code == 409
-    assert mismatch_info.value.detail["code"] == "request_id_conflict"
-    assert harness.saved_messages() == ()
+    assert winner.status_code == 200
+    assert winner.json()["replay"]["replayed"] is False
+    assert overlapping.status_code == 409
+    assert overlapping.json()["detail"]["code"] == "request_in_progress"
+    assert replay.status_code == 200
+    assert replay.json()["replay"]["replayed"] is True
+    assert replay.json()["turn"] == winner.json()["turn"]
+    assert harness.transports.generation_calls == 1
+    assert len(harness.saved_messages()) == 2
+    receipts = harness.receipt_rows()
+    assert len(receipts) == 1
+    assert receipts[0]["status"] == "completed"
+    assert receipts[0]["user_message_id"] is not None
+    assert receipts[0]["assistant_message_id"] is not None
+    assert receipts[0]["completed_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -717,17 +729,17 @@ async def test_authority_and_frozen_scope_changes_fail_before_persistence(
         elif mutation == "source":
             harness.owner_db.delete_workspace_source(WORKSPACE_ID, "source-2")
         else:
-            harness.media[102]["content_hash"] = "changed-content-hash"
+            harness.mutate_media_hash("source-2")
 
-    setattr(harness.chat_service, boundary, mutate)
-    body = harness.body("de305d54-75b4-431b-adb2-eb6b9e546016")
+    setattr(harness.transports, boundary, mutate)
+    response = await harness.post_chat(
+        harness.chat_body("de305d54-75b4-431b-adb2-eb6b9e546016")
+    )
 
-    with pytest.raises(HTTPException) as exc_info:
-        await harness.chat(body)
-
-    assert exc_info.value.status_code in {404, 409}
-    assert exc_info.value.detail["code"] in {
+    assert response.status_code in {404, 409}
+    assert response.json()["detail"]["code"] in {
         "shared_workspace_not_found",
         "shared_source_changed",
     }
     assert harness.saved_messages() == ()
+    assert harness.receipt_rows()[0]["status"] in {"retryable", "conflicted"}
