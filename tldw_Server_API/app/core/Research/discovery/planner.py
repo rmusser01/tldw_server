@@ -147,7 +147,8 @@ def _has_exact_pubmed_central_policy(route: AccessRoute) -> bool:
             member_value="direct",
         )
         and type(route.query_modes) is tuple
-        and route.query_modes == (QueryMode.GENERAL_FREE_TEXT,)
+        and len(route.query_modes) == 1
+        and route.query_modes[0] is QueryMode.GENERAL_FREE_TEXT
         and _is_exact_contract_enum_member(
             route.source_constraint,
             enum_name="SourceConstraint",

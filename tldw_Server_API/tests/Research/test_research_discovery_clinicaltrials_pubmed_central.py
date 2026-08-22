@@ -1912,6 +1912,22 @@ def test_exact_pmc_identity_with_structured_mode_cannot_enter_raw_string_builder
         )
 
 
+def test_pmc_planner_rejects_plain_string_general_query_mode_lookalike() -> None:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_central_esearch_summary_direct")
+    object.__setattr__(route, "query_modes", ("general_free_text",))
+    assert type(route.query_modes) is tuple
+    assert type(route.query_modes[0]) is str
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("pubmed_central",), GeneralFreeTextQuery("alpha beta"), (), 10),
+            registry=registry,
+            readiness=_module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.SYNTHETIC),
+            budget=_pmc_budget(result_limit=10),
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     (
