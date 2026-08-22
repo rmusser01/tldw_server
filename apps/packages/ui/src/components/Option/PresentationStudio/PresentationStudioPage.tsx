@@ -18,6 +18,7 @@ import { usePresentationStudioStore } from "@/store/presentation-studio"
 type PresentationStudioPageProps = {
   mode?: "index" | "new" | "detail"
   projectId?: string | null
+  embedded?: boolean
 }
 
 const formatEtag = (version: number | null | undefined): string | null =>
@@ -34,7 +35,18 @@ const DEFAULT_VISUAL_STYLE_ID = "minimal-academic"
 
 type InFlightProjectRequest = {
   projectId: string | null
-  promise: Promise<PresentationDetailResult>
+  promise: Promise<DetailLoadResult>
+}
+
+type DetailLoadResult =
+  | { kind: "structured"; detail: PresentationDetailResult }
+  | { kind: "standalone_html" }
+  | { kind: "unsupported"; contentKind: string | null }
+  | { kind: "metadata_unavailable" }
+
+const errorStatus = (error: unknown): number | null => {
+  const status = error && typeof error === "object" ? (error as { status?: unknown }).status : null
+  return typeof status === "number" && Number.isFinite(status) ? status : null
 }
 
 const encodeVisualStyleValue = (styleId: string | null, styleScope: string | null): string =>
@@ -80,7 +92,8 @@ const resolveThemeFromVisualStyle = (
 
 export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   mode = "index",
-  projectId = null
+  projectId = null,
+  embedded = false
 }) => {
   const navigate = useNavigate()
   const isOnline = useServerOnline()
@@ -102,6 +115,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   const [draftTitle, setDraftTitle] = React.useState("Untitled Presentation")
   const [draftVisualStyleValue, setDraftVisualStyleValue] = React.useState("")
   const [isCreatingProject, setIsCreatingProject] = React.useState(false)
+  const [detailState, setDetailState] = React.useState<Exclude<DetailLoadResult, { kind: "structured" }> | null>(null)
   const detailRequestRef = React.useRef<InFlightProjectRequest | null>(null)
 
   const refreshVisualStyles = React.useCallback(async (): Promise<VisualStyleRecord[]> => {
@@ -156,31 +170,61 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     let cancelled = false
     setIsProjectLoading(true)
     setLoadError(null)
+    setDetailState(null)
     if (!detailRequestRef.current || detailRequestRef.current.projectId !== projectId) {
       detailRequestRef.current = {
         projectId,
-        promise: tldwClient.getPresentationMetadata(projectId).then((metadata) => {
-          if (metadata.record.content_kind !== "structured_slides") {
-            throw new Error("Structured presentation required")
+        promise: (async () => {
+          try {
+            const metadata = await tldwClient.getPresentationMetadata(projectId)
+            if (metadata.record.content_kind === "structured_slides") {
+              return { kind: "structured", detail: await tldwClient.getPresentation(projectId) }
+            }
+            if (metadata.record.content_kind === "standalone_html") {
+              return { kind: "standalone_html" }
+            }
+            return {
+              kind: "unsupported",
+              contentKind: metadata.record.content_kind === "unsupported"
+                ? metadata.record.unsupported_content_kind
+                : null
+            }
+          } catch (error) {
+            if (errorStatus(error) !== 404) throw error
+            try {
+              await tldwClient.getSlidesCapabilities()
+              return { kind: "metadata_unavailable" }
+            } catch (capabilityError) {
+              if (errorStatus(capabilityError) !== 404) {
+                return { kind: "metadata_unavailable" }
+              }
+              const detail = await tldwClient.getPresentation(projectId)
+              if (detail.record.content_kind !== "structured_slides") {
+                return { kind: "metadata_unavailable" }
+              }
+              return { kind: "structured", detail }
+            }
           }
-          return tldwClient.getPresentation(projectId)
-        })
+        })() as Promise<DetailLoadResult>
       }
     }
 
     void detailRequestRef.current.promise
-      .then((detail) => {
+      .then((result) => {
         if (cancelled) {
           return
         }
-        if (detail.record.content_kind !== "structured_slides") {
-          throw new Error("Structured presentation required")
+        if (result.kind === "structured") {
+          if (result.detail.record.content_kind !== "structured_slides") {
+            throw new Error("Structured presentation required")
+          }
+          loadProject(result.detail.record, {
+            etag: result.detail.etag
+          })
+        } else {
+          setDetailState(result)
         }
-        const project = detail.record
         setIsProjectLoading(false)
-        loadProject(project, {
-          etag: detail.etag
-        })
         detailRequestRef.current = null
       })
       .catch((error) => {
@@ -353,9 +397,10 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   )
 
   if (!isOnline) {
+    const Heading = embedded ? "h2" : "h1"
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h1 className="text-2xl font-semibold text-slate-900">Presentation Studio</h1>
+        <Heading className="text-2xl font-semibold text-slate-900">Presentation Studio</Heading>
         <p className="mt-2 text-sm text-slate-600">
           Server is offline. Connect to use Presentation Studio.
         </p>
@@ -364,9 +409,10 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   }
 
   if (!loading && capabilities && !capabilities.hasPresentationStudio) {
+    const Heading = embedded ? "h2" : "h1"
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h1 className="text-2xl font-semibold text-slate-900">Presentation Studio</h1>
+        <Heading className="text-2xl font-semibold text-slate-900">Presentation Studio</Heading>
         <p className="mt-2 text-sm text-slate-600">
           Presentation Studio is not available on this server.
         </p>
@@ -379,11 +425,14 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   }
 
   if (mode === "new") {
+    const Heading = embedded ? "h2" : "h1"
     return (
       <section className="space-y-4">
         <header className="rounded-xl border border-slate-200 bg-white p-6">
           <div className="space-y-2">
-            <h1 className="text-2xl font-semibold text-slate-900">Presentation Studio</h1>
+            <Heading className="text-2xl font-semibold text-slate-900">
+              {embedded ? "Structured presentation setup" : "Presentation Studio"}
+            </Heading>
             <p className="max-w-2xl text-sm text-slate-600">
               Start a new deck with a reusable visual style preset. The selected style
               sets the default strategy for future generated slides.
@@ -474,6 +523,40 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h1 className="text-2xl font-semibold text-slate-900">Presentation Studio</h1>
         <p className="mt-2 text-sm text-rose-600">{loadError}</p>
+      </section>
+    )
+  }
+
+  if (detailState?.kind === "standalone_html") {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <h1 className="text-2xl font-semibold text-slate-900">Standalone HTML presentation</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Viewing standalone HTML presentations will be available in Task 15.
+        </p>
+      </section>
+    )
+  }
+
+  if (detailState?.kind === "unsupported") {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <h1 className="text-2xl font-semibold text-slate-900">Unsupported presentation kind</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          This presentation type is read only in this version.
+        </p>
+        {detailState.contentKind ? <code className="mt-3 block break-all text-sm text-slate-700">{detailState.contentKind}</code> : null}
+      </section>
+    )
+  }
+
+  if (detailState?.kind === "metadata_unavailable") {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <h1 className="text-2xl font-semibold text-slate-900">Presentation metadata is unavailable</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Try again after the server can identify this presentation type.
+        </p>
       </section>
     )
   }

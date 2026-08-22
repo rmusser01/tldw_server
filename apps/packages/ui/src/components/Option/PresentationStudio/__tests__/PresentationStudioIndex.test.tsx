@@ -84,7 +84,9 @@ const loadSubject = () =>
 
 describe("PresentationStudioIndex", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    mocks.listPresentations.mockReset()
+    mocks.getPresentation.mockReset()
+    mocks.navigate.mockReset()
     mocks.online = true
   })
 
@@ -127,6 +129,44 @@ describe("PresentationStudioIndex", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open Future deck" }))
     expect(mocks.navigate).toHaveBeenCalledWith("/presentation-studio/future-1")
+  })
+
+  it("continues through a duplicate-only advancing page to reach later projects", async () => {
+    mocks.listPresentations
+      .mockResolvedValueOnce(page([structured, standalone], 0, true, 2))
+      .mockResolvedValueOnce(page([structured, standalone], 2, true, 4))
+      .mockResolvedValueOnce(page([unsupported], 4, false, null))
+    const { PresentationStudioIndex } = await loadSubject()
+    render(<PresentationStudioIndex />)
+
+    await screen.findByText("Quarterly review")
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }))
+    await waitFor(() => expect(mocks.listPresentations).toHaveBeenCalledTimes(2))
+    expect(screen.getAllByText("Quarterly review")).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }))
+
+    expect(await screen.findByText("Future deck")).toBeVisible()
+    expect(mocks.listPresentations).toHaveBeenNthCalledWith(3, { limit: 25, offset: 4 })
+  })
+
+  it.each([
+    ["null", null],
+    ["same", 2],
+    ["backward", 1],
+    ["nonfinite", Number.POSITIVE_INFINITY]
+  ])("surfaces a retryable pagination contract error for %s next_offset", async (_case, nextOffset) => {
+    mocks.listPresentations
+      .mockResolvedValueOnce(page([structured], 0, true, 2))
+      .mockResolvedValueOnce(page([standalone], 2, true, nextOffset))
+      .mockResolvedValueOnce(page([structured, standalone], 0, false, null))
+    const { PresentationStudioIndex } = await loadSubject()
+    render(<PresentationStudioIndex />)
+
+    await screen.findByText("Quarterly review")
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }))
+    expect(await screen.findByText("Presentation pages could not continue")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(mocks.listPresentations).toHaveBeenCalledTimes(3))
   })
 
   it("teaches from the empty state and retries a failed request", async () => {

@@ -160,6 +160,10 @@ const responseEnvelope = (
   headers: options?.headers ?? { "content-type": "application/json" }
 })
 
+const capabilityEnvelope = (data: unknown) => responseEnvelope(data, {
+  headers: { "cache-control": "private, no-store" }
+})
+
 const createCore = (requestImpl: (...args: any[]) => any): TldwApiClientCore => ({
   ensureConfigForRequest: vi.fn(async () => ({})),
   request: vi.fn(requestImpl) as unknown as TldwApiClientCore["request"],
@@ -221,6 +225,20 @@ describe("standalone presentation client contracts", () => {
       etag: '"v7"'
     })
     expect(result.record).not.toHaveProperty("slides")
+  })
+
+  it("preserves metadata 404 status for legacy-server dispatch without source details", async () => {
+    const client = createCore(async () => responseEnvelope(
+      { detail: { error_code: "presentation_not_found", source: "DO NOT EXPOSE" } },
+      { ok: false, status: 404 }
+    ))
+
+    const error = await presentationsMethods.getPresentationMetadata
+      .call(client, "legacy-structured")
+      .then(() => null, (failure: unknown) => failure)
+
+    expect(error).toMatchObject({ status: 404, details: { error_code: "presentation_not_found" } })
+    expect(JSON.stringify(error)).not.toContain("DO NOT EXPOSE")
   })
 
   it.each([
@@ -440,16 +458,63 @@ describe("standalone presentation client contracts", () => {
     )
   })
 
-  it("accepts the exact capabilities shape without adding negotiation", async () => {
-    const client = createCore(async () => capabilities)
+  it("accepts the exact private no-store capabilities envelope without adding negotiation", async () => {
+    const client = createCore(async () => responseEnvelope(capabilities, {
+      headers: { "cache-control": "private, no-store" }
+    }))
 
     const result = await (presentationsMethods as any).getSlidesCapabilities.call(client)
 
     expect(result).toEqual(capabilities)
     expect((client.request as any).mock.calls[0][0]).toEqual({
       path: "/api/v1/slides/capabilities",
-      method: "GET"
+      method: "GET",
+      returnResponse: true
     })
+  })
+
+  it.each([undefined, "public, max-age=60"])(
+    "fails closed when capability Cache-Control is %s",
+    async (cacheControl) => {
+      const client = createCore(async () => responseEnvelope(capabilities, {
+        headers: cacheControl ? { "cache-control": cacheControl } : {}
+      }))
+
+      await expect(
+        (presentationsMethods as any).getSlidesCapabilities.call(client)
+      ).rejects.toThrow("Invalid Slides capabilities cache policy")
+    }
+  )
+
+  it("passes optional abort signals through all standalone generation requests", async () => {
+    const signal = new AbortController().signal
+    const client = createCore(async (request) => {
+      if (request.path.endsWith("/capabilities")) {
+        return responseEnvelope(capabilities, {
+          headers: { "cache-control": "private, no-store" }
+        })
+      }
+      if (request.returnResponse) return responseEnvelope(pendingReceipt)
+      return pendingReceipt
+    })
+
+    await (presentationsMethods as any).getSlidesCapabilities.call(client, { abortSignal: signal })
+    await (presentationsMethods as any).submitPresentationGeneration.call(
+      client,
+      generationRequest,
+      { idempotencyKey: "A".repeat(24), abortSignal: signal }
+    )
+    await (presentationsMethods as any).getPresentationGenerationStatus.call(
+      client,
+      pendingReceipt.generation_id,
+      { abortSignal: signal }
+    )
+
+    expect((client.request as any).mock.calls.map(([request]: any[]) => request.abortSignal)).toEqual([
+      signal,
+      signal,
+      signal
+    ])
   })
 
   it.each([
@@ -499,7 +564,7 @@ describe("standalone presentation client contracts", () => {
     ]
   ])("rejects impossible content capability state: %s", async (_case, mutate) => {
     const client = createCore(async () =>
-      mutateCapabilities(mutate as (value: any) => void)
+      capabilityEnvelope(mutateCapabilities(mutate as (value: any) => void))
     )
 
     await expect((presentationsMethods as any).getSlidesCapabilities.call(client)).rejects.toThrow(
@@ -639,7 +704,7 @@ describe("standalone presentation client contracts", () => {
     ]
   ])("rejects impossible generation capability state: %s", async (_case, mutate) => {
     const client = createCore(async () =>
-      mutateCapabilities(mutate as (value: any) => void)
+      capabilityEnvelope(mutateCapabilities(mutate as (value: any) => void))
     )
 
     await expect((presentationsMethods as any).getSlidesCapabilities.call(client)).rejects.toThrow(
@@ -674,7 +739,7 @@ describe("standalone presentation client contracts", () => {
     ]
   ])("rejects invalid effective capability limit: %s", async (_case, mutate) => {
     const client = createCore(async () =>
-      mutateCapabilities(mutate as (value: any) => void)
+      capabilityEnvelope(mutateCapabilities(mutate as (value: any) => void))
     )
 
     await expect((presentationsMethods as any).getSlidesCapabilities.call(client)).rejects.toThrow(
@@ -704,7 +769,7 @@ describe("standalone presentation client contracts", () => {
         })
       }
     })
-    const client = createCore(async () => disabled)
+    const client = createCore(async () => capabilityEnvelope(disabled))
 
     await expect(
       (presentationsMethods as any).getSlidesCapabilities.call(client)
@@ -719,7 +784,7 @@ describe("standalone presentation client contracts", () => {
         reason: "validator_unavailable"
       })
     })
-    const client = createCore(async () => invalid)
+    const client = createCore(async () => capabilityEnvelope(invalid))
 
     await expect((presentationsMethods as any).getSlidesCapabilities.call(client)).rejects.toThrow(
       "Invalid Slides capabilities response"
@@ -818,6 +883,47 @@ describe("standalone presentation client contracts", () => {
         pendingReceipt.generation_id
       )
     ).resolves.toEqual(pendingReceipt)
+  })
+
+  it.each([401, 404, 429, 503])(
+    "preserves HTTP %s and bounded Retry-After through the status seam",
+    async (status) => {
+      const client = createCore(async () => ({
+        ...responseEnvelope(
+          { detail: { error_code: "generation_status_unavailable", source: "DO NOT RENDER" } },
+          { ok: false, status, headers: { "retry-after": "90" } }
+        ),
+        retryAfterMs: 90_000
+      }))
+
+      const error = await (presentationsMethods as any).getPresentationGenerationStatus
+        .call(client, pendingReceipt.generation_id)
+        .then(() => null, (failure: unknown) => failure)
+
+      expect(error).toMatchObject({
+        status,
+        retryAfterMs: 60_000,
+        details: { error_code: "generation_status_unavailable" }
+      })
+      expect(JSON.stringify(error)).not.toContain("DO NOT RENDER")
+    }
+  )
+
+  it("accepts completed status without a presentation binding for hook recovery", async () => {
+    const receipt = {
+      ...pendingReceipt,
+      status: "completed",
+      presentation_id: null,
+      content_kind: "standalone_html"
+    }
+    const client = createCore(async () => responseEnvelope(receipt))
+
+    await expect(
+      (presentationsMethods as any).getPresentationGenerationStatus.call(
+        client,
+        pendingReceipt.generation_id
+      )
+    ).resolves.toEqual({ receipt, retryAfterMs: null })
   })
 
   it("fails closed for unknown or widened generation receipt shapes", async () => {

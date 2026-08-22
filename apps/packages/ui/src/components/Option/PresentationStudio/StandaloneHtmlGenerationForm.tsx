@@ -6,7 +6,9 @@ import { useStandaloneHtmlGeneration } from "@/hooks/useStandaloneHtmlGeneration
 import type { SlidesCapabilities } from "@/services/tldw/TldwApiClient"
 
 type StandaloneHtmlGenerationFormProps = {
-  capabilities: SlidesCapabilities
+  capabilities: SlidesCapabilities | null
+  recoveryOnly?: boolean
+  onCapabilitiesChanged?: () => Promise<unknown> | unknown
   onCompleted?: (presentationId: string) => void
   onStopWaiting?: () => void
 }
@@ -61,20 +63,27 @@ const phaseLabel = (phase: string): string | null => {
   if (phase === "outage") return "Status unavailable"
   if (phase === "stopped") return "Waiting stopped"
   if (phase === "rejected") return "Request rejected"
+  if (phase === "configuration_changed") return "Configuration changed"
   return null
 }
 
 export const StandaloneHtmlGenerationForm: React.FC<StandaloneHtmlGenerationFormProps> = ({
   capabilities,
+  recoveryOnly = false,
+  onCapabilitiesChanged = () => undefined,
   onCompleted = () => undefined,
   onStopWaiting = () => undefined
 }) => {
-  const capability = capabilities.generation_modes.standalone_html
-  if (!capability.enabled) return null
+  const generation = capabilities?.generation_modes.standalone_html ?? null
+  const capability = generation?.enabled ? generation : null
+  const contentMaxSlides = capabilities?.content_kinds.standalone_html.limits.max_slides ?? 30
 
   return (
     <EnabledStandaloneHtmlGenerationForm
       capability={capability}
+      contentMaxSlides={contentMaxSlides}
+      recoveryOnly={recoveryOnly}
+      onCapabilitiesChanged={onCapabilitiesChanged}
       onCompleted={onCompleted}
       onStopWaiting={onStopWaiting}
     />
@@ -87,11 +96,20 @@ type EnabledCapability = Extract<
 >
 
 const EnabledStandaloneHtmlGenerationForm: React.FC<{
-  capability: EnabledCapability
+  capability: EnabledCapability | null
+  contentMaxSlides: number
+  recoveryOnly: boolean
+  onCapabilitiesChanged: () => Promise<unknown> | unknown
   onCompleted: (presentationId: string) => void
   onStopWaiting: () => void
-}> = ({ capability, onCompleted, onStopWaiting }) => {
-  const generation = useStandaloneHtmlGeneration({ capability, onCompleted, onStopWaiting })
+}> = ({ capability, contentMaxSlides, recoveryOnly, onCapabilitiesChanged, onCompleted, onStopWaiting }) => {
+  const generation = useStandaloneHtmlGeneration({
+    capability,
+    contentMaxSlides,
+    onCapabilitiesChanged,
+    onCompleted,
+    onStopWaiting
+  })
   const [confirmDifferent, setConfirmDifferent] = React.useState(false)
   const {
     draft,
@@ -107,7 +125,7 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
     storageWarning
   } = generation
 
-  const currentStatus = statusLabel(backendStatus) ?? phaseLabel(phase)
+  const currentStatus = phaseLabel(phase) ?? statusLabel(backendStatus)
   const isSubmitting = phase === "submitting"
   const isPolling = phase === "polling"
   const canTryAgain = ["failed", "cancelled", "completed_missing_binding"].includes(phase)
@@ -134,10 +152,11 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
         </div>
 
         <dl className="mt-4 grid gap-x-6 gap-y-2 border-t border-border pt-4 text-sm sm:grid-cols-2">
-          <div><dt className="text-text-muted">Provider</dt><dd className="break-all font-medium text-text">{capability.provider}</dd></div>
-          <div><dt className="text-text-muted">Model</dt><dd className="break-all font-medium text-text">{capability.model}</dd></div>
-          <div><dt className="text-text-muted">Adapter</dt><dd className="break-all font-medium text-text">{capability.adapter_id}</dd></div>
-          <div><dt className="text-text-muted">Endpoint</dt><dd className="break-all font-medium text-text">{capability.endpoint_identity}</dd></div>
+          <div><dt className="text-text-muted">Provider</dt><dd className="break-all font-medium text-text">{capability?.provider ?? "Unavailable"}</dd></div>
+          <div><dt className="text-text-muted">Model</dt><dd className="break-all font-medium text-text">{capability?.model ?? "Unavailable"}</dd></div>
+          <div><dt className="text-text-muted">Adapter</dt><dd className="break-all font-medium text-text">{capability?.adapter_id ?? "Unavailable"}</dd></div>
+          <div><dt className="text-text-muted">Endpoint</dt><dd className="break-all font-medium text-text">{capability?.endpoint_identity ?? "Unavailable"}</dd></div>
+          <div className="sm:col-span-2"><dt className="text-text-muted">Generation configuration revision</dt><dd className="break-all font-mono text-xs text-text">{capability?.generation_config_revision ?? "Unavailable"}</dd></div>
         </dl>
 
         <form className="mt-6 space-y-5" autoComplete="off" onSubmit={(event) => { event.preventDefault(); void generation.submit() }}>
@@ -149,7 +168,7 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
               id="standalone-html-source"
               value={draft.source}
               onChange={(event) => generation.updateField("source", event.target.value)}
-              disabled={locked}
+              disabled={locked || recoveryOnly || !capability}
               rows={9}
               spellCheck={false}
               autoCorrect="off"
@@ -172,7 +191,7 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
               <select
                 id="standalone-html-type"
                 value={draft.presentationType}
-                disabled={locked}
+                disabled={locked || recoveryOnly || !capability}
                 onChange={(event) => generation.updateField("presentationType", event.target.value as typeof draft.presentationType)}
                 className={inputClass}
               >
@@ -185,7 +204,7 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
                 id="standalone-html-audience"
                 type="text"
                 value={draft.audience}
-                disabled={locked}
+                disabled={locked || recoveryOnly || !capability}
                 onChange={(event) => generation.updateField("audience", event.target.value)}
                 spellCheck={false}
                 autoCorrect="off"
@@ -204,10 +223,10 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
                 id="standalone-html-slide-count"
                 type="number"
                 min={1}
-                max={30}
+                max={Math.min(30, contentMaxSlides)}
                 step={1}
                 value={draft.slideCount}
-                disabled={locked}
+                disabled={locked || recoveryOnly || !capability}
                 onChange={(event) => generation.updateField("slideCount", Number(event.target.value))}
                 aria-invalid={Boolean(fieldErrors.slideCount)}
                 aria-describedby={fieldErrors.slideCount ? "standalone-html-slide-count-error" : undefined}
@@ -220,7 +239,7 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
               <select
                 id="standalone-html-direction"
                 value={draft.visualDirection}
-                disabled={locked}
+                disabled={locked || recoveryOnly || !capability}
                 onChange={(event) => generation.updateField("visualDirection", event.target.value as typeof draft.visualDirection)}
                 className={inputClass}
               >
@@ -229,7 +248,7 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
             </div>
           </div>
 
-          <fieldset disabled={locked} className="space-y-2">
+          <fieldset disabled={locked || recoveryOnly || !capability} className="space-y-2">
             <legend className="text-sm font-medium text-text">Delivery style</legend>
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="flex min-h-[44px] cursor-pointer items-start gap-3 rounded-md border border-border p-3 focus-within:ring-2 focus-within:ring-focus/30">
@@ -252,7 +271,7 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
             type="submit"
             variant="primary"
             size="lg"
-            disabled={!generation.scopeReady || snapshot !== null}
+            disabled={!generation.scopeReady || snapshot !== null || recoveryOnly || !capability}
             loading={isSubmitting}
           >
             {isSubmitting ? "Submitting request" : "Generate standalone presentation"}

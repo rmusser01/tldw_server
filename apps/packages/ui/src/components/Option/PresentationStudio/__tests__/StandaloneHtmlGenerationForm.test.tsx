@@ -115,6 +115,7 @@ describe("StandaloneHtmlGenerationForm", () => {
     expect(screen.getByText("allowed-model")).toBeVisible()
     expect(screen.getByText("built-in-adapter")).toBeVisible()
     expect(screen.getByText("https://provider.example/v1")).toBeVisible()
+    expect(screen.getByText(`sha256:${"b".repeat(64)}`)).toBeVisible()
     expect(screen.queryByRole("combobox", { name: /provider|model/i })).not.toBeInTheDocument()
 
     const presentationType = screen.getByLabelText("Presentation type")
@@ -158,7 +159,8 @@ describe("StandaloneHtmlGenerationForm", () => {
     expect(screen.getByRole("heading", { name: "Submitted request" })).toBeVisible()
     expect(screen.getByText("Explain the trust boundary")).toBeVisible()
     expect(screen.getByText("Security engineers")).toBeVisible()
-    expect(screen.getByText(`sha256:${"b".repeat(64)}`)).toBeVisible()
+    const submittedRequest = screen.getByRole("heading", { name: "Submitted request" }).closest("section")!
+    expect(within(submittedRequest).getByText(`sha256:${"b".repeat(64)}`)).toBeVisible()
     expect(screen.queryByText(/idempotency/i)).not.toBeInTheDocument()
     expect(screen.getByLabelText("Subject and material")).toBeDisabled()
     expect(screen.getByLabelText("Audience")).toBeDisabled()

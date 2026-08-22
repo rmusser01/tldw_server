@@ -133,6 +133,7 @@ const MAX_STANDALONE_HTML_BYTES = 1_048_576
 const HTML_ATTACHMENT_CONTENT_TYPE = "application/octet-stream"
 const HTML_ATTACHMENT_DISPOSITION = 'attachment; filename="presentation.html"'
 const MAX_GENERATION_RETRY_AFTER_MS = 60_000
+const SAFE_ERROR_CODE = /^[a-z0-9_]{1,100}$/
 
 const presentationNegotiationHeaders = (): Record<string, string> => ({
   [ACCEPT_CONTENT_KINDS_HEADER]: ACCEPT_CONTENT_KINDS_VALUE
@@ -313,7 +314,26 @@ const requireSuccessfulResponseData = (response: unknown): unknown => {
     record.status < 200 ||
     record.status >= 300
   ) {
-    throw new Error("Invalid presentation response")
+    const data = toRecord(record.data)
+    const detail = toRecord(data.detail)
+    const candidate = [detail.error_code, detail.code, data.error_code, data.code]
+      .find((value) => typeof value === "string" && SAFE_ERROR_CODE.test(value))
+    const error = new Error("Invalid presentation response") as Error & {
+      status?: number
+      details?: { error_code: string }
+      retryAfterMs?: number | null
+    }
+    if (typeof record.status === "number" && Number.isFinite(record.status)) {
+      error.status = record.status
+    }
+    error.details = {
+      error_code: typeof candidate === "string" ? candidate : "presentation_request_failed"
+    }
+    error.retryAfterMs =
+      typeof record.retryAfterMs === "number" && Number.isFinite(record.retryAfterMs) && record.retryAfterMs >= 0
+        ? Math.min(MAX_GENERATION_RETRY_AFTER_MS, Math.floor(record.retryAfterMs))
+        : null
+    throw error
   }
   return record.data
 }
@@ -483,7 +503,8 @@ const validateGenerationReceipt = (value: unknown): PresentationGenerationReceip
         ["progress_text"]
       ) &&
       record.presentation_id === null &&
-      (record.progress_text === undefined || isNullableString(record.progress_text))
+      (record.progress_text === undefined ||
+        (isNullableString(record.progress_text) && (record.progress_text?.length ?? 0) <= 500))
   } else if (record.status === "completed") {
     valid =
       exactKeys(record, [
@@ -493,7 +514,7 @@ const validateGenerationReceipt = (value: unknown): PresentationGenerationReceip
         "presentation_id",
         "content_kind"
       ]) &&
-      isRequiredString(record.presentation_id) &&
+      (record.presentation_id === null || isRequiredString(record.presentation_id)) &&
       record.content_kind === "standalone_html"
   } else if (record.status === "failed") {
     valid =
@@ -506,8 +527,8 @@ const validateGenerationReceipt = (value: unknown): PresentationGenerationReceip
         "error_message"
       ]) &&
       record.presentation_id === null &&
-      isRequiredString(record.error_code) &&
-      isRequiredString(record.error_message)
+      typeof record.error_code === "string" && SAFE_ERROR_CODE.test(record.error_code) &&
+      isRequiredString(record.error_message) && record.error_message.length <= 1_000
   } else if (record.status === "cancelled") {
     valid =
       exactKeys(record, [
@@ -811,18 +832,28 @@ export const presentationsMethods = {
     }
   },
 
-  async getSlidesCapabilities(this: TldwApiClientCore): Promise<SlidesCapabilities> {
-    const payload = await this.request<unknown>({
+  async getSlidesCapabilities(
+    this: TldwApiClientCore,
+    options?: { abortSignal?: AbortSignal }
+  ): Promise<SlidesCapabilities> {
+    const response = await this.request<unknown>({
       path: "/api/v1/slides/capabilities",
-      method: "GET"
+      method: "GET",
+      ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+      returnResponse: true
     })
+    const payload = requireSuccessfulResponseData(response)
+    const cacheControl = responseHeaders(response).get("cache-control")?.trim().toLowerCase()
+    if (cacheControl !== "private, no-store") {
+      throw new Error("Invalid Slides capabilities cache policy")
+    }
     return validateSlidesCapabilities(payload)
   },
 
   async submitPresentationGeneration(
     this: TldwApiClientCore,
     payload: PresentationGenerationRequest,
-    options: { idempotencyKey: string }
+    options: { idempotencyKey: string; abortSignal?: AbortSignal }
   ): Promise<PresentationGenerationReceipt> {
     const response = await this.request<unknown>({
       path: "/api/v1/slides/generations",
@@ -831,7 +862,8 @@ export const presentationsMethods = {
         "Content-Type": "application/json",
         "Idempotency-Key": options.idempotencyKey
       },
-      body: payload
+      body: payload,
+      ...(options.abortSignal ? { abortSignal: options.abortSignal } : {})
     })
     return validateGenerationReceipt(response)
   },
@@ -849,11 +881,13 @@ export const presentationsMethods = {
 
   async getPresentationGenerationStatus(
     this: TldwApiClientCore,
-    generationId: string
+    generationId: string,
+    options?: { abortSignal?: AbortSignal }
   ): Promise<PresentationGenerationStatusResult> {
     const response = await this.request<unknown>({
       path: `/api/v1/slides/generations/${encodeURIComponent(generationId)}`,
       method: "GET",
+      ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
       returnResponse: true
     })
     const record = toRecord(response)

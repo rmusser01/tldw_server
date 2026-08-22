@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/Common/Button"
 import { Badge, LoadingState, StatePanel } from "@/components/ui"
 import { useSlidesCapabilities } from "@/hooks/useSlidesCapabilities"
+import { useStandaloneHtmlRecoveryProbe } from "@/hooks/useStandaloneHtmlGeneration"
 
 import { PresentationStudioPage } from "./PresentationStudioPage"
 import { StandaloneHtmlGenerationForm } from "./StandaloneHtmlGenerationForm"
@@ -13,9 +14,28 @@ type CreationMode = "structured" | "standalone_html"
 export const PresentationStudioNew: React.FC = () => {
   const navigate = useNavigate()
   const slides = useSlidesCapabilities()
+  const recovery = useStandaloneHtmlRecoveryProbe()
   const [creationMode, setCreationMode] = React.useState<CreationMode>("structured")
+  const recoveryAvailable = recovery.status === "available"
+  const capabilityConfirmed = ["ready", "generation_disabled", "validator_unavailable"].includes(slides.status)
+  const htmlOptionEnabled = capabilityConfirmed || recoveryAvailable
+
+  React.useEffect(() => {
+    if (recoveryAvailable) setCreationMode("standalone_html")
+  }, [recoveryAvailable])
 
   const standaloneContent = React.useMemo(() => {
+    if (recoveryAvailable && !slides.canGenerate) {
+      return (
+        <StandaloneHtmlGenerationForm
+          capabilities={slides.capabilities}
+          recoveryOnly
+          onCapabilitiesChanged={slides.retry}
+          onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
+          onStopWaiting={() => navigate("/presentation-studio")}
+        />
+      )
+    }
     if (slides.status === "loading") {
       return (
         <div role="status" aria-label="Loading generation capabilities" className="rounded-lg border border-border bg-surface p-4">
@@ -24,9 +44,9 @@ export const PresentationStudioNew: React.FC = () => {
       )
     }
     if (slides.status === "offline") {
-      return <StatePanel state="unavailable" title="Presentation Studio is offline" message="Reconnect before starting generation." />
+      return <StatePanel state="unavailable" title="Presentation Studio is offline" message="Reconnect before starting generation." primaryAction={{ label: "Retry", onClick: () => void slides.retry() }} />
     }
-    if (slides.status === "error") {
+    if (slides.status === "error" || slides.status === "auth_required" || slides.status === "forbidden") {
       return (
         <StatePanel
           state="error"
@@ -43,6 +63,7 @@ export const PresentationStudioNew: React.FC = () => {
           state="blocked"
           title="Standalone validation is unavailable"
           message={<code className="break-all">{slides.reason ?? "validator_unavailable"}</code>}
+          primaryAction={{ label: "Retry", onClick: () => void slides.retry() }}
         />
       )
     }
@@ -52,17 +73,19 @@ export const PresentationStudioNew: React.FC = () => {
           state="blocked"
           title="Standalone generation is disabled"
           message={<code className="break-all">{slides.reason ?? "generation_disabled"}</code>}
+          primaryAction={{ label: "Retry", onClick: () => void slides.retry() }}
         />
       )
     }
     return (
       <StandaloneHtmlGenerationForm
         capabilities={slides.capabilities}
+        onCapabilitiesChanged={slides.retry}
         onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
         onStopWaiting={() => navigate("/presentation-studio")}
       />
     )
-  }, [navigate, slides])
+  }, [navigate, recoveryAvailable, slides])
 
   return (
     <div className="space-y-6 py-6">
@@ -100,19 +123,27 @@ export const PresentationStudioNew: React.FC = () => {
               value="standalone_html"
               checked={creationMode === "standalone_html"}
               onChange={() => setCreationMode("standalone_html")}
+              disabled={!htmlOptionEnabled}
               className="mt-1 h-4 w-4"
             />
             <span>
               <span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-text">
                 Standalone HTML + JavaScript <Badge variant="secondary">Experimental</Badge>
               </span>
-              <span className="mt-1 block text-xs text-text-muted">Generated as one downloadable, non-executing file.</span>
+              <span className="mt-1 block text-xs text-text-muted">Generated as one downloadable file that can run only after you download and open it outside tldw.</span>
             </span>
           </label>
         </div>
       </fieldset>
 
-      {creationMode === "structured" ? <PresentationStudioPage mode="new" /> : standaloneContent}
+      {!htmlOptionEnabled && slides.status !== "loading" ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4" role="status">
+          <p className="text-sm text-text-muted">Standalone generation stays unavailable until the server contract is confirmed.</p>
+          <Button variant="outline" size="lg" onClick={() => void slides.retry()}>Retry generation capabilities</Button>
+        </div>
+      ) : null}
+
+      {creationMode === "structured" ? <PresentationStudioPage mode="new" embedded /> : standaloneContent}
     </div>
   )
 }

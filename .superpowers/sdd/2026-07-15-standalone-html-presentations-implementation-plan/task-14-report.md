@@ -85,3 +85,72 @@ The following unrelated artifacts remain unstaged and were not modified by this 
 - `apps/packages/ui/node_modules/antd`
 - `tldw_Server_API/Config_Files/templates/watchlists/cti_osint_report_markdown.md`
 - `tldw_Server_API/Config_Files/templates/watchlists/news_briefing_markdown.md`
+
+## Independent review fix round
+
+This section supersedes the earlier verification counts where the independent review expanded the required matrix.
+
+### Review verification and canonical RED
+
+Each Critical, Important, Minor, and controller finding was checked against the implementation before changes. The coherent fix matrix was written before production edits and run with:
+
+```bash
+cd apps/tldw-frontend
+bun run test:run -- \
+  ../packages/ui/src/hooks/__tests__/useSlidesCapabilities.test.tsx \
+  ../packages/ui/src/hooks/__tests__/useStandaloneHtmlGeneration.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/PresentationStudioIndex.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/StandaloneHtmlGenerationForm.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/StandaloneHtmlGeneration.integration.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/PresentationStudioNew.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/PresentationStudioPage.test.tsx \
+  ../packages/ui/src/services/__tests__/tldw-api-client.presentations-standalone.test.ts \
+  ../packages/ui/src/routes/__tests__/option-presentation-studio-route-guards.test.tsx \
+  __tests__/auth.logout.test.ts \
+  --maxWorkers=1 --no-file-parallelism
+```
+
+The canonical RED collected all 10 files and all 179 tests: 57 failed and 122 passed. Nine files failed for intended Task 14 behavior and the unchanged route-guard suite passed. There were no harness-only or unrelated baseline failures. The failures covered every required group:
+
+- scope epoch fencing, synchronous auth/config/pagehide boundaries, stale POST/poll rejection, abort, and unmount scrubbing;
+- capability request fencing, auth/offline/scope invalidation, no-store response enforcement, option gating, retry states, and revision display;
+- real DOM snapshot commitment before POST;
+- real client-envelope status/details/Retry-After handling and completed-without-binding normalization;
+- quota-safe in-memory recovery, split draft/resume deletion, reload and Stop-to-New recovery, disabled-capability recovery, and transient scope outage retention;
+- Unicode scalar, canonical UTF-8 request byte, effective slide, and terminal retry validation;
+- source-free HTML/unknown detail dispatch, new-server metadata failure, and legacy structured-only fallback;
+- invalid offset pagination and duplicate-only advancing pages;
+- 409 configuration revision reconfirmation, bounded receipt text, logout boundary signaling, heading semantics, and downloaded-file wording.
+
+### Fix implementation
+
+- Added a captured canonical origin/principal scope epoch to every submit and poll result. Config, auth, pagehide, and unmount boundaries synchronously invalidate the epoch, detach scope, abort supported work, scrub source/key refs, and ignore late results before storage, UI, or handoff.
+- Fenced authoritative capability requests with request generations and abort signals, subscribed to trusted config/auth and page lifecycle events, distinguished 401 from 403, kept the HTML option disabled until confirmation or trusted recovery, and enforced the exact `private, no-store` response policy at the response seam.
+- Deferred POST to a committed-attempt effect so React renders the immutable snapshot and disabled controls before the client invocation.
+- Preserved status, bounded details, and bounded Retry-After metadata for non-2xx client envelopes without changing Task 13's receipt-only method. The client accepts completed receipts without a binding so the hook can show the required safe state.
+- Kept resume metadata in memory even when session storage fails, split draft and resume deletion, preserved drafts on pre-admission rejection and terminal edits, and added a source-free scoped recovery probe. Existing receipts remain recoverable when current generation is disabled or temporarily unavailable.
+- Counted Unicode scalar values, enforced canonical request UTF-8 bytes, clamped slides to the content capability and fixed limit of 30, and routed terminal retries through current validation.
+- Added source-free, kind-aware detail states. Full detail is requested only for metadata-proven structured records or when both metadata and exact Slides capabilities return 404, proving a legacy structured-only server.
+- Rejected null, repeated, backward, noninteger, and nonfinite pagination offsets while allowing duplicate-only advancing pages.
+- Added a synchronous frontend logout principal-boundary event, safe 409 revision-reconfirmation flow, bounded progress/error rendering, one top-level heading in embedded structured setup, and accurate downloaded-file execution wording.
+
+### Fix-round verification
+
+- First root-cause GREEN: detail dispatch and pagination passed 2 files and 23 tests.
+- Scope/recovery/form/client-boundary GREEN: 3 files and 49 tests passed.
+- Canonical amended focused matrix: 10 files and 179 tests passed.
+- Adjacent Presentation Studio and route regressions: 13 files and 70 tests passed.
+- Direct auth, config, API-send, request-core, background-proxy, connection-sync, and online-state regressions: 11 files and 72 tests passed.
+- OpenAPI guard: 317 client paths and 49 fallback fields verified; the 10 pre-reviewed OSS exception paths were reported and allowed.
+- The required package typecheck used `NODE_OPTIONS=--max-old-space-size=8192`. After corrections, it reports zero diagnostics in Task 14 production or test paths. It still exits nonzero on 47 inherited diagnostics grouped under Notes, Audio Studio, Research Workspace, Scheduled Tasks, Setup, Skills, Dexie, background entry code, MCP Hub, and voice cloning.
+- `git diff --check` passed.
+- The static no-execution scan found no `dangerouslySetInnerHTML`, `DOMParser`, `srcdoc`, HTML insertion, Blob URL, iframe, popup, worker, dynamic import, eval, or Function constructor in Task 14 production files.
+- The source/key sink scan found replay keys only in the local hook record and client options. Source remains in component/hook memory, bounded scoped `sessionStorage`, the request body, and ordinary React text nodes. It is absent from logs, analytics, URL state, and global stores.
+- Targeted ESLint reported zero errors; six package UI paths are ignored by the frontend base-path configuration. Targeted Prettier check reports the same package UI baseline formatting failure reproduced by untouched `Common/Button.tsx`, so no bulk formatting rewrite was made.
+- Bandit remains not applicable because the fix round touches no Python.
+
+### Fix-round visual and accessibility self-review
+
+The review covered loading, offline, unavailable, disabled, validator-blocked, source-free recovery, idle, submitting, polling, ambiguous, stopped, auth-lost, missing, throttled, outage, rejected, configuration-changed, failed, cancelled, missing-binding, completed handoff, pagination error, standalone detail, unknown detail, and legacy structured states against `PRODUCT.md` and `DESIGN.md`.
+
+The implementation keeps one top-level heading in the New route, visible labels and focus styles, shared 44px buttons and form targets, semantic `fieldset`/`legend`/`dl`/status/alert structure, reduced-motion-safe transitions, and single-column narrow-screen fallbacks. It reuses the existing restrained surface, border, text, focus, badge, loading, and state-panel system. No gradients, glass, card grid, decorative motion, em-dash copy, provider picker, or bespoke visual system was added. Browser automation remains intentionally deferred to Task 17.

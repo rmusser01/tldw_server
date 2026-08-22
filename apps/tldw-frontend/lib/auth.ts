@@ -209,6 +209,9 @@ class AuthService {
       void apiClient.post('/auth/logout').catch(() => undefined);
     }
     if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed', {
+        detail: { kind: 'logout' },
+      }));
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');
       dispatchAuthCredentialsChanged(false);

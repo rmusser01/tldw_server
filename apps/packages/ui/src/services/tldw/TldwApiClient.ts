@@ -777,7 +777,7 @@ export type PresentationGenerationReceipt =
     })
   | (PresentationGenerationReceiptBase & {
       status: "completed"
-      presentation_id: string
+      presentation_id: string | null
       content_kind: "standalone_html"
     })
   | (PresentationGenerationReceiptBase & {

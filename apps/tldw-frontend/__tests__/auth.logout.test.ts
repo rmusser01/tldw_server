@@ -99,4 +99,23 @@ describe('authService.logout', () => {
 
     expect(mockedApiClient.post).not.toHaveBeenCalled();
   });
+
+  it('synchronously announces the trusted principal boundary before clearing logout state', () => {
+    localStorage.setItem('access_token', 'token');
+    localStorage.setItem('user', JSON.stringify({ id: 42, username: 'user' }));
+    const observed: Array<{ token: string | null; user: string | null; kind?: string }> = [];
+    const listener = (event: Event) => {
+      observed.push({
+        token: localStorage.getItem('access_token'),
+        user: localStorage.getItem('user'),
+        kind: (event as CustomEvent<{ kind?: string }>).detail?.kind,
+      });
+    };
+    window.addEventListener('tldw:auth-principal-changed', listener);
+
+    authService.logout();
+
+    expect(observed).toEqual([{ token: 'token', user: JSON.stringify({ id: 42, username: 'user' }), kind: 'logout' }]);
+    window.removeEventListener('tldw:auth-principal-changed', listener);
+  });
 });

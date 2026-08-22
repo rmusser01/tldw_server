@@ -4,13 +4,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   getSlidesCapabilities: vi.fn(),
+  getConfig: vi.fn(),
+  getCurrentUser: vi.fn(),
   online: true
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    getSlidesCapabilities: (...args: unknown[]) => mocks.getSlidesCapabilities(...args)
+    getSlidesCapabilities: (...args: unknown[]) => mocks.getSlidesCapabilities(...args),
+    getConfig: (...args: unknown[]) => mocks.getConfig(...args)
   }
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: (...args: unknown[]) => mocks.getCurrentUser(...args) }
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -74,8 +81,12 @@ const loadSubject = () =>
 
 describe("useSlidesCapabilities", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    mocks.getSlidesCapabilities.mockReset()
+    mocks.getConfig.mockReset()
+    mocks.getCurrentUser.mockReset()
     mocks.online = true
+    mocks.getConfig.mockResolvedValue({ serverUrl: "https://tldw.example/base" })
+    mocks.getCurrentUser.mockResolvedValue({ id: 42 })
   })
 
   it("fetches the authoritative Slides capability on entry and explicit Retry", async () => {
@@ -184,5 +195,74 @@ describe("useSlidesCapabilities", () => {
     rerender()
     await waitFor(() => expect(result.current.status).toBe("ready"))
     expect(mocks.getSlidesCapabilities).toHaveBeenCalledTimes(1)
+  })
+
+  it("fences an out-of-order enabled response after an origin and principal change", async () => {
+    let resolveOld: ((value: unknown) => void) | undefined
+    mocks.getSlidesCapabilities
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve }))
+      .mockResolvedValueOnce({
+        ...enabledCapabilities,
+        generation_modes: {
+          ...enabledCapabilities.generation_modes,
+          standalone_html: {
+            ...enabledCapabilities.generation_modes.standalone_html,
+            model: "new-principal-model"
+          }
+        }
+      })
+    const { useSlidesCapabilities } = await loadSubject()
+    const { result } = renderHook(() => useSlidesCapabilities())
+
+    await waitFor(() => expect(mocks.getSlidesCapabilities).toHaveBeenCalledTimes(1))
+    mocks.getConfig.mockResolvedValue({ serverUrl: "https://other.example" })
+    mocks.getCurrentUser.mockResolvedValue({ id: 77 })
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")))
+    await waitFor(() => expect(result.current.capabilities?.generation_modes.standalone_html.model).toBe("new-principal-model"))
+
+    resolveOld?.(enabledCapabilities)
+    await act(async () => Promise.resolve())
+    expect(result.current.capabilities?.generation_modes.standalone_html.model).toBe("new-principal-model")
+    expect((mocks.getSlidesCapabilities.mock.calls[0][0] as { abortSignal?: AbortSignal }).abortSignal?.aborted).toBe(true)
+  })
+
+  it("invalidates an in-flight result when connectivity drops", async () => {
+    let resolveRequest: ((value: unknown) => void) | undefined
+    mocks.getSlidesCapabilities.mockReturnValue(new Promise((resolve) => { resolveRequest = resolve }))
+    const { useSlidesCapabilities } = await loadSubject()
+    const { result, rerender } = renderHook(() => useSlidesCapabilities())
+    await waitFor(() => expect(mocks.getSlidesCapabilities).toHaveBeenCalledTimes(1))
+
+    mocks.online = false
+    rerender()
+    expect(result.current.status).toBe("offline")
+    resolveRequest?.(enabledCapabilities)
+    await act(async () => Promise.resolve())
+    expect(result.current.status).toBe("offline")
+    expect(result.current.capabilities).toBeNull()
+  })
+
+  it.each([
+    [401, "auth_required", "authentication_required"],
+    [403, "forbidden", "permission_denied"]
+  ])("distinguishes HTTP %s capability failures", async (status, expectedStatus, reason) => {
+    mocks.getSlidesCapabilities.mockRejectedValue(Object.assign(new Error("denied"), { status }))
+    const { useSlidesCapabilities } = await loadSubject()
+    const { result } = renderHook(() => useSlidesCapabilities())
+
+    await waitFor(() => expect(result.current.status).toBe(expectedStatus))
+    expect(result.current.reason).toBe(reason)
+    expect(result.current.canGenerate).toBe(false)
+  })
+
+  it("retains fail-closed state during a transient scope verification outage", async () => {
+    mocks.getConfig.mockRejectedValue(new Error("config unavailable"))
+    mocks.getSlidesCapabilities.mockResolvedValue(enabledCapabilities)
+    const { useSlidesCapabilities } = await loadSubject()
+    const { result } = renderHook(() => useSlidesCapabilities())
+
+    await waitFor(() => expect(result.current.status).toBe("error"))
+    expect(result.current.capabilities).toBeNull()
+    expect(mocks.getSlidesCapabilities).not.toHaveBeenCalled()
   })
 })
