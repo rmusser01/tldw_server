@@ -16,6 +16,7 @@ import {
   WORKSPACES_PATH
 } from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { isHostedVisibleOptionPath } from "./option-route-visibility"
 
 import OptionIndex from "./option-index"
@@ -173,6 +174,13 @@ const OptionPresentationStudioNew = lazy(() => import("./option-presentation-stu
 const OptionPresentationStudioStart = lazy(() => import("./option-presentation-studio-start"))
 const OptionPresentationStudioDetail = lazy(
   () => import("./option-presentation-studio-detail")
+)
+const ExtensionPresentationProjectPanel = lazy(() =>
+  import("@/components/Option/PresentationStudio/ExtensionStartPanel").then(
+    ({ ExtensionPresentationProjectPanel }) => ({
+      default: ExtensionPresentationProjectPanel
+    })
+  )
 )
 const OptionChatWorkflows = lazy(() => import("./option-chat-workflows"))
 const OptionWorkflowEditor = lazy(() => import("./option-workflow-editor"))
@@ -445,7 +453,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   {
     kind: "options",
     path: "/presentation-studio/new",
-    element: <OptionPresentationStudioNew />
+    element: isExtensionRuntime() ? (
+      <Navigate to="/presentation-studio/start" replace />
+    ) : (
+      <OptionPresentationStudioNew />
+    )
   },
   {
     kind: "options",
@@ -455,7 +467,13 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   {
     kind: "options",
     path: "/presentation-studio/:projectId",
-    element: <OptionPresentationStudioDetail />
+    element: isExtensionRuntime() ? (
+      <ExtensionPresentationProjectPanel
+        structuredDetail={<OptionPresentationStudioDetail />}
+      />
+    ) : (
+      <OptionPresentationStudioDetail />
+    )
   },
   {
     kind: "options",
