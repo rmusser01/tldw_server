@@ -467,8 +467,15 @@ async def test_standalone_html_runtime_reloads_only_narrower_generation_controls
     assert current.input_limits.max_source_chars == 100
     assert current.output_limits.max_provider_response_bytes == 1_000
     assert current.provider_limits.max_output_tokens == 100
-    assert current.generation_config_revision == first_config.generation_config_revision
+    assert current.generation_config_revision is None
     assert refresh_calls["count"] == 1
+    assert runtime.config_epoch != snapshot.config_epoch
+    runtime.admission_gate.open = True
+    with pytest.raises(
+        standalone_html_registry.DigestKeyUnavailableError,
+        match="generation digest key unavailable",
+    ):
+        await runtime.digest_snapshot_loader()
 
 
 def test_standalone_html_coordination_generation_defaults_to_legacy_zero(
@@ -576,6 +583,11 @@ async def test_standalone_html_composite_starts_handler_only_after_shared_startu
     runtime = SimpleNamespace(
         reconciler=reconciler,
         local_only=False,
+        job_manager=object(),
+        keyring=object(),
+        digest_snapshot_loader=object(),
+        current_config_loader=object(),
+        validator_available=True,
         admission_gate=SimpleNamespace(open=False),
         validation_pool=None,
     )
@@ -607,6 +619,7 @@ async def test_standalone_html_composite_starts_handler_only_after_shared_startu
     assert reconciler.calls >= 2
     assert app.state.standalone_html_generation_worker_registered is True
     assert app.state.standalone_html_reconciler_admission_ready is True
+    assert app.state.standalone_html_transport_context is runtime
 
     stop_event.set()
     await asyncio.wait_for(task, timeout=1)
@@ -614,6 +627,7 @@ async def test_standalone_html_composite_starts_handler_only_after_shared_startu
     assert reconciler.released is True
     assert app.state.standalone_html_generation_worker_registered is False
     assert app.state.standalone_html_reconciler_admission_ready is False
+    assert getattr(app.state, "standalone_html_transport_context", None) is None
 
 
 @pytest.mark.asyncio

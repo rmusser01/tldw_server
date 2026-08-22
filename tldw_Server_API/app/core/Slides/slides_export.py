@@ -191,6 +191,7 @@ _ALLOWED_CSS_PROPERTIES = [
     "left",
     "width",
 ]
+_CSS_FUNCTION_TYPE = "function"
 
 _PDF_FORMAT_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 _PDF_DIMENSION_RE = re.compile(r"^\d+(\.\d+)?(px|in|cm|mm)$")
@@ -448,38 +449,76 @@ def _json_for_inline_script(value: Any) -> str:
     )
 
 
+def _css_tokens_contain_url(tokens: Iterable[Any]) -> bool:
+    """Reject URL values after tinycss2 has normalized CSS escapes."""
+
+    for token in tokens:
+        token_type = getattr(token, "type", None)
+        if token_type in {"url", "bad-url"}:
+            return True
+        if token_type == _CSS_FUNCTION_TYPE:
+            name = getattr(token, "lower_name", None) or getattr(token, "name", None)
+            if isinstance(name, str) and name.casefold() == "url":
+                return True
+            arguments = getattr(token, "arguments", None)
+            if isinstance(arguments, list) and _css_tokens_contain_url(arguments):
+                return True
+        content = getattr(token, "content", None)
+        if isinstance(content, list) and _css_tokens_contain_url(content):
+            return True
+    return False
+
+
+def _parse_css_rules_without_urls(css_text: str) -> list[Any]:
+    """Parse a stylesheet and reject every normalized URL-bearing token."""
+
+    rules = tinycss2.parse_stylesheet(
+        css_text,
+        skip_comments=False,
+        skip_whitespace=False,
+    )
+    for rule in rules:
+        if getattr(rule, "type", None) == "error":
+            raise SlidesExportInputError("custom_css_rule_blocked")
+        prelude = getattr(rule, "prelude", None)
+        content = getattr(rule, "content", None)
+        if (isinstance(prelude, list) and _css_tokens_contain_url(prelude)) or (
+            isinstance(content, list) and _css_tokens_contain_url(content)
+        ):
+            raise SlidesExportInputError("custom_css_url_blocked")
+    return rules
+
+
 def _sanitize_custom_css(css_text: str | None) -> str | None:
     if not css_text:
+        return None
+    if CSSSanitizer is None or tinycss2 is None:
         return None
     if re.search(r"@import", css_text, flags=re.IGNORECASE):
         raise SlidesExportInputError("custom_css_import_blocked")
     if re.search(r"url\s*\(", css_text, flags=re.IGNORECASE):
         raise SlidesExportInputError("custom_css_url_blocked")
-    cleaned = css_text
-    if CSSSanitizer is not None and tinycss2 is not None:
-        try:
-            sanitizer = CSSSanitizer(allowed_css_properties=_ALLOWED_CSS_PROPERTIES)
-            rules = tinycss2.parse_stylesheet(
-                css_text,
-                skip_comments=False,
-                skip_whitespace=False,
-            )
-            sanitized_rules: list[str] = []
-            for rule in rules:
-                if rule.type in {"comment", "whitespace"}:
-                    sanitized_rules.append(tinycss2.serialize([rule]))
-                    continue
-                if rule.type != "qualified-rule":
-                    raise SlidesExportInputError("custom_css_rule_blocked")
-                declarations = sanitizer.sanitize_css(tinycss2.serialize(rule.content)).strip()
-                if declarations:
-                    sanitized_rules.append(f"{tinycss2.serialize(rule.prelude).strip()} {{{declarations}}}")
-            cleaned = "".join(sanitized_rules)
-        except SlidesExportInputError:
-            raise
-        except Exception:
-            logger.warning("slides export: css sanitizer failed")
-            cleaned = ""
+    cleaned = ""
+    try:
+        sanitizer = CSSSanitizer(allowed_css_properties=_ALLOWED_CSS_PROPERTIES)
+        rules = _parse_css_rules_without_urls(css_text)
+        sanitized_rules: list[str] = []
+        for rule in rules:
+            if rule.type in {"comment", "whitespace"}:
+                sanitized_rules.append(tinycss2.serialize([rule]))
+                continue
+            if rule.type != "qualified-rule":
+                raise SlidesExportInputError("custom_css_rule_blocked")
+            declarations = sanitizer.sanitize_css(tinycss2.serialize(rule.content)).strip()
+            if declarations:
+                sanitized_rules.append(f"{tinycss2.serialize(rule.prelude).strip()} {{{declarations}}}")
+        cleaned = "".join(sanitized_rules)
+        _parse_css_rules_without_urls(cleaned)
+    except SlidesExportInputError:
+        raise
+    except Exception:
+        logger.warning("slides export: css sanitizer failed")
+        cleaned = ""
     cleaned = cleaned.replace("\x00", "").strip()
     return cleaned or None
 

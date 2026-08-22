@@ -365,6 +365,24 @@ DiscriminatedPresentationSummary = Annotated[
 PresentationSummary = LegacyPresentationSummary | DiscriminatedPresentationSummary
 
 
+class StructuredPresentationMetadata(StructuredPresentationSummary):
+    """Closed source-free metadata response for a structured presentation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StandaloneHtmlPresentationMetadata(StandaloneHtmlPresentationSummary):
+    """Closed source-free metadata response for a standalone HTML presentation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+PresentationMetadataResponse = Annotated[
+    StructuredPresentationMetadata | StandaloneHtmlPresentationMetadata,
+    Field(discriminator="content_kind"),
+]
+
+
 class PresentationListResponse(BaseModel):
     """Paginated list response for presentations."""
 
@@ -584,12 +602,27 @@ class StructuredSlidesContentCapability(_ClosedStandaloneModel):
     edit: Literal[True]
 
 
+StandaloneHtmlContentCapabilityReason = Literal["validator_unavailable"]
+StandaloneHtmlGenerationCapabilityReason = Literal[
+    "feature_disabled",
+    "egress_disabled",
+    "default_model_not_configured",
+    "default_model_not_allowed",
+    "default_endpoint_not_allowed",
+    "prompt_asset_unavailable",
+    "digest_key_unavailable",
+    "generation_worker_unavailable",
+    "generation_reconciler_overloaded",
+    "validator_unavailable",
+]
+
+
 class StandaloneHtmlContentCapability(_ClosedStandaloneModel):
     read: Literal[True]
     edit: bool
     export_attachment: bool
     draft_attachment: Literal[True]
-    reason: str | None
+    reason: StandaloneHtmlContentCapabilityReason | None
     limits: StandaloneHtmlContentLimits
 
 
@@ -621,7 +654,7 @@ class StandaloneHtmlOutputLimitsResponse(_ClosedStandaloneModel):
 
 class StandaloneHtmlGenerationCapability(_ClosedStandaloneModel):
     enabled: bool
-    reason: str | None
+    reason: StandaloneHtmlGenerationCapabilityReason | None
     transport: Literal["slides_generation_job"]
     source_kinds: tuple[Literal["prompt", "chat", "media", "notes", "rag"], ...]
     provider: str | None

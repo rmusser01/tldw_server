@@ -41,6 +41,7 @@ from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     PresentationCreateRequest,
     PresentationDeleteResponse,
     PresentationListResponse,
+    PresentationMetadataResponse,
     PresentationPatchRequest,
     PresentationRenderArtifactInfo,
     PresentationRenderArtifactListResponse,
@@ -1604,6 +1605,28 @@ async def get_presentation(
         response.headers["X-Content-Type-Options"] = "nosniff"
         merge_auth_vary_header(response.headers)
     return _build_presentation_response(row, additive=STANDALONE_HTML in accepted)
+
+
+@router.get(
+    "/presentations/{presentation_id}/metadata",
+    response_model=PresentationMetadataResponse,
+    summary="Get source-free presentation metadata",
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.get.metadata"))],
+)
+async def get_presentation_metadata(
+    presentation_id: str,
+    response: Response,
+    db: SlidesDatabase = Depends(get_slides_db_for_user),
+) -> PresentationMetadataResponse:
+    try:
+        row = PresentationService(db).get_metadata(presentation_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="presentation_not_found") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["ETag"] = _format_etag(row.version, row.content_kind)
+    response.headers["Last-Modified"] = row.last_modified
+    merge_auth_vary_header(response.headers)
+    return presentation_summary(row)
 
 
 @router.put(

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import os
+import inspect
 import re
 import uuid
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -27,7 +28,6 @@ from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     StandaloneHtmlGenerationResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_READ
-from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Slides import standalone_html_validator
 from tldw_Server_API.app.core.Slides.presentation_service import (
     CONTENT_KIND_HEADER,
@@ -46,11 +46,6 @@ from tldw_Server_API.app.core.Slides.standalone_html_config import (
 from tldw_Server_API.app.core.Slides.standalone_html_reconciler import (
     reconcile_owner_generation_receipts,
 )
-from tldw_Server_API.app.core.Slides.standalone_html_registry import (
-    JobManagerDigestKeyRegistryStore,
-    StandaloneHtmlHmacKeyring,
-    StandaloneHtmlKeyRegistry,
-)
 from tldw_Server_API.app.core.Slides.standalone_html_service import (
     StandaloneHtmlGenerationError,
     StandaloneHtmlGenerationService,
@@ -65,17 +60,10 @@ from tldw_Server_API.app.core.Slides.standalone_html_sources import (
 router = APIRouter()
 
 _RUNTIME_STATE_ATTR = "standalone_html_api_runtime"
+_TRANSPORT_CONTEXT_STATE_ATTR = "standalone_html_transport_context"
 _SAFE_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 _MAX_PROGRESS_TEXT = 256
 _MAX_ERROR_MESSAGE = 256
-
-
-def _job_manager() -> JobManager:
-    db_url = (os.getenv("JOBS_DB_URL") or "").strip()
-    if not db_url:
-        return JobManager()
-    backend = "postgres" if db_url.startswith("postgres") else None
-    return JobManager(backend=backend, db_url=db_url)
 
 
 def _bounded_public_text(value: object, *, maximum: int) -> str | None:
@@ -94,11 +82,18 @@ class StandaloneHtmlApiRuntime:
     """Source-free request runtime composed from the existing producers."""
 
     slides_db: SlidesDatabase
-    job_manager: JobManager
+    job_manager: Any | None
     generation_service: StandaloneHtmlGenerationService
     config_loader: Any
+    validator_available: bool
 
     def reconcile_owner(self, owner_user_id: str):
+        if self.job_manager is None:
+            raise StandaloneHtmlGenerationError(
+                "generation_receipt_unresolved",
+                status_code=503,
+                retry_after=1,
+            )
         return reconcile_owner_generation_receipts(
             self.slides_db,
             self.job_manager,
@@ -115,6 +110,12 @@ class StandaloneHtmlApiRuntime:
         return code, message
 
     def job_progress(self, job_uuid: str, owner_user_id: str) -> dict[str, Any] | None:
+        if self.job_manager is None:
+            raise StandaloneHtmlGenerationError(
+                "generation_receipt_unresolved",
+                status_code=503,
+                retry_after=1,
+            )
         try:
             job = self.job_manager.get_job_by_uuid(job_uuid)
         except Exception:  # noqa: BLE001 - Jobs failures cross a bounded boundary
@@ -128,74 +129,110 @@ class StandaloneHtmlApiRuntime:
         return job
 
 
-async def _build_runtime(request: Request, slides_db: SlidesDatabase) -> StandaloneHtmlApiRuntime:
-    existing = getattr(request.app.state, _RUNTIME_STATE_ATTR, None)
-    if existing is not None:
-        return existing
+@dataclass(slots=True)
+class _LazySourceDatabases:
+    """Acquire only the selected request's source stores after replay checks."""
 
-    job_manager = _job_manager()
-    digest_available = False
-    keyring: Any = object()
-    registry: StandaloneHtmlKeyRegistry | None = None
-    try:
-        keyring = StandaloneHtmlHmacKeyring.from_env()
-        registry = StandaloneHtmlKeyRegistry(
-            store=JobManagerDigestKeyRegistryStore(job_manager),
-            keyring=keyring,
-        )
-        snapshot = await registry.snapshot()
-        snapshot.require_generation_ready()
-        digest_available = True
-    except Exception:  # noqa: BLE001 - capability must expose only a safe reason
-        digest_available = False
+    request: Request
+    current_user: User
 
-    validator_available = bool(
-        standalone_html_validator.html5lib is not None and standalone_html_validator.tinycss2 is not None
-    )
+    @asynccontextmanager
+    async def _dependency(self, dependency: Any, **kwargs: Any):
+        provider = self.request.app.dependency_overrides.get(dependency, dependency)
+        resolved = provider(**kwargs) if provider is dependency else provider()
+        if inspect.isawaitable(resolved):
+            resolved = await resolved
+        if inspect.isasyncgen(resolved):
+            try:
+                yield await resolved.__anext__()
+            finally:
+                await resolved.aclose()
+            return
+        if inspect.isgenerator(resolved):
+            try:
+                yield next(resolved)
+            finally:
+                resolved.close()
+            return
+        yield resolved
 
-    def availability() -> StandaloneHtmlGenerationAvailability:
-        return StandaloneHtmlGenerationAvailability(
-            digest_key_available=digest_available,
-            worker_handler_registered=(
-                getattr(request.app.state, "standalone_html_generation_worker_registered", False) is True
-            ),
-            reconciler_admission_ready=(
-                getattr(request.app.state, "standalone_html_reconciler_admission_ready", False) is True
-            ),
-            validator_available=validator_available,
+    def media(self):
+        return self._dependency(
+            get_media_db_for_user,
+            request=self.request,
+            current_user=self.current_user,
         )
 
-    def config_loader() -> SlidesStandaloneHtmlConfig:
+    def chacha(self):
+        return self._dependency(
+            get_chacha_db_for_user,
+            current_user=self.current_user,
+        )
+
+
+def _closed_config_loader(*, validator_available: bool):
+    def load() -> SlidesStandaloneHtmlConfig:
         from tldw_Server_API.app.core.config import load_comprehensive_config, refresh_config_cache
 
         refresh_config_cache()
         return load_standalone_html_config(
             load_comprehensive_config(),
-            availability=availability(),
+            availability=StandaloneHtmlGenerationAvailability(
+                digest_key_available=False,
+                worker_handler_registered=False,
+                reconciler_admission_ready=False,
+                validator_available=validator_available,
+            ),
         )
 
-    async def digest_snapshot_loader():
-        if (
-            registry is None
-            or not digest_available
-            or getattr(request.app.state, "standalone_html_reconciler_admission_ready", False) is not True
-        ):
-            raise RuntimeError("digest registry unavailable")
-        current = await registry.snapshot()
-        current.require_generation_ready()
-        return current
+    return load
 
+
+async def _closed_digest_snapshot_loader():
+    raise RuntimeError("standalone generation transport unavailable")
+
+
+async def _build_runtime(request: Request, slides_db: SlidesDatabase) -> StandaloneHtmlApiRuntime:
+    existing = getattr(request.app.state, _RUNTIME_STATE_ATTR, None)
+    if existing is not None:
+        return existing
+
+    validator_available = bool(
+        standalone_html_validator.html5lib is not None and standalone_html_validator.tinycss2 is not None
+    )
+    context = getattr(request.app.state, _TRANSPORT_CONTEXT_STATE_ATTR, None)
+    required = (
+        getattr(context, "job_manager", None),
+        getattr(context, "keyring", None),
+        getattr(context, "digest_snapshot_loader", None),
+        getattr(context, "current_config_loader", None),
+    )
+    if context is None or getattr(context, "local_only", True) or any(value is None for value in required):
+        service = StandaloneHtmlGenerationService(
+            slides_db=slides_db,
+            job_manager=None,
+            keyring=None,
+            digest_snapshot_loader=_closed_digest_snapshot_loader,
+        )
+        return StandaloneHtmlApiRuntime(
+            slides_db=slides_db,
+            job_manager=None,
+            generation_service=service,
+            config_loader=_closed_config_loader(validator_available=validator_available),
+            validator_available=validator_available,
+        )
     service = StandaloneHtmlGenerationService(
         slides_db=slides_db,
-        job_manager=job_manager,
-        keyring=keyring,
-        digest_snapshot_loader=digest_snapshot_loader,
+        job_manager=context.job_manager,
+        keyring=context.keyring,
+        digest_snapshot_loader=context.digest_snapshot_loader,
     )
     return StandaloneHtmlApiRuntime(
         slides_db=slides_db,
-        job_manager=job_manager,
+        job_manager=context.job_manager,
         generation_service=service,
-        config_loader=config_loader,
+        config_loader=context.current_config_loader,
+        validator_available=bool(getattr(context, "validator_available", False)),
     )
 
 
@@ -208,8 +245,7 @@ def _limits(value: object, names: tuple[str, ...]) -> dict[str, int]:
     return {name: int(getattr(value, name)) for name in names}
 
 
-def _capability_payload(config: Any) -> dict[str, Any]:
-    validator_available = config.disabled_reason != "validator_unavailable"
+def _capability_payload(config: Any, *, validator_available: bool) -> dict[str, Any]:
     target = config.target
     return {
         "schema_version": 1,
@@ -281,7 +317,9 @@ async def get_slides_capabilities(
     runtime = await _build_runtime(request, slides_db)
     config = runtime.config_loader()
     _auth_private_headers(response)
-    return SlidesCapabilitiesResponse.model_validate(_capability_payload(config))
+    return SlidesCapabilitiesResponse.model_validate(
+        _capability_payload(config, validator_available=runtime.validator_available)
+    )
 
 
 def _idempotency_key(request: Request) -> str:
@@ -347,8 +385,10 @@ def _generation_payload(
         code, message = runtime.receipt_error_fields(owner_user_id, submission.receipt_id)
         return {
             **common,
-            "error_code": code or "generation_failed",
-            "error_message": message or "Generation failed.",
+            "error_code": (
+                code if isinstance(code, str) and _SAFE_ERROR_CODE_RE.fullmatch(code) else "generation_failed"
+            ),
+            "error_message": (_bounded_public_text(message, maximum=_MAX_ERROR_MESSAGE) or "Generation failed."),
         }
     raise StandaloneHtmlGenerationError("generation_correlation_mismatch", status_code=409)
 
@@ -365,21 +405,28 @@ async def submit_standalone_html_generation(
     response: Response,
     current_user: User = Depends(get_request_user),
     slides_db: SlidesDatabase = Depends(get_slides_db_for_user),
-    media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: Any = Depends(get_chacha_db_for_user),
 ) -> dict[str, Any]:
     key = _idempotency_key(request)
     runtime = await _build_runtime(request, slides_db)
     owner_user_id = str(current_user.id)
+    source_databases = _LazySourceDatabases(request, current_user)
 
     async def source_resolver(source: dict[str, Any], limits: Any):
-        return await resolve_standalone_html_source(
-            source,
-            owner_user_id=owner_user_id,
-            limits=limits,
-            media_db=media_db,
-            chacha_db=chacha_db,
-        )
+        kind = source.get("kind")
+        async with AsyncExitStack() as stack:
+            media_db = None
+            chacha_db = None
+            if kind in {"media", "rag"}:
+                media_db = await stack.enter_async_context(source_databases.media())
+            if kind in {"chat", "notes", "rag"}:
+                chacha_db = await stack.enter_async_context(source_databases.chacha())
+            return await resolve_standalone_html_source(
+                source,
+                owner_user_id=owner_user_id,
+                limits=limits,
+                media_db=media_db,
+                chacha_db=chacha_db,
+            )
 
     try:
         submission = await runtime.generation_service.submit(

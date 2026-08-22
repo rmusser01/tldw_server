@@ -41,6 +41,7 @@ _STANDALONE_MAX_COORDINATION_GENERATION = (1 << 63) - 1
 _STANDALONE_VALIDATION_POOL_ATTR = "standalone_html_validation_pool"
 _STANDALONE_VALIDATION_POOL_LOCK_ATTR = "standalone_html_validation_pool_lock"
 _STANDALONE_VALIDATION_POOL_WORKER_OWNED_ATTR = "standalone_html_validation_pool_worker_owned"
+_STANDALONE_TRANSPORT_CONTEXT_ATTR = "standalone_html_transport_context"
 
 
 @dataclass
@@ -49,6 +50,7 @@ class _StandaloneHtmlGenerationRuntime:
 
     reconciler: Any
     local_only: bool
+    job_manager: Any | None = None
     keyring: Any | None = None
     registry: Any | None = None
     digest_snapshot_loader: Any | None = None
@@ -56,6 +58,8 @@ class _StandaloneHtmlGenerationRuntime:
     provider_api_key_loader: Any | None = None
     validation_pool: Any | None = None
     admission_gate: Any | None = None
+    validator_available: bool = False
+    config_epoch: str | None = None
 
 
 @dataclass
@@ -1309,7 +1313,7 @@ def _restrict_standalone_html_config(boot_config: Any, live_config: Any) -> Any:
     allowed_live = frozenset(live_config.allowed_targets)
     allowed_targets = tuple(target for target in boot_config.allowed_targets if target in allowed_live)
     target_allowed = boot_config.target is not None and boot_config.target in allowed_targets
-    enabled = boot_config.enabled and feature_enabled and egress_enabled and target_allowed
+    enabled = boot_config.enabled and live_config.enabled and feature_enabled and egress_enabled and target_allowed
     disabled_reason = boot_config.disabled_reason
     if not feature_enabled:
         disabled_reason = "feature_disabled"
@@ -1317,6 +1321,8 @@ def _restrict_standalone_html_config(boot_config: Any, live_config: Any) -> Any:
         disabled_reason = "egress_disabled"
     elif boot_config.enabled and not target_allowed:
         disabled_reason = "default_model_not_allowed"
+    elif not live_config.enabled:
+        disabled_reason = live_config.disabled_reason
     elif enabled:
         disabled_reason = None
     return replace(
@@ -1325,6 +1331,10 @@ def _restrict_standalone_html_config(boot_config: Any, live_config: Any) -> Any:
         egress_enabled=egress_enabled,
         enabled=enabled,
         disabled_reason=disabled_reason,
+        target=boot_config.target if enabled else None,
+        prompt=boot_config.prompt if enabled else None,
+        generation_config_revision=(boot_config.generation_config_revision if enabled else None),
+        _revision_manifest=(boot_config.revision_manifest if enabled else ""),
         allowed_targets=allowed_targets,
         input_limits=_minimum_dataclass(
             boot_config.input_limits,
@@ -1368,6 +1378,7 @@ def _local_only_standalone_runtime(*, job_manager: Any, base_dir: Any) -> _Stand
             holder_uuid=str(uuid.uuid4()),
         ),
         local_only=True,
+        job_manager=job_manager,
     )
 
 
@@ -1391,6 +1402,7 @@ async def _build_standalone_html_generation_runtime(
         from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
             resolve_provider_api_key_from_config,
         )
+        from tldw_Server_API.app.core.Slides import standalone_html_validator
         from tldw_Server_API.app.core.Slides.standalone_html_config import (
             StandaloneHtmlGenerationAvailability,
             load_standalone_html_config,
@@ -1439,6 +1451,9 @@ async def _build_standalone_html_generation_runtime(
             holder_uuid=str(uuid.uuid4()),
         )
         gate = _StandaloneHtmlAdmissionGate()
+        validator_available = bool(
+            standalone_html_validator.html5lib is not None and standalone_html_validator.tinycss2 is not None
+        )
 
         async def digest_snapshot_loader():
             if not gate.open or not reconciler.admission_ready():
@@ -1451,11 +1466,34 @@ async def _build_standalone_html_generation_runtime(
 
         def current_config_loader():
             refresh_config_cache()
+            app = getattr(_context, "app", None)
+            availability = StandaloneHtmlGenerationAvailability(
+                digest_key_available=True,
+                worker_handler_registered=(
+                    getattr(
+                        getattr(app, "state", None),
+                        "standalone_html_generation_worker_registered",
+                        False,
+                    )
+                    is True
+                ),
+                reconciler_admission_ready=(
+                    gate.open
+                    and reconciler.admission_ready()
+                    and getattr(
+                        getattr(app, "state", None),
+                        "standalone_html_reconciler_admission_ready",
+                        False,
+                    )
+                    is True
+                ),
+                validator_available=validator_available,
+            )
             return _restrict_standalone_html_config(
                 static_config,
                 load_standalone_html_config(
                     load_comprehensive_config(),
-                    availability=all_available,
+                    availability=availability,
                 ),
             )
 
@@ -1468,12 +1506,15 @@ async def _build_standalone_html_generation_runtime(
         return _StandaloneHtmlGenerationRuntime(
             reconciler=reconciler,
             local_only=False,
+            job_manager=job_manager,
             keyring=keyring,
             registry=registry,
             digest_snapshot_loader=digest_snapshot_loader,
             current_config_loader=current_config_loader,
             provider_api_key_loader=provider_api_key_loader,
             admission_gate=gate,
+            validator_available=validator_available,
+            config_epoch=config_epoch,
         )
     except Exception as exc:  # noqa: BLE001 - never expose key/config/store details
         logger.warning(
@@ -1575,6 +1616,24 @@ def _close_standalone_html_admission(app: Any, runtime: Any | None) -> None:
     app.state.standalone_html_reconciler_admission_ready = False
 
 
+def _publish_standalone_html_transport_context(app: Any, runtime: Any) -> None:
+    """Publish only the full source-free lifecycle context used by REST transport."""
+
+    if getattr(runtime, "local_only", True):
+        return
+    setattr(app.state, _STANDALONE_TRANSPORT_CONTEXT_ATTR, runtime)
+
+
+def _clear_standalone_html_transport_context(app: Any, runtime: Any | None) -> None:
+    """Remove the context only when it is still owned by this lifecycle."""
+
+    current = getattr(app.state, _STANDALONE_TRANSPORT_CONTEXT_ATTR, None)
+    if current is not runtime:
+        return
+    with contextlib.suppress(AttributeError, KeyError):
+        delattr(app.state, _STANDALONE_TRANSPORT_CONTEXT_ATTR)
+
+
 def _standalone_html_handler_done(
     app: Any,
     runtime: Any,
@@ -1615,7 +1674,10 @@ async def _cleanup_standalone_html_generation_runtime(
             if runtime is not None:
                 await _run_reconciliation_batch(runtime.reconciler.release)
         finally:
-            await _close_worker_owned_validation_pool(app)
+            try:
+                _clear_standalone_html_transport_context(app, runtime)
+            finally:
+                await _close_worker_owned_validation_pool(app)
 
 
 async def _run_cancellation_safe_standalone_cleanup(
@@ -1653,6 +1715,10 @@ async def _run_standalone_html_generation_jobs_service(
     app = context.app
     app.state.standalone_html_generation_worker_registered = False
     app.state.standalone_html_reconciler_admission_ready = False
+    stale_context = getattr(app.state, _STANDALONE_TRANSPORT_CONTEXT_ATTR, None)
+    if stale_context is not None:
+        _close_standalone_html_admission(app, stale_context)
+        _clear_standalone_html_transport_context(app, stale_context)
     runtime: _StandaloneHtmlGenerationRuntime | Any | None = None
     handler_task: asyncio.Task[Any] | None = None
     handler_stop_event: asyncio.Event | None = None
@@ -1675,6 +1741,7 @@ async def _run_standalone_html_generation_jobs_service(
             try:
                 if runtime is None:
                     runtime = await _build_standalone_html_generation_runtime(context)
+                    _publish_standalone_html_transport_context(app, runtime)
                     if stop_event.is_set():
                         break
                 if getattr(runtime, "local_only", False):
@@ -1700,6 +1767,7 @@ async def _run_standalone_html_generation_jobs_service(
                             if stop_event.is_set():
                                 break
                             runtime = candidate
+                            _publish_standalone_html_transport_context(app, runtime)
                     continue
 
                 if draining_local_expiry:
