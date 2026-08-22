@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
@@ -45,7 +46,12 @@ from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
 )
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
+    ResolvedExecutionTarget,
+    ResolvedPrompt,
     SlidesStandaloneHtmlConfig,
+    StandaloneHtmlInputLimits,
+    StandaloneHtmlOutputLimits,
+    StandaloneHtmlProviderLimits,
 )
 from tldw_Server_API.app.core.Slides.standalone_html_registry import (
     DigestKeyAvailability,
@@ -61,6 +67,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_service import (
 from tldw_Server_API.app.core.Slides.standalone_html_validator import (
     validate_standalone_html,
 )
+from tldw_Server_API.app.services.lifecycle_worker_specs import WorkerLifecycleContext
 
 _ACCEPT = "X-Slides-Accept-Content-Kinds"
 _BOTH = {_ACCEPT: "structured_slides,standalone_html"}
@@ -135,6 +142,294 @@ def _runtime_config(
         ),
         _revision_manifest="test-manifest" if enabled else "",
     )
+
+
+def _lifecycle_runtime_config() -> SlidesStandaloneHtmlConfig:
+    target = ResolvedExecutionTarget(
+        provider="openai",
+        model="allowed-model",
+        adapter_id="openai_official_chat_v1",
+        endpoint_identity="https://api.openai.com:443/v1/chat/completions",
+    )
+    return SlidesStandaloneHtmlConfig(
+        feature_enabled=True,
+        egress_enabled=True,
+        enabled=True,
+        disabled_reason=None,
+        target=target,
+        prompt=ResolvedPrompt(
+            text="Build a standalone presentation.",
+            sha256="b" * 64,
+            contract_version="slides.standalone_html.v1",
+            byte_count=32,
+        ),
+        allowed_targets=(target,),
+        generation_config_revision=_REVISION,
+        input_limits=StandaloneHtmlInputLimits(
+            max_request_bytes=4_194_304,
+            max_source_chars=200_000,
+            max_source_tokens=50_000,
+            max_audience_chars=500,
+            max_source_identifier_bytes=256,
+            max_note_ids=100,
+            max_rag_query_chars=20_000,
+            max_rag_top_k=100,
+        ),
+        output_limits=StandaloneHtmlOutputLimits(
+            max_provider_response_bytes=8_388_608,
+            max_document_bytes=1_048_576,
+        ),
+        provider_limits=StandaloneHtmlProviderLimits(
+            connect_timeout_seconds=10.0,
+            read_timeout_seconds=120.0,
+            overall_timeout_seconds=180.0,
+            max_output_tokens=16_384,
+        ),
+        _revision_manifest="test-manifest",
+    )
+
+
+@pytest.mark.asyncio
+async def test_generation_http_uses_lifecycle_owned_transport_and_cleans_up(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tldw_Server_API.app.core import config as config_module
+    from tldw_Server_API.app.core.DB_Management import db_path_utils
+    from tldw_Server_API.app.core.Slides import (
+        standalone_html_config,
+        standalone_html_reconciler,
+        standalone_html_registry,
+    )
+    from tldw_Server_API.app.services import startup_content_jobs_pollers
+
+    app = FastAPI()
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="1")
+    config = _lifecycle_runtime_config()
+    shared_job_manager = object()
+    shared_keyring = StandaloneHtmlHmacKeyring(
+        secrets={"key-v1": b"k" * 32},
+        current_key_id="key-v1",
+    )
+    stop_event = asyncio.Event()
+    handler_started = asyncio.Event()
+    allocations = {"job_manager": 0, "keyring": 0, "registry": 0}
+    registries = []
+    reconcilers = []
+    handler_runtimes = []
+
+    class _Registry:
+        def __init__(self, *, store, keyring) -> None:
+            del store
+            assert keyring is shared_keyring
+            allocations["registry"] += 1
+            self.snapshot_calls = 0
+            self.snapshot_value = DigestKeySnapshot(
+                records=(),
+                config_epoch=None,
+                configured_current_key_id="key-v1",
+                availability=DigestKeyAvailability(missing_key_ids=()),
+            )
+            registries.append(self)
+
+        async def snapshot(self):
+            self.snapshot_calls += 1
+            return self.snapshot_value
+
+        async def activate_configured_current(self, **kwargs):
+            self.snapshot_value = DigestKeySnapshot(
+                records=(
+                    DigestKeyMetadata(
+                        key_id="key-v1",
+                        state=DigestKeyState.CURRENT,
+                        activated_at=datetime(2026, 8, 21, tzinfo=timezone.utc),
+                        retired_at=None,
+                    ),
+                ),
+                config_epoch=kwargs["new_config_epoch"],
+                configured_current_key_id="key-v1",
+                availability=DigestKeyAvailability(missing_key_ids=()),
+            )
+            return self.snapshot_value
+
+    class _Reconciler:
+        def __init__(self, **_kwargs) -> None:
+            self.released = False
+            reconcilers.append(self)
+
+        def admission_ready(self) -> bool:
+            return True
+
+        def run_batch(self):
+            return SimpleNamespace(
+                startup_ready=True,
+                leader=True,
+                completed_pass=True,
+                jobs_available=True,
+                local_sweep_state="not_run",
+            )
+
+        def release(self) -> bool:
+            self.released = True
+            return True
+
+    def _job_manager_factory():
+        allocations["job_manager"] += 1
+        return shared_job_manager
+
+    class _KeyringFactory:
+        @classmethod
+        def from_env(cls):
+            allocations["keyring"] += 1
+            return shared_keyring
+
+    async def _handler(runtime, worker_stop_event):
+        handler_runtimes.append(runtime)
+        handler_started.set()
+        await worker_stop_event.wait()
+
+    async def _override_user():
+        return User(
+            id=1,
+            username="tester",
+            email=None,
+            is_active=True,
+            is_admin=True,
+        )
+
+    async def _override_principal(request=None):
+        principal = AuthPrincipal(
+            kind="user",
+            user_id=1,
+            api_key_id=None,
+            subject="test-user",
+            token_type="single_user",  # nosec B106 - test principal type
+            jti=None,
+            roles=["admin"],
+            permissions=["media.create"],
+            is_admin=True,
+            org_ids=[],
+            team_ids=[],
+        )
+        if request is not None:
+            request.state.auth = AuthContext(
+                principal=principal,
+                ip=None,
+                user_agent=None,
+                request_id=None,
+            )
+        return principal
+
+    async def _override_db():
+        yield db
+
+    monkeypatch.setattr(
+        startup_content_jobs_pollers,
+        "_standalone_html_jobs_manager",
+        _job_manager_factory,
+    )
+    monkeypatch.setattr(
+        startup_content_jobs_pollers,
+        "_get_worker_owned_validation_pool",
+        lambda _app: asyncio.sleep(0, result=object()),
+    )
+    monkeypatch.setattr(
+        startup_content_jobs_pollers,
+        "_run_standalone_html_generation_handler",
+        _handler,
+    )
+    monkeypatch.setattr(
+        db_path_utils.DatabasePaths,
+        "resolve_user_db_base_dir",
+        lambda: tmp_path / "users",
+    )
+    monkeypatch.setattr(config_module, "load_comprehensive_config", lambda: {})
+    monkeypatch.setattr(config_module, "refresh_config_cache", lambda: None)
+    monkeypatch.setattr(
+        standalone_html_config,
+        "load_standalone_html_config",
+        lambda _raw, *, availability: config,
+    )
+    monkeypatch.setattr(
+        standalone_html_registry,
+        "StandaloneHtmlHmacKeyring",
+        _KeyringFactory,
+    )
+    monkeypatch.setattr(
+        standalone_html_registry,
+        "JobManagerDigestKeyRegistryStore",
+        lambda manager: manager,
+    )
+    monkeypatch.setattr(
+        standalone_html_registry,
+        "StandaloneHtmlKeyRegistry",
+        _Registry,
+    )
+    monkeypatch.setattr(
+        standalone_html_reconciler,
+        "FencedStandaloneHtmlReconciler",
+        _Reconciler,
+    )
+
+    app.include_router(slides_router, prefix="/api/v1", tags=["slides"])
+    app.dependency_overrides[get_request_user] = _override_user
+    app.dependency_overrides[get_auth_principal] = _override_principal
+    app.dependency_overrides[get_slides_db_for_user] = _override_db
+    lifecycle_context = WorkerLifecycleContext(
+        app=app,
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+    lifecycle_task = asyncio.create_task(
+        startup_content_jobs_pollers._run_standalone_html_generation_jobs_service(
+            lifecycle_context,
+            stop_event,
+        )
+    )
+
+    try:
+        await asyncio.wait_for(handler_started.wait(), timeout=1)
+        await asyncio.sleep(0)
+        published = app.state.standalone_html_transport_context
+        assert not hasattr(app.state, "standalone_html_api_runtime")
+        assert handler_runtimes == [published]
+        assert published.job_manager is shared_job_manager
+        assert published.admission_gate.open is True
+        snapshot_calls_before_request = registries[0].snapshot_calls
+
+        stale_request = {
+            **_GENERATION_REQUEST,
+            "generation_config_revision": "sha256:" + "c" * 64,
+        }
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                "/api/v1/slides/generations",
+                headers={"Idempotency-Key": "lifecycle-owned-http-request"},
+                json=stale_request,
+            )
+
+        assert response.status_code == 409
+        assert response.json() == {"detail": "generation_configuration_changed"}
+        assert registries[0].snapshot_calls == snapshot_calls_before_request + 1
+        assert allocations == {"job_manager": 1, "keyring": 1, "registry": 1}
+        assert app.state.standalone_html_transport_context is published
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(lifecycle_task, timeout=1)
+        db.close_connection()
+
+    assert published.admission_gate.open is False
+    assert reconcilers[0].released is True
+    assert not hasattr(app.state, "standalone_html_transport_context")
+    assert app.state.standalone_html_generation_worker_registered is False
+    assert app.state.standalone_html_reconciler_admission_ready is False
 
 
 @pytest.mark.asyncio
