@@ -121,4 +121,41 @@ describe("TldwApiClient presentations normalization", () => {
     expect(styles.map((style) => style.id)).toEqual(["page-1-style", "page-2-style"])
     expect(client.request).toHaveBeenCalledTimes(2)
   })
+
+  it("treats a legacy detail with slides as structured without preserving HTML-shaped extras", async () => {
+    const client: TldwApiClientCore = {
+      ensureConfigForRequest: vi.fn(async () => ({})),
+      request: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: { etag: 'W/"v2"' },
+        data: {
+          id: "legacy-1",
+          title: "Legacy",
+          theme: "black",
+          slides: [],
+          html_document: "must not survive legacy structured normalization",
+          created_at: "2026-07-15T00:00:00Z",
+          last_modified: "2026-07-15T00:00:01Z",
+          deleted: false,
+          client_id: "1",
+          version: 2
+        }
+      })) as unknown as TldwApiClientCore["request"],
+      resolveApiPath: vi.fn(),
+      fillPathParams: vi.fn()
+    }
+
+    const result = await presentationsMethods.getPresentation.call(client, "legacy-1")
+
+    expect(result.record).toEqual(
+      expect.objectContaining({
+        id: "legacy-1",
+        content_kind: "structured_slides",
+        slides: []
+      })
+    )
+    expect(result.record).not.toHaveProperty("html_document")
+    expect(result.etag).toBe('W/"v2"')
+  })
 })

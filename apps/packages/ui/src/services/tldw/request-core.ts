@@ -497,7 +497,7 @@ export const tldwRequest = async (
       resp = await fetchFn(url, {
         method,
         headers: retryHeaders,
-        body: body ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined,
+        body: resolvedBody,
         signal: retryController.signal
       })
       if (retryTimeoutId) {

@@ -7,7 +7,7 @@ import { VisualStyleManager } from "./VisualStyleManager"
 import {
   buildPresentationVisualStyleSnapshot,
   tldwClient,
-  type PresentationStudioRecord,
+  type PresentationDetailResult,
   type VisualStyleRecord
 } from "@/services/tldw/TldwApiClient"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -33,7 +33,7 @@ const DEFAULT_VISUAL_STYLE_ID = "minimal-academic"
 
 type InFlightProjectRequest = {
   projectId: string | null
-  promise: Promise<PresentationStudioRecord>
+  promise: Promise<PresentationDetailResult>
 }
 
 const encodeVisualStyleValue = (styleId: string | null, styleScope: string | null): string =>
@@ -163,13 +163,17 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     }
 
     void detailRequestRef.current.promise
-      .then((project) => {
+      .then((detail) => {
         if (cancelled) {
           return
         }
+        if (detail.record.content_kind !== "structured_slides") {
+          throw new Error("Structured presentation required")
+        }
+        const project = detail.record
         setIsProjectLoading(false)
         loadProject(project, {
-          etag: formatEtag(project.version)
+          etag: detail.etag
         })
         detailRequestRef.current = null
       })

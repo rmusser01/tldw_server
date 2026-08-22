@@ -2,7 +2,7 @@ import { createWithEqualityFn } from "zustand/traditional"
 
 import type {
   PresentationVisualStyleSnapshot,
-  PresentationStudioRecord,
+  StructuredPresentationStudioRecord,
   PresentationStudioSlide
 } from "@/services/tldw/TldwApiClient"
 import { clonePresentationVisualStyleSnapshot } from "@/services/tldw/TldwApiClient"
@@ -82,7 +82,7 @@ type PresentationStudioStore = {
   reset: () => void
   initializeBlankProject: () => void
   loadProject: (
-    project: PresentationStudioRecord,
+    project: StructuredPresentationStudioRecord,
     options?: { etag?: string | null; preserveDirty?: boolean }
   ) => void
   updateProjectMeta: (updates: {
@@ -107,7 +107,7 @@ type PresentationStudioStore = {
     updates: PresentationStudioSlideUpdate
   ) => void
   setAutosaveState: (state: AutosaveState, error?: string | null) => void
-  markPersisted: (etag?: string | null, project?: PresentationStudioRecord) => void
+  markPersisted: (etag?: string | null, project?: StructuredPresentationStudioRecord) => void
   buildPatchPayload: () => {
     title: string
     description: string | null
@@ -369,7 +369,7 @@ const mergeSlideMetadata = (
 
 export const buildPresentationStudioPatchPayloadFromRecord = (
   project: Pick<
-    PresentationStudioRecord,
+    StructuredPresentationStudioRecord,
     | "title"
     | "description"
     | "theme"
@@ -396,9 +396,9 @@ export const buildPresentationStudioPatchPayloadFromRecord = (
   })
 
 export const mergePresentationStudioDraftWithRemote = (
-  latest: PresentationStudioRecord,
+  latest: StructuredPresentationStudioRecord,
   localDraft: PresentationStudioPatchPayload
-): PresentationStudioRecord => {
+): StructuredPresentationStudioRecord => {
   const localHasVisualStyleName = Object.prototype.hasOwnProperty.call(
     localDraft,
     "visual_style_name"
@@ -529,6 +529,16 @@ const createInitialState = () => ({
   autosaveError: null as string | null
 })
 
+const assertStructuredPresentation = (project: StructuredPresentationStudioRecord): void => {
+  const candidate = project as unknown as Record<string, unknown>
+  if (
+    (candidate.content_kind != null && candidate.content_kind !== "structured_slides") ||
+    Object.prototype.hasOwnProperty.call(candidate, "html_document")
+  ) {
+    throw new Error("Structured presentation required")
+  }
+}
+
 export const usePresentationStudioStore = createWithEqualityFn<PresentationStudioStore>(
   (set, get) => ({
     ...createInitialState(),
@@ -544,7 +554,8 @@ export const usePresentationStudioStore = createWithEqualityFn<PresentationStudi
       })
     },
 
-    loadProject: (project, options) =>
+    loadProject: (project, options) => {
+      assertStructuredPresentation(project)
       set((state) => {
       const slides = (project.slides || []).map((slide, index) => normalizeSlide(slide, index))
       const previousSelected = state.selectedSlideId
@@ -552,6 +563,9 @@ export const usePresentationStudioStore = createWithEqualityFn<PresentationStudi
         slides.find((slide) => slide.metadata.studio.slideId === previousSelected)?.metadata.studio.slideId ||
         slides[0]?.metadata.studio.slideId ||
         null
+      const etag = Object.prototype.hasOwnProperty.call(options ?? {}, "etag")
+        ? options?.etag ?? null
+        : `W/"v${project.version}"`
       return {
         projectId: project.id,
         title: project.title || "Untitled Presentation",
@@ -569,12 +583,13 @@ export const usePresentationStudioStore = createWithEqualityFn<PresentationStudi
             : null,
         slides,
         selectedSlideId,
-        etag: options?.etag ?? `W/"v${project.version}"`,
+        etag,
         isDirty: Boolean(options?.preserveDirty),
         autosaveState: options?.preserveDirty ? state.autosaveState : "idle",
         autosaveError: options?.preserveDirty ? state.autosaveError : null
       }
-    }),
+    })
+    },
 
     updateProjectMeta: (updates) =>
       set((state) => ({

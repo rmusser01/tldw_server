@@ -268,42 +268,46 @@ describe("PresentationStudioPage", () => {
 
   it("loads a detail project and leaves the loading state", async () => {
     clientMocks.getPresentation.mockResolvedValue({
-      id: "presentation-load",
-      title: "Loaded Presentation",
-      description: null,
-      theme: "black",
-      visual_style_id: "minimal-academic",
-      visual_style_scope: "builtin",
-      visual_style_name: "Minimal Academic",
-      visual_style_version: 1,
-      visual_style_snapshot: {
-        id: "minimal-academic",
-        scope: "builtin",
-        name: "Minimal Academic",
-        appearance_defaults: { theme: "white" }
-      },
-      slides: [
-        {
-          order: 0,
-          layout: "title",
-          title: "Loaded slide",
-          content: "",
-          speaker_notes: "",
-          metadata: {
-            studio: {
-              slideId: "slide-load",
-              audio: { status: "missing" },
-              image: { status: "missing" }
+      record: {
+        id: "presentation-load",
+        content_kind: "structured_slides",
+        title: "Loaded Presentation",
+        description: null,
+        theme: "black",
+        visual_style_id: "minimal-academic",
+        visual_style_scope: "builtin",
+        visual_style_name: "Minimal Academic",
+        visual_style_version: 1,
+        visual_style_snapshot: {
+          id: "minimal-academic",
+          scope: "builtin",
+          name: "Minimal Academic",
+          appearance_defaults: { theme: "white" }
+        },
+        slides: [
+          {
+            order: 0,
+            layout: "title",
+            title: "Loaded slide",
+            content: "",
+            speaker_notes: "",
+            metadata: {
+              studio: {
+                slideId: "slide-load",
+                audio: { status: "missing" },
+                image: { status: "missing" }
+              }
             }
           }
-        }
-      ],
-      studio_data: { origin: "blank" },
-      created_at: "2026-03-13T00:00:00Z",
-      last_modified: "2026-03-13T00:00:00Z",
-      deleted: false,
-      client_id: "1",
-      version: 1
+        ],
+        studio_data: { origin: "blank" },
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      etag: 'W/"opaque-server-tag"'
     })
 
     render(
@@ -318,6 +322,7 @@ describe("PresentationStudioPage", () => {
       expect(screen.getByTestId("presentation-studio-slide-rail")).toBeInTheDocument()
     })
     expect(screen.queryByText("Loading presentation…")).not.toBeInTheDocument()
+    expect(usePresentationStudioStore.getState().etag).toBe('W/"opaque-server-tag"')
     fireEvent.click(screen.getByRole("button", { name: /Timeline/ }))
 
     await waitFor(() => {
@@ -327,42 +332,46 @@ describe("PresentationStudioPage", () => {
 
   it("updates the deck visual style preference on the detail page without mutating slides", async () => {
     clientMocks.getPresentation.mockResolvedValue({
-      id: "presentation-style",
-      title: "Styled Deck",
-      description: null,
-      theme: "black",
-      visual_style_id: "minimal-academic",
-      visual_style_scope: "builtin",
-      visual_style_name: "Minimal Academic",
-      visual_style_version: 1,
-      visual_style_snapshot: {
-        id: "minimal-academic",
-        scope: "builtin",
-        name: "Minimal Academic",
-        appearance_defaults: { theme: "white" }
-      },
-      slides: [
-        {
-          order: 0,
-          layout: "title",
-          title: "Loaded slide",
-          content: "",
-          speaker_notes: "",
-          metadata: {
-            studio: {
-              slideId: "slide-load",
-              audio: { status: "missing" },
-              image: { status: "missing" }
+      record: {
+        id: "presentation-style",
+        content_kind: "structured_slides",
+        title: "Styled Deck",
+        description: null,
+        theme: "black",
+        visual_style_id: "minimal-academic",
+        visual_style_scope: "builtin",
+        visual_style_name: "Minimal Academic",
+        visual_style_version: 1,
+        visual_style_snapshot: {
+          id: "minimal-academic",
+          scope: "builtin",
+          name: "Minimal Academic",
+          appearance_defaults: { theme: "white" }
+        },
+        slides: [
+          {
+            order: 0,
+            layout: "title",
+            title: "Loaded slide",
+            content: "",
+            speaker_notes: "",
+            metadata: {
+              studio: {
+                slideId: "slide-load",
+                audio: { status: "missing" },
+                image: { status: "missing" }
+              }
             }
           }
-        }
-      ],
-      studio_data: { origin: "blank" },
-      created_at: "2026-03-13T00:00:00Z",
-      last_modified: "2026-03-13T00:00:00Z",
-      deleted: false,
-      client_id: "1",
-      version: 1
+        ],
+        studio_data: { origin: "blank" },
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      etag: 'W/"v1"'
     })
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-style" />)
@@ -465,43 +474,47 @@ describe("PresentationStudioPage", () => {
 
   it("edits and deletes a selected custom visual style in detail mode", async () => {
     clientMocks.getPresentation.mockResolvedValue({
-      id: "presentation-custom-style",
-      title: "Styled Deck",
-      description: null,
-      theme: "black",
-      visual_style_id: "style-user-1",
-      visual_style_scope: "user",
-      visual_style_name: "CGPSC Sprint",
-      visual_style_version: 1,
-      visual_style_snapshot: {
-        id: "style-user-1",
-        scope: "user",
-        name: "CGPSC Sprint",
-        description: "Recall-heavy revision deck",
-        appearance_defaults: { theme: "beige" }
-      },
-      slides: [
-        {
-          order: 0,
-          layout: "title",
-          title: "Loaded slide",
-          content: "",
-          speaker_notes: "",
-          metadata: {
-            studio: {
-              slideId: "slide-load",
-              audio: { status: "missing" },
-              image: { status: "missing" }
+      record: {
+        id: "presentation-custom-style",
+        content_kind: "structured_slides",
+        title: "Styled Deck",
+        description: null,
+        theme: "black",
+        visual_style_id: "style-user-1",
+        visual_style_scope: "user",
+        visual_style_name: "CGPSC Sprint",
+        visual_style_version: 1,
+        visual_style_snapshot: {
+          id: "style-user-1",
+          scope: "user",
+          name: "CGPSC Sprint",
+          description: "Recall-heavy revision deck",
+          appearance_defaults: { theme: "beige" }
+        },
+        slides: [
+          {
+            order: 0,
+            layout: "title",
+            title: "Loaded slide",
+            content: "",
+            speaker_notes: "",
+            metadata: {
+              studio: {
+                slideId: "slide-load",
+                audio: { status: "missing" },
+                image: { status: "missing" }
+              }
             }
           }
-        }
-      ],
-      studio_data: { origin: "blank" },
-      created_at: "2026-03-13T00:00:00Z",
-      last_modified: "2026-03-13T00:00:00Z",
-      deleted: false,
-      client_id: "1",
-      version: 1
+        ],
+        studio_data: { origin: "blank" },
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      etag: 'W/"v1"'
     })
     clientMocks.listVisualStyles
       .mockResolvedValueOnce([
