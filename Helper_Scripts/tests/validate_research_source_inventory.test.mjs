@@ -925,7 +925,7 @@ test("required sources require exact core routes without excluding reviewed addi
 
 test("implemented sources require exact shadow evidence and report blockers for every drift", () => {
   const inventoryId = "sourclip-2026-07-13-0001";
-  const implementationRevision = "7d0f1fa3574455753cf228f27fc60c3f2511f218";
+  const implementationRevision = "2d0f968a7f45d2f6a7ed9b73fed4bfdadc204b29";
   const implementationPath = "tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py";
   const implementationReference = `https://github.com/rmusser01/tldw_server/blob/${implementationRevision}/${implementationPath}`;
   const implementationClaim = "The fixture-only adapter implements the reviewed bounded metadata projection.";
@@ -1150,7 +1150,7 @@ test("authoritative implemented rows require one exact immutable implementation 
     }, 1, 0],
     ["revision", (row, entry) => {
       entry.reference = entry.reference.replace(
-        "7d0f1fa3574455753cf228f27fc60c3f2511f218",
+        "2d0f968a7f45d2f6a7ed9b73fed4bfdadc204b29",
         "0000000000000000000000000000000000000000",
       );
     }, 1, 0],
@@ -1164,7 +1164,7 @@ test("authoritative implemented rows require one exact immutable implementation 
       row.evidence.push({
         kind: "implementation",
         reference_type: "https_url",
-        reference: "https://github.com/rmusser01/tldw_server/blob/7d0f1fa3574455753cf228f27fc60c3f2511f218/README.md",
+        reference: "https://github.com/rmusser01/tldw_server/blob/2d0f968a7f45d2f6a7ed9b73fed4bfdadc204b29/README.md",
         claim: "An unrelated checked-in artifact cannot certify this implemented inventory row.",
       });
     }, 2, 1],
