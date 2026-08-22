@@ -35,6 +35,16 @@ def test_request_contract_is_immutable_and_uses_bounded_defaults() -> None:
         request.port = 8443  # type: ignore[misc]
 
 
+def test_request_repr_hides_target_without_changing_semantics() -> None:
+    request = _request(target="/works?pageToken=opaque-target-sentinel")
+    equal_request = _request(target="/works?pageToken=opaque-target-sentinel")
+
+    assert request.target == "/works?pageToken=opaque-target-sentinel"
+    assert request == equal_request
+    assert hash(request) == hash(equal_request)
+    assert "opaque-target-sentinel" not in repr(request)
+
+
 def test_http_hop_error_is_the_centralized_core_exception() -> None:
     assert http_hop.HTTPHopError is core_exceptions.HTTPHopError
     assert http_hop.HTTPHopErrorCode is core_exceptions.HTTPHopErrorCode

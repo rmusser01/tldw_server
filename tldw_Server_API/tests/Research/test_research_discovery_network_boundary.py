@@ -129,7 +129,7 @@ _IMPORT_BOOTSTRAP_PATHS = {
     )
 }
 _EXPECTED_IMPORT_DIGESTS = {
-    "contracts.py": "795b84090cafaa034f2a12af4e6f3b3c6ddbb9ebb3f1607db1ae714cbd8d4ea5",
+    "contracts.py": "ca7fb253b2bf67a8b40cd30d19195a5a0ee231a4fae099c28a9a5c349a6273ad",
     "registry.py": "56ffcb107d482f12c2c2477f563b571e716ba73d0937e1a632c89a59b6c1b797",
     "planner.py": "61173a2f0f2e79c022f82cda2f357632dd796cadad2ad3853b9d53df3ca86143",
     "executor.py": "5534d834736280327f11e88fb55460b233e5491521b1448ca65fc5931fc695f5",
@@ -147,7 +147,7 @@ _EXPECTED_IMPORT_DIGESTS = {
     "tldw_Server_API/app/core/Security/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 }
 _EXPECTED_AST_DIGESTS = {
-    "contracts.py": "f0d47f95cbd919b0834c0426deb32e2569bb0f7867082f16f74515ef5e96f70e",
+    "contracts.py": "31006c7e537eadf401494f1356cf55d690da2af8314adb57751b59ce88d36e52",
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
     "planner.py": "0f48631a336d1dd3e940195dd68e3bec96a9d3e105534aa0c164d7ead44d7837",
     "executor.py": "f404c1feaa2e2382dbb6cfc4b779851c334e24803984a4cf5bf9628b353f6fb4",
