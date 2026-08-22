@@ -578,6 +578,21 @@ def test_pubmed_identity_overlay_rejects_malformed_policy_objects_with_typed_pla
     assert caught.value.code == "invalid_pubmed_route_identity:pubmed_ncbi_eutils_pubmed_direct"
 
 
+@pytest.mark.parametrize("malformed_route", (object(),))
+def test_pubmed_identity_policy_predicate_rejects_non_contract_route_without_attribute_error(
+    malformed_route,
+) -> None:
+    assert planner_module._has_exact_pubmed_identity_policy(malformed_route) is False
+
+
+def test_pubmed_identity_policy_predicate_rejects_non_contract_policy_without_attribute_error() -> None:
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_ncbi_eutils_pubmed_direct")
+    object.__setattr__(route, "policy", object())
+
+    assert planner_module._has_exact_pubmed_identity_policy(route) is False
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     (

@@ -1711,7 +1711,7 @@ async def _execute_ncbi_esearch_summary(
         trusted_group, profile, max_input_bytes, retstart, retmax, binding = trusted_inputs(group)
     except DiscoveryAdapterError:
         raise
-    except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError, OverflowError):
         raise DiscoveryAdapterError("provider_payload_invalid") from None
     search, summary = trusted_group.intents
     search_response = _checked_response(await dispatch(search))
@@ -1737,7 +1737,7 @@ async def _execute_ncbi_esearch_summary(
         _raise_adapter_error(error)
     except DiscoveryAdapterError:
         raise
-    except (KeyError, TypeError, ValueError, OverflowError):
+    except (IndexError, KeyError, TypeError, ValueError, OverflowError):
         raise DiscoveryAdapterError("provider_payload_invalid") from None
     if not ids:
         return DiscoveryAdapterResult(candidates=())
@@ -1780,7 +1780,7 @@ async def _execute_ncbi_esearch_summary(
         _raise_adapter_error(error)
     except DiscoveryAdapterError:
         raise
-    except (KeyError, TypeError, ValueError, OverflowError):
+    except (IndexError, KeyError, TypeError, ValueError, OverflowError):
         raise DiscoveryAdapterError("provider_payload_invalid") from None
     return DiscoveryAdapterResult(tuple(candidates))
 

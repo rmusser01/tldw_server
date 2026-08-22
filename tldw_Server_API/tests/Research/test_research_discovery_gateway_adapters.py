@@ -569,6 +569,26 @@ async def test_ncbi_trusted_input_callback_attribute_error_normalizes_but_adapte
 
     assert propagated.value is expected
 
+    group = _pubmed_group()
+    route = foundation_registry().get_route(group.route_id)
+    dispatch = _RecordingDispatch([_response(route, group.intents[0], b"{}")])
+
+    def indexed_parser(*_args, **_kwargs):
+        raise IndexError("synthetic indexed parser failure")
+
+    with pytest.raises(_adapter_error_type()) as indexed:
+        await module._execute_ncbi_esearch_summary(
+            group,
+            dispatch,
+            _CountingClock(),
+            trusted_inputs=module._trusted_pubmed_inputs,
+            parse_esearch_ids=indexed_parser,
+            parse_summary_records=lambda *_args, **_kwargs: (),
+            strict_rate_envelope=False,
+        )
+
+    _assert_typed_error(indexed.value, "provider_payload_invalid")
+
 
 @pytest.mark.parametrize(
     "mutation", ("intent", "query_container", "query_member", "binding_container", "binding_member", "limits")

@@ -365,6 +365,8 @@ def _has_exact_clinicaltrials_policy(route: AccessRoute) -> bool:
 
 def _has_exact_pubmed_identity_policy(route: AccessRoute) -> bool:
     """Anchor the PubMed identity overlay to one approved route and policy."""
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
     policy = route.policy
     origin = policy.origin
     return (
