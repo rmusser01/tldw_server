@@ -805,6 +805,50 @@ def test_preview_text_uses_one_aggregate_budget_with_focus_first(
     assert bounded["text_truncated"] is True
 
 
+def test_preview_overlap_does_not_mark_fully_emitted_primary_text_truncated() -> None:
+    main_text = "0123456789" * 100
+    preview = {
+        "text_preview": main_text,
+        "text_truncated": False,
+        "snippets": [
+            {"kind": "content_excerpt", "text": main_text},
+            {
+                "kind": "chunk",
+                "text": main_text[200:400],
+                "chunk_index": 7,
+            },
+            {
+                "kind": "chunk",
+                "text": main_text[:500],
+                "chunk_index": 8,
+            },
+        ],
+    }
+
+    bounded = sharing._recipient_preview_text_projection(
+        preview,
+        max_chars=1_200,
+        focus_chunk_index=7,
+    )
+
+    assert bounded["text_preview"] == main_text
+    assert bounded["snippets"] == [
+        {
+            "kind": "chunk",
+            "text": main_text[200:400],
+            "chunk_index": 7,
+        }
+    ]
+    assert sum(
+        len(text)
+        for text in (
+            bounded["text_preview"],
+            *(snippet["text"] for snippet in bounded["snippets"]),
+        )
+    ) == 1_200
+    assert bounded["text_truncated"] is False
+
+
 def test_preview_missing_source_is_neutral_and_does_not_open_media(api_factory, monkeypatch) -> None:
     preview_called = False
 
@@ -935,6 +979,34 @@ def test_history_store_failure_remains_unavailable(api_factory, monkeypatch) -> 
     client, _service = api_factory()
 
     response = client.get("/api/v1/sharing/shared-with-me/42/chat/messages")
+
+    assert response.status_code == 503
+    assert response.json() == UNAVAILABLE
+
+
+def test_history_non_cursor_input_error_after_decode_remains_unavailable(
+    api_factory,
+    monkeypatch,
+) -> None:
+    store = SharedWorkspaceChatStore(SimpleNamespace(client_id="9"))
+    valid_timestamp = datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc)
+    cursor = store._encode_cursor(valid_timestamp, valid_timestamp, "message-1")
+
+    async def _history(_context, *, before, limit):
+        store._decode_cursor(before)
+        return store._encode_cursor(
+            "corrupt-stored-timestamp",
+            valid_timestamp,
+            "message-2",
+        )
+
+    monkeypatch.setattr(sharing, "_load_recipient_chat_history", _history)
+    client, _service = api_factory()
+
+    response = client.get(
+        "/api/v1/sharing/shared-with-me/42/chat/messages",
+        params={"before": cursor},
+    )
 
     assert response.status_code == 503
     assert response.json() == UNAVAILABLE

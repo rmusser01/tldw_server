@@ -63,6 +63,10 @@ class StaleSharedWorkspaceChatClaim(ConflictError):
         super().__init__("Shared workspace chat claim is stale.")
 
 
+class SharedWorkspaceCursorInputError(InputError):
+    """Raised only when a client-supplied history cursor is invalid."""
+
+
 @dataclass(frozen=True)
 class SharedWorkspaceChatThread:
     share_id: int
@@ -1177,10 +1181,12 @@ class SharedWorkspaceChatStore:
         if (
             not isinstance(cursor, str)
             or not cursor
-            or len(cursor.encode("utf-8")) > _MAX_CURSOR_BYTES
             or not _CURSOR_RE.fullmatch(cursor)
+            or len(cursor.encode("utf-8")) > _MAX_CURSOR_BYTES
         ):
-            raise InputError("Invalid shared workspace message cursor.")
+            raise SharedWorkspaceCursorInputError(
+                "Invalid shared workspace message cursor."
+            )
         try:
             padding = "=" * (-len(cursor) % 4)
             raw = base64.b64decode(
@@ -1190,18 +1196,34 @@ class SharedWorkspaceChatStore:
             )
             decoded = json.loads(raw.decode("utf-8"))
         except (UnicodeError, ValueError, json.JSONDecodeError, binascii.Error) as exc:
-            raise InputError("Invalid shared workspace message cursor.") from exc
+            raise SharedWorkspaceCursorInputError(
+                "Invalid shared workspace message cursor."
+            ) from exc
         if base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=") != cursor:
-            raise InputError("Invalid shared workspace message cursor.")
+            raise SharedWorkspaceCursorInputError(
+                "Invalid shared workspace message cursor."
+            )
         if (
             not isinstance(decoded, list)
             or len(decoded) != 3
             or not all(isinstance(value, str) and value for value in decoded)
-            or len(decoded[2].encode("utf-8")) > 512
         ):
-            raise InputError("Invalid shared workspace message cursor.")
-        self._aware_utc_string(decoded[0], field="cursor timestamp")
-        self._aware_utc_string(decoded[1], field="cursor last_modified")
+            raise SharedWorkspaceCursorInputError(
+                "Invalid shared workspace message cursor."
+            )
+        try:
+            if len(decoded[2].encode("utf-8")) > 512:
+                raise SharedWorkspaceCursorInputError(
+                    "Invalid shared workspace message cursor."
+                )
+            self._aware_utc_string(decoded[0], field="cursor timestamp")
+            self._aware_utc_string(decoded[1], field="cursor last_modified")
+        except (InputError, UnicodeError) as exc:
+            if isinstance(exc, SharedWorkspaceCursorInputError):
+                raise
+            raise SharedWorkspaceCursorInputError(
+                "Invalid shared workspace message cursor."
+            ) from exc
         return decoded[0], decoded[1], decoded[2]
 
     @classmethod
@@ -1321,6 +1343,7 @@ __all__ = [
     "SharedWorkspaceChatClaim",
     "SharedWorkspaceChatStore",
     "SharedWorkspaceChatThread",
+    "SharedWorkspaceCursorInputError",
     "SharedWorkspaceMessagePage",
     "SharedWorkspaceStoredMessage",
     "StaleSharedWorkspaceChatClaim",

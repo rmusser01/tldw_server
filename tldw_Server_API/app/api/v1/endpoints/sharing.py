@@ -45,7 +45,9 @@ from tldw_Server_API.app.api.v1.utils.shared_workspace_recipient_route import (
     SharedWorkspaceRecipientRoute,
     recipient_error_detail,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+from tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store import (
+    SharedWorkspaceCursorInputError,
+)
 
 from ..schemas.sharing_schemas import (
     AdminShareListResponse,
@@ -744,23 +746,27 @@ def _recipient_preview_text_projection(
     )
 
     remaining = max_chars
-    available_chars = 0
-    emitted_chars = 0
-    seen_texts: set[str] = set()
+    emitted_by_text: dict[str, int] = {}
+    primary_was_shortened = False
     bounded_preview: str | None = None
     bounded_snippets: list[dict[str, Any]] = []
     for kind, text, snippet in candidates:
-        if text in seen_texts:
+        prior_emitted = emitted_by_text.get(text)
+        if prior_emitted is not None:
+            if kind == "preview" and prior_emitted < len(text):
+                primary_was_shortened = True
             continue
-        seen_texts.add(text)
-        available_chars += len(text)
         if remaining <= 0:
+            emitted_by_text[text] = 0
+            if kind == "preview":
+                primary_was_shortened = True
             continue
         emitted = text[:remaining]
+        emitted_by_text[text] = len(emitted)
         remaining -= len(emitted)
-        emitted_chars += len(emitted)
         if kind == "preview":
             bounded_preview = emitted
+            primary_was_shortened = len(emitted) < len(text)
             continue
         bounded = dict(snippet or {})
         bounded["text"] = emitted
@@ -775,7 +781,7 @@ def _recipient_preview_text_projection(
         "text_preview": bounded_preview,
         "snippets": bounded_snippets,
         "text_truncated": bool(preview.get("text_truncated"))
-        or emitted_chars < available_chars,
+        or primary_was_shortened,
     }
 
 
@@ -1562,7 +1568,7 @@ async def get_shared_workspace_messages(
             limit=limit,
         )
         return _recipient_message_page(history)
-    except InputError as exc:
+    except SharedWorkspaceCursorInputError as exc:
         raise _recipient_http_error(422, "invalid_shared_workspace_request") from exc
     except (HTTPException, ValidationError) as exc:
         if isinstance(exc, HTTPException):

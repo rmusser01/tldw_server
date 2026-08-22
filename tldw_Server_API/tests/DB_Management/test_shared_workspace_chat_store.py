@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -13,6 +14,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store import (
     SharedWorkspaceChatStore,
+    SharedWorkspaceCursorInputError,
     StaleSharedWorkspaceChatClaim,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -603,8 +605,28 @@ def test_history_uses_opaque_stable_cursor_and_returns_chronological_pages(
     assert second.next_before is None
     assert first.messages[-1].citations == turns[-1].citations
 
-    for invalid in ("not-base64", "e30", "", "A" * 2049):
-        with pytest.raises(InputError, match="cursor"):
+    invalid_timestamp_cursor = base64.urlsafe_b64encode(
+        json.dumps(
+            ["not-a-timestamp", NOW.isoformat(), "message-1"],
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    invalid_message_id_cursor = base64.urlsafe_b64encode(
+        json.dumps(
+            [NOW.isoformat(), NOW.isoformat(), "\ud800"],
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    for invalid in (
+        "not-base64",
+        "e30",
+        "",
+        "\ud800",
+        "A" * 2049,
+        invalid_timestamp_cursor,
+        invalid_message_id_cursor,
+    ):
+        with pytest.raises(SharedWorkspaceCursorInputError, match="cursor"):
             db.shared_workspace_chat_store.list_messages(
                 share_id=41, before=invalid, limit=3
             )

@@ -199,3 +199,61 @@ Result: `1 failed, 36 deselected`; recipient operations did not declare the stri
 ### PostgreSQL State And Concerns
 
 No PostgreSQL schema, policy, fixture, query, or runtime state was touched. No Fix Round 1 blocker remains. The known repository-wide default-character executor cleanup can make the serial sharing matrix slow, but it continued making progress and exited successfully. Task 7 still owns replacing the typed interim 503 chat route with canonical safe generation.
+
+## Fix Round 2
+
+### Status
+
+DONE. Reviewed fix head `d800b952da34d1a36178a4551050fb721678b213`; both blocking re-review findings are fixed.
+
+### Implementation
+
+- Added and exported `SharedWorkspaceCursorInputError`, an `InputError` subtype owned by the canonical shared-workspace chat store. Every client cursor rejection in `_decode_cursor` now uses that subtype, including malformed encoding/shape, noncanonical base64, invalid timestamps, oversized or unencodable message IDs, and unencodable cursor strings.
+- The recipient history route catches only `SharedWorkspaceCursorInputError` for exact `422 invalid_shared_workspace_request`. Other `InputError` instances, including real `_encode_cursor` failure on corrupt stored timestamps after a valid cursor decode, flow to exact typed 503.
+- Preview `text_truncated` now preserves canonical source-content semantics: it is true when the canonical preview helper says source content was truncated or when focus allocation shortens the primary `text_preview`. Omitted duplicate/overlapping supplemental chunks do not independently mark source content truncated.
+
+### TDD RED
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/DB_Management/test_shared_workspace_chat_store.py tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py -k 'history_uses_opaque_stable_cursor or history_rejects_cursor_from_canonical_store_decoder or history_non_cursor_input_error_after_decode_remains_unavailable' -q --timeout=45 -o log_cli=false
+```
+
+Initial result: collection error because `SharedWorkspaceCursorInputError` did not exist. After adding only the canonical subtype/decoder normalization: `1 failed, 2 passed, 68 deselected`; real encoder-side corrupt stored timestamp `InputError` was still misclassified as 422.
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py -k 'preview_overlap_does_not_mark_fully_emitted_primary_text_truncated or preview_text_uses_one_aggregate_budget_with_focus_first' -q --timeout=45 -o log_cli=false
+```
+
+Result: `1 failed, 2 passed, 36 deselected`; omitted overlapping chunks incorrectly forced `text_truncated=true`.
+
+Self-review added unencodable cursor/message-ID cases to the real decoder target. Focused RED: `1 failed, 32 deselected`; an unencodable cursor raised `UnicodeEncodeError` before normalization.
+
+### GREEN Verification
+
+- Final focused new/retained cursor and preview target: `8 passed, 64 deselected, 4 warnings in 8.38s`.
+- Complete canonical SQLite shared-workspace chat store file: `33 passed, 2 warnings in 21.49s`.
+- Fix Round 1 accepted Task 5 evidence remains `102 passed` for the exact matrix and `11 passed` for focused auth/introspection/OpenAPI/old-route coverage.
+- Ruff on both touched production files and both touched tests: passed.
+- Bandit on `sharing.py` plus the now-touched canonical store: zero findings across 3,112 LOC. One existing `nosec B608` fixed-store-SQL suppression was skipped as designed; JSON at `/tmp/bandit_task_12020_40_task5_fix_round_2.json`.
+- `git diff --check`: passed.
+- PostgreSQL was not touched.
+
+### Aggregate Run Diagnostics And Three-Attempt Rule
+
+- Aggregate attempt 1 used the serial 104-test Task 5 matrix. It exceeded the established 266-second profile while continuing to emit passing progress and was interrupted on request. No assertion failed.
+- Aggregate attempt 2 used the previously successful `-n 4 --dist=loadfile --timeout=45` form. It also exceeded its prior 54-second profile because a loadfile worker encountered the known repository-wide ChaCha default-character cleanup latency. It eventually exited `104 passed, 24 warnings in 264.37s`, but is treated as over-profile diagnostic evidence rather than required completion evidence.
+- No third aggregate was run. Process inspection confirmed no Task 5 pytest or xdist worker remained. Unrelated pytest processes for other worktrees/test targets were not touched.
+
+### Files And Self-Review
+
+- Production: `tldw_Server_API/app/api/v1/endpoints/sharing.py`; `tldw_Server_API/app/core/DB_Management/chacha/shared_workspace_chat_store.py`.
+- Tests: `tldw_Server_API/tests/DB_Management/test_shared_workspace_chat_store.py`; `tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py`.
+- Tracking: this report, the SDD progress ledger, and existing `TASK-12020.40` notes.
+- The API contains no cursor codec copy and catches no broad domain `InputError`. Authorization-before-resource-open ordering and typed 422/503 envelopes are unchanged.
+- Preview still enforces one aggregate 1..12,000-character budget, focus-first allocation, and duplicate suppression; truncation now describes canonical source-content coverage only.
+- No recipient fields, owner/media identifiers, internal scope, paths, secrets, errors, credentials, prompts, queries, or provider diagnostics were added.
+- The two unrelated watchlist templates remain unmodified and unstaged.
+
+### Concerns
+
+No Fix Round 2 product blocker remains. Aggregate suite cleanup latency is a repository-wide test-lifecycle concern and is documented above; focused product assertions and the full relevant store suite pass under bounded timeouts. Task 7 still owns canonical safe chat generation.
