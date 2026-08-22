@@ -327,6 +327,55 @@ describe("useStandaloneHtmlGeneration", () => {
     getSpy.mockRestore()
   })
 
+  it("retains a trusted recovery kind through storage outage and clears it on definitive none", async () => {
+    const first = await setup()
+    first.unmount()
+    const keys = first.module.buildStandaloneHtmlStorageKeys({
+      serverOrigin: "https://tldw.example",
+      principalId: "42"
+    })
+    const probe = renderHook(() => first.module.useStandaloneHtmlRecoveryProbe())
+    await waitFor(() => expect(probe.result.current.status).toBe("available"))
+    expect(probe.result.current.kind).toBe("draft")
+
+    const keySpy = vi.spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "key")
+      .mockImplementation(() => { throw new DOMException("storage unavailable", "SecurityError") })
+    await act(async () => probe.result.current.retry())
+    keySpy.mockRestore()
+
+    expect(probe.result.current.status).toBe("unavailable")
+    expect(probe.result.current.kind).toBe("draft")
+
+    sessionStorage.removeItem(keys.draft)
+    await act(async () => probe.result.current.retry())
+    expect(probe.result.current.status).toBe("none")
+    expect(probe.result.current.kind).toBeNull()
+    probe.unmount()
+  })
+
+  it("clears a trusted recovery kind when a confirmed scope switch cannot inspect storage", async () => {
+    const first = await setup()
+    first.unmount()
+    const oldKeys = first.module.buildStandaloneHtmlStorageKeys({
+      serverOrigin: "https://tldw.example",
+      principalId: "42"
+    })
+    const probe = renderHook(() => first.module.useStandaloneHtmlRecoveryProbe())
+    await waitFor(() => expect(probe.result.current.kind).toBe("draft"))
+
+    mocks.getConfig.mockResolvedValue({ serverUrl: "https://other.example/base" })
+    mocks.getCurrentUser.mockResolvedValue({ id: 77 })
+    const keySpy = vi.spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "key")
+      .mockImplementation(() => { throw new DOMException("storage unavailable", "SecurityError") })
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+    await waitFor(() => expect(probe.result.current.status).toBe("unavailable"))
+    keySpy.mockRestore()
+
+    expect(probe.result.current.kind).toBeNull()
+    expect(sessionStorage.getItem(oldKeys.draft)).toBeNull()
+    probe.unmount()
+  })
+
   it("invalidates deferred recovery probing on logout and deletes its last trusted namespace", async () => {
     mocks.submit.mockResolvedValue(pendingReceipt)
     mocks.status.mockReturnValue(new Promise(() => undefined))
@@ -351,6 +400,7 @@ describe("useStandaloneHtmlGeneration", () => {
     })))
 
     expect(probe.result.current.status).toBe("unavailable")
+    expect(probe.result.current.kind).toBeNull()
     expect(mocks.getConfig).toHaveBeenCalledTimes(callsBeforeLogout)
     expect(sessionStorage.getItem(keys.draft)).toBeNull()
     expect(sessionStorage.getItem(keys.resume)).toBeNull()

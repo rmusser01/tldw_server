@@ -328,14 +328,19 @@ export const useStandaloneHtmlRecoveryProbe = (): StandaloneHtmlRecoveryProbeRes
     if (requestId !== requestIdRef.current) return
     const result = scope ? inspectStandaloneHtmlRecovery(scope) : null
     if (requestId !== requestIdRef.current) return
-    if (scope && result) {
-      if (lastTrustedScopeRef.current && !sameScope(lastTrustedScopeRef.current, scope)) {
-        removeScopedRecoveryRecords(lastTrustedScopeRef.current)
-      }
+    if (scope && lastTrustedScopeRef.current && !sameScope(lastTrustedScopeRef.current, scope)) {
+      removeScopedRecoveryRecords(lastTrustedScopeRef.current)
+      lastTrustedScopeRef.current = scope
+      setKind(null)
+    } else if (scope && result) {
       lastTrustedScopeRef.current = scope
     }
-    setKind(result?.kind === "resume" || result?.kind === "draft" ? result.kind : null)
-    setStatus(result === null ? "unavailable" : result.kind === "none" ? "none" : "available")
+    if (result === null) {
+      setStatus("unavailable")
+      return
+    }
+    setKind(result.kind === "resume" || result.kind === "draft" ? result.kind : null)
+    setStatus(result.kind === "none" ? "none" : "available")
   }, [])
 
   React.useEffect(() => {
@@ -354,7 +359,6 @@ export const useStandaloneHtmlRecoveryProbe = (): StandaloneHtmlRecoveryProbeRes
     }
     const invalidate = () => {
       requestIdRef.current += 1
-      setKind(null)
       setStatus("checking")
     }
     const scopeMismatch = () => {

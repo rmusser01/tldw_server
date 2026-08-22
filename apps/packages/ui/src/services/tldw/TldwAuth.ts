@@ -5,6 +5,7 @@ import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { clearSourceReviewHandoffs } from "@/services/tldw/source-review-handoff"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { clearStandaloneHtmlSessionRecords } from "@/services/tldw/standalone-html-session-records"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 export interface LoginCredentials {
@@ -240,6 +241,13 @@ export class TldwAuthService {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer)
       this.refreshTimer = null
+    }
+
+    clearStandaloneHtmlSessionRecords()
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
+        detail: { kind: "logout" }
+      }))
     }
   }
 
