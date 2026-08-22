@@ -131,10 +131,10 @@ def _serialize_result_document(doc: Any) -> dict[str, Any]:
         ):
             value = doc.get(field_name)
             if value is not None:
-                metadata[field_name] = value
+                metadata.setdefault(field_name, value)
         doc_id = doc.get("id")
         if doc_id is not None:
-            metadata["chunk_id"] = str(doc_id)
+            metadata.setdefault("chunk_id", str(doc_id))
         serialized = {
             "id": doc_id,
             "content": doc.get("content") or doc.get("text") or doc.get("body"),
@@ -157,11 +157,11 @@ def _serialize_result_document(doc: Any) -> dict[str, Any]:
 
     doc_id = getattr(doc, "id", None)
     if doc_id is not None:
-        metadata["chunk_id"] = str(doc_id)
+        metadata.setdefault("chunk_id", str(doc_id))
     for field_name in ("chunk_index", "start_char", "end_char"):
         value = getattr(doc, field_name, None)
         if value is not None:
-            metadata[field_name] = value
+            metadata.setdefault(field_name, value)
 
     serialized = {
         "id": doc_id,
@@ -2204,6 +2204,8 @@ async def unified_rag_pipeline(
     # ========== PERFORMANCE ==========
     enable_performance_analysis: bool = False,
     timeout_seconds: Optional[float] = None,
+    include_retrieval_diagnostics: bool = True,
+
     # ========== STREAMING ==========
     enable_streaming: bool = False,
     # ========== INDEXING / NAMESPACE ==========
@@ -2789,6 +2791,8 @@ async def unified_rag_pipeline(
         to_value: str,
         reason: str,
     ) -> None:
+        if not include_retrieval_diagnostics:
+            return
         profile_resolution = _ensure_profile_resolution_metadata()
         degraded_features = profile_resolution.get("degraded_features")
         if not isinstance(degraded_features, list):
@@ -2803,7 +2807,8 @@ async def unified_rag_pipeline(
             }
         )
 
-    _ensure_profile_resolution_metadata()
+    if include_retrieval_diagnostics:
+        _ensure_profile_resolution_metadata()
 
     cache_instance = None
     cache_setup_attempted = False
@@ -3178,7 +3183,7 @@ async def unified_rag_pipeline(
             for source, count in filtered_artifact_counts.items():
                 cumulative_filtered_artifact_counts[source] = cumulative_filtered_artifact_counts.get(source, 0) + count
             result.documents = filtered_documents
-            if source_status_retriever is not None:
+            if include_retrieval_diagnostics and source_status_retriever is not None:
                 result.metadata["source_status"] = _build_source_status(
                     _normalize_pipeline_sources(list(retrieval_sources)),
                     retriever=source_status_retriever,
@@ -6534,7 +6539,7 @@ async def unified_rag_pipeline(
 
         # ========== WHY THESE SOURCES (metadata) ==========
         try:
-            docs = result.documents or []
+            docs = (result.documents or []) if include_retrieval_diagnostics else []
             if docs:
                 import urllib.parse
 

@@ -167,6 +167,7 @@ class SharedRetrievalPolicy:
             media_db=media_db,
             include_media_ids=list(media_ids),
             index_namespace=f"user_{owner_user_id}_media_embeddings",
+            user_id=str(owner_user_id),
         )
         return call
 
@@ -249,6 +250,7 @@ _PINNED_RETRIEVAL_PARAMETERS: tuple[tuple[str, Any], ...] = (
     ("trace_id", None),
     ("enable_performance_analysis", False),
     ("timeout_seconds", None),
+    ("include_retrieval_diagnostics", False),
     ("enable_streaming", False),
     ("retrieval_plan", None),
     ("resolved_request", None),
@@ -292,7 +294,6 @@ _PINNED_RETRIEVAL_PARAMETERS: tuple[tuple[str, Any], ...] = (
     ("filter_media_types", None),
     ("chacha_db", None),
     ("fallback_on_error", False),
-    ("user_id", None),
     ("session_id", None),
     ("ground_truth_doc_ids", None),
     ("enable_faithfulness_eval", False),
@@ -317,7 +318,7 @@ _PINNED_RETRIEVAL_PARAMETERS: tuple[tuple[str, Any], ...] = (
 )
 
 _DYNAMIC_RETRIEVAL_PARAMETERS = frozenset(
-    {"media_db_path", "media_db", "include_media_ids", "index_namespace"}
+    {"media_db_path", "media_db", "include_media_ids", "index_namespace", "user_id"}
 )
 
 _REVIEWED_INERT_RETRIEVAL_PARAMETERS = frozenset(
@@ -698,11 +699,7 @@ class SharedWorkspaceChatService:
 
         for row in sorted_rows:
             source_id = _source_row_id(row)
-            try:
-                media_id = _positive_int(row.get("media_id"))
-            except ValueError:
-                invalid_sources.add(source_id)
-                continue
+            media_id = _positive_int(row.get("media_id"))
             row_media_ids[source_id] = media_id
             if media_id in media_rows:
                 continue
@@ -729,11 +726,13 @@ class SharedWorkspaceChatService:
                 media is None
                 or _truthy(media.get("deleted"))
                 or _truthy(media.get("is_trash"))
-                or not _bounded_exact_text(media.get("uuid"), 512)
-                or not _bounded_exact_text(media.get("content_hash"), 512)
             ):
                 invalid_sources.add(source_id)
                 continue
+            if not _bounded_exact_text(
+                media.get("uuid"), 512
+            ) or not _bounded_exact_text(media.get("content_hash"), 512):
+                raise ValueError("invalid media identity")
             live_rows.append(row)
 
         try:

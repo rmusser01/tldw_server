@@ -56,7 +56,7 @@ def test_serialize_result_document_preserves_dict_compatibility_without_inventin
     assert serialized["metadata"]["source"] == "media_db"
 
 
-def test_serialize_result_document_uses_document_source_and_authoritative_locators() -> None:
+def test_serialize_result_document_only_overrides_authoritative_source() -> None:
     serialized = _serialize_result_document(
         Document(
             id="note-chunk-1",
@@ -66,6 +66,7 @@ def test_serialize_result_document_uses_document_source_and_authoritative_locato
             metadata={
                 "source": "media_db",
                 "media_id": 10,
+                "chunk_id": "metadata-chunk-1",
                 "chunk_index": 999,
                 "start_char": 999,
                 "end_char": 999,
@@ -78,7 +79,52 @@ def test_serialize_result_document_uses_document_source_and_authoritative_locato
 
     assert serialized["source"] == "notes"
     assert serialized["metadata"]["source"] == "notes"
-    assert serialized["metadata"]["chunk_id"] == "note-chunk-1"
-    assert serialized["metadata"]["chunk_index"] == 2
-    assert serialized["metadata"]["start_char"] == 10
-    assert serialized["metadata"]["end_char"] == 35
+    assert serialized["metadata"]["chunk_id"] == "metadata-chunk-1"
+    assert serialized["metadata"]["chunk_index"] == 999
+    assert serialized["metadata"]["start_char"] == 999
+    assert serialized["metadata"]["end_char"] == 999
+
+
+def test_serialize_result_document_preserves_dict_metadata_identity_and_locators() -> None:
+    serialized = _serialize_result_document(
+        {
+            "id": "top-chunk-1",
+            "content": "Ordinary RAG content",
+            "source": DataSource.MEDIA_DB,
+            "media_id": 10,
+            "note_id": "top-note",
+            "record_id": "top-record",
+            "chunk_id": "top-chunk-field",
+            "chunk_index": 2,
+            "start": 10,
+            "end": 35,
+            "start_char": 10,
+            "end_char": 35,
+            "metadata": {
+                "source": "notes",
+                "media_id": 99,
+                "note_id": "metadata-note",
+                "record_id": "metadata-record",
+                "chunk_id": "metadata-chunk",
+                "chunk_index": 7,
+                "start": 70,
+                "end": 95,
+                "start_char": 70,
+                "end_char": 95,
+            },
+        }
+    )
+
+    assert serialized["source"] == "media_db"
+    assert serialized["metadata"] == {
+        "source": "media_db",
+        "media_id": 99,
+        "note_id": "metadata-note",
+        "record_id": "metadata-record",
+        "chunk_id": "metadata-chunk",
+        "chunk_index": 7,
+        "start": 70,
+        "end": 95,
+        "start_char": 70,
+        "end_char": 95,
+    }

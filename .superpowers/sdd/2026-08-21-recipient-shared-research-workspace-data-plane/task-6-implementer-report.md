@@ -148,3 +148,66 @@ Task 7 still owns API orchestration, receipt persistence, generation, and persis
 ### PostgreSQL State
 
 PostgreSQL was not started or touched. Fix Round 1 changed no PostgreSQL schema, migration, RLS policy, fixture, or query.
+
+## Fix Round 2
+
+Reviewed head: `f741f881e486540b43df4e5efd57f6ca718a42ca`
+
+### Changes
+
+- Added a default-on `include_retrieval_diagnostics` unified-pipeline gate. Shared retrieval pins it off, so `profile_resolution`, `source_status`, and `why_these_sources` cannot enter its response metadata while ordinary callers retain the existing default diagnostics.
+- Exercised `retrieve_verified_evidence` through the real unified pipeline and a controlled media retriever. The integration exposed and fixed owner namespace reconstruction by passing the owner user ID as a server-owned dynamic input alongside the explicit owner media database, namespace, and IDs.
+- Classified invalid source-row media IDs and malformed exact media UUID/content hashes as storage-shape errors. `all` maps them to `shared_workspace_unavailable`, including mixed rows, while initial `include` and revalidation preserve their established mappings.
+- Replaced the hidden-kwargs key-set-only analysis with a scope-aware AST validator. Every load of the outer pipeline `kwargs` must be the direct receiver of an approved literal-key `get`/`pop`/`setdefault` call or a constant-string subscript; aliasing, dynamic keys, iteration, membership, truthiness, unpacking, and indirect method access fail the sentinel, while nested functions with their own `kwargs` are ignored.
+- Restored serializer `setdefault` precedence for all non-source metadata identities and locators. Only top-level `source` is authoritative; shared retrieval still rejects preserved chunk identity conflicts in the actual serialized response shape.
+
+### TDD Evidence
+
+RED results captured before each production correction:
+
+```text
+real pipeline diagnostics: 1 failed
+real owner namespace integration: 1 failed, 2 passed
+malformed all-mode identities: 14 failed, 6 passed
+outer kwargs analyzer fixtures: 8 failed, 1 passed
+serializer and shared actual-shape regressions: 3 failed
+```
+
+Focused GREEN command:
+
+```text
+TLDW_TEST_NO_DOCKER=1 .venv/bin/python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py tldw_Server_API/tests/RAG/test_unified_pipeline_document_serialization.py -q --timeout=60 -o log_cli=false
+```
+
+Result: `126 passed, 4 warnings in 6.85s`.
+
+Focused Task 4 and Task 5 regressions:
+
+```text
+TLDW_TEST_NO_DOCKER=1 .venv/bin/python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_access_service.py -q --timeout=60 -o log_cli=false
+TLDW_TEST_NO_DOCKER=1 .venv/bin/python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py tldw_Server_API/tests/Sharing/test_shared_workspace_chat_security.py -q --timeout=60 -o log_cli=false
+```
+
+Results: `9 passed, 2 warnings in 6.62s`; `40 passed, 4 warnings in 7.71s`.
+
+The established 290-item Task 4/5/6 xdist matrix scheduled all tests and reached `pytest_sessionfinish` without reporting an assertion failure. Its `xdist`/`execnet` node teardown exceeded the prior cleanup-latency profile and was interrupted once with exit 130. No aggregate rerun was made, and no pytest/xdist worker remained.
+
+Ruff passed all four touched Python files. Bandit reported zero findings and zero errors across both touched production files (9,006 LOC, zero skips). `git diff --check` passed.
+
+### Files
+
+- `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`
+- `tldw_Server_API/app/core/Sharing/shared_workspace_chat_service.py`
+- `tldw_Server_API/tests/RAG/test_unified_pipeline_document_serialization.py`
+- `tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py`
+- Task 6 backlog, progress, and implementer report tracking.
+
+### Self-Review And Residual Risk
+
+The diagnostics switch defaults to the prior ordinary-client behavior and gates only response diagnostics, not retrieval. The shared policy owns every dynamic value and still accepts no caller plan, profile, metadata, or arbitrary kwargs. Source scope remains explicit owner-only media; serializer compatibility does not weaken shared validation because authoritative source and top-level/metadata identity conflicts are checked after serialization.
+
+Task 7 remains responsible for API orchestration, generation, receipts, and persisted citations. The policy signature and hidden-kwargs sentinels intentionally require review when the unified pipeline changes. The aggregate teardown issue remains repository test-harness cleanup behavior; focused Task 4, Task 5, Task 6, real-pipeline, and serializer acceptance targets are conclusive.
+
+### PostgreSQL State
+
+PostgreSQL was not started or touched. Fix Round 2 changed no PostgreSQL schema, migration, RLS policy, fixture, or query.

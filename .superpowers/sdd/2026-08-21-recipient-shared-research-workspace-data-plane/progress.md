@@ -106,6 +106,11 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Fix Round 1 TDD RED: serializer `3 failed, 1 passed`; response/policy `28 failed, 3 passed`; snapshot/title `9 failed`; identity/capacity `15 failed`; timeout policy `1 failed`; contentless locator self-review `1 failed`.
 - Fix Round 1 GREEN: serializer and focused Task 6 `94 passed`; final Task 4/5/6 regression matrix `258 passed`; Ruff passed; Bandit reported zero findings across 9,003 touched production LOC; `git diff --check` passed.
 - Fix Round 1 PostgreSQL state: untouched and not started; no schema, migration, policy, fixture, or PostgreSQL query changed.
+- Fix Round 2 reviewed head: `f741f881e486540b43df4e5efd57f6ca718a42ca`.
+- Fix Round 2: added a default-on unified-pipeline retrieval-diagnostics gate and pinned it off for shared retrieval, supplied the owner user namespace on the real retrieval path, rejected malformed authoritative media identities as storage-shape failures, hardened the hidden-kwargs sentinel against every unapproved outer `kwargs` load, and restored ordinary serializer metadata precedence for every non-source field while retaining authoritative top-level provenance.
+- Fix Round 2 TDD RED: real-pipeline diagnostics `1 failed`; owner namespace integration `1 failed, 2 passed`; malformed all-mode identities `14 failed, 6 passed`; kwargs analyzer negative fixtures `8 failed, 1 passed`; serializer/shared actual-shape regressions `3 failed`.
+- Fix Round 2 GREEN: serializer plus focused Task 6 `126 passed`; focused Task 4 access `9 passed`; focused Task 5 recipient/security `40 passed`. The 290-item xdist aggregate reached `pytest_sessionfinish` without an assertion failure but exceeded the established cleanup profile in `xdist`/`execnet` node teardown and was interrupted once with exit 130; it was not repeated. Ruff passed; Bandit reported zero findings across 9,006 touched production LOC; `git diff --check` passed.
+- Fix Round 2 PostgreSQL state: untouched and not started; no schema, migration, RLS policy, fixture, or PostgreSQL query changed.
 - Status: complete.
 
 ## Task 4 - Authoritative access and reusable read helpers

@@ -142,6 +142,32 @@ class _Pipeline:
         return self.result
 
 
+class _ControlledRealRetriever:
+    calls: list[dict[str, Any]] = []
+
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+        self.retrievers = {DataSource.MEDIA_DB: object()}
+
+    async def retrieve_from_plan(self, _plan: Any, **kwargs: Any) -> list[Document]:
+        type(self).calls.append(kwargs)
+        return [
+            Document(
+                id="chunk-real-1",
+                content="real pipeline evidence",
+                source=DataSource.MEDIA_DB,
+                score=0.91,
+                metadata={
+                    "source": "media_db",
+                    "media_id": 1,
+                    "chunk_id": "chunk-real-1",
+                    "chunk_index": 1,
+                    "start_char": 0,
+                    "end_char": 22,
+                },
+            )
+        ]
+
+
 def _result(
     documents: list[Any],
     *,
@@ -412,6 +438,77 @@ def test_all_maps_malformed_authoritative_rows_to_sanitized_data_unavailable(
     assert type(exc_info.value) is not ValueError
 
 
+@pytest.mark.parametrize("include_valid_source", [False, True], ids=["alone", "mixed"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("media_id", 0),
+        ("uuid", " media-uuid-1"),
+        ("uuid", "media\x00uuid"),
+        ("uuid", "u" * 513),
+        ("content_hash", " sha256-1"),
+        ("content_hash", "sha256\x00hash"),
+        ("content_hash", "h" * 513),
+    ],
+    ids=[
+        "invalid-media-id",
+        "uuid-whitespace",
+        "uuid-nonprintable",
+        "uuid-oversized",
+        "hash-whitespace",
+        "hash-nonprintable",
+        "hash-oversized",
+    ],
+)
+def test_all_rejects_malformed_authoritative_media_identity_as_storage_shape(
+    field: str,
+    value: Any,
+    include_valid_source: bool,
+) -> None:
+    malformed_source = _source("source-bad", 1)
+    malformed_media = _media(1)
+    if field == "media_id":
+        malformed_source["media_id"] = value
+    else:
+        malformed_media[field] = value
+    sources = [malformed_source]
+    rows = {1: malformed_media}
+    if include_valid_source:
+        sources.append(_source("source-valid", 2))
+        rows[2] = _media(2)
+    service, _chacha, _media_db, _pipeline = _service(sources, rows)
+
+    with pytest.raises(SharedWorkspaceChatServiceError) as exc_info:
+        service.resolve_source_snapshot(mode="all")
+
+    assert exc_info.value.code == "shared_workspace_unavailable"
+    assert type(exc_info.value) is not ValueError
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("media_id", 0),
+        ("uuid", "media-uuid-1 "),
+        ("content_hash", "sha256\x00hash"),
+    ],
+)
+def test_include_maps_malformed_authoritative_media_identity_to_invalid_request(
+    field: str,
+    value: Any,
+) -> None:
+    source = _source("source-a", 1)
+    media = _media(1)
+    if field == "media_id":
+        source["media_id"] = value
+    else:
+        media[field] = value
+    service, _chacha, _media_db, _pipeline = _service([source], {1: media})
+
+    with pytest.raises(SharedWorkspaceSourceScopeInvalid):
+        service.resolve_source_snapshot(mode="include", source_ids=("source-a",))
+
+
 @pytest.mark.parametrize("field", ["uuid", "content_hash"])
 def test_initial_snapshot_rejects_noncanonical_exact_media_identity(field: str) -> None:
     media = _media(1)
@@ -488,6 +585,28 @@ def test_revalidation_rejects_noncanonical_identity_whitespace(field: str) -> No
     )
     snapshot = service.resolve_source_snapshot(mode="all")
     media_db.rows[1][field] = f"{media_db.rows[1][field]} "
+
+    with pytest.raises(SharedWorkspaceSourceChanged):
+        service.revalidate_source_snapshot(snapshot=snapshot)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("media_id", 0), ("uuid", "media\x00uuid"), ("content_hash", "h" * 513)],
+)
+def test_revalidation_maps_malformed_identity_shape_to_source_changed(
+    field: str,
+    value: Any,
+) -> None:
+    service, chacha, media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+    if field == "media_id":
+        chacha.sources[0][field] = value
+    else:
+        media_db.rows[1][field] = value
 
     with pytest.raises(SharedWorkspaceSourceChanged):
         service.revalidate_source_snapshot(snapshot=snapshot)
@@ -593,6 +712,7 @@ async def test_retrieval_call_is_media_only_owner_scoped_and_locked() -> None:
     assert call["include_media_ids"] == [1, 2]
     assert 999 not in call["include_media_ids"]
     assert call["index_namespace"] == "user_7_media_embeddings"
+    assert call["user_id"] == "7"
     assert call["media_db_path"] == "/private/owner/media.db"
     assert call["media_db"] is media_db
     assert call["notes_db_path"] is None
@@ -605,6 +725,7 @@ async def test_retrieval_call_is_media_only_owner_scoped_and_locked() -> None:
     assert call["chunk_type_filter"] is None
     assert call["ocr_confidence_threshold"] is None
     assert call["timeout_seconds"] is None
+    assert call["include_retrieval_diagnostics"] is False
     assert call["reranking_strategy"] == "none"
     assert call["search_depth_mode"] is None
     assert call["rag_profile"] is None
@@ -620,11 +741,18 @@ async def test_retrieval_call_is_media_only_owner_scoped_and_locked() -> None:
             assert value is False, name
 
 
-def _literal_outer_pipeline_kwargs_reads() -> set[str]:
-    tree = ast.parse(textwrap.dedent(inspect.getsource(unified_rag_pipeline)))
+def _literal_outer_pipeline_kwargs_reads(source: str | None = None) -> set[str]:
+    tree = ast.parse(
+        textwrap.dedent(source or inspect.getsource(unified_rag_pipeline))
+    )
     root = tree.body[0]
     assert isinstance(root, ast.AsyncFunctionDef)
     keys: set[str] = set()
+    parents = {
+        child: parent
+        for parent in ast.walk(root)
+        for child in ast.iter_child_nodes(parent)
+    }
 
     class KwargsReadVisitor(ast.NodeVisitor):
         def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -645,30 +773,57 @@ def _literal_outer_pipeline_kwargs_reads() -> set[str]:
 
         visit_AsyncFunctionDef = visit_FunctionDef
 
-        def visit_Call(self, node: ast.Call) -> None:
-            function = node.func
-            if (
-                isinstance(function, ast.Attribute)
-                and isinstance(function.value, ast.Name)
-                and function.value.id == "kwargs"
-                and function.attr in {"get", "pop", "setdefault"}
-                and node.args
-                and isinstance(node.args[0], ast.Constant)
-                and isinstance(node.args[0].value, str)
-            ):
-                keys.add(node.args[0].value)
-            self.generic_visit(node)
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            names = {
+                argument.arg
+                for argument in (
+                    *node.args.posonlyargs,
+                    *node.args.args,
+                    *node.args.kwonlyargs,
+                )
+            }
+            if node.args.vararg is not None:
+                names.add(node.args.vararg.arg)
+            if node.args.kwarg is not None:
+                names.add(node.args.kwarg.arg)
+            if "kwargs" not in names:
+                self.generic_visit(node)
 
-        def visit_Subscript(self, node: ast.Subscript) -> None:
+        def visit_Name(self, node: ast.Name) -> None:
             if (
-                isinstance(node.ctx, ast.Load)
-                and isinstance(node.value, ast.Name)
-                and node.value.id == "kwargs"
-                and isinstance(node.slice, ast.Constant)
-                and isinstance(node.slice.value, str)
+                node.id != "kwargs"
+                or not isinstance(node.ctx, ast.Load)
             ):
-                keys.add(node.slice.value)
-            self.generic_visit(node)
+                return
+
+            parent = parents.get(node)
+            if (
+                isinstance(parent, ast.Subscript)
+                and parent.value is node
+                and isinstance(parent.ctx, ast.Load)
+                and isinstance(parent.slice, ast.Constant)
+                and isinstance(parent.slice.value, str)
+            ):
+                keys.add(parent.slice.value)
+                return
+
+            grandparent = parents.get(parent) if parent is not None else None
+            if (
+                isinstance(parent, ast.Attribute)
+                and parent.value is node
+                and parent.attr in {"get", "pop", "setdefault"}
+                and isinstance(grandparent, ast.Call)
+                and grandparent.func is parent
+                and grandparent.args
+                and isinstance(grandparent.args[0], ast.Constant)
+                and isinstance(grandparent.args[0].value, str)
+            ):
+                keys.add(grandparent.args[0].value)
+                return
+
+            raise AssertionError(
+                f"unapproved outer kwargs load at line {node.lineno}"
+            )
 
     visitor = KwargsReadVisitor()
     for statement in root.body:
@@ -757,6 +912,52 @@ def test_hidden_pipeline_kwargs_reads_are_explicitly_reviewed_absent() -> None:
         SHARED_RETRIEVAL_POLICY.reviewed_absent_kwarg_names
         & SHARED_RETRIEVAL_POLICY.pinned_parameter_names
     )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "options = kwargs",
+        "key = 'metadata'\nvalue = kwargs.get(key)",
+        "key = 'metadata'\nvalue = kwargs[key]",
+        "values = list(kwargs)",
+        "present = 'metadata' in kwargs",
+        "enabled = bool(kwargs)",
+        "values = {**kwargs}",
+        "reader = kwargs.get\nvalue = reader('metadata')",
+    ],
+    ids=[
+        "alias",
+        "dynamic-method-key",
+        "dynamic-subscript-key",
+        "iteration",
+        "membership",
+        "truthiness",
+        "unpacking",
+        "indirect-method",
+    ],
+)
+def test_outer_kwargs_analyzer_rejects_every_unapproved_load(body: str) -> None:
+    source = "async def unified_rag_pipeline(**kwargs):\n" + textwrap.indent(
+        body,
+        "    ",
+    )
+
+    with pytest.raises(AssertionError, match="unapproved outer kwargs load"):
+        _literal_outer_pipeline_kwargs_reads(source)
+
+
+def test_outer_kwargs_analyzer_ignores_nested_function_kwargs() -> None:
+    source = """
+        async def unified_rag_pipeline(**kwargs):
+            value = kwargs.get("metadata")
+            def nested(**kwargs):
+                options = kwargs
+                return kwargs.get(dynamic_key)
+            return value, nested
+    """
+
+    assert _literal_outer_pipeline_kwargs_reads(source) == {"metadata"}
 
 
 @pytest.mark.asyncio
@@ -949,6 +1150,49 @@ async def test_actual_pipeline_metadata_allowlist_accepts_locked_media_only_shap
 
 
 @pytest.mark.asyncio
+async def test_real_pipeline_shared_retrieval_disables_normal_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pipeline_module = inspect.getmodule(unified_rag_pipeline)
+    assert pipeline_module is not None
+    _ControlledRealRetriever.calls.clear()
+    monkeypatch.setattr(
+        pipeline_module,
+        "MultiDatabaseRetriever",
+        _ControlledRealRetriever,
+    )
+    service, _chacha, owner_media, _pipeline = _service(
+        [_source("source-a", 1, title="Canonical")],
+        {1: _media(1)},
+        pipeline=unified_rag_pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    evidence = await service.retrieve_verified_evidence(
+        query="Question",
+        snapshot=snapshot,
+    )
+
+    assert evidence[0].content == "real pipeline evidence"
+    assert _ControlledRealRetriever.calls[0]["allowed_media_ids"] == [1]
+
+    ordinary_call = SHARED_RETRIEVAL_POLICY.build_call(
+        media_ids=(1,),
+        media_db_path="/private/owner/media.db",
+        media_db=owner_media,
+        owner_user_id=7,
+    )
+    ordinary_call.pop("include_retrieval_diagnostics", None)
+    ordinary_result = await unified_rag_pipeline(query="Question", **ordinary_call)
+
+    assert {
+        "profile_resolution",
+        "source_status",
+        "why_these_sources",
+    } <= set(ordinary_result.metadata)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "pipeline",
     [
@@ -1091,6 +1335,36 @@ async def test_conflicting_top_level_and_metadata_chunk_identity_fails_closed() 
     document = _document(1, document_id="chunk-top")
     document["metadata"]["chunk_id"] = "chunk-metadata"
     pipeline = _Pipeline(_result([document]))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with pytest.raises(SharedWorkspaceRetrievalUnavailable):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+
+
+@pytest.mark.asyncio
+async def test_serialized_document_chunk_identity_conflict_fails_closed() -> None:
+    serialized = _serialize_result_document(
+        Document(
+            id="top-level-chunk",
+            content="Conflicting identity",
+            source=DataSource.MEDIA_DB,
+            score=0.8,
+            metadata={
+                "source": "media_db",
+                "media_id": 1,
+                "chunk_id": "metadata-chunk",
+                "chunk_index": 1,
+                "start_char": 0,
+                "end_char": 20,
+            },
+        )
+    )
+    pipeline = _Pipeline(_result([serialized]))
     service, _chacha, _media_db, _pipeline = _service(
         [_source("source-a", 1)],
         {1: _media(1)},
