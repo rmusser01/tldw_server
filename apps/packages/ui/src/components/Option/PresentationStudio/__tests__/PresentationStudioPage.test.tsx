@@ -62,6 +62,14 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("../StandaloneHtmlWorkspace", () => ({
+  StandaloneHtmlWorkspace: ({ presentationId }: { presentationId: string }) => (
+    <section data-testid="standalone-html-workspace-handoff">
+      Standalone HTML workspace for {presentationId}
+    </section>
+  )
+}))
+
 const visualStyles = [
   {
     id: "minimal-academic",
@@ -349,7 +357,7 @@ describe("PresentationStudioPage", () => {
     })
   })
 
-  it("shows a source-free kind-aware state for standalone HTML detail", async () => {
+  it("hands standalone HTML metadata to the isolated workspace without fetching detail in the page", async () => {
     clientMocks.getPresentationMetadata.mockResolvedValue({
       record: { id: "presentation-html", content_kind: "standalone_html" },
       etag: null
@@ -357,8 +365,9 @@ describe("PresentationStudioPage", () => {
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-html" />)
 
-    expect(await screen.findByText("Standalone HTML presentation")).toBeVisible()
-    expect(screen.getByText(/available in Task 15/i)).toBeVisible()
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toHaveTextContent(
+      "presentation-html"
+    )
     expect(clientMocks.getPresentationMetadata).toHaveBeenCalledWith("presentation-html")
     expect(clientMocks.getPresentation).not.toHaveBeenCalled()
   })

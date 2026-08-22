@@ -581,7 +581,12 @@ const exactAttachmentBytes = (response: unknown): Uint8Array => {
     record.ok !== true ||
     record.status !== 200 ||
     headers.get("content-type") !== HTML_ATTACHMENT_CONTENT_TYPE ||
-    headers.get("content-disposition") !== HTML_ATTACHMENT_DISPOSITION
+    headers.get("content-disposition") !== HTML_ATTACHMENT_DISPOSITION ||
+    headers.get("x-content-type-options") !== "nosniff" ||
+    headers.get("x-download-options") !== "noopen" ||
+    headers.get("cache-control") !== "private, no-store" ||
+    headers.get("referrer-policy") !== "no-referrer" ||
+    headers.get("cross-origin-resource-policy") !== "same-origin"
   ) {
     throw new Error("Invalid standalone HTML attachment response")
   }
@@ -803,12 +808,14 @@ export const presentationsMethods = {
 
   async getPresentation(
     this: TldwApiClientCore,
-    presentationId: string
+    presentationId: string,
+    options?: { abortSignal?: AbortSignal }
   ): Promise<PresentationDetailResult> {
     const response = await this.request<unknown>({
       path: `/api/v1/slides/presentations/${encodeURIComponent(presentationId)}`,
       method: "GET",
       headers: presentationNegotiationHeaders(),
+      ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
       returnResponse: true
     })
     return {
@@ -1060,7 +1067,7 @@ export const presentationsMethods = {
     this: TldwApiClientCore,
     presentationId: string,
     source: string,
-    options: { ifMatch: string }
+    options: { ifMatch: string; abortSignal?: AbortSignal }
   ): Promise<StandalonePresentationDetailResult> {
     validateIfMatch(options.ifMatch)
     validateStandaloneSource(source)
@@ -1073,6 +1080,7 @@ export const presentationsMethods = {
         ...presentationNegotiationHeaders()
       },
       body: source,
+      ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
       returnResponse: true
     })
     return {
@@ -1086,7 +1094,8 @@ export const presentationsMethods = {
   async downloadStandaloneHtmlDraft(
     this: TldwApiClientCore,
     presentationId: string,
-    source: string
+    source: string,
+    options?: { abortSignal?: AbortSignal }
   ): Promise<Uint8Array> {
     validateStandaloneSource(source)
     const response = await this.request<unknown>({
@@ -1098,6 +1107,7 @@ export const presentationsMethods = {
         ...presentationNegotiationHeaders()
       },
       body: source,
+      ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
       responseType: "arrayBuffer",
       returnResponse: true
     })

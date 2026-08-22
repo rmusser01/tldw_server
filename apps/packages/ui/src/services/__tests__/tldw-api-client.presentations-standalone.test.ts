@@ -7,6 +7,15 @@ import type { StandaloneHtmlPresentationStudioRecord } from "@/services/tldw/Tld
 const ACCEPTED_CONTENT_KINDS = "structured_slides,standalone_html"
 const ACCEPT_HEADER = "X-Slides-Accept-Content-Kinds"
 const FIXED_DISPOSITION = 'attachment; filename="presentation.html"'
+const FIXED_ATTACHMENT_HEADERS = {
+  "content-type": "application/octet-stream",
+  "content-disposition": FIXED_DISPOSITION,
+  "x-content-type-options": "nosniff",
+  "x-download-options": "noopen",
+  "cache-control": "private, no-store",
+  "referrer-policy": "no-referrer",
+  "cross-origin-resource-policy": "same-origin"
+}
 
 const structuredDetail = {
   id: "structured-1",
@@ -1074,18 +1083,12 @@ describe("standalone presentation client contracts", () => {
       .fn()
       .mockResolvedValueOnce(
         responseEnvelope(savedBytes.buffer, {
-          headers: {
-            "content-type": "application/octet-stream",
-            "content-disposition": FIXED_DISPOSITION
-          }
+          headers: FIXED_ATTACHMENT_HEADERS
         })
       )
       .mockResolvedValueOnce(
         responseEnvelope(draftBytes, {
-          headers: {
-            "content-type": "application/octet-stream",
-            "content-disposition": FIXED_DISPOSITION
-          }
+          headers: FIXED_ATTACHMENT_HEADERS
         })
       )
     const client = createCore(request)
@@ -1128,6 +1131,40 @@ describe("standalone presentation client contracts", () => {
     )
   })
 
+  it("threads optional cancellation through detail, save, and authenticated draft attachment requests", async () => {
+    const abortController = new AbortController()
+    const client = createCore(
+      vi
+        .fn()
+        .mockResolvedValueOnce(responseEnvelope(standaloneDetail, { headers: { etag: '"v7"' } }))
+        .mockResolvedValueOnce(responseEnvelope(standaloneDetail, { headers: { etag: '"v8"' } }))
+        .mockResolvedValueOnce(
+          responseEnvelope(Uint8Array.from([1, 2, 3]), { headers: FIXED_ATTACHMENT_HEADERS })
+        )
+    )
+
+    await (presentationsMethods as any).getPresentation.call(client, "html-1", {
+      abortSignal: abortController.signal
+    })
+    await (presentationsMethods as any).saveStandaloneHtmlSource.call(
+      client,
+      "html-1",
+      standaloneDetail.html_document,
+      { ifMatch: '"v7"', abortSignal: abortController.signal }
+    )
+    await (presentationsMethods as any).downloadStandaloneHtmlDraft.call(
+      client,
+      "html-1",
+      standaloneDetail.html_document,
+      { abortSignal: abortController.signal }
+    )
+
+    expect((client.request as any).mock.calls).toHaveLength(3)
+    for (const [request] of (client.request as any).mock.calls) {
+      expect(request.abortSignal).toBe(abortController.signal)
+    }
+  })
+
   it.each([
     ["wrong status", responseEnvelope(new ArrayBuffer(0), { status: 202 })],
     [
@@ -1143,18 +1180,45 @@ describe("standalone presentation client contracts", () => {
       "wrong disposition",
       responseEnvelope(new ArrayBuffer(0), {
         headers: {
-          "content-type": "application/octet-stream",
+          ...FIXED_ATTACHMENT_HEADERS,
           "content-disposition": 'attachment; filename="model-title.html"'
         }
       })
     ],
     [
+      "missing nosniff",
+      responseEnvelope(new ArrayBuffer(0), {
+        headers: { ...FIXED_ATTACHMENT_HEADERS, "x-content-type-options": "" }
+      })
+    ],
+    [
+      "missing noopen",
+      responseEnvelope(new ArrayBuffer(0), {
+        headers: { ...FIXED_ATTACHMENT_HEADERS, "x-download-options": "" }
+      })
+    ],
+    [
+      "wrong cache policy",
+      responseEnvelope(new ArrayBuffer(0), {
+        headers: { ...FIXED_ATTACHMENT_HEADERS, "cache-control": "public" }
+      })
+    ],
+    [
+      "wrong referrer policy",
+      responseEnvelope(new ArrayBuffer(0), {
+        headers: { ...FIXED_ATTACHMENT_HEADERS, "referrer-policy": "origin" }
+      })
+    ],
+    [
+      "wrong resource policy",
+      responseEnvelope(new ArrayBuffer(0), {
+        headers: { ...FIXED_ATTACHMENT_HEADERS, "cross-origin-resource-policy": "cross-origin" }
+      })
+    ],
+    [
       "non-byte body",
       responseEnvelope("<!doctype html>", {
-        headers: {
-          "content-type": "application/octet-stream",
-          "content-disposition": FIXED_DISPOSITION
-        }
+        headers: FIXED_ATTACHMENT_HEADERS
       })
     ]
   ])("rejects a saved attachment with %s", async (_case, response) => {

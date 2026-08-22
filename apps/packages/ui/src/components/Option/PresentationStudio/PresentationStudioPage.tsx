@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 
 import { ProjectWorkspace } from "./ProjectWorkspace"
 import { PresentationStudioIndex } from "./PresentationStudioIndex"
+import { StandaloneHtmlWorkspace } from "./StandaloneHtmlWorkspace"
 import { VisualStylePicker } from "./VisualStylePicker"
 import { VisualStyleManager } from "./VisualStyleManager"
 import {
@@ -14,6 +15,7 @@ import {
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { usePresentationStudioStore } from "@/store/presentation-studio"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 
 type PresentationStudioPageProps = {
   mode?: "index" | "new" | "detail"
@@ -43,6 +45,10 @@ type DetailLoadResult =
   | { kind: "standalone_html" }
   | { kind: "unsupported"; contentKind: string | null }
   | { kind: "metadata_unavailable" }
+
+type DetailSurfaceState =
+  | { kind: "structured" }
+  | Exclude<DetailLoadResult, { kind: "structured" }>
 
 const errorStatus = (error: unknown): number | null => {
   const status = error && typeof error === "object" ? (error as { status?: unknown }).status : null
@@ -110,12 +116,12 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   const [isProjectLoading, setIsProjectLoading] = React.useState(mode === "detail")
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [availableStyles, setAvailableStyles] = React.useState<VisualStyleRecord[]>([])
-  const [stylesLoading, setStylesLoading] = React.useState(mode !== "index")
+  const [stylesLoading, setStylesLoading] = React.useState(mode === "new")
   const [stylesError, setStylesError] = React.useState<string | null>(null)
   const [draftTitle, setDraftTitle] = React.useState("Untitled Presentation")
   const [draftVisualStyleValue, setDraftVisualStyleValue] = React.useState("")
   const [isCreatingProject, setIsCreatingProject] = React.useState(false)
-  const [detailState, setDetailState] = React.useState<Exclude<DetailLoadResult, { kind: "structured" }> | null>(null)
+  const [detailState, setDetailState] = React.useState<DetailSurfaceState | null>(null)
   const detailRequestRef = React.useRef<InFlightProjectRequest | null>(null)
 
   const refreshVisualStyles = React.useCallback(async (): Promise<VisualStyleRecord[]> => {
@@ -125,7 +131,13 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   }, [])
 
   React.useEffect(() => {
-    if (mode === "index" || !isOnline) {
+    const shouldLoadStyles =
+      mode === "new" ||
+      (mode === "detail" &&
+        detailState?.kind === "structured" &&
+        currentProjectId === projectId &&
+        !isProjectLoading)
+    if (!shouldLoadStyles || !isOnline) {
       return
     }
 
@@ -157,13 +169,16 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     return () => {
       cancelled = true
     }
-  }, [isOnline, mode, refreshVisualStyles])
+  }, [currentProjectId, detailState?.kind, isOnline, isProjectLoading, mode, projectId, refreshVisualStyles])
 
   React.useEffect(() => {
     if (mode !== "detail" || !projectId) {
       return
     }
+    // This store accepts structured records only, so an exact ID hit is already a
+    // source-free kind decision and cannot bypass the standalone metadata boundary.
     if (currentProjectId === projectId) {
+      setDetailState({ kind: "structured" })
       setIsProjectLoading(false)
       return
     }
@@ -198,6 +213,9 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
               if (errorStatus(capabilityError) !== 404) {
                 return { kind: "metadata_unavailable" }
               }
+              if (isExtensionRuntime()) {
+                return { kind: "metadata_unavailable" }
+              }
               const detail = await tldwClient.getPresentation(projectId)
               if (detail.record.content_kind !== "structured_slides") {
                 return { kind: "metadata_unavailable" }
@@ -221,6 +239,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
           loadProject(result.detail.record, {
             etag: result.detail.etag
           })
+          setDetailState({ kind: "structured" })
         } else {
           setDetailState(result)
         }
@@ -527,15 +546,19 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     )
   }
 
-  if (detailState?.kind === "standalone_html") {
+  if (detailState?.kind === "standalone_html" && isExtensionRuntime()) {
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h1 className="text-2xl font-semibold text-slate-900">Standalone HTML presentation</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Viewing standalone HTML presentations will be available in Task 15.
+          Standalone HTML editing is available only in the WebUI.
         </p>
       </section>
     )
+  }
+
+  if (detailState?.kind === "standalone_html" && projectId) {
+    return <StandaloneHtmlWorkspace presentationId={projectId} />
   }
 
   if (detailState?.kind === "unsupported") {
