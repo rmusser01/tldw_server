@@ -751,6 +751,14 @@ class AdminWebhookRepository:
                 is_postgres=self.is_postgres,
             ).count_active_registrations()
 
+    async def count_secret_rotation_required(self) -> int:
+        """Return non-deleted registrations awaiting canonical secret rotation."""
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).count_secret_rotation_required()
+
     async def registration_limit_state(self, *, limit: int) -> RegistrationLimitState:
         async with self._read_connection() as connection:
             return await AdminWebhookUnitOfWork(
@@ -917,6 +925,17 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             SELECT COUNT(*) AS count
             FROM admin_webhook_registrations
             WHERE deleted_at IS NULL AND active = ?
+            """,
+            (True,),
+        )
+        return int(row["count"]) if row is not None else 0
+
+    async def count_secret_rotation_required(self) -> int:
+        row = await self._fetchrow(
+            """
+            SELECT COUNT(*) AS count
+            FROM admin_webhook_registrations
+            WHERE deleted_at IS NULL AND secret_rotation_required = ?
             """,
             (True,),
         )

@@ -351,6 +351,17 @@ async def test_stale_revision_counts_and_over_limit_state(
 
     assert await sqlite_repo.repository.count_registrations() == 2
     assert await sqlite_repo.repository.count_active_registrations() == 1
+    assert await sqlite_repo.repository.count_secret_rotation_required() == 0
+    async with sqlite_repo.repository.transaction() as tx:
+        marked = await tx.patch_registration(
+            active.id,
+            expected_revision=active.revision,
+            patch=RegistrationPatch(secret_rotation_required=True),
+            actor_user_id=8,
+            at=NOW + timedelta(minutes=1),
+        )
+    assert marked.registration.secret_rotation_required is True
+    assert await sqlite_repo.repository.count_secret_rotation_required() == 1
     state = await sqlite_repo.repository.registration_limit_state(limit=1)
     assert state.current == 2
     assert state.limit == 1

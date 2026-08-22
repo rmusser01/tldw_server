@@ -28,17 +28,20 @@ class WebhookErrorCode(str, Enum):
     EVENT_UNSUPPORTED = "admin_webhook_event_unsupported"
     IDEMPOTENCY_KEY_INVALID = "admin_webhook_idempotency_key_invalid"
     IDEMPOTENCY_CONFLICT = "idempotency_conflict"
+    IDEMPOTENCY_IN_PROGRESS = "idempotency_in_progress"
     IDEMPOTENCY_RESULT_SUPERSEDED = "idempotency_result_superseded"
     PRECONDITION_REQUIRED = "precondition_required"
     PRECONDITION_FAILED = "precondition_failed"
     TARGET_REJECTED = "admin_webhook_target_rejected"
     NOT_FOUND = "admin_webhook_not_found"
-    MODE_UNAVAILABLE = "admin_webhook_mode_unavailable"
+    DISABLED = "admin_webhooks_disabled"
+    MODE_UNAVAILABLE = "admin_webhooks_disabled"
     MIGRATION_PENDING = "admin_webhook_migration_pending"
     REGISTRATION_LIMIT = "admin_webhook_registration_limit"
     ACTIVE_LIMIT = "admin_webhook_active_limit"
     # Stable public error code; this value is not a credential.
     SECRET_ROTATION_REQUIRED = "admin_webhook_secret_rotation_required"  # nosec B105
+    REGISTRATION_ACTIVE = "admin_webhook_registration_active"
     KEY_UNAVAILABLE = "admin_webhook_key_unavailable"
     KEY_CONFIGURATION_MISMATCH = "admin_webhook_key_configuration_mismatch"
     KEY_ROTATION_IN_PROGRESS = "admin_webhook_key_rotation_in_progress"
@@ -53,16 +56,18 @@ _ERROR_STATUS = {
     WebhookErrorCode.EVENT_UNSUPPORTED: 422,
     WebhookErrorCode.IDEMPOTENCY_KEY_INVALID: 422,
     WebhookErrorCode.IDEMPOTENCY_CONFLICT: 409,
+    WebhookErrorCode.IDEMPOTENCY_IN_PROGRESS: 409,
     WebhookErrorCode.IDEMPOTENCY_RESULT_SUPERSEDED: 409,
     WebhookErrorCode.PRECONDITION_REQUIRED: 428,
     WebhookErrorCode.PRECONDITION_FAILED: 412,
     WebhookErrorCode.TARGET_REJECTED: 422,
     WebhookErrorCode.NOT_FOUND: 404,
-    WebhookErrorCode.MODE_UNAVAILABLE: 503,
+    WebhookErrorCode.DISABLED: 503,
     WebhookErrorCode.MIGRATION_PENDING: 503,
     WebhookErrorCode.REGISTRATION_LIMIT: 409,
     WebhookErrorCode.ACTIVE_LIMIT: 409,
     WebhookErrorCode.SECRET_ROTATION_REQUIRED: 409,
+    WebhookErrorCode.REGISTRATION_ACTIVE: 409,
     WebhookErrorCode.KEY_UNAVAILABLE: 503,
     WebhookErrorCode.KEY_CONFIGURATION_MISMATCH: 503,
     WebhookErrorCode.KEY_ROTATION_IN_PROGRESS: 503,
@@ -117,6 +122,10 @@ class WebhookLimits:
 
     registrations: int
     active_registrations: int
+    current_registrations: int = 0
+    current_active_registrations: int = 0
+    registrations_over_limit: bool = False
+    active_registrations_over_limit: bool = False
 
 
 @dataclass(frozen=True)
@@ -127,6 +136,7 @@ class WebhookMigrationSummary:
     imported_count: int = 0
     unresolved_count: int = 0
     rejected_count: int = 0
+    secret_rotation_required_count: int = 0
     legacy_file_restore_permitted: bool = False
     rollback_expires_at: datetime | None = None
 

@@ -139,6 +139,34 @@ async def test_postgres_commit_sequence_and_readback(
     assert sorted(allocated) == list(range(2, 12))
 
 
+async def test_postgres_counts_secret_rotation_required(
+    pg_repo: PostgreSQLRepositoryFixture,
+) -> None:
+    async with pg_repo.repository.transaction() as tx:
+        first_id = await tx.allocate_registration_id()
+        first = await tx.insert_registration(_registration_insert(first_id))
+        second_id = await tx.allocate_registration_id()
+        await tx.insert_registration(_registration_insert(second_id))
+        marked = await tx.patch_registration(
+            first.id,
+            expected_revision=first.revision,
+            patch=RegistrationPatch(secret_rotation_required=True),
+            actor_user_id=8,
+            at=NOW + timedelta(minutes=1),
+        )
+
+    assert marked.registration.secret_rotation_required is True
+    assert await pg_repo.repository.count_secret_rotation_required() == 1
+    async with pg_repo.repository.transaction() as tx:
+        await tx.soft_delete_registration(
+            first.id,
+            expected_revision=marked.registration.revision,
+            actor_user_id=8,
+            at=NOW + timedelta(minutes=2),
+        )
+    assert await pg_repo.repository.count_secret_rotation_required() == 0
+
+
 async def test_postgres_revision_noop_versions_soft_delete_and_limits(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
