@@ -24,12 +24,12 @@
       "technically_infeasible": 1
     },
     "implementation": {
-      "planned": 233,
-      "implemented": 2
+      "planned": 231,
+      "implemented": 4
     },
     "fixture": {
-      "not_run": 233,
-      "passed": 2,
+      "not_run": 231,
+      "passed": 4,
       "failed": 0
     },
     "live": {
@@ -75,12 +75,68 @@
     }
   },
   "required_source_blockers": [],
+  "required_implemented_sources": {
+    "sourclip-2026-07-13-0026": {
+      "source_snapshot_sha256": "cbc4a8445252460ef4502924edf409c7fc8098eb6987745b83cc426bd2fc8e73",
+      "canonical_target": "clinicaltrials_gov",
+      "required_route_id": "clinicaltrials_gov_studies_search_direct",
+      "captured_label": "ClinicalTrials.gov",
+      "resolution": "mapped",
+      "canonical_targets": [
+        "clinicaltrials_gov"
+      ],
+      "declared_surfaces": [
+        "standalone_search",
+        "deep_research"
+      ],
+      "capabilities": [
+        "search",
+        "detail",
+        "metadata",
+        "snippet"
+      ],
+      "implementation_state": "implemented",
+      "fixture_state": "passed",
+      "live_state": "not_run",
+      "certifications": [],
+      "implementation_evidence": true,
+      "substantively_triaged": true,
+      "implementation_satisfied": true
+    },
+    "sourclip-2026-07-13-0027": {
+      "source_snapshot_sha256": "34d7fc36d4b64b2dca99c0472ad3d804c7ed9ff5a96574a8146947133913b32b",
+      "canonical_target": "pubmed_central",
+      "required_route_id": "pubmed_central_esearch_summary_direct",
+      "captured_label": "PubMed Central",
+      "resolution": "mapped",
+      "canonical_targets": [
+        "pubmed_central"
+      ],
+      "declared_surfaces": [
+        "standalone_search",
+        "deep_research"
+      ],
+      "capabilities": [
+        "search",
+        "detail",
+        "metadata"
+      ],
+      "implementation_state": "implemented",
+      "fixture_state": "passed",
+      "live_state": "not_run",
+      "certifications": [],
+      "implementation_evidence": true,
+      "substantively_triaged": true,
+      "implementation_satisfied": true
+    }
+  },
+  "required_implemented_source_blockers": [],
   "digests": {
     "manifest": "6715db5a499abb13a3095c5153566323afd037db5ce0ff77ade7b629d5137c1e",
-    "ledger": "5bb54127ef9990d9e093a0ddf3102341f03baa20f5249f17845f385d3db988ad",
-    "ledger_rows": "aa4e19a4d3591743c82a83c19f1747f2cccaa6433a30ee2a0a09333ef81bd6ae",
+    "ledger": "b84420d418c2670af331a4979e1fffd0821f9c4a5def96f8fda653c5b68f2f19",
+    "ledger_rows": "091bca5bf02d1440145578f62cc4729232316c3611dd89286dd50bb1d8983b20",
     "schema": "ac85c7889ce84d25b8ddf9473c8fa1a8db43da848c683f1dbc1dce91a3375f29",
-    "validator": "db2de88ee4cbb7bf93439268ae8af4fd3c1fc600641a67cb1b9ea78ee3653e67",
+    "validator": "95d8674ae6cb82ee94c37769e3925181bdb65b30d372f3368b3c14cc14b96dde",
     "schema_validator": "ef79194445aa2544a3dd4b52cadcfd1b4efe99e52e49aabfb499bb3caa46fe16"
   },
   "structurally_valid": true,

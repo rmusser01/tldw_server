@@ -15,8 +15,10 @@ import socket
 import subprocess  # nosec B404
 import urllib.request
 from collections import Counter
-from dataclasses import replace
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -63,8 +65,8 @@ _REPO_ROOT = Path(__file__).parents[3]
 _DISCOVERY_ROOT = Path(__file__).parents[2] / "app" / "core" / "Research" / "discovery"
 _FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "research_discovery_gateway_adapters"
 _ADAPTER_MODULE_NAME = "tldw_Server_API.app.core.Research.discovery.gateway_adapters"
-_FAMILY_MODULE_NAME = "tldw_Server_API.app.core.Research.discovery.biorxiv_medrxiv"
 _HTTP_HOP_MODULE = "tldw_Server_API.app.core.Security.http_hop"
+_HTTP_HOP_PATH = Path(__file__).parents[2] / "app" / "core" / "Security" / "http_hop.py"
 _RECORDED_FIXTURES = {
     ("semantic_scholar_v2", "foundation-v2"): ("semantic_scholar_success.json",),
     ("crossref_v2", "foundation-v2"): ("crossref_success.json",),
@@ -77,28 +79,6 @@ _RECORDED_FIXTURES = {
     ("figshare_v2", "foundation-v2"): ("figshare_success.json",),
     ("osf_v2", "foundation-v2"): ("osf_success.json",),
 }
-_FAMILY_RECORDED_FIXTURES = {
-    ("biorxiv_europe_pmc_search_aggregator", "europe_pmc_preprint_v2", "europe-pmc-preprint-v2"): (
-        "europe_pmc_biorxiv_success.json",
-    ),
-    ("medrxiv_europe_pmc_search_aggregator", "europe_pmc_preprint_v2", "europe-pmc-preprint-v2"): (
-        "europe_pmc_medrxiv_success.json",
-    ),
-    ("biorxiv_details_lookup_direct", "biorxiv_details_v2", "biorxiv-details-v2"): (
-        "biorxiv_details_doi_success.json",
-    ),
-    ("medrxiv_details_lookup_direct", "biorxiv_details_v2", "biorxiv-details-v2"): (
-        "medrxiv_details_doi_success.json",
-    ),
-    ("biorxiv_details_interval_direct", "biorxiv_details_v2", "biorxiv-details-v2"): (
-        "biorxiv_details_interval_page_1.json",
-        "biorxiv_details_interval_page_2.json",
-    ),
-    ("medrxiv_details_interval_direct", "biorxiv_details_v2", "biorxiv-details-v2"): (
-        "biorxiv_details_interval_page_1.json",
-        "biorxiv_details_interval_page_2.json",
-    ),
-}
 _V2_ROOT_MODULES = frozenset(
     {
         "contracts.py",
@@ -109,13 +89,11 @@ _V2_ROOT_MODULES = frozenset(
         "gateway.py",
     }
 )
-_FAMILY_ROOT_MODULES = frozenset({"biorxiv_medrxiv.py"})
 _EXPECTED_LOCAL_CLOSURE = _V2_ROOT_MODULES | {
     "identity.py",
     "catalog.py",
     "models.py",
 }
-_EXPECTED_FAMILY_LOCAL_CLOSURE = _EXPECTED_LOCAL_CLOSURE | _FAMILY_ROOT_MODULES
 _IMPORT_BOOTSTRAP_PATHS = {
     relative_path: _REPO_ROOT / relative_path
     for relative_path in (
@@ -138,6 +116,7 @@ _EXPECTED_IMPORT_DIGESTS = {
     "identity.py": "233069fec1e798085a85b14bc1d887a585e22b8a6a6ddaa7dd90001f65b2668d",
     "catalog.py": "2aed2f8efc153fb962668b00c1c3d0f2d51eea78ca03e9c181d30c02d2f7e8e8",
     "models.py": "b3e92240a262c80ac8dc8ab26185ac94565e63dbbd12b5fdfd4b970680263e3c",
+    "Security/http_hop.py": "d416d2e67cbd9eb8d0979f2e0e68a41fab56934e2250f57f22eae3901a60030a",
     "tldw_Server_API/__init__.py": "b70c123a5edf6dd5edd30b5fd42c2d4c184032b550c3571ba50791de7d61ce63",
     "tldw_Server_API/app/__init__.py": "4d024921beea6dc90cd29b6a2699f05de3e1b428b14b7cac356b1cf83544495a",
     "tldw_Server_API/app/core/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -156,6 +135,7 @@ _EXPECTED_AST_DIGESTS = {
     "identity.py": "f59640d8f793fd3ebd11df49d333f73ebee9e59efb549393116bee2a241f5f06",
     "catalog.py": "6f89e526a0cee3f934fc04da6adc5698800842e9f798ac45e35847d859e08ba6",
     "models.py": "7f6e2b159cf9c42af917a79f24ae2ebd5b4a62c84f81b71766a9d4108f2f57fc",
+    "Security/http_hop.py": "46908e6dd13a0ac5c75b192dc758ab734415a7f8670626550326b595f75889e0",
     "tldw_Server_API/__init__.py": "450c3d7751c7b4d86400f87ae9bbdbdec9306297f44dc3dde652c1508d1bb8df",
     "tldw_Server_API/app/__init__.py": "88280dc29abf20f25212758d3a6497a3be5e5647b78037128817634245ab39b6",
     "tldw_Server_API/app/core/__init__.py": "3543b4693a36a1098850b8bc928887694ed59a6deb7d3dfd0339de01f55a77b6",
@@ -166,73 +146,417 @@ _EXPECTED_AST_DIGESTS = {
 }
 _EXPECTED_FAMILY_RAW_DIGESTS = {
     "biorxiv_medrxiv.py": "ee77fb9bc5da1cb93dc88baea86c9cd5b6a6e961d02faec97faa66cbcf383af9",
+    "clinicaltrials_pubmed_central.py": "ebbb77fb5d3c6ac088eec4cf229e7e0b78c4d741d7e102b0c801423f94defcc3",
 }
 _EXPECTED_FAMILY_IMPORT_DIGESTS = {
     "biorxiv_medrxiv.py": "a9a057e486c28731299b0997b04862a6e81dc6454d73d4fc94d0806d6831ebf3",
+    "clinicaltrials_pubmed_central.py": "7c5f72481295b990658e780413605869116d9ea0ee25a92c0db6248fa1bc7b10",
 }
 _EXPECTED_FAMILY_AST_DIGESTS = {
     "biorxiv_medrxiv.py": "21f46f0468fc0a83877d6cc4f1bb8830bdc48bbe4c10ee1c1db90d9144e67f95",
+    "clinicaltrials_pubmed_central.py": "2737a1eee6e29e6a5e5de2e23edfa10b76b2a176da9c2ffb81ec03ea4f39314b",
 }
-_EXPECTED_FAMILY_LOCAL_IMPORTS = {
-    "contracts": {
-        "MAX_PAGINATION_CURSOR",
-        "AccessRoute",
-        "BackendDefinition",
-        "BoundedDecimalQueryValuePolicy",
-        "BoundedTextQueryValuePolicy",
-        "CredentialRequirement",
-        "CredentialStatus",
-        "DiscoveryOutcomeIdentity",
-        "ExactOrigin",
-        "ExactQueryValuePolicy",
-        "ExecutionMode",
-        "LiteralTermsQueryValuePolicy",
-        "OperationKind",
-        "PathSlot",
-        "PathSlotKind",
-        "PathTemplate",
-        "PlannedDispatchGroup",
-        "PredicateOperator",
-        "QueryMode",
-        "ReadinessOverlay",
-        "ReadinessState",
-        "RouteKind",
-        "RouteLimits",
-        "RoutePolicy",
-        "RouteReadiness",
-        "SourceConstraint",
-        "SourceDefinition",
-        "SourcePredicate",
-        "SourceRouteReference",
-    },
-    "executor": {
-        "BoundDispatch",
-        "DiscoveryAdapter",
-        "DiscoveryAdapterError",
-        "DiscoveryAdapterResult",
-        "DiscoveryCandidate",
-        "NumericCursor",
-    },
-    "gateway_adapters": {
-        "MonotonicClock",
-        "_ParseDeadlineExceeded",
-        "_ParseGuard",
-        "_ParseLimitExceeded",
-        "_ParsingProfile",
-        "_PayloadInvalid",
-        "_base_record",
-        "_canonical_decimal_text",
-        "_checked_response",
-        "_optional_text",
-        "_raise_adapter_error",
-        "_require_dict",
-        "_require_list",
-        "_required_text",
-        "_strict_json",
-    },
-    "identity": {"build_fingerprint"},
-    "registry": {"DiscoveryRegistry", "foundation_readiness", "foundation_registry"},
-}
+_BIORXIV_MEDRXIV_LOCAL_IMPORTS = MappingProxyType(
+    {
+        "contracts": frozenset(
+            {
+                "MAX_PAGINATION_CURSOR",
+                "AccessRoute",
+                "BackendDefinition",
+                "BoundedDecimalQueryValuePolicy",
+                "BoundedTextQueryValuePolicy",
+                "CredentialRequirement",
+                "CredentialStatus",
+                "DiscoveryOutcomeIdentity",
+                "ExactOrigin",
+                "ExactQueryValuePolicy",
+                "ExecutionMode",
+                "LiteralTermsQueryValuePolicy",
+                "OperationKind",
+                "PathSlot",
+                "PathSlotKind",
+                "PathTemplate",
+                "PlannedDispatchGroup",
+                "PredicateOperator",
+                "QueryMode",
+                "ReadinessOverlay",
+                "ReadinessState",
+                "RouteKind",
+                "RouteLimits",
+                "RoutePolicy",
+                "RouteReadiness",
+                "SourceConstraint",
+                "SourceDefinition",
+                "SourcePredicate",
+                "SourceRouteReference",
+            }
+        ),
+        "executor": frozenset(
+            {
+                "BoundDispatch",
+                "DiscoveryAdapter",
+                "DiscoveryAdapterError",
+                "DiscoveryAdapterResult",
+                "DiscoveryCandidate",
+                "NumericCursor",
+            }
+        ),
+        "gateway_adapters": frozenset(
+            {
+                "MonotonicClock",
+                "_ParseDeadlineExceeded",
+                "_ParseGuard",
+                "_ParseLimitExceeded",
+                "_ParsingProfile",
+                "_PayloadInvalid",
+                "_base_record",
+                "_canonical_decimal_text",
+                "_checked_response",
+                "_optional_text",
+                "_raise_adapter_error",
+                "_require_dict",
+                "_require_list",
+                "_required_text",
+                "_strict_json",
+            }
+        ),
+        "identity": frozenset({"build_fingerprint"}),
+        "registry": frozenset({"DiscoveryRegistry", "foundation_readiness", "foundation_registry"}),
+    }
+)
+
+_CLINICALTRIALS_PMC_LOCAL_IMPORTS = MappingProxyType(
+    {
+        "contracts": frozenset(
+            {
+                "AccessRoute",
+                "BackendDefinition",
+                "BoundedDecimalQueryValuePolicy",
+                "CredentialRequirement",
+                "CredentialStatus",
+                "DeferredNumericCSVQueryBinding",
+                "DiscoveryOutcomeIdentity",
+                "DispatchAllowance",
+                "DispatchIntent",
+                "ExactOrigin",
+                "ExactQueryValuePolicy",
+                "ExecutionMode",
+                "LiteralTermsQueryValuePolicy",
+                "MAX_PAGINATION_CURSOR",
+                "OpaqueCursorQueryValuePolicy",
+                "OperationKind",
+                "PlannedDispatchGroup",
+                "PlannedLogicalAttempt",
+                "QueryMode",
+                "QueryPair",
+                "ReadinessOverlay",
+                "ReadinessState",
+                "RouteKind",
+                "RouteLimits",
+                "RoutePolicy",
+                "RouteReadiness",
+                "SourceConstraint",
+                "SourceDefinition",
+                "SourceRouteReference",
+            }
+        ),
+        "executor": frozenset(
+            {
+                "BoundDispatch",
+                "DiscoveryAdapter",
+                "DiscoveryAdapterError",
+                "DiscoveryAdapterResult",
+                "DiscoveryCandidate",
+                "DiscoveryExecutionError",
+                "OpaqueCursor",
+            }
+        ),
+        "gateway_adapters": frozenset(
+            {
+                "MonotonicClock",
+                "_ParseDeadlineExceeded",
+                "_ParseGuard",
+                "_ParseLimitExceeded",
+                "_ParsingProfile",
+                "_PayloadInvalid",
+                "_TrustedNCBIInputs",
+                "_base_record",
+                "_canonical_decimal_text",
+                "_checked_response",
+                "_execute_ncbi_esearch_summary",
+                "_guarded_items",
+                "_ncbi_json_root",
+                "_raise_adapter_error",
+                "_require_dict",
+                "_require_list",
+                "_strict_json",
+                "_validate_ncbi_message_list",
+            }
+        ),
+        "identity": frozenset({"build_fingerprint", "has_unsafe_url_material", "normalize_doi"}),
+        "registry": frozenset({"DiscoveryRegistry", "foundation_readiness", "foundation_registry"}),
+    }
+)
+_CLINICALTRIALS_PMC_IMPORTED_ATTRIBUTE_PATHS = frozenset(
+    {
+        ".contracts.CredentialRequirement.NONE",
+        ".contracts.CredentialStatus.NOT_REQUIRED",
+        ".contracts.DiscoveryOutcomeIdentity.from_fingerprint",
+        ".contracts.OperationKind.CONDITIONAL_SUMMARY",
+        ".contracts.OperationKind.SEARCH",
+        ".contracts.QueryMode.GENERAL_FREE_TEXT",
+        ".contracts.ReadinessState.READY",
+        ".contracts.RouteKind.DIRECT",
+        ".contracts.SourceConstraint.NATIVE_CORPUS",
+        "datetime.date.fromisoformat",
+        "re.ASCII",
+        "re.IGNORECASE",
+        "re.compile",
+        "re.fullmatch",
+        "time.monotonic",
+        "unicodedata.category",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _FamilyRuntimeCase:
+    case_id: str
+    source_id: str
+    route_identity: tuple[str, str, str, str]
+    query: str | GeneralFreeTextQuery | IdentifierLookupQuery | DateIntervalQuery
+    result_limit: int
+    fixture_files: tuple[str, ...]
+    expected_pages: int
+    expected_dispatches: int
+    expect_candidates: bool = True
+    fixture_transform: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _FamilyBoundaryConfig:
+    module_name: str
+    filename: str
+    registry_factory: str
+    readiness_factory: str
+    adapter_factory: str
+    root_modules: frozenset[str]
+    local_imports: Mapping[str, frozenset[str]]
+    runtime_cases: tuple[_FamilyRuntimeCase, ...]
+    include_foundation_adapters: bool = False
+
+
+_FAMILY_CONFIGS = MappingProxyType(
+    {
+        "biorxiv_medrxiv": _FamilyBoundaryConfig(
+            module_name="tldw_Server_API.app.core.Research.discovery.biorxiv_medrxiv",
+            filename="biorxiv_medrxiv.py",
+            registry_factory="biorxiv_medrxiv_shadow_registry",
+            readiness_factory="biorxiv_medrxiv_shadow_readiness",
+            adapter_factory="biorxiv_medrxiv_gateway_adapters",
+            root_modules=frozenset({"biorxiv_medrxiv.py"}),
+            local_imports=_BIORXIV_MEDRXIV_LOCAL_IMPORTS,
+            runtime_cases=(
+                _FamilyRuntimeCase(
+                    "biorxiv_general",
+                    "biorxiv",
+                    (
+                        "biorxiv_europe_pmc_search_aggregator",
+                        "europe_pmc_preprint_v2",
+                        "europe-pmc-preprint-v2",
+                        "research-discovery-route-policy-v2-biorxiv-medrxiv",
+                    ),
+                    GeneralFreeTextQuery("bounded family discovery"),
+                    100,
+                    ("europe_pmc_biorxiv_success.json",),
+                    1,
+                    1,
+                ),
+                _FamilyRuntimeCase(
+                    "medrxiv_general",
+                    "medrxiv",
+                    (
+                        "medrxiv_europe_pmc_search_aggregator",
+                        "europe_pmc_preprint_v2",
+                        "europe-pmc-preprint-v2",
+                        "research-discovery-route-policy-v2-biorxiv-medrxiv",
+                    ),
+                    GeneralFreeTextQuery("bounded family discovery"),
+                    100,
+                    ("europe_pmc_medrxiv_success.json",),
+                    1,
+                    1,
+                ),
+                _FamilyRuntimeCase(
+                    "biorxiv_lookup",
+                    "biorxiv",
+                    (
+                        "biorxiv_details_lookup_direct",
+                        "biorxiv_details_v2",
+                        "biorxiv-details-v2",
+                        "research-discovery-route-policy-v2-biorxiv-medrxiv",
+                    ),
+                    IdentifierLookupQuery("10.5555/biorxiv.details.synthetic"),
+                    30,
+                    ("biorxiv_details_doi_success.json",),
+                    1,
+                    1,
+                ),
+                _FamilyRuntimeCase(
+                    "medrxiv_lookup",
+                    "medrxiv",
+                    (
+                        "medrxiv_details_lookup_direct",
+                        "biorxiv_details_v2",
+                        "biorxiv-details-v2",
+                        "research-discovery-route-policy-v2-biorxiv-medrxiv",
+                    ),
+                    IdentifierLookupQuery("10.5555/medrxiv.details.synthetic"),
+                    30,
+                    ("medrxiv_details_doi_success.json",),
+                    1,
+                    1,
+                ),
+                _FamilyRuntimeCase(
+                    "biorxiv_interval",
+                    "biorxiv",
+                    (
+                        "biorxiv_details_interval_direct",
+                        "biorxiv_details_v2",
+                        "biorxiv-details-v2",
+                        "research-discovery-route-policy-v2-biorxiv-medrxiv",
+                    ),
+                    DateIntervalQuery("2026-06-01", "2026-06-02", "neuroscience"),
+                    120,
+                    ("biorxiv_details_interval_page_1.json", "biorxiv_details_interval_page_2.json"),
+                    2,
+                    2,
+                ),
+                _FamilyRuntimeCase(
+                    "medrxiv_interval",
+                    "medrxiv",
+                    (
+                        "medrxiv_details_interval_direct",
+                        "biorxiv_details_v2",
+                        "biorxiv-details-v2",
+                        "research-discovery-route-policy-v2-biorxiv-medrxiv",
+                    ),
+                    DateIntervalQuery("2026-06-01", "2026-06-02", "neuroscience"),
+                    120,
+                    ("biorxiv_details_interval_page_1.json", "biorxiv_details_interval_page_2.json"),
+                    2,
+                    2,
+                    fixture_transform="medrxiv_interval",
+                ),
+            ),
+        ),
+        "clinicaltrials_pubmed_central": _FamilyBoundaryConfig(
+            module_name="tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central",
+            filename="clinicaltrials_pubmed_central.py",
+            registry_factory="clinicaltrials_pubmed_central_shadow_registry",
+            readiness_factory="clinicaltrials_pubmed_central_shadow_readiness",
+            adapter_factory="clinicaltrials_pubmed_central_gateway_adapters",
+            root_modules=frozenset({"clinicaltrials_pubmed_central.py"}),
+            local_imports=_CLINICALTRIALS_PMC_LOCAL_IMPORTS,
+            include_foundation_adapters=True,
+            runtime_cases=(
+                _FamilyRuntimeCase(
+                    "clinicaltrials_nonempty",
+                    "clinicaltrials_gov",
+                    (
+                        "clinicaltrials_gov_studies_search_direct",
+                        "clinicaltrials_gov_v2",
+                        "clinicaltrials-gov-v2",
+                        "research-discovery-route-policy-v2-clinicaltrials-pmc",
+                    ),
+                    GeneralFreeTextQuery("bounded family discovery"),
+                    100,
+                    ("clinicaltrials_success_page_1.json", "clinicaltrials_success_page_2.json"),
+                    2,
+                    2,
+                ),
+                _FamilyRuntimeCase(
+                    "pmc_nonempty",
+                    "pubmed_central",
+                    (
+                        "pubmed_central_esearch_summary_direct",
+                        "pubmed_central_v2",
+                        "pubmed-central-v2",
+                        "research-discovery-route-policy-v2-clinicaltrials-pmc",
+                    ),
+                    GeneralFreeTextQuery("bounded family discovery"),
+                    100,
+                    ("pmc_esearch_success.json", "pmc_esummary_success.json"),
+                    1,
+                    2,
+                ),
+                _FamilyRuntimeCase(
+                    "pmc_empty",
+                    "pubmed_central",
+                    (
+                        "pubmed_central_esearch_summary_direct",
+                        "pubmed_central_v2",
+                        "pubmed-central-v2",
+                        "research-discovery-route-policy-v2-clinicaltrials-pmc",
+                    ),
+                    GeneralFreeTextQuery("bounded absent discovery"),
+                    100,
+                    ("pmc_esearch_empty.json",),
+                    1,
+                    1,
+                    expect_candidates=False,
+                ),
+                _FamilyRuntimeCase(
+                    "pubmed_identity_nonempty",
+                    "pubmed",
+                    (
+                        "pubmed_ncbi_eutils_pubmed_direct",
+                        "pubmed_v2",
+                        "pubmed-v2-ncbi-identity",
+                        "research-discovery-route-policy-v2-foundation-pubmed-ncbi-identity-2026-08-21",
+                    ),
+                    "bounded family discovery",
+                    100,
+                    ("pubmed_esearch_success.json", "pubmed_esummary_success.json"),
+                    1,
+                    2,
+                ),
+            ),
+        ),
+    }
+)
+
+_FAMILY_RUNTIME_PARAMS = tuple(
+    pytest.param(family_id, config, case, id=f"{family_id}-{case.case_id}")
+    for family_id, config in _FAMILY_CONFIGS.items()
+    for case in config.runtime_cases
+)
+_EXPECTED_FAMILY_PATHS = MappingProxyType(
+    {
+        "biorxiv_general": ("/europepmc/webservices/rest/search",),
+        "medrxiv_general": ("/europepmc/webservices/rest/search",),
+        "biorxiv_lookup": ("/details/biorxiv/10.5555/biorxiv.details.synthetic/na/json",),
+        "medrxiv_lookup": ("/details/medrxiv/10.5555/medrxiv.details.synthetic/na/json",),
+        "biorxiv_interval": (
+            "/details/biorxiv/2026-06-01/2026-06-02/0/json",
+            "/details/biorxiv/2026-06-01/2026-06-02/1/json",
+        ),
+        "medrxiv_interval": (
+            "/details/medrxiv/2026-06-01/2026-06-02/0/json",
+            "/details/medrxiv/2026-06-01/2026-06-02/1/json",
+        ),
+        "clinicaltrials_nonempty": ("/api/v2/studies", "/api/v2/studies"),
+        "pmc_nonempty": (
+            "/entrez/eutils/esearch.fcgi",
+            "/entrez/eutils/esummary.fcgi",
+        ),
+        "pmc_empty": ("/entrez/eutils/esearch.fcgi",),
+        "pubmed_identity_nonempty": (
+            "/entrez/eutils/esearch.fcgi",
+            "/entrez/eutils/esummary.fcgi",
+        ),
+    }
+)
 _EXPECTED_GATEWAY_IMPORTS = {
     "executor.py": {
         "DiscoveryGatewayError",
@@ -242,6 +566,7 @@ _EXPECTED_GATEWAY_IMPORTS = {
     },
     "gateway_adapters.py": {"DiscoveryGatewayResponse"},
     "biorxiv_medrxiv.py": set(),
+    "clinicaltrials_pubmed_central.py": set(),
 }
 _EXPECTED_IDENTITY_IMPORTS = {
     "executor.py": {"build_fingerprint"},
@@ -252,13 +577,22 @@ _EXPECTED_IDENTITY_IMPORTS = {
         "normalize_doi",
     },
     "biorxiv_medrxiv.py": {"build_fingerprint"},
+    "clinicaltrials_pubmed_central.py": {
+        "build_fingerprint",
+        "has_unsafe_url_material",
+        "normalize_doi",
+    },
 }
 _EXPECTED_HTTP_HOP_IMPORTS = {
-    "HTTPHopError",
-    "HTTPHopLimits",
-    "HTTPHopResponse",
-    "NormalizedHTTPHopRequest",
-    "request_http_hop",
+    "gateway.py": {
+        "HTTPHopError",
+        "HTTPHopLimits",
+        "HTTPHopResponse",
+        "NormalizedHTTPHopRequest",
+        "request_http_hop",
+    },
+    "biorxiv_medrxiv.py": set(),
+    "clinicaltrials_pubmed_central.py": set(),
 }
 _EXPECTED_IMPORTED_ATTRIBUTE_PATHS = {
     "contracts.py": {
@@ -391,6 +725,7 @@ _EXPECTED_IMPORTED_ATTRIBUTE_PATHS = {
         "time.monotonic",
         "unicodedata.normalize",
     },
+    "clinicaltrials_pubmed_central.py": _CLINICALTRIALS_PMC_IMPORTED_ATTRIBUTE_PATHS,
     "catalog.py": set(),
     "models.py": set(),
 }
@@ -572,8 +907,8 @@ def _adapter_module():
     return importlib.import_module(_ADAPTER_MODULE_NAME)
 
 
-def _family_module():
-    return importlib.import_module(_FAMILY_MODULE_NAME)
+def _family_module(config: _FamilyBoundaryConfig):
+    return importlib.import_module(config.module_name)
 
 
 def _canonical_import_digest(tree: ast.AST) -> str:
@@ -672,19 +1007,20 @@ def _boundary_violations(source: str, filename: str, *, check_import_digest: boo
     parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
     import_bindings = _import_bindings(tree)
     asyncio_aliases = {name for name, qualified_path in import_bindings.items() if qualified_path == "asyncio"}
-    if filename == "biorxiv_medrxiv.py":
+    family_config = next((config for config in _FAMILY_CONFIGS.values() if config.filename == filename), None)
+    if family_config is not None:
         local_imports = {
-            node.module: {alias.name for alias in node.names}
+            node.module: frozenset(alias.name for alias in node.names)
             for node in tree.body
             if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module is not None
         }
-        if local_imports != _EXPECTED_FAMILY_LOCAL_IMPORTS:
+        if local_imports != family_config.local_imports:
             violations.append(f"{filename}:family_local_imports:{local_imports}")
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             if any(alias.name == "*" for alias in node.names):
                 violations.append(f"{filename}:{node.lineno}:star_import")
-            if filename == "biorxiv_medrxiv.py":
+            if family_config is not None:
                 imported_modules = (
                     tuple(alias.name for alias in node.names)
                     if isinstance(node, ast.Import)
@@ -706,7 +1042,7 @@ def _boundary_violations(source: str, filename: str, *, check_import_digest: boo
                     violations.append(f"{filename}:{node.lineno}:identity_symbols:{sorted(imported)}")
             if isinstance(node, ast.ImportFrom) and node.module == _HTTP_HOP_MODULE:
                 imported = {alias.name for alias in node.names}
-                if filename != "gateway.py" or imported != _EXPECTED_HTTP_HOP_IMPORTS:
+                if imported != _EXPECTED_HTTP_HOP_IMPORTS.get(filename, set()):
                     violations.append(f"{filename}:{node.lineno}:http_hop_symbols:{sorted(imported)}")
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in _FORBIDDEN_DYNAMIC_CALLS:
@@ -728,7 +1064,11 @@ def _boundary_violations(source: str, filename: str, *, check_import_digest: boo
                 violations.append(f"{filename}:{node.lineno}:attribute:{node.attr}")
         if isinstance(node, ast.Attribute) and not isinstance(parents.get(node), ast.Attribute):
             imported_path = _resolve_import_path(node, import_bindings)
-            if imported_path is not None and imported_path not in _EXPECTED_IMPORTED_ATTRIBUTE_PATHS[filename]:
+            if filename in _IMPORT_BOOTSTRAP_PATHS:
+                expected_attribute_paths = _EXPECTED_IMPORTED_ATTRIBUTE_PATHS.get(filename, set())
+            else:
+                expected_attribute_paths = _EXPECTED_IMPORTED_ATTRIBUTE_PATHS[filename]
+            if imported_path is not None and imported_path not in expected_attribute_paths:
                 violations.append(f"{filename}:{node.lineno}:imported_attribute:{imported_path}")
         if (
             isinstance(node, ast.Attribute)
@@ -787,34 +1127,22 @@ def _foundation_plan(
     return registry, plan
 
 
-def _family_plan(route_id: str):
-    module = _family_module()
-    source_id = route_id.split("_", 1)[0]
-    if route_id.endswith("europe_pmc_search_aggregator"):
-        query = GeneralFreeTextQuery("bounded family discovery")
-        result_limit = 100
-        max_pages = max_dispatches = 1
-    elif route_id.endswith("details_lookup_direct"):
-        query = IdentifierLookupQuery(f"10.5555/{source_id}.details.synthetic")
-        result_limit = 30
-        max_pages = max_dispatches = 1
-    else:
-        query = DateIntervalQuery("2026-06-01", "2026-06-02", "neuroscience")
-        result_limit = 120
-        max_pages = max_dispatches = 4
-    registry = module.biorxiv_medrxiv_shadow_registry()
+def _family_plan(config: _FamilyBoundaryConfig, case: _FamilyRuntimeCase):
+    module = _family_module(config)
+    registry = getattr(module, config.registry_factory)()
+    route = registry.get_route(case.route_identity[0])
     plan = compile_discovery_plan(
-        PlanningRequest((source_id,), query, (), result_limit),
+        PlanningRequest((case.source_id,), case.query, (), case.result_limit),
         registry=registry,
-        readiness=module.biorxiv_medrxiv_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE),
+        readiness=getattr(module, config.readiness_factory)(ExecutionMode.OFFLINE_FIXTURE),
         budget=BudgetCeilings(
             max_route_attempts=1,
-            max_physical_dispatches=max_dispatches,
-            max_pages_per_route=max_pages,
+            max_physical_dispatches=route.max_physical_dispatches,
+            max_pages_per_route=route.policy.limits.max_pages,
             max_redirects=0,
             max_retries=0,
-            max_wall_time_ms=20_000 * max_dispatches,
-            max_results=result_limit,
+            max_wall_time_ms=route.policy.limits.timeout_ms * route.max_physical_dispatches,
+            max_results=case.result_limit,
         ),
     )
     return registry, plan
@@ -833,26 +1161,36 @@ def _derived_medrxiv_interval_body(body: bytes) -> bytes:
     return json.dumps(payload, separators=(",", ":")).encode()
 
 
-def _family_fixture_bodies() -> dict[tuple[str, str, str], tuple[bytes, ...]]:
+def _family_fixture_bodies(
+    config: _FamilyBoundaryConfig,
+) -> dict[str, tuple[bytes, ...]]:
     bodies = {
-        identity: tuple((_FIXTURE_ROOT / filename).read_bytes() for filename in filenames)
-        for identity, filenames in _FAMILY_RECORDED_FIXTURES.items()
+        case.case_id: tuple((_FIXTURE_ROOT / filename).read_bytes() for filename in case.fixture_files)
+        for case in config.runtime_cases
     }
-    medrxiv_interval = next(identity for identity in bodies if identity[0] == "medrxiv_details_interval_direct")
-    bodies[medrxiv_interval] = tuple(_derived_medrxiv_interval_body(body) for body in bodies[medrxiv_interval])
+    for case in config.runtime_cases:
+        if case.fixture_transform == "medrxiv_interval":
+            bodies[case.case_id] = tuple(_derived_medrxiv_interval_body(body) for body in bodies[case.case_id])
     return bodies
 
 
-def _family_boundary_route_ids(registry, readiness) -> tuple[set[str], set[str], set[str]]:
-    foundation_route_ids = {route.route_id for route in foundation_registry().routes}
-    registry_route_ids = {route.route_id for route in registry.routes if route.route_id not in foundation_route_ids}
-    readiness_route_ids = {entry.route_id for entry in readiness.routes if entry.route_id not in foundation_route_ids}
+def _route_identity(route) -> tuple[str, str, str, str]:
+    return route.route_id, route.adapter_id, route.adapter_version, route.policy.policy_version
+
+
+def _family_boundary_routes(registry, readiness):
+    foundation_route_identities = {_route_identity(route) for route in foundation_registry().routes}
+    changed_routes = tuple(
+        route for route in registry.routes if _route_identity(route) not in foundation_route_identities
+    )
+    changed_route_ids = {route.route_id for route in changed_routes}
+    readiness_route_ids = {entry.route_id for entry in readiness.routes if entry.route_id in changed_route_ids}
     ready_route_ids = {
         entry.route_id
         for entry in readiness.routes
-        if entry.state is ReadinessState.READY and entry.route_id not in foundation_route_ids
+        if entry.state is ReadinessState.READY and entry.route_id in changed_route_ids
     }
-    return registry_route_ids, readiness_route_ids, ready_route_ids
+    return changed_routes, readiness_route_ids, ready_route_ids
 
 
 def _response(route, intent, body: bytes, *, status_code: int = 200) -> DiscoveryGatewayResponse:
@@ -1412,19 +1750,28 @@ async def test_ambiguous_only_aggregator_result_is_unattributed_valid_empty() ->
     assert result.usage.accounting.debited == 1
 
 
-def test_biorxiv_medrxiv_family_has_a_separate_closed_boundary_contract() -> None:
-    assert frozenset({"biorxiv_medrxiv.py"}) == _FAMILY_ROOT_MODULES
-    assert _local_dependency_closure(_FAMILY_ROOT_MODULES) == _EXPECTED_FAMILY_LOCAL_CLOSURE
-    assert set(_EXPECTED_FAMILY_RAW_DIGESTS) == _FAMILY_ROOT_MODULES
-    assert set(_EXPECTED_FAMILY_IMPORT_DIGESTS) == _FAMILY_ROOT_MODULES
-    assert set(_EXPECTED_FAMILY_AST_DIGESTS) == _FAMILY_ROOT_MODULES
+@pytest.mark.parametrize(
+    ("family_id", "config"),
+    _FAMILY_CONFIGS.items(),
+    ids=_FAMILY_CONFIGS,
+)
+def test_each_family_has_a_separate_closed_boundary_contract(
+    family_id: str,
+    config: _FamilyBoundaryConfig,
+) -> None:
+    expected_closure = _EXPECTED_LOCAL_CLOSURE | config.root_modules
+    assert config.root_modules == frozenset({config.filename})
+    assert _local_dependency_closure(config.root_modules) == expected_closure
+    assert set(_EXPECTED_FAMILY_RAW_DIGESTS) == {configured.filename for configured in _FAMILY_CONFIGS.values()}
+    assert set(_EXPECTED_FAMILY_IMPORT_DIGESTS) == set(_EXPECTED_FAMILY_RAW_DIGESTS)
+    assert set(_EXPECTED_FAMILY_AST_DIGESTS) == set(_EXPECTED_FAMILY_RAW_DIGESTS)
 
     violations = []
     http_hop_consumers = []
-    for filename in sorted(_EXPECTED_FAMILY_LOCAL_CLOSURE):
+    for filename in sorted(expected_closure):
         module_path = _DISCOVERY_ROOT / filename
         raw_source = module_path.read_bytes()
-        if filename in _EXPECTED_FAMILY_RAW_DIGESTS:
+        if filename == config.filename:
             assert hashlib.sha256(raw_source).hexdigest() == _EXPECTED_FAMILY_RAW_DIGESTS[filename]
         source = raw_source.decode("utf-8")
         violations.extend(_boundary_violations(source, filename))
@@ -1433,10 +1780,23 @@ def test_biorxiv_medrxiv_family_has_a_separate_closed_boundary_contract() -> Non
             if isinstance(node, ast.ImportFrom) and node.module == _HTTP_HOP_MODULE:
                 http_hop_consumers.append(filename)
 
+    assert family_id in _FAMILY_CONFIGS
     assert violations == []
     assert http_hop_consumers == ["gateway.py"]
 
 
+def test_changed_http_hop_import_and_semantic_ast_digests_are_frozen() -> None:
+    source = _HTTP_HOP_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename="Security/http_hop.py")
+
+    assert _frozen_digest_violations(tree, "Security/http_hop.py") == []
+
+
+@pytest.mark.parametrize(
+    ("family_id", "config"),
+    _FAMILY_CONFIGS.items(),
+    ids=_FAMILY_CONFIGS,
+)
 @pytest.mark.parametrize(
     "probe",
     (
@@ -1459,168 +1819,186 @@ def test_biorxiv_medrxiv_family_has_a_separate_closed_boundary_contract() -> Non
         "import urllib.request\nurllib.request.urlopen(record['url'])",
     ),
 )
-def test_family_boundary_scanner_rejects_every_deferred_effect_class(probe: str) -> None:
-    filename = "biorxiv_medrxiv.py"
-    source = (_DISCOVERY_ROOT / filename).read_text(encoding="utf-8") + f"\n{probe}\n"
+def test_family_boundary_scanner_rejects_every_deferred_effect_class(
+    family_id: str,
+    config: _FamilyBoundaryConfig,
+    probe: str,
+) -> None:
+    source = (_DISCOVERY_ROOT / config.filename).read_text(encoding="utf-8") + f"\n{probe}\n"
 
-    violations = _boundary_violations(source, filename, check_import_digest=False)
+    violations = _boundary_violations(source, config.filename, check_import_digest=False)
 
+    assert family_id in _FAMILY_CONFIGS
     assert any("forbidden_import" in violation for violation in violations), violations
 
 
-def test_ready_family_routes_factories_recordings_and_plans_are_exactly_equal() -> None:
-    module = _family_module()
-    registry = module.biorxiv_medrxiv_shadow_registry()
-    readiness = module.biorxiv_medrxiv_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE)
-    family_route_identities = set(_FAMILY_RECORDED_FIXTURES)
-    recorded_family_route_ids = {identity[0] for identity in family_route_identities}
-    registry_family_route_ids, readiness_family_route_ids, ready_route_ids = _family_boundary_route_ids(
-        registry,
-        readiness,
-    )
-    assert registry_family_route_ids == recorded_family_route_ids
-    assert readiness_family_route_ids == recorded_family_route_ids
-    assert ready_route_ids == recorded_family_route_ids
+@pytest.mark.parametrize(
+    ("family_id", "config"),
+    _FAMILY_CONFIGS.items(),
+    ids=_FAMILY_CONFIGS,
+)
+def test_ready_family_routes_factories_recordings_and_plans_are_exactly_equal(
+    family_id: str,
+    config: _FamilyBoundaryConfig,
+) -> None:
+    module = _family_module(config)
+    registry = getattr(module, config.registry_factory)()
+    readiness = getattr(module, config.readiness_factory)(ExecutionMode.OFFLINE_FIXTURE)
+    expected_route_identities = {case.route_identity for case in config.runtime_cases}
+    changed_routes, readiness_route_ids, ready_route_ids = _family_boundary_routes(registry, readiness)
+    changed_route_identities = {_route_identity(route) for route in changed_routes}
+    recorded_route_ids = {identity[0] for identity in expected_route_identities}
 
-    ready_routes = tuple(route for route in registry.routes if route.route_id in ready_route_ids)
-    registry_route_identities = {(route.route_id, route.adapter_id, route.adapter_version) for route in ready_routes}
-    registry_adapter_identities = {(route.adapter_id, route.adapter_version) for route in ready_routes}
-    factory = module.biorxiv_medrxiv_gateway_adapters()
-    factory_identities = set()
-    for adapter_id in factory:
-        versions = {route.adapter_version for route in ready_routes if route.adapter_id == adapter_id}
-        assert len(versions) == 1
-        factory_identities.add((adapter_id, versions.pop()))
+    assert changed_route_identities == expected_route_identities
+    assert readiness_route_ids == recorded_route_ids
+    assert ready_route_ids == recorded_route_ids
+
+    ready_routes = tuple(route for route in changed_routes if route.route_id in ready_route_ids)
+    changed_ready_adapter_identities = {(route.adapter_id, route.adapter_version) for route in ready_routes}
+    family_factory = getattr(module, config.adapter_factory)()
+    family_callable_ids = set(family_factory)
     plan_identities = set()
-    for route_id in registry_family_route_ids:
-        _registry, plan = _family_plan(route_id)
+    for case in config.runtime_cases:
+        _registry, plan = _family_plan(config, case)
         assert len(plan.dispatch_groups) == 1
-        assert plan.dispatch_groups[0].route_id == route_id
-        plan_identities.add((plan.dispatch_groups[0].adapter_id, plan.dispatch_groups[0].adapter_version))
+        group = plan.dispatch_groups[0]
+        route = _registry.get_route(group.route_id)
+        plan_identities.add((group.route_id, group.adapter_id, group.adapter_version, route.policy.policy_version))
 
-    assert registry_route_identities == family_route_identities
-    assert registry_adapter_identities == factory_identities == plan_identities
-    assert registry_adapter_identities == set(module._FAMILY_PARSING_PROFILES)
-    assert set(factory) == {adapter_id for adapter_id, _version in registry_adapter_identities}
-    assert {adapter.__module__ for adapter in factory.values()} == {_FAMILY_MODULE_NAME}
+    assert family_id in _FAMILY_CONFIGS
+    assert changed_route_identities == plan_identities
     assert all(route.credential_requirement is CredentialRequirement.NONE for route in ready_routes)
     assert all(route.policy.limits.max_redirects == 0 for route in ready_routes)
+    assert {adapter.__module__ for adapter in family_factory.values()} == {config.module_name}
+
+    if config.include_foundation_adapters:
+        family_profile_identities = set(module._FAMILY_PARSING_PROFILES)
+        assert family_profile_identities == {
+            ("clinicaltrials_gov_v2", "clinicaltrials-gov-v2"),
+            ("pubmed_central_v2", "pubmed-central-v2"),
+        }
+        assert family_callable_ids == {"clinicaltrials_gov_v2", "pubmed_central_v2"}
+
+        overlay_profile_identity = ("pubmed_v2", "pubmed-v2-ncbi-identity")
+        shared_module = _adapter_module()
+        assert overlay_profile_identity in shared_module._PARSING_PROFILES
+        foundation_adapters = shared_module.foundation_gateway_adapters()
+        assert "pubmed_v2" in foundation_adapters
+        assert not family_callable_ids.intersection(foundation_adapters)
+
+        assert changed_ready_adapter_identities == family_profile_identities | {overlay_profile_identity}
+        assert {adapter_id for adapter_id, _version in changed_ready_adapter_identities} == (
+            family_callable_ids | {"pubmed_v2"}
+        )
+    else:
+        assert changed_ready_adapter_identities == set(module._FAMILY_PARSING_PROFILES)
+        assert family_callable_ids == {adapter_id for adapter_id, _version in changed_ready_adapter_identities}
 
 
-def test_unrecorded_ready_family_route_cannot_hide_behind_shared_adapter_identity() -> None:
-    module = _family_module()
-    registry = module.biorxiv_medrxiv_shadow_registry()
-    readiness = module.biorxiv_medrxiv_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE)
-    extra_route_id = "biorxiv_unrecorded_ready_direct"
-    extra_route = replace(registry.get_route("biorxiv_details_lookup_direct"), route_id=extra_route_id)
+@pytest.mark.parametrize(
+    ("family_id", "config"),
+    _FAMILY_CONFIGS.items(),
+    ids=_FAMILY_CONFIGS,
+)
+def test_unrecorded_ready_family_route_cannot_hide_behind_shared_adapter_identity(
+    family_id: str,
+    config: _FamilyBoundaryConfig,
+) -> None:
+    module = _family_module(config)
+    registry = getattr(module, config.registry_factory)()
+    readiness = getattr(module, config.readiness_factory)(ExecutionMode.OFFLINE_FIXTURE)
+    base_case = next(
+        case
+        for case in config.runtime_cases
+        if registry.get_route(case.route_identity[0]).source_constraint is SourceConstraint.NATIVE_CORPUS
+    )
+    extra_route_id = f"{base_case.source_id}_unrecorded_ready_direct"
+    extra_route = replace(registry.get_route(base_case.route_identity[0]), route_id=extra_route_id)
     extra_readiness = replace(
-        next(entry for entry in readiness.routes if entry.route_id == "biorxiv_details_lookup_direct"),
+        next(entry for entry in readiness.routes if entry.route_id == base_case.route_identity[0]),
         route_id=extra_route_id,
     )
-    biorxiv_source = registry.get_source("biorxiv")
+    selected_source = registry.get_source(base_case.source_id)
     mutated_source = replace(
-        biorxiv_source,
-        route_references=biorxiv_source.route_references + (SourceRouteReference(extra_route_id, None),),
+        selected_source,
+        route_references=selected_source.route_references + (SourceRouteReference(extra_route_id, None),),
     )
     mutated_registry = replace(
         registry,
-        sources=tuple(mutated_source if source is biorxiv_source else source for source in registry.sources),
+        sources=tuple(mutated_source if source is selected_source else source for source in registry.sources),
         routes=registry.routes + (extra_route,),
     )
     mutated_readiness = replace(readiness, routes=readiness.routes + (extra_readiness,))
-    registry_route_ids, readiness_route_ids, ready_route_ids = _family_boundary_route_ids(
+    changed_routes, readiness_route_ids, ready_route_ids = _family_boundary_routes(
         mutated_registry,
         mutated_readiness,
     )
-    recorded_route_ids = {identity[0] for identity in _FAMILY_RECORDED_FIXTURES}
+    recorded_route_ids = {case.route_identity[0] for case in config.runtime_cases}
+    registry_route_ids = {route.route_id for route in changed_routes}
 
+    assert family_id in _FAMILY_CONFIGS
     assert registry_route_ids - recorded_route_ids == {extra_route_id}
     assert readiness_route_ids - recorded_route_ids == {extra_route_id}
     assert ready_route_ids - recorded_route_ids == {extra_route_id}
 
 
 @pytest.mark.asyncio
-async def test_all_six_family_routes_use_only_accounted_executor_gateway_dispatches(
+@pytest.mark.parametrize(("family_id", "config", "case"), _FAMILY_RUNTIME_PARAMS)
+async def test_all_family_runtime_cases_use_only_accounted_executor_gateway_dispatches(
+    family_id: str,
+    config: _FamilyBoundaryConfig,
+    case: _FamilyRuntimeCase,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = _family_module()
-    adapters = module.biorxiv_medrxiv_gateway_adapters(monotonic_clock=lambda: 0.0)
-    fixture_bodies = _family_fixture_bodies()
-    planned = {identity: _family_plan(identity[0]) for identity in _FAMILY_RECORDED_FIXTURES}
-    expected_dispatches = sum(len(bodies) for bodies in fixture_bodies.values())
-    dispatch_ids = iter(f"family-dispatch-{index}" for index in range(1, expected_dispatches + 1))
+    module = _family_module(config)
+    family_adapters = dict(getattr(module, config.adapter_factory)(monotonic_clock=lambda: 0.0))
+    if config.include_foundation_adapters:
+        foundation_adapters = dict(_adapter_module().foundation_gateway_adapters(monotonic_clock=lambda: 0.0))
+        duplicate_adapter_ids = set(family_adapters).intersection(foundation_adapters)
+        assert duplicate_adapter_ids == set()
+        adapters = {**foundation_adapters, **family_adapters}
+    else:
+        adapters = family_adapters
+    fixture_bodies = _family_fixture_bodies(config)
+    registry, plan = _family_plan(config, case)
+    route = registry.get_route(case.route_identity[0])
+    remaining = list(fixture_bodies[case.case_id])
+    dispatch_ids = iter(f"{family_id}-dispatch-{index}" for index in range(1, case.expected_dispatches + 1))
     gateway_calls: list[tuple[str, str]] = []
-    executions = {}
     _install_runtime_tripwires(monkeypatch)
 
-    for identity, bodies in fixture_bodies.items():
-        route_id, _adapter_id, _adapter_version = identity
-        registry, plan = planned[identity]
-        remaining = list(bodies)
+    async def gateway(route, intent, *, is_policy_active):
+        assert is_policy_active(route.route_id, route.policy.policy_digest)
+        assert route.route_id == case.route_identity[0]
+        gateway_calls.append((route.route_id, intent.path))
+        return _response(route, intent, remaining.pop(0))
 
-        async def gateway(
-            route,
-            intent,
-            *,
-            is_policy_active,
-            expected_route_id=route_id,
-            responses=remaining,
-        ):
-            assert is_policy_active(route.route_id, route.policy.policy_digest)
-            assert route.route_id == expected_route_id
-            gateway_calls.append((route.route_id, intent.path))
-            return _response(route, intent, responses.pop(0))
-
-        execution = await execute_discovery_plan(
-            plan,
-            registry=registry,
-            adapters=adapters,
-            gateway=gateway,
-            policy_is_active=lambda _route_id, _digest: True,
-            dispatch_id_factory=lambda: next(dispatch_ids),
-            monotonic_clock=lambda: 0.0,
-        )
-        executions[route_id] = execution
-        assert remaining == []
-        assert tuple(outcome.state for outcome in execution.logical_outcomes) == (LogicalOutcomeState.SUCCEEDED,)
-        assert execution.usage.pages == len(bodies)
-        assert len(execution.usage.physical_records) == len(bodies)
-        assert execution.usage.accounting.created == len(bodies)
-        assert execution.usage.accounting.debited == len(bodies)
-        assert execution.candidates
-        assert "example.invalid" not in repr(execution)
-        assert "fixture-secret" not in repr(execution)
-
-    expected_paths = {
-        "biorxiv_europe_pmc_search_aggregator": ["/europepmc/webservices/rest/search"],
-        "medrxiv_europe_pmc_search_aggregator": ["/europepmc/webservices/rest/search"],
-        "biorxiv_details_lookup_direct": ["/details/biorxiv/10.5555/biorxiv.details.synthetic/na/json"],
-        "medrxiv_details_lookup_direct": ["/details/medrxiv/10.5555/medrxiv.details.synthetic/na/json"],
-        "biorxiv_details_interval_direct": [
-            "/details/biorxiv/2026-06-01/2026-06-02/0/json",
-            "/details/biorxiv/2026-06-01/2026-06-02/1/json",
-        ],
-        "medrxiv_details_interval_direct": [
-            "/details/medrxiv/2026-06-01/2026-06-02/0/json",
-            "/details/medrxiv/2026-06-01/2026-06-02/1/json",
-        ],
-    }
-    observed_paths = {
-        route_id: [path for observed_route_id, path in gateway_calls if observed_route_id == route_id]
-        for route_id in expected_paths
-    }
-
-    assert observed_paths == expected_paths
-    assert len(gateway_calls) == expected_dispatches == 8
-    assert Counter(route_id for route_id, _path in gateway_calls) == Counter(
-        {
-            "biorxiv_europe_pmc_search_aggregator": 1,
-            "medrxiv_europe_pmc_search_aggregator": 1,
-            "biorxiv_details_lookup_direct": 1,
-            "medrxiv_details_lookup_direct": 1,
-            "biorxiv_details_interval_direct": 2,
-            "medrxiv_details_interval_direct": 2,
-        }
+    execution = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters=adapters,
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: next(dispatch_ids),
+        monotonic_clock=lambda: 0.0,
     )
-    assert executions["biorxiv_details_interval_direct"].usage.accounting.debited == 2
-    assert executions["medrxiv_details_interval_direct"].usage.accounting.debited == 2
+
+    assert plan.dispatch_groups[0].allowance.physical_dispatches == route.max_physical_dispatches
+    assert plan.dispatch_groups[0].allowance.pages == route.policy.limits.max_pages
+    assert plan.allowance.aggregate_wall_time_ms == (route.policy.limits.timeout_ms * route.max_physical_dispatches)
+    assert remaining == []
+    expected_state = LogicalOutcomeState.SUCCEEDED if case.expect_candidates else LogicalOutcomeState.VALID_EMPTY
+    assert tuple(outcome.state for outcome in execution.logical_outcomes) == (expected_state,)
+    assert execution.usage.pages == case.expected_pages
+    assert len(execution.usage.physical_records) == case.expected_dispatches
+    assert execution.usage.accounting.created == case.expected_dispatches
+    assert execution.usage.accounting.debited == case.expected_dispatches
+    assert execution.usage.accounting.released == 0
+    assert execution.usage.accounting.outstanding == 0
+    assert bool(execution.candidates) is case.expect_candidates
+    assert tuple(path for _route_id, path in gateway_calls) == _EXPECTED_FAMILY_PATHS[case.case_id]
+    assert Counter(route_id for route_id, _path in gateway_calls) == Counter(
+        {case.route_identity[0]: case.expected_dispatches}
+    )
+    assert "example.invalid" not in repr(execution)
+    assert "fixture-secret" not in repr(execution)

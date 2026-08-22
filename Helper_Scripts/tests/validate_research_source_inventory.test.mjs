@@ -251,6 +251,7 @@ test("validates a complete reconciled manifest and ledger", () => {
     schema: { $id: "test-schema" },
     schemaValidated: true,
     requiredSources: {},
+    requiredImplementedSources: {},
   });
 
   assert.deepEqual(report.errors, []);
@@ -276,6 +277,7 @@ test("rejects digest drift and duplicate ledger rows", () => {
   const report = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
   });
 
@@ -297,6 +299,7 @@ test("reports a null manifest items container without throwing", () => {
     report = validateInventoryDocuments(manifest, ledger, {
       freeze: freezeFor(manifest),
       requiredSources: {},
+      requiredImplementedSources: {},
       schemaValidated: true,
     });
   });
@@ -313,6 +316,7 @@ test("reports null manifest item entries without throwing", () => {
     report = validateInventoryDocuments(manifest, ledger, {
       freeze: freezeFor(manifest),
       requiredSources: {},
+      requiredImplementedSources: {},
       schemaValidated: true,
     });
   });
@@ -334,6 +338,7 @@ test("does not retain target definitions with non-array inventory IDs", () => {
     report = validateInventoryDocuments(manifest, ledger, {
       freeze: freezeFor(manifest),
       requiredSources: {},
+      requiredImplementedSources: {},
       schemaValidated: true,
     });
   });
@@ -355,6 +360,7 @@ test("requires current source-route-surface certification before mapped rows clo
     freeze: freezeFor(manifest),
     asOf: "2026-07-13",
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
     artifactDigests: {},
     trustedReviewerIds: ["research-maintainer"],
@@ -520,6 +526,7 @@ test("rejects route kinds that misstate source constraint and attribution", () =
     freeze: freezeFor(manifest),
     asOf: "2026-07-13",
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -541,6 +548,7 @@ test("aggregator routes require a machine-readable source predicate", () => {
     freeze: freezeFor(manifest),
     asOf: "2026-07-13",
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   };
@@ -602,6 +610,7 @@ test("credentialed exclusions do not require invented route candidates", () => {
     freeze: freezeFor(manifest),
     asOf: "2026-07-13",
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -622,6 +631,7 @@ test("credentialed exclusions do not require invented route candidates", () => {
     freeze: freezeFor(manifest),
     asOf: "2026-07-13",
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -637,6 +647,7 @@ test("contract freeze records an explicit trusted reviewer boundary", () => {
     freeze: freezeFor(manifest),
     asOf: "2026-07-13",
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
   };
 
@@ -713,6 +724,7 @@ test("required sources require exact core routes without excluding reviewed addi
   const unreviewed = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -731,6 +743,7 @@ test("required sources require exact core routes without excluding reviewed addi
   const wrongTarget = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -744,6 +757,7 @@ test("required sources require exact core routes without excluding reviewed addi
   const correctTargetWrongRoute = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -786,6 +800,7 @@ test("required sources require exact core routes without excluding reviewed addi
   const completeMapping = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -818,6 +833,7 @@ test("required sources require exact core routes without excluding reviewed addi
   const futureAuthenticatedCandidate = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -834,6 +850,7 @@ test("required sources require exact core routes without excluding reviewed addi
   const missingIntervalRoute = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -852,6 +869,7 @@ test("required sources require exact core routes without excluding reviewed addi
   const intervalRouteAdvertisesRecent = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -863,6 +881,7 @@ test("required sources require exact core routes without excluding reviewed addi
   const wrongPublisher = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources,
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   });
@@ -898,6 +917,168 @@ test("required sources require exact core routes without excluding reviewed addi
         .mapping_satisfied,
       false,
     );
+  }
+});
+
+
+test("implemented sources require exact shadow evidence and report blockers for every drift", () => {
+  const inventoryId = "sourclip-2026-07-13-0001";
+
+  const documents = () => {
+    const { manifest, ledger } = validDocuments();
+    const route = mappedRoute({
+      routeCandidateId: "clinicaltrials_gov_studies_search_direct",
+      plannedBackendId: "clinicaltrials_gov_api_v2",
+      evidenceReference: "https://clinicaltrials.gov/data-api/api",
+    });
+    const row = mapExampleRow(manifest, ledger, route);
+    row.capabilities = ["search", "detail", "metadata", "snippet"];
+    row.implementation_state = "implemented";
+    row.fixture_state = "passed";
+    row.live_state = "not_run";
+    row.evidence.push({
+      kind: "implementation",
+      reference_type: "https_url",
+      reference: "https://example.test/fixture-implementation",
+      claim: "The fixture-only adapter implements the reviewed bounded metadata projection.",
+    });
+    refreshLedgerDigest(ledger);
+    const requirement = {
+      sourceSnapshotSha256: manifest.items[0].row_sha256,
+      canonicalTarget: "example_source",
+      declaredSurfaces: ["standalone_search", "deep_research"],
+      capabilities: ["search", "detail", "metadata", "snippet"],
+      route: {
+        id: "clinicaltrials_gov_studies_search_direct",
+        routeKind: "direct",
+        backendId: "clinicaltrials_gov_api_v2",
+        queryModes: ["general_free_text"],
+        sourceConstraint: "native_corpus",
+        sourcePredicate: null,
+        attributionBasis: "native_response",
+        evidenceHosts: ["clinicaltrials.gov"],
+      },
+      implementationState: "implemented",
+      fixtureState: "passed",
+      liveState: "not_run",
+      certifications: [],
+    };
+    return { manifest, ledger, row, requirement };
+  };
+
+  const validate = ({ manifest, ledger, requirement }) => validateInventoryDocuments(
+    manifest,
+    ledger,
+    {
+      freeze: freezeFor(manifest),
+      asOf: "2026-07-13",
+      requiredSources: {},
+      requiredImplementedSources: { [inventoryId]: requirement },
+      schemaValidated: true,
+      trustedReviewerIds: ["research-maintainer"],
+    },
+  );
+
+  const valid = documents();
+  const report = validate(valid);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.required_implemented_source_blockers, []);
+  assert.equal(report.contract_freeze_ready, true);
+  assert.deepEqual(report.required_implemented_sources[inventoryId], {
+    source_snapshot_sha256: valid.requirement.sourceSnapshotSha256,
+    canonical_target: "example_source",
+    required_route_id: "clinicaltrials_gov_studies_search_direct",
+    captured_label: "Example Source",
+    resolution: "mapped",
+    canonical_targets: ["example_source"],
+    declared_surfaces: ["standalone_search", "deep_research"],
+    capabilities: ["search", "detail", "metadata", "snippet"],
+    implementation_state: "implemented",
+    fixture_state: "passed",
+    live_state: "not_run",
+    certifications: [],
+    implementation_evidence: true,
+    substantively_triaged: true,
+    implementation_satisfied: true,
+  });
+
+  const mutations = [
+    ["snapshot", ({ row }) => { row.source_snapshot_sha256 = "f".repeat(64); }, false],
+    ["target", ({ ledger, row }) => {
+      row.canonical_targets = ["wrong_target"];
+      ledger.target_definitions[0].canonical_target_id = "wrong_target";
+    }, true],
+    ["surfaces", ({ row }) => { row.declared_surfaces.reverse(); }, true],
+    ["capabilities", ({ row }) => { row.capabilities.pop(); }, true],
+    ["route.id", ({ row }) => {
+      row.route_candidates[0].route_candidate_id = "wrong_direct";
+    }, true],
+    ["route.routeKind", ({ row }) => {
+      row.route_candidates[0].route_kind = "site_search";
+      row.route_kinds = ["site_search"];
+    }, true],
+    ["route.backendId", ({ row }) => {
+      row.route_candidates[0].planned_backend_id = "wrong_api";
+    }, true],
+    ["route.queryModes", ({ row }) => {
+      row.route_candidates[0].query_modes.push("identifier_lookup");
+    }, true],
+    ["route.sourceConstraint", ({ row }) => {
+      row.route_candidates[0].route_kind = "aggregator";
+      row.route_kinds = ["aggregator"];
+      row.route_candidates[0].source_constraint = "provider_source_filter";
+      row.route_candidates[0].source_constraint_predicate = {
+        provider_field: "source",
+        operator: "equals",
+        values: ["ClinicalTrials.gov"],
+      };
+      row.route_candidates[0].attribution_basis = "provider_source_field";
+    }, true],
+    ["route.sourcePredicate", ({ row }) => {
+      row.route_candidates[0].route_kind = "aggregator";
+      row.route_kinds = ["aggregator"];
+      row.route_candidates[0].source_constraint = "provider_source_filter";
+      row.route_candidates[0].source_constraint_predicate = {
+        provider_field: "source",
+        operator: "one_of",
+        values: ["ClinicalTrials.gov"],
+      };
+      row.route_candidates[0].attribution_basis = "provider_source_field";
+    }, true],
+    ["route.attributionBasis", ({ row }) => {
+      row.route_candidates[0].route_kind = "aggregator";
+      row.route_kinds = ["aggregator"];
+      row.route_candidates[0].source_constraint = "provider_domain_filter";
+      row.route_candidates[0].source_constraint_predicate = {
+        provider_field: "url",
+        operator: "domain_suffix",
+        values: ["clinicaltrials.gov"],
+      };
+      row.route_candidates[0].attribution_basis = "verified_reported_origin";
+    }, true],
+    ["route.evidenceHosts", ({ row }) => {
+      row.route_candidates[0].evidence_reference = "https://example.test/api";
+    }, true],
+    ["implementation_state", ({ row }) => { row.implementation_state = "planned"; }, true],
+    ["fixture_state", ({ row }) => { row.fixture_state = "not_run"; }, true],
+    ["live_state", ({ row }) => { row.live_state = "current"; }, true],
+    ["certifications", ({ row }) => { row.certifications = [{}]; }, false],
+    ["implementation evidence", ({ row }) => {
+      row.evidence = row.evidence.filter((entry) => entry.kind !== "implementation");
+    }, true],
+    ["substantive triage", ({ row }) => { row.ownership.reviewer = "untrusted-reviewer"; }, true],
+  ];
+
+  for (const [label, mutate, structurallyValid] of mutations) {
+    const mutated = documents();
+    mutate(mutated);
+    refreshLedgerDigest(mutated.ledger);
+    const drift = validate(mutated);
+    if (structurallyValid) assert.deepEqual(drift.errors, [], label);
+    else assert.ok(drift.errors.length > 0, label);
+    assert.deepEqual(drift.required_implemented_source_blockers, [inventoryId], label);
+    assert.equal(drift.required_implemented_sources[inventoryId].implementation_satisfied, false, label);
+    assert.equal(drift.contract_freeze_ready, false, label);
   }
 });
 
@@ -942,6 +1123,7 @@ test("exclusions close only with an externally trusted matching approval", () =>
     freeze: freezeFor(manifest),
     asOf: "2026-07-13",
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
     trustedReviewerIds: ["research-maintainer"],
   };
@@ -989,6 +1171,7 @@ test("rejects superficial terminal exclusions instead of freezing them", () => {
   const report = validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
     asOf: "2026-07-13",
   });
@@ -1018,6 +1201,7 @@ test("validation does not mutate malformed input", () => {
   validateInventoryDocuments(manifest, ledger, {
     freeze: freezeFor(manifest),
     requiredSources: {},
+    requiredImplementedSources: {},
     schemaValidated: true,
   });
 
@@ -1150,6 +1334,7 @@ test("the authoritative CLI composes schema and semantic validation", (t) => {
     "codex-task-12968.5-inventory-review",
   ]);
   assert.equal(validReport.contract_freeze_ready, true);
+  assert.equal(validReport.inventory_delivery_ready, false);
   assert.match(validReport.digests.schema_validator, /^[a-f0-9]{64}$/);
   assert.deepEqual(
     validReport,
@@ -1168,12 +1353,12 @@ test("the authoritative CLI composes schema and semantic validation", (t) => {
   assert.equal(validReport.counts.resolution.mapped, 191);
   assert.equal(validReport.counts.resolution.credentialed_out_of_scope, 35);
   assert.deepEqual(validReport.counts.implementation, {
-    planned: 233,
-    implemented: 2,
+    planned: 231,
+    implemented: 4,
   });
   assert.deepEqual(validReport.counts.fixture, {
-    not_run: 233,
-    passed: 2,
+    not_run: 231,
+    passed: 4,
     failed: 0,
   });
   assert.deepEqual(validReport.counts.live, {
@@ -1271,6 +1456,55 @@ test("the authoritative CLI composes schema and semantic validation", (t) => {
     assert.ok(row.evidence.some(
       (entry) => /2026-07-15/.test(entry.claim) && /recent/i.test(entry.claim),
     ));
+  }
+  assert.deepEqual(validReport.required_implemented_source_blockers, []);
+  const expectedImplementedSources = {
+    "sourclip-2026-07-13-0026": {
+      sourceSnapshotSha256: "cbc4a8445252460ef4502924edf409c7fc8098eb6987745b83cc426bd2fc8e73",
+      canonicalTarget: "clinicaltrials_gov",
+      capabilities: ["search", "detail", "metadata", "snippet"],
+      routeId: "clinicaltrials_gov_studies_search_direct",
+      backendId: "clinicaltrials_gov_api_v2",
+      evidenceHost: "clinicaltrials.gov",
+    },
+    "sourclip-2026-07-13-0027": {
+      sourceSnapshotSha256: "34d7fc36d4b64b2dca99c0472ad3d804c7ed9ff5a96574a8146947133913b32b",
+      canonicalTarget: "pubmed_central",
+      capabilities: ["search", "detail", "metadata"],
+      routeId: "pubmed_central_esearch_summary_direct",
+      backendId: "ncbi_eutils_pmc",
+      evidenceHost: "www.ncbi.nlm.nih.gov",
+    },
+  };
+  for (const [inventoryId, expected] of Object.entries(expectedImplementedSources)) {
+    const row = rowsById.get(inventoryId);
+    const state = validReport.required_implemented_sources[inventoryId];
+    assert.equal(state.implementation_satisfied, true);
+    assert.equal(row.source_snapshot_sha256, expected.sourceSnapshotSha256);
+    assert.deepEqual(row.canonical_targets, [expected.canonicalTarget]);
+    assert.deepEqual(row.declared_surfaces, ["standalone_search", "deep_research"]);
+    assert.deepEqual(row.capabilities, expected.capabilities);
+    assert.equal(row.implementation_state, "implemented");
+    assert.equal(row.fixture_state, "passed");
+    assert.equal(row.live_state, "not_run");
+    assert.deepEqual(row.certifications, []);
+    assert.ok(row.evidence.some((entry) => entry.kind === "implementation"));
+    assert.equal(row.route_candidates.filter(
+      (candidate) => candidate.route_candidate_id === expected.routeId,
+    ).length, 1);
+    const [route] = row.route_candidates;
+    assert.deepEqual(route, {
+      route_candidate_id: expected.routeId,
+      route_kind: "direct",
+      credential_requirement: "none",
+      planned_backend_id: expected.backendId,
+      query_modes: ["general_free_text"],
+      source_constraint: "native_corpus",
+      source_constraint_predicate: null,
+      attribution_basis: "native_response",
+      coverage_notes: route.coverage_notes,
+      evidence_reference: `https://${expected.evidenceHost}${new URL(route.evidence_reference).pathname}`,
+    });
   }
   const openAlex = rowsById.get("sourclip-2026-07-13-0088");
   assert.equal(openAlex.resolution, "credentialed_out_of_scope");

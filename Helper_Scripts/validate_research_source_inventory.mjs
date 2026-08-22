@@ -95,6 +95,48 @@ const REQUIRED_SOURCES = Object.freeze({
     }),
   }),
 });
+const REQUIRED_IMPLEMENTED_SOURCES = Object.freeze({
+  "sourclip-2026-07-13-0026": Object.freeze({
+    sourceSnapshotSha256: "cbc4a8445252460ef4502924edf409c7fc8098eb6987745b83cc426bd2fc8e73",
+    canonicalTarget: "clinicaltrials_gov",
+    declaredSurfaces: Object.freeze(["standalone_search", "deep_research"]),
+    capabilities: Object.freeze(["search", "detail", "metadata", "snippet"]),
+    route: Object.freeze({
+      id: "clinicaltrials_gov_studies_search_direct",
+      routeKind: "direct",
+      backendId: "clinicaltrials_gov_api_v2",
+      queryModes: Object.freeze(["general_free_text"]),
+      sourceConstraint: "native_corpus",
+      sourcePredicate: null,
+      attributionBasis: "native_response",
+      evidenceHosts: Object.freeze(["clinicaltrials.gov"]),
+    }),
+    implementationState: "implemented",
+    fixtureState: "passed",
+    liveState: "not_run",
+    certifications: Object.freeze([]),
+  }),
+  "sourclip-2026-07-13-0027": Object.freeze({
+    sourceSnapshotSha256: "34d7fc36d4b64b2dca99c0472ad3d804c7ed9ff5a96574a8146947133913b32b",
+    canonicalTarget: "pubmed_central",
+    declaredSurfaces: Object.freeze(["standalone_search", "deep_research"]),
+    capabilities: Object.freeze(["search", "detail", "metadata"]),
+    route: Object.freeze({
+      id: "pubmed_central_esearch_summary_direct",
+      routeKind: "direct",
+      backendId: "ncbi_eutils_pmc",
+      queryModes: Object.freeze(["general_free_text"]),
+      sourceConstraint: "native_corpus",
+      sourcePredicate: null,
+      attributionBasis: "native_response",
+      evidenceHosts: Object.freeze(["www.ncbi.nlm.nih.gov"]),
+    }),
+    implementationState: "implemented",
+    fixtureState: "passed",
+    liveState: "not_run",
+    certifications: Object.freeze([]),
+  }),
+});
 const RESOLUTIONS = new Set([
   "unreviewed",
   "mapped",
@@ -358,6 +400,14 @@ function sameStringSet(left, right) {
     && left.length === right.length
     && new Set(left).size === left.length
     && left.every((value) => right.includes(value));
+}
+
+
+function sameStringArray(left, right) {
+  return Array.isArray(left)
+    && Array.isArray(right)
+    && left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 
@@ -717,6 +767,7 @@ export function validateInventoryDocuments(
     asOf = new Date().toISOString().slice(0, 10),
     schema = null,
     requiredSources = REQUIRED_SOURCES,
+    requiredImplementedSources = REQUIRED_IMPLEMENTED_SOURCES,
     schemaValidated = false,
     schemaErrors = [],
     artifactDigests = {},
@@ -1274,6 +1325,52 @@ export function validateInventoryDocuments(
     .filter(([, state]) => !state.mapping_satisfied)
     .map(([inventoryId]) => inventoryId);
 
+  const requiredImplementedSourceStates = {};
+  for (const [inventoryId, requirement] of Object.entries(requiredImplementedSources)) {
+    const row = ledgerById.get(inventoryId);
+    const matchingRoutes = Array.isArray(row?.route_candidates)
+      ? row.route_candidates.filter((candidate) => (
+        routeMatchesRequirement(candidate, requirement.route)
+      ))
+      : [];
+    const substantiveTriage = row
+      ? isSubstantivelyTriaged(row, asOf, trustedReviewers)
+      : false;
+    const implementationEvidence = hasEvidence(row, "implementation");
+    const implementationSatisfied = row?.resolution === "mapped"
+      && row?.source_snapshot_sha256 === requirement.sourceSnapshotSha256
+      && sameStringArray(row?.canonical_targets, [requirement.canonicalTarget])
+      && sameStringArray(row?.declared_surfaces, requirement.declaredSurfaces)
+      && sameStringArray(row?.capabilities, requirement.capabilities)
+      && matchingRoutes.length === 1
+      && row?.implementation_state === requirement.implementationState
+      && row?.fixture_state === requirement.fixtureState
+      && row?.live_state === requirement.liveState
+      && canonicalJson(row?.certifications) === canonicalJson(requirement.certifications)
+      && implementationEvidence
+      && substantiveTriage;
+    requiredImplementedSourceStates[inventoryId] = {
+      source_snapshot_sha256: requirement.sourceSnapshotSha256,
+      canonical_target: requirement.canonicalTarget,
+      required_route_id: requirement.route.id,
+      captured_label: manifestById.get(inventoryId)?.label ?? null,
+      resolution: row?.resolution ?? null,
+      canonical_targets: Array.isArray(row?.canonical_targets) ? [...row.canonical_targets] : [],
+      declared_surfaces: Array.isArray(row?.declared_surfaces) ? [...row.declared_surfaces] : [],
+      capabilities: Array.isArray(row?.capabilities) ? [...row.capabilities] : [],
+      implementation_state: row?.implementation_state ?? null,
+      fixture_state: row?.fixture_state ?? null,
+      live_state: row?.live_state ?? null,
+      certifications: Array.isArray(row?.certifications) ? [...row.certifications] : [],
+      implementation_evidence: implementationEvidence,
+      substantively_triaged: substantiveTriage,
+      implementation_satisfied: implementationSatisfied,
+    };
+  }
+  const requiredImplementedSourceBlockers = Object.entries(requiredImplementedSourceStates)
+    .filter(([, state]) => !state.implementation_satisfied)
+    .map(([inventoryId]) => inventoryId);
+
   for (const item of manifestById.values()) {
     if (!ledgerById.has(item.inventory_id)) {
       errors.push(`ledger is missing inventory_id ${item.inventory_id}`);
@@ -1337,7 +1434,8 @@ export function validateInventoryDocuments(
   const contractFreezeReady = structurallyValid
     && manifestItems.length > 0
     && triaged === manifestItems.length
-    && requiredSourceBlockers.length === 0;
+    && requiredSourceBlockers.length === 0
+    && requiredImplementedSourceBlockers.length === 0;
   return {
     errors,
     schema_validated: schemaValidated,
@@ -1348,6 +1446,8 @@ export function validateInventoryDocuments(
     blockers,
     required_sources: requiredSourceStates,
     required_source_blockers: requiredSourceBlockers,
+    required_implemented_sources: requiredImplementedSourceStates,
+    required_implemented_source_blockers: requiredImplementedSourceBlockers,
     digests: {
       manifest: sha256(canonicalJson(manifest)),
       ledger: sha256(canonicalJson(ledger)),
