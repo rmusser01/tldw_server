@@ -130,3 +130,72 @@ Tracking/reporting:
 ## Concerns
 
 No Task 5 implementation blocker. Repository-wide ChaCha default-character cleanup can add intermittent serial-suite latency; bounded verification passed and this task did not change that lifecycle code. Task 7 must replace the interim chat 503 with canonical scoped retrieval and generation before chat is usable.
+
+## Fix Round 1
+
+### Status
+
+DONE. Review head `6be3d619b8f8818d61946161d296606ff86f3f1a`; all four accepted findings are fixed without restoring an unsafe recipient chat path.
+
+### Implementation
+
+- Source `q` matching now uses only canonical source ID, bounded projected title/type, and sanitized origin URL/host. Credentials, paths, queries, fragments, file URLs, unsupported schemes, and other raw URL text cannot affect membership or totals.
+- Recipient preview projection now allocates one aggregate `max_chars` budget across focused chunk text, `text_preview`, and remaining chunks. Focus is prioritized, the duplicate content-excerpt projection is omitted, exact duplicate texts are suppressed, and `text_truncated` reflects omitted source text.
+- History maps only the canonical store's `InputError` cursor rejection to exact `422 invalid_shared_workspace_request`; operational exceptions remain typed 503. The test executes the real `SharedWorkspaceChatStore` decoder before any DB transaction.
+- Added strict `SharedWorkspaceErrorResponse` and declared typed 401/403/404/422/429/503 responses on every recipient operation. The interim POST chat retains `SharedWorkspaceChatRequest`, advertises no 200, is documented as 503, authorizes first, and remains generation-free.
+
+### TDD RED
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py -k 'source_search_ignores_hidden_raw_url_content or source_search_matches_sanitized_origin' -q --timeout=45 -o log_cli=false
+```
+
+Result: `1 failed, 1 passed, 30 deselected`; hidden raw URL content changed source membership.
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py -k 'preview_text_uses_one_aggregate_budget_with_focus_first' -q --timeout=45 -o log_cli=false
+```
+
+Result: `2 failed, 32 deselected`; no aggregate recipient preview allocator existed.
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py -k 'history_rejects_cursor_from_canonical_store_decoder or history_store_failure_remains_unavailable' -q --timeout=45 -o log_cli=false
+```
+
+Result: `1 failed, 1 passed, 34 deselected`; canonical malformed cursor returned 503 instead of 422.
+
+```text
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py -k 'recipient_openapi_declares_only_typed_route_scoped_errors' -q --timeout=45 -o log_cli=false
+```
+
+Result: `1 failed, 36 deselected`; recipient operations did not declare the strict typed error wrapper and chat still advertised 200.
+
+### GREEN Verification
+
+- Exact Task 5 matrix from the brief, serial and bounded: `102 passed, 5 warnings in 266.86s`.
+- Focused auth, dependency metadata, route isolation, OpenAPI, malformed body, and old-route absence target: `11 passed, 27 deselected, 4 warnings in 6.80s`.
+- Final all-new-fix target: `7 passed, 30 deselected, 4 warnings in 9.16s`.
+- Ruff on both touched production files and the recipient endpoint test: passed.
+- Bandit on touched production: zero findings, zero skipped tests, 2,022 LOC scanned; JSON at `/tmp/bandit_task_12020_40_task5_fix_round_1.json`.
+- `git diff --check`: passed.
+- No pytest process was left open. The exact matrix continuously progressed and exited normally.
+
+### Files
+
+- `tldw_Server_API/app/api/v1/endpoints/sharing.py`
+- `tldw_Server_API/app/api/v1/schemas/shared_workspace_recipient_schemas.py`
+- `tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py`
+- This report, the SDD progress ledger, and existing `TASK-12020.40` notes.
+
+### Self-Review
+
+- Search input cannot observe non-projected URL material; positive matching still works on the normalized safe origin.
+- Preview text fields share one 1..12,000-character budget; focused text consumes that budget first and does not enlarge it.
+- Access resolution still occurs before history storage or owner media access. No cursor codec was copied into the API layer.
+- Every recipient operation documents the same strict bounded detail envelope; route-scoped runtime mapping remains isolated from clone, owner, token, and admin routes.
+- No media/owner IDs, internal share scope, paths, secrets, raw errors, credentials, prompts, queries, or provider diagnostics were added.
+- The two unrelated watchlist templates remain unmodified and unstaged.
+
+### PostgreSQL State And Concerns
+
+No PostgreSQL schema, policy, fixture, query, or runtime state was touched. No Fix Round 1 blocker remains. The known repository-wide default-character executor cleanup can make the serial sharing matrix slow, but it continued making progress and exited successfully. Task 7 still owns replacing the typed interim 503 chat route with canonical safe generation.

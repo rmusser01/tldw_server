@@ -1,6 +1,7 @@
 """Recipient shared-workspace API contract tests."""
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -23,10 +24,11 @@ from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas impor
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store import (
-    SharedWorkspaceMessagePage as StoredMessagePage,
+    SharedWorkspaceChatStore,
+    SharedWorkspaceStoredMessage,
 )
 from tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store import (
-    SharedWorkspaceStoredMessage,
+    SharedWorkspaceMessagePage as StoredMessagePage,
 )
 from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
     SharedWorkspaceAccessContext,
@@ -629,6 +631,88 @@ def test_source_page_serializes_only_recipient_safe_fields(api_factory, monkeypa
         assert forbidden not in serialized
 
 
+def test_source_search_ignores_hidden_raw_url_content(api_factory, monkeypatch) -> None:
+    sources = [
+        _source(
+            1,
+            title="Visible title",
+            url=(
+                "https://hidden-oracle:password@safe.example/hidden-oracle"
+                "?hidden-oracle=yes#hidden-oracle"
+            ),
+        ),
+        _source(2, title="File source", url="file:///private/hidden-oracle.db"),
+        _source(3, title="Unsupported source", url="javascript:hidden-oracle"),
+    ]
+    projected: list[str] = []
+
+    async def _sources(_context):
+        return sources
+
+    async def _projection(_context, selected_sources):
+        projected.extend(str(source["id"]) for source in selected_sources)
+        return {
+            "sources": [_status(source) for source in selected_sources],
+            "summary": {
+                "total": len(selected_sources),
+                "queryable": len(selected_sources),
+                "processing": 0,
+                "failed": 0,
+            },
+            "partial_errors": [],
+        }
+
+    monkeypatch.setattr(sharing, "_load_recipient_workspace_sources", _sources)
+    monkeypatch.setattr(sharing, "_project_recipient_source_status", _projection)
+    client, _service = api_factory()
+
+    response = client.get(
+        "/api/v1/sharing/shared-with-me/42/sources",
+        params={"q": "hidden-oracle"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+    assert response.json()["pagination"]["total"] == 0
+    assert projected == []
+
+
+def test_source_search_matches_sanitized_origin(api_factory, monkeypatch) -> None:
+    source = _source(
+        1,
+        title="Visible title",
+        url="https://user:password@Safe.Example/private?secret=yes#fragment",
+    )
+
+    async def _sources(_context):
+        return [source]
+
+    async def _projection(_context, selected_sources):
+        return {
+            "sources": [_status(item) for item in selected_sources],
+            "summary": {
+                "total": len(selected_sources),
+                "queryable": len(selected_sources),
+                "processing": 0,
+                "failed": 0,
+            },
+            "partial_errors": [],
+        }
+
+    monkeypatch.setattr(sharing, "_load_recipient_workspace_sources", _sources)
+    monkeypatch.setattr(sharing, "_project_recipient_source_status", _projection)
+    client, _service = api_factory()
+
+    response = client.get(
+        "/api/v1/sharing/shared-with-me/42/sources",
+        params={"q": "safe.example"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["pagination"]["total"] == 1
+    assert response.json()["items"][0]["origin_host"] == "safe.example"
+
+
 def test_preview_resolves_canonical_source_membership_and_focus(api_factory, monkeypatch) -> None:
     events: list[str] = []
     service = _AccessService(events=events)
@@ -677,6 +761,48 @@ def test_preview_resolves_canonical_source_membership_and_focus(api_factory, mon
     serialized = response.text.lower()
     assert "media_id" not in serialized
     assert "chunk_uuid" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("max_chars", "expected_preview_chars", "expected_focus_chars"),
+    [(1, 0, 1), (12_000, 6_000, 6_000)],
+)
+def test_preview_text_uses_one_aggregate_budget_with_focus_first(
+    max_chars: int,
+    expected_preview_chars: int,
+    expected_focus_chars: int,
+) -> None:
+    main_text = "M" * 8_000
+    preview = {
+        "text_preview": main_text,
+        "text_truncated": True,
+        "snippets": [
+            {"kind": "content_excerpt", "text": main_text, "start_char": 0, "end_char": 8_000},
+            {"kind": "chunk", "text": "L" * 4_000, "chunk_index": 6},
+            {"kind": "chunk", "text": "F" * 6_000, "chunk_index": 7},
+            {"kind": "chunk", "text": "R" * 4_000, "chunk_index": 8},
+        ],
+    }
+
+    bounded = sharing._recipient_preview_text_projection(
+        preview,
+        max_chars=max_chars,
+        focus_chunk_index=7,
+    )
+
+    emitted_texts = [
+        bounded["text_preview"] or "",
+        *(snippet["text"] for snippet in bounded["snippets"]),
+    ]
+    assert sum(len(text) for text in emitted_texts) == max_chars
+    assert len(bounded["text_preview"] or "") == expected_preview_chars
+    assert bounded["snippets"][0]["chunk_index"] == 7
+    assert len(bounded["snippets"][0]["text"]) == expected_focus_chars
+    assert all(snippet["kind"] == "chunk" for snippet in bounded["snippets"])
+    assert len([text for text in emitted_texts if text]) == len(
+        {text for text in emitted_texts if text}
+    )
+    assert bounded["text_truncated"] is True
 
 
 def test_preview_missing_source_is_neutral_and_does_not_open_media(api_factory, monkeypatch) -> None:
@@ -776,6 +902,44 @@ def test_history_cursor_page_is_bounded_and_chronological(api_factory, monkeypat
     assert body["messages"][1]["citations"][0]["source_id"] == "source-001"
 
 
+def test_history_rejects_cursor_from_canonical_store_decoder(
+    api_factory,
+    monkeypatch,
+) -> None:
+    store = SharedWorkspaceChatStore(SimpleNamespace(client_id="9"))
+
+    async def _history(context, *, before, limit):
+        return store.list_messages(
+            share_id=context.share_id,
+            before=before,
+            limit=limit,
+        )
+
+    monkeypatch.setattr(sharing, "_load_recipient_chat_history", _history)
+    client, _service = api_factory()
+
+    response = client.get(
+        "/api/v1/sharing/shared-with-me/42/chat/messages",
+        params={"before": "not-a-canonical-cursor"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_WORKSPACE_REQUEST
+
+
+def test_history_store_failure_remains_unavailable(api_factory, monkeypatch) -> None:
+    async def _history(_context, *, before, limit):
+        raise RuntimeError("database unavailable at /private/recipient.db")
+
+    monkeypatch.setattr(sharing, "_load_recipient_chat_history", _history)
+    client, _service = api_factory()
+
+    response = client.get("/api/v1/sharing/shared-with-me/42/chat/messages")
+
+    assert response.status_code == 503
+    assert response.json() == UNAVAILABLE
+
+
 @pytest.mark.parametrize(
     ("body", "raw"),
     [
@@ -843,6 +1007,49 @@ def test_recipient_openapi_keeps_typed_models_and_does_not_change_clone_route(ap
     clone = schema["paths"]["/api/v1/sharing/shared-with-me/{share_id}/clone"]["post"]
     assert clone["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/CloneWorkspaceResponse"
+    )
+
+
+def test_recipient_openapi_declares_only_typed_route_scoped_errors(api_factory) -> None:
+    client, _service = api_factory()
+
+    schema = client.get("/openapi.json").json()
+    operations = (
+        ("/api/v1/sharing/shared-with-me/{share_id}/workspace", "get"),
+        ("/api/v1/sharing/shared-with-me/{share_id}/sources", "get"),
+        (
+            "/api/v1/sharing/shared-with-me/{share_id}/sources/{source_id}/preview",
+            "get",
+        ),
+        ("/api/v1/sharing/shared-with-me/{share_id}/chat/messages", "get"),
+        ("/api/v1/sharing/shared-with-me/{share_id}/chat", "post"),
+    )
+    error_statuses = {"401", "403", "404", "422", "429", "503"}
+
+    for path, method in operations:
+        operation = schema["paths"][path][method]
+        assert error_statuses <= operation["responses"].keys()
+        assert "HTTPValidationError" not in json.dumps(operation)
+        for status_code in error_statuses:
+            response_schema = operation["responses"][status_code]["content"][
+                "application/json"
+            ]["schema"]
+            assert response_schema["$ref"].endswith("/SharedWorkspaceErrorResponse")
+
+    wrapper = schema["components"]["schemas"]["SharedWorkspaceErrorResponse"]
+    assert wrapper["additionalProperties"] is False
+    assert wrapper["required"] == ["detail"]
+    assert wrapper["properties"]["detail"]["$ref"].endswith(
+        "/SharedWorkspaceErrorDetail"
+    )
+
+    chat = schema["paths"]["/api/v1/sharing/shared-with-me/{share_id}/chat"]["post"]
+    assert "200" not in chat["responses"]
+    assert chat["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/SharedWorkspaceChatRequest"
+    )
+    assert chat["responses"]["503"]["description"] == (
+        "Shared workspace generation is not available."
     )
 
 

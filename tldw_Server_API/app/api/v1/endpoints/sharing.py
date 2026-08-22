@@ -15,7 +15,7 @@ import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlsplit
 
 import asyncpg
@@ -33,6 +33,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas import (
     SharedWorkspaceBootstrapResponse,
     SharedWorkspaceChatRequest,
+    SharedWorkspaceErrorResponse,
     SharedWorkspaceMessage,
     SharedWorkspaceMessagePage,
     SharedWorkspaceSource,
@@ -44,6 +45,7 @@ from tldw_Server_API.app.api.v1.utils.shared_workspace_recipient_route import (
     SharedWorkspaceRecipientRoute,
     recipient_error_detail,
 )
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
 
 from ..schemas.sharing_schemas import (
     AdminShareListResponse,
@@ -91,6 +93,32 @@ _RECIPIENT_CHAT_DEPENDENCIES = [
     Depends(require_permissions("sharing.read", detail=_RECIPIENT_PERMISSION_DETAIL)),
     Depends(rbac_rate_limit("sharing.read", detail=_RECIPIENT_CHAT_RATE_DETAIL)),
 ]
+
+
+def _recipient_error_responses(*, unavailable_description: str) -> dict[int, dict[str, Any]]:
+    descriptions = {
+        401: "Authentication is required.",
+        403: "The sharing.read permission is required.",
+        404: "The shared workspace or source was not found.",
+        422: "The recipient request is invalid.",
+        429: "The recipient request is temporarily rate limited.",
+        503: unavailable_description,
+    }
+    return {
+        status_code: {
+            "model": SharedWorkspaceErrorResponse,
+            "description": description,
+        }
+        for status_code, description in descriptions.items()
+    }
+
+
+_RECIPIENT_READ_ERROR_RESPONSES = _recipient_error_responses(
+    unavailable_description="Shared workspace data is temporarily unavailable."
+)
+_RECIPIENT_CHAT_ERROR_RESPONSES = _recipient_error_responses(
+    unavailable_description="Shared workspace generation is not available."
+)
 
 
 # ── Lazy service construction ──
@@ -587,6 +615,22 @@ def _source_is_retrieval_ready(source_status: dict[str, Any]) -> bool:
     )
 
 
+def _recipient_source_search_haystack(source: dict[str, Any]) -> str:
+    source_id = str(source.get("id") or "")
+    if len(source_id) > 512:
+        source_id = ""
+    origin_url, origin_host = _sanitize_recipient_source_origin(source.get("url"))
+    return " ".join(
+        (
+            source_id,
+            _bounded_recipient_text(source.get("title"), 512),
+            _bounded_recipient_text(source.get("source_type"), 64, fallback="media"),
+            origin_url or "",
+            origin_host or "",
+        )
+    )
+
+
 def _recipient_source_model(
     source: dict[str, Any],
     source_status: dict[str, Any],
@@ -663,6 +707,78 @@ def _recipient_message_page(value: Any) -> SharedWorkspaceMessagePage:
     )
 
 
+def _recipient_preview_text_projection(
+    preview: dict[str, Any],
+    *,
+    max_chars: int,
+    focus_chunk_index: int | None,
+) -> dict[str, Any]:
+    """Allocate one response-wide text budget, prioritizing an explicit focus."""
+    if not 1 <= max_chars <= 12_000:
+        raise ValueError("max_chars must be between 1 and 12000")
+
+    main_text = str(preview.get("text_preview") or "")
+    chunks = [
+        dict(snippet)
+        for snippet in list(preview.get("snippets") or [])[:10]
+        if snippet.get("kind") == "chunk" and str(snippet.get("text") or "")
+    ]
+    focused = next(
+        (
+            snippet
+            for snippet in chunks
+            if focus_chunk_index is not None
+            and snippet.get("chunk_index") == focus_chunk_index
+        ),
+        None,
+    )
+    remaining_chunks = [snippet for snippet in chunks if snippet is not focused]
+    candidates: list[tuple[str, str, dict[str, Any] | None]] = []
+    if focused is not None:
+        candidates.append(("snippet", str(focused["text"]), focused))
+    if main_text:
+        candidates.append(("preview", main_text, None))
+    candidates.extend(
+        ("snippet", str(snippet["text"]), snippet)
+        for snippet in remaining_chunks
+    )
+
+    remaining = max_chars
+    available_chars = 0
+    emitted_chars = 0
+    seen_texts: set[str] = set()
+    bounded_preview: str | None = None
+    bounded_snippets: list[dict[str, Any]] = []
+    for kind, text, snippet in candidates:
+        if text in seen_texts:
+            continue
+        seen_texts.add(text)
+        available_chars += len(text)
+        if remaining <= 0:
+            continue
+        emitted = text[:remaining]
+        remaining -= len(emitted)
+        emitted_chars += len(emitted)
+        if kind == "preview":
+            bounded_preview = emitted
+            continue
+        bounded = dict(snippet or {})
+        bounded["text"] = emitted
+        if len(emitted) < len(text):
+            start_char = bounded.get("start_char")
+            bounded["end_char"] = (
+                start_char + len(emitted) if isinstance(start_char, int) else None
+            )
+        bounded_snippets.append(bounded)
+
+    return {
+        "text_preview": bounded_preview,
+        "snippets": bounded_snippets,
+        "text_truncated": bool(preview.get("text_truncated"))
+        or emitted_chars < available_chars,
+    }
+
+
 async def _build_recipient_source_preview(
     context: Any,
     source: dict[str, Any],
@@ -709,9 +825,14 @@ async def _build_recipient_source_preview(
         raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
 
     origin_url, origin_host = _sanitize_recipient_source_origin(source.get("url"))
+    text_projection = _recipient_preview_text_projection(
+        preview,
+        max_chars=max_chars,
+        focus_chunk_index=chunk_index,
+    )
     snippets = []
-    for snippet in list(preview.get("snippets") or [])[:10]:
-        text = str(snippet.get("text") or "")[:12_000]
+    for snippet in text_projection["snippets"]:
+        text = str(snippet.get("text") or "")
         if not text:
             continue
         snippets.append(
@@ -748,13 +869,9 @@ async def _build_recipient_source_preview(
             if preview.get("unavailable_reason")
             else None
         ),
-        "text_preview": (
-            str(preview.get("text_preview"))[:12_000]
-            if preview.get("text_preview") is not None
-            else None
-        ),
+        "text_preview": text_projection["text_preview"],
         "text_total_chars": preview.get("text_total_chars"),
-        "text_truncated": bool(preview.get("text_truncated")),
+        "text_truncated": text_projection["text_truncated"],
         "snippets": snippets,
         "generated_at": preview.get("generated_at"),
     }
@@ -1060,6 +1177,7 @@ async def shared_with_me(
 @recipient_router.get(
     "/workspace",
     response_model=SharedWorkspaceBootstrapResponse,
+    responses=_RECIPIENT_READ_ERROR_RESPONSES,
     dependencies=_RECIPIENT_READ_DEPENDENCIES,
     summary="Read shared workspace metadata",
 )
@@ -1310,6 +1428,7 @@ def _run_clone_task(
 @recipient_router.get(
     "/sources",
     response_model=SharedWorkspaceSourcePage,
+    responses=_RECIPIENT_READ_ERROR_RESPONSES,
     dependencies=_RECIPIENT_READ_DEPENDENCIES,
     summary="List sources of a shared workspace",
 )
@@ -1333,15 +1452,7 @@ async def list_shared_workspace_sources(
         sources = [
             source
             for source in sources
-            if needle
-            in " ".join(
-                (
-                    str(source.get("id") or ""),
-                    str(source.get("title") or ""),
-                    str(source.get("source_type") or ""),
-                    str(source.get("url") or ""),
-                )
-            ).casefold()
+            if needle in _recipient_source_search_haystack(source).casefold()
         ]
     sources.sort(
         key=lambda source: (
@@ -1387,6 +1498,7 @@ async def list_shared_workspace_sources(
 @recipient_router.get(
     "/sources/{source_id}/preview",
     response_model=SharedWorkspaceSourcePreview,
+    responses=_RECIPIENT_READ_ERROR_RESPONSES,
     dependencies=_RECIPIENT_READ_DEPENDENCIES,
     summary="Preview a source in a shared workspace",
 )
@@ -1427,6 +1539,7 @@ async def preview_shared_workspace_source(
 @recipient_router.get(
     "/chat/messages",
     response_model=SharedWorkspaceMessagePage,
+    responses=_RECIPIENT_READ_ERROR_RESPONSES,
     dependencies=_RECIPIENT_READ_DEPENDENCIES,
     summary="Read recipient-owned shared chat history",
 )
@@ -1449,6 +1562,8 @@ async def get_shared_workspace_messages(
             limit=limit,
         )
         return _recipient_message_page(history)
+    except InputError as exc:
+        raise _recipient_http_error(422, "invalid_shared_workspace_request") from exc
     except (HTTPException, ValidationError) as exc:
         if isinstance(exc, HTTPException):
             raise
@@ -1459,6 +1574,9 @@ async def get_shared_workspace_messages(
 
 @recipient_router.post(
     "/chat",
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    response_model=SharedWorkspaceErrorResponse,
+    responses=_RECIPIENT_CHAT_ERROR_RESPONSES,
     dependencies=_RECIPIENT_CHAT_DEPENDENCIES,
     summary="Validate a shared chat request while generation remains unavailable",
 )
@@ -1467,7 +1585,7 @@ async def validate_shared_workspace_chat_request(
     body: SharedWorkspaceChatRequest,
     user: User = Depends(get_request_user),
     service: Any = Depends(get_shared_workspace_access_service),
-) -> None:
+) -> NoReturn:
     _ = body
     await _resolve_recipient_access(
         service,

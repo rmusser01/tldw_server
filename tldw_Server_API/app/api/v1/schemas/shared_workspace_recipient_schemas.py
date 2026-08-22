@@ -30,6 +30,10 @@ class SharedWorkspaceErrorDetail(_RecipientModel):
     retry_after_ms: int | None = Field(default=None, ge=0, le=1_800_000)
 
 
+class SharedWorkspaceErrorResponse(_RecipientModel):
+    detail: SharedWorkspaceErrorDetail
+
+
 class SharedWorkspacePartialError(_RecipientModel):
     area: str = Field(min_length=1, max_length=64)
     code: ShortCode
@@ -231,6 +235,7 @@ __all__ = [
     "SharedWorkspaceChatRequest",
     "SharedWorkspaceCitation",
     "SharedWorkspaceErrorDetail",
+    "SharedWorkspaceErrorResponse",
     "SharedWorkspaceGenerationDefault",
     "SharedWorkspaceMessage",
     "SharedWorkspaceMessagePage",
