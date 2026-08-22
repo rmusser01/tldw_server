@@ -69,6 +69,20 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Controller-resolved review cautions: `rg` found no remaining active UI consumer of the deleted context/banner; `git status --short --branch` confirmed only the two unrelated watchlist templates remain untracked and unstaged.
 - Status: complete.
 
+## Task 7 - Provider resolution, grounded generation, and safe chat API
+
+- Base: `fa5ce0b131ceb70422c1c36bf39fe4f423e1aa38`.
+- Brief: `task-7-brief.md`.
+- Implementation: added direct canonical provider/model resolution without fallback routing; exact-share-scope BYOK and separately derived trusted-base-URL authority; locally counted bounded grounded generation over an immutable budgeted `VerifiedSharedEvidence` subset; strict JSON response/citation validation; and the canonical authorization-first, claim-first, fenced shared-chat endpoint with replay, rate limiting, frozen-source revalidation, atomic completion, sanitized errors, and bounded audit metadata.
+- Self-review: added exact frozen-snapshot hash enforcement and provider-timeout-derived 5-30 minute receipt leases.
+- TDD RED: absent provider resolution produced `4 failed, 1 passed, 8 errors`; generation and endpoint initially failed collection on their absent contracts; focused frozen-receipt and lease tests each produced one failing test before their fixes.
+- GREEN: exact Task 7 suite `78 passed`; recipient/retrieval/security regressions `171 passed`; ordinary chat provider/default regressions `200 passed, 1 skipped`.
+- Gates: Ruff passed the touched scope (`chat.py`'s three whole-file I001 findings are unchanged from the base and were ignored only for that legacy file); Bandit reported zero findings/errors; `git diff --check` passed.
+- PostgreSQL state: live PostgreSQL was not started or available. No schema, migration, RLS, or store SQL changed.
+- Report: `task-7-implementer-report.md`.
+- Residual boundary: Task 8 and controller-owned UAT still consume and validate the typed API. Parent task remains In Progress.
+- Status: implementation complete; pending controller review.
+
 ## Task 5 - Typed bounded recipient read APIs
 
 - Base: `52e95b5bb4bae2efefea1acb5b5147e759cfd776`.

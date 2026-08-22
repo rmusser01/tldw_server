@@ -49,6 +49,48 @@ _ERRORS: dict[str, dict[str, Any]] = {
         "retryable": True,
         "recovery_action": "retry",
     },
+    "request_in_progress": {
+        "message": "This question is still processing.",
+        "retryable": True,
+        "recovery_action": "retry",
+    },
+    "request_id_conflict": {
+        "message": "This request ID was already used for another question.",
+        "retryable": False,
+    },
+    "source_subset_required": {
+        "message": "Select a smaller set of shared sources.",
+        "retryable": False,
+        "recovery_action": "reselect_sources",
+    },
+    "shared_source_changed": {
+        "message": "The selected shared sources changed.",
+        "retryable": False,
+        "recovery_action": "refresh",
+    },
+    "no_relevant_evidence": {
+        "message": "No relevant shared evidence was found.",
+        "retryable": False,
+        "recovery_action": "reselect_sources",
+    },
+    "shared_chat_context_too_large": {
+        "message": "The shared chat question is too large for this model.",
+        "retryable": False,
+    },
+    "retrieval_unavailable": {
+        "message": "Shared workspace retrieval is temporarily unavailable.",
+        "retryable": True,
+        "recovery_action": "retry",
+    },
+    "no_provider_configured": {
+        "message": "No usable generation provider is configured.",
+        "retryable": False,
+    },
+    "generation_failed": {
+        "message": "Shared workspace generation is temporarily unavailable.",
+        "retryable": True,
+        "recovery_action": "retry",
+    },
 }
 
 

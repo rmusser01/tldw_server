@@ -16,6 +16,7 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import sharing
 from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas import (
     SharedWorkspaceChatRequest,
+    SharedWorkspaceChatResponse,
     SharedWorkspaceCitation,
     SharedWorkspaceErrorDetail,
     SharedWorkspacePartialError,
@@ -1045,10 +1046,45 @@ def test_interim_chat_validation_is_typed_and_fail_closed(
     assert response.json() == INVALID_CHAT_REQUEST
 
 
-def test_valid_interim_chat_request_authorizes_then_remains_unavailable(api_factory) -> None:
-    events: list[str] = []
-    service = _AccessService(events=events)
-    client, _service = api_factory(service=service)
+def test_valid_chat_route_returns_canonical_typed_response(api_factory, monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _orchestrate(**kwargs):
+        captured.update(kwargs)
+        return SharedWorkspaceChatResponse(
+            request_id="de305d54-75b4-431b-adb2-eb6b9e546014",
+            conversation_id="conversation-1",
+            turn={
+                "user_message": {
+                    "message_id": "message-user",
+                    "role": "user",
+                    "content": "What evidence supports the conclusion?",
+                    "created_at": datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc),
+                },
+                "assistant_message": {
+                    "message_id": "message-assistant",
+                    "role": "assistant",
+                    "content": "Grounded answer",
+                    "created_at": datetime(2026, 8, 21, 20, 1, tzinfo=timezone.utc),
+                },
+            },
+            citations=[
+                {
+                    "citation_id": "citation-1",
+                    "source_id": "source-1",
+                    "source_title": "Source",
+                    "locator": {"chunk": 1, "start_char": 0, "end_char": 8},
+                    "quote": "Evidence",
+                    "score": 0.9,
+                }
+            ],
+            generation={"provider": "openai", "model": "gpt-model"},
+            source_scope={"mode": "all", "effective_source_count": 1},
+            replay={"replayed": False},
+        )
+
+    monkeypatch.setattr(sharing, "_orchestrate_shared_workspace_chat", _orchestrate)
+    client, _service = api_factory()
 
     response = client.post(
         "/api/v1/sharing/shared-with-me/42/chat",
@@ -1059,9 +1095,13 @@ def test_valid_interim_chat_request_authorizes_then_remains_unavailable(api_fact
         },
     )
 
-    assert response.status_code == 503
-    assert response.json() == UNAVAILABLE
-    assert events == ["access:42:9"]
+    assert response.status_code == 200
+    assert response.json()["generation"] == {
+        "provider": "openai",
+        "model": "gpt-model",
+    }
+    assert captured["share_id"] == 42
+    assert captured["recipient_user_id"] == 9
 
 
 def test_recipient_openapi_keeps_typed_models_and_does_not_change_clone_route(api_factory) -> None:
@@ -1116,7 +1156,12 @@ def test_recipient_openapi_declares_only_typed_route_scoped_errors(api_factory) 
     )
 
     chat = schema["paths"]["/api/v1/sharing/shared-with-me/{share_id}/chat"]["post"]
-    assert "200" not in chat["responses"]
+    assert chat["responses"]["200"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/SharedWorkspaceChatResponse")
+    assert chat["responses"]["409"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/SharedWorkspaceErrorResponse")
     assert chat["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/SharedWorkspaceChatRequest"
     )

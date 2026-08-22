@@ -157,6 +157,11 @@ from tldw_Server_API.app.core.Chat.chat_exceptions import (
     ChatModuleException,
     set_request_id,
 )
+from tldw_Server_API.app.core.Chat.chat_target_resolution import (
+    config_default_llm_provider,
+    get_default_model_for_provider,
+    get_default_provider,
+)
 
 # Note: streaming utilities are handled inside chat_service. No direct import needed here.
 from tldw_Server_API.app.core.Chat.chat_helpers import (
@@ -2709,22 +2714,8 @@ async def validate_chat_dictionary(
 
 @lru_cache(maxsize=1)
 def _config_default_llm_provider() -> str | None:
-    """Read default provider from config.txt (llm_api_settings/API sections)."""
-    cfg = load_and_log_configs()
-    if not isinstance(cfg, dict):
-        return None
-
-    def _extract(section: str) -> str | None:
-        data = cfg.get(section)
-        if isinstance(data, dict):
-            default_api = data.get("default_api")
-            if isinstance(default_api, str):
-                value = default_api.strip()
-                if value:
-                    return value
-        return None
-
-    return _extract("llm_api_settings") or _extract("API")
+    """Compatibility wrapper for tests patching the endpoint config loader."""
+    return config_default_llm_provider(load_and_log_configs())
 
 
 def _any_cloud_provider_has_key() -> bool:
@@ -2754,17 +2745,22 @@ def _any_cloud_provider_has_key() -> bool:
 
 
 def _get_default_provider() -> str:
-    """Resolve default provider preferring config.txt, then env/test fallbacks."""
-    cfg_default = _config_default_llm_provider()
-    if cfg_default:
-        return cfg_default
+    """Compatibility wrapper for tests patching ordinary chat defaults."""
+    return get_default_provider(
+        config_resolver=_config_default_llm_provider,
+        test_mode_resolver=_shared_is_test_mode,
+        fallback_provider=DEFAULT_LLM_PROVIDER,
+    )
 
-    env_val = os.getenv("DEFAULT_LLM_PROVIDER")
-    if env_val:
-        return env_val
-    if _shared_is_test_mode():
-        return "local-llm"
-    return DEFAULT_LLM_PROVIDER
+
+def _get_default_model_for_provider_name(target_provider: str) -> str | None:
+    """Compatibility wrapper for ordinary chat's patchable override helpers."""
+    return get_default_model_for_provider(
+        target_provider,
+        override_default_resolver=get_override_default_model,
+        override_resolver=get_llm_provider_override,
+        config_loader=lambda: _config,
+    )
 
 
 def _should_enforce_strict_model_selection() -> bool:
@@ -4298,25 +4294,6 @@ async def create_chat_completion(
             # Normalize provider/model on the request for downstream logic (already resolved)
             provider = selected_provider
             model = selected_model or model
-
-            def _get_default_model_for_provider_name(target_provider: str) -> str | None:
-                override_default = get_override_default_model(target_provider)
-                if override_default:
-                    return override_default
-                override = get_llm_provider_override(target_provider)
-                if override and override.allowed_models:
-                    return override.allowed_models[0]
-                normalized = target_provider.replace(".", "_").replace("-", "_")
-                env_key = f"DEFAULT_MODEL_{normalized.upper()}"
-                env_val = os.getenv(env_key)
-                if env_val:
-                    return env_val
-                config_key = f"default_model_{normalized.lower()}"
-                if _chat_config:
-                    cfg_val = _chat_config.get(config_key)
-                    if cfg_val:
-                        return cfg_val
-                return None
 
             try:
                 if not request_model_was_explicit:

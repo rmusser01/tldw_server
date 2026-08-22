@@ -200,7 +200,7 @@ class SharedWorkspaceBootstrapResponse(_RecipientModel):
     partial_errors: list[SharedWorkspacePartialError] = Field(default_factory=list, max_length=8)
 
 
-class SharedWorkspaceChatSourceScope(_RecipientModel):
+class SharedWorkspaceSourceScope(_RecipientModel):
     mode: Literal["all", "include"]
     source_ids: list[Identifier] = Field(default_factory=list, max_length=500)
 
@@ -218,7 +218,7 @@ class SharedWorkspaceChatSourceScope(_RecipientModel):
 class SharedWorkspaceChatRequest(_RecipientModel):
     request_id: UUID
     query: str = Field(min_length=1, max_length=10_000)
-    source_scope: SharedWorkspaceChatSourceScope
+    source_scope: SharedWorkspaceSourceScope
     provider: str | None = Field(default=None, min_length=1, max_length=128)
     model: str | None = Field(default=None, min_length=1, max_length=512)
 
@@ -229,10 +229,53 @@ class SharedWorkspaceChatRequest(_RecipientModel):
         return self
 
 
+# Compatibility for tests and callers introduced with the read-plane scaffold.
+SharedWorkspaceChatSourceScope = SharedWorkspaceSourceScope
+
+
+class SharedWorkspaceTurnMessage(_RecipientModel):
+    message_id: Identifier
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=100_000)
+    created_at: AwareDatetime
+
+
+class SharedWorkspaceChatTurn(_RecipientModel):
+    user_message: SharedWorkspaceTurnMessage
+    assistant_message: SharedWorkspaceTurnMessage
+
+
+class SharedWorkspaceChatGeneration(_RecipientModel):
+    provider: str = Field(min_length=1, max_length=128)
+    model: str = Field(min_length=1, max_length=512)
+
+
+class SharedWorkspaceEffectiveSourceScope(_RecipientModel):
+    mode: Literal["all", "include"]
+    effective_source_count: int = Field(ge=1, le=500)
+
+
+class SharedWorkspaceChatReplay(_RecipientModel):
+    replayed: bool
+
+
+class SharedWorkspaceChatResponse(_RecipientModel):
+    schema_version: Literal[1] = 1
+    request_id: UUID
+    conversation_id: Identifier
+    turn: SharedWorkspaceChatTurn
+    citations: list[SharedWorkspaceCitation] = Field(min_length=1, max_length=20)
+    generation: SharedWorkspaceChatGeneration
+    source_scope: SharedWorkspaceEffectiveSourceScope
+    replay: SharedWorkspaceChatReplay
+
+
 __all__ = [
     "SharedWorkspaceAllowedAction",
     "SharedWorkspaceBootstrapResponse",
     "SharedWorkspaceChatRequest",
+    "SharedWorkspaceChatResponse",
+    "SharedWorkspaceChatSourceScope",
     "SharedWorkspaceCitation",
     "SharedWorkspaceErrorDetail",
     "SharedWorkspaceErrorResponse",
@@ -242,6 +285,7 @@ __all__ = [
     "SharedWorkspacePagination",
     "SharedWorkspacePartialError",
     "SharedWorkspaceSource",
+    "SharedWorkspaceSourceScope",
     "SharedWorkspaceSourcePage",
     "SharedWorkspaceSourcePreview",
 ]
