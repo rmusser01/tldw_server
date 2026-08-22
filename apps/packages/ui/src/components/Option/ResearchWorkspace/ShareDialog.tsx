@@ -1,4 +1,5 @@
 import React, { useState } from "react"
+import { useTranslation } from "react-i18next"
 import {
   Modal,
   Form,
@@ -13,7 +14,6 @@ import {
   Tooltip,
   Tabs,
   message,
-  Space,
   DatePicker,
 } from "antd"
 import { Copy, Link2, Trash2 } from "lucide-react"
@@ -202,7 +202,7 @@ const LinkShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
     allow_clone: boolean
     password?: string
     max_uses?: number
-    expires_at?: any
+    expires_at?: { toISOString: () => string }
   }) => {
     try {
       const result = await createToken.mutateAsync({
@@ -326,6 +326,7 @@ const LinkShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
 const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
   workspaceId,
 }) => {
+  const { t } = useTranslation("playground")
   const { data, isLoading } = useWorkspaceShares(workspaceId)
   const updateShareMutation = useUpdateShare()
   const revokeMutation = useRevokeShare()
@@ -538,6 +539,12 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
 
   return (
     <div className="space-y-4">
+      <p className="text-sm leading-5 text-text-muted">
+        {t(
+          "sharedWorkspace.ownerRevocationCopy",
+          "Revoking access prevents future workspace reads and questions. It does not erase content or answers recipients saved while they had access. Recipients may use their own configured model provider, which can receive selected shared passages when they ask a question."
+        )}
+      </p>
       <div>
         <h4 className="mb-2 text-sm font-medium text-text-muted">Team/Org Shares</h4>
         <Table

@@ -96,6 +96,20 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Final re-review verdict: all findings addressed; no new Critical, Important, or Minor breakage.
 - Task 8: complete (commits `8c199fc..6e42b02`, review clean).
 
+## Task 9 - Dedicated recipient Sources and Chat surface
+
+- Base: `5f2f1221ef`.
+- Brief: `task-9-brief.md`.
+- Implementation: replaced the shared placeholder with the approved compact recipient header, stable desktop Sources/Chat panes, mobile semantic tabs, responsive preview drawer/sheet, server-backed source controls, grounded chat history/composer/citations, exact server generation-default model seeding, direct in-pane recovery states, and owner revocation/provider copy.
+- Task 8 semantics preserved: `all` means every queryable source across pages; `include` is a persistent explicit 1-500 ID subset; over-500 all scope and zero scope cannot submit; immutable retry/rate-limit state stays controller-owned.
+- Safety and scope: server `allowed_actions` is the sole action authority; preview/model/citation content uses escaped text or sanitized Markdown; no local workspace store/API, mutation controls, banners, aliases, redirects, or `/research` coupling was added.
+- TDD RED: exact three-file UI command failed 3 files/12 tests against the placeholder. GREEN: the same three files passed 18 tests. Final changed-scope matrix passed 8 files/80 tests; locale mirror passed 2 tests; route boundary passed 17 tests; ESLint and `git diff --check` passed.
+- Complete focused suite attempt: 816 passed/20 failed. Seven route-fixture failures were corrected and reran 17/17; the remaining 13 reproduce standalone in three untouched baseline source-view files (7 SourceViewControls, 5 Stage 12 saved-view state, 1 SourcesPane fixture). Package TypeScript exhausted 4 GB; focused roots emitted only existing test/environment/global diagnostics and no changed production diagnostic. Bandit is not applicable to frontend-only production.
+- English mirror: added the `sharedWorkspace` namespace to both locale formats and corrected 17 pre-existing missing extension aliases exposed by the full mirror test.
+- Report: `task-9-implementer-report.md`.
+- Residual boundary: Task 11 owns live backend/provider/browser UAT. The two unrelated watchlist templates remain untouched and unstaged.
+- Status: implementation complete; pending controller review.
+
 ## Task 7 - Provider resolution, grounded generation, and safe chat API
 
 - Base: `fa5ce0b131ceb70422c1c36bf39fe4f423e1aa38`.

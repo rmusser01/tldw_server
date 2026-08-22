@@ -250,6 +250,11 @@ describe("ShareDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Active Shares" }))
 
+    expect(
+      screen.getByText(
+        "Revoking access prevents future workspace reads and questions. It does not erase content or answers recipients saved while they had access. Recipients may use their own configured model provider, which can receive selected shared passages when they ask a question."
+      )
+    ).toBeInTheDocument()
     expect(screen.getByText("Team #7")).toBeInTheDocument()
     expect(screen.getAllByText("Full access").length).toBeGreaterThan(0)
     expect(screen.getByText("Clone disabled")).toBeInTheDocument()

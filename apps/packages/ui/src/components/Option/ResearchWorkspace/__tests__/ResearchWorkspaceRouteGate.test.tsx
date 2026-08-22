@@ -17,6 +17,9 @@ const sharedControllerState = vi.hoisted(() => ({
 
 vi.mock("react-router-dom", () => ({
   useLocation: () => locationState,
+  Link: ({ to, children, ...props }: React.ComponentProps<"a"> & { to: string }) => (
+    <a href={to} {...props}>{children}</a>
+  ),
 }));
 
 vi.mock("../index", () => {
@@ -31,6 +34,24 @@ vi.mock("../index", () => {
 
 vi.mock("../SharedResearchWorkspace/useSharedResearchWorkspace", () => ({
   useSharedResearchWorkspace: () => ({ state: sharedControllerState }),
+}));
+
+vi.mock("../SharedResearchWorkspace/SharedWorkspaceHeader", () => ({
+  SharedWorkspaceHeader: ({ bootstrap }: { bootstrap: { workspace: { name: string } } }) => (
+    <h1>{bootstrap.workspace.name}</h1>
+  ),
+}));
+
+vi.mock("../SharedResearchWorkspace/SharedWorkspaceSourcesPane", () => ({
+  SharedWorkspaceSourcesPane: () => <section aria-label="Shared sources" />,
+}));
+
+vi.mock("../SharedResearchWorkspace/SharedWorkspaceChatPane", () => ({
+  SharedWorkspaceChatPane: () => <section aria-label="Shared chat" />,
+}));
+
+vi.mock("../SharedResearchWorkspace/SharedWorkspacePreview", () => ({
+  SharedWorkspacePreview: () => null,
 }));
 
 const renderGate = (search: string) => {
@@ -100,12 +121,16 @@ describe("ResearchWorkspaceRouteGate", () => {
   it("replaces a valid shared route without mounting the local workspace", async () => {
     const view = renderGate("?shared=42");
 
-    expect(await screen.findByText("Share 42")).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: /loading shared workspace/i }),
+    ).toBeVisible();
 
     locationState.search = "?shared=43";
     view.rerender(<ResearchWorkspaceRouteGate />);
 
-    expect(await screen.findByText("Share 43")).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: /loading shared workspace/i }),
+    ).toBeVisible();
     expect(localWorkspaceFactory).not.toHaveBeenCalled();
   });
 
@@ -126,15 +151,15 @@ describe("ResearchWorkspaceRouteGate", () => {
     renderGate("?shared=01");
 
     const heading = await screen.findByRole("heading", {
-      name: /shared workspace unavailable/i,
+      name: "This shared workspace isn't available.",
     });
     expect(heading).toHaveFocus();
     expect(localWorkspaceFactory).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["not-found", "Shared workspace not found"],
-    ["unavailable", "Shared workspace unavailable"],
+    ["not-found", "This shared workspace isn't available."],
+    ["unavailable", "This shared workspace isn't available."],
   ])("renders the stable %s placeholder", async (status, heading) => {
     sharedControllerState.status = status;
     renderGate("?shared=42");
