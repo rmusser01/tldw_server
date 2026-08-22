@@ -115,7 +115,10 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Fix Round 3: made the test-only hidden-kwargs AST sentinel inspect nested callable decorators, defaults, argument/return annotations, and optional runtime type parameters in the enclosing scope before skipping only a body with independently bound `kwargs`; preserved approved literal header reads and added bypass/allowed fixtures.
 - Fix Round 3 TDD RED: required header fixtures `6 failed, 10 passed`; expanded rejection plus approved-literal header selection `9 failed`. GREEN: focused sentinel `20 passed`; full Task 6 plus serializer `136 passed`; Ruff passed the touched test; `git diff --check` passed. Bandit was not rerun because production code was unchanged.
 - Fix Round 3 PostgreSQL state: untouched and not started; no production code, schema, migration, RLS policy, fixture, or query changed.
-- Status: implementation complete; final review pending.
+- Final re-reviewer: `01a027e6-48a2-7680-8d38-f0b1b58bda9c` (`Socrates`), `gpt-5.6-terra`, high reasoning.
+- Final review package: `review-task-6-fix3-91b278a..e4045fb.diff`.
+- Final re-review verdict: all findings addressed; no new Critical or Important breakage.
+- Status: complete.
 
 ## Task 4 - Authoritative access and reusable read helpers
 
