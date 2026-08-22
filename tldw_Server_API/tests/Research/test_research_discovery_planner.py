@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     ExecutionMode,
     JSONBodyPair,
     LiteralTermsQueryValuePolicy,
+    OpaqueCursorQueryValuePolicy,
     PathSlot,
     PathSlotKind,
     PathTemplate,
@@ -242,6 +243,72 @@ def _typed_query_registry() -> tuple[DiscoveryRegistry, ReadinessOverlay]:
                 "typed_ready",
             )
             for route in routes
+        ),
+    )
+    return registry, readiness
+
+
+def _opaque_query_registry() -> tuple[DiscoveryRegistry, ReadinessOverlay]:
+    limits = RouteLimits(2, 0, 0, 250, 65_536, 100, 16_384)
+    policy = RoutePolicy(
+        policy_version="opaque-query-policy-v1",
+        origin=ExactOrigin("https", "clinical.example.test", 443),
+        methods=("GET",),
+        paths=("/api/v2/studies",),
+        allowed_query_keys=("query.term", "pageToken", "format", "pageSize"),
+        limits=limits,
+        pagination_query_key="pageToken",
+        query_value_policies=(
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            OpaqueCursorQueryValuePolicy("pageToken", 1_024, required=False),
+            ExactQueryValuePolicy("format", "json"),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+    )
+    route = AccessRoute(
+        route_id="opaque_query_search",
+        backend_id="opaque_query_backend",
+        adapter_id="opaque_query_adapter",
+        route_kind=RouteKind.DIRECT,
+        query_modes=(QueryMode.GENERAL_FREE_TEXT,),
+        source_constraint=SourceConstraint.NATIVE_CORPUS,
+        attribution_basis="native_response",
+        credential_requirement=CredentialRequirement.NONE,
+        fallback_order=0,
+        max_physical_dispatches=2,
+        adapter_version="opaque-v1",
+        policy=policy,
+    )
+    registry = DiscoveryRegistry(
+        catalog_version="opaque-query-catalog-v1",
+        registry_version="opaque-query-registry-v1",
+        sources=(
+            SourceDefinition(
+                catalog_source_id="opaque_query_source",
+                display_name="Opaque Query Source",
+                aliases=(),
+                categories=("synthetic",),
+                content_types=("records",),
+                surfaces=("standalone_search",),
+                route_references=(SourceRouteReference(route.route_id, None),),
+                site_hosts=("clinical.example.test",),
+                priority=10,
+                catalog_version="opaque-query-catalog-v1",
+            ),
+        ),
+        routes=(route,),
+        backends=(BackendDefinition("opaque_query_backend", "Opaque Query Backend"),),
+    )
+    readiness = ReadinessOverlay(
+        overlay_version="opaque-query-readiness-v1",
+        execution_mode=ExecutionMode.SYNTHETIC,
+        routes=(
+            RouteReadiness(
+                route.route_id,
+                ReadinessState.READY,
+                CredentialStatus.NOT_REQUIRED,
+                "synthetic_ready",
+            ),
         ),
     )
     return registry, readiness
@@ -558,6 +625,134 @@ def test_general_query_builds_only_literal_terms_and_route_owned_values() -> Non
         QueryPair("pageSize", "50"),
     )
     assert "cursorMark" not in {pair.name for pair in intent.query_pairs}
+
+
+def test_general_query_omits_named_optional_opaque_cursor_on_first_page() -> None:
+    registry, readiness = _opaque_query_registry()
+    plan = compile_discovery_plan(
+        _request(
+            ("opaque_query_source",),
+            query=planner_module.GeneralFreeTextQuery("alpha beta"),
+            result_limit=100,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
+    )
+
+    assert plan.dispatch_groups[0].intents[0].query_pairs == (
+        QueryPair("query.term", '"alpha" AND "beta"'),
+        QueryPair("format", "json"),
+        QueryPair("pageSize", "50"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("route_max_results", "expected_page_size"),
+    ((100, "50"), (25, "25")),
+)
+def test_general_query_clamps_decimal_to_route_and_rule_ceilings(
+    route_max_results: int,
+    expected_page_size: str,
+) -> None:
+    registry, readiness = _opaque_query_registry()
+    route = registry.get_route("opaque_query_search")
+    registry = replace(
+        registry,
+        routes=(
+            replace(
+                route,
+                policy=replace(
+                    route.policy,
+                    limits=replace(route.policy.limits, max_results=route_max_results),
+                    policy_digest="",
+                ),
+            ),
+        ),
+    )
+    plan = compile_discovery_plan(
+        _request(
+            ("opaque_query_source",),
+            query=planner_module.GeneralFreeTextQuery("alpha beta"),
+            result_limit=100,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
+    )
+
+    assert plan.dispatch_groups[0].intents[0].query_pairs[-1] == QueryPair("pageSize", expected_page_size)
+
+
+@pytest.mark.parametrize(
+    "query_value_policies",
+    (
+        (
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            OpaqueCursorQueryValuePolicy("pageToken", 1_024, required=True),
+            ExactQueryValuePolicy("format", "json"),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+        (
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            ExactQueryValuePolicy("pageToken", "first"),
+            OpaqueCursorQueryValuePolicy("format", 1_024, required=False),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+        (
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            OpaqueCursorQueryValuePolicy("pageToken", 1_024, required=False),
+            OpaqueCursorQueryValuePolicy("format", 1_024, required=False),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+    ),
+)
+def test_general_query_rejects_invalid_optional_opaque_cursor_policy(
+    query_value_policies: tuple[object, ...],
+) -> None:
+    registry, readiness = _opaque_query_registry()
+    route = registry.get_route("opaque_query_search")
+    registry = replace(
+        registry,
+        routes=(
+            replace(
+                route,
+                policy=replace(route.policy, query_value_policies=query_value_policies, policy_digest=""),
+            ),
+        ),
+    )
+
+    with pytest.raises(PlanningError) as exc_info:
+        compile_discovery_plan(
+            _request(
+                ("opaque_query_source",),
+                query=planner_module.GeneralFreeTextQuery("alpha beta"),
+                result_limit=100,
+            ),
+            registry=registry,
+            readiness=readiness,
+            budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
+        )
+
+    assert exc_info.value.code == "invalid_optional_opaque_cursor_policy:opaque_query_search"
+
+
+def test_general_query_rejects_term_longer_than_route_literal_policy_before_emitting_intent() -> None:
+    registry, readiness = _opaque_query_registry()
+
+    with pytest.raises(PlanningError) as exc_info:
+        compile_discovery_plan(
+            _request(
+                ("opaque_query_source",),
+                query=planner_module.GeneralFreeTextQuery("a" * 33),
+                result_limit=100,
+            ),
+            registry=registry,
+            readiness=readiness,
+            budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
+        )
+
+    assert exc_info.value.code == "invalid_literal_terms_policy:opaque_query_search"
 
 
 def test_general_query_accepts_exact_sixteen_by_sixty_four_term_boundary() -> None:

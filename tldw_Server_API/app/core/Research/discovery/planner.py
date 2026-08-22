@@ -24,6 +24,7 @@ from .contracts import (
     ExactQueryValuePolicy,
     JSONBodyPair,
     LiteralTermsQueryValuePolicy,
+    OpaqueCursorQueryValuePolicy,
     OperationKind,
     PathSlot,
     PathSlotKind,
@@ -424,12 +425,17 @@ def _build_typed_intents(
         policies = {policy.name: policy for policy in route.policy.query_value_policies}
         pairs: list[QueryPair] = []
         literal_terms_seen = False
+        omitted_opaque = 0
         for name in route.policy.allowed_query_keys:
             policy = policies.get(name)
+            if type(policy) is OpaqueCursorQueryValuePolicy:
+                if policy.required or name != route.policy.pagination_query_key or omitted_opaque:
+                    raise _planning_error(f"invalid_optional_opaque_cursor_policy:{route.route_id}")
+                omitted_opaque += 1
+                continue
             if type(policy) is LiteralTermsQueryValuePolicy:
                 if (
                     literal_terms_seen
-                    or name != "query"
                     or not 1 <= len(query.terms) <= policy.max_terms
                     or any(len(term) > policy.max_term_chars for term in query.terms)
                 ):
@@ -444,13 +450,10 @@ def _build_typed_intents(
             elif type(policy) is ExactQueryValuePolicy:
                 pairs.append(QueryPair(name, policy.value))
             elif type(policy) is BoundedDecimalQueryValuePolicy:
-                limit = min(result_limit, route.policy.limits.max_results)
-                if limit > policy.maximum:
-                    raise _planning_error(f"typed_result_limit_exceeds_policy:{route.route_id}")
-                pairs.append(QueryPair(name, str(limit)))
+                pairs.append(QueryPair(name, str(min(result_limit, route.policy.limits.max_results, policy.maximum))))
             else:
                 raise _planning_error(f"invalid_general_query_value_policy:{route.route_id}")
-        if not literal_terms_seen or len(pairs) != len(route.policy.allowed_query_keys):
+        if not literal_terms_seen or len(pairs) + omitted_opaque != len(route.policy.allowed_query_keys):
             raise _planning_error(f"incomplete_general_query_policy:{route.route_id}")
         return (
             _intent(
