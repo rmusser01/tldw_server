@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useOptionLayoutShellOverrides } from '@/components/Layouts/Layout';
@@ -215,7 +215,20 @@ vi.mock('@/components/Option/Sidebar', () => ({
 }));
 
 vi.mock('@/components/Layouts/Header', () => ({
-  Header: () => <div data-testid="header" />,
+  Header: ({
+    onToggleSidebar,
+    sidebarCollapsed,
+  }: {
+    onToggleSidebar?: () => void;
+    sidebarCollapsed?: boolean;
+  }) => (
+    <button
+      type="button"
+      data-testid="header"
+      aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      onClick={onToggleSidebar}
+    />
+  ),
 }));
 
 vi.mock('@/components/Layouts/QuickIngestButton', () => ({
@@ -388,6 +401,7 @@ describe('WebLayout /chat scroll contract', () => {
     routerState.location.hash = '';
     storageState.stickyChatInput = true;
     featureFlagState.showChatSidebar = false;
+    layoutUiState.value.chatSidebarCollapsed = true;
     mediaQueryState.isDesktop = false;
     mediaQueryState.isMobile = false;
     chatSidebarMockState.props = [];
@@ -586,6 +600,26 @@ describe('WebLayout /chat scroll contract', () => {
         openResetKey: expect.any(Number),
       })
     );
+  });
+
+  it('labels and opens the legacy sidebar from the Drawer state', () => {
+    featureFlagState.showChatSidebar = false;
+    layoutUiState.value.chatSidebarCollapsed = false;
+
+    render(
+      <OptionLayout>
+        <div data-testid="chat-route-content">Chat route</div>
+      </OptionLayout>
+    );
+
+    const sidebarToggle = screen.getByTestId('header');
+    expect(sidebarToggle).toHaveAttribute('aria-label', 'Expand sidebar');
+    expect(screen.queryByTestId('drawer')).toBeNull();
+
+    fireEvent.click(sidebarToggle);
+
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    expect(sidebarToggle).toHaveAttribute('aria-label', 'Collapse sidebar');
   });
 
   it('mirrors shared layout reset-key wiring for desktop and mobile mounts', () => {

@@ -18,6 +18,21 @@ describe("deriveRequestTimeout generation defaults", () => {
     expect(timeout).toBeGreaterThanOrEqual(120000)
   })
 
+  it("keeps the model metadata catalog above the generic 10-second timeout", () => {
+    expect(
+      deriveRequestTimeout(
+        { requestTimeoutMs: 10000 },
+        "/api/v1/llm/models/metadata"
+      )
+    ).toBeGreaterThanOrEqual(60000)
+    expect(
+      deriveRequestTimeout(
+        { requestTimeoutMs: 90000 },
+        "/api/v1/llm/models/metadata"
+      )
+    ).toBe(90000)
+  })
+
   it("still honors an explicit chatRequestTimeoutMs override", () => {
     const timeout = deriveRequestTimeout(
       { chatRequestTimeoutMs: 20000 },

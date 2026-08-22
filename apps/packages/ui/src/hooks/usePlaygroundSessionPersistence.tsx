@@ -516,7 +516,15 @@ export function usePlaygroundSessionPersistence() {
 
   // Restore session from persisted state
   const restoreSession = useCallback(async (): Promise<boolean> => {
+    const restoreRevision =
+      usePlaygroundSessionStore.getState().restoreRevision
+    const isCurrentRestore = () =>
+      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
     const scopeKey = await resolveCurrentScopeKey()
+    if (!isCurrentRestore()) {
+      initialRestoreSettledRef.current = true
+      return false
+    }
     if (!isSessionValid(scopeKey)) {
       clearSession()
       initialRestoreSettledRef.current = true
@@ -545,6 +553,7 @@ export function usePlaygroundSessionPersistence() {
       if (savedHistoryId) {
         // Restore messages from Dexie
         const chatData = await getFullChatData(savedHistoryId)
+        if (!isCurrentRestore()) return false
         if (!chatData) {
           // History was deleted, clear session
           clearSession()
@@ -560,6 +569,7 @@ export function usePlaygroundSessionPersistence() {
         const lastUsedPrompt = (chatData.historyInfo as any)?.last_used_prompt
         if (lastUsedPrompt?.prompt_id) {
           const prompt = await getPromptById(lastUsedPrompt.prompt_id)
+          if (!isCurrentRestore()) return false
           if (prompt) {
             setSelectedSystemPrompt(lastUsedPrompt.prompt_id)
             setSystemPrompt(prompt.content)
@@ -582,6 +592,7 @@ export function usePlaygroundSessionPersistence() {
           getAssistantSelectionMode(savedTrackedAssistantSelection) === "tracked"
         ) {
           await setSelectedAssistant(savedTrackedAssistantSelection)
+          if (!isCurrentRestore()) return false
         } else if (savedTrackedAssistantKind && savedTrackedAssistantId) {
           const reconstructedSelection = normalizeAssistantSelection({
             kind: savedTrackedAssistantKind,
@@ -596,6 +607,7 @@ export function usePlaygroundSessionPersistence() {
           })
           if (reconstructedSelection) {
             await setSelectedAssistant(reconstructedSelection)
+            if (!isCurrentRestore()) return false
           }
         }
         if (savedTrackedAssistantKind && savedTrackedAssistantId) {

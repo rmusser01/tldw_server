@@ -696,6 +696,12 @@ export const Playground = () => {
   const routeCharacterIntentSignatureRef = React.useRef<string | null>(null);
   const translationRef = React.useRef(t);
   const previousThreadRef = React.useRef<string | null>(null);
+  const initialConversationRef = React.useRef({
+    historyId: historyId ?? null,
+    serverChatId: serverChatId ?? null,
+    messagesLength: messages.length,
+    historyLength: history.length,
+  });
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
   const showStarterDeck =
     messages.length === 0 &&
@@ -737,6 +743,10 @@ export const Playground = () => {
       hasPersistedSession,
       persistedHistoryId,
       persistedServerChatId,
+      initialHistoryId: initialConversationRef.current.historyId,
+      initialServerChatId: initialConversationRef.current.serverChatId,
+      initialMessagesLength: initialConversationRef.current.messagesLength,
+      initialHistoryLength: initialConversationRef.current.historyLength,
       currentHistoryId: historyId ?? null,
       currentServerChatId: serverChatId ?? null,
       currentMessagesLength: messages.length,

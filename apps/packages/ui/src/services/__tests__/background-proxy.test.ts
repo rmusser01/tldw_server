@@ -3722,6 +3722,90 @@ describe("background proxy GET coalescing", () => {
     expect(first).toBe(second)
   })
 
+  it("coalesces equivalent normalized expected-status contracts", async () => {
+    let resolveSend: (value: unknown) => void = () => {}
+    mocks.sendMessage.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSend = resolve
+      })
+    )
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({
+      path: "/api/v1/chats/chat-1/settings",
+      method: "GET",
+      expectedStatuses: [409, 404, 404]
+    })
+    const second = bgRequest({
+      path: "/api/v1/chats/chat-1/settings",
+      method: "GET",
+      expectedStatuses: [404, 409]
+    })
+    resolveSend({ ok: true, status: 200, data: { settings: {} } })
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(firstResult).toBe(secondResult)
+  })
+
+  it("does not coalesce different expected-status contracts", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { settings: {} }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [404]
+      }),
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [404, 409]
+      })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it("coalesces expected-status errors without changing rejection behavior", async () => {
+    let resolveSend: (value: unknown) => void = () => {}
+    mocks.sendMessage.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSend = resolve
+      })
+    )
+    const { bgRequest } = await importProxy()
+    const init = {
+      path: "/api/v1/chats/chat-1/settings" as const,
+      method: "GET" as const,
+      expectedStatuses: [404]
+    }
+
+    const first = bgRequest(init)
+    const second = bgRequest(init)
+    resolveSend({ ok: false, status: 404, error: "Chat settings not found" })
+
+    const results = await Promise.allSettled([first, second])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(results).toEqual([
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ status: 404 })
+      }),
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ status: 404 })
+      })
+    ])
+  })
+
   it("does not coalesce returnResponse GETs with data-only GETs", async () => {
     mocks.sendMessage.mockResolvedValue({
       ok: true,

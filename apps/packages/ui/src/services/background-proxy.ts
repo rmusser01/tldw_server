@@ -818,7 +818,6 @@ export async function bgRequest<
     !init.suppressBackendUnavailableEvent &&
     !init.sanitizeRagProviderError &&
     !init.servicePromptConfig &&
-    !init.expectedStatuses?.length &&
     init.configSnapshot === undefined
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
@@ -837,6 +836,9 @@ export async function bgRequest<
           return acc
         }, {})
     : null
+  const expectedStatuses = Array.from(
+    normalizeExpectedStatuses(init.expectedStatuses)
+  ).sort((left, right) => left - right)
   const key = JSON.stringify({
     p: String(init.path),
     h: normalizedHeaders,
@@ -844,6 +846,7 @@ export async function bgRequest<
       ? Boolean(init.noAuth)
       : "__unset__",
     returnResponse: Boolean(init.returnResponse),
+    expectedStatuses,
     suppressBackendUnavailableEvent: Boolean(
       init.suppressBackendUnavailableEvent
     ),

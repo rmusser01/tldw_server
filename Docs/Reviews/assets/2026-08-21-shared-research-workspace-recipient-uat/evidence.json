@@ -1,0 +1,2166 @@
+{
+  "acceptance": {
+    "allSourcesGrounded": true,
+    "blockedRevokedPreview": true,
+    "citationPreview": true,
+    "contextIsolation": true,
+    "historyAfterReload": true,
+    "malformedNeutralFailure": true,
+    "memberSharedIsolation": true,
+    "mobileResponsive": true,
+    "noExtraBannerBars": true,
+    "nonmemberNeutralFailure": true,
+    "ownerRecipientView": true,
+    "recipientChatVisibleInChats": true,
+    "revocationFailClosed": true,
+    "sentinelsExcluded": true,
+    "subsetGrounded": true
+  },
+  "environment": {
+    "apiUrl": "http://127.0.0.1:18001",
+    "authMode": "multi_user",
+    "cdpUrl": "http://127.0.0.1:9222",
+    "database": "sqlite",
+    "dockerAttempted": false,
+    "personas": [
+      "owner",
+      "member",
+      "nonmember"
+    ],
+    "webUrl": "http://127.0.0.1:18082"
+  },
+  "failureMessageHash": null,
+  "finishedAt": "2026-08-22T22:07:18.420Z",
+  "ledger": {
+    "consoleErrors": [
+      {
+        "context": "nonmember",
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "context": "member",
+        "message": "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "status": 409,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/chat"
+      },
+      {
+        "context": "member",
+        "message": "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "status": 409,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/chat"
+      },
+      {
+        "context": "member",
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "context": "member",
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/sources/source-amber-final27-1787436202-8548/preview"
+      }
+    ],
+    "expectedHttpFailures": [
+      {
+        "context": "nonmember",
+        "method": "GET",
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "context": "member",
+        "method": "POST",
+        "status": 409,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/chat"
+      },
+      {
+        "context": "member",
+        "method": "GET",
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "context": "member",
+        "method": "GET",
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/sources/source-amber-final27-1787436202-8548/preview"
+      }
+    ],
+    "pageErrors": [],
+    "requests": [
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/research-workspace?shared=46"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/persona/profiles"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "bodyHash": "sha256:574a9c2796a671c842b7593a6fa16f65cdf857678d11e8f5ff14dbdb2d699127",
+        "context": "member",
+        "method": "POST",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/chat"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/sources/source-cobalt-final27-1787436202-8548/preview?chunk_index=0"
+      },
+      {
+        "bodyHash": "sha256:aacdda09e21959a97987c192852641e2c77db7f029f812c9f488bdea79f6b5b0",
+        "context": "member",
+        "method": "POST",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/chat"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/llm/models/metadata"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/research-workspace?shared=46"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/persona/profiles"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/research-workspace?shared=46"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/persona/profiles"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/research-workspace?shared=invalid"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/persona/profiles"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/research-workspace?shared=46"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/persona/profiles"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/research-workspace?shared=46"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/persona/profiles"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "bodyHash": "sha256:4b3029cf5103e2ae0b9fb250cf77f7e48463da63aa6944c22a2c639abefe98b8",
+        "context": "member",
+        "method": "POST",
+        "status": 409,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/chat"
+      },
+      {
+        "bodyHash": "sha256:4b3029cf5103e2ae0b9fb250cf77f7e48463da63aa6944c22a2c639abefe98b8",
+        "context": "member",
+        "method": "POST",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/chat"
+      },
+      {
+        "bodyHash": "sha256:4b3029cf5103e2ae0b9fb250cf77f7e48463da63aa6944c22a2c639abefe98b8",
+        "context": "member",
+        "method": "POST",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/chat"
+      },
+      {
+        "bodyHash": "sha256:cea38635a989b93f2ffdcd672022f6768d057a6a16a29363f0ce76846a1449ec",
+        "context": "member",
+        "method": "POST",
+        "status": 409,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/chat"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/sources/source-amber-final27-1787436202-8548/preview"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/llm/models/metadata"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/shares"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/tokens"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "DELETE",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shares/46"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/tokens"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/shares"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/e1bb7fc5-1040-4f8e-9136-d515e2e1ddd4/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/research-workspace?shared=46"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 304,
+        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/persona/profiles"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/workspace"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/46/sources/source-amber-final27-1787436202-8548/preview"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/chats/?limit=25&offset=0&ordering=-updated_at&include_message_counts=false&scope_type=global"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/chats/6a8efdef-5a12-4317-82e5-1a66a43a7870/settings?scope_type=global"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/chats/6a8efdef-5a12-4317-82e5-1a66a43a7870/research-runs"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/chats/6a8efdef-5a12-4317-82e5-1a66a43a7870/messages?scope_type=global&include_deleted=false&include_metadata=true&limit=200&offset=0"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/chat/conversations/6a8efdef-5a12-4317-82e5-1a66a43a7870/share-links?scope_type=global"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_Markdown_tsx-_979b2.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/audio/voices/catalog?provider=kitten_tts"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/chats/6a8efdef-5a12-4317-82e5-1a66a43a7870/settings?scope_type=global"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": "sha256:c4256226d78a9398aa32f611a229a83c8e70c9c02d6073b8193c4e60cccceab9",
+        "context": "member-chats",
+        "method": "POST",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/rag/feedback/implicit"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/audio/transcriptions/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member-chats",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/chats/6a8efdef-5a12-4317-82e5-1a66a43a7870/research-runs"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health/live"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      }
+    ],
+    "requestFailures": [],
+    "runtimeOverlays": [],
+    "classification": {
+      "failures": [],
+      "ok": true
+    }
+  },
+  "provider": {
+    "model": "Qwen2.5-0.5B-Instruct",
+    "provider": "local-llm"
+  },
+  "raceProbe": {
+    "requestHashes": [
+      "sha256:4b3029cf5103e2ae0b9fb250cf77f7e48463da63aa6944c22a2c639abefe98b8",
+      "sha256:cea38635a989b93f2ffdcd672022f6768d057a6a16a29363f0ce76846a1449ec"
+    ],
+    "requestIdHash": "sha256:892f09bfac32a92fe0fabcc3263cc615cbf63aa02fa0b0128e5af6f0805164bb",
+    "responseHashes": [
+      "sha256:8f96d6bb10672f74cf8f0c46c5293a04781605d3489f183b69fce1fd3cc54f35",
+      "sha256:0fd185c56d713e063cce3872628bdf3ba64b572035c2665c4bd1212bf1e0c723"
+    ],
+    "statuses": [
+      409,
+      200,
+      200,
+      409
+    ],
+    "timingsMs": [
+      336,
+      3341,
+      152,
+      158
+    ],
+    "turnHashes": [
+      "sha256:e29d2010f821a11c2f122df47ac1346416b6aea84611ef176e0e4d06a7f550cb",
+      "sha256:e29d2010f821a11c2f122df47ac1346416b6aea84611ef176e0e4d06a7f550cb"
+    ]
+  },
+  "runIdHash": "sha256:17b768f06446665c9e0a27a3a86a5a7bf22f4e43b774e25e3c5204eb16fe3db9",
+  "settingsRequestProbe": {
+    "count": 2,
+    "maximum": 2,
+    "statuses": [
+      200,
+      200
+    ]
+  },
+  "screenshots": {
+    "desktopGroundedAnswer": "desktop-grounded-answer.png",
+    "desktopSharedWorkspace": "desktop-shared-workspace.png",
+    "mobileSharedWorkspace": "mobile-shared-workspace.png",
+    "revokedShare": "revoked-share.png"
+  },
+  "startedAt": "2026-08-22T22:03:22.653Z",
+  "status": "passed",
+  "contextIsolationProof": [
+    {
+      "configHash": "sha256:ce9bbac65fded748183b6dfb90edb434ebb511e9a7c929c91f7ed69b4c667139",
+      "cookieHash": "sha256:9ca780b06075c512a9add1c93436aebb3cac66be95cffa7d4dc78d8e183f4fea",
+      "markerHash": "sha256:74fb7b6366cf7c2bd6f11618ddc7a263eefdc1d58dd3ea55746f240850cc1442",
+      "markerCookieHash": "sha256:74fb7b6366cf7c2bd6f11618ddc7a263eefdc1d58dd3ea55746f240850cc1442",
+      "persona": "member",
+      "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
+    },
+    {
+      "configHash": "sha256:7edcfea4f154ca2a3dc667959e6e9f4c0ee71fe7cc8c8e2d46715556452cbf4c",
+      "cookieHash": "sha256:8340ed0c14c4653f39a4c561ad8934782742eb675ee08b42b5adc4988c3a4a09",
+      "markerHash": "sha256:51200dbad5f61466ff403bfa8abf4e2e229b5da338968fbbb8eab2852fb885d1",
+      "markerCookieHash": "sha256:51200dbad5f61466ff403bfa8abf4e2e229b5da338968fbbb8eab2852fb885d1",
+      "persona": "nonmember",
+      "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
+    },
+    {
+      "configHash": "sha256:70110523b2784163127453934ecdad78c593a865726aa36db4bf6c33dc23e4c1",
+      "cookieHash": "sha256:bbeb8c48b02ca2f1374314f0b5688e5360a261ad0dc74a9949cb05953752c813",
+      "markerHash": "sha256:ac78a95a15c03c39675fbbe593e9106616715ad9230e2dd9ee6d680c4381c418",
+      "markerCookieHash": "sha256:ac78a95a15c03c39675fbbe593e9106616715ad9230e2dd9ee6d680c4381c418",
+      "persona": "owner",
+      "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
+    }
+  ],
+  "fixture": {
+    "canonicalStatusEnvelope": {
+      "truncated": true,
+      "hash": "sha256:689b0af1cdc3c1583456709e49e32b1b1d995187e8e41bebac426363d8c20c04"
+    },
+    "shareIdHash": "sha256:25fc0e7096fc653718202dc30b0c580b8ab87eac11a700cba03a7c021bc35b0c",
+    "sourceIds": [
+      "sha256:d6274d1fc22dfc9015d9f83c720607a7d222bfefff08c8bd070a1a339ba28a53",
+      "sha256:99a0dc71460c3bb4fb8aed2afff537c56509f28308b34ad6d7008af163aa5124"
+    ],
+    "workspaceIdHash": "sha256:976943645c2cedd16b027fa81ac24d96324f729696ad38eaff610a78a30c41fc"
+  },
+  "providerReadiness": {
+    "provider": "local-llm",
+    "model": "Qwen2.5-0.5B-Instruct",
+    "ready": true,
+    "reason_code": null
+  },
+  "validation": {
+    "exitCode": 0,
+    "failures": []
+  }
+}

@@ -10,6 +10,8 @@ const {
   mockRevokeToken,
   mockMessage,
   mockModalConfirm,
+  mockStaticMessage,
+  mockStaticModalConfirm,
   mockClipboardWriteText,
   sharingState
 } = vi.hoisted(() => ({
@@ -23,6 +25,11 @@ const {
     error: vi.fn()
   },
   mockModalConfirm: vi.fn(),
+  mockStaticMessage: {
+    success: vi.fn(),
+    error: vi.fn()
+  },
+  mockStaticModalConfirm: vi.fn(),
   mockClipboardWriteText: vi.fn(),
   sharingState: {
     shares: [] as Array<Record<string, unknown>>,
@@ -33,15 +40,23 @@ const {
 vi.mock("antd", async () => {
   const actual = await vi.importActual<typeof import("antd")>("antd")
   const Modal = Object.assign(actual.Modal, {
-    confirm: mockModalConfirm
+    confirm: mockStaticModalConfirm
+  })
+  const App = Object.assign(actual.App, {
+    useApp: () => ({
+      message: mockMessage,
+      modal: { confirm: mockModalConfirm },
+      notification: {}
+    })
   })
   return {
     ...actual,
+    App,
     Modal,
     message: {
       ...actual.message,
-      success: mockMessage.success,
-      error: mockMessage.error
+      success: mockStaticMessage.success,
+      error: mockStaticMessage.error
     }
   }
 })
@@ -296,6 +311,9 @@ describe("ShareDialog", () => {
     expect(mockRevokeToken).toHaveBeenCalledWith(99)
     expect(mockMessage.success).toHaveBeenCalledWith("Share link revoked")
     expect(closeTokenConfirm).toHaveBeenCalledTimes(1)
+    expect(mockStaticModalConfirm).not.toHaveBeenCalled()
+    expect(mockStaticMessage.success).not.toHaveBeenCalled()
+    expect(mockStaticMessage.error).not.toHaveBeenCalled()
   })
 
   it("updates active team or org share access and clone permission", async () => {

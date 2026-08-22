@@ -160,12 +160,23 @@ export const SharedWorkspaceChatPane: React.FC<
         getCanonicalModelKey(model).toLowerCase() === selectedModel.toLowerCase()
     )
     if (!selected) return
-    const provider = getModelProvider(selected)
     const model = getModelId(selected)
+    const seededDefaultKey = generationDefault?.ready
+      ? getCanonicalModelKey(
+          generationDefault.provider,
+          generationDefault.model
+        )
+      : null
+    const provider =
+      seededDefaultKey?.toLowerCase() === selectedModel.toLowerCase() &&
+      model === generationDefault?.model
+        ? generationDefault.provider
+        : getModelProvider(selected)
     if (provider && provider !== state.provider) setProvider(provider)
     if (model && model !== state.model) setModel(model)
   }, [
     composerModels,
+    generationDefault,
     selectedModel,
     setModel,
     setProvider,

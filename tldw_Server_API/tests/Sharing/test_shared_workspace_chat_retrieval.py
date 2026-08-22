@@ -13,6 +13,10 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+from tldw_Server_API.app.core.DB_Management.scope_context import (
+    get_scope,
+    scoped_context,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     _serialize_result_document,
@@ -140,6 +144,16 @@ class _Pipeline:
         if self.error is not None:
             raise self.error
         return self.result
+
+
+class _ScopeRecordingPipeline(_Pipeline):
+    def __init__(self, result: Any) -> None:
+        super().__init__(result)
+        self.scopes: list[Any] = []
+
+    async def __call__(self, **kwargs: Any) -> Any:
+        self.scopes.append(get_scope())
+        return await super().__call__(**kwargs)
 
 
 class _ControlledRealRetriever:
@@ -739,6 +753,40 @@ async def test_retrieval_call_is_media_only_owner_scoped_and_locked() -> None:
     for name, value in call.items():
         if name.startswith("enable_"):
             assert value is False, name
+
+
+@pytest.mark.asyncio
+async def test_retrieval_temporarily_uses_owner_content_scope_and_restores_recipient() -> None:
+    pipeline = _ScopeRecordingPipeline(_result([_document(1)]))
+    service, _chacha, _media_db, _pipeline = _service(
+        [_source("source-a", 1)],
+        {1: _media(1)},
+        pipeline=pipeline,
+    )
+    snapshot = service.resolve_source_snapshot(mode="all")
+
+    with scoped_context(
+        user_id=39,
+        org_ids=[21],
+        team_ids=[30],
+        active_org_id=21,
+        active_team_id=30,
+        session_role="user",
+    ):
+        await service.retrieve_verified_evidence(query="Question", snapshot=snapshot)
+        restored = get_scope()
+
+    assert len(pipeline.scopes) == 1
+    owner_scope = pipeline.scopes[0]
+    assert owner_scope is not None
+    assert owner_scope.user_id == 7
+    assert owner_scope.org_ids == []
+    assert owner_scope.team_ids == []
+    assert owner_scope.is_admin is False
+    assert restored is not None
+    assert restored.user_id == 39
+    assert restored.org_ids == [21]
+    assert restored.team_ids == [30]
 
 
 def _literal_outer_pipeline_kwargs_reads(source: str | None = None) -> set[str]:

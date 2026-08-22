@@ -133,6 +133,41 @@ def test_get_or_create_thread_uses_canonical_conversation_fields(db: CharactersR
     assert _thread(db).conversation_id == thread.conversation_id
 
 
+def test_get_or_create_thread_initializes_empty_chat_settings(db: CharactersRAGDB) -> None:
+    thread = _thread(db)
+
+    settings = db.get_conversation_settings(thread.conversation_id)
+
+    assert settings is not None
+    assert settings["settings"] == {}
+
+
+def test_get_or_create_thread_repairs_missing_chat_settings(db: CharactersRAGDB) -> None:
+    thread = _thread(db)
+    db.execute_query(
+        "DELETE FROM conversation_settings WHERE conversation_id = ?",
+        (thread.conversation_id,),
+        commit=True,
+    )
+    assert db.get_conversation_settings(thread.conversation_id) is None
+
+    reopened = _thread(db)
+
+    assert reopened.conversation_id == thread.conversation_id
+    assert db.get_conversation_settings(thread.conversation_id)["settings"] == {}
+
+
+def test_get_or_create_thread_preserves_existing_chat_settings(db: CharactersRAGDB) -> None:
+    thread = _thread(db)
+    expected = {"authorNote": "Keep this recipient setting."}
+    assert db.upsert_conversation_settings(thread.conversation_id, expected)
+
+    reopened = _thread(db)
+
+    assert reopened.conversation_id == thread.conversation_id
+    assert db.get_conversation_settings(thread.conversation_id)["settings"] == expected
+
+
 def test_concurrent_first_thread_creation_returns_one_mapping(tmp_path) -> None:
     path = tmp_path / "concurrent-recipient-chat.db"
     databases = [CharactersRAGDB(path, client_id="recipient-a") for _ in range(2)]
@@ -157,8 +192,13 @@ def test_concurrent_first_thread_creation_returns_one_mapping(tmp_path) -> None:
             "SELECT id FROM conversations WHERE external_ref = ? AND deleted = 0",
             ("share:91",),
         ).fetchall()
+        settings_rows = databases[0].execute_query(
+            "SELECT conversation_id FROM conversation_settings WHERE conversation_id = ?",
+            (threads[0].conversation_id,),
+        ).fetchall()
         assert len(rows) == 1
         assert len(conversations) == 1
+        assert len(settings_rows) == 1
     finally:
         for database in databases:
             database.close_all_connections()

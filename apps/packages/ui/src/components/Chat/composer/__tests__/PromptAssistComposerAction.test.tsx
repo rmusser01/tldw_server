@@ -84,6 +84,7 @@ vi.mock("antd", async (importOriginal) => {
       title,
       children,
       onClose,
+      size,
       width,
       afterOpenChange,
       focusable
@@ -92,6 +93,7 @@ vi.mock("antd", async (importOriginal) => {
       title?: React.ReactNode
       children?: React.ReactNode
       onClose?: () => void
+      size?: number | string
       width?: number | string
       afterOpenChange?: (open: boolean) => void
       focusable?: { focusTriggerAfterClose?: boolean }
@@ -123,6 +125,7 @@ vi.mock("antd", async (importOriginal) => {
         <aside
           role="dialog"
           aria-label={String(title)}
+          data-drawer-size={String(size)}
           data-drawer-width={String(width)}
           data-focus-trigger-after-close={String(
             focusable?.focusTriggerAfterClose
@@ -926,7 +929,8 @@ describe("PromptAssistComposerAction exact Undo lifecycle", () => {
     await user.click(screen.getByRole("button", { name: "View changes" }))
 
     const drawer = screen.getByRole("dialog", { name: "Prompt improvement" })
-    expect(drawer).toHaveAttribute("data-drawer-width", "480")
+    expect(drawer).toHaveAttribute("data-drawer-size", "480")
+    expect(drawer).toHaveAttribute("data-drawer-width", "undefined")
     expect(screen.getByText("Applied changes")).toBeInTheDocument()
     expect(
       screen.getByRole("textbox", { name: "Improved prompt candidate" })
@@ -1032,7 +1036,8 @@ describe("PromptAssistComposerAction owner surface", () => {
         name: "Prompt improvement"
       })
       expect(drawers).toHaveLength(1)
-      expect(drawers[0]).toHaveAttribute("data-drawer-width", expectedWidth)
+      expect(drawers[0]).toHaveAttribute("data-drawer-size", expectedWidth)
+      expect(drawers[0]).toHaveAttribute("data-drawer-width", "undefined")
       expect(drawers[0]).toHaveAttribute(
         "data-focus-trigger-after-close",
         "false"

@@ -26,7 +26,18 @@ from pydantic import BaseModel, EmailStr, Field
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_auth_rate_limit, get_auth_principal, get_current_active_user, get_db_transaction, get_jwt_service_dep, get_password_service_dep, get_rate_limiter_dep, get_registration_service_dep, get_session_manager_dep, RateLimiter
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RateLimiter,
+    check_auth_rate_limit,
+    get_auth_principal,
+    get_db_transaction,
+    get_jwt_service_dep,
+    get_login_db_connection,
+    get_password_service_dep,
+    get_rate_limiter_dep,
+    get_registration_service_dep,
+    get_session_manager_dep,
+)
 from tldw_Server_API.app.api.v1.API_Deps.federation_deps import (
     get_federation_provisioning_service_dep,
     get_identity_provider_repo_dep,
@@ -1511,7 +1522,7 @@ async def login(
     response: Response,
     _diag=Depends(_login_runtime_diag),  # noqa: B008
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     password_service: PasswordService = Depends(get_password_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),

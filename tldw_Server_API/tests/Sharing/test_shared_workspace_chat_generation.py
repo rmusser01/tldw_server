@@ -178,6 +178,10 @@ async def test_prompt_keeps_server_instruction_and_json_isolates_source_instruct
     messages = captured["provider_call"]["messages_payload"]
     assert messages[0]["role"] == "system"
     assert "untrusted data" in messages[0]["content"].lower()
+    assert '"Grounded answer"' not in messages[0]["content"]
+    assert "answer value must come from the evidence" in messages[0]["content"]
+    assert "Do not copy facts from the question" in messages[0]["content"]
+    assert "include every evidence label needed" in messages[0]["content"]
     assert messages[1] == {"role": "user", "content": "Question:\nWhat is supported?"}
     assert messages[2]["role"] == "user"
     serialized_evidence = messages[2]["content"].split("\n", 1)[1]

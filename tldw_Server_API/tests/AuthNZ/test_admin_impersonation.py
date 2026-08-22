@@ -46,26 +46,44 @@ class TestImpersonationTokenResponse:
 
 class TestCreateImpersonationToken:
     @pytest.mark.asyncio
+    async def test_success_uses_backend_agnostic_user_repository(self):
+        principal = _admin_principal()
+        mock_pool = MagicMock()
+        mock_pool.acquire.side_effect = AssertionError("endpoint must not issue ad hoc user SQL")
+        mock_jwt_svc = MagicMock()
+        mock_jwt_svc.create_access_token.return_value = "mock.jwt.token"
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.get_user_by_id",
+                new_callable=AsyncMock,
+                return_value={
+                    "id": 42,
+                    "username": "targetuser",
+                    "is_active": True,
+                    "role": "user",
+                },
+            ) as get_user,
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.jwt_service.get_jwt_service",
+                return_value=mock_jwt_svc,
+            ),
+        ):
+            result = await create_impersonation_token(42, principal)
+
+        assert result.impersonated_user_id == 42
+        get_user.assert_awaited_once_with(42)
+        assert mock_jwt_svc.create_access_token.call_args.kwargs["role"] == "user"
+
+    @pytest.mark.asyncio
     async def test_success(self):
         principal = _admin_principal()
-
-        # Mock cursor for user lookup
-        mock_cursor_user = AsyncMock()
-        mock_cursor_user.fetchone = AsyncMock(return_value=(42, "targetuser", 1))
-
-        # Mock cursor for role lookup
-        mock_cursor_role = AsyncMock()
-        mock_cursor_role.fetchone = AsyncMock(return_value=("user",))
-
-        mock_conn = AsyncMock()
-        # First call returns user info, second returns role
-        mock_conn.execute = AsyncMock(side_effect=[mock_cursor_user, mock_cursor_role])
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-
         mock_pool = MagicMock()
-        mock_pool.acquire = MagicMock(return_value=mock_conn)
-
         mock_jwt_svc = MagicMock()
         mock_jwt_svc.create_access_token = MagicMock(return_value="mock.jwt.token")
 
@@ -74,6 +92,16 @@ class TestCreateImpersonationToken:
                 "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
                 new_callable=AsyncMock,
                 return_value=mock_pool,
+            ),
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.get_user_by_id",
+                new_callable=AsyncMock,
+                return_value={
+                    "id": 42,
+                    "username": "targetuser",
+                    "is_active": True,
+                    "role": "user",
+                },
             ),
             patch(
                 "tldw_Server_API.app.core.AuthNZ.jwt_service.get_jwt_service",
@@ -96,24 +124,19 @@ class TestCreateImpersonationToken:
     @pytest.mark.asyncio
     async def test_user_not_found(self):
         principal = _admin_principal()
-
-        mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value=None)
-
-        mock_conn = AsyncMock()
-        mock_conn.execute = AsyncMock(return_value=mock_cursor)
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-
         mock_pool = MagicMock()
-        mock_pool.acquire = MagicMock(return_value=mock_conn)
 
-        from fastapi import HTTPException
-
-        with patch(
-            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
-            new_callable=AsyncMock,
-            return_value=mock_pool,
+        with (
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.get_user_by_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await create_impersonation_token(999, principal)
@@ -122,24 +145,24 @@ class TestCreateImpersonationToken:
     @pytest.mark.asyncio
     async def test_inactive_user_rejected(self):
         principal = _admin_principal()
-
-        mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value=(42, "inactive", 0))  # is_active=0
-
-        mock_conn = AsyncMock()
-        mock_conn.execute = AsyncMock(return_value=mock_cursor)
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-
         mock_pool = MagicMock()
-        mock_pool.acquire = MagicMock(return_value=mock_conn)
 
-        from fastapi import HTTPException
-
-        with patch(
-            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
-            new_callable=AsyncMock,
-            return_value=mock_pool,
+        with (
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.get_user_by_id",
+                new_callable=AsyncMock,
+                return_value={
+                    "id": 42,
+                    "username": "inactive",
+                    "is_active": False,
+                    "role": "user",
+                },
+            ),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await create_impersonation_token(42, principal)

@@ -351,6 +351,37 @@ describe("SharedResearchWorkspace recipient surface", () => {
     )
   })
 
+  it("preserves the exact server provider identifier for a local generation default", async () => {
+    api.bootstrap.mockResolvedValue(
+      buildBootstrap({
+        generation_default: {
+          provider: "local-llm",
+          model: "Qwen2.5-0.5B-Instruct",
+          ready: true,
+          reason_code: null
+        }
+      })
+    )
+    fetchChatModels.mockResolvedValue([])
+    renderWorkspace()
+
+    await waitFor(() =>
+      expect(screen.getByTestId("model-selector")).toHaveTextContent(
+        "local / Qwen2.5-0.5B-Instruct"
+      )
+    )
+    fireEvent.change(screen.getByLabelText("Ask about shared sources"), {
+      target: { value: "What does the report conclude?" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Ask shared workspace" }))
+
+    await waitFor(() => expect(api.ask).toHaveBeenCalledTimes(1))
+    expect(api.ask.mock.calls[0][1]).toMatchObject({
+      provider: "local-llm",
+      model: "Qwen2.5-0.5B-Instruct"
+    })
+  })
+
   it("loads older history upward without duplicate IDs or losing the scroll anchor", async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView

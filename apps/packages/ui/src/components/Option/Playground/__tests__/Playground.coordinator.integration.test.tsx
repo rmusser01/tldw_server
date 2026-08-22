@@ -46,7 +46,7 @@ const sessionPersistenceState = vi.hoisted(() => ({
 }))
 
 const restoreDecisionState = vi.hoisted(() => ({
-  value: false
+  value: false as boolean | null
 }))
 
 const tldwClientState = vi.hoisted(() => ({
@@ -84,9 +84,20 @@ vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => sessionPersistenceState.value
 }))
 
-vi.mock("@/hooks/playground-session-restore", () => ({
-  shouldRestorePersistedPlaygroundSession: () => restoreDecisionState.value
-}))
+vi.mock("@/hooks/playground-session-restore", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/hooks/playground-session-restore")
+  >("@/hooks/playground-session-restore")
+  return {
+    shouldRestorePersistedPlaygroundSession: (
+      input: Parameters<
+        typeof actual.shouldRestorePersistedPlaygroundSession
+      >[0]
+    ) =>
+      restoreDecisionState.value ??
+      actual.shouldRestorePersistedPlaygroundSession(input)
+  }
+})
 
 vi.mock("@/services/app", () => ({
   webUIResumeLastChat: vi.fn(async () => false)
@@ -304,6 +315,26 @@ describe("Playground coordinator integration", () => {
     await waitFor(() => {
       expect(restoreSession).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it("does not overwrite a server chat selected while session scope initializes", async () => {
+    const restoreSession = vi.fn(async () => true)
+    sessionPersistenceState.value.restoreSession = restoreSession
+    sessionPersistenceState.value.sessionScopeReady = false
+    sessionPersistenceState.value.hasPersistedSession = true
+    sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
+    restoreDecisionState.value = null
+
+    const { rerender } = render(<Playground />)
+
+    messageOptionState.value.serverChatId = "selected-chat"
+    sessionPersistenceState.value.sessionScopeReady = true
+    rerender(<Playground />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("playground-chat")).toBeInTheDocument()
+    })
+    expect(restoreSession).not.toHaveBeenCalled()
   })
 
   it("applies explicit character chat route ids before persisted session restore", async () => {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -51,6 +52,14 @@ def _reset_restricted_session(db: CharactersRAGDB) -> None:
     conn.commit()
 
 
+def _stored_settings(backend, conversation_id: str) -> dict | None:
+    row = backend.execute(
+        "SELECT settings_json FROM conversation_settings WHERE conversation_id = %s",
+        (conversation_id,),
+    ).first
+    return None if row is None else json.loads(row["settings_json"])
+
+
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 def test_postgres_store_round_trips_thread_claim_freeze_complete_and_history(
@@ -97,6 +106,35 @@ def test_postgres_store_round_trips_thread_claim_freeze_complete_and_history(
         )
         assert [message.content for message in page.messages] == ["Question", "Answer"]
         assert page.messages[-1].citations == stored.citations
+    finally:
+        _close(db)
+        backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(60)
+def test_postgres_thread_settings_are_initialized_repaired_and_idempotent(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="recipient-a", backend=backend)
+    try:
+        thread = _thread(db, share_id=52)
+        assert _stored_settings(backend, thread.conversation_id) == {}
+
+        expected = {"authorNote": "Keep this recipient setting."}
+        assert db.upsert_conversation_settings(thread.conversation_id, expected)
+        assert _thread(db, share_id=52).conversation_id == thread.conversation_id
+        assert _stored_settings(backend, thread.conversation_id) == expected
+
+        backend.execute(
+            "DELETE FROM conversation_settings WHERE conversation_id = %s",
+            (thread.conversation_id,),
+        )
+        assert _stored_settings(backend, thread.conversation_id) is None
+
+        assert _thread(db, share_id=52).conversation_id == thread.conversation_id
+        assert _stored_settings(backend, thread.conversation_id) == {}
     finally:
         _close(db)
         backend.get_pool().close_all()
@@ -208,7 +246,7 @@ def test_postgres_store_blocks_cross_recipient_select_claim_update_and_delete(
         assert db_a.execute_query(
             "SELECT error_code FROM shared_workspace_chat_requests WHERE request_id = ?",
             (str(claim_a.request_id),),
-        ).fetchone()[0] is None
+        ).fetchone()["error_code"] is None
 
         with db_a.transaction() as conn:
             conn.execute(
@@ -218,9 +256,9 @@ def test_postgres_store_blocks_cross_recipient_select_claim_update_and_delete(
             )
         assert db_b.shared_workspace_chat_store.purge_expired_conflicts(now=NOW) == 0
         assert db_a.execute_query(
-            "SELECT count(*) FROM shared_workspace_chat_requests WHERE request_id = ?",
+            "SELECT count(*) AS count FROM shared_workspace_chat_requests WHERE request_id = ?",
             (str(claim_a.request_id),),
-        ).fetchone()[0] == 1
+        ).fetchone()["count"] == 1
     finally:
         try:
             try:

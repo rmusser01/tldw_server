@@ -1398,6 +1398,58 @@ class DatabasePool:
                     raise failure
                 raise failure from None
 
+    @asynccontextmanager
+    async def acquire_statement_autocommit(self, *, timeout: float | None = None):
+        """Acquire a connection whose standalone writes commit per statement.
+
+        Asyncpg already runs statements outside an explicit transaction in
+        autocommit mode. SQLite needs ``isolation_level=None`` so login-time
+        password and timestamp writes cannot retain a lock while session and
+        audit services use their own connections.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        if self.pool is not None:
+            async with self.acquire(timeout=timeout) as conn:
+                yield conn
+            return
+
+        conn = None
+        try:
+            conn = await aiosqlite.connect(
+                self.db_path,
+                uri=self._sqlite_uri,
+                isolation_level=None,
+            )
+            await configure_sqlite_connection_async(conn)
+            conn.row_factory = aiosqlite.Row
+
+            class _SQLiteAutocommitConnShim:
+                def __init__(self, connection):
+                    self._connection = connection
+
+                async def execute(self, query: str, *args):
+                    normalized_query = _normalize_sqlite_sql(query)
+                    if len(args) == 0:
+                        return await self._connection.execute(normalized_query)
+                    params = (
+                        args[0]
+                        if len(args) == 1 and isinstance(args[0], (list, tuple, dict))
+                        else args
+                    )
+                    if isinstance(params, dict):
+                        return await self._connection.execute(normalized_query, params)
+                    return await self._connection.execute(normalized_query, tuple(params))
+
+                def __getattr__(self, name: str):
+                    return getattr(self._connection, name)
+
+            yield _SQLiteAutocommitConnShim(conn)
+        finally:
+            if conn:
+                await conn.close()
+
     async def execute(self, query: str, *args) -> Any:
         """Execute a query without returning results"""
         async with self.acquire() as conn:

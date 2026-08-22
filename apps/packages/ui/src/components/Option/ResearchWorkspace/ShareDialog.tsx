@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
+  App,
   Modal,
   Form,
   Select,
@@ -13,7 +14,6 @@ import {
   Tag,
   Tooltip,
   Tabs,
-  message,
   DatePicker,
 } from "antd"
 import { Copy, Link2, Trash2 } from "lucide-react"
@@ -58,12 +58,16 @@ interface ShareDialogProps {
   onClose: () => void
 }
 
+type MessageApi = ReturnType<typeof App.useApp>["message"]
+type ModalApi = ReturnType<typeof App.useApp>["modal"]
+
 export const ShareDialog: React.FC<ShareDialogProps> = ({
   workspaceId,
   open,
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState("team")
+  const { message: messageApi, modal: modalApi } = App.useApp()
 
   return (
     <Modal
@@ -82,21 +86,25 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             key: "team",
             label: "Team / Org",
             children: (
-              <TeamShareTab workspaceId={workspaceId} />
+              <TeamShareTab workspaceId={workspaceId} messageApi={messageApi} />
             ),
           },
           {
             key: "link",
             label: "Share Link",
             children: (
-              <LinkShareTab workspaceId={workspaceId} />
+              <LinkShareTab workspaceId={workspaceId} messageApi={messageApi} />
             ),
           },
           {
             key: "active",
             label: "Active Shares",
             children: (
-              <ActiveSharesTab workspaceId={workspaceId} />
+              <ActiveSharesTab
+                workspaceId={workspaceId}
+                messageApi={messageApi}
+                modalApi={modalApi}
+              />
             ),
           },
         ]}
@@ -107,7 +115,10 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
 // ── Team Share Tab ──
 
-const TeamShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
+const TeamShareTab: React.FC<{
+  workspaceId: string
+  messageApi: MessageApi
+}> = ({ workspaceId, messageApi }) => {
   const [form] = Form.useForm()
   const shareMutation = useShareWorkspace(workspaceId)
 
@@ -124,10 +135,10 @@ const TeamShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
         access_level: values.access_level,
         allow_clone: values.allow_clone,
       })
-      message.success("Workspace shared successfully")
+      messageApi.success("Workspace shared successfully")
       form.resetFields()
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "Failed to share workspace")
+      messageApi.error(err instanceof Error ? err.message : "Failed to share workspace")
     }
   }
 
@@ -192,7 +203,10 @@ const TeamShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
 
 // ── Link Share Tab ──
 
-const LinkShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
+const LinkShareTab: React.FC<{
+  workspaceId: string
+  messageApi: MessageApi
+}> = ({ workspaceId, messageApi }) => {
   const [form] = Form.useForm()
   const [generatedLink, setGeneratedLink] = useState<string | null>(null)
   const createToken = useCreateToken()
@@ -219,24 +233,24 @@ const LinkShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
       if (result.raw_token) {
         const link = `${window.location.origin}/share/${result.raw_token}`
         setGeneratedLink(link)
-        message.success("Share link created")
+        messageApi.success("Share link created")
       }
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "Failed to create share link")
+      messageApi.error(err instanceof Error ? err.message : "Failed to create share link")
     }
   }
 
   const copyLink = async () => {
     if (generatedLink) {
       if (!navigator.clipboard?.writeText) {
-        message.error("Clipboard access is not supported in this browser context")
+        messageApi.error("Clipboard access is not supported in this browser context")
         return
       }
       try {
         await navigator.clipboard.writeText(generatedLink)
-        message.success("Share link copied to clipboard")
+        messageApi.success("Share link copied to clipboard")
       } catch (err) {
-        message.error(
+        messageApi.error(
           err instanceof Error ? err.message : "Failed to copy share link"
         )
       }
@@ -323,9 +337,11 @@ const LinkShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
 
 // ── Active Shares Tab ──
 
-const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
-  workspaceId,
-}) => {
+const ActiveSharesTab: React.FC<{
+  workspaceId: string
+  messageApi: MessageApi
+  modalApi: ModalApi
+}> = ({ workspaceId, messageApi, modalApi }) => {
   const { t } = useTranslation("playground")
   const { data, isLoading } = useWorkspaceShares(workspaceId)
   const updateShareMutation = useUpdateShare()
@@ -342,15 +358,15 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
         shareId: record.id,
         ...patch,
       })
-      message.success("Share updated")
+      messageApi.success("Share updated")
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "Failed to update share")
+      messageApi.error(err instanceof Error ? err.message : "Failed to update share")
     }
   }
 
   const confirmRevokeShare = (record: ShareResponse) => {
     const scopeLabel = formatShareScopeLabel(record)
-    Modal.confirm({
+    modalApi.confirm({
       title: `Revoke ${scopeLabel}?`,
       content: "People in this scope will lose access to this workspace.",
       okText: "Revoke",
@@ -359,10 +375,10 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
       onOk: async (close) => {
         try {
           await revokeMutation.mutateAsync(record.id)
-          message.success("Share revoked")
+          messageApi.success("Share revoked")
           close?.()
         } catch (err) {
-          message.error(
+          messageApi.error(
             err instanceof Error ? err.message : "Failed to revoke share"
           )
           throw err
@@ -372,7 +388,7 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
   }
 
   const confirmRevokeToken = (record: TokenResponse) => {
-    Modal.confirm({
+    modalApi.confirm({
       title: `Revoke share link ${record.token_prefix}?`,
       content: "Anyone using this link will lose access immediately.",
       okText: "Revoke",
@@ -381,10 +397,10 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
       onOk: async (close) => {
         try {
           await revokeTokenMutation.mutateAsync(record.id)
-          message.success("Share link revoked")
+          messageApi.success("Share link revoked")
           close?.()
         } catch (err) {
-          message.error(
+          messageApi.error(
             err instanceof Error ? err.message : "Failed to revoke share link"
           )
           throw err

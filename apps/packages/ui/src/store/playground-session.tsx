@@ -44,9 +44,11 @@ export interface PlaygroundSessionData {
 }
 
 interface PlaygroundSessionState extends PlaygroundSessionData {
+  restoreRevision: number
   // Actions
   saveSession: (data: Partial<PlaygroundSessionData>) => void
   clearSession: () => void
+  cancelPendingRestore: () => void
   isSessionStale: () => boolean
   isSessionValid: (expectedScopeKey?: string | null) => boolean
 }
@@ -79,6 +81,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
   persist(
     (set, get) => ({
       ...initialState,
+      restoreRevision: 0,
 
       saveSession: (data) =>
         set((state) => ({
@@ -87,7 +90,15 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
           lastUpdated: Date.now()
         })),
 
-      clearSession: () => set({ ...initialState, lastUpdated: 0 }),
+      clearSession: () =>
+        set((state) => ({
+          ...initialState,
+          lastUpdated: 0,
+          restoreRevision: state.restoreRevision + 1
+        })),
+
+      cancelPendingRestore: () =>
+        set((state) => ({ restoreRevision: state.restoreRevision + 1 })),
 
       isSessionStale: () => {
         const { lastUpdated } = get()

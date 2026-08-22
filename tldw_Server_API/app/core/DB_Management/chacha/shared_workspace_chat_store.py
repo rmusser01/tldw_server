@@ -152,14 +152,11 @@ class SharedWorkspaceChatStore:
         workspace = self._bounded_text(workspace_id, "workspace_id", 512)
         title = self._bounded_text(workspace_name, "workspace_name", 1_000)
 
-        existing = self.get_thread(share_id=normalized_share_id)
-        if existing is not None:
-            return existing
-
         try:
             with self._db.transaction() as conn:
                 existing = self._get_thread_with_conn(conn, normalized_share_id)
                 if existing is not None:
+                    self._ensure_chat_settings_with_conn(conn, existing.conversation_id)
                     return existing
                 conversation_id = self._db.add_conversation(
                     {
@@ -173,6 +170,7 @@ class SharedWorkspaceChatStore:
                 )
                 if not conversation_id:
                     raise CharactersRAGDBError("Shared workspace conversation creation failed.")
+                self._ensure_chat_settings_with_conn(conn, conversation_id)
                 conn.execute(
                     """
                     INSERT INTO shared_workspace_chat_threads(
@@ -197,6 +195,8 @@ class SharedWorkspaceChatStore:
             try:
                 with self._db.transaction() as conn:
                     winner = self._get_thread_with_conn(conn, normalized_share_id)
+                    if winner is not None:
+                        self._ensure_chat_settings_with_conn(conn, winner.conversation_id)
             except (sqlite3.Error, BackendDatabaseError) as reload_exc:
                 raise CharactersRAGDBError(
                     f"Shared workspace thread race reload failed: {reload_exc}"
@@ -210,6 +210,19 @@ class SharedWorkspaceChatStore:
             raise
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Shared workspace thread persistence failed: {exc}") from exc
+
+    @staticmethod
+    def _ensure_chat_settings_with_conn(conn: Any, conversation_id: str) -> None:
+        """Make a shared thread a complete Chats record without overwriting settings."""
+        conn.execute(
+            """
+            INSERT INTO conversation_settings(
+                conversation_id, settings_json, last_modified
+            ) VALUES (?, '{}', CURRENT_TIMESTAMP)
+            ON CONFLICT(conversation_id) DO NOTHING
+            """,
+            (conversation_id,),
+        )
 
     def get_thread(self, *, share_id: int) -> SharedWorkspaceChatThread | None:
         """Return a recipient-visible thread without creating one."""

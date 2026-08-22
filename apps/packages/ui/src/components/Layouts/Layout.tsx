@@ -148,6 +148,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     !hideHeader &&
     !hideSidebar &&
     !isMobile
+  const headerSidebarCollapsed = showChatSidebar
+    ? isMobile
+      ? !sidebarOpen
+      : chatSidebarCollapsed
+    : !sidebarOpen
   const isViewportConstrainedRoute = (
     VIEWPORT_CONSTRAINED_PATHS as readonly string[]
   ).includes(location.pathname)
@@ -195,7 +200,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   }
 
   React.useEffect(() => {
-    if (isMobile && !showChatSidebar) return
+    if (!showChatSidebar) return
     if (!isMobile && sidebarOpen) {
       setSidebarOpen(false)
     }
@@ -415,11 +420,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
               >
                 <Header
                   onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                  sidebarCollapsed={
-                    showChatSidebar && isMobile
-                      ? !sidebarOpen
-                      : chatSidebarCollapsed
-                  }
+                  sidebarCollapsed={headerSidebarCollapsed}
                   notificationCount={notificationCount}
                   onOpenNotifications={onOpenNotifications}
                 />

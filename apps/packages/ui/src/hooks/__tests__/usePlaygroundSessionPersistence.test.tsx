@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -45,8 +46,10 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }))
 
 import { usePlaygroundSessionPersistence } from "../usePlaygroundSessionPersistence"
+import { useSelectServerChat } from "../chat/useSelectServerChat"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
 
 describe("usePlaygroundSessionPersistence", () => {
   beforeEach(() => {
@@ -223,6 +226,71 @@ describe("usePlaygroundSessionPersistence", () => {
         "read_only"
       )
     })
+  })
+
+  it("does not overwrite a server chat selected while session restore is in flight", async () => {
+    let resolveChatData: (value: {
+      historyInfo: Record<string, never>
+      messages: Array<{ id: string; role: string; content: string }>
+    }) => void = () => undefined
+    const deferredChatData = new Promise<{
+      historyInfo: Record<string, never>
+      messages: Array<{ id: string; role: string; content: string }>
+    }>((resolve) => {
+      resolveChatData = resolve
+    })
+    mocks.getFullChatData.mockReturnValue(deferredChatData)
+    usePlaygroundSessionStore.getState().saveSession({
+      historyId: "persisted-history",
+      serverChatId: "persisted-chat",
+      scopeKey: "global",
+      queuedMessages: []
+    })
+
+    const { result } = renderHook(
+      () => ({
+        persistence: usePlaygroundSessionPersistence(),
+        selectServerChat: useSelectServerChat()
+      }),
+      { wrapper: MemoryRouter }
+    )
+
+    await waitFor(() => {
+      expect(result.current.persistence.sessionScopeReady).toBe(true)
+    })
+
+    let restorePromise: Promise<boolean> | undefined
+    act(() => {
+      restorePromise = result.current.persistence.restoreSession()
+    })
+    await waitFor(() => {
+      expect(mocks.getFullChatData).toHaveBeenCalledWith("persisted-history")
+    })
+
+    act(() => {
+      result.current.selectServerChat({
+        id: "selected-chat",
+        title: "Selected from Chats",
+        version: 1,
+        state: "active",
+        topic_label: null,
+        cluster_id: null,
+        source: "webui",
+        external_ref: null
+      } as ServerChatSummary)
+    })
+    await act(async () => {
+      resolveChatData({
+        historyInfo: {},
+        messages: [
+          { id: "persisted-message", role: "user", content: "stale" }
+        ]
+      })
+      await expect(restorePromise).resolves.toBe(false)
+    })
+
+    expect(useStoreMessageOption.getState().serverChatId).toBe("selected-chat")
+    expect(useStoreMessageOption.getState().historyId).toBeNull()
   })
 
   it("keeps the richer tracked persona snapshot when autosave only has generic metadata", async () => {

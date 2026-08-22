@@ -1064,6 +1064,8 @@ git commit -m "test(workspaces): verify shared recipient isolation"
 
 ### Task 11: Run Real Backend, WebUI, and CDP Acceptance and Close the Task
 
+**Status:** Complete. Live evidence was recorded with a real multi-user SQLite backend, Next.js WebUI, local OpenAI-compatible provider, and explicit Chrome CDP. PR preparation is intentionally omitted by executor direction.
+
 **Files:**
 - Create: `apps/tldw-frontend/scripts/shared-research-workspace-cdp-uat.mjs`
 - Create: `apps/tldw-frontend/__tests__/shared-research-workspace-cdp-uat.test.ts`
@@ -1076,11 +1078,11 @@ git commit -m "test(workspaces): verify shared recipient isolation"
 - Create: `Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/revoked-share.png`
 - Update through Backlog CLI: `TASK-12020.40`
 
-- [ ] **Step 1: Write runner contract tests before the live script**
+- [x] **Step 1: Write runner contract tests before the live script**
 
 Assert required admin and disposable-account credentials, API/Web/CDP URLs, evidence directory, local-provider preference, redacted output, nonzero exit on any undeclared HTTP failure/console error/page error/request failure, and no computer-control fallback. Secrets may come only from environment variables and must never appear in command logs, screenshots, or `evidence.json`.
 
-- [ ] **Step 2: Implement an explicit CDP live runner**
+- [x] **Step 2: Implement an explicit CDP live runner**
 
 Connect to an already running Chrome instance with:
 
@@ -1090,13 +1092,13 @@ const browser = await chromium.connectOverCDP(process.env.TLDW_CDP_URL)
 
 Use admin-authenticated API calls only for fixture provisioning and browser CDP for all product UI interaction. Derive unique owner/member/nonmember usernames from a run ID, create them with the disposable fixture password, create the team/share, and register cleanup metadata without attempting destructive cleanup on failure. Open three isolated CDP browser contexts, log each persona in through the WebUI, and assert storage/cookies do not cross contexts. Provision the owner workspace, two real ingested files, unrelated owner sentinel media, and recipient local sentinel content. Poll the canonical workspace source/status envelope until both shared sources are `queryable`; time out with the final bounded status payload rather than proceeding early.
 
-- [ ] **Step 3: Run the deterministic runner tests**
+- [x] **Step 3: Run the deterministic runner tests**
 
 Run: `cd apps/tldw-frontend && bunx vitest run __tests__/shared-research-workspace-cdp-uat.test.ts __tests__/research-workspace-uat-runner.test.ts --maxWorkers=1 --no-file-parallelism`
 
 Expected: configuration, redaction, failure classification, and evidence checks pass.
 
-- [ ] **Step 4: Start actual services and run the CDP matrix**
+- [x] **Step 4: Start actual services and run the CDP matrix**
 
 Use the repository virtual environment for the multi-user backend and the Next.js WebUI. Configure the local OpenAI-compatible `llama.cpp` provider at `http://127.0.0.1:9099/v1/chat/completions` when healthy; otherwise select another configured provider and record its effective provider/model.
 
@@ -1117,15 +1119,15 @@ node scripts/shared-research-workspace-cdp-uat.mjs
 
 The run must prove: shared identity/source isolation; all-source and subset answers; verified citation preview; no unrelated owner or recipient sentinel in context/answer/citations; history after reload; owner recipient-style view; malformed/nonmember neutral failures; revocation; saved transcript visibility in Chats; blocked revoked preview; clean desktop/mobile layouts; and no extra banner bars.
 
-- [ ] **Step 5: Run the API idempotency race probe against the same backend**
+- [x] **Step 5: Run the API idempotency race probe against the same backend**
 
 Race two matching request IDs, assert one generated/stored turn and replay equivalence, then reuse the ID with a changed fingerprint and assert typed `409 request_id_conflict`. Record status codes, request IDs, response hashes, and redacted timings in `evidence.json`.
 
-- [ ] **Step 6: Inspect all screenshots and the request/error ledger**
+- [x] **Step 6: Inspect all screenshots and the request/error ledger**
 
 Verify visually that controls/text do not overlap, the header is compact, Sources/Chat are the only core panes/tabs, evidence is readable, mobile has no horizontal overflow, and revoked state contains no owner/local data. The ledger must contain no undeclared status >= 400, status 0, failed request, page error, console error, runtime overlay, old full-media call, local workspace call, or mutation/tool request in shared mode.
 
-- [ ] **Step 7: Run final repository checks and inspect the diff**
+- [x] **Step 7: Run final repository checks and inspect the diff**
 
 Run: `git diff --check`
 
@@ -1135,7 +1137,7 @@ Run: `rg -n "shared-with-me/.+/media/|SharedWorkspaceBanner|SharedWorkspaceProvi
 
 Expected: clean whitespace; only intended files plus the two pre-existing untracked watchlist templates; no active old endpoint/banner/provider references.
 
-- [ ] **Step 8: Update Backlog and commit live evidence**
+- [x] **Step 8: Update Backlog and commit live evidence**
 
 Use `backlog task edit TASK-12020.40` to check all acceptance criteria/definition-of-done items, append exact verification commands/results and skips, link the design/plan/PR, and add a final summary covering the security boundary, recipient persistence, UI, and live evidence.
 
