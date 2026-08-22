@@ -213,3 +213,51 @@ One exploratory broad-test command included `__tests__/hooks/useConfig.fetch-mod
 The retained-refresh and preserved-draft states reuse the existing surface, border, text, degraded-state, button, and state-panel system. Stale target data is explicitly identified as non-authoritative, submission stays disabled until fresh confirmation, and Retry remains a shared large button action. The preserved-draft state uses a labelled section and an explicit Forget action without reading draft source in the controller.
 
 The form keeps visible labels, semantic `form`, `fieldset`, `legend`, `dl`, status, and alert structure; shared large actions retain approximately 44px targets and visible focus. Existing responsive grids collapse to one column without hiding recovery actions. No gradients, glass, card grid, decorative motion, em-dash copy, or bespoke visual system was introduced. The flow remains non-executing and browser automation remains deferred to Task 17.
+
+## Final scope-fencing fix round 3
+
+### Review verification and RED
+
+The round-3 findings were verified against the committed round-2 implementation before any production edit. The coherent five-file matrix was added first and run with:
+
+```bash
+cd apps/tldw-frontend
+bun run test:run -- \
+  __tests__/auth.logout.test.ts \
+  ../packages/ui/src/hooks/__tests__/useSlidesCapabilities.test.tsx \
+  ../packages/ui/src/hooks/__tests__/useStandaloneHtmlGeneration.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/PresentationStudioNew.test.tsx \
+  ../packages/ui/src/components/Option/PresentationStudio/__tests__/PresentationStudioNew.integration.test.tsx \
+  --maxWorkers=1 --no-file-parallelism --reporter=dot
+```
+
+The canonical RED collected all five files and all 72 tests: 13 intended tests failed and 59 passed. There were no unrelated baseline or harness-only failures. The failures covered route-independent source-free logout cleanup; retained display-only capability data after null confirmation; definitive scope-mismatch signaling; generation/recovery mismatch scrubbing; combined capability and recovery Retry; stable quota-only form state through 409 network and confirmation failures; and synchronous old-scope source removal after a confirmed mismatch. An isolated null-confirmation run confirmed that the 409 POST and deferred capability response both executed; its failure was the intended old form-remount behavior, not a timing or harness failure.
+
+### Round-3 implementation
+
+- Frontend logout now enumerates `sessionStorage` key names backwards and removes only the two Task 14 draft/resume prefixes after clearing local authentication and before emitting the existing narrow logout boundary. It never reads source-bearing draft or replay values and preserves unrelated session keys.
+- A definitive post-response origin/principal mismatch emits one synchronous, source-free Slides scope-mismatch boundary. Capability data is cleared; generation and recovery owners fence work, abort supported requests, scrub source/key refs, remove the last trusted namespace, and remain guarded until a later explicit or lifecycle revalidation.
+- A null post-response confirmation remains fail closed but retains the prior capability object as display-only data. `canGenerate` remains false, so no stale revision can authorize a POST.
+- Every relevant Retry now rechecks both Slides authority and source-free recovery presence.
+- The standalone controller uses one stable wrapper and keeps the form in the same first-child position whenever trusted recovery or a prior enabled capability exists. Ready, loading, network-error, null-confirmation, Retry, and success transitions therefore preserve quota-only component memory while disabling fields and POST authority until a fresh revision is confirmed. A real scope mismatch clears the retained capability and recovery boundary, so the subtree unmounts only after its source has been synchronously scrubbed.
+
+No global/module source cache, history or URL source state, unsafe request header, token estimator, execution sink, dependency, provider picker, or automatic replay was added.
+
+### Round-3 verification
+
+- First focused GREEN and final post-cleanup rerun: the amended five-file matrix passed 72 tests in each run.
+- Final amended canonical matrix, including index, form, detail, client, route, and auth boundaries: 11 files and 198 tests passed.
+- Adjacent Presentation Studio and route regressions: 16 files and 82 tests passed.
+- Direct auth, canonical config, capability, connectivity, API-send, background proxy, request-core, connection sync, hosted auth, and standalone client regressions: 12 files and 159 tests passed.
+- OpenAPI guard: 317 client paths and 49 fallback fields verified; the same 10 reviewed OSS exception paths were reported and allowed.
+- Required package typecheck used `NODE_OPTIONS=--max-old-space-size=8192`. It reports zero diagnostics in Task 14 production or test paths. It exits nonzero on the same 47 inherited diagnostics documented in the prior rounds, grouped under Notes, Audio Studio, Research Workspace, Scheduled Tasks, Setup, Skills, Dexie/background entry code, MCP Hub, and voice cloning.
+- Targeted ESLint reported zero errors; seven package UI paths were ignored by the frontend base-path configuration. Targeted Prettier reported the existing package/frontend formatting baseline, reproduced by untouched `Common/Button.tsx` and `pages/_app.tsx`, so no bulk formatter rewrite expanded the diff.
+- `git diff --check` passed. The protected `antd` artifact and both Watchlist files remain outside the Task 14 diff and staging scope.
+- A diff-sensitive execution-sink scan found no added HTML parsing/insertion, `srcdoc`, Blob URL, iframe, popup, worker, dynamic import, eval, or Function constructor.
+- The source/key sink review found no logging, analytics, URL, history, global store, or local-storage source/key sink. Source and replay values remain limited to current component/hook memory, bounded scoped `sessionStorage`, request bodies, ordinary React text nodes, and the existing client request option.
+
+### Round-3 visual and accessibility self-review
+
+The stable refresh wrapper preserves the existing semantic form, labelled controls, provider/model/adapter/endpoint/revision description list, status and alert regions, visible focus, and shared action sizing. Retained target data is explicitly described as reference-only, and all source-bearing fields plus submission remain disabled while authority is loading or unavailable. Combined Retry is exposed in capability-error, offline, disabled, validator, and recovery-first states without introducing duplicate actions in the active HTML flow.
+
+The layout continues to collapse to one column at narrow widths, uses existing surface/border/text/focus/state tokens, and adds no gradients, glass, card grid, decorative motion, em-dash copy, imagery, or bespoke visual system. The flow remains non-executing, and browser automation remains deferred to Task 17 as required.

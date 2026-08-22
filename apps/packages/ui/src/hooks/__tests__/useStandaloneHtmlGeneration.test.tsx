@@ -626,6 +626,24 @@ describe("useStandaloneHtmlGeneration", () => {
     expect(first.result.current.draft.source).toBe("")
   })
 
+  it("scrubs hydrated source and removes the trusted namespace on a confirmed Slides scope mismatch", async () => {
+    const first = await setup()
+    const oldKeys = first.module.buildStandaloneHtmlStorageKeys({
+      serverOrigin: "https://tldw.example",
+      principalId: "42"
+    })
+    expect(sessionStorage.getItem(oldKeys.draft)).toContain("Bounded source")
+    const callsBeforeMismatch = mocks.getConfig.mock.calls.length
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:slides-scope-mismatch")))
+
+    expect(first.result.current.draft.source).toBe("")
+    expect(first.result.current.scopeReady).toBe(false)
+    expect(sessionStorage.getItem(oldKeys.draft)).toBeNull()
+    expect(sessionStorage.getItem(oldKeys.resume)).toBeNull()
+    expect(mocks.getConfig).toHaveBeenCalledTimes(callsBeforeMismatch)
+  })
+
   it("invalidates deferred POST work on pagehide while preserving pre-admission recovery", async () => {
     let resolveSubmit: ((value: unknown) => void) | undefined
     mocks.submit.mockReturnValue(new Promise((resolve) => { resolveSubmit = resolve }))

@@ -294,6 +294,45 @@ describe("useSlidesCapabilities", () => {
     expect(typeof result.current.retry).toBe("function")
   })
 
+  it("retains prior capabilities as display-only data when retry scope confirmation is unavailable", async () => {
+    mocks.getSlidesCapabilities.mockResolvedValue(enabledCapabilities)
+    const { useSlidesCapabilities } = await loadSubject()
+    const { result } = renderHook(() => useSlidesCapabilities())
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+
+    mocks.getConfig
+      .mockResolvedValueOnce({ serverUrl: "https://tldw.example/base" })
+      .mockRejectedValueOnce(new Error("confirmation unavailable"))
+    await act(async () => result.current.retry())
+
+    expect(result.current.status).toBe("error")
+    expect(result.current.capabilities).toEqual(enabledCapabilities)
+    expect(result.current.canGenerate).toBe(false)
+  })
+
+  it("announces a definitive post-response scope mismatch and discards prior display data", async () => {
+    mocks.getSlidesCapabilities.mockResolvedValue(enabledCapabilities)
+    const { useSlidesCapabilities } = await loadSubject()
+    const { result } = renderHook(() => useSlidesCapabilities())
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    const mismatch = vi.fn()
+    window.addEventListener("tldw:slides-scope-mismatch", mismatch)
+
+    mocks.getConfig
+      .mockResolvedValueOnce({ serverUrl: "https://tldw.example/base" })
+      .mockResolvedValueOnce({ serverUrl: "https://other.example/base" })
+    mocks.getCurrentUser
+      .mockResolvedValueOnce({ id: 42 })
+      .mockResolvedValueOnce({ id: 77 })
+    await act(async () => result.current.retry())
+
+    expect(result.current.status).toBe("error")
+    expect(result.current.capabilities).toBeNull()
+    expect(result.current.canGenerate).toBe(false)
+    expect(mismatch).toHaveBeenCalledTimes(1)
+    window.removeEventListener("tldw:slides-scope-mismatch", mismatch)
+  })
+
   it("invalidates logout without resolving old authority and waits for a later trusted boundary", async () => {
     let resolveOld: ((value: unknown) => void) | undefined
     const newCapabilities = {

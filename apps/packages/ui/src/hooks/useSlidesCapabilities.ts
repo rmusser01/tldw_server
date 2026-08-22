@@ -27,6 +27,8 @@ export type UseSlidesCapabilitiesResult = {
 
 type CapabilityScope = { serverOrigin: string; principalId: string }
 
+const SLIDES_SCOPE_MISMATCH_EVENT = "tldw:slides-scope-mismatch"
+
 const sameScope = (left: CapabilityScope, right: CapabilityScope): boolean =>
   left.serverOrigin === right.serverOrigin && left.principalId === right.principalId
 
@@ -99,19 +101,18 @@ export const useSlidesCapabilities = (): UseSlidesCapabilitiesResult => {
       const next = await tldwClient.getSlidesCapabilities({ abortSignal: controller.signal })
       if (!mountedRef.current || requestId !== requestIdRef.current || controller.signal.aborted) return
       const confirmedScope = await resolveCapabilityScope()
-      if (
-        !mountedRef.current ||
-        requestId !== requestIdRef.current ||
-        controller.signal.aborted ||
-        !confirmedScope ||
-        !sameScope(expectedScope, confirmedScope)
-      ) {
-        if (mountedRef.current && requestId === requestIdRef.current && !controller.signal.aborted) {
-          capabilitiesRef.current = null
-          setCapabilities(null)
-          setFailureReason("scope_confirmation_failed")
-          setStatus("error")
-        }
+      if (!mountedRef.current || requestId !== requestIdRef.current || controller.signal.aborted) return
+      if (!confirmedScope) {
+        setFailureReason("scope_confirmation_failed")
+        setStatus("error")
+        return
+      }
+      if (!sameScope(expectedScope, confirmedScope)) {
+        capabilitiesRef.current = null
+        setCapabilities(null)
+        setFailureReason("scope_confirmation_failed")
+        setStatus("error")
+        window.dispatchEvent(new CustomEvent(SLIDES_SCOPE_MISMATCH_EVENT))
         return
       }
       capabilitiesRef.current = next

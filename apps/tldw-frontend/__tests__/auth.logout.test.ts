@@ -44,12 +44,14 @@ describe('authService.logout', () => {
   beforeEach(() => {
     clearEnv();
     localStorage.clear();
+    sessionStorage.clear();
     clearRuntimeAuth();
     mockedApiClient.post.mockResolvedValue({});
   });
 
   afterEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     clearRuntimeAuth();
     restoreEnv();
     vi.resetAllMocks();
@@ -117,5 +119,26 @@ describe('authService.logout', () => {
 
     expect(observed).toEqual([{ token: null, user: null, kind: 'logout' }]);
     window.removeEventListener('tldw:auth-principal-changed', listener);
+  });
+
+  it('removes only Task 14 recovery keys without reading source-bearing values when no route hook is mounted', () => {
+    const draftKey = 'tldw:presentation-studio:html:draft:v1:https%3A%2F%2Ftldw.example:42';
+    const resumeKey = 'tldw:presentation-studio:html:resume:v1:https%3A%2F%2Ftldw.example:42';
+    sessionStorage.setItem(draftKey, 'PRIVATE DIRECT MATERIAL');
+    sessionStorage.setItem(resumeKey, '{"idempotencyKey":"PRIVATE-KEY"}');
+    sessionStorage.setItem('unrelated:session:key', 'keep');
+    const getSpy = vi.spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, 'getItem');
+
+    authService.logout();
+
+    const remainingKeys = Array.from(
+      { length: sessionStorage.length },
+      (_, index) => sessionStorage.key(index),
+    );
+    expect(remainingKeys).toEqual(['unrelated:session:key']);
+    expect(sessionStorage.getItem('unrelated:session:key')).toBe('keep');
+    expect(getSpy).not.toHaveBeenCalledWith(draftKey);
+    expect(getSpy).not.toHaveBeenCalledWith(resumeKey);
+    getSpy.mockRestore();
   });
 });

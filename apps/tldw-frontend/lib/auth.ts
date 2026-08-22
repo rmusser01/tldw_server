@@ -63,6 +63,24 @@ const hasJwtToken = (): boolean => {
   return !!localStorage.getItem('access_token');
 };
 
+const PRESENTATION_STUDIO_HTML_SESSION_PREFIXES = [
+  'tldw:presentation-studio:html:draft:v1:',
+  'tldw:presentation-studio:html:resume:v1:',
+] as const;
+
+const clearStandaloneHtmlSessionRecords = (): void => {
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index);
+      if (key && PRESENTATION_STUDIO_HTML_SESSION_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+        window.sessionStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // Storage may be unavailable; authentication cleanup still completes.
+  }
+};
+
 const getApiErrorInfo = (error: unknown): ApiErrorLike => {
   if (!error || typeof error !== 'object') {
     return {};
@@ -211,6 +229,7 @@ class AuthService {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');
+      clearStandaloneHtmlSessionRecords();
       window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed', {
         detail: { kind: 'logout' },
       }));
