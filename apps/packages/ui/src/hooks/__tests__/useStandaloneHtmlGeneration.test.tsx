@@ -36,6 +36,11 @@ const capability = {
   output_limits: { max_provider_response_bytes: 8_388_608, max_document_bytes: 1_048_576 }
 } as const
 
+const withLimits = (limits: Partial<Record<keyof typeof capability.input_limits, number>>) => ({
+  ...capability,
+  input_limits: { ...capability.input_limits, ...limits }
+})
+
 const validDraft = {
   source: "Bounded source",
   presentationType: "tech-sharing",
@@ -69,10 +74,18 @@ const setup = async () => {
   return { ...hook, module }
 }
 
+const storedValues = (): string =>
+  Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.getItem(sessionStorage.key(index)!) ?? "").join("\n")
+
 describe("useStandaloneHtmlGeneration", () => {
   beforeEach(() => {
     vi.useRealTimers()
-    vi.clearAllMocks()
+    mocks.getConfig.mockReset()
+    mocks.getCurrentUser.mockReset()
+    mocks.submit.mockReset()
+    mocks.status.mockReset()
+    mocks.onCompleted.mockReset()
+    mocks.onStopWaiting.mockReset()
     sessionStorage.clear()
     mocks.getConfig.mockResolvedValue({ serverUrl: "https://tldw.example/base", authMode: "multi-user", accessToken: "secret-token" })
     mocks.getCurrentUser.mockResolvedValue({ id: 42, username: "researcher", is_active: true })
@@ -263,6 +276,52 @@ describe("useStandaloneHtmlGeneration", () => {
     second.unmount()
   })
 
+  it("keeps an existing receipt recoverable when current generation capability is unavailable", async () => {
+    mocks.submit.mockResolvedValue(pendingReceipt)
+    mocks.status.mockReturnValue(new Promise(() => undefined))
+    const first = await setup()
+    await act(async () => first.result.current.submit())
+    first.result.current.stopWaiting()
+    first.unmount()
+
+    const second = renderHook(() => (first.module.useStandaloneHtmlGeneration as any)({
+      capability: null,
+      contentMaxSlides: 30,
+      onCompleted: mocks.onCompleted,
+      onStopWaiting: mocks.onStopWaiting
+    }))
+    await waitFor(() => expect(second.result.current.phase).toBe("stopped"))
+    expect(second.result.current.recoveryAvailable).toBe(true)
+    await act(async () => { void second.result.current.resume() })
+    expect(mocks.status).toHaveBeenCalledTimes(2)
+    second.unmount()
+  })
+
+  it("probes source-free recovery after scope confirmation and leaves records unread on outage", async () => {
+    mocks.submit.mockResolvedValue(pendingReceipt)
+    mocks.status.mockReturnValue(new Promise(() => undefined))
+    const first = await setup()
+    await act(async () => first.result.current.submit())
+    first.result.current.stopWaiting()
+    first.unmount()
+    const keys = first.module.buildStandaloneHtmlStorageKeys({
+      serverOrigin: "https://tldw.example",
+      principalId: "42"
+    })
+    const getSpy = vi.spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "getItem")
+
+    await expect((first.module as any).probeStandaloneHtmlRecovery()).resolves.toBe(true)
+    expect(getSpy).toHaveBeenCalledWith(keys.resume)
+    expect(getSpy).not.toHaveBeenCalledWith(keys.draft)
+
+    getSpy.mockClear()
+    mocks.getConfig.mockRejectedValue(new Error("temporary outage"))
+    await expect((first.module as any).probeStandaloneHtmlRecovery()).resolves.toBeNull()
+    expect(getSpy).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(keys.resume)).not.toBeNull()
+    getSpy.mockRestore()
+  })
+
   it.each([
     [401, "auth_lost"],
     [404, "missing"],
@@ -275,8 +334,31 @@ describe("useStandaloneHtmlGeneration", () => {
     await act(async () => result.current.submit())
 
     await waitFor(() => expect(result.current.phase).toBe(phase))
-    expect(result.current.snapshot?.source.prompt).toBe("Bounded source")
+    expect(result.current.snapshot?.source.kind === "prompt" ? result.current.snapshot.source.prompt : null).toBe("Bounded source")
     expect(result.current.recoveryAvailable).toBe(true)
+  })
+
+  it.each([429, 503])("retries transient polling HTTP %s with bounded backoff", async (status) => {
+    mocks.submit.mockResolvedValue(pendingReceipt)
+    mocks.status
+      .mockRejectedValueOnce(Object.assign(new Error("temporary"), { status, retryAfterMs: 60_000 }))
+      .mockResolvedValueOnce({
+        receipt: {
+          ...pendingReceipt,
+          status: "completed",
+          presentation_id: "presentation-after-retry",
+          content_kind: "standalone_html"
+        },
+        retryAfterMs: null
+      })
+    const { result } = await setup()
+    vi.useFakeTimers()
+    await act(async () => result.current.submit())
+    expect(result.current.phase).toBe(status === 429 ? "throttled" : "outage")
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(mocks.status).toHaveBeenCalledTimes(2)
+    expect(mocks.onCompleted).toHaveBeenCalledWith("presentation-after-retry")
   })
 
   it.each([
@@ -313,6 +395,292 @@ describe("useStandaloneHtmlGeneration", () => {
     expect(setSpy).toHaveBeenCalled()
     await waitFor(() => expect(result.current.storageWarning).toBe("Reload recovery is unavailable."))
     setSpy.mockRestore()
+  })
+
+  it("keeps ambiguous replay resumable in memory when sessionStorage quota fails", async () => {
+    const setSpy = vi.spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "setItem")
+      .mockImplementation(() => { throw new DOMException("quota", "QuotaExceededError") })
+    mocks.submit
+      .mockRejectedValueOnce(Object.assign(new Error("network"), { status: 0 }))
+      .mockResolvedValueOnce(pendingReceipt)
+    mocks.status.mockReturnValue(new Promise(() => undefined))
+    const { result } = await setup()
+
+    await act(async () => result.current.submit())
+    const [request, options] = mocks.submit.mock.calls[0]
+    expect(result.current.phase).toBe("ambiguous")
+    expect(result.current.recoveryAvailable).toBe(true)
+
+    await act(async () => result.current.resume())
+    expect(mocks.submit.mock.calls[1][0]).toEqual(request)
+    expect(mocks.submit.mock.calls[1][1].idempotencyKey).toBe(options.idempotencyKey)
+    setSpy.mockRestore()
+  })
+
+  it("preserves the draft but removes replay metadata after a definitive 422", async () => {
+    mocks.submit.mockRejectedValue(Object.assign(new Error("invalid"), {
+      status: 422,
+      details: { error_code: "generation_request_invalid" }
+    }))
+    const first = await setup()
+    await act(async () => first.result.current.submit())
+    expect(first.result.current.phase).toBe("rejected")
+    expect(storedValues()).toContain("Bounded source")
+    expect(storedValues()).not.toContain(pendingReceipt.generation_id)
+    first.unmount()
+
+    const second = renderHook(() => first.module.useStandaloneHtmlGeneration({
+      capability: capability as any,
+      onCompleted: mocks.onCompleted,
+      onStopWaiting: mocks.onStopWaiting
+    }))
+    await waitFor(() => expect(second.result.current.scopeReady).toBe(true))
+    expect(second.result.current.draft.source).toBe("Bounded source")
+    expect(second.result.current.recoveryAvailable).toBe(false)
+    second.unmount()
+  })
+
+  it("keeps a terminally edited draft across reload without digest-deleting it", async () => {
+    mocks.submit.mockResolvedValue({
+      ...pendingReceipt,
+      status: "failed",
+      error_code: "provider_failed",
+      error_message: "Provider failed"
+    })
+    const first = await setup()
+    await act(async () => first.result.current.submit())
+    act(() => first.result.current.updateField("source", "Edited after failure"))
+    first.unmount()
+
+    const second = renderHook(() => first.module.useStandaloneHtmlGeneration({
+      capability: capability as any,
+      onCompleted: mocks.onCompleted,
+      onStopWaiting: mocks.onStopWaiting
+    }))
+    await waitFor(() => expect(second.result.current.scopeReady).toBe(true))
+    expect(second.result.current.draft.source).toBe("Edited after failure")
+    expect(second.result.current.recoveryAvailable).toBe(false)
+    second.unmount()
+  })
+
+  it("rejects stale POST completion after principal and origin replacement", async () => {
+    let resolveSubmit: ((value: unknown) => void) | undefined
+    mocks.submit.mockReturnValue(new Promise((resolve) => { resolveSubmit = resolve }))
+    const { result } = await setup()
+    act(() => { void result.current.submit() })
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1))
+
+    mocks.getConfig.mockResolvedValue({ serverUrl: "https://other.example" })
+    mocks.getCurrentUser.mockResolvedValue({ id: 77 })
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")))
+    await waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.scopeReady).toBe(true))
+    resolveSubmit?.({
+      ...pendingReceipt,
+      status: "completed",
+      presentation_id: "old-principal-presentation",
+      content_kind: "standalone_html"
+    })
+    await act(async () => Promise.resolve())
+
+    expect(mocks.onCompleted).not.toHaveBeenCalled()
+    expect(result.current.snapshot).toBeNull()
+    expect(storedValues()).not.toContain("old-principal-presentation")
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it("rejects stale poll completion after an auth boundary", async () => {
+    let resolveStatus: ((value: unknown) => void) | undefined
+    mocks.submit.mockResolvedValue(pendingReceipt)
+    mocks.status.mockReturnValue(new Promise((resolve) => { resolveStatus = resolve }))
+    const { result } = await setup()
+    await act(async () => result.current.submit())
+
+    mocks.getCurrentUser.mockResolvedValue({ id: 77 })
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")))
+    await waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.scopeReady).toBe(true))
+    resolveStatus?.({
+      receipt: {
+        ...pendingReceipt,
+        status: "completed",
+        presentation_id: "old-poll-presentation",
+        content_kind: "standalone_html"
+      },
+      retryAfterMs: null
+    })
+    await act(async () => Promise.resolve())
+
+    expect(mocks.onCompleted).not.toHaveBeenCalled()
+    expect(storedValues()).not.toContain("old-poll-presentation")
+    expect(result.current.snapshot).toBeNull()
+  })
+
+  it("invalidates deferred POST work on pagehide while preserving pre-admission recovery", async () => {
+    let resolveSubmit: ((value: unknown) => void) | undefined
+    mocks.submit.mockReturnValue(new Promise((resolve) => { resolveSubmit = resolve }))
+    const { result } = await setup()
+    act(() => { void result.current.submit() })
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1))
+
+    act(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })))
+    expect(result.current.snapshot).toBeNull()
+    expect((mocks.submit.mock.calls[0][1] as { abortSignal?: AbortSignal }).abortSignal?.aborted).toBe(true)
+    resolveSubmit?.({
+      ...pendingReceipt,
+      status: "completed",
+      presentation_id: "late-bfcache-presentation",
+      content_kind: "standalone_html"
+    })
+    await act(async () => Promise.resolve())
+    expect(mocks.onCompleted).not.toHaveBeenCalled()
+    expect(storedValues()).not.toContain("late-bfcache-presentation")
+  })
+
+  it("scrubs refs and ignores late POST completion after unmount", async () => {
+    let resolveSubmit: ((value: unknown) => void) | undefined
+    mocks.submit.mockReturnValue(new Promise((resolve) => { resolveSubmit = resolve }))
+    const hook = await setup()
+    act(() => { void hook.result.current.submit() })
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1))
+    const before = storedValues()
+    hook.unmount()
+    expect((mocks.submit.mock.calls[0][1] as { abortSignal?: AbortSignal }).abortSignal?.aborted).toBe(true)
+
+    resolveSubmit?.({
+      ...pendingReceipt,
+      status: "completed",
+      presentation_id: "late-unmounted-presentation",
+      content_kind: "standalone_html"
+    })
+    await act(async () => Promise.resolve())
+    expect(mocks.onCompleted).not.toHaveBeenCalled()
+    expect(storedValues()).toBe(before)
+  })
+
+  it("counts Unicode scalar values and clamps slides to the content capability", async () => {
+    const module = await loadSubject()
+    const effectiveCapability = withLimits({ max_source_chars: 2 })
+    const { result } = renderHook(() => (module.useStandaloneHtmlGeneration as any)({
+      capability: effectiveCapability,
+      contentMaxSlides: 5,
+      onCompleted: mocks.onCompleted,
+      onStopWaiting: mocks.onStopWaiting
+    }))
+    await waitFor(() => expect(result.current.scopeReady).toBe(true))
+
+    act(() => expect(result.current.updateField("source", "😀😀")).toBe(true))
+    act(() => expect(result.current.updateField("source", "😀😀😀")).toBe(false))
+    act(() => expect(result.current.updateField("slideCount", 6)).toBe(false))
+    expect(result.current.fieldErrors.slideCount).toContain("1 to 5")
+  })
+
+  it("enforces canonical request UTF-8 bytes before POST", async () => {
+    const module = await loadSubject()
+    const { result } = renderHook(() => module.useStandaloneHtmlGeneration({
+      capability: withLimits({ max_request_bytes: 150 }) as any,
+      onCompleted: mocks.onCompleted,
+      onStopWaiting: mocks.onStopWaiting
+    }))
+    await waitFor(() => expect(result.current.scopeReady).toBe(true))
+    act(() => result.current.replaceDraft(validDraft as any))
+
+    await act(async () => result.current.submit())
+    expect(mocks.submit).not.toHaveBeenCalled()
+    expect(result.current.editError).toBe("Request exceeds the 150 byte limit.")
+  })
+
+  it("routes terminal Try again through nonblank validation", async () => {
+    mocks.submit.mockResolvedValueOnce({
+      ...pendingReceipt,
+      status: "failed",
+      error_code: "provider_failed",
+      error_message: "Provider failed"
+    })
+    const { result } = await setup()
+    await act(async () => result.current.submit())
+    act(() => result.current.updateField("source", ""))
+
+    await act(async () => result.current.tryAgain())
+    expect(mocks.submit).toHaveBeenCalledTimes(1)
+  })
+
+  it("revalidates a terminal retry after the effective slide cap decreases", async () => {
+    mocks.submit.mockResolvedValueOnce({
+      ...pendingReceipt,
+      status: "failed",
+      error_code: "provider_failed",
+      error_message: "Provider failed"
+    })
+    const module = await loadSubject()
+    const { result, rerender } = renderHook(
+      ({ contentMaxSlides }) => (module.useStandaloneHtmlGeneration as any)({
+        capability,
+        contentMaxSlides,
+        onCompleted: mocks.onCompleted,
+        onStopWaiting: mocks.onStopWaiting
+      }),
+      { initialProps: { contentMaxSlides: 30 } }
+    )
+    await waitFor(() => expect(result.current.scopeReady).toBe(true))
+    act(() => result.current.replaceDraft(validDraft as any))
+    await act(async () => result.current.submit())
+    rerender({ contentMaxSlides: 5 })
+
+    await act(async () => result.current.tryAgain())
+    expect(mocks.submit).toHaveBeenCalledTimes(1)
+    expect(result.current.fieldErrors.slideCount).toContain("1 to 5")
+  })
+
+  it("handles generation_configuration_changed as a non-replayable draft-preserving correction", async () => {
+    const refreshed = vi.fn().mockResolvedValue({
+      ...capability,
+      generation_config_revision: `sha256:${"d".repeat(64)}`
+    })
+    mocks.submit.mockRejectedValue(Object.assign(new Error("changed"), {
+      status: 409,
+      details: { error_code: "generation_configuration_changed" }
+    }))
+    const module = await loadSubject()
+    const { result } = renderHook(() => (module.useStandaloneHtmlGeneration as any)({
+      capability,
+      contentMaxSlides: 30,
+      onCapabilitiesChanged: refreshed,
+      onCompleted: mocks.onCompleted,
+      onStopWaiting: mocks.onStopWaiting
+    }))
+    await waitFor(() => expect(result.current.scopeReady).toBe(true))
+    act(() => result.current.replaceDraft(validDraft as any))
+
+    await act(async () => result.current.submit())
+    expect(result.current.phase).toBe("configuration_changed")
+    expect(result.current.draft.source).toBe("Bounded source")
+    expect(result.current.snapshot).toBeNull()
+    expect(result.current.recoveryAvailable).toBe(false)
+    expect(refreshed).toHaveBeenCalledTimes(1)
+  })
+
+  it("bounds receipt progress and never renders an arbitrary error payload", async () => {
+    mocks.submit.mockResolvedValueOnce({
+      ...pendingReceipt,
+      status: "running",
+      progress_text: "p".repeat(2_000)
+    })
+    mocks.status.mockResolvedValueOnce({
+      receipt: {
+        ...pendingReceipt,
+        status: "failed",
+        error_code: "PRIVATE SOURCE: do not render",
+        error_message: "PRIVATE SOURCE: do not render"
+      },
+      retryAfterMs: null
+    })
+    const { result } = await setup()
+    await act(async () => result.current.submit())
+
+    expect(result.current.progressText?.length).toBeLessThanOrEqual(500)
+    expect(result.current.safeError).toBe("generation_failed")
+    expect(JSON.stringify(result.current)).not.toContain("PRIVATE SOURCE")
   })
 
   it("flushes then clears on pagehide, guardedly rehydrates on pageshow, and clears on principal/config change", async () => {

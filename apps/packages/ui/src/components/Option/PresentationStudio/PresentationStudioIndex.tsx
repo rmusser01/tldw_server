@@ -40,7 +40,7 @@ export const PresentationStudioIndex: React.FC = () => {
   const [presentations, setPresentations] = React.useState<PresentationSummary[]>([])
   const [loading, setLoading] = React.useState(online)
   const [loadingMore, setLoadingMore] = React.useState(false)
-  const [error, setError] = React.useState(false)
+  const [error, setError] = React.useState<"initial" | "pagination" | null>(null)
   const [nextOffset, setNextOffset] = React.useState<number | null>(0)
   const requestIdRef = React.useRef(0)
 
@@ -48,10 +48,24 @@ export const PresentationStudioIndex: React.FC = () => {
     if (!online) return
     const requestId = ++requestIdRef.current
     append ? setLoadingMore(true) : setLoading(true)
-    setError(false)
+    setError(null)
     try {
       const result = await tldwClient.listPresentations({ limit: PAGE_SIZE, offset })
       if (requestId !== requestIdRef.current) return
+      const candidateOffset = result.pagination.next_offset
+      if (
+        result.pagination.has_more &&
+        (
+          typeof candidateOffset !== "number" ||
+          !Number.isFinite(candidateOffset) ||
+          !Number.isInteger(candidateOffset) ||
+          candidateOffset <= offset
+        )
+      ) {
+        setNextOffset(null)
+        setError("pagination")
+        return
+      }
       setPresentations((current) => {
         const merged = append ? [...current, ...result.presentations] : result.presentations
         const byId = new Map<string, PresentationSummary>()
@@ -61,7 +75,7 @@ export const PresentationStudioIndex: React.FC = () => {
       setNextOffset(result.pagination.has_more ? result.pagination.next_offset : null)
     } catch {
       if (requestId !== requestIdRef.current) return
-      setError(true)
+      setError(append ? "pagination" : "initial")
     } finally {
       if (requestId === requestIdRef.current) {
         setLoading(false)
@@ -113,14 +127,14 @@ export const PresentationStudioIndex: React.FC = () => {
       {!loading && error ? (
         <StatePanel
           state="error"
-          title="Presentations could not load"
-          message="Check the server connection, then try again."
+          title={error === "pagination" ? "Presentation pages could not continue" : "Presentations could not load"}
+          message={error === "pagination" ? "The server returned an invalid next page. Retry from the beginning." : "Check the server connection, then try again."}
           primaryAction={{ label: "Retry", onClick: () => void load(0, false) }}
           role="alert"
         />
       ) : null}
 
-      {!loading && !error && presentations.length === 0 ? (
+      {!loading && error === null && presentations.length === 0 ? (
         <StatePanel
           state="empty"
           title="No presentations yet"

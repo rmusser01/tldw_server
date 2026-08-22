@@ -20,6 +20,7 @@ const routerMocks = vi.hoisted(() => ({
 const clientMocks = vi.hoisted(() => ({
   createPresentation: vi.fn(),
   getPresentationMetadata: vi.fn(),
+  getSlidesCapabilities: vi.fn(),
   getPresentation: vi.fn(),
   listVisualStyles: vi.fn(),
   createVisualStyle: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args),
     getPresentationMetadata: (...args: unknown[]) => clientMocks.getPresentationMetadata(...args),
+    getSlidesCapabilities: (...args: unknown[]) => clientMocks.getSlidesCapabilities(...args),
     getPresentation: (...args: unknown[]) => clientMocks.getPresentation(...args),
     listVisualStyles: (...args: unknown[]) => clientMocks.listVisualStyles(...args),
     createVisualStyle: (...args: unknown[]) => clientMocks.createVisualStyle(...args),
@@ -91,6 +93,7 @@ describe("PresentationStudioPage", () => {
     routerMocks.navigate.mockReset()
     clientMocks.createPresentation.mockReset()
     clientMocks.getPresentationMetadata.mockReset()
+    clientMocks.getSlidesCapabilities.mockReset()
     clientMocks.getPresentation.mockReset()
     clientMocks.listVisualStyles.mockReset()
     clientMocks.createVisualStyle.mockReset()
@@ -110,6 +113,11 @@ describe("PresentationStudioPage", () => {
       record: { id: presentationId, content_kind: "structured_slides" },
       etag: null
     }))
+    clientMocks.getSlidesCapabilities.mockResolvedValue({
+      schema_version: 1,
+      content_kinds: { standalone_html: { read: true } },
+      generation_modes: { standalone_html: { enabled: true } }
+    })
   })
 
   it("creates a blank project from the precreate form and redirects to its detail route", async () => {
@@ -153,11 +161,13 @@ describe("PresentationStudioPage", () => {
       version: 1
     })
 
-    render(<PresentationStudioPage mode="new" />)
+    render(<PresentationStudioPage mode="new" embedded />)
 
     await waitFor(() => {
       expect(clientMocks.listVisualStyles).toHaveBeenCalledTimes(1)
     })
+    expect(screen.getByRole("heading", { level: 2, name: "Structured presentation setup" })).toBeVisible()
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
     expect(
       screen.getByText(
         /Updates deck appearance defaults and future generated slides\. Existing slide content stays unchanged\./
@@ -339,7 +349,7 @@ describe("PresentationStudioPage", () => {
     })
   })
 
-  it("checks source-free metadata before refusing a standalone HTML detail", async () => {
+  it("shows a source-free kind-aware state for standalone HTML detail", async () => {
     clientMocks.getPresentationMetadata.mockResolvedValue({
       record: { id: "presentation-html", content_kind: "standalone_html" },
       etag: null
@@ -347,9 +357,72 @@ describe("PresentationStudioPage", () => {
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-html" />)
 
-    expect(await screen.findByText("Structured presentation required")).toBeVisible()
+    expect(await screen.findByText("Standalone HTML presentation")).toBeVisible()
+    expect(screen.getByText(/available in Task 15/i)).toBeVisible()
     expect(clientMocks.getPresentationMetadata).toHaveBeenCalledWith("presentation-html")
     expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+  })
+
+  it("shows a source-free kind-aware state for an unknown presentation kind", async () => {
+    clientMocks.getPresentationMetadata.mockResolvedValue({
+      record: {
+        id: "presentation-future",
+        content_kind: "unsupported",
+        unsupported_content_kind: "immersive_canvas",
+        read_only: true
+      },
+      etag: null
+    })
+
+    render(<PresentationStudioPage mode="detail" projectId="presentation-future" />)
+
+    expect(await screen.findByText("Unsupported presentation kind")).toBeVisible()
+    expect(screen.getByText("immersive_canvas")).toBeVisible()
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+  })
+
+  it("does not fall back to full detail when a standalone-aware server lacks metadata", async () => {
+    clientMocks.getPresentationMetadata.mockRejectedValue(Object.assign(new Error("missing"), { status: 404 }))
+
+    render(<PresentationStudioPage mode="detail" projectId="new-server-missing-metadata" />)
+
+    expect(await screen.findByText("Presentation metadata is unavailable")).toBeVisible()
+    expect(clientMocks.getSlidesCapabilities).toHaveBeenCalledTimes(1)
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+  })
+
+  it("uses full detail only when a 404 capability endpoint proves a legacy structured-only server", async () => {
+    clientMocks.getPresentationMetadata.mockRejectedValue(Object.assign(new Error("missing"), { status: 404 }))
+    clientMocks.getSlidesCapabilities.mockRejectedValue(Object.assign(new Error("legacy"), { status: 404 }))
+    clientMocks.getPresentation.mockResolvedValue({
+      record: {
+        id: "legacy-structured",
+        content_kind: "structured_slides",
+        title: "Legacy structured deck",
+        description: null,
+        theme: "black",
+        slides: [{
+          order: 0,
+          layout: "title",
+          title: "Legacy slide",
+          content: "",
+          speaker_notes: "",
+          metadata: { studio: { slideId: "legacy-slide", audio: { status: "missing" }, image: { status: "missing" } } }
+        }],
+        studio_data: { origin: "blank" },
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      etag: 'W/"legacy"'
+    })
+
+    render(<PresentationStudioPage mode="detail" projectId="legacy-structured" />)
+
+    expect(await screen.findByTestId("presentation-studio-slide-rail")).toBeVisible()
+    expect(clientMocks.getPresentation).toHaveBeenCalledWith("legacy-structured")
   })
 
   it("updates the deck visual style preference on the detail page without mutating slides", async () => {
