@@ -87,14 +87,23 @@ export const usePresentationPrincipalScope = (
     const visible = () => {
       if (document.visibilityState === "visible") invalidateAndResolve()
     }
+    const scopeMismatch = () => {
+      epochRef.current += 1
+      callbackRef.current?.("mismatch")
+      trustedScopeRef.current = null
+      setScope(null)
+      setStatus("guarded")
+    }
 
     window.addEventListener("tldw:auth-principal-changed", authBoundary)
+    window.addEventListener("tldw:slides-scope-mismatch", scopeMismatch)
     window.addEventListener("tldw:config-updated", invalidateAndResolve)
     window.addEventListener("pageshow", invalidateAndResolve)
     window.addEventListener("focus", invalidateAndResolve)
     document.addEventListener("visibilitychange", visible)
     return () => {
       window.removeEventListener("tldw:auth-principal-changed", authBoundary)
+      window.removeEventListener("tldw:slides-scope-mismatch", scopeMismatch)
       window.removeEventListener("tldw:config-updated", invalidateAndResolve)
       window.removeEventListener("pageshow", invalidateAndResolve)
       window.removeEventListener("focus", invalidateAndResolve)

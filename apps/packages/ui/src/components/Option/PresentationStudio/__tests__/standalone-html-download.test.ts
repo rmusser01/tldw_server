@@ -225,6 +225,41 @@ describe("standalone HTML attachment handoff", () => {
     manager.dispose()
   })
 
+  it("falls back from a throwing anchor remove and still schedules no-throw URL cleanup", async () => {
+    const { StandaloneHtmlDownloadManager } = await loadDownload()
+    const manager = new StandaloneHtmlDownloadManager({
+      downloadDraft: vi.fn().mockResolvedValue(BYTES)
+    })
+    const remove = vi.spyOn(HTMLAnchorElement.prototype, "remove").mockImplementationOnce(() => {
+      throw new Error("anchor remove unavailable")
+    })
+
+    await expect(
+      manager.download({ presentationId: "html-1", source: SOURCE })
+    ).resolves.toBeUndefined()
+    expect(remove).toHaveBeenCalledTimes(1)
+    expect(document.querySelector("a[data-standalone-html-download]")).toBeNull()
+    await vi.runOnlyPendingTimersAsync()
+    expect(revokeObjectURL).toHaveBeenCalledWith(OBJECT_URL)
+    expect(() => manager.dispose()).not.toThrow()
+  })
+
+  it("contains URL revocation failures while clearing owned URL state", async () => {
+    const { StandaloneHtmlDownloadManager } = await loadDownload()
+    const manager = new StandaloneHtmlDownloadManager({
+      downloadDraft: vi.fn().mockResolvedValue(BYTES)
+    })
+    await manager.download({ presentationId: "html-1", source: SOURCE })
+    revokeObjectURL.mockImplementation(() => {
+      throw new Error("URL revocation unavailable")
+    })
+
+    expect(() => manager.dispose()).not.toThrow()
+    expect(revokeObjectURL).toHaveBeenCalledWith(OBJECT_URL)
+    await vi.runAllTimersAsync()
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1)
+  })
+
   it("revokes synchronously if temporary anchor setup fails after URL creation", async () => {
     const { StandaloneHtmlDownloadManager } = await loadDownload()
     const manager = new StandaloneHtmlDownloadManager({

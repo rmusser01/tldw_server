@@ -1,7 +1,9 @@
+import { hasDirectUrlLikeText } from "./standalone-html-outline-text-policy"
+
 const COMPLEXITY_FAILURE = {
   ok: false as const,
   code: "document_too_complex" as const,
-  message: "Outline unavailable — document too complex"
+  message: "Outline unavailable: document too complex."
 }
 
 const MAX_POTENTIAL_TOKENS = 50_000
@@ -16,6 +18,8 @@ const MAX_SLIDES = 30
 const MAX_BLOCK_SCALARS = 4_096
 const MAX_SLIDE_SCALARS = 20_000
 const MAX_TOTAL_SCALARS = 100_000
+const TRUNCATION_MARKER = "... [truncated]"
+const TRUNCATION_MARKER_SCALARS = Array.from(TRUNCATION_MARKER).length
 
 const VOID_TAGS = new Set([
   "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
@@ -23,9 +27,14 @@ const VOID_TAGS = new Set([
 ])
 
 const FORBIDDEN_SUBTREES = new Set([
-  "a", "audio", "button", "canvas", "embed", "font", "form", "iframe", "img", "input",
-  "link", "math", "noscript", "object", "picture", "script", "select", "source", "style",
-  "svg", "template", "textarea", "video"
+  "a", "applet", "audio", "button", "canvas", "embed", "fencedframe", "font", "form",
+  "frame", "frameset", "iframe", "img", "input", "link", "math", "noscript", "object",
+  "nav", "picture", "portal", "script", "select", "source", "style", "svg", "template", "textarea",
+  "track", "video"
+])
+
+const CHROME_CLASSES = new Set([
+  "deck-header", "deck-footer", "slide-number", "progress", "navigation", "nav"
 ])
 
 const TRUSTED_BLOCKS: Record<string, OutlineBlockKind> = {
@@ -136,7 +145,7 @@ export const preflightStandaloneHtmlOutline = (source: string) => {
   let attributes = 0
   let commentsDeclarations = 0
   let textRuns = 0
-  let depth = 0
+  const openTags: string[] = []
   let index = 0
 
   const overBudget = () =>
@@ -145,7 +154,7 @@ export const preflightStandaloneHtmlOutline = (source: string) => {
     attributes > MAX_ATTRIBUTES ||
     commentsDeclarations > MAX_COMMENTS_DECLARATIONS ||
     textRuns > MAX_TEXT_RUNS ||
-    depth > MAX_DEPTH
+    openTags.length > MAX_DEPTH
 
   while (index < source.length) {
     if (source[index] !== "<") {
@@ -182,12 +191,13 @@ export const preflightStandaloneHtmlOutline = (source: string) => {
     if (inner.startsWith("!") || inner.startsWith("?")) {
       commentsDeclarations += 1
     } else if (inner.startsWith("/")) {
-      depth = Math.max(0, depth - 1)
+      const tagName = inner.slice(1).trim().split(/[\s>]/, 1)[0].toLowerCase()
+      if (openTags.at(-1) === tagName) openTags.pop()
     } else if (inner.length > 0) {
       startTags += 1
       attributes += countAttributes(inner)
       const tagName = inner.split(/[\s/]/, 1)[0].toLowerCase()
-      if (!inner.endsWith("/") && !VOID_TAGS.has(tagName)) depth += 1
+      if (!VOID_TAGS.has(tagName)) openTags.push(tagName)
     }
     if (overBudget()) return COMPLEXITY_FAILURE
     index = end + 1
@@ -217,10 +227,16 @@ const hasClass = (node: ParserNode, expected: string): boolean =>
     .split(/\s+/)
     .some((value) => value === expected)
 
+const isBlockedSubtree = (node: ParserNode): boolean =>
+  FORBIDDEN_SUBTREES.has(elementName(node)) ||
+  String(node.attribs?.class ?? "")
+    .split(/\s+/)
+    .some((value) => CHROME_CLASSES.has(value))
+
 const cleanText = (value: string): string =>
   value
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "")
-    .replace(/[\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]/g, "")
+    .replace(/[\u202a-\u202e\u2066-\u206f\u200e\u200f\u061c]/g, "")
     .replace(/[\t\n\r ]+/g, " ")
     .trim()
 
@@ -233,8 +249,7 @@ const collectTrustedText = (root: ParserNode): string => {
       if (typeof node.data === "string") pieces.push(node.data)
       continue
     }
-    const name = elementName(node)
-    if (FORBIDDEN_SUBTREES.has(name) || hasClass(node, "notes")) continue
+    if (isBlockedSubtree(node) || hasClass(node, "notes") || hasClass(node, "slide")) continue
     const children = node.children ?? []
     for (let index = children.length - 1; index >= 0; index -= 1) stack.push(children[index])
   }
@@ -243,31 +258,59 @@ const collectTrustedText = (root: ParserNode): string => {
 
 const takeScalars = (value: string, maximum: number) => {
   const scalars = Array.from(value)
-  const count = Math.min(scalars.length, Math.max(0, maximum))
+  if (scalars.length <= maximum) {
+    return {
+      text: value,
+      count: scalars.length,
+      truncated: false
+    }
+  }
+  const capacity = Math.max(0, maximum)
+  if (capacity < TRUNCATION_MARKER_SCALARS) {
+    return { text: "", count: 0, truncated: true }
+  }
+  const prefixLength = capacity - TRUNCATION_MARKER_SCALARS
+  let prefix = scalars.slice(0, prefixLength).join("")
+  while (prefix.endsWith(TRUNCATION_MARKER)) {
+    prefix = prefix.slice(0, -TRUNCATION_MARKER.length)
+  }
+  const text = `${prefix}${TRUNCATION_MARKER}`
   return {
-    text: scalars.slice(0, count).join(""),
-    count,
-    truncated: count < scalars.length
+    text,
+    count: Array.from(text).length,
+    truncated: true
   }
 }
 
-const validateParsedTree = (root: ParserNode): ParserNode[] => {
+export const validateStandaloneHtmlOutlineTree = (root: ParserNode): ParserNode[] => {
   const slides: ParserNode[] = []
-  const stack: Array<{ node: ParserNode; depth: number; blocked: boolean }> = [
-    { node: root, depth: 0, blocked: false }
+  const stack: Array<{
+    node: ParserNode
+    depth: number
+    blocked: boolean
+    inNotes: boolean
+    slideAncestor: boolean
+  }> = [
+    { node: root, depth: 0, blocked: false, inNotes: false, slideAncestor: false }
   ]
   let nodes = 0
   while (stack.length > 0) {
     const current = stack.pop()!
     nodes += 1
     if (nodes > MAX_PARSED_NODES || current.depth > MAX_DEPTH) throw complexityError()
-    const name = elementName(current.node)
-    const blocked = current.blocked || FORBIDDEN_SUBTREES.has(name)
-    if (!blocked && hasClass(current.node, "slide")) slides.push(current.node)
-    if (blocked) continue
+    const blocked = current.blocked || isBlockedSubtree(current.node)
+    const inNotes = current.inNotes || hasClass(current.node, "notes")
+    const isSlide = hasClass(current.node, "slide")
+    if (!blocked && !inNotes && !current.slideAncestor && isSlide) slides.push(current.node)
     const children = current.node.children ?? []
     for (let index = children.length - 1; index >= 0; index -= 1) {
-      stack.push({ node: children[index], depth: current.depth + 1, blocked })
+      stack.push({
+        node: children[index],
+        depth: current.depth + 1,
+        blocked,
+        inNotes,
+        slideAncestor: current.slideAncestor || isSlide
+      })
     }
   }
   return slides
@@ -281,7 +324,7 @@ export const extractStandaloneHtmlOutline = async (
   const cheerio = (await import("cheerio/slim")) as any
   const $ = cheerio.load(source)
   const roots = $.root().toArray() as ParserNode[]
-  const slideNodes = roots.flatMap(validateParsedTree)
+  const slideNodes = roots.flatMap(validateStandaloneHtmlOutlineTree)
   const outline: StandaloneHtmlOutline = {
     digest,
     slides: [],
@@ -306,23 +349,28 @@ export const extractStandaloneHtmlOutline = async (
     while (stack.length > 0) {
       const current = stack.pop()!
       const name = elementName(current.node)
-      if (FORBIDDEN_SUBTREES.has(name)) continue
+      if (isBlockedSubtree(current.node) || hasClass(current.node, "slide")) continue
       const inNotes = current.notes || hasClass(current.node, "notes")
       const kind = TRUSTED_BLOCKS[name]
       if (kind) {
         const cleaned = collectTrustedText(current.node)
-        if (!cleaned) continue
-        const remaining = Math.min(
+        if (!cleaned || hasDirectUrlLikeText(cleaned)) continue
+        const absoluteRemaining = Math.min(
           MAX_BLOCK_SCALARS,
           MAX_SLIDE_SCALARS - slideScalars,
           MAX_TOTAL_SCALARS - totalScalars
         )
-        if (remaining <= 0) {
+        if (absoluteRemaining <= 0) {
           card.truncated = true
           outline.truncated = true
           continue
         }
-        const capped = takeScalars(cleaned, remaining)
+        const capped = takeScalars(cleaned, absoluteRemaining)
+        if (!capped.text) {
+          card.truncated = true
+          outline.truncated = true
+          continue
+        }
         const block = { kind, text: capped.text, truncated: capped.truncated }
         ;(inNotes ? card.notes : card.blocks).push(block)
         slideScalars += capped.count
