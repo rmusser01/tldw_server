@@ -159,6 +159,41 @@ class RegistrationInsert:
     now: datetime
 
 
+@dataclass(frozen=True)
+class LegacyWebhookRow:
+    """One raw legacy database row kept inside the migration boundary."""
+
+    source_identity: str
+    values: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source_identity, str) or not self.source_identity:
+            raise ValueError("legacy source identity is invalid")
+        if not isinstance(self.values, Mapping):
+            raise TypeError("legacy row values must be a mapping")
+        object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
+
+
+@dataclass(frozen=True)
+class LegacyImportDatabaseSnapshot:
+    """Deterministic legacy and canonical allocator state for one import scan."""
+
+    table_present: bool
+    rows: tuple[LegacyWebhookRow, ...]
+    canonical_registration_ids: tuple[int, ...]
+    next_registration_id: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.table_present, bool):
+            raise TypeError("legacy table presence must be boolean")
+        if self.next_registration_id < 1:
+            raise ValueError("next registration ID must be positive")
+        if tuple(sorted(set(self.canonical_registration_ids))) != (
+            self.canonical_registration_ids
+        ):
+            raise ValueError("canonical registration IDs must be unique and sorted")
+
+
 class _Unset:
     __slots__ = ()
 
@@ -829,6 +864,14 @@ class AdminWebhookRepository:
                 is_postgres=self.is_postgres,
             ).get_migration_state(lock=False)
 
+    async def get_legacy_import_snapshot(self) -> LegacyImportDatabaseSnapshot:
+        """Read legacy rows and canonical ID-allocation state without mutation."""
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).get_legacy_import_snapshot(lock=False)
+
     async def page_protected_rows(
         self,
         *,
@@ -878,6 +921,97 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         if row is None:
             raise WebhookRepositoryError(WebhookRepositoryErrorCode.SEQUENCE_UNAVAILABLE)
         return int(row["allocated_id"])
+
+    async def ensure_registration_sequence_above(self, webhook_id: int) -> int:
+        """Advance the allocator past one imported ID without moving it backward."""
+        if isinstance(webhook_id, bool) or not 1 <= webhook_id < 2**63 - 1:
+            raise ValueError("imported webhook ID cannot be followed by a positive ID")
+        next_value = webhook_id + 1
+        row = await self._fetchrow(
+            """
+            UPDATE admin_webhook_sequences
+            SET next_value = CASE
+                WHEN next_value < ? THEN ?
+                ELSE next_value
+            END
+            WHERE name = ?
+            RETURNING next_value
+            """,
+            (next_value, next_value, "registration"),
+        )
+        if row is None:
+            raise WebhookRepositoryError(WebhookRepositoryErrorCode.SEQUENCE_UNAVAILABLE)
+        return int(row["next_value"])
+
+    async def get_legacy_import_snapshot(
+        self,
+        *,
+        lock: bool,
+    ) -> LegacyImportDatabaseSnapshot:
+        """Read one fixed-table legacy snapshot for planning or import validation."""
+        if self._is_postgres:
+            table_row = await self._fetchrow(
+                "SELECT to_regclass(?) AS table_name",
+                ("public.admin_webhooks",),
+            )
+            table_present = bool(table_row and table_row["table_name"] is not None)
+        else:
+            table_row = await self._fetchrow(
+                """
+                SELECT name AS table_name
+                FROM sqlite_master
+                WHERE type = ? AND name = ?
+                """,
+                ("table", "admin_webhooks"),
+            )
+            table_present = table_row is not None
+
+        raw_rows: list[dict[str, Any]] = []
+        if table_present:
+            legacy_query = "SELECT * FROM admin_webhooks ORDER BY id ASC"
+            if lock and self._is_postgres:
+                legacy_query += " FOR SHARE"
+            raw_rows = await self._fetch(legacy_query)
+
+        canonical_query = "SELECT id FROM admin_webhook_registrations ORDER BY id ASC"
+        if lock and self._is_postgres:
+            canonical_query += " FOR SHARE"
+        canonical_rows = await self._fetch(canonical_query)
+
+        sequence_query = (
+            "SELECT next_value FROM admin_webhook_sequences WHERE name = ?"
+        )
+        if lock and self._is_postgres:
+            sequence_query += " FOR UPDATE"
+        sequence_row = await self._fetchrow(sequence_query, ("registration",))
+        if sequence_row is None:
+            raise WebhookRepositoryError(WebhookRepositoryErrorCode.SEQUENCE_UNAVAILABLE)
+
+        rows: list[LegacyWebhookRow] = []
+        for position, raw_row in enumerate(raw_rows):
+            raw_identity = raw_row.get("id")
+            if isinstance(raw_identity, bool):
+                source_identity = "true" if raw_identity else "false"
+            elif raw_identity is None:
+                source_identity = "null"
+            elif isinstance(raw_identity, (int, str)):
+                source_identity = str(raw_identity)
+            else:
+                source_identity = f"row-{position + 1}"
+            rows.append(
+                LegacyWebhookRow(
+                    source_identity=source_identity,
+                    values=raw_row,
+                )
+            )
+
+        canonical_ids = tuple(int(row["id"]) for row in canonical_rows)
+        return LegacyImportDatabaseSnapshot(
+            table_present=table_present,
+            rows=tuple(rows),
+            canonical_registration_ids=canonical_ids,
+            next_registration_id=int(sequence_row["next_value"]),
+        )
 
     async def insert_registration(
         self,

@@ -67,8 +67,13 @@ except ImportError:
 
 
 @contextmanager
-def _store_file_lock(timeout: float = _LOCK_TIMEOUT_SECONDS):
-    lock_path = _STORE_PATH.with_suffix(_STORE_PATH.suffix + ".lock")
+def _store_file_lock(
+    timeout: float = _LOCK_TIMEOUT_SECONDS,
+    *,
+    store_path: Path | None = None,
+):
+    active_store_path = store_path or _STORE_PATH
+    lock_path = active_store_path.with_suffix(active_store_path.suffix + ".lock")
     lock_fd = None
     try:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -227,11 +232,11 @@ def _normalize_incident_record(value: Any) -> dict[str, Any]:
     return incident
 
 
-def _load_store_strict(
+def _read_store_strict(
     path: Path,
     max_bytes: int = _STRICT_STORE_MAX_BYTES,
-) -> dict[str, Any]:
-    """Read a bounded store without recovery defaults or content logging."""
+) -> tuple[dict[str, Any], bytes]:
+    """Read and parse one bounded store snapshot from a single descriptor."""
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
         raise ValueError("system ops store size limit is invalid")
 
@@ -239,7 +244,7 @@ def _load_store_strict(
     try:
         fd = os.open(path, flags)
     except FileNotFoundError:
-        return {}
+        return {}, b""
 
     try:
         metadata = os.fstat(fd)
@@ -266,18 +271,34 @@ def _load_store_strict(
 
     payload = b"".join(chunks)
     if not payload.strip():
-        return {}
+        return {}, payload
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError:
         raise ValueError("system ops store must contain valid UTF-8") from None
+    def object_hook(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("system ops store contains a duplicate key")
+            value[key] = item
+        return value
+
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+        data = json.loads(text, object_pairs_hook=object_hook)
+    except (ValueError, RecursionError):
         raise ValueError("system ops store must contain valid JSON") from None
     if not isinstance(data, dict):
         raise ValueError("system ops store must contain a JSON object")
-    return data
+    return data, payload
+
+
+def _load_store_strict(
+    path: Path,
+    max_bytes: int = _STRICT_STORE_MAX_BYTES,
+) -> dict[str, Any]:
+    """Read a bounded store without recovery defaults or content logging."""
+    return _read_store_strict(path, max_bytes=max_bytes)[0]
 
 
 def _load_store() -> dict[str, Any]:

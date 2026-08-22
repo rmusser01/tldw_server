@@ -40,6 +40,8 @@ _PURPOSE_PATTERN = re.compile(r"^[a-z][a-z0-9._-]{0,127}$")
 _IDENTITY_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 _MAX_KEY_CONFIG_BYTES = 16_384
 _MIGRATION_FINGERPRINT_PREFIX = b"tldw-admin-webhook-migration-v1\x00"
+_MIGRATION_OPERATION_PREFIX = b"tldw-admin-webhook-migration-operation-v1\x00"
+_MIGRATION_FINGERPRINT_PATTERN = re.compile(r"^hmac-sha256:[0-9a-f]{64}$")
 
 
 class WebhookKeyErrorCode(str, Enum):
@@ -427,6 +429,41 @@ class WebhookKeyRing:
         )
         digest = hmac.new(raw_key, payload, hashlib.sha256).hexdigest()
         return self.primary_id, f"hmac-sha256:{digest}"
+
+    def derive_migration_operation_id(
+        self,
+        source_fingerprints: Mapping[str, str],
+    ) -> str:
+        """Derive a stable opaque operation ID for one keyed source snapshot."""
+        if not isinstance(source_fingerprints, Mapping) or not source_fingerprints:
+            raise WebhookKeyError(WebhookKeyErrorCode.FINGERPRINT_DOMAIN_INVALID)
+        normalized: list[tuple[str, str]] = []
+        for source_kind in sorted(source_fingerprints):
+            fingerprint = source_fingerprints[source_kind]
+            if (
+                not isinstance(source_kind, str)
+                or not source_kind
+                or len(source_kind) > 64
+                or not isinstance(fingerprint, str)
+                or _MIGRATION_FINGERPRINT_PATTERN.fullmatch(fingerprint) is None
+            ):
+                raise WebhookKeyError(WebhookKeyErrorCode.FINGERPRINT_DOMAIN_INVALID)
+            normalized.append((source_kind, fingerprint))
+        payload = json.dumps(
+            {
+                "fingerprint_key_id": self.primary_id,
+                "source_fingerprints": normalized,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        raw_key = _decode_configured_key(self._keys[self.primary_id])
+        digest = hmac.new(
+            raw_key,
+            _MIGRATION_OPERATION_PREFIX + payload,
+            hashlib.sha256,
+        ).hexdigest()
+        return f"whmig_{digest[:32]}"
 
 
 def load_webhook_key_ring(

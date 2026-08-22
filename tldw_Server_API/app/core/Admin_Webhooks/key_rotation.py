@@ -502,7 +502,9 @@ class WebhookKeyRotationService:
         if state.rotation_table_cursor != PENDING_INCIDENT_MARKER_TABLE:
             raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
 
-        with system_ops._STORE_LOCK, system_ops._store_file_lock():
+        with system_ops._STORE_LOCK, system_ops._store_file_lock(
+            store_path=self._store_path
+        ):
             store, markers = self._read_pending_markers()
             page = [
                 marker
@@ -634,7 +636,9 @@ class WebhookKeyRotationService:
         return count
 
     def _verify_file_inventory(self, *, target: str) -> int:
-        with system_ops._STORE_LOCK, system_ops._store_file_lock():
+        with system_ops._STORE_LOCK, system_ops._store_file_lock(
+            store_path=self._store_path
+        ):
             _, markers = self._read_pending_markers()
             for marker in markers:
                 if marker.body.key_id != target:
