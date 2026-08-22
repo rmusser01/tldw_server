@@ -2147,7 +2147,7 @@ git commit -m "test(research): seal clinicaltrials PMC shadow evidence (TASK-129
 
 **Tests:** Full Research suite, touched Security transport tests, Node validator suite, schema/contract gate, compile, Ruff, Black, Bandit, and `git diff --check`.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 9: Run final gates, independent reviews, tracking, and PR handoff
 
@@ -2274,7 +2274,7 @@ git commit -m "fix(research): address final clinicaltrials PMC review (TASK-1296
 
 If no review required a repository change, skip this fix commit. In either case, `git status --short` must show only the pending Backlog tracking update before Step 4.
 
-- [ ] **Step 4: Open a provider-only draft PR, then update Backlog through the official CLI**
+- [x] **Step 4: Open a provider-only draft PR, then update Backlog through the official CLI**
 
 Push the fully reviewed code/evidence commits first and open a draft PR so its real URL exists before the tracking-only commit:
 
@@ -2305,7 +2305,7 @@ Use `backlog task 12968.6 --plain` to confirm the unique task, then append:
 
 Do not manually edit the task file unless the official CLI is unavailable and the user explicitly approves the exception.
 
-- [ ] **Step 5: Commit and push the final tracking-only update**
+- [x] **Step 5: Commit and push the final tracking-only update**
 
 ```bash
 git status --short
