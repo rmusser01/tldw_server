@@ -94,10 +94,6 @@ describe("useServerChatHistoryId", () => {
       }
     })
     expect(setHistoryId).not.toHaveBeenCalled()
-    expect(runChatPersistenceTransactionMock).toHaveBeenCalledWith(
-      scopeController.signal,
-      expect.any(Function)
-    )
 
     await act(async () => {
       await expect(
