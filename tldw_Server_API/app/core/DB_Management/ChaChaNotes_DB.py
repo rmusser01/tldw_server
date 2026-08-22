@@ -6834,6 +6834,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store import (
+            SharedWorkspaceChatStore,
+        )
         from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
 
         self.character_store = CharacterStore(self)
@@ -6846,6 +6849,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
+        self.shared_workspace_chat_store = SharedWorkspaceChatStore(self)
 
         if self.backend_type != BackendType.SQLITE:
             self.is_memory_db = False

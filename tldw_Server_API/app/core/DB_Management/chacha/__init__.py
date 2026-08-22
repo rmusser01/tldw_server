@@ -13,6 +13,13 @@ __all__ = [
     "NoteStore",
     "NotesLinkStore",
     "PersonaStateStore",
+    "SharedWorkspaceChatClaim",
+    "SharedWorkspaceChatStore",
+    "SharedWorkspaceChatThread",
+    "SharedWorkspaceMessagePage",
+    "SharedWorkspaceStoredMessage",
+    "StaleSharedWorkspaceChatClaim",
+    "StoredSharedWorkspaceTurn",
 ]
 
 
@@ -27,6 +34,13 @@ _STORE_MODULES = {
     "NotesLinkStore": "tldw_Server_API.app.core.DB_Management.chacha.note_link_store",
     "NoteGraphProjectionStore": "tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store",
     "PersonaStateStore": "tldw_Server_API.app.core.DB_Management.chacha.persona_state_store",
+    "SharedWorkspaceChatClaim": "tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store",
+    "SharedWorkspaceChatStore": "tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store",
+    "SharedWorkspaceChatThread": "tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store",
+    "SharedWorkspaceMessagePage": "tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store",
+    "SharedWorkspaceStoredMessage": "tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store",
+    "StaleSharedWorkspaceChatClaim": "tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store",
+    "StoredSharedWorkspaceTurn": "tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store",
 }
 
 
