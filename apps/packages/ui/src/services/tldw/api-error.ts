@@ -1,7 +1,10 @@
 export interface StructuredApiErrorDetail {
   category?: string
+  code?: string
   frontend_state?: string
   message?: string
+  recovery_action?: "retry" | "refresh" | "reselect_sources"
+  retry_after_ms?: number
   retryable?: boolean
   [key: string]: unknown
 }
@@ -58,14 +61,33 @@ export const getStructuredApiErrorDetail = (
     return null
   }
 
-  const structured: StructuredApiErrorDetail = { ...detail }
-  structured.category =
-    typeof detail.category === "string" ? detail.category : undefined
-  structured.frontend_state =
-    typeof detail.frontend_state === "string" ? detail.frontend_state : undefined
-  structured.message =
-    typeof detail.message === "string" ? detail.message : undefined
-  structured.retryable =
-    typeof detail.retryable === "boolean" ? detail.retryable : undefined
-  return structured
+  const recoveryAction = detail.recovery_action
+  return {
+    ...detail,
+    code:
+      typeof detail.code === "string" && detail.code.trim()
+        ? detail.code.trim()
+        : undefined,
+    message: typeof detail.message === "string" ? detail.message : undefined,
+    retryable:
+      typeof detail.retryable === "boolean" ? detail.retryable : undefined,
+    recovery_action:
+      recoveryAction === "retry" ||
+      recoveryAction === "refresh" ||
+      recoveryAction === "reselect_sources"
+        ? recoveryAction
+        : undefined,
+    retry_after_ms:
+      typeof detail.retry_after_ms === "number" &&
+      Number.isFinite(detail.retry_after_ms) &&
+      detail.retry_after_ms >= 0
+        ? detail.retry_after_ms
+        : undefined,
+    category:
+      typeof detail.category === "string" ? detail.category : undefined,
+    frontend_state:
+      typeof detail.frontend_state === "string"
+        ? detail.frontend_state
+        : undefined
+  }
 }

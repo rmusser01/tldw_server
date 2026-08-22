@@ -21,6 +21,10 @@ export {
 export { workspaceApiMethods, type WorkspaceApiMethods } from "./workspace-api"
 export { webClipperMethods, type WebClipperMethods } from "./web-clipper"
 export {
+  sharedWorkspacesApi,
+  type SharedWorkspacesApi
+} from "./shared-workspaces"
+export {
   visualIdentityMethods,
   type VisualIdentityMethods
 } from "./visual-identities"

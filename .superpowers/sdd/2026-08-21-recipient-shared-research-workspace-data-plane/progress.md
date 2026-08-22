@@ -69,6 +69,21 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Controller-resolved review cautions: `rg` found no remaining active UI consumer of the deleted context/banner; `git status --short --branch` confirmed only the two unrelated watchlist templates remain untracked and unstaged.
 - Status: complete.
 
+## Task 8 - Typed frontend client and abortable shared controller
+
+- Base: `8c199fce37f788439074d08b78f27059830874d0`.
+- Brief: `task-8-brief.md`.
+- Implementation: added strict recipient response types and bounded runtime parsing, authenticated canonical read/chat calls with abort propagation, normalized typed shared errors, a fail-closed reducer, and a hook controller with per-operation abort ownership and monotonically fenced share generations.
+- Submission lifecycle: request UUIDs are allocated once, source IDs are normalized before an immutable payload is frozen, only ambiguous transport failures retain an exact-payload retry receipt, edits invalidate failed receipts, source conflicts refresh only while current, and stale responses cannot mutate state or trigger refresh side effects.
+- Route shell: replaced Task 1's static surface with stable loading, neutral not-found, unavailable, and loaded placeholders driven only by the shared controller; local `/research-workspace` behavior and lazy isolation remain unchanged.
+- TDD RED: the exact brief command produced two failed suites because the client and reducer/controller modules were absent; the unchanged route suite passed all 14 existing tests. Self-review RED added three expected failures for the canonical preview shape, normalized source IDs, and stale aborted conflict side effects.
+- GREEN: exact Task 8 command `44 passed`; focused existing authenticated-fetch/domain-client/route-state regressions `42 passed`; `git diff --check` passed.
+- Static gates: repository ESLint 9 passed every touched TS/TSX file, with only the shared Next.js config's expected missing-pages notice for the UI library package. Package-wide TypeScript exhausted Node's 4 GB heap before diagnostics; the focused Task 8 config reached the known package baseline (jest-dom matcher types, `chrome`/`browser`, and `import.meta.env`) with no Task 8 production diagnostics. Bandit is not applicable because no Python production code changed.
+- Scope guards: canonical `/api/v1/sharing/shared-with-me/{share_id}` paths only; no alias, redirect, local workspace store import, owner mutation hook, banner/trust UI, or visual redesign. The unrelated watchlist templates remain untouched and unstaged.
+- Report: `task-8-implementer-report.md`.
+- Residual boundary: Task 9 still owns the complete recipient visual workspace, and Task 11 owns live backend/provider/browser UAT. Parent task remains In Progress.
+- Status: implementation complete; pending controller review.
+
 ## Task 7 - Provider resolution, grounded generation, and safe chat API
 
 - Base: `fa5ce0b131ceb70422c1c36bf39fe4f423e1aa38`.

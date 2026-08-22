@@ -6,6 +6,14 @@ import { parseSharedWorkspaceRoute } from "../shared-workspace-route-state";
 const localWorkspaceFactory = vi.hoisted(() => vi.fn());
 const localWorkspaceApiRequests = vi.hoisted(() => vi.fn());
 const locationState = vi.hoisted(() => ({ search: "" }));
+const sharedControllerState = vi.hoisted(() => ({
+  status: "loading",
+  bootstrap: null as null | {
+    share: { share_id: number };
+    workspace: { name: string };
+  },
+  errors: { bootstrap: null as null | { code?: string } },
+}));
 
 vi.mock("react-router-dom", () => ({
   useLocation: () => locationState,
@@ -20,6 +28,10 @@ vi.mock("../index", () => {
     },
   };
 });
+
+vi.mock("../SharedResearchWorkspace/useSharedResearchWorkspace", () => ({
+  useSharedResearchWorkspace: () => ({ state: sharedControllerState }),
+}));
 
 const renderGate = (search: string) => {
   locationState.search = search;
@@ -56,6 +68,9 @@ describe("parseSharedWorkspaceRoute", () => {
 describe("ResearchWorkspaceRouteGate", () => {
   afterEach(() => {
     locationState.search = "";
+    sharedControllerState.status = "loading";
+    sharedControllerState.bootstrap = null;
+    sharedControllerState.errors.bootstrap = null;
     vi.clearAllMocks();
   });
 
@@ -72,7 +87,7 @@ describe("ResearchWorkspaceRouteGate", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: /shared workspace unavailable/i,
+        name: /loading shared workspace/i,
       }),
     ).toBeVisible();
     expect(localWorkspaceFactory).not.toHaveBeenCalled();
@@ -98,7 +113,7 @@ describe("ResearchWorkspaceRouteGate", () => {
     const view = renderGate("?shared=42");
 
     await screen.findByRole("heading", {
-      name: /shared workspace unavailable/i,
+      name: /loading shared workspace/i,
     });
     locationState.search = "";
     view.rerender(<ResearchWorkspaceRouteGate />);
@@ -114,6 +129,31 @@ describe("ResearchWorkspaceRouteGate", () => {
       name: /shared workspace unavailable/i,
     });
     expect(heading).toHaveFocus();
+    expect(localWorkspaceFactory).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["not-found", "Shared workspace not found"],
+    ["unavailable", "Shared workspace unavailable"],
+  ])("renders the stable %s placeholder", async (status, heading) => {
+    sharedControllerState.status = status;
+    renderGate("?shared=42");
+
+    expect(await screen.findByRole("heading", { name: heading })).toBeVisible();
+    expect(localWorkspaceFactory).not.toHaveBeenCalled();
+  });
+
+  it("renders the loaded shared identity without mounting local workspace", async () => {
+    sharedControllerState.status = "loaded";
+    sharedControllerState.bootstrap = {
+      share: { share_id: 42 },
+      workspace: { name: "Shared climate research" },
+    };
+    renderGate("?shared=42");
+
+    expect(
+      await screen.findByRole("heading", { name: "Shared climate research" }),
+    ).toBeVisible();
     expect(localWorkspaceFactory).not.toHaveBeenCalled();
   });
 });
