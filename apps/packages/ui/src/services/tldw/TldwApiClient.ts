@@ -35,7 +35,6 @@ import {
   type ChatRequestDebugMetadata
 } from "@/services/tldw/chat-request-debug"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
-import { toTrimmedStringArray } from "@/services/tldw/client-utils"
 import { getNormalizedTldwModels } from "@/services/tldw/model-normalization"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
 import {
@@ -515,11 +514,24 @@ export type VisualStylePatchInput = {
   fallback_policy?: Record<string, any> | null
 }
 
-export type PresentationStudioRecord = {
+export type PresentationStudioRecordBase = {
   id: string
   title: string
   description?: string | null
   theme: string
+  source_type?: string | null
+  source_ref?: unknown
+  source_query?: string | null
+  created_at: string
+  last_modified: string
+  deleted?: boolean
+  client_id?: string
+  version: number
+}
+
+export type StructuredPresentationStudioRecord = PresentationStudioRecordBase & {
+  /** Missing only for direct legacy fixtures; network normalization always adds it. */
+  content_kind?: "structured_slides"
   marp_theme?: string | null
   template_id?: string | null
   visual_style_id?: string | null
@@ -531,15 +543,226 @@ export type PresentationStudioRecord = {
   studio_data?: Record<string, any> | null
   slides: PresentationStudioSlide[]
   custom_css?: string | null
-  source_type?: string | null
-  source_ref?: unknown
-  source_query?: string | null
+}
+
+export type StandaloneHtmlPresentationStudioRecord = PresentationStudioRecordBase & {
+  content_kind: "standalone_html"
+  html_document: string
+  html_sha256: string
+  html_bytes: number
+  html_slide_count: number
+  generation_provenance: Record<string, unknown>
+}
+
+export type UnsupportedPresentationStudioRecord = PresentationStudioRecordBase & {
+  content_kind: "unsupported"
+  unsupported_content_kind: string | null
+  read_only: true
+}
+
+export type PresentationStudioRecord =
+  | StructuredPresentationStudioRecord
+  | StandaloneHtmlPresentationStudioRecord
+  | UnsupportedPresentationStudioRecord
+
+export type PresentationDetailResult = {
+  record: PresentationStudioRecord
+  etag: string | null
+}
+
+export type PresentationProvenanceSummary = {
+  source_kind: string | null
+  provider: string | null
+  model: string | null
+}
+
+export type PresentationSummaryBase = {
+  id: string
+  title: string
+  description: string | null
+  theme: string
   created_at: string
   last_modified: string
-  deleted?: boolean
-  client_id?: string
+  deleted: boolean
   version: number
+  provenance: PresentationProvenanceSummary
 }
+
+export type StructuredPresentationSummary = PresentationSummaryBase & {
+  content_kind: "structured_slides"
+  slide_count: number
+}
+
+export type StandaloneHtmlPresentationSummary = PresentationSummaryBase & {
+  content_kind: "standalone_html"
+  html_slide_count: number
+  html_bytes: number
+}
+
+export type UnsupportedPresentationSummary = PresentationSummaryBase & {
+  content_kind: "unsupported"
+  unsupported_content_kind: string | null
+  read_only: true
+}
+
+export type PresentationSummary =
+  StructuredPresentationSummary | StandaloneHtmlPresentationSummary | UnsupportedPresentationSummary
+
+export type PresentationListResponse = {
+  presentations: PresentationSummary[]
+  total: number
+  limit: number
+  offset: number
+  pagination: {
+    mode: "offset"
+    limit: number
+    offset: number
+    total: number
+    has_more: boolean
+    next_offset: number | null
+  }
+  has_more: boolean | null
+  next_offset: number | null
+}
+
+export type PresentationMetadataResult = {
+  record: PresentationSummary
+  etag: string | null
+}
+
+export type StandaloneHtmlContentCapabilityReason = "validator_unavailable"
+export type StandaloneHtmlGenerationCapabilityReason =
+  | "feature_disabled"
+  | "egress_disabled"
+  | "default_model_not_configured"
+  | "default_model_not_allowed"
+  | "default_endpoint_not_allowed"
+  | "prompt_asset_unavailable"
+  | "digest_key_unavailable"
+  | "generation_worker_unavailable"
+  | "generation_reconciler_overloaded"
+  | "validator_unavailable"
+
+export type SlidesCapabilities = {
+  schema_version: 1
+  content_kind_request_header: "X-Slides-Accept-Content-Kinds"
+  content_kinds: {
+    structured_slides: { read: true; edit: true }
+    standalone_html: {
+      read: true
+      edit: boolean
+      export_attachment: boolean
+      draft_attachment: true
+      reason: StandaloneHtmlContentCapabilityReason | null
+      limits: {
+        max_document_bytes: number
+        max_source_write_bytes: number
+        max_draft_attachment_bytes: number
+        max_slides: number
+        max_nesting_depth: number
+      }
+    }
+  }
+  generation_modes: {
+    structured_slides: {
+      enabled: true
+      transport: "existing_source_endpoints"
+    }
+    standalone_html: {
+      enabled: boolean
+      reason: StandaloneHtmlGenerationCapabilityReason | null
+      transport: "slides_generation_job"
+      source_kinds: Array<"prompt" | "chat" | "media" | "notes" | "rag">
+      provider: string | null
+      model: string | null
+      adapter_id: string | null
+      endpoint_identity: string | null
+      generation_config_revision: string | null
+      input_limits: {
+        max_request_bytes: number
+        max_source_chars: number
+        max_source_tokens: number
+        max_audience_chars: number
+        max_source_identifier_bytes: number
+        max_note_ids: number
+        max_rag_query_chars: number
+        max_rag_top_k: number
+      }
+      output_limits: {
+        max_provider_response_bytes: number
+        max_document_bytes: number
+      }
+    }
+  }
+}
+
+export type PresentationGenerationSource =
+  | { kind: "prompt"; prompt: string }
+  | { kind: "chat"; conversation_id: string }
+  | { kind: "media"; media_id: number }
+  | { kind: "notes"; note_ids: string[] }
+  | { kind: "rag"; query: string; top_k?: number }
+
+export type PresentationGenerationRequest = {
+  generation_mode: "standalone_html"
+  generation_config_revision: string
+  source: PresentationGenerationSource
+  html_options: {
+    presentation_type:
+      | "pitch-deck"
+      | "tech-sharing"
+      | "product-launch"
+      | "weekly-report"
+      | "course-module"
+      | "keynote"
+      | "data-report"
+      | "training"
+      | "social-media"
+      | "case-study"
+      | "comparison"
+      | "roadmap"
+    audience: string
+    slide_count: number
+    visual_direction:
+      | "auto"
+      | "dark-technical"
+      | "minimal-light"
+      | "editorial"
+      | "corporate"
+      | "soft-pastel"
+      | "bold-creative"
+      | "neo-brutalist"
+    delivery_style: "speaker-led" | "self-guided"
+  }
+}
+
+type PresentationGenerationReceiptBase = {
+  generation_id: string
+  status_url: string
+}
+
+export type PresentationGenerationReceipt =
+  | (PresentationGenerationReceiptBase & {
+      status: "queued" | "running"
+      presentation_id: null
+      progress_text?: string | null
+    })
+  | (PresentationGenerationReceiptBase & {
+      status: "completed"
+      presentation_id: string
+      content_kind: "standalone_html"
+    })
+  | (PresentationGenerationReceiptBase & {
+      status: "failed"
+      presentation_id: null
+      error_code: string
+      error_message: string
+    })
+  | (PresentationGenerationReceiptBase & {
+      status: "cancelled"
+      presentation_id: null
+      error_code: "generation_cancelled"
+    })
 
 export type PresentationRenderFormat = "mp4" | "webm"
 
@@ -567,95 +790,6 @@ export type PresentationRenderArtifact = {
 export type PresentationRenderArtifactList = {
   presentation_id: string
   artifacts: PresentationRenderArtifact[]
-}
-
-const normalizeVisualStyleSnapshot = (
-  value: unknown
-): PresentationVisualStyleSnapshot | null => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null
-  }
-  const snapshot = value as Record<string, unknown>
-  const id = String(snapshot.id ?? "").trim()
-  const scope = String(snapshot.scope ?? "").trim()
-  const name = String(snapshot.name ?? "").trim()
-  if (!id || !scope || !name) {
-    return null
-  }
-  return clonePresentationVisualStyleSnapshot({
-    id,
-    scope,
-    name,
-    description: toOptionalString(snapshot.description),
-    category: toOptionalString(snapshot.category),
-    guide_number: toOptionalNumber(snapshot.guide_number),
-    tags: toTrimmedStringArray(snapshot.tags),
-    best_for: toTrimmedStringArray(snapshot.best_for),
-    generation_rules: toRecord(snapshot.generation_rules),
-    artifact_preferences: toTrimmedStringArray(snapshot.artifact_preferences),
-    appearance_defaults: toRecord(snapshot.appearance_defaults),
-    fallback_policy: toRecord(snapshot.fallback_policy),
-    version: toOptionalNumber(snapshot.version)
-  })
-}
-
-const normalizeVisualStyleRecord = (style: unknown): VisualStyleRecord => {
-  const record = style && typeof style === "object" && !Array.isArray(style)
-    ? (style as Record<string, unknown>)
-    : {}
-  return {
-    id: String(record.id ?? ""),
-    name: String(record.name ?? ""),
-    scope: String(record.scope ?? ""),
-    description: toOptionalString(record.description),
-    category: toOptionalString(record.category),
-    guide_number: toOptionalNumber(record.guide_number),
-    tags: toTrimmedStringArray(record.tags),
-    best_for: toTrimmedStringArray(record.best_for),
-    generation_rules: toRecord(record.generation_rules),
-    artifact_preferences: toTrimmedStringArray(record.artifact_preferences),
-    appearance_defaults: toRecord(record.appearance_defaults),
-    fallback_policy: toRecord(record.fallback_policy),
-    version: toOptionalNumber(record.version),
-    created_at: toOptionalString(record.created_at),
-    updated_at: toOptionalString(record.updated_at)
-  }
-}
-
-const normalizePresentationStudioRecord = (presentation: unknown): PresentationStudioRecord => {
-  const record =
-    presentation && typeof presentation === "object" && !Array.isArray(presentation)
-      ? (presentation as Record<string, unknown>)
-      : {}
-  const slides = Array.isArray(record.slides)
-    ? (record.slides as PresentationStudioSlide[])
-    : []
-  return {
-    id: String(record.id ?? ""),
-    title: String(record.title ?? ""),
-    description: toOptionalString(record.description),
-    theme: String(record.theme ?? "black"),
-    marp_theme: toOptionalString(record.marp_theme),
-    template_id: toOptionalString(record.template_id),
-    visual_style_id: toOptionalString(record.visual_style_id),
-    visual_style_scope: toOptionalString(record.visual_style_scope),
-    visual_style_name: toOptionalString(record.visual_style_name),
-    visual_style_version: toOptionalNumber(record.visual_style_version),
-    visual_style_snapshot: normalizeVisualStyleSnapshot(record.visual_style_snapshot),
-    settings: Object.keys(toRecord(record.settings)).length > 0 ? toRecord(record.settings) : null,
-    studio_data:
-      Object.keys(toRecord(record.studio_data)).length > 0 ? toRecord(record.studio_data) : null,
-    slides,
-    custom_css: toOptionalString(record.custom_css),
-    source_type: toOptionalString(record.source_type),
-    source_ref: record.source_ref ?? null,
-    source_query: toOptionalString(record.source_query),
-    created_at: String(record.created_at ?? ""),
-    last_modified: String(record.last_modified ?? ""),
-    deleted: Boolean(record.deleted),
-    client_id: toOptionalString(record.client_id) ?? undefined,
-    version: toFiniteNumber(record.version, 0)
-  }
 }
 
 export type UserProfileUpdateEntry = {
