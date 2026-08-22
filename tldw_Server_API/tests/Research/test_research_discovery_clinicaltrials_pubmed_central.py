@@ -64,6 +64,7 @@ from tldw_Server_API.app.core.Research.discovery.executor import (
     DiscoveryAdapter,
     DiscoveryAdapterError,
     DiscoveryAdapterResult,
+    DiscoveryCandidate,
     DiscoveryExecutionError,
     LogicalOutcomeState,
     OpaqueCursor,
@@ -142,6 +143,30 @@ class _RoutePolicySubclass(RoutePolicy):
 
 class _AccessRouteSubclass(AccessRoute):
     """Structurally valid AccessRoute lookalike with a non-exact type."""
+
+
+class _ExactOriginSubclass(ExactOrigin):
+    """Equal-valued origin with a non-exact type."""
+
+
+class _RouteLimitsSubclass(RouteLimits):
+    """Equal-valued route limits with a non-exact type."""
+
+
+class _LiteralTermsQueryValuePolicySubclass(LiteralTermsQueryValuePolicy):
+    """Equal-valued literal-terms policy with a non-exact type."""
+
+
+class _ExactQueryValuePolicySubclass(ExactQueryValuePolicy):
+    """Equal-valued exact-value policy with a non-exact type."""
+
+
+class _BoundedDecimalQueryValuePolicySubclass(BoundedDecimalQueryValuePolicy):
+    """Equal-valued bounded-decimal policy with a non-exact type."""
+
+
+class _OpaqueCursorQueryValuePolicySubclass(OpaqueCursorQueryValuePolicy):
+    """Equal-valued opaque-cursor policy with a non-exact type."""
 
 
 def _module():
@@ -2253,6 +2278,7 @@ def test_pmc_planner_rejects_equal_valued_route_policy_type_lookalikes(mutation:
         "backend_id",
         "adapter_id",
         "adapter_version",
+        "policy_object",
         "policy_type",
         "policy_version",
     ),
@@ -2269,6 +2295,8 @@ def test_clinicaltrials_shared_policy_owner_requires_exact_identity_types(mutati
             routes=tuple(mutated if item.route_id == route.route_id else item for item in registry.routes),
             backends=registry.backends,
         )
+    elif mutation == "policy_object":
+        object.__setattr__(route, "policy", object())
     elif mutation == "policy_type":
         object.__setattr__(route, "policy", _route_policy_subclass(route.policy))
     elif mutation == "policy_version":
@@ -2287,6 +2315,277 @@ def test_clinicaltrials_shared_policy_owner_requires_exact_identity_types(mutati
             readiness=_clinicaltrials_test_readiness(ExecutionMode.SYNTHETIC),
             budget=_clinical_budget(result_limit=10),
         )
+
+
+def test_clinicaltrials_shared_policy_owner_rejects_attribution_drift_before_plan_emission() -> None:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("clinicaltrials_gov_studies_search_direct")
+    object.__setattr__(route, "attribution_basis", "attacker_forged_basis")
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("clinicaltrials_gov",), GeneralFreeTextQuery("alpha beta"), (), 10),
+            registry=registry,
+            readiness=_clinicaltrials_test_readiness(ExecutionMode.SYNTHETIC),
+            budget=_clinical_budget(result_limit=10),
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "route_kind",
+        "query_modes_value",
+        "query_modes_tuple",
+        "source_constraint",
+        "attribution_type",
+        "credential_requirement",
+        "fallback_value",
+        "fallback_type",
+        "max_dispatch_value",
+        "max_dispatch_type",
+        "policy_version_value",
+        "origin_type",
+        "origin_scheme",
+        "origin_host",
+        "origin_port_type",
+        "policy_digest_type",
+        "methods_tuple",
+        "method_member",
+        "paths_tuple",
+        "path_member",
+        "allowed_query_keys_tuple",
+        "allowed_query_key_member",
+        "pagination_query_key",
+        "path_template",
+        "pagination_json_body_key",
+        "allowed_json_body_keys",
+        "integer_json_body_keys",
+        "limits_type",
+        "limits_scalar_type",
+        "query_value_policies_tuple",
+        "query_value_policy_order",
+        "literal_policy_type",
+        "literal_name_type",
+        "literal_suffix_type",
+        "literal_max_terms_type",
+        "literal_max_term_chars_type",
+        "literal_required_type",
+        "exact_policy_type",
+        "exact_name_type",
+        "exact_value_type",
+        "exact_required_type",
+        "decimal_policy_type",
+        "decimal_name_type",
+        "decimal_maximum_type",
+        "decimal_required_type",
+        "cursor_policy_type",
+        "cursor_name_type",
+        "cursor_max_chars_type",
+        "cursor_required_type",
+    ),
+)
+def test_clinicaltrials_shared_policy_owner_requires_complete_exact_semantics(mutation: str) -> None:
+    registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("clinicaltrials_gov_studies_search_direct")
+    policy = route.policy
+    query_policies = list(policy.query_value_policies)
+
+    if mutation == "route_kind":
+        object.__setattr__(route, "route_kind", RouteKind.AGGREGATOR)
+    elif mutation == "query_modes_value":
+        object.__setattr__(route, "query_modes", (QueryMode.STRUCTURED_QUERY,))
+    elif mutation == "query_modes_tuple":
+        object.__setattr__(route, "query_modes", _TupleSubclass(route.query_modes))
+    elif mutation == "source_constraint":
+        object.__setattr__(route, "source_constraint", SourceConstraint.PROVIDER_SOURCE_FILTER)
+    elif mutation == "attribution_type":
+        object.__setattr__(route, "attribution_basis", _StringSubclass(route.attribution_basis))
+    elif mutation == "credential_requirement":
+        object.__setattr__(route, "credential_requirement", CredentialRequirement.API_KEY)
+    elif mutation == "fallback_value":
+        object.__setattr__(route, "fallback_order", 1)
+    elif mutation == "fallback_type":
+        object.__setattr__(route, "fallback_order", 0.0)
+    elif mutation == "max_dispatch_value":
+        object.__setattr__(route, "max_physical_dispatches", 3)
+    elif mutation == "max_dispatch_type":
+        object.__setattr__(route, "max_physical_dispatches", 2.0)
+    elif mutation == "policy_version_value":
+        object.__setattr__(policy, "policy_version", "unapproved-clinicaltrials-policy")
+    elif mutation == "origin_type":
+        object.__setattr__(
+            policy,
+            "origin",
+            _ExactOriginSubclass(policy.origin.scheme, policy.origin.host, policy.origin.port),
+        )
+    elif mutation in {"origin_scheme", "origin_host"}:
+        field = mutation.removeprefix("origin_")
+        object.__setattr__(policy.origin, field, _StringSubclass(getattr(policy.origin, field)))
+    elif mutation == "origin_port_type":
+        object.__setattr__(policy.origin, "port", 443.0)
+    elif mutation == "policy_digest_type":
+        object.__setattr__(policy, "policy_digest", _StringSubclass(policy.policy_digest))
+    elif mutation == "methods_tuple":
+        object.__setattr__(policy, "methods", _TupleSubclass(policy.methods))
+    elif mutation == "method_member":
+        object.__setattr__(policy, "methods", (_StringSubclass("GET"),))
+    elif mutation == "paths_tuple":
+        object.__setattr__(policy, "paths", _TupleSubclass(policy.paths))
+    elif mutation == "path_member":
+        object.__setattr__(policy, "paths", (_StringSubclass(policy.paths[0]),))
+    elif mutation == "allowed_query_keys_tuple":
+        object.__setattr__(policy, "allowed_query_keys", _TupleSubclass(policy.allowed_query_keys))
+    elif mutation == "allowed_query_key_member":
+        object.__setattr__(
+            policy,
+            "allowed_query_keys",
+            (_StringSubclass(policy.allowed_query_keys[0]),) + policy.allowed_query_keys[1:],
+        )
+    elif mutation == "pagination_query_key":
+        object.__setattr__(policy, "pagination_query_key", _StringSubclass("pageToken"))
+    elif mutation == "path_template":
+        object.__setattr__(policy, "path_template", object())
+    elif mutation == "pagination_json_body_key":
+        object.__setattr__(policy, "pagination_json_body_key", "pageToken")
+    elif mutation == "allowed_json_body_keys":
+        object.__setattr__(policy, "allowed_json_body_keys", ("pageToken",))
+    elif mutation == "integer_json_body_keys":
+        object.__setattr__(policy, "integer_json_body_keys", ("pageToken",))
+    elif mutation == "limits_type":
+        limits = policy.limits
+        object.__setattr__(
+            policy,
+            "limits",
+            _RouteLimitsSubclass(
+                limits.max_pages,
+                limits.max_redirects,
+                limits.max_retries,
+                limits.timeout_ms,
+                limits.max_response_bytes,
+                limits.max_results,
+                limits.max_request_body_bytes,
+            ),
+        )
+    elif mutation == "limits_scalar_type":
+        object.__setattr__(policy.limits, "timeout_ms", 20_000.0)
+    elif mutation == "query_value_policies_tuple":
+        object.__setattr__(policy, "query_value_policies", _TupleSubclass(policy.query_value_policies))
+    elif mutation == "query_value_policy_order":
+        query_policies[1], query_policies[2] = query_policies[2], query_policies[1]
+        object.__setattr__(policy, "query_value_policies", tuple(query_policies))
+    elif mutation == "literal_policy_type":
+        query_policies[0] = _LiteralTermsQueryValuePolicySubclass("query.term", "", 8, 32)
+        object.__setattr__(policy, "query_value_policies", tuple(query_policies))
+    elif mutation.startswith("literal_"):
+        field, value = {
+            "literal_name_type": ("name", _StringSubclass("query.term")),
+            "literal_suffix_type": ("fixed_suffix", _StringSubclass("")),
+            "literal_max_terms_type": ("max_terms", 8.0),
+            "literal_max_term_chars_type": ("max_term_chars", 32.0),
+            "literal_required_type": ("required", 1),
+        }[mutation]
+        object.__setattr__(query_policies[0], field, value)
+    elif mutation == "exact_policy_type":
+        query_policies[1] = _ExactQueryValuePolicySubclass("format", "json")
+        object.__setattr__(policy, "query_value_policies", tuple(query_policies))
+    elif mutation.startswith("exact_"):
+        field, value = {
+            "exact_name_type": ("name", _StringSubclass("format")),
+            "exact_value_type": ("value", _StringSubclass("json")),
+            "exact_required_type": ("required", 1),
+        }[mutation]
+        object.__setattr__(query_policies[1], field, value)
+    elif mutation == "decimal_policy_type":
+        query_policies[4] = _BoundedDecimalQueryValuePolicySubclass("pageSize", 50)
+        object.__setattr__(policy, "query_value_policies", tuple(query_policies))
+    elif mutation.startswith("decimal_"):
+        field, value = {
+            "decimal_name_type": ("name", _StringSubclass("pageSize")),
+            "decimal_maximum_type": ("maximum", 50.0),
+            "decimal_required_type": ("required", 1),
+        }[mutation]
+        object.__setattr__(query_policies[4], field, value)
+    elif mutation == "cursor_policy_type":
+        query_policies[6] = _OpaqueCursorQueryValuePolicySubclass("pageToken", 1_024, required=False)
+        object.__setattr__(policy, "query_value_policies", tuple(query_policies))
+    else:
+        field, value = {
+            "cursor_name_type": ("name", _StringSubclass("pageToken")),
+            "cursor_max_chars_type": ("max_chars", 1_024.0),
+            "cursor_required_type": ("required", 0),
+        }[mutation]
+        object.__setattr__(query_policies[6], field, value)
+
+    with pytest.raises(PlanningError, match="invalid_pubmed_central_route_identity"):
+        compile_discovery_plan(
+            PlanningRequest(("clinicaltrials_gov",), GeneralFreeTextQuery("alpha beta"), (), 10),
+            registry=registry,
+            readiness=_clinicaltrials_test_readiness(ExecutionMode.SYNTHETIC),
+            budget=_clinical_budget(result_limit=10),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("target", "forged_attribution"),
+    (
+        ("clinicaltrials_gov", "post_plan_forged_clinicaltrials_basis"),
+        ("pubmed_central", "post_plan_forged_pmc_basis"),
+        ("pubmed", "post_plan_forged_pubmed_basis"),
+    ),
+)
+async def test_sealed_family_attribution_mutation_after_planning_fails_before_dispatch(
+    target: str,
+    forged_attribution: str,
+) -> None:
+    if target == "clinicaltrials_gov":
+        registry, plan = _clinical_plan(result_limit=10)
+    elif target == "pubmed_central":
+        registry, plan = _pmc_plan(result_limit=10)
+    else:
+        registry = _module().clinicaltrials_pubmed_central_shadow_registry()
+        plan = compile_discovery_plan(
+            PlanningRequest(("pubmed",), "bounded discovery", (), 7),
+            registry=registry,
+            readiness=_module().clinicaltrials_pubmed_central_shadow_readiness(ExecutionMode.OFFLINE_FIXTURE),
+            budget=_budget(),
+        )
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    object.__setattr__(route, "attribution_basis", forged_attribution)
+    gateway_calls: list[str] = []
+    dispatch_ids: list[str] = []
+
+    async def gateway(route_arg, intent, *, is_policy_active):
+        gateway_calls.append(route_arg.route_id)
+        return _clinical_response(route_arg, intent, b"{}")
+
+    async def adapter(group_arg, dispatch):
+        await dispatch(group_arg.intents[0])
+        return DiscoveryAdapterResult(
+            candidates=(DiscoveryCandidate("must-not-commit", {"title": "forged provenance"}),)
+        )
+
+    journal = AttemptJournal(physical_ceiling=plan.ceilings.max_physical_dispatches)
+    execution = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={group.adapter_id: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: dispatch_ids.append("unexpected") or "unexpected",
+        journal=journal,
+    )
+
+    assert gateway_calls == []
+    assert dispatch_ids == []
+    assert journal.records == ()
+    assert journal.accounting.created == journal.accounting.debited == 0
+    assert execution.candidates == ()
+    assert execution.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert execution.logical_outcomes[0].code == "registry_mismatch"
+    assert forged_attribution not in repr(execution)
 
 
 def test_generic_route_with_only_pmc_policy_marker_fails_closed() -> None:

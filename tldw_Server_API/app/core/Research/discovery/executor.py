@@ -76,7 +76,13 @@ from .gateway import (
     reconstruct_redirect_intent,
 )
 from .identity import build_fingerprint
-from .planner import expected_dispatch_group_id, expected_logical_attempt_id
+from .planner import (
+    _has_exact_clinicaltrials_policy,
+    _has_exact_pubmed_central_policy,
+    _has_exact_pubmed_identity_policy,
+    expected_dispatch_group_id,
+    expected_logical_attempt_id,
+)
 from .registry import DiscoveryRegistry
 
 PolicyActivityCheck = Callable[[str, str], bool]
@@ -1105,6 +1111,17 @@ def _gateway_error_metadata(error: DiscoveryGatewayError) -> tuple[str, bool, bo
     return code, retryable, timed_out
 
 
+def _group_matches_sealed_route(group: PlannedDispatchGroup, route: AccessRoute) -> bool:
+    """Re-seal family routes whose provenance is fixed by provider identity."""
+    if group.route_id == "clinicaltrials_gov_studies_search_direct":
+        return _has_exact_clinicaltrials_policy(route)
+    if group.route_id == "pubmed_central_esearch_summary_direct":
+        return _has_exact_pubmed_central_policy(route)
+    if group.route_id == "pubmed_ncbi_eutils_pubmed_direct" and group.adapter_version == "pubmed-v2-ncbi-identity":
+        return _has_exact_pubmed_identity_policy(route)
+    return True
+
+
 def _group_matches_route(group: PlannedDispatchGroup, route: AccessRoute) -> bool:
     try:
         limits = route.policy.limits
@@ -1116,6 +1133,7 @@ def _group_matches_route(group: PlannedDispatchGroup, route: AccessRoute) -> boo
             and group.adapter_version == route.adapter_version
             and type(route.attribution_basis) is str
             and bool(route.attribution_basis.strip())
+            and _group_matches_sealed_route(group, route)
             and group.fallback_order == route.fallback_order
             and group.policy_digest == route.policy.policy_digest == canonical_policy_digest(route.policy)
             and group.limits == limits

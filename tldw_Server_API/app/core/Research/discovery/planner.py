@@ -86,6 +86,24 @@ _PUBMED_CENTRAL_ADAPTER_VERSION = "pubmed-central-v2"
 _PUBMED_CENTRAL_POLICY_VERSION = "research-discovery-route-policy-v2-clinicaltrials-pmc"
 _PUBMED_CENTRAL_POLICY_DIGEST = "621115ce40342226999a120bfc3ab31fcac28a0e6eb2e37c39653bdd72791fc9"
 _PUBMED_CENTRAL_BINDING_ID = "pmc_esearch_ids"
+_CLINICALTRIALS_ROUTE_ID = "clinicaltrials_gov_studies_search_direct"
+_CLINICALTRIALS_BACKEND_ID = "clinicaltrials_gov_api_v2"
+_CLINICALTRIALS_ADAPTER_ID = "clinicaltrials_gov_v2"
+_CLINICALTRIALS_ADAPTER_VERSION = "clinicaltrials-gov-v2"
+_CLINICALTRIALS_POLICY_DIGEST = "80c6b86d91cb215477162138be4a7ea0a1935fbb40ae6c19e279106c258aab02"
+_CLINICALTRIALS_FIELDS = (
+    "NCTId,BriefTitle,OfficialTitle,BriefSummary,OverallStatus,Condition,"
+    "InterventionName,LeadSponsorName,StudyType,StartDate,CompletionDate,HasResults"
+)
+_CLINICALTRIALS_QUERY_KEYS = (
+    "query.term",
+    "format",
+    "markupFormat",
+    "fields",
+    "pageSize",
+    "countTotal",
+    "pageToken",
+)
 
 
 def _is_identity_pubmed_route(route: AccessRoute) -> bool:
@@ -145,34 +163,30 @@ def _is_pubmed_central_route(route: AccessRoute) -> bool:
 
 
 def _has_pubmed_central_identity_component(route: AccessRoute) -> bool:
+    if _has_exact_clinicaltrials_policy(route):
+        return False
+    try:
+        policy_version = route.policy.policy_version
+    except Exception:  # noqa: BLE001 - malformed registry policies fail closed as identity drift.
+        policy_version = None
     return any(
         (
             route.route_id == _PUBMED_CENTRAL_ROUTE_ID,
             route.backend_id == _PUBMED_CENTRAL_BACKEND_ID,
             route.adapter_id == _PUBMED_CENTRAL_ADAPTER_ID,
             route.adapter_version == _PUBMED_CENTRAL_ADAPTER_VERSION,
-            route.policy.policy_version == _PUBMED_CENTRAL_POLICY_VERSION
-            and not _is_clinicaltrials_shared_policy_owner(route),
+            route.route_id == _CLINICALTRIALS_ROUTE_ID,
+            route.backend_id == _CLINICALTRIALS_BACKEND_ID,
+            route.adapter_id == _CLINICALTRIALS_ADAPTER_ID,
+            route.adapter_version == _CLINICALTRIALS_ADAPTER_VERSION,
+            policy_version == _PUBMED_CENTRAL_POLICY_VERSION,
         )
     )
 
 
 def _is_clinicaltrials_shared_policy_owner(route: AccessRoute) -> bool:
-    """Exclude the one exact sibling route that owns the shared policy marker."""
-    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
-        return False
-    return (
-        type(route.route_id) is str
-        and route.route_id == "clinicaltrials_gov_studies_search_direct"
-        and type(route.backend_id) is str
-        and route.backend_id == "clinicaltrials_gov_api_v2"
-        and type(route.adapter_id) is str
-        and route.adapter_id == "clinicaltrials_gov_v2"
-        and type(route.adapter_version) is str
-        and route.adapter_version == "clinicaltrials-gov-v2"
-        and type(route.policy.policy_version) is str
-        and route.policy.policy_version == _PUBMED_CENTRAL_POLICY_VERSION
-    )
+    """Exclude only the complete exact sibling route that owns the shared marker."""
+    return _has_exact_clinicaltrials_policy(route)
 
 
 def _is_exact_contract_enum_member(
@@ -202,6 +216,142 @@ def _is_exact_string_tuple(value: object, expected: tuple[str, ...]) -> bool:
         type(value) is tuple
         and len(value) == len(expected)
         and all(type(actual) is str and actual == approved for actual, approved in zip(value, expected))
+    )
+
+
+def _has_exact_exact_query_value_policy(value: object, name: str, exact_value: str) -> bool:
+    return (
+        type(value) is ExactQueryValuePolicy
+        and type(value.name) is str
+        and value.name == name
+        and type(value.value) is str
+        and value.value == exact_value
+        and type(value.required) is bool
+        and value.required is True
+    )
+
+
+def _has_exact_clinicaltrials_query_value_policies(value: object) -> bool:
+    if type(value) is not tuple or len(value) != 7:
+        return False
+    literal_terms, format_rule, markup_rule, fields_rule, page_size, count_total, page_token = value
+    return (
+        type(literal_terms) is LiteralTermsQueryValuePolicy
+        and type(literal_terms.name) is str
+        and literal_terms.name == "query.term"
+        and type(literal_terms.fixed_suffix) is str
+        and literal_terms.fixed_suffix == ""
+        and type(literal_terms.max_terms) is int
+        and literal_terms.max_terms == 8
+        and type(literal_terms.max_term_chars) is int
+        and literal_terms.max_term_chars == 32
+        and type(literal_terms.required) is bool
+        and literal_terms.required is True
+        and _has_exact_exact_query_value_policy(format_rule, "format", "json")
+        and _has_exact_exact_query_value_policy(markup_rule, "markupFormat", "legacy")
+        and _has_exact_exact_query_value_policy(fields_rule, "fields", _CLINICALTRIALS_FIELDS)
+        and type(page_size) is BoundedDecimalQueryValuePolicy
+        and type(page_size.name) is str
+        and page_size.name == "pageSize"
+        and type(page_size.maximum) is int
+        and page_size.maximum == 50
+        and type(page_size.required) is bool
+        and page_size.required is True
+        and _has_exact_exact_query_value_policy(count_total, "countTotal", "true")
+        and type(page_token) is OpaqueCursorQueryValuePolicy
+        and type(page_token.name) is str
+        and page_token.name == "pageToken"
+        and type(page_token.max_chars) is int
+        and page_token.max_chars == 1_024
+        and type(page_token.required) is bool
+        and page_token.required is False
+    )
+
+
+def _has_exact_clinicaltrials_limits(limits: object) -> bool:
+    if type(limits) is not RouteLimits:
+        return False
+    values = (
+        limits.max_pages,
+        limits.max_redirects,
+        limits.max_retries,
+        limits.timeout_ms,
+        limits.max_response_bytes,
+        limits.max_results,
+        limits.max_request_body_bytes,
+    )
+    return all(type(value) is int for value in values) and values == (
+        2,
+        0,
+        0,
+        20_000,
+        2_097_152,
+        100,
+        16_384,
+    )
+
+
+def _has_exact_clinicaltrials_policy(route: AccessRoute) -> bool:
+    """Anchor the shared ClinicalTrials marker to one complete approved route."""
+    if type(route) is not AccessRoute or type(route.policy) is not RoutePolicy:
+        return False
+    policy = route.policy
+    origin = policy.origin
+    return (
+        type(route.route_id) is str
+        and route.route_id == _CLINICALTRIALS_ROUTE_ID
+        and type(route.backend_id) is str
+        and route.backend_id == _CLINICALTRIALS_BACKEND_ID
+        and type(route.adapter_id) is str
+        and route.adapter_id == _CLINICALTRIALS_ADAPTER_ID
+        and type(route.adapter_version) is str
+        and route.adapter_version == _CLINICALTRIALS_ADAPTER_VERSION
+        and _is_exact_contract_enum_member(
+            route.route_kind,
+            enum_name="RouteKind",
+            member_name="DIRECT",
+            member_value="direct",
+        )
+        and type(route.query_modes) is tuple
+        and len(route.query_modes) == 1
+        and route.query_modes[0] is QueryMode.GENERAL_FREE_TEXT
+        and _is_exact_contract_enum_member(
+            route.source_constraint,
+            enum_name="SourceConstraint",
+            member_name="NATIVE_CORPUS",
+            member_value="native_corpus",
+        )
+        and type(route.attribution_basis) is str
+        and route.attribution_basis == "native_nct_record"
+        and route.credential_requirement is CredentialRequirement.NONE
+        and type(route.fallback_order) is int
+        and route.fallback_order == 0
+        and type(route.max_physical_dispatches) is int
+        and route.max_physical_dispatches == 2
+        and type(policy.policy_version) is str
+        and policy.policy_version == _PUBMED_CENTRAL_POLICY_VERSION
+        and type(origin) is ExactOrigin
+        and type(origin.scheme) is str
+        and origin.scheme == "https"
+        and type(origin.host) is str
+        and origin.host == "clinicaltrials.gov"
+        and type(origin.port) is int
+        and origin.port == 443
+        and type(policy.policy_digest) is str
+        and policy.policy_digest == _CLINICALTRIALS_POLICY_DIGEST
+        and _is_exact_string_tuple(policy.methods, ("GET",))
+        and _is_exact_string_tuple(policy.paths, ("/api/v2/studies",))
+        and policy.path_template is None
+        and _is_exact_string_tuple(policy.allowed_query_keys, _CLINICALTRIALS_QUERY_KEYS)
+        and type(policy.pagination_query_key) is str
+        and policy.pagination_query_key == "pageToken"
+        and policy.pagination_json_body_key is None
+        and type(policy.allowed_json_body_keys) is tuple
+        and policy.allowed_json_body_keys == ()
+        and type(policy.integer_json_body_keys) is tuple
+        and policy.integer_json_body_keys == ()
+        and _has_exact_clinicaltrials_query_value_policies(policy.query_value_policies)
+        and _has_exact_clinicaltrials_limits(policy.limits)
     )
 
 

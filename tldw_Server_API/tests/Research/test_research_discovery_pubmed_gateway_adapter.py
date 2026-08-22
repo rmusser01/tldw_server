@@ -761,7 +761,7 @@ async def test_forged_public_origin_registry_and_plan_stop_before_gateway_or_one
     )
 
     assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
-    assert result.logical_outcomes[0].code == "adapter_failed"
+    assert result.logical_outcomes[0].code == "registry_mismatch"
     assert gateway_calls == []
     assert one_hop_calls == []
     assert result.usage.accounting.created == result.usage.accounting.debited == 0
