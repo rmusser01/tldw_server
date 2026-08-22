@@ -22,8 +22,11 @@ from tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central i
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
     DiscoveryOutcomeIdentity,
+    DispatchAllowance,
+    ExactOrigin,
     ExecutionMode,
     OperationKind,
+    QueryPair,
 )
 from tldw_Server_API.app.core.Research.discovery.executor import (
     DiscoveryAdapterResult,
@@ -41,6 +44,8 @@ from tldw_Server_API.app.core.Research.discovery.identity import build_fingerpri
 from tldw_Server_API.app.core.Research.discovery.planner import (
     PlanningRequest,
     compile_discovery_plan,
+    expected_dispatch_group_id,
+    expected_logical_attempt_id,
 )
 from tldw_Server_API.app.core.Research.discovery.registry import (
     DiscoveryRegistry,
@@ -542,6 +547,160 @@ def _overlay_plan_for(*, result_limit: int = 2):
         budget=BudgetCeilings(1, 2, 1, 0, 0, 40_000, result_limit),
     )
     return registry, plan
+
+
+def _aligned_overlay_group(group, **changes):
+    """Apply coherent group fields to every intent carrying that field."""
+    intent_changes = {name: changes[name] for name in ("route_id", "policy_digest", "limits") if name in changes}
+    intents = tuple(replace(intent, **intent_changes) for intent in group.intents)
+    return replace(group, intents=intents, **changes)
+
+
+def _mutated_overlay_group(mutation: str):
+    _registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    if mutation == "route_id":
+        return _aligned_overlay_group(group, route_id="forged_pubmed_route")
+    if mutation == "backend_id":
+        return replace(group, backend_id="arxiv_api")
+    if mutation == "policy_digest":
+        return _aligned_overlay_group(group, policy_digest="f" * 64)
+    if mutation == "limits":
+        limits = replace(group.limits, timeout_ms=19_999)
+        return _aligned_overlay_group(group, limits=limits)
+    if mutation == "allowance":
+        return replace(group, allowance=DispatchAllowance(3, 1, 0, 0))
+    if mutation == "logical_source":
+        attempts = tuple(replace(attempt, catalog_source_id="pubmed_forged") for attempt in group.logical_attempts)
+        return replace(group, logical_attempts=attempts)
+    if mutation == "filters":
+        return replace(group, filters=(QueryPair("provider", "forged"),))
+    if mutation == "fallback_order":
+        return replace(group, fallback_order=1)
+    if mutation == "intent_route_alignment":
+        object.__setattr__(group.intents[0], "route_id", "forged_pubmed_route")
+        return group
+    if mutation == "intent_policy_alignment":
+        object.__setattr__(group.intents[0], "policy_digest", "f" * 64)
+        return group
+    if mutation == "intent_limits_alignment":
+        object.__setattr__(group.intents[0], "limits", replace(group.limits, timeout_ms=19_999))
+        return group
+    if mutation == "intent_limits_scalar_type":
+        forged_limits = replace(group.limits)
+        object.__setattr__(forged_limits, "max_pages", True)
+        object.__setattr__(group.intents[0], "limits", forged_limits)
+        return group
+    if mutation == "normalized_query_alignment":
+        search = group.intents[0]
+        query_pairs = list(search.query_pairs)
+        query_pairs[1] = QueryPair("term", "forged query")
+        object.__setattr__(search, "query_pairs", tuple(query_pairs))
+        return group
+    raise AssertionError(f"unknown test mutation: {mutation}")
+
+
+def _forge_plan_group_for_policy(plan, policy_digest: str):
+    """Rebuild deterministic IDs for one otherwise coherent hostile plan."""
+    group = _aligned_overlay_group(plan.dispatch_groups[0], policy_digest=policy_digest)
+    group_id = expected_dispatch_group_id(group)
+    logical_attempts = tuple(
+        replace(
+            attempt,
+            logical_attempt_id=expected_logical_attempt_id(attempt, group_id),
+        )
+        for attempt in group.logical_attempts
+    )
+    return replace(group, dispatch_group_id=group_id, logical_attempts=logical_attempts)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "route_id",
+        "backend_id",
+        "policy_digest",
+        "limits",
+        "allowance",
+        "logical_source",
+        "filters",
+        "fallback_order",
+        "intent_route_alignment",
+        "intent_policy_alignment",
+        "intent_limits_alignment",
+        "intent_limits_scalar_type",
+        "normalized_query_alignment",
+    ),
+)
+@pytest.mark.asyncio
+async def test_identity_overlay_adapter_rejects_group_trust_drift_before_dispatch(mutation: str) -> None:
+    group = _mutated_overlay_group(mutation)
+    dispatch = _RecordingDispatch([])
+
+    with pytest.raises(executor_module.DiscoveryAdapterError) as caught:
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
+    assert dispatch.calls == []
+
+
+@pytest.mark.asyncio
+async def test_forged_public_origin_registry_and_plan_stop_before_gateway_or_one_hop() -> None:
+    registry, plan = _overlay_plan_for()
+    route = registry.get_route("pubmed_ncbi_eutils_pubmed_direct")
+    forged_policy = replace(
+        route.policy,
+        origin=ExactOrigin("https", "attacker.example", 443),
+        policy_digest="",
+    )
+    forged_route = replace(route, policy=forged_policy)
+    forged_registry = replace(
+        registry,
+        routes=tuple(
+            forged_route if candidate.route_id == route.route_id else candidate for candidate in registry.routes
+        ),
+    )
+    forged_group = _forge_plan_group_for_policy(plan, forged_policy.policy_digest)
+    forged_plan = replace(plan, dispatch_groups=(forged_group,), plan_digest="")
+    gateway_calls: list[object] = []
+    one_hop_calls: list[NormalizedHTTPHopRequest] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        one_hop_calls.append(request)
+        body = _fixture("esearch_empty")
+        return HTTPHopResponse(
+            status_code=200,
+            headers=(("content-type", "application/json"),),
+            body=body,
+            resolved_ips=("93.184.216.34",),
+            connected_ip="93.184.216.34",
+            response_header_bytes=64,
+            wire_bytes=len(body),
+        )
+
+    async def gateway(candidate_route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return await dispatch_once(
+            candidate_route,
+            intent,
+            is_policy_active=is_policy_active,
+            one_hop=one_hop,
+        )
+
+    result = await execute_discovery_plan(
+        forged_plan,
+        registry=forged_registry,
+        adapters={_ADAPTER_ID: _module().foundation_gateway_adapters()[_ADAPTER_ID]},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("forged-public-origin-dispatch",)).__next__,
+    )
+
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "adapter_failed"
+    assert gateway_calls == []
+    assert one_hop_calls == []
+    assert result.usage.accounting.created == result.usage.accounting.debited == 0
 
 
 async def _execute_overlay_via_one_hop(bodies: list[bytes]):

@@ -111,7 +111,7 @@ _EXPECTED_IMPORT_DIGESTS = {
     "registry.py": "56ffcb107d482f12c2c2477f563b571e716ba73d0937e1a632c89a59b6c1b797",
     "planner.py": "6c900fd42a08c94e5eb0272a8fa0817815900041cd4fa6ec14f8fcfcf11629a3",
     "executor.py": "d501a6ecd493d758dba75cfae1ff863482de572e43c5d048109900057006250a",
-    "gateway_adapters.py": "0f7e168f695c4269b16566d45a7bb6fac4f28963d42a33f0e1599404e06e1b5f",
+    "gateway_adapters.py": "acc83403d2c27c25b401b549bf804786fd62d9ee8faf405464ecf8cbfb34c568",
     "gateway.py": "faf5f17bc9dcde5dbe297b96ee5a6a85e906d2329be4ed4cc1e69e66e8e71088",
     "identity.py": "233069fec1e798085a85b14bc1d887a585e22b8a6a6ddaa7dd90001f65b2668d",
     "catalog.py": "2aed2f8efc153fb962668b00c1c3d0f2d51eea78ca03e9c181d30c02d2f7e8e8",
@@ -128,9 +128,9 @@ _EXPECTED_IMPORT_DIGESTS = {
 _EXPECTED_AST_DIGESTS = {
     "contracts.py": "31006c7e537eadf401494f1356cf55d690da2af8314adb57751b59ce88d36e52",
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
-    "planner.py": "c9f2edc9b5969ffd3557efb68206e7c553100033d0dff455e5ca7af1621a4f82",
+    "planner.py": "467a9d1188755446befd27baaa972f778bf0fbdfdbeeafa7a28f056337fda7e2",
     "executor.py": "f96a7f310a608def1c163cd88c22481b21cdba99281eb9a76326bffb74fd0296",
-    "gateway_adapters.py": "7f416c949d1795c3cc47df2d926ce34f49d9c7c7454d0d6d19aaafc98ea0f76a",
+    "gateway_adapters.py": "641397d8b41fabe3b34da31074d1c84819fbbbd01b0844386a7f4973deb212c6",
     "gateway.py": "9fa3be4b099e4beb519e63bee037873d55fcd8425c7ec939520ea100cd896654",
     "identity.py": "f59640d8f793fd3ebd11df49d333f73ebee9e59efb549393116bee2a241f5f06",
     "catalog.py": "6f89e526a0cee3f934fc04da6adc5698800842e9f798ac45e35847d859e08ba6",
@@ -146,15 +146,15 @@ _EXPECTED_AST_DIGESTS = {
 }
 _EXPECTED_FAMILY_RAW_DIGESTS = {
     "biorxiv_medrxiv.py": "ee77fb9bc5da1cb93dc88baea86c9cd5b6a6e961d02faec97faa66cbcf383af9",
-    "clinicaltrials_pubmed_central.py": "ebbb77fb5d3c6ac088eec4cf229e7e0b78c4d741d7e102b0c801423f94defcc3",
+    "clinicaltrials_pubmed_central.py": "1d54d505576d2baa88857e32e350b7b0febcfa60bb08e6275b057382ef274fda",
 }
 _EXPECTED_FAMILY_IMPORT_DIGESTS = {
     "biorxiv_medrxiv.py": "a9a057e486c28731299b0997b04862a6e81dc6454d73d4fc94d0806d6831ebf3",
-    "clinicaltrials_pubmed_central.py": "7c5f72481295b990658e780413605869116d9ea0ee25a92c0db6248fa1bc7b10",
+    "clinicaltrials_pubmed_central.py": "46ed9a6797e007b2280940ce1d32356f5dab526f281020bf94545d936feea245",
 }
 _EXPECTED_FAMILY_AST_DIGESTS = {
     "biorxiv_medrxiv.py": "21f46f0468fc0a83877d6cc4f1bb8830bdc48bbe4c10ee1c1db90d9144e67f95",
-    "clinicaltrials_pubmed_central.py": "2737a1eee6e29e6a5e5de2e23edfa10b76b2a176da9c2ffb81ec03ea4f39314b",
+    "clinicaltrials_pubmed_central.py": "93a17b53739bb360d8752450ad2fddb4f65c811b4cf59a13131353dc3dcb2912",
 }
 _BIORXIV_MEDRXIV_LOCAL_IMPORTS = MappingProxyType(
     {

@@ -30,8 +30,13 @@ from .contracts import (
     MAX_PAGINATION_CURSOR,
     DeferredNumericCSVQueryBinding,
     DiscoveryOutcomeIdentity,
+    DispatchAllowance,
+    DispatchIntent,
     OperationKind,
     PlannedDispatchGroup,
+    PlannedLogicalAttempt,
+    QueryPair,
+    RouteLimits,
 )
 from .executor import (
     BoundDispatch,
@@ -121,7 +126,10 @@ _XML_ENCODING_RE = re.compile(r"\bencoding\s*=\s*(['\"])([^'\"]+)\1", re.IGNOREC
 _PUBMED_ID_RE = re.compile(r"[1-9][0-9]{0,15}\Z", re.ASCII)
 _PMCID_RE = re.compile(r"PMC[1-9][0-9]{0,15}\Z", re.ASCII)
 _PUBMED_BINDING_ID = "pubmed_esearch_ids"
+_PUBMED_ROUTE_ID = "pubmed_ncbi_eutils_pubmed_direct"
+_PUBMED_BACKEND_ID = "ncbi_eutils_pubmed"
 _PUBMED_IDENTITY_ADAPTER_VERSION = "pubmed-v2-ncbi-identity"
+_PUBMED_IDENTITY_POLICY_DIGEST = "742b8aca76878ca06ab43ae17130627b5daaebea0a3c3ae25786521a9f159d22"
 _NCBI_JSON_VERSION = "0.3"
 _NCBI_RATE_COUNT_RE = re.compile(r"(?:0|[1-9][0-9]*)\Z", re.ASCII)
 _MAX_PUBMED_AUTHORS_PER_RECORD = 1_024
@@ -1375,6 +1383,110 @@ def _initial_page_and_size(group: PlannedDispatchGroup) -> tuple[int, int]:
     raise _PayloadInvalid
 
 
+def _is_sealed_identity_pubmed_group(group: PlannedDispatchGroup) -> bool:
+    """Validate all non-secret identity-overlay trust material before dispatch."""
+    if (
+        type(group.route_id) is not str
+        or group.route_id != _PUBMED_ROUTE_ID
+        or type(group.backend_id) is not str
+        or group.backend_id != _PUBMED_BACKEND_ID
+        or type(group.adapter_id) is not str
+        or group.adapter_id != "pubmed_v2"
+        or type(group.adapter_version) is not str
+        or group.adapter_version != _PUBMED_IDENTITY_ADAPTER_VERSION
+        or type(group.policy_digest) is not str
+        or group.policy_digest != _PUBMED_IDENTITY_POLICY_DIGEST
+        or type(group.normalized_query) is not str
+        or not group.normalized_query
+        or type(group.filters) is not tuple
+        or group.filters != ()
+        or type(group.fallback_order) is not int
+        or group.fallback_order != 0
+        or type(group.limits) is not RouteLimits
+        or not _is_exact_identity_pubmed_limits(group.limits)
+        or type(group.allowance) is not DispatchAllowance
+        or not _is_exact_identity_pubmed_allowance(group.allowance)
+        or type(group.logical_attempts) is not tuple
+        or len(group.logical_attempts) != 1
+        or type(group.intents) is not tuple
+        or len(group.intents) != 2
+    ):
+        return False
+    logical = group.logical_attempts[0]
+    if (
+        type(logical) is not PlannedLogicalAttempt
+        or type(logical.logical_attempt_id) is not str
+        or not logical.logical_attempt_id
+        or type(logical.catalog_source_id) is not str
+        or logical.catalog_source_id != "pubmed"
+        or type(logical.selection_reason) is not str
+        or logical.selection_reason != "explicit"
+        or logical.source_predicate is not None
+    ):
+        return False
+    search, summary = group.intents
+    if type(search) is not DispatchIntent or type(summary) is not DispatchIntent:
+        return False
+    for intent in (search, summary):
+        if (
+            type(intent.route_id) is not str
+            or intent.route_id != group.route_id
+            or type(intent.policy_digest) is not str
+            or intent.policy_digest != group.policy_digest
+            or type(intent.method) is not str
+            or type(intent.path) is not str
+            or type(intent.limits) is not RouteLimits
+            or not _is_exact_identity_pubmed_limits(intent.limits)
+            or intent.limits != group.limits
+            or type(intent.query_pairs) is not tuple
+            or any(type(pair) is not QueryPair for pair in intent.query_pairs)
+            or type(intent.json_body_pairs) is not tuple
+            or intent.json_body_pairs != ()
+            or type(intent.query_bindings) is not tuple
+        ):
+            return False
+    if len(search.query_pairs) < 2:
+        return False
+    search_term = search.query_pairs[1]
+    return (
+        type(search_term.name) is str
+        and search_term.name == "term"
+        and type(search_term.value) is str
+        and search_term.value == group.normalized_query
+    )
+
+
+def _is_exact_identity_pubmed_limits(limits: RouteLimits) -> bool:
+    values = (
+        limits.max_pages,
+        limits.max_redirects,
+        limits.max_retries,
+        limits.timeout_ms,
+        limits.max_response_bytes,
+        limits.max_results,
+        limits.max_request_body_bytes,
+    )
+    return all(type(value) is int for value in values) and values == (
+        1,
+        0,
+        0,
+        20_000,
+        2_097_152,
+        100,
+        16_384,
+    )
+
+
+def _is_exact_identity_pubmed_allowance(allowance: DispatchAllowance) -> bool:
+    values = (
+        allowance.physical_dispatches,
+        allowance.pages,
+        allowance.redirects,
+        allowance.retries,
+    )
+    return all(type(value) is int for value in values) and values == (2, 1, 0, 0)
+
+
 def _trusted_pubmed_inputs(
     group: object,
 ) -> _TrustedNCBIInputs:
@@ -1383,6 +1495,8 @@ def _trusted_pubmed_inputs(
         raise DiscoveryAdapterError("provider_payload_invalid")
     profile = _PARSING_PROFILES.get((group.adapter_id, group.adapter_version))
     if profile is None or type(group.intents) is not tuple or len(group.intents) != 2:
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    if group.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION and not _is_sealed_identity_pubmed_group(group):
         raise DiscoveryAdapterError("provider_payload_invalid")
     search, summary = group.intents
     limits = group.limits

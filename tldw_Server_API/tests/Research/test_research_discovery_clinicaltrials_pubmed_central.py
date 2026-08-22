@@ -94,6 +94,41 @@ pytestmark = pytest.mark.unit
 
 _MODULE = "tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central"
 _FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "research_discovery_gateway_adapters"
+_COMMONMARK_HUMAN_TEXT_CASES = (
+    "[label](/relative)",
+    "![image](image.png)",
+    "[label][reference]",
+    "[label][]",
+    "![image][asset]",
+    "[label][reference]\n\n[reference]: /relative",
+    "[label][]\n\n[label]: /relative",
+    "[label]\n\n[label]: /relative",
+    "![image][asset]\n\n[asset]: image.png",
+    "[reference]: /relative",
+    f"[{'x' * 1_025}](/relative)",
+    f"[label](/{'x' * 4_097})",
+    "&#91;label&#93;&#40;/relative&#41;",
+)
+_FORMAT_CONTROL_HUMAN_TEXT_CASES = (
+    "safe\u200bunsafe",
+    "safe\u202eunsafe",
+    "safe\u2066unsafe",
+    "safe &#x202E; unsafe",
+)
+_ENTITY_DECODED_UNSAFE_HUMAN_TEXT_CASES = (
+    "&#91label&#93&#40/relative&#41",
+    "safe &#x202E unsafe",
+    "&ltb&gtunsafe&lt/b&gt",
+)
+_OVER_CEILING_RESIDUAL_ENTITY_CASES = (
+    "&" + "a" * 40 + ";",
+    "&#00000065;",
+    "&#x0000041;",
+)
+
+
+class _StringSubclass(str):
+    """Equal-to-string mutation used to prove exact scalar type checks."""
 
 
 def _module():
@@ -567,7 +602,132 @@ def _cloned_clinical_group() -> PlannedDispatchGroup:
     original = plan.dispatch_groups[0]
     limits = replace(original.limits)
     intent = replace(original.intents[0], limits=replace(limits))
-    return replace(original, limits=limits, intents=(intent,), allowance=replace(original.allowance))
+    return replace(
+        original,
+        limits=limits,
+        filters=tuple(replace(pair) for pair in original.filters),
+        logical_attempts=tuple(replace(attempt) for attempt in original.logical_attempts),
+        intents=(intent,),
+        allowance=replace(original.allowance),
+    )
+
+
+@pytest.mark.asyncio
+async def test_clinicaltrials_recomputed_plan_query_rendering_mismatch_fails_before_gateway_hop() -> None:
+    registry, plan = _clinical_plan()
+    original = plan.dispatch_groups[0]
+    provisional = replace(original, normalized_query="Alternate bounded discovery")
+    group_id = planner_module.expected_dispatch_group_id(provisional)
+    attempts = tuple(
+        replace(
+            attempt,
+            logical_attempt_id=planner_module.expected_logical_attempt_id(attempt, group_id),
+        )
+        for attempt in provisional.logical_attempts
+    )
+    group = replace(
+        provisional,
+        dispatch_group_id=group_id,
+        logical_attempts=attempts,
+    )
+    mismatched_plan = replace(
+        plan,
+        normalized_query=group.normalized_query,
+        dispatch_groups=(group,),
+        plan_digest="",
+    )
+    gateway_hops: list[str] = []
+    dispatch_ids: list[str] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        gateway_hops.append(route.route_id)
+        return _clinical_response(route, intent, _fixture_bytes("empty"))
+
+    result = await execute_discovery_plan(
+        mismatched_plan,
+        registry=registry,
+        adapters=_clinicaltrials_test_adapters(_CountingClock()),
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: dispatch_ids.append("unexpected") or "unexpected",
+    )
+
+    assert mismatched_plan.plan_digest != plan.plan_digest
+    assert gateway_hops == []
+    assert dispatch_ids == []
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "adapter_failed"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "normalized_query_empty",
+        "normalized_query_non_string",
+        "normalized_query_rendering_mismatch",
+        "filters_list",
+        "logical_attempts_list",
+        "logical_attempt_wrong_type",
+        "logical_attempt_source",
+        "logical_attempt_source_subclass",
+        "logical_attempt_selection",
+        "logical_attempt_selection_subclass",
+        "logical_attempt_predicate",
+        "fallback_bool",
+        "allowance_wrong_type",
+        "allowance_float",
+        "limits_wrong_type",
+        "limits_float",
+        "intent_wrong_type",
+        "query_pair_wrong_type",
+    ),
+)
+def test_clinicaltrials_trusted_inputs_reject_exact_contract_type_and_lineage_mutations(mutation: str) -> None:
+    group = _cloned_clinical_group()
+    if mutation == "normalized_query_empty":
+        object.__setattr__(group, "normalized_query", "")
+    elif mutation == "normalized_query_non_string":
+        object.__setattr__(group, "normalized_query", object())
+    elif mutation == "normalized_query_rendering_mismatch":
+        object.__setattr__(group, "normalized_query", "Alternate bounded discovery")
+    elif mutation == "filters_list":
+        object.__setattr__(group, "filters", [])
+    elif mutation == "logical_attempts_list":
+        object.__setattr__(group, "logical_attempts", list(group.logical_attempts))
+    elif mutation == "logical_attempt_wrong_type":
+        object.__setattr__(group, "logical_attempts", (object(),))
+    elif mutation == "logical_attempt_source":
+        object.__setattr__(group.logical_attempts[0], "catalog_source_id", "pubmed_central")
+    elif mutation == "logical_attempt_source_subclass":
+        object.__setattr__(group.logical_attempts[0], "catalog_source_id", _StringSubclass("clinicaltrials_gov"))
+    elif mutation == "logical_attempt_selection":
+        object.__setattr__(group.logical_attempts[0], "selection_reason", "default")
+    elif mutation == "logical_attempt_selection_subclass":
+        object.__setattr__(group.logical_attempts[0], "selection_reason", _StringSubclass("explicit"))
+    elif mutation == "logical_attempt_predicate":
+        object.__setattr__(group.logical_attempts[0], "source_predicate", object())
+    elif mutation == "fallback_bool":
+        object.__setattr__(group, "fallback_order", False)
+    elif mutation == "allowance_wrong_type":
+        object.__setattr__(group, "allowance", object())
+    elif mutation == "allowance_float":
+        object.__setattr__(group.allowance, "pages", 2.0)
+    elif mutation == "limits_wrong_type":
+        object.__setattr__(group, "limits", object())
+    elif mutation == "limits_float":
+        object.__setattr__(group.limits, "timeout_ms", 20_000.0)
+        object.__setattr__(group.intents[0].limits, "timeout_ms", 20_000.0)
+    elif mutation == "intent_wrong_type":
+        object.__setattr__(group, "intents", (object(),))
+    else:
+        object.__setattr__(
+            group.intents[0],
+            "query_pairs",
+            (object(),) + group.intents[0].query_pairs[1:],
+        )
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
 
 
 def test_clinicaltrials_constructor_and_first_page_plan_are_exact() -> None:
@@ -913,6 +1073,65 @@ def test_clinicaltrials_legacy_summary_drops_unsafe_or_overbound_optional_conten
     assert _module()._legacy_summary_text(value) is None
 
 
+@pytest.mark.parametrize("value", _COMMONMARK_HUMAN_TEXT_CASES)
+def test_family_human_text_rejects_commonmark_links_images_and_references_before_or_after_decode(
+    value: str,
+) -> None:
+    assert _module()._plain_clinical_text(value, max_chars=16_384, required=False) is None
+    with pytest.raises(_PayloadInvalid):
+        _module()._plain_clinical_text(value, max_chars=16_384, required=True)
+    assert _module()._legacy_summary_text(value) is None
+    assert _module()._plain_pmc_text(value, max_chars=16_384, required=False) is None
+    with pytest.raises(_PayloadInvalid):
+        _module()._plain_pmc_text(value, max_chars=16_384, required=True)
+
+
+@pytest.mark.parametrize("value", _FORMAT_CONTROL_HUMAN_TEXT_CASES)
+def test_family_human_text_rejects_bidi_and_zero_width_format_controls_before_or_after_decode(value: str) -> None:
+    assert _module()._plain_clinical_text(value, max_chars=256, required=False) is None
+    with pytest.raises(_PayloadInvalid):
+        _module()._plain_clinical_text(value, max_chars=256, required=True)
+    assert _module()._legacy_summary_text(value) is None
+    assert _module()._plain_pmc_text(value, max_chars=256, required=False) is None
+    with pytest.raises(_PayloadInvalid):
+        _module()._plain_pmc_text(value, max_chars=256, required=True)
+
+
+@pytest.mark.parametrize("value", _ENTITY_DECODED_UNSAFE_HUMAN_TEXT_CASES)
+def test_plain_family_text_rejects_unsafe_forms_revealed_only_by_entity_decoding(value: str) -> None:
+    assert _module()._plain_clinical_text(value, max_chars=256, required=False) is None
+    with pytest.raises(_PayloadInvalid):
+        _module()._plain_clinical_text(value, max_chars=256, required=True)
+    assert _module()._legacy_summary_text(value) is None
+    assert _module()._plain_pmc_text(value, max_chars=256, required=False) is None
+    with pytest.raises(_PayloadInvalid):
+        _module()._plain_pmc_text(value, max_chars=256, required=True)
+
+
+@pytest.mark.parametrize("value", _OVER_CEILING_RESIDUAL_ENTITY_CASES)
+def test_plain_family_text_rejects_residual_entities_without_smaller_internal_caps(value: str) -> None:
+    assert len(value) <= 256
+    assert _module()._contains_residual_markup(value)
+    assert _module()._plain_clinical_text(value, max_chars=256, required=False) is None
+    assert _module()._plain_pmc_text(value, max_chars=256, required=False) is None
+
+
+def test_family_human_text_preserves_non_link_bracketed_prose() -> None:
+    value = "Synthetic trial [Phase 2]"
+
+    assert _module()._plain_clinical_text(value, max_chars=256, required=True) == value
+    assert _module()._legacy_summary_text(value) == value
+    assert _module()._plain_pmc_text(value, max_chars=256, required=True) == value
+
+
+def test_plain_family_text_validates_entity_decoded_shadow_without_decoding_provider_text() -> None:
+    value = "Synthetic &copy trial"
+
+    assert _module()._plain_clinical_text(value, max_chars=256, required=True) == value
+    assert _module()._plain_pmc_text(value, max_chars=256, required=True) == value
+    assert _module()._legacy_summary_text("Synthetic &copy; trial") == "Synthetic © trial"
+
+
 @pytest.mark.parametrize(
     ("value", "required", "expected"),
     (
@@ -1195,6 +1414,7 @@ async def test_clinicaltrials_title_candidates_drop_independently(
         ("https://example.org/article", None),
         ("x" * 1_025, None),
         ("<b>unsafe</b>", "javascript:unsafe"),
+        ("[unsafe](/relative)", "safe\u202eunsafe"),
     ),
 )
 @pytest.mark.asyncio
@@ -2417,6 +2637,63 @@ def test_pmc_article_ids_require_exact_pmcid_and_canonicalize_optional_doi_and_p
 
 
 @pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        ("10.5555/PMC.Synthetic", "10.5555/pmc.synthetic"),
+        ("doi:10.5555/pmc.synthetic", "10.5555/pmc.synthetic"),
+        ("DOI:10.5555/PMC.Synthetic", "10.5555/pmc.synthetic"),
+        ("http://doi.org/10.5555/pmc.synthetic", "10.5555/pmc.synthetic"),
+        ("https://doi.org/10.5555/pmc.synthetic", "10.5555/pmc.synthetic"),
+        ("http://dx.doi.org/10.5555/pmc.synthetic", "10.5555/pmc.synthetic"),
+        ("https://dx.doi.org/10.5555/pmc.synthetic", "10.5555/pmc.synthetic"),
+    ),
+)
+def test_pmc_article_ids_accept_only_frozen_doi_envelope_forms(value: str, expected: str) -> None:
+    articleids = [
+        {"idtype": "pmcid", "value": "PMC9000001"},
+        {"idtype": "doi", "value": value},
+    ]
+
+    assert _module()._pmc_article_ids(articleids, "9000001", _pmc_guard()) == (
+        "PMC9000001",
+        expected,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "prefix10.5555/pmc.synthetic",
+        "urn:doi:10.5555/pmc.synthetic",
+        "ftp://doi.org/10.5555/pmc.synthetic",
+        "https://example.org/10.5555/pmc.synthetic",
+        "https://doi.org.evil.test/10.5555/pmc.synthetic",
+        "https://user@doi.org/10.5555/pmc.synthetic",
+        "https://doi.org:443/10.5555/pmc.synthetic",
+        "https://doi.org/10.5555/pmc.synthetic?download=1",
+        "https://doi.org/10.5555/pmc.synthetic#fragment",
+        "%68ttps://doi.org/10.5555/pmc.synthetic",
+        "https%3A%2F%2Fdoi.org%2F10.5555%2Fpmc.synthetic",
+        "https://doi.org/10.5555%2Fpmc.synthetic",
+        "10.5555%2Fpmc.synthetic",
+        "10.5555/pmc.synthetic.",
+        "10.5555/pmc.synthetic\ufffd",
+        "10.5555/https://evil.test/path",
+        "10.5555/javascript:alert(1)",
+    ),
+)
+def test_pmc_article_ids_reject_doi_search_extraction_wrappers_and_unsafe_transport_material(value: str) -> None:
+    articleids = [
+        {"idtype": "pmcid", "value": "PMC9000001"},
+        {"idtype": "doi", "value": value},
+    ]
+
+    with pytest.raises(_PayloadInvalid):
+        _module()._pmc_article_ids(articleids, "9000001", _pmc_guard())
+
+
+@pytest.mark.parametrize(
     "articleids",
     (
         [],
@@ -2501,8 +2778,12 @@ def test_pmc_record_normalizes_only_bounded_metadata_and_drops_numeric_uid() -> 
         ("title", ""),
         ("title", "x" * 4_097),
         ("title", "https://example.org/article"),
+        ("title", "[unsafe](/relative)"),
+        ("title", "safe\u202eunsafe"),
         ("authors", "Synthetic Author"),
         ("authors", [{"name": "https://doi.org/10.5555/pmc.synthetic"}]),
+        ("authors", [{"name": "![unsafe](relative.png)"}]),
+        ("authors", [{"name": "safe\u200bunsafe"}]),
         ("authors", [{"name": "x" * 513}]),
         ("authors", [{}]),
         ("authors", [{"name": "Synthetic"}] * 65),

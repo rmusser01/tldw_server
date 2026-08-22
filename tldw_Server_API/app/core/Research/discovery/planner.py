@@ -56,8 +56,26 @@ _GENERAL_MAX_TERMS = 16
 _GENERAL_MAX_TERM_CHARS = 64
 _GENERAL_MAX_RAW_CHARS = _GENERAL_MAX_TERMS * _GENERAL_MAX_TERM_CHARS + _GENERAL_MAX_TERMS - 1
 _GENERAL_MAX_RAW_UTF8_BYTES = _GENERAL_MAX_TERMS * _GENERAL_MAX_TERM_CHARS * 4 + _GENERAL_MAX_TERMS - 1
+_PUBMED_ROUTE_ID = "pubmed_ncbi_eutils_pubmed_direct"
+_PUBMED_BACKEND_ID = "ncbi_eutils_pubmed"
+_PUBMED_ADAPTER_ID = "pubmed_v2"
 _PUBMED_IDENTITY_POLICY_VERSION = "research-discovery-route-policy-v2-foundation-pubmed-ncbi-identity-2026-08-21"
 _PUBMED_IDENTITY_ADAPTER_VERSION = "pubmed-v2-ncbi-identity"
+_PUBMED_IDENTITY_POLICY_DIGEST = "742b8aca76878ca06ab43ae17130627b5daaebea0a3c3ae25786521a9f159d22"
+_PUBMED_IDENTITY_QUERY_KEYS = (
+    "db",
+    "term",
+    "retstart",
+    "retmax",
+    "retmode",
+    "sort",
+    "datetype",
+    "mindate",
+    "maxdate",
+    "tool",
+    "email",
+    "id",
+)
 _NCBI_TOOL = "tldw_server"
 _NCBI_EMAIL = "contact@tldwproject.com"
 _PUBMED_CENTRAL_ROUTE_ID = "pubmed_central_esearch_summary_direct"
@@ -72,11 +90,38 @@ _PUBMED_CENTRAL_BINDING_ID = "pmc_esearch_ids"
 def _is_identity_pubmed_route(route: AccessRoute) -> bool:
     """Return whether one route is the complete sealed NCBI identity overlay."""
     return (
-        route.route_id == "pubmed_ncbi_eutils_pubmed_direct"
-        and route.backend_id == "ncbi_eutils_pubmed"
-        and route.adapter_id == "pubmed_v2"
+        route.route_id == _PUBMED_ROUTE_ID
+        and route.backend_id == _PUBMED_BACKEND_ID
+        and route.adapter_id == _PUBMED_ADAPTER_ID
         and route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION
         and route.policy.policy_version == _PUBMED_IDENTITY_POLICY_VERSION
+        and _has_exact_pubmed_identity_policy(route)
+    )
+
+
+def _is_foundation_pubmed_policy_owner(route: AccessRoute) -> bool:
+    """Exclude the exact foundation identity from overlay-specific sealing."""
+    return (
+        route.route_id == _PUBMED_ROUTE_ID
+        and route.backend_id == _PUBMED_BACKEND_ID
+        and route.adapter_id == _PUBMED_ADAPTER_ID
+        and route.adapter_version == "foundation-v2"
+        and route.policy.policy_version == "research-discovery-route-policy-v2-foundation"
+    )
+
+
+def _has_pubmed_identity_component(route: AccessRoute) -> bool:
+    """Return whether a non-foundation route claims any PubMed overlay marker."""
+    if _is_foundation_pubmed_policy_owner(route):
+        return False
+    return any(
+        (
+            route.route_id == _PUBMED_ROUTE_ID,
+            route.backend_id == _PUBMED_BACKEND_ID,
+            route.adapter_id == _PUBMED_ADAPTER_ID,
+            route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION,
+            route.policy.policy_version == _PUBMED_IDENTITY_POLICY_VERSION,
+        )
     )
 
 
@@ -134,6 +179,105 @@ def _is_exact_contract_enum_member(
         )
     except (AttributeError, KeyError, TypeError):
         return False
+
+
+def _is_exact_string_tuple(value: object, expected: tuple[str, ...]) -> bool:
+    """Match tuple shape, values, and exact scalar types."""
+    return (
+        type(value) is tuple
+        and len(value) == len(expected)
+        and all(type(actual) is str and actual == approved for actual, approved in zip(value, expected))
+    )
+
+
+def _has_exact_pubmed_identity_policy(route: AccessRoute) -> bool:
+    """Anchor the PubMed identity overlay to one approved route and policy."""
+    policy = route.policy
+    origin = policy.origin
+    return (
+        type(route) is AccessRoute
+        and type(route.route_id) is str
+        and route.route_id == _PUBMED_ROUTE_ID
+        and type(route.backend_id) is str
+        and route.backend_id == _PUBMED_BACKEND_ID
+        and type(route.adapter_id) is str
+        and route.adapter_id == _PUBMED_ADAPTER_ID
+        and type(route.adapter_version) is str
+        and route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION
+        and _is_exact_contract_enum_member(
+            route.route_kind,
+            enum_name="RouteKind",
+            member_name="DIRECT",
+            member_value="direct",
+        )
+        and type(route.query_modes) is tuple
+        and len(route.query_modes) == 1
+        and route.query_modes[0] is QueryMode.STRUCTURED_QUERY
+        and _is_exact_contract_enum_member(
+            route.source_constraint,
+            enum_name="SourceConstraint",
+            member_name="NATIVE_CORPUS",
+            member_value="native_corpus",
+        )
+        and type(route.attribution_basis) is str
+        and route.attribution_basis == "native_response"
+        and route.credential_requirement is CredentialRequirement.NONE
+        and type(route.fallback_order) is int
+        and route.fallback_order == 0
+        and type(route.max_physical_dispatches) is int
+        and route.max_physical_dispatches == 2
+        and type(policy.policy_version) is str
+        and policy.policy_version == _PUBMED_IDENTITY_POLICY_VERSION
+        and type(origin) is ExactOrigin
+        and type(origin.scheme) is str
+        and origin.scheme == "https"
+        and type(origin.host) is str
+        and origin.host == "eutils.ncbi.nlm.nih.gov"
+        and type(origin.port) is int
+        and origin.port == 443
+        and type(policy.policy_digest) is str
+        and policy.policy_digest == _PUBMED_IDENTITY_POLICY_DIGEST
+        and _is_exact_string_tuple(policy.methods, ("GET",))
+        and _is_exact_string_tuple(
+            policy.paths,
+            ("/entrez/eutils/esearch.fcgi", "/entrez/eutils/esummary.fcgi"),
+        )
+        and policy.path_template is None
+        and _is_exact_string_tuple(policy.allowed_query_keys, _PUBMED_IDENTITY_QUERY_KEYS)
+        and type(policy.pagination_query_key) is str
+        and policy.pagination_query_key == "retstart"
+        and policy.pagination_json_body_key is None
+        and type(policy.allowed_json_body_keys) is tuple
+        and policy.allowed_json_body_keys == ()
+        and type(policy.integer_json_body_keys) is tuple
+        and policy.integer_json_body_keys == ()
+        and type(policy.query_value_policies) is tuple
+        and policy.query_value_policies == ()
+        and _has_exact_pubmed_identity_limits(policy.limits)
+    )
+
+
+def _has_exact_pubmed_identity_limits(limits: object) -> bool:
+    if type(limits) is not RouteLimits:
+        return False
+    values = (
+        limits.max_pages,
+        limits.max_redirects,
+        limits.max_retries,
+        limits.timeout_ms,
+        limits.max_response_bytes,
+        limits.max_results,
+        limits.max_request_body_bytes,
+    )
+    return all(type(value) is int for value in values) and values == (
+        1,
+        0,
+        0,
+        20_000,
+        2_097_152,
+        100,
+        16_384,
+    )
 
 
 def _has_exact_pubmed_central_policy(route: AccessRoute) -> bool:
@@ -346,6 +490,8 @@ def compile_discovery_plan(
                 not _is_pubmed_central_route(route) or not _has_exact_pubmed_central_policy(route)
             ):
                 raise _planning_error(f"invalid_pubmed_central_route_identity:{route.route_id}")
+            if _has_pubmed_identity_component(route) and not _is_identity_pubmed_route(route):
+                raise _planning_error(f"invalid_pubmed_route_identity:{route.route_id}")
             if query_context.mode not in route.query_modes:
                 skipped.append(
                     SkippedTarget(
@@ -794,15 +940,7 @@ def _build_intents(
                 ),
             ),
         )
-    if any(
-        (
-            route.route_id == "pubmed_ncbi_eutils_pubmed_direct",
-            route.backend_id == "ncbi_eutils_pubmed",
-            route.adapter_id == "pubmed_v2",
-            route.adapter_version == _PUBMED_IDENTITY_ADAPTER_VERSION,
-            route.policy.policy_version == _PUBMED_IDENTITY_POLICY_VERSION,
-        )
-    ):
+    if _has_pubmed_identity_component(route):
         raise _planning_error(f"invalid_pubmed_route_identity:{route.route_id}")
 
     pairs_by_backend = {

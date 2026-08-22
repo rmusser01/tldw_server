@@ -10,6 +10,9 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Research.discovery import planner as planner_module
+from tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central import (
+    clinicaltrials_pubmed_central_shadow_registry,
+)
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
     AttributionMatch,
@@ -76,6 +79,10 @@ _FOUNDATION_SOURCE_IDS = (
 )
 
 
+class _EqualStringSubclass(str):
+    pass
+
+
 def _budget(**changes: int) -> BudgetCeilings:
     values = {
         "max_route_attempts": 16,
@@ -103,6 +110,106 @@ def _request(
         filters=filters,
         result_limit=result_limit,
     )
+
+
+def _pubmed_overlay_registry_with_mutation(mutation: str) -> DiscoveryRegistry:
+    """Build one valid registry whose identity overlay has one named drift."""
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    route_id = "pubmed_ncbi_eutils_pubmed_direct"
+    route = registry.get_route(route_id)
+    policy = route.policy
+    sources = registry.sources
+
+    if mutation == "origin_scheme":
+        policy = replace(policy, origin=ExactOrigin("http", "eutils.ncbi.nlm.nih.gov", 80), policy_digest="")
+    elif mutation == "origin_host":
+        policy = replace(policy, origin=ExactOrigin("https", "attacker.example", 443), policy_digest="")
+    elif mutation == "origin_port":
+        policy = replace(policy, origin=ExactOrigin("https", "eutils.ncbi.nlm.nih.gov", 444), policy_digest="")
+    elif mutation == "method":
+        policy = replace(policy, methods=("POST",), policy_digest="")
+    elif mutation == "method_scalar_type":
+        object.__setattr__(policy, "methods", (_EqualStringSubclass("GET"),))
+    elif mutation == "path_order":
+        policy = replace(policy, paths=tuple(reversed(policy.paths)), policy_digest="")
+    elif mutation == "path_scalar_type":
+        object.__setattr__(
+            policy,
+            "paths",
+            (_EqualStringSubclass(policy.paths[0]), *policy.paths[1:]),
+        )
+    elif mutation == "query_key_order":
+        keys = policy.allowed_query_keys
+        policy = replace(policy, allowed_query_keys=(keys[1], keys[0], *keys[2:]), policy_digest="")
+    elif mutation == "query_key_scalar_type":
+        keys = policy.allowed_query_keys
+        object.__setattr__(policy, "allowed_query_keys", (_EqualStringSubclass(keys[0]), *keys[1:]))
+    elif mutation == "pagination_key":
+        policy = replace(policy, pagination_query_key="id", policy_digest="")
+    elif mutation.startswith("limit_"):
+        limit_name, limit_value = {
+            "limit_pages": ("max_pages", 2),
+            "limit_redirects": ("max_redirects", 1),
+            "limit_retries": ("max_retries", 1),
+            "limit_timeout": ("timeout_ms", 19_999),
+            "limit_response_bytes": ("max_response_bytes", 2_097_151),
+            "limit_results": ("max_results", 99),
+            "limit_request_body_bytes": ("max_request_body_bytes", 16_383),
+        }[mutation]
+        policy = replace(
+            policy,
+            limits=replace(policy.limits, **{limit_name: limit_value}),
+            policy_digest="",
+        )
+        if mutation in {"limit_pages", "limit_redirects", "limit_retries"}:
+            route = replace(route, max_physical_dispatches=3)
+    elif mutation == "route_kind":
+        route = replace(route, route_kind=RouteKind.AGGREGATOR)
+    elif mutation == "query_modes":
+        route = replace(route, query_modes=(QueryMode.GENERAL_FREE_TEXT,))
+    elif mutation == "source_constraint":
+        route = replace(route, source_constraint=SourceConstraint.PROVIDER_SOURCE_FILTER)
+        predicate = SourcePredicate(
+            field_path=("provider",),
+            operator=PredicateOperator.EQUALS_ANY,
+            values=("pubmed",),
+        )
+        sources = tuple(
+            (
+                replace(
+                    source,
+                    route_references=tuple(
+                        replace(reference, source_predicate=predicate) if reference.route_id == route_id else reference
+                        for reference in source.route_references
+                    ),
+                )
+                if source.catalog_source_id == "pubmed"
+                else source
+            )
+            for source in sources
+        )
+    elif mutation == "attribution_basis":
+        route = replace(route, attribution_basis="attacker_claimed_native_response")
+    elif mutation == "credential_requirement":
+        route = replace(route, credential_requirement=CredentialRequirement.API_KEY)
+    elif mutation == "fallback_order":
+        route = replace(route, fallback_order=1)
+    elif mutation == "physical_allowance":
+        route = replace(route, max_physical_dispatches=3)
+    elif mutation not in {"policy_digest", "query_modes_scalar_type"}:
+        raise AssertionError(f"unknown test mutation: {mutation}")
+
+    route = replace(route, policy=policy)
+    if mutation == "query_modes_scalar_type":
+        object.__setattr__(route, "query_modes", ("structured_query",))
+    registry = replace(
+        registry,
+        sources=sources,
+        routes=tuple(route if candidate.route_id == route_id else candidate for candidate in registry.routes),
+    )
+    if mutation == "policy_digest":
+        object.__setattr__(route.policy, "policy_digest", "f" * 64)
+    return registry
 
 
 def _typed_query_registry() -> tuple[DiscoveryRegistry, ReadinessOverlay]:
@@ -396,6 +503,87 @@ def _aggregator_registry(
         ),
     )
     return registry, readiness
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "origin_scheme",
+        "origin_host",
+        "origin_port",
+        "method",
+        "method_scalar_type",
+        "path_order",
+        "path_scalar_type",
+        "query_key_order",
+        "query_key_scalar_type",
+        "pagination_key",
+        "limit_pages",
+        "limit_redirects",
+        "limit_retries",
+        "limit_timeout",
+        "limit_response_bytes",
+        "limit_results",
+        "limit_request_body_bytes",
+        "policy_digest",
+        "route_kind",
+        "query_modes",
+        "query_modes_scalar_type",
+        "source_constraint",
+        "attribution_basis",
+        "credential_requirement",
+        "fallback_order",
+        "physical_allowance",
+    ),
+)
+def test_pubmed_identity_overlay_rejects_exact_policy_or_route_semantic_drift(mutation: str) -> None:
+    registry = _pubmed_overlay_registry_with_mutation(mutation)
+
+    with pytest.raises(PlanningError) as caught:
+        compile_discovery_plan(
+            _request(("pubmed",), result_limit=7),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(
+                max_physical_dispatches=8,
+                max_pages_per_route=3,
+                max_redirects=2,
+                max_retries=2,
+            ),
+        )
+
+    assert caught.value.code == "invalid_pubmed_route_identity:pubmed_ncbi_eutils_pubmed_direct"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("backend_id", "ncbi_eutils_pubmed"),
+        ("adapter_id", "pubmed_v2"),
+    ),
+)
+def test_pmc_identity_classifier_precedes_an_overlapping_pubmed_marker(field: str, value: str) -> None:
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    route = registry.get_route("pubmed_central_esearch_summary_direct")
+    mutated = replace(route, **{field: value})
+    registry = replace(
+        registry,
+        routes=tuple(mutated if candidate.route_id == route.route_id else candidate for candidate in registry.routes),
+    )
+
+    with pytest.raises(PlanningError) as caught:
+        compile_discovery_plan(
+            _request(
+                ("pubmed_central",),
+                query=planner_module.GeneralFreeTextQuery("bounded discovery"),
+                result_limit=7,
+            ),
+            registry=registry,
+            readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+            budget=_budget(),
+        )
+
+    assert caught.value.code == "invalid_pubmed_central_route_identity:pubmed_central_esearch_summary_direct"
 
 
 def test_planning_request_accepts_only_exact_public_query_types() -> None:

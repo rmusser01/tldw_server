@@ -8,6 +8,7 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date
+from html import unescape
 from html.parser import HTMLParser
 from types import MappingProxyType
 from typing import Any, cast
@@ -135,15 +136,12 @@ _PUBMED_OVERLAY_QUERY_KEYS = (
     "id",
 )
 _NCT_ID_RE = re.compile(r"NCT[0-9]{8}\Z", re.ASCII)
-_RESIDUAL_ENTITY_RE = re.compile(r"&(?:#[0-9]{1,7}|#x[0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{0,31});", re.ASCII)
-_COMMONMARK_LINK_RE = re.compile(
-    r"!?\[[^\]\r\n]{0,1024}\]\([^\)\r\n]{0,4096}\)|<[^>\r\n]{0,4096}://[^>\r\n]{0,4096}>",
-    re.ASCII,
-)
+_RESIDUAL_ENTITY_RE = re.compile(r"&(?:#[0-9]+|#[xX][0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);", re.ASCII)
 _URL_MATERIAL_RE = re.compile(
     r"(?:https?://|ftp://|www\.|mailto:|data:|javascript:)[^\s<>\x00-\x1f]{0,4096}",
     re.IGNORECASE | re.ASCII,
 )
+_PMC_DOI_RE = re.compile(r"10\.[0-9]{4,9}/[A-Z0-9._;()/:+\-]+\Z", re.IGNORECASE | re.ASCII)
 
 
 def clinicaltrials_pubmed_central_shadow_registry() -> DiscoveryRegistry:
@@ -319,6 +317,31 @@ class _ClinicalTrialsPage:
     next_page_token: str | None
 
 
+def _exact_route_limits(value: object, expected: RouteLimits) -> bool:
+    """Require one exact RouteLimits object whose scalar fields are integers."""
+    if type(value) is not RouteLimits:
+        return False
+    actual_values = (
+        value.max_pages,
+        value.max_redirects,
+        value.max_retries,
+        value.timeout_ms,
+        value.max_response_bytes,
+        value.max_results,
+        value.max_request_body_bytes,
+    )
+    expected_values = (
+        expected.max_pages,
+        expected.max_redirects,
+        expected.max_retries,
+        expected.timeout_ms,
+        expected.max_response_bytes,
+        expected.max_results,
+        expected.max_request_body_bytes,
+    )
+    return all(type(item) is int for item in actual_values) and actual_values == expected_values
+
+
 def _trusted_clinicaltrials_inputs(
     group: object,
 ) -> tuple[PlannedDispatchGroup, _ParsingProfile, int, int]:
@@ -327,6 +350,7 @@ def _trusted_clinicaltrials_inputs(
         raise DiscoveryAdapterError("provider_payload_invalid")
     profile = _FAMILY_PARSING_PROFILES.get((group.adapter_id, group.adapter_version))
     exact_policy = _clinicaltrials_route().policy
+    exact_limits = RouteLimits(2, 0, 0, 20_000, 2_097_152, 100, 16_384)
     if (
         group.route_id != "clinicaltrials_gov_studies_search_direct"
         or group.backend_id != "clinicaltrials_gov_api_v2"
@@ -334,26 +358,55 @@ def _trusted_clinicaltrials_inputs(
         or group.adapter_version != CLINICALTRIALS_GOV_ADAPTER_VERSION
         or profile is None
         or group.policy_digest != exact_policy.policy_digest
-        or group.fallback_order != 0
+        or not _exact_route_limits(group.limits, exact_limits)
+        or type(group.normalized_query) is not str
+        or not group.normalized_query
+        or type(group.filters) is not tuple
         or group.filters != ()
-        or group.allowance.pages != 2
-        or group.allowance.physical_dispatches != 2
-        or group.allowance.redirects != 0
-        or group.allowance.retries != 0
+        or type(group.logical_attempts) is not tuple
+        or len(group.logical_attempts) != 1
+        or type(group.logical_attempts[0]) is not PlannedLogicalAttempt
+        or type(group.logical_attempts[0].logical_attempt_id) is not str
+        or not group.logical_attempts[0].logical_attempt_id
+        or type(group.logical_attempts[0].catalog_source_id) is not str
+        or group.logical_attempts[0].catalog_source_id != "clinicaltrials_gov"
+        or type(group.logical_attempts[0].selection_reason) is not str
+        or group.logical_attempts[0].selection_reason != "explicit"
+        or group.logical_attempts[0].source_predicate is not None
+        or type(group.fallback_order) is not int
+        or group.fallback_order != 0
+        or type(group.allowance) is not DispatchAllowance
+        or any(
+            type(value) is not int
+            for value in (
+                group.allowance.physical_dispatches,
+                group.allowance.pages,
+                group.allowance.redirects,
+                group.allowance.retries,
+            )
+        )
+        or (
+            group.allowance.physical_dispatches,
+            group.allowance.pages,
+            group.allowance.redirects,
+            group.allowance.retries,
+        )
+        != (2, 2, 0, 0)
         or type(group.intents) is not tuple
         or len(group.intents) != 1
     ):
         raise DiscoveryAdapterError("provider_payload_invalid")
     limits = group.limits
-    if limits != RouteLimits(2, 0, 0, 20_000, 2_097_152, 100, 16_384):
-        raise DiscoveryAdapterError("provider_payload_invalid")
     intent = group.intents[0]
     if (
-        type(intent.query_pairs) is not tuple
+        type(intent) is not DispatchIntent
+        or type(intent.query_pairs) is not tuple
+        or any(type(pair) is not QueryPair for pair in intent.query_pairs)
         or type(intent.json_body_pairs) is not tuple
         or intent.json_body_pairs != ()
         or type(intent.query_bindings) is not tuple
         or intent.query_bindings != ()
+        or not _exact_route_limits(intent.limits, exact_limits)
     ):
         raise DiscoveryAdapterError("provider_payload_invalid")
     pairs = tuple((pair.name, pair.value) for pair in intent.query_pairs)
@@ -363,7 +416,6 @@ def _trusted_clinicaltrials_inputs(
         or intent.operation_kind is not OperationKind.SEARCH
         or intent.method != "GET"
         or intent.path != "/api/v2/studies"
-        or intent.limits != limits
         or intent.policy_digest != group.policy_digest
         or len(pairs) != 6
         or tuple(name for name, _value in pairs)
@@ -379,14 +431,18 @@ def _trusted_clinicaltrials_inputs(
     ):
         raise DiscoveryAdapterError("provider_payload_invalid")
     literal_terms = pairs[0][1].split(" AND ") if type(pairs[0][1]) is str else ()
-    if not 1 <= len(literal_terms) <= 8 or any(
-        len(term) < 3
-        or term[0] != '"'
-        or term[-1] != '"'
-        or not 1 <= len(term[1:-1]) <= 32
-        or not all(character.isalnum() for character in term[1:-1])
-        for term in literal_terms
-    ):
+    normalized_terms: list[str] = []
+    for term in literal_terms:
+        if (
+            len(term) < 3
+            or term[0] != '"'
+            or term[-1] != '"'
+            or not 1 <= len(term[1:-1]) <= 32
+            or not all(character.isalnum() for character in term[1:-1])
+        ):
+            raise DiscoveryAdapterError("provider_payload_invalid")
+        normalized_terms.append(term[1:-1])
+    if not 1 <= len(normalized_terms) <= 8 or " ".join(normalized_terms) != group.normalized_query:
         raise DiscoveryAdapterError("provider_payload_invalid")
     raw_page_size = pairs[4][1]
     if (
@@ -403,7 +459,7 @@ def _trusted_clinicaltrials_inputs(
 
 
 def _has_forbidden_text_character(value: str) -> bool:
-    return any(character == "\ufffd" or unicodedata.category(character) in {"Cc", "Cs"} for character in value)
+    return any(character == "\ufffd" or unicodedata.category(character) in {"Cc", "Cf", "Cs"} for character in value)
 
 
 def _contains_residual_markup(value: str) -> bool:
@@ -415,6 +471,63 @@ def _contains_url_material(value: str) -> bool:
     return _URL_MATERIAL_RE.search(value) is not None or has_unsafe_url_material(value)
 
 
+def _contains_commonmark_link_form(value: str) -> bool:
+    """Detect unescaped inline, image, and reference forms in one bounded scan."""
+    stack: list[tuple[int, int]] = []
+    line_start = 0
+    escaped = False
+    for index, character in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\":
+            escaped = True
+            continue
+        if character == "\n":
+            line_start = index + 1
+            continue
+        if character == "[":
+            stack.append((index, line_start))
+            continue
+        if character != "]" or not stack:
+            continue
+        opening, opening_line_start = stack.pop()
+        following = index + 1
+        if following < len(value) and value[following] in "([":
+            return True
+        if (
+            following < len(value)
+            and value[following] == ":"
+            and opening - opening_line_start <= 3
+            and value[opening_line_start:opening].strip(" ") == ""
+        ):
+            return True
+    return False
+
+
+def _unsafe_inert_human_text(value: str) -> bool:
+    """Return whether a decoded plain-text candidate is unsafe to retain."""
+    return (
+        _has_forbidden_text_character(value)
+        or _contains_residual_markup(value)
+        or _contains_commonmark_link_form(value)
+        or _contains_url_material(value)
+    )
+
+
+def _normalized_inert_human_text(value: str, *, max_chars: int) -> str | None:
+    """Validate a decoded shadow, then normalize without decoding provider text."""
+    if len(value) > max_chars or _unsafe_inert_human_text(value):
+        return None
+    decoded = unescape(value)
+    if len(decoded) > max_chars or _unsafe_inert_human_text(decoded):
+        return None
+    normalized = " ".join(value.split())
+    if not normalized or len(normalized) > max_chars or _unsafe_inert_human_text(normalized):
+        return None
+    return normalized
+
+
 def _plain_clinical_text(
     value: Any,
     *,
@@ -422,16 +535,7 @@ def _plain_clinical_text(
     required: bool,
 ) -> str | None:
     """Normalize Unicode whitespace and reject controls, markup, or URL material."""
-    invalid = (
-        type(value) is not str
-        or len(value) > max_chars
-        or _has_forbidden_text_character(value)
-        or _contains_residual_markup(value)
-        or _contains_url_material(value)
-    )
-    normalized = None if invalid else " ".join(value.split())
-    if normalized is not None and (not normalized or len(normalized) > max_chars):
-        normalized = None
+    normalized = None if type(value) is not str else _normalized_inert_human_text(value, max_chars=max_chars)
     if normalized is None and required:
         raise _PayloadInvalid
     return normalized
@@ -463,8 +567,16 @@ def _legacy_summary_text(value: Any) -> str | None:
     if (
         len(value) > 65_536
         or _has_forbidden_text_character(value)
-        or _COMMONMARK_LINK_RE.search(value) is not None
+        or _contains_commonmark_link_form(value)
         or _contains_url_material(value)
+    ):
+        return None
+    decoded_source = unescape(value)
+    if (
+        len(decoded_source) > 65_536
+        or _has_forbidden_text_character(decoded_source)
+        or _contains_commonmark_link_form(decoded_source)
+        or _contains_url_material(decoded_source)
     ):
         return None
     try:
@@ -473,16 +585,7 @@ def _legacy_summary_text(value: Any) -> str | None:
         parser.close()
     except Exception:  # noqa: BLE001 - hostile optional markup is dropped fail-closed.
         return None
-    text = " ".join("".join(parser.parts).split())
-    if (
-        not text
-        or len(text) > 16_384
-        or _has_forbidden_text_character(text)
-        or _contains_residual_markup(text)
-        or _contains_url_material(text)
-    ):
-        return None
-    return text
+    return _normalized_inert_human_text("".join(parser.parts), max_chars=16_384)
 
 
 def _partial_date(value: Any) -> str | None:
@@ -774,7 +877,7 @@ def _trusted_pubmed_central_inputs(
         or group.adapter_id != PUBMED_CENTRAL_ADAPTER_ID
         or group.adapter_version != PUBMED_CENTRAL_ADAPTER_VERSION
         or group.policy_digest != exact_policy.policy_digest
-        or not _exact_pubmed_central_limits(group.limits, exact_limits)
+        or not _exact_route_limits(group.limits, exact_limits)
         or type(group.normalized_query) is not str
         or not group.normalized_query
         or type(group.filters) is not tuple
@@ -822,8 +925,8 @@ def _trusted_pubmed_central_inputs(
         or search.query_bindings != ()
         or type(summary.query_bindings) is not tuple
         or len(summary.query_bindings) != 1
-        or not _exact_pubmed_central_limits(search.limits, exact_limits)
-        or not _exact_pubmed_central_limits(summary.limits, exact_limits)
+        or not _exact_route_limits(search.limits, exact_limits)
+        or not _exact_route_limits(summary.limits, exact_limits)
     ):
         raise DiscoveryAdapterError("provider_payload_invalid")
 
@@ -915,31 +1018,6 @@ def _trusted_pubmed_central_inputs(
     )
 
 
-def _exact_pubmed_central_limits(value: object, expected: RouteLimits) -> bool:
-    """Require every PMC route-limit scalar to retain its exact integer type."""
-    if type(value) is not RouteLimits:
-        return False
-    actual_values = (
-        value.max_pages,
-        value.max_redirects,
-        value.max_retries,
-        value.timeout_ms,
-        value.max_response_bytes,
-        value.max_results,
-        value.max_request_body_bytes,
-    )
-    expected_values = (
-        expected.max_pages,
-        expected.max_redirects,
-        expected.max_retries,
-        expected.timeout_ms,
-        expected.max_response_bytes,
-        expected.max_results,
-        expected.max_request_body_bytes,
-    )
-    return all(type(item) is int for item in actual_values) and actual_values == expected_values
-
-
 def _pmc_uid(value: Any, max_chars: int) -> tuple[str, int]:
     """Return one canonical PMC UID string and its transport-only number."""
     if (
@@ -1016,18 +1094,30 @@ def _plain_pmc_text(
     required: bool,
 ) -> str | None:
     """Normalize human text and reject controls, markup, or any URL token."""
-    invalid = (
-        type(value) is not str
-        or len(value) > max_chars
-        or _has_forbidden_text_character(value)
-        or any(unicodedata.category(character) == "Cf" for character in value)
-        or _contains_residual_markup(value)
-        or _contains_url_material(value)
-    )
-    normalized = None if invalid else " ".join(value.split())
-    if normalized is not None and (not normalized or len(normalized) > max_chars):
-        normalized = None
+    normalized = None if type(value) is not str else _normalized_inert_human_text(value, max_chars=max_chars)
     if normalized is None and required:
+        raise _PayloadInvalid
+    return normalized
+
+
+def _normalized_pmc_doi(value: str) -> str:
+    """Return a DOI only from the frozen PMC bare, label, or resolver envelope."""
+    if value == "" or value == "\ufffd" or "\ufffd" in value:
+        raise _PayloadInvalid
+    folded = value.casefold()
+    prefixes = (
+        "https://dx.doi.org/",
+        "http://dx.doi.org/",
+        "https://doi.org/",
+        "http://doi.org/",
+        "doi:",
+    )
+    prefix = next((candidate for candidate in prefixes if folded.startswith(candidate)), None)
+    candidate = value[len(prefix) :] if prefix is not None else value
+    if _PMC_DOI_RE.fullmatch(candidate) is None or _contains_url_material(candidate):
+        raise _PayloadInvalid
+    normalized = normalize_doi(candidate)
+    if normalized is None or normalized != candidate.casefold():
         raise _PayloadInvalid
     return normalized
 
@@ -1056,9 +1146,7 @@ def _pmc_article_ids(
     pmcid = recognized.get("pmcid")
     if pmcid != f"PMC{expected_uid}" or re.fullmatch(r"PMC[1-9][0-9]{0,15}", pmcid or "", re.ASCII) is None:
         raise _PayloadInvalid
-    doi = None if "doi" not in recognized else normalize_doi(recognized["doi"])
-    if "doi" in recognized and doi is None:
-        raise _PayloadInvalid
+    doi = None if "doi" not in recognized else _normalized_pmc_doi(recognized["doi"])
     raw_pmid = recognized.get("pmid")
     pmid = None if raw_pmid in {None, "0"} else raw_pmid
     if pmid is not None and re.fullmatch(r"[1-9][0-9]{0,15}", pmid, re.ASCII) is None:
