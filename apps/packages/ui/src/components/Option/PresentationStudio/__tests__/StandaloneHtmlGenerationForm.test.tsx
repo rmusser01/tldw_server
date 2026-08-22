@@ -74,6 +74,7 @@ const baseHook = () => ({
   progressText: null,
   safeError: null,
   recoveryAvailable: false,
+  draftRecoveryAvailable: false,
   storageWarning: null,
   updateField: vi.fn(),
   submit: vi.fn(),
@@ -211,6 +212,21 @@ describe("StandaloneHtmlGenerationForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resume" }))
     fireEvent.click(screen.getByRole("button", { name: "Forget this job; generation continues" }))
     expect(mocks.hook.resume).toHaveBeenCalledTimes(1)
+    expect(mocks.hook.forget).toHaveBeenCalledTimes(1)
+  })
+
+  it("exposes preserved draft recovery and Forget without a generation receipt", async () => {
+    mocks.hook = {
+      ...baseHook(),
+      draft: { ...baseHook().draft, source: "Preserved direct material", audience: "Engineers" },
+      draftRecoveryAvailable: true
+    }
+    const { StandaloneHtmlGenerationForm } = await loadSubject()
+    render(<StandaloneHtmlGenerationForm capabilities={null} recoveryOnly />)
+
+    expect(screen.getByText("Preserved draft")).toBeVisible()
+    expect(screen.getByDisplayValue("Preserved direct material")).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Forget preserved draft" }))
     expect(mocks.hook.forget).toHaveBeenCalledTimes(1)
   })
 })

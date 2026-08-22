@@ -25,11 +25,24 @@ export const PresentationStudioNew: React.FC = () => {
   }, [recoveryAvailable])
 
   const standaloneContent = React.useMemo(() => {
+    if (slides.capabilities && slides.status === "loading") {
+      return (
+        <StandaloneHtmlGenerationForm
+          capabilities={slides.capabilities}
+          authorityConfirmed={false}
+          refreshing
+          onCapabilitiesChanged={slides.retry}
+          onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
+          onStopWaiting={() => navigate("/presentation-studio")}
+        />
+      )
+    }
     if (recoveryAvailable && !slides.canGenerate) {
       return (
         <StandaloneHtmlGenerationForm
           capabilities={slides.capabilities}
           recoveryOnly
+          authorityConfirmed={false}
           onCapabilitiesChanged={slides.retry}
           onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
           onStopWaiting={() => navigate("/presentation-studio")}
@@ -47,6 +60,26 @@ export const PresentationStudioNew: React.FC = () => {
       return <StatePanel state="unavailable" title="Presentation Studio is offline" message="Reconnect before starting generation." primaryAction={{ label: "Retry", onClick: () => void slides.retry() }} />
     }
     if (slides.status === "error" || slides.status === "auth_required" || slides.status === "forbidden") {
+      if (slides.capabilities) {
+        return (
+          <div className="space-y-4">
+            <StandaloneHtmlGenerationForm
+              capabilities={slides.capabilities}
+              authorityConfirmed={false}
+              onCapabilitiesChanged={slides.retry}
+              onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
+              onStopWaiting={() => navigate("/presentation-studio")}
+            />
+            <StatePanel
+              state="error"
+              title="Generation capabilities could not refresh"
+              message="The prior target is shown for reference only. Submission stays unavailable until the current server contract is confirmed."
+              primaryAction={{ label: "Retry", onClick: () => void slides.retry() }}
+              role="alert"
+            />
+          </div>
+        )
+      }
       return (
         <StatePanel
           state="error"

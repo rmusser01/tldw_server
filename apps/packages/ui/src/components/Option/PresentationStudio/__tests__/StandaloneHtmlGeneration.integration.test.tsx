@@ -181,6 +181,31 @@ describe("Standalone HTML form and client integration", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeVisible()
   })
 
+  it("clears stale progress when a terminal receipt omits progress", async () => {
+    mocks.submit.mockResolvedValue({
+      ...pendingReceipt,
+      status: "running",
+      progress_text: "Validating generated document"
+    })
+    mocks.statusEnvelope.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        ...pendingReceipt,
+        status: "failed",
+        error_code: "provider_failed",
+        error_message: "Provider failed"
+      },
+      headers: {},
+      retryAfterMs: null
+    })
+    await renderReadyForm()
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate standalone presentation" }))
+    expect(await screen.findByText("Failed")).toBeVisible()
+    expect(screen.queryByText("Validating generated document")).not.toBeInTheDocument()
+  })
+
   it("uses the effective five-slide cap in the rendered control", async () => {
     mocks.submit.mockResolvedValue(pendingReceipt)
     mocks.statusEnvelope.mockReturnValue(new Promise(() => undefined))
