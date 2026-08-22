@@ -4,7 +4,7 @@
   "manifest_items_sha256": "cef8c83a2f6cf0640d88e6300f54205363654d800927263c2d918060e6a28339",
   "closure_policy_version": "credentialless-public-v2",
   "generated_at_utc": "2026-07-15T20:46:48Z",
-  "rows_sha256": "76e3118f7909368fe8056f0a55f492e408eaa6d6aab52c02d13742dc4304785b",
+  "rows_sha256": "d3b818ea9c9d08c5e1973398fb0a25a878ef2baf03a93ab16de5b16166e0bc26",
   "rows": [
     {
       "inventory_id": "sourclip-2026-07-13-0001",
@@ -1851,7 +1851,7 @@
         {
           "kind": "implementation",
           "reference_type": "https_url",
-          "reference": "https://github.com/rmusser01/tldw_server/blob/8bbff7820f0d05a2c25d0f2561b0241d0024d5d9/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
+          "reference": "https://github.com/rmusser01/tldw_server/blob/7d0f1fa3574455753cf228f27fc60c3f2511f218/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
           "claim": "Checked-in synthetic fixtures prove the bounded ClinicalTrials.gov adapter and modified metadata projection without live or product-surface certification."
         }
       ],
@@ -1924,7 +1924,7 @@
         {
           "kind": "implementation",
           "reference_type": "https_url",
-          "reference": "https://github.com/rmusser01/tldw_server/blob/8bbff7820f0d05a2c25d0f2561b0241d0024d5d9/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
+          "reference": "https://github.com/rmusser01/tldw_server/blob/7d0f1fa3574455753cf228f27fc60c3f2511f218/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
           "claim": "Checked-in synthetic fixtures prove bounded PMC ESearch and ESummary metadata execution without live, abstract, full-text, or product-surface certification."
         }
       ],

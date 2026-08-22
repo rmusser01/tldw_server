@@ -105,8 +105,8 @@
           "reference_type": "https_url",
           "host": "github.com",
           "path": "tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
-          "revision": "8bbff7820f0d05a2c25d0f2561b0241d0024d5d9",
-          "reference": "https://github.com/rmusser01/tldw_server/blob/8bbff7820f0d05a2c25d0f2561b0241d0024d5d9/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
+          "revision": "7d0f1fa3574455753cf228f27fc60c3f2511f218",
+          "reference": "https://github.com/rmusser01/tldw_server/blob/7d0f1fa3574455753cf228f27fc60c3f2511f218/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
           "claim": "Checked-in synthetic fixtures prove the bounded ClinicalTrials.gov adapter and modified metadata projection without live or product-surface certification."
         },
         "entries": [
@@ -115,8 +115,8 @@
             "reference_type": "https_url",
             "host": "github.com",
             "path": "tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
-            "revision": "8bbff7820f0d05a2c25d0f2561b0241d0024d5d9",
-            "reference": "https://github.com/rmusser01/tldw_server/blob/8bbff7820f0d05a2c25d0f2561b0241d0024d5d9/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
+            "revision": "7d0f1fa3574455753cf228f27fc60c3f2511f218",
+            "reference": "https://github.com/rmusser01/tldw_server/blob/7d0f1fa3574455753cf228f27fc60c3f2511f218/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
             "claim": "Checked-in synthetic fixtures prove the bounded ClinicalTrials.gov adapter and modified metadata projection without live or product-surface certification."
           }
         ],
@@ -154,8 +154,8 @@
           "reference_type": "https_url",
           "host": "github.com",
           "path": "tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
-          "revision": "8bbff7820f0d05a2c25d0f2561b0241d0024d5d9",
-          "reference": "https://github.com/rmusser01/tldw_server/blob/8bbff7820f0d05a2c25d0f2561b0241d0024d5d9/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
+          "revision": "7d0f1fa3574455753cf228f27fc60c3f2511f218",
+          "reference": "https://github.com/rmusser01/tldw_server/blob/7d0f1fa3574455753cf228f27fc60c3f2511f218/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
           "claim": "Checked-in synthetic fixtures prove bounded PMC ESearch and ESummary metadata execution without live, abstract, full-text, or product-surface certification."
         },
         "entries": [
@@ -164,8 +164,8 @@
             "reference_type": "https_url",
             "host": "github.com",
             "path": "tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
-            "revision": "8bbff7820f0d05a2c25d0f2561b0241d0024d5d9",
-            "reference": "https://github.com/rmusser01/tldw_server/blob/8bbff7820f0d05a2c25d0f2561b0241d0024d5d9/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
+            "revision": "7d0f1fa3574455753cf228f27fc60c3f2511f218",
+            "reference": "https://github.com/rmusser01/tldw_server/blob/7d0f1fa3574455753cf228f27fc60c3f2511f218/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
             "claim": "Checked-in synthetic fixtures prove bounded PMC ESearch and ESummary metadata execution without live, abstract, full-text, or product-surface certification."
           }
         ],
@@ -179,10 +179,10 @@
   "required_implemented_source_blockers": [],
   "digests": {
     "manifest": "6715db5a499abb13a3095c5153566323afd037db5ce0ff77ade7b629d5137c1e",
-    "ledger": "dd4284da9bf96967629a362c14fc14768150cd1ec30f8bfe03a41f78cb207396",
-    "ledger_rows": "76e3118f7909368fe8056f0a55f492e408eaa6d6aab52c02d13742dc4304785b",
+    "ledger": "51dbdf0deaf62144710522cd1824b6131b24a3e3d113fad0019e7680540f4ec3",
+    "ledger_rows": "d3b818ea9c9d08c5e1973398fb0a25a878ef2baf03a93ab16de5b16166e0bc26",
     "schema": "ac85c7889ce84d25b8ddf9473c8fa1a8db43da848c683f1dbc1dce91a3375f29",
-    "validator": "39cb0f6df9182a57bcb4194eb8c83e25fd96fba7d4b846a74f34517f318f932c",
+    "validator": "a5b010a9ad182c1d44e54723845d68a176890d4db3a749d980ee0cc602727d0e",
     "schema_validator": "ef79194445aa2544a3dd4b52cadcfd1b4efe99e52e49aabfb499bb3caa46fe16"
   },
   "structurally_valid": true,
