@@ -28,6 +28,10 @@ const isAbortError = (error: unknown): boolean =>
     ? error.name === "AbortError"
     : isRecord(error) && error.name === "AbortError"
 
+const isAmbiguousTransportFailure = (error: unknown): boolean =>
+  error instanceof TypeError &&
+  !(isRecord(error) && typeof error.status === "number")
+
 const normalizeError = (error: unknown): SharedWorkspaceError => {
   const structured: StructuredApiErrorDetail =
     getStructuredApiErrorDetail(error) ?? {}
@@ -55,13 +59,18 @@ const defaultRequestId = (): string => {
 const immutableRequest = (
   requestId: string,
   query: string,
+  sourceScopeMode: "all" | "include",
   sourceIds: string[],
   provider: string | null,
   model: string | null
 ): Readonly<SharedChatRequest> => {
-  const ids = Object.freeze(Array.from(new Set(sourceIds)).sort())
+  const ids = Object.freeze(
+    sourceScopeMode === "all"
+      ? []
+      : Array.from(new Set(sourceIds)).sort()
+  )
   const sourceScope = Object.freeze({
-    mode: "include" as const,
+    mode: sourceScopeMode,
     source_ids: ids
   })
   return Object.freeze({
@@ -109,6 +118,13 @@ export const useSharedResearchWorkspace = (
     []
   )
 
+  const isCurrentOperation = React.useCallback(
+    (operation: Operation, controller: AbortController): boolean =>
+      controllersRef.current[operation] === controller &&
+      !controller.signal.aborted,
+    []
+  )
+
   React.useLayoutEffect(() => {
     abortAll()
     const generation = generationRef.current + 1
@@ -119,10 +135,16 @@ export const useSharedResearchWorkspace = (
     void sharedWorkspacesApi
       .bootstrap(shareId, controller.signal)
       .then((bootstrap) => {
+        if (!isCurrentOperation("bootstrap", controller)) return
         dispatch({ type: "bootstrapSucceeded", generation, bootstrap })
       })
       .catch((error: unknown) => {
-        if (isAbortError(error)) return
+        if (
+          isAbortError(error) ||
+          !isCurrentOperation("bootstrap", controller)
+        ) {
+          return
+        }
         const normalized = normalizeError(error)
         dispatch({
           type: "bootstrapFailed",
@@ -136,7 +158,20 @@ export const useSharedResearchWorkspace = (
       .finally(() => releaseOperation("bootstrap", controller))
 
     return abortAll
-  }, [abortAll, releaseOperation, shareId, startOperation])
+  }, [
+    abortAll,
+    isCurrentOperation,
+    releaseOperation,
+    shareId,
+    startOperation
+  ])
+
+  React.useEffect(() => {
+    if (state.rateLimitUntil === null) return
+    const tick = () => dispatch({ type: "rateLimitTick", now: Date.now() })
+    const timer = globalThis.setInterval(tick, 250)
+    return () => globalThis.clearInterval(timer)
+  }, [state.rateLimitUntil])
 
   const refreshSources = React.useCallback(
     async (query: SharedSourceQuery = state.sourceQuery): Promise<void> => {
@@ -149,9 +184,13 @@ export const useSharedResearchWorkspace = (
           query,
           controller.signal
         )
-        dispatch({ type: "sourcesSucceeded", generation, page })
+        if (!isCurrentOperation("sources", controller)) return
+        dispatch({ type: "sourcesSucceeded", generation, query, page })
       } catch (error) {
-        if (!isAbortError(error)) {
+        if (
+          !isAbortError(error) &&
+          isCurrentOperation("sources", controller)
+        ) {
           dispatch({
             type: "sourcesFailed",
             generation,
@@ -162,7 +201,13 @@ export const useSharedResearchWorkspace = (
         releaseOperation("sources", controller)
       }
     },
-    [releaseOperation, shareId, startOperation, state.sourceQuery]
+    [
+      isCurrentOperation,
+      releaseOperation,
+      shareId,
+      startOperation,
+      state.sourceQuery
+    ]
   )
 
   const loadOlderHistory = React.useCallback(async (): Promise<void> => {
@@ -175,9 +220,13 @@ export const useSharedResearchWorkspace = (
         state.nextBefore,
         controller.signal
       )
+      if (!isCurrentOperation("history", controller)) return
       dispatch({ type: "historySucceeded", generation, page })
     } catch (error) {
-      if (!isAbortError(error)) {
+      if (
+        !isAbortError(error) &&
+        isCurrentOperation("history", controller)
+      ) {
         dispatch({
           type: "historyFailed",
           generation,
@@ -187,7 +236,13 @@ export const useSharedResearchWorkspace = (
     } finally {
       releaseOperation("history", controller)
     }
-  }, [releaseOperation, shareId, startOperation, state.nextBefore])
+  }, [
+    isCurrentOperation,
+    releaseOperation,
+    shareId,
+    startOperation,
+    state.nextBefore
+  ])
 
   const previewSource = React.useCallback(
     async (sourceId: string, chunkIndex?: number): Promise<void> => {
@@ -200,9 +255,13 @@ export const useSharedResearchWorkspace = (
           chunkIndex,
           controller.signal
         )
+        if (!isCurrentOperation("preview", controller)) return
         dispatch({ type: "previewSucceeded", generation, preview })
       } catch (error) {
-        if (!isAbortError(error)) {
+        if (
+          !isAbortError(error) &&
+          isCurrentOperation("preview", controller)
+        ) {
           dispatch({
             type: "previewFailed",
             generation,
@@ -213,51 +272,88 @@ export const useSharedResearchWorkspace = (
         releaseOperation("preview", controller)
       }
     },
-    [releaseOperation, shareId, startOperation]
+    [isCurrentOperation, releaseOperation, shareId, startOperation]
   )
 
   const sendRequest = React.useCallback(
-    async (request: Readonly<SharedChatRequest>): Promise<void> => {
+    async (
+      request: Readonly<SharedChatRequest>,
+      submittedDraft: string,
+      draftRevision: number
+    ): Promise<void> => {
       const generation = generationRef.current
       const controller = startOperation("submission")
-      dispatch({ type: "submissionStarted", generation, request })
+      dispatch({
+        type: "submissionStarted",
+        generation,
+        request,
+        submittedDraft,
+        draftRevision
+      })
       try {
         const response = await sharedWorkspacesApi.ask(
           shareId,
           request as SharedChatRequest,
           controller.signal
         )
+        if (!isCurrentOperation("submission", controller)) return
+        if (response.request_id !== request.request_id) {
+          dispatch({
+            type: "submissionFailed",
+            generation,
+            error: {
+              status: 502,
+              code: "shared_chat_response_mismatch",
+              message: "Shared chat response did not match the request.",
+              retryable: false
+            },
+            retryableReceipt: false,
+            rateLimitUntil: null,
+            rateLimitRemainingMs: 0
+          })
+          return
+        }
         dispatch({ type: "submissionSucceeded", generation, response })
       } catch (error) {
         if (
           isAbortError(error) ||
-          controller.signal.aborted ||
+          !isCurrentOperation("submission", controller) ||
           generation !== generationRef.current
         ) {
           return
         }
-        const structured = getStructuredApiErrorDetail(error)
         const normalized = normalizeError(error)
         const sourceChanged = normalized.code === "shared_source_changed"
         const retryAfter = normalized.retry_after_ms
+        const rateLimitRemainingMs =
+          retryAfter === undefined ||
+          (normalized.code !== "shared_chat_rate_limited" &&
+            normalized.code !== "request_in_progress")
+            ? 0
+            : Math.min(retryAfter, 1_800_000)
         dispatch({
           type: "submissionFailed",
           generation,
           error: normalized,
-          retryableReceipt: !structured?.code,
+          retryableReceipt: isAmbiguousTransportFailure(error),
           rateLimitUntil:
-            retryAfter === undefined ||
-            (normalized.code !== "shared_chat_rate_limited" &&
-              normalized.code !== "request_in_progress")
+            rateLimitRemainingMs === 0
               ? null
-              : Date.now() + Math.min(retryAfter, 1_800_000)
+              : Date.now() + rateLimitRemainingMs,
+          rateLimitRemainingMs
         })
         if (sourceChanged) await refreshSources()
       } finally {
         releaseOperation("submission", controller)
       }
     },
-    [refreshSources, releaseOperation, shareId, startOperation]
+    [
+      isCurrentOperation,
+      refreshSources,
+      releaseOperation,
+      shareId,
+      startOperation
+    ]
   )
 
   const submitDraft = React.useCallback(async (): Promise<void> => {
@@ -267,49 +363,71 @@ export const useSharedResearchWorkspace = (
       !state.allowedActions.ask_grounded_questions.allowed ||
       !state.provider ||
       !state.model ||
-      state.selectedSourceIds.length === 0 ||
-      state.selectedSourceIds.length > 500
+      (state.rateLimitUntil !== null && Date.now() < state.rateLimitUntil) ||
+      (state.sourceScopeMode === "all"
+        ? !state.sourceSummary ||
+          state.sourceSummary.queryable === 0 ||
+          state.sourceSummary.queryable > 500
+        : state.selectedSourceIds.length === 0 ||
+          state.selectedSourceIds.length > 500)
     ) {
       return
     }
     const request = immutableRequest(
       (options.createRequestId ?? defaultRequestId)(),
       query,
+      state.sourceScopeMode,
       state.selectedSourceIds,
       state.provider,
       state.model
     )
-    await sendRequest(request)
+    await sendRequest(request, state.draft, state.draftRevision)
   }, [
     options.createRequestId,
     sendRequest,
     state.allowedActions.ask_grounded_questions.allowed,
     state.draft,
+    state.draftRevision,
     state.model,
     state.provider,
+    state.rateLimitUntil,
+    state.sourceScopeMode,
+    state.sourceSummary,
     state.selectedSourceIds
   ])
 
   const retryPending = React.useCallback(async (): Promise<void> => {
     const pending = state.pendingSubmission
     if (pending?.status !== "retryable") return
+    if (state.rateLimitUntil !== null && Date.now() < state.rateLimitUntil) {
+      return
+    }
     const currentSourceIds = Array.from(new Set(state.selectedSourceIds)).sort()
     if (
       pending.request.query !== state.draft.trim() ||
       pending.request.provider !== state.provider ||
       pending.request.model !== state.model ||
+      pending.request.source_scope.mode !== state.sourceScopeMode ||
       JSON.stringify(pending.request.source_scope.source_ids) !==
-        JSON.stringify(currentSourceIds)
+        JSON.stringify(
+          state.sourceScopeMode === "all" ? [] : currentSourceIds
+        )
     ) {
       return
     }
-    await sendRequest(pending.request)
+    await sendRequest(
+      pending.request,
+      pending.submittedDraft,
+      pending.draftRevision
+    )
   }, [
     sendRequest,
     state.draft,
     state.model,
     state.pendingSubmission,
     state.provider,
+    state.rateLimitUntil,
+    state.sourceScopeMode,
     state.selectedSourceIds
   ])
 
@@ -325,6 +443,9 @@ export const useSharedResearchWorkspace = (
       dispatch({ type: "sourceQueryChanged", query }),
     setSelectedSourceIds: (sourceIds: string[]) =>
       dispatch({ type: "selectedSourcesChanged", sourceIds }),
+    selectAllSources: () => dispatch({ type: "allSourcesSelected" }),
+    clearSelectedSources: () =>
+      dispatch({ type: "selectedSourcesChanged", sourceIds: [] }),
     setProvider: (provider: string | null) =>
       dispatch({ type: "providerChanged", provider }),
     setModel: (model: string | null) =>

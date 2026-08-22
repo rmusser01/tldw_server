@@ -1,22 +1,24 @@
 ---
 id: TASK-12020
 title: Research Workspace 2026-06-25 UAT follow-up remediation
-status: To Do
-created_date: 2026-06-25 20:05
+status: In Progress
+assignee: []
+created_date: '2026-06-25 20:05'
+updated_date: '2026-08-22 08:11'
 labels:
-- research-workspace
-- uat
-- ux
-- webui
-priority: High
+  - research-workspace
+  - uat
+  - ux
+  - webui
 milestone: Research Workspace UAT Remediation
+dependencies: []
 references:
-- TASK-478
-- TASK-12019
-- /private/tmp/tldw_research_workspace_uat_2026-06-25
+  - TASK-478
+  - TASK-12019
+  - /private/tmp/tldw_research_workspace_uat_2026-06-25
 documentation:
-- Docs/Reviews/RESEARCH_WORKSPACE_LIVE_UAT_MATRIX_2026_05_25.md
-updated_date: 2026-06-25 20:16
+  - Docs/Reviews/RESEARCH_WORKSPACE_LIVE_UAT_MATRIX_2026_05_25.md
+priority: high
 ---
 
 ## Description
@@ -35,13 +37,19 @@ Follow-up epic for the fresh 2026-06-25 CDP UAT of `/research-workspace` across 
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Planning pass completed under `TASK-12020.1`. Created child tasks `TASK-12020.2` through `TASK-12020.11` and saved `Docs/superpowers/plans/2026-06-25-research-workspace-uat-follow-up-remediation-plan.md`. Parent remains open for implementation and final UAT closure; acceptance criterion #4 remains unchecked until child tasks are completed, split, or explicitly deferred.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

@@ -2,6 +2,10 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   SharedChatRequest,
+  SharedChatResponse,
+  SharedMessagePage,
+  SharedSourcePage,
+  SharedSourcePreview,
   SharedWorkspaceBootstrap
 } from "@/types/shared-workspace"
 import {
@@ -104,8 +108,88 @@ const apiError = (
   }
 })
 
+const sourcePage = (
+  items: SharedSourcePage["items"],
+  pagination: SharedSourcePage["pagination"] = {
+    offset: 0,
+    limit: 50,
+    total: items.length,
+    has_more: false
+  }
+): SharedSourcePage => ({
+  items,
+  pagination,
+  summary: {
+    total: pagination.total,
+    queryable: items.filter((item) => item.retrieval_ready).length,
+    processing: items.filter((item) => item.state === "processing").length,
+    failed: items.filter((item) => item.state === "failed").length
+  },
+  partial_errors: []
+})
+
+const chatResponse = (
+  requestId: string,
+  suffix = "1",
+  mode: "all" | "include" = "include"
+): SharedChatResponse => ({
+  schema_version: 1,
+  request_id: requestId,
+  conversation_id: "conversation-1",
+  turn: {
+    user_message: {
+      message_id: `user-${suffix}`,
+      role: "user",
+      content: `Question ${suffix}`,
+      created_at: "2026-08-22T00:00:01Z"
+    },
+    assistant_message: {
+      message_id: `assistant-${suffix}`,
+      role: "assistant",
+      content: `Answer ${suffix}`,
+      created_at: "2026-08-22T00:00:02Z"
+    }
+  },
+  citations: [],
+  generation: { provider: "openai", model: "gpt-5-mini" },
+  source_scope: { mode, effective_source_count: 1 },
+  replay: { replayed: false }
+})
+
+const historyPage = (messageId: string): SharedMessagePage => ({
+  conversation_id: "conversation-1",
+  messages: [
+    {
+      message_id: messageId,
+      role: "user",
+      content: messageId,
+      created_at: "2026-08-22T00:00:00Z",
+      citations: []
+    }
+  ],
+  next_before: null
+})
+
+const preview = (sourceId: string): SharedSourcePreview => ({
+  source_id: sourceId,
+  title: sourceId,
+  source_type: "document",
+  origin_url: null,
+  origin_host: null,
+  state: "queryable",
+  reason_code: null,
+  content_available: true,
+  preview_mode: "content_excerpt",
+  unavailable_reason: null,
+  text_preview: sourceId,
+  text_total_chars: sourceId.length,
+  text_truncated: false,
+  snippets: [],
+  generated_at: "2026-08-22T00:00:00Z"
+})
+
 describe("sharedResearchWorkspaceReducer", () => {
-  it("starts fail closed and selects only queryable bootstrap sources", () => {
+  it("starts fail closed and represents the bootstrap selection as all queryable sources", () => {
     const initial = createInitialSharedResearchWorkspaceState(4, 1)
     expect(
       Object.values(initial.allowedActions).every((action) => !action.allowed)
@@ -117,6 +201,7 @@ describe("sharedResearchWorkspaceReducer", () => {
       bootstrap: bootstrap(4)
     })
 
+    expect(state.sourceScopeMode).toBe("all")
     expect(state.selectedSourceIds).toEqual(["source-1"])
     expect(state.provider).toBe("openai")
     expect(state.model).toBe("gpt-5-mini")
@@ -142,7 +227,7 @@ describe("sharedResearchWorkspaceReducer", () => {
     expect(state.allowedActions.ask_grounded_questions.allowed).toBe(false)
   })
 
-  it("reconciles removed and nonqueryable selections on source refresh", () => {
+  it("reconciles removed and nonqueryable selections from a complete source refresh", () => {
     let state = sharedResearchWorkspaceReducer(
       createInitialSharedResearchWorkspaceState(4, 1),
       { type: "bootstrapSucceeded", generation: 1, bootstrap: bootstrap(4) }
@@ -155,15 +240,57 @@ describe("sharedResearchWorkspaceReducer", () => {
     state = sharedResearchWorkspaceReducer(state, {
       type: "sourcesSucceeded",
       generation: 1,
-      page: {
-        items: [source("source-1"), source("source-2", false)],
-        pagination: { offset: 0, limit: 50, total: 2, has_more: false },
-        summary: { total: 2, queryable: 1, processing: 1, failed: 0 },
-        partial_errors: []
-      }
+      query: { offset: 0, limit: 50 },
+      page: sourcePage([source("source-1"), source("source-2", false)])
     })
 
     expect(state.selectedSourceIds).toEqual(["source-1"])
+  })
+
+  it("keeps include selections across filtered and paginated source pages", () => {
+    let state = sharedResearchWorkspaceReducer(
+      createInitialSharedResearchWorkspaceState(4, 1),
+      { type: "bootstrapSucceeded", generation: 1, bootstrap: bootstrap(4) }
+    )
+    state = sharedResearchWorkspaceReducer(state, {
+      type: "selectedSourcesChanged",
+      sourceIds: ["source-1", "off-page", "not-ready"]
+    })
+
+    state = sharedResearchWorkspaceReducer(state, {
+      type: "sourcesSucceeded",
+      generation: 1,
+      query: { offset: 50, limit: 50, q: "filtered" },
+      page: sourcePage(
+        [source("source-1"), source("not-ready", false)],
+        { offset: 50, limit: 50, total: 120, has_more: true }
+      )
+    })
+
+    expect(state.sourceScopeMode).toBe("include")
+    expect(state.selectedSourceIds).toEqual(["source-1", "off-page"])
+  })
+
+  it("keeps all-mode selection across pages and adds queryable returned sources", () => {
+    let state = sharedResearchWorkspaceReducer(
+      createInitialSharedResearchWorkspaceState(4, 1),
+      { type: "bootstrapSucceeded", generation: 1, bootstrap: bootstrap(4) }
+    )
+
+    state = sharedResearchWorkspaceReducer(state, {
+      type: "sourcesSucceeded",
+      generation: 1,
+      query: { offset: 50, limit: 50 },
+      page: sourcePage([source("source-51")], {
+        offset: 50,
+        limit: 50,
+        total: 75,
+        has_more: false
+      })
+    })
+
+    expect(state.sourceScopeMode).toBe("all")
+    expect(state.selectedSourceIds).toEqual(["source-1", "source-51"])
   })
 
   it("prepends older history without duplicating message IDs", () => {
@@ -219,7 +346,7 @@ describe("sharedResearchWorkspaceReducer", () => {
 
 describe("useSharedResearchWorkspace", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
   })
 
   it("clears the previous share synchronously, aborts it, and ignores its response", async () => {
@@ -250,29 +377,7 @@ describe("useSharedResearchWorkspace", () => {
     api.bootstrap.mockResolvedValue(bootstrap(4))
     api.ask
       .mockRejectedValueOnce(new TypeError("connection reset"))
-      .mockResolvedValueOnce({
-        schema_version: 1,
-        request_id: "request-1",
-        conversation_id: "conversation-1",
-        turn: {
-          user_message: {
-            message_id: "user-1",
-            role: "user",
-            content: "Question",
-            created_at: "2026-08-22T00:00:01Z"
-          },
-          assistant_message: {
-            message_id: "assistant-1",
-            role: "assistant",
-            content: "Answer",
-            created_at: "2026-08-22T00:00:02Z"
-          }
-        },
-        citations: [],
-        generation: { provider: "openai", model: "gpt-5-mini" },
-        source_scope: { mode: "include", effective_source_count: 1 },
-        replay: { replayed: false }
-      })
+      .mockResolvedValueOnce(chatResponse("request-1", "1", "all"))
     const uuid = vi.fn().mockReturnValue("request-1")
     const { result } = renderHook(() =>
       useSharedResearchWorkspace(4, { createRequestId: uuid })
@@ -286,7 +391,7 @@ describe("useSharedResearchWorkspace", () => {
     expect(frozen).toEqual({
       request_id: "request-1",
       query: "Question",
-      source_scope: { mode: "include", source_ids: ["source-1"] },
+      source_scope: { mode: "all", source_ids: [] },
       provider: "openai",
       model: "gpt-5-mini"
     })
@@ -297,6 +402,34 @@ describe("useSharedResearchWorkspace", () => {
     expect(api.ask.mock.calls[1][1]).toBe(frozen)
     expect(uuid).toHaveBeenCalledTimes(1)
     expect(result.current.state.draft).toBe("")
+  })
+
+  it("preserves an exact raw draft edit made while a request is in flight", async () => {
+    const pending = deferred<SharedChatResponse>()
+    api.bootstrap.mockResolvedValue(bootstrap(4))
+    api.ask.mockReturnValue(pending.promise)
+    const { result } = renderHook(() =>
+      useSharedResearchWorkspace(4, { createRequestId: () => "request-1" })
+    )
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+
+    act(() => result.current.setDraft("Question"))
+    act(() => {
+      void result.current.submitDraft()
+    })
+    await waitFor(() => expect(api.ask).toHaveBeenCalledTimes(1))
+    act(() => result.current.setDraft("  Question  "))
+
+    await act(async () => {
+      pending.resolve(chatResponse("request-1", "1", "all"))
+      await pending.promise
+    })
+
+    await waitFor(() =>
+      expect(result.current.state.pendingSubmission).toBeNull()
+    )
+    expect(result.current.state.messages).toHaveLength(2)
+    expect(result.current.state.draft).toBe("  Question  ")
   })
 
   it("invalidates a failed receipt after edits and allocates a new UUID", async () => {
@@ -359,6 +492,44 @@ describe("useSharedResearchWorkspace", () => {
     expect(result.current.state.draft).toBe("Question")
   })
 
+  it("reuses a UUID only for transport ambiguity, never an untyped HTTP error", async () => {
+    api.bootstrap.mockResolvedValue(bootstrap(4))
+    api.ask
+      .mockRejectedValueOnce({
+        status: 400,
+        detail: { message: "Malformed request" }
+      })
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+      .mockResolvedValueOnce(chatResponse("request-2", "2", "all"))
+    const uuid = vi
+      .fn()
+      .mockReturnValueOnce("request-1")
+      .mockReturnValueOnce("request-2")
+    const { result } = renderHook(() =>
+      useSharedResearchWorkspace(4, { createRequestId: uuid })
+    )
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+    act(() => result.current.setDraft("Question"))
+
+    await act(async () => result.current.submitDraft())
+    expect(result.current.state.pendingSubmission).toBeNull()
+    await act(async () => result.current.retryPending())
+    expect(api.ask).toHaveBeenCalledTimes(1)
+
+    await act(async () => result.current.submitDraft())
+    expect(result.current.state.pendingSubmission?.request.request_id).toBe(
+      "request-2"
+    )
+    await act(async () => result.current.retryPending())
+
+    expect(api.ask.mock.calls.map((call) => call[1].request_id)).toEqual([
+      "request-1",
+      "request-2",
+      "request-2"
+    ])
+    expect(uuid).toHaveBeenCalledTimes(2)
+  })
+
   it("sorts and deduplicates source IDs before freezing a submission", async () => {
     api.bootstrap.mockResolvedValue(
       bootstrap(4, [source("source-1"), source("source-2")])
@@ -413,6 +584,118 @@ describe("useSharedResearchWorkspace", () => {
 
     expect(api.listSources).not.toHaveBeenCalled()
     expect(result.current.state.bootstrap?.share.share_id).toBe(5)
+  })
+
+  it("ignores a reordered same-share source response after a newer refresh", async () => {
+    const older = deferred<SharedSourcePage>()
+    const newer = deferred<SharedSourcePage>()
+    api.bootstrap.mockResolvedValue(bootstrap(4))
+    api.listSources
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise)
+    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+
+    act(() => {
+      void result.current.refreshSources({ offset: 0, limit: 50, q: "older" })
+      void result.current.refreshSources({ offset: 0, limit: 50, q: "newer" })
+    })
+    const olderSignal = api.listSources.mock.calls[0][2] as AbortSignal
+    expect(olderSignal.aborted).toBe(true)
+
+    await act(async () => {
+      newer.resolve(sourcePage([source("newer")]))
+      await newer.promise
+    })
+    await act(async () => {
+      older.resolve(sourcePage([source("older")]))
+      await older.promise
+    })
+
+    expect(result.current.state.sources?.items[0]?.source_id).toBe("newer")
+  })
+
+  it("ignores reordered same-share preview and history responses", async () => {
+    const olderPreview = deferred<SharedSourcePreview>()
+    const newerPreview = deferred<SharedSourcePreview>()
+    const olderHistory = deferred<SharedMessagePage>()
+    const newerHistory = deferred<SharedMessagePage>()
+    const initial = bootstrap(4)
+    initial.conversation.next_before = "older"
+    api.bootstrap.mockResolvedValue(initial)
+    api.previewSource
+      .mockReturnValueOnce(olderPreview.promise)
+      .mockReturnValueOnce(newerPreview.promise)
+    api.listMessages
+      .mockReturnValueOnce(olderHistory.promise)
+      .mockReturnValueOnce(newerHistory.promise)
+    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+
+    act(() => {
+      void result.current.previewSource("older")
+      void result.current.previewSource("newer")
+      void result.current.loadOlderHistory()
+      void result.current.loadOlderHistory()
+    })
+
+    await act(async () => {
+      newerPreview.resolve(preview("newer"))
+      newerHistory.resolve(historyPage("newer-message"))
+      await Promise.all([newerPreview.promise, newerHistory.promise])
+    })
+    await act(async () => {
+      olderPreview.resolve(preview("older"))
+      olderHistory.resolve(historyPage("older-message"))
+      await Promise.all([olderPreview.promise, olderHistory.promise])
+    })
+
+    expect(result.current.state.preview?.source_id).toBe("newer")
+    expect(result.current.state.messages.map((message) => message.message_id)).toEqual([
+      "newer-message"
+    ])
+  })
+
+  it("ignores a reordered same-share submission and rejects mismatched response IDs", async () => {
+    const older = deferred<SharedChatResponse>()
+    const newer = deferred<SharedChatResponse>()
+    api.bootstrap.mockResolvedValue(bootstrap(4))
+    api.ask.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
+    const uuid = vi
+      .fn()
+      .mockReturnValueOnce("request-1")
+      .mockReturnValueOnce("request-2")
+    const { result } = renderHook(() =>
+      useSharedResearchWorkspace(4, { createRequestId: uuid })
+    )
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+
+    act(() => result.current.setDraft("First"))
+    act(() => {
+      void result.current.submitDraft()
+    })
+    await waitFor(() => expect(api.ask).toHaveBeenCalledTimes(1))
+    act(() => result.current.setDraft("Second"))
+    act(() => {
+      void result.current.submitDraft()
+    })
+    await waitFor(() => expect(api.ask).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      newer.resolve(chatResponse("wrong-request", "2", "all"))
+      await newer.promise
+    })
+    await act(async () => {
+      older.resolve(chatResponse("request-1", "1", "all"))
+      await older.promise
+    })
+
+    expect(result.current.state.messages).toEqual([])
+    expect(result.current.state.draft).toBe("Second")
+    expect(result.current.state.pendingSubmission).toBeNull()
+    expect(result.current.state.errors.submission?.code).toBe(
+      "shared_chat_response_mismatch"
+    )
   })
 
   it("aborts every active operation and clears all old share data on replacement", async () => {
@@ -485,28 +768,113 @@ describe("useSharedResearchWorkspace", () => {
     expect(api.ask.mock.calls[1][1].request_id).toBe("request-2")
   })
 
-  it("tracks a bounded rate-limit countdown and preserves context-budget drafts", async () => {
+  it("blocks an over-cap all scope until an explicit include subset is chosen", async () => {
+    const initial = bootstrap(4)
+    initial.source_summary = {
+      total: 501,
+      queryable: 501,
+      processing: 0,
+      failed: 0
+    }
+    initial.sources.pagination = {
+      offset: 0,
+      limit: 50,
+      total: 501,
+      has_more: true
+    }
+    api.bootstrap.mockResolvedValue(initial)
+    api.ask.mockRejectedValue(new TypeError("connection reset"))
+    const { result } = renderHook(() =>
+      useSharedResearchWorkspace(4, { createRequestId: () => "request-1" })
+    )
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+
+    act(() => result.current.setDraft("Question"))
+    await act(async () => result.current.submitDraft())
+    expect(api.ask).not.toHaveBeenCalled()
+
+    act(() => result.current.setSelectedSourceIds(["source-1"]))
+    await act(async () => result.current.submitDraft())
+
+    expect(api.ask.mock.calls[0][1].source_scope).toEqual({
+      mode: "include",
+      source_ids: ["source-1"]
+    })
+  })
+
+  it("supports explicit select-all and clear scope transitions", async () => {
+    api.bootstrap.mockResolvedValue(bootstrap(4))
+    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+
+    act(() => result.current.setSelectedSourceIds(["source-1"]))
+    expect(result.current.state.sourceScopeMode).toBe("include")
+
+    act(() => result.current.selectAllSources())
+    expect(result.current.state.sourceScopeMode).toBe("all")
+
+    act(() => result.current.clearSelectedSources())
+    expect(result.current.state.sourceScopeMode).toBe("include")
+    expect(result.current.state.selectedSourceIds).toEqual([])
+  })
+
+  it("blocks retries during a rate limit and updates the bounded countdown", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-08-22T00:00:00Z"))
     api.bootstrap.mockResolvedValue(bootstrap(4))
     api.ask
       .mockRejectedValueOnce(apiError("shared_chat_rate_limited", true, 1500))
-      .mockRejectedValueOnce(apiError("shared_chat_context_too_large", false))
-    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+    const uuid = vi
+      .fn()
+      .mockReturnValueOnce("request-1")
+      .mockReturnValueOnce("request-2")
+    const { result, unmount } = renderHook(() =>
+      useSharedResearchWorkspace(4, { createRequestId: uuid })
+    )
     await act(async () => Promise.resolve())
     await act(async () => Promise.resolve())
 
     act(() => result.current.setDraft("Keep this exact draft"))
     await act(async () => result.current.submitDraft())
     expect(result.current.state.rateLimitUntil).toBe(Date.now() + 1500)
+    expect(result.current.state.rateLimitRemainingMs).toBe(1500)
     expect(result.current.state.draft).toBe("Keep this exact draft")
+
+    await act(async () => result.current.submitDraft())
+    expect(api.ask).toHaveBeenCalledTimes(1)
+
+    await act(async () => vi.advanceTimersByTimeAsync(1000))
+    expect(result.current.state.rateLimitRemainingMs).toBeGreaterThan(0)
+    expect(result.current.state.rateLimitRemainingMs).toBeLessThanOrEqual(500)
+    await act(async () => result.current.retryPending())
+    expect(api.ask).toHaveBeenCalledTimes(1)
+
+    await act(async () => vi.advanceTimersByTimeAsync(500))
+    expect(result.current.state.rateLimitUntil).toBeNull()
+    expect(result.current.state.rateLimitRemainingMs).toBe(0)
+    await act(async () => result.current.submitDraft())
+    expect(api.ask).toHaveBeenCalledTimes(2)
+    expect(api.ask.mock.calls[1][1].request_id).toBe("request-2")
+
+    unmount()
+    vi.useRealTimers()
+  })
+
+  it("preserves the exact draft for a context-budget error", async () => {
+    api.bootstrap.mockResolvedValue(bootstrap(4))
+    api.ask.mockRejectedValue(
+      apiError("shared_chat_context_too_large", false)
+    )
+    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
 
     act(() => result.current.setDraft("Context draft"))
     await act(async () => result.current.submitDraft())
+
     expect(result.current.state.errors.submission?.code).toBe(
       "shared_chat_context_too_large"
     )
     expect(result.current.state.draft).toBe("Context draft")
-    vi.useRealTimers()
   })
 })

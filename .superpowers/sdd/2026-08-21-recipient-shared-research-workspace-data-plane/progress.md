@@ -83,6 +83,11 @@ No preflight ruling was required; the apparent Task 5/7 and Task 8 dependency ov
 - Report: `task-8-implementer-report.md`.
 - Residual boundary: Task 9 still owns the complete recipient visual workspace, and Task 11 owns live backend/provider/browser UAT. Parent task remains In Progress.
 - Status: implementation complete; pending controller review.
+- Fix Round 1 reviewed head: `231136f213ff8c4da4187d0755747557257cb58c`.
+- Fix Round 1: modeled initial selection as explicit `all` scope and explicit subsets as persistent cross-page `include` IDs; partial source pages reconcile only returned readiness while a complete unfiltered page may authoritatively remove absent IDs. The authoritative unfiltered source summary blocks an over-500 all-scope request until an include subset is selected, with select-all/clear controller transitions exposed for Task 9.
+- Fix Round 1 lifecycle: every operation now checks current controller identity as well as share generation; chat successes additionally require the response request ID to match the submitted UUID. Rate deadlines gate submit/retry and drive a bounded remaining-millisecond countdown. Pending submissions retain the exact raw draft and revision, and only a matching unchanged revision clears after stored success. Untyped received HTTP errors discard the UUID; only ambiguous fetch `TypeError` failures retain exact-payload replay.
+- Fix Round 1 TDD RED: focused controller target `11 failed, 15 passed`. GREEN: focused controller `27 passed`; exact Task 8 matrix `54 passed`; existing auth-fetch/domain-client/route-state regressions `42 passed`.
+- Fix Round 1 gates: ESLint passed all three touched TS/test files with only the UI library's shared missing-pages notice; focused production typecheck reached 14 existing imported `import.meta.env` diagnostics and no changed-file diagnostic; Bandit not applicable to frontend-only production; `git diff --check` passed. The two unrelated watchlist templates remained untouched and unstaged. Parent remains In Progress.
 
 ## Task 7 - Provider resolution, grounded generation, and safe chat API
 

@@ -8,6 +8,7 @@ import type {
   SharedSourcePage,
   SharedSourcePreview,
   SharedSourceQuery,
+  SharedSourceSummary,
   SharedWorkspaceBootstrap
 } from "@/types/shared-workspace"
 
@@ -24,6 +25,8 @@ export interface SharedWorkspaceError extends StructuredApiErrorDetail {
 export interface PendingSharedSubmission {
   request: Readonly<SharedChatRequest>
   status: "submitting" | "retryable"
+  submittedDraft: string
+  draftRevision: number
 }
 
 export interface SharedResearchWorkspaceState {
@@ -34,15 +37,19 @@ export interface SharedResearchWorkspaceState {
   allowedActions: SharedAllowedActions
   sourceQuery: SharedSourceQuery
   sources: SharedSourcePage | null
+  sourceSummary: SharedSourceSummary | null
+  sourceScopeMode: "all" | "include"
   selectedSourceIds: string[]
   messages: SharedMessage[]
   nextBefore: string | null
   draft: string
+  draftRevision: number
   provider: string | null
   model: string | null
   pendingSubmission: PendingSharedSubmission | null
   preview: SharedSourcePreview | null
   rateLimitUntil: number | null
+  rateLimitRemainingMs: number
   errors: {
     bootstrap: SharedWorkspaceError | null
     sources: SharedWorkspaceError | null
@@ -73,15 +80,19 @@ export const createInitialSharedResearchWorkspaceState = (
   allowedActions: deniedSharedWorkspaceActions(),
   sourceQuery: { offset: 0, limit: 50 },
   sources: null,
+  sourceSummary: null,
+  sourceScopeMode: "all",
   selectedSourceIds: [],
   messages: [],
   nextBefore: null,
   draft: "",
+  draftRevision: 0,
   provider: null,
   model: null,
   pendingSubmission: null,
   preview: null,
   rateLimitUntil: null,
+  rateLimitRemainingMs: 0,
   errors: {
     bootstrap: null,
     sources: null,
@@ -105,7 +116,12 @@ export type SharedResearchWorkspaceAction =
       notFound: boolean
     }
   | { type: "sourcesStarted"; generation: number }
-  | { type: "sourcesSucceeded"; generation: number; page: SharedSourcePage }
+  | {
+      type: "sourcesSucceeded"
+      generation: number
+      query: SharedSourceQuery
+      page: SharedSourcePage
+    }
   | {
       type: "sourcesFailed"
       generation: number
@@ -134,12 +150,15 @@ export type SharedResearchWorkspaceAction =
   | { type: "draftChanged"; draft: string }
   | { type: "sourceQueryChanged"; query: SharedSourceQuery }
   | { type: "selectedSourcesChanged"; sourceIds: string[] }
+  | { type: "allSourcesSelected" }
   | { type: "providerChanged"; provider: string | null }
   | { type: "modelChanged"; model: string | null }
   | {
       type: "submissionStarted"
       generation: number
       request: Readonly<SharedChatRequest>
+      submittedDraft: string
+      draftRevision: number
     }
   | {
       type: "submissionFailed"
@@ -147,7 +166,9 @@ export type SharedResearchWorkspaceAction =
       error: SharedWorkspaceError
       retryableReceipt: boolean
       rateLimitUntil: number | null
+      rateLimitRemainingMs: number
     }
+  | { type: "rateLimitTick"; now: number }
   | {
       type: "submissionSucceeded"
       generation: number
@@ -193,6 +214,48 @@ const deduplicateHistory = (
   })
 }
 
+const uniqueSourceIds = (sourceIds: string[]): string[] =>
+  Array.from(new Set(sourceIds))
+
+const isCompleteUnfilteredPage = (
+  query: SharedSourceQuery,
+  page: SharedSourcePage
+): boolean =>
+  query.offset === 0 &&
+  !query.q?.trim() &&
+  !query.state &&
+  !page.pagination.has_more
+
+const reconcileSelectedSources = (
+  state: SharedResearchWorkspaceState,
+  query: SharedSourceQuery,
+  page: SharedSourcePage
+): string[] => {
+  const queryableIds = page.items
+    .filter((source) => source.retrieval_ready)
+    .map((source) => source.source_id)
+  if (isCompleteUnfilteredPage(query, page)) {
+    return uniqueSourceIds(
+      state.sourceScopeMode === "all"
+        ? queryableIds
+        : state.selectedSourceIds.filter((id) => queryableIds.includes(id))
+    )
+  }
+
+  const returnedNonqueryableIds = new Set(
+    page.items
+      .filter((source) => !source.retrieval_ready)
+      .map((source) => source.source_id)
+  )
+  const selected =
+    state.sourceScopeMode === "all"
+      ? [...state.selectedSourceIds, ...queryableIds]
+      : state.selectedSourceIds
+  return uniqueSourceIds(selected).filter(
+    (id) => !returnedNonqueryableIds.has(id)
+  )
+}
+
 export const sharedResearchWorkspaceReducer = (
   state: SharedResearchWorkspaceState,
   action: SharedResearchWorkspaceAction
@@ -230,6 +293,8 @@ export const sharedResearchWorkspaceReducer = (
             (error) => error.area === "sources"
           )
         },
+        sourceSummary: action.bootstrap.source_summary,
+        sourceScopeMode: "all",
         selectedSourceIds: action.bootstrap.sources.items
           .filter((source) => source.retrieval_ready)
           .map((source) => source.source_id),
@@ -253,16 +318,15 @@ export const sharedResearchWorkspaceReducer = (
     case "sourcesStarted":
       return { ...state, errors: { ...state.errors, sources: null } }
     case "sourcesSucceeded": {
-      const queryable = new Set(
-        action.page.items
-          .filter((source) => source.retrieval_ready)
-          .map((source) => source.source_id)
-      )
+      const unfiltered = !action.query.q?.trim() && !action.query.state
       return {
         ...state,
         sources: action.page,
-        selectedSourceIds: state.selectedSourceIds.filter((id) =>
-          queryable.has(id)
+        sourceSummary: unfiltered ? action.page.summary : state.sourceSummary,
+        selectedSourceIds: reconcileSelectedSources(
+          state,
+          action.query,
+          action.page
         ),
         errors: { ...state.errors, sources: null }
       }
@@ -290,6 +354,7 @@ export const sharedResearchWorkspaceReducer = (
       return {
         ...state,
         draft: action.draft,
+        draftRevision: state.draftRevision + 1,
         pendingSubmission: clearFailedReceipt(state),
         errors: { ...state.errors, submission: null }
       }
@@ -302,7 +367,14 @@ export const sharedResearchWorkspaceReducer = (
     case "selectedSourcesChanged":
       return {
         ...state,
-        selectedSourceIds: [...action.sourceIds],
+        sourceScopeMode: "include",
+        selectedSourceIds: uniqueSourceIds(action.sourceIds),
+        pendingSubmission: clearFailedReceipt(state)
+      }
+    case "allSourcesSelected":
+      return {
+        ...state,
+        sourceScopeMode: "all",
         pendingSubmission: clearFailedReceipt(state)
       }
     case "providerChanged":
@@ -320,7 +392,14 @@ export const sharedResearchWorkspaceReducer = (
     case "submissionStarted":
       return {
         ...state,
-        pendingSubmission: { request: action.request, status: "submitting" },
+        pendingSubmission: {
+          request: action.request,
+          status: "submitting",
+          submittedDraft: action.submittedDraft,
+          draftRevision: action.draftRevision
+        },
+        rateLimitUntil: null,
+        rateLimitRemainingMs: 0,
         errors: { ...state.errors, submission: null }
       }
     case "submissionFailed":
@@ -331,10 +410,23 @@ export const sharedResearchWorkspaceReducer = (
             ? { ...state.pendingSubmission, status: "retryable" }
             : null,
         rateLimitUntil: action.rateLimitUntil,
+        rateLimitRemainingMs: action.rateLimitRemainingMs,
         errors: { ...state.errors, submission: action.error }
       }
+    case "rateLimitTick": {
+      if (state.rateLimitUntil === null) return state
+      const remaining = Math.max(
+        0,
+        Math.min(state.rateLimitUntil - action.now, 1_800_000)
+      )
+      return {
+        ...state,
+        rateLimitUntil: remaining === 0 ? null : state.rateLimitUntil,
+        rateLimitRemainingMs: remaining
+      }
+    }
     case "submissionSucceeded": {
-      const pendingQuery = state.pendingSubmission?.request.query
+      const pending = state.pendingSubmission
       const userMessage: SharedMessage = {
         ...action.response.turn.user_message,
         citations: []
@@ -349,9 +441,15 @@ export const sharedResearchWorkspaceReducer = (
           userMessage,
           assistantMessage
         ]),
-        draft: state.draft.trim() === pendingQuery ? "" : state.draft,
+        draft:
+          pending &&
+          state.draftRevision === pending.draftRevision &&
+          state.draft === pending.submittedDraft
+            ? ""
+            : state.draft,
         pendingSubmission: null,
         rateLimitUntil: null,
+        rateLimitRemainingMs: 0,
         errors: { ...state.errors, submission: null }
       }
     }
