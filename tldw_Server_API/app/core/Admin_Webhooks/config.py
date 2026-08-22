@@ -7,6 +7,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 
+WEBHOOK_KEYS_ENV = "TLDW_ADMIN_WEBHOOK_KEYS_JSON"
+WEBHOOK_PRIMARY_KEY_ID_ENV = "TLDW_ADMIN_WEBHOOK_PRIMARY_KEY_ID"
+
 
 class AdminWebhookMode(str, Enum):
     """Canonical control-plane operating mode."""
