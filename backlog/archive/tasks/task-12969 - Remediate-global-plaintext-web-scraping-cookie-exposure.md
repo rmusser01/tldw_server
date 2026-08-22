@@ -37,7 +37,7 @@ Eliminate the existing global plaintext domain-cookie store and cross-user raw c
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-2026-08-21: Superseded by unique research-discovery security prerequisite TASK-13013 after the active TASK-12969 ID collision was confirmed. Discovery documents and inventory follow-up references were migrated without changing scope. This duplicate record is retained in archive for history.
+2026-08-21: Superseded by research-discovery security prerequisite TASK-13100 after the active TASK-12969 ID collision was confirmed. The initial branch-local TASK-13013 replacement was rekeyed after the latest-dev rebase exposed unrelated active claimants. Discovery documents and inventory follow-up references were migrated without changing scope. This duplicate record is retained in archive for history.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

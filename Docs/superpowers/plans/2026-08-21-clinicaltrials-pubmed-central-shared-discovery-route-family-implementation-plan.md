@@ -24,7 +24,7 @@
 - Freeze PMC to ESearch then conditional ESummary at `https://eutils.ncbi.nlm.nih.gov:443`; one logical page; at most 100 IDs; two physical dispatches; 20 seconds, 2 MiB, zero redirects, and zero retries per hop.
 - Freeze `RouteLimits.max_request_body_bytes=16_384` for both GET/no-body routes; each contributes exactly 40,000 ms to planned aggregate wall-time, and a plan selecting both contributes 80,000 ms before any other route.
 - Leave process-wide NCBI pacing, registration proof, required notices/currentness presentation, long-query routing, API-key use, and consumer cutover to TASK-12968.3.
-- Leave authenticated retrieval, cookies, browser state, and login automation outside TASK-12968.6 and blocked on TASK-13013 plus a separate approved design.
+- Leave authenticated retrieval, cookies, browser state, and login automation outside TASK-12968.6 and blocked on TASK-13100 plus a separate approved design.
 - Leave `discovery/__init__.py`, production service/endpoint/router modules, default catalog factories, and consumer adapter maps unchanged.
 - Preserve dependency direction: shared `planner.py`, `executor.py`, `gateway.py`, and `gateway_adapters.py` may not import the provider-family module. Duplicate the two exact overlay version strings as private shared-module constants/literals and reconcile them in tests; imports flow family → shared only.
 - Treat normalized result URLs as inert synthesized metadata; never request or resolve them.
@@ -2329,4 +2329,4 @@ Confirm the draft PR now contains the tracking commit. Do not mark it ready or m
 - [x] Network-boundary tests cover ClinicalTrials.gov `2/2`, PMC nonempty `1/2`, PMC empty `1/1`, and PubMed overlay `1/2`.
 - [x] Inventory states stop at `implemented/passed/not_run`, certifications remain empty, and `inventory_delivery_ready=false`.
 - [x] Production Search and Deep Research import no family symbol and issue zero family requests.
-- [x] TASK-12968.3 remains the owner of pacing, registration proof, notices/currentness, long-query routing, and Standalone cutover; TASK-12968.4 remains consumer-only and waits for TASK-13014.
+- [x] TASK-12968.3 remains the owner of pacing, registration proof, notices/currentness, long-query routing, and Standalone cutover; TASK-12968.4 remains consumer-only and waits for TASK-13101.

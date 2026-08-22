@@ -32,7 +32,7 @@ Add a Jobs-level cooperative cancellation primitive for processing jobs so worke
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-08-21: Superseded by unique research-discovery cancellation prerequisite TASK-13014 after the active TASK-12970 ID collision was confirmed. TASK-12968.4, the shared-discovery design, and the provider-family design were migrated without changing scope. This duplicate record is retained in archive for history; the unrelated Web_Scraping TASK-12970 parent and children remain active and unchanged.
+2026-08-21: Superseded by research-discovery cancellation prerequisite TASK-13101 after the active TASK-12970 ID collision was confirmed. The initial branch-local TASK-13014 replacement was rekeyed after the latest-dev rebase exposed an unrelated active claimant. TASK-12968.4, the shared-discovery design, and the provider-family design were migrated without changing scope. This duplicate record is retained in archive for history; the unrelated Web_Scraping TASK-12970 parent and children remain active and unchanged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

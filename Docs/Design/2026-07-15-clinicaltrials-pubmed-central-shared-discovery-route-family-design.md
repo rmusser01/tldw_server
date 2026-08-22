@@ -375,7 +375,7 @@ The family code may not import an HTTP client, DNS/socket library, browser tool,
 
 `test_research_discovery_network_boundary.py` is currently singular and hard-coded to `biorxiv_medrxiv.py`; merely adding a digest would not certify this family. This task generalizes that test to an exact per-family configuration map. For each family it declares the module filename, allowed root/import closure, runtime adapter/route fixtures, expected logical-page count, expected physical-dispatch count, and consumer-denial expectations. The scanner applies its AST import rules to every configured family module, pins raw and semantic-AST digests for each family root, pins semantic/import digests for changed shared closure modules, updates exact closure/import allowlists, and runs both ClinicalTrials.gov and PMC fixture plans under the no-network runtime tripwire. Raw shared-module digests are deliberately avoided because comment/format churn is not executable policy. Production consumers remain forbidden from importing either family.
 
-Only normalized metadata and synthesized inert links leave the adapter. Pagination tokens, raw payloads, provider query URLs, provider-supplied links, contacts, locations, attachments, documents, markup, and unknown fields are discarded. Every retained human-facing ClinicalTrials.gov or PMC string passes the bounded family-local any-URL detector after normalization/sanitization; DOI/PMID/PMCID values follow their separate identifier grammars and never pass through this human-text rule. No returned URL is requested, resolved, or used to alter attribution. Against the implementation-base revision, explicit import/AST/runtime tests deny `tldw_Server_API.app.core.Web_Scraping`, `http.cookiejar`, browser-cookie modules, cookie managers, credential stores, and cookie/authorization header construction. They do not claim knowledge of unknown future TASK-13013 APIs.
+Only normalized metadata and synthesized inert links leave the adapter. Pagination tokens, raw payloads, provider query URLs, provider-supplied links, contacts, locations, attachments, documents, markup, and unknown fields are discarded. Every retained human-facing ClinicalTrials.gov or PMC string passes the bounded family-local any-URL detector after normalization/sanitization; DOI/PMID/PMCID values follow their separate identifier grammars and never pass through this human-text rule. No returned URL is requested, resolved, or used to alter attribution. Against the implementation-base revision, explicit import/AST/runtime tests deny `tldw_Server_API.app.core.Web_Scraping`, `http.cookiejar`, browser-cookie modules, cookie managers, credential stores, and cookie/authorization header construction. They do not claim knowledge of unknown future TASK-13100 APIs.
 
 ## Rate, Timeout, Cancellation, and Failure Semantics
 
@@ -515,7 +515,7 @@ TASK-12968.3 separately owns:
 - Standalone Search consumer wiring and live surface certification;
 - canonical selection, effective-plan preview, partial outcomes, and large-catalog controls.
 
-TASK-12968.4 separately owns new-session Deep Research wiring and waits for merged TASK-12968.3 and TASK-13014. Authenticated retrieval remains outside TASK-12968 and waits for TASK-13013 plus a separate approved design.
+TASK-12968.4 separately owns new-session Deep Research wiring and waits for merged TASK-12968.3 and TASK-13101. Authenticated retrieval remains outside TASK-12968 and waits for TASK-13100 plus a separate approved design.
 
 ## Alternatives Rejected
 

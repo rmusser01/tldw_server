@@ -179,8 +179,8 @@
   "required_implemented_source_blockers": [],
   "digests": {
     "manifest": "6715db5a499abb13a3095c5153566323afd037db5ce0ff77ade7b629d5137c1e",
-    "ledger": "854d7b6637a935900fbc0e8abff4ae8aee01f7af5b66de519e36e9863185d76b",
-    "ledger_rows": "765533077e79bf3c7cd5ab7a6465c3add8261db72fd8ffa6fdb7084fac87d856",
+    "ledger": "5191a5c80b5fdc6fcc0df101e2b901ea32aca7be475fe133ab12fcd5950ede23",
+    "ledger_rows": "f4dcb1208974fae7c47c72c3fa8328e2296c5a50b1b083bae3186f585bdc9bb6",
     "schema": "ac85c7889ce84d25b8ddf9473c8fa1a8db43da848c683f1dbc1dce91a3375f29",
     "validator": "811daa3bf46a7e3313246ca31b6fcd58cacebe97650e92e75954d2ef24cf4a94",
     "schema_validator": "ef79194445aa2544a3dd4b52cadcfd1b4efe99e52e49aabfb499bb3caa46fe16"
