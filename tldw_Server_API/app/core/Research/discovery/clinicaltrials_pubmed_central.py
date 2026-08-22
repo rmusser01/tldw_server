@@ -252,7 +252,9 @@ def _trusted_clinicaltrials_inputs(
     intent = group.intents[0]
     pairs = tuple((pair.name, pair.value) for pair in intent.query_pairs)
     if (
-        intent.operation_kind is not OperationKind.SEARCH
+        intent.route_id != group.route_id
+        or intent.route_id != "clinicaltrials_gov_studies_search_direct"
+        or intent.operation_kind is not OperationKind.SEARCH
         or intent.method != "GET"
         or intent.path != "/api/v2/studies"
         or intent.limits != limits

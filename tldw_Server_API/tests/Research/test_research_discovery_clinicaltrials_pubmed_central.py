@@ -36,10 +36,12 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
     CredentialRequirement,
     CredentialStatus,
+    DeferredNumericCSVQueryBinding,
     DiscoveryOutcomeIdentity,
     ExactOrigin,
     ExactQueryValuePolicy,
     ExecutionMode,
+    JSONBodyPair,
     LiteralTermsQueryValuePolicy,
     OpaqueCursorQueryValuePolicy,
     OperationKind,
@@ -552,6 +554,15 @@ def _assert_adapter_error(error: BaseException, code: str = "provider_payload_in
     assert str(error) == code
 
 
+def _cloned_clinical_group() -> PlannedDispatchGroup:
+    """Return a structurally independent valid group for frozen-field mutation tests."""
+    _registry, plan = _clinical_plan()
+    original = plan.dispatch_groups[0]
+    limits = replace(original.limits)
+    intent = replace(original.intents[0], limits=replace(limits))
+    return replace(original, limits=limits, intents=(intent,), allowance=replace(original.allowance))
+
+
 def test_clinicaltrials_constructor_and_first_page_plan_are_exact() -> None:
     registry, plan = _clinical_plan(result_limit=100)
     source = registry.get_source("clinicaltrials_gov")
@@ -641,46 +652,171 @@ def test_clinicaltrials_profile_is_exact_and_local() -> None:
 
 
 @pytest.mark.parametrize(
-    "mutation",
+    ("field", "value", "mirror_intent"),
     (
-        {"route_id": "clinicaltrials_gov_studies_search_swapped"},
-        {"backend_id": "openalex_api"},
-        {"adapter_id": "clinicaltrials_gov_v3"},
-        {"adapter_version": "clinicaltrials-gov-v3"},
-        {"fallback_order": 1},
-        {"filters": (QueryPair("status", "attacker"),)},
+        ("route_id", "clinicaltrials_gov_studies_search_swapped", False),
+        ("backend_id", "openalex_api", False),
+        ("adapter_id", "clinicaltrials_gov_v3", False),
+        ("adapter_version", "clinicaltrials-gov-v3", False),
+        ("policy_digest", "0" * 64, True),
+        ("fallback_order", 1, False),
+        ("filters", (QueryPair("status", "attacker"),), False),
     ),
 )
-def test_clinicaltrials_trusted_inputs_reject_identity_and_filter_drift(mutation: dict[str, object]) -> None:
-    _registry, plan = _clinical_plan()
-    group = replace(plan.dispatch_groups[0])
-    for name, value in mutation.items():
-        object.__setattr__(group, name, value)
+def test_clinicaltrials_trusted_inputs_reject_group_identity_policy_and_filter_drift(
+    field: str, value: object, mirror_intent: bool
+) -> None:
+    group = _cloned_clinical_group()
+    object.__setattr__(group, field, value)
+    if mirror_intent:
+        object.__setattr__(group.intents[0], field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+def test_clinicaltrials_trusted_inputs_reject_intent_route_identity_drift() -> None:
+    group = _cloned_clinical_group()
+    intent = group.intents[0]
+    object.__setattr__(intent, "route_id", "clinicaltrials_gov_studies_search_alternate")
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+@pytest.mark.parametrize("intents", ((), "duplicate", "list"))
+def test_clinicaltrials_trusted_inputs_require_one_intent_in_an_exact_tuple(intents: object) -> None:
+    group = _cloned_clinical_group()
+    intent = group.intents[0]
+    mutated = (intent, intent) if intents == "duplicate" else [intent] if intents == "list" else intents
+    object.__setattr__(group, "intents", mutated)
 
     with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
         _module()._trusted_clinicaltrials_inputs(group)
 
 
 @pytest.mark.parametrize(
-    "group_mutator",
+    ("field", "value"),
     (
-        lambda group: object.__setattr__(group.allowance, "pages", 1) or group,
-        lambda group: object.__setattr__(group.allowance, "physical_dispatches", 1) or group,
-        lambda group: replace(
-            group,
-            limits=replace(group.limits, max_results=99),
-            intents=tuple(replace(intent, limits=replace(intent.limits, max_results=99)) for intent in group.intents),
-        ),
-        lambda group: replace(group, intents=(replace(group.intents[0], method="POST"),)),
-        lambda group: replace(group, intents=(replace(group.intents[0], path="/api/v2/other"),)),
-        lambda group: replace(
-            group, intents=(replace(group.intents[0], query_pairs=group.intents[0].query_pairs[::-1]),)
+        ("physical_dispatches", 1),
+        ("pages", 1),
+        ("redirects", 1),
+        ("retries", 1),
+    ),
+)
+def test_clinicaltrials_trusted_inputs_reject_every_allowance_drift(field: str, value: int) -> None:
+    group = _cloned_clinical_group()
+    object.__setattr__(group.allowance, field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("max_pages", 3),
+        ("max_redirects", 1),
+        ("max_retries", 1),
+        ("timeout_ms", 19_999),
+        ("max_response_bytes", 2_097_151),
+        ("max_results", 99),
+        ("max_request_body_bytes", 16_383),
+    ),
+)
+def test_clinicaltrials_trusted_inputs_reject_every_group_route_limit_drift(field: str, value: int) -> None:
+    group = _cloned_clinical_group()
+    object.__setattr__(group.limits, field, value)
+    object.__setattr__(group.intents[0].limits, field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("max_pages", 3),
+        ("max_redirects", 1),
+        ("max_retries", 1),
+        ("timeout_ms", 19_999),
+        ("max_response_bytes", 2_097_151),
+        ("max_results", 99),
+        ("max_request_body_bytes", 16_383),
+    ),
+)
+def test_clinicaltrials_trusted_inputs_reject_independent_intent_limit_drift(field: str, value: int) -> None:
+    group = _cloned_clinical_group()
+    object.__setattr__(group.intents[0].limits, field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("policy_digest", "0" * 64),
+        ("operation_kind", OperationKind.CONDITIONAL_SUMMARY),
+        ("method", "POST"),
+        ("path", "/api/v2/other"),
+        ("json_body_pairs", (JSONBodyPair("page", 1),)),
+        (
+            "query_bindings",
+            (DeferredNumericCSVQueryBinding("synthetic_ids", "id", 1, 8),),
         ),
     ),
 )
-def test_clinicaltrials_trusted_inputs_reject_allowance_limit_intent_and_query_drift(group_mutator) -> None:
-    _registry, plan = _clinical_plan()
-    group = group_mutator(plan.dispatch_groups[0])
+def test_clinicaltrials_trusted_inputs_reject_independent_intent_material_drift(field: str, value: object) -> None:
+    group = _cloned_clinical_group()
+    object.__setattr__(group.intents[0], field, value)
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+@pytest.mark.parametrize(
+    ("_case", "index", "replacement"),
+    (
+        ("term_key", 0, QueryPair("query.other", '"Synthetic" AND "bounded" AND "discovery"')),
+        ("term_unquoted", 0, QueryPair("query.term", "Synthetic")),
+        ("term_too_many", 0, QueryPair("query.term", " AND ".join(f'"term{index}"' for index in range(9)))),
+        ("term_too_long", 0, QueryPair("query.term", f'"{"x" * 33}"')),
+        ("term_non_alnum", 0, QueryPair("query.term", '"synthetic-trial"')),
+        ("format", 1, QueryPair("format", "xml")),
+        ("markup_format", 2, QueryPair("markupFormat", "markdown")),
+        ("fields", 3, QueryPair("fields", f"{CLINICALTRIALS_FIELDS},Location")),
+        ("page_size_key", 4, QueryPair("limit", "50")),
+        ("page_size_zero", 4, QueryPair("pageSize", "0")),
+        ("page_size_over", 4, QueryPair("pageSize", "51")),
+        ("page_size_noncanonical", 4, QueryPair("pageSize", "050")),
+        ("page_size_non_ascii", 4, QueryPair("pageSize", "５")),
+        ("page_size_not_decimal", 4, QueryPair("pageSize", "fifty")),
+        ("page_size_token_too_long", 4, QueryPair("pageSize", "1" * 33)),
+        ("count_total", 5, QueryPair("countTotal", "false")),
+    ),
+)
+def test_clinicaltrials_trusted_inputs_reject_first_page_query_key_or_value_drift(
+    _case: str, index: int, replacement: QueryPair
+) -> None:
+    group = _cloned_clinical_group()
+    pairs = list(group.intents[0].query_pairs)
+    pairs[index] = replacement
+    object.__setattr__(group.intents[0], "query_pairs", tuple(pairs))
+
+    with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
+        _module()._trusted_clinicaltrials_inputs(group)
+
+
+@pytest.mark.parametrize("case", ("wrong_order", "first_page_token"))
+def test_clinicaltrials_trusted_inputs_reject_first_page_query_shape_drift(case: str) -> None:
+    group = _cloned_clinical_group()
+    pairs = list(group.intents[0].query_pairs)
+    if case == "wrong_order":
+        pairs[1], pairs[2] = pairs[2], pairs[1]
+    else:
+        pairs.append(QueryPair("pageToken", "synthetic-page-two"))
+    object.__setattr__(group.intents[0], "query_pairs", tuple(pairs))
 
     with pytest.raises(DiscoveryAdapterError, match="provider_payload_invalid"):
         _module()._trusted_clinicaltrials_inputs(group)
@@ -890,20 +1026,36 @@ async def test_clinicaltrials_frozen_count_change_fails_atomically() -> None:
 
 
 @pytest.mark.asyncio
-async def test_clinicaltrials_page_size_and_cumulative_raw_ceilings_fail_before_deduplication() -> None:
+async def test_clinicaltrials_page_size_ceiling_fails_before_deduplication() -> None:
     oversized_page = {"totalCount": 51, "studies": [_minimal_study(index) for index in range(51)]}
     oversized_page["nextPageToken"] = "synthetic-next"
     with pytest.raises(Exception) as page_error:
         await _invoke_clinical_bodies([_payload_bytes(oversized_page)])
     _assert_adapter_error(page_error.value, "provider_parse_limit_exceeded")
 
+
+@pytest.mark.asyncio
+async def test_clinicaltrials_cumulative_raw_ceiling_rejects_two_individually_widened_pages_totaling_101(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    strict_page = module._clinicaltrials_page
+    parsed_record_counts: list[int] = []
+
+    def widened_page(payload, *, guard, page_size):
+        assert page_size == 50
+        page = strict_page(payload, guard=guard, page_size=51)
+        parsed_record_counts.append(len(page.records))
+        return page
+
+    monkeypatch.setattr(module, "_clinicaltrials_page", widened_page)
     page_one = {"totalCount": 101, "studies": [_minimal_study(index) for index in range(50)]}
     page_one["nextPageToken"] = "synthetic-page-two"
     page_two = {"totalCount": 101, "studies": [_minimal_study(index + 50) for index in range(51)]}
-    page_two["nextPageToken"] = "synthetic-page-three"
     with pytest.raises(Exception) as cumulative_error:
         await _invoke_clinical_bodies([_payload_bytes(page_one), _payload_bytes(page_two)])
-    _assert_adapter_error(cumulative_error.value, "provider_parse_limit_exceeded")
+    _assert_adapter_error(cumulative_error.value)
+    assert parsed_record_counts == [50, 51]
 
 
 @pytest.mark.asyncio
@@ -1131,6 +1283,45 @@ async def test_clinicaltrials_http_429_timeout_and_redirect_are_typed_and_not_re
     with pytest.raises(Exception) as redirected:
         await _invoke_clinical_bodies([b"not-json"], status_code=302, content_type=None)
     _assert_adapter_error(redirected.value, "provider_response_rejected")
+
+
+@pytest.mark.parametrize("exception_type", (KeyError, TypeError, ValueError, OverflowError))
+@pytest.mark.asyncio
+async def test_clinicaltrials_unexpected_builtin_parser_errors_collapse_to_payload_invalid(
+    monkeypatch: pytest.MonkeyPatch, exception_type: type[Exception]
+) -> None:
+    error = exception_type("synthetic parser failure")
+
+    def failing_page(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(_module(), "_clinicaltrials_page", failing_page)
+    with pytest.raises(DiscoveryAdapterError) as caught:
+        await _invoke_clinical_bodies([_fixture_bytes("empty")])
+
+    _assert_adapter_error(caught.value)
+
+
+@pytest.mark.parametrize(
+    "error",
+    (
+        DiscoveryExecutionError("gateway_timed_out"),
+        DiscoveryAdapterError("provider_response_rejected"),
+    ),
+    ids=("execution", "adapter"),
+)
+@pytest.mark.asyncio
+async def test_clinicaltrials_framework_errors_from_parser_path_propagate_unchanged(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    def failing_page(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(_module(), "_clinicaltrials_page", failing_page)
+    with pytest.raises(type(error)) as caught:
+        await _invoke_clinical_bodies([_fixture_bytes("empty")])
+
+    assert caught.value is error
 
 
 @pytest.mark.parametrize(
