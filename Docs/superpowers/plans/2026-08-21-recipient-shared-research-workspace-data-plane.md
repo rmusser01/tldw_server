@@ -1064,7 +1064,7 @@ git commit -m "test(workspaces): verify shared recipient isolation"
 
 ### Task 11: Run Real Backend, WebUI, and CDP Acceptance and Close the Task
 
-**Status:** Complete through Fix Round 1/5. Live evidence was recorded with a real multi-user SQLite backend, Next.js WebUI, transparent local-model forwarding probe, local OpenAI-compatible provider, and explicit Chrome CDP. PR preparation is intentionally omitted by executor direction.
+**Status:** Fix Round 2/5 implementation and fresh live evidence passed from reviewed head `5a648f8532`; pending controller review. The Backlog task remains In Progress and PR preparation is intentionally omitted by executor direction.
 
 **Files:**
 - Create: `apps/tldw-frontend/scripts/shared-research-workspace-cdp-uat.mjs`
@@ -1082,6 +1082,10 @@ git commit -m "test(workspaces): verify shared recipient isolation"
 - Update through Backlog CLI: `TASK-12020.40`
 
 **Fix Round 1/5 closeout:** Partition direct/background GET reuse by resolved server and safe auth scope; fence assistant restoration against newer explicit selections; replace the transition observer with separate bounded owner-management and member-Chats operation policies; enforce multiset expected-error correlation and a closed evidence schema; and prove provider-context exclusion through an unchanged-body local forwarding probe. The fresh final31 fixture passed all 15 acceptance checks with closed strict/transition ledgers and five separately inspected screenshots. Focused changed behavior passed `191` tests, the required matched suite passed `111`, and the two correctly resolved package tests passed `13`.
+
+**Fix Round 2/5 scope:** Bind direct GET reuse to the immutable request configuration used by that exact request; require exact transition operation status contracts and persona-isolation identity proofs; and reject non-loopback or malformed provider-probe traffic before any upstream fetch. Each finding proceeds through an isolated RED/GREEN cycle before a fresh live CDP run.
+
+**Fix Round 2/5 closeout:** The four findings completed isolated RED/GREEN cycles. The amended frontend matrix passed `159` runner/probe tests plus `101` correctly resolved shared-package tests. Fresh `final32-fix2-1787446794-16413` passed all canonical 15 checks with closed strict and exact-status transition ledgers, settings `2x200`, race `200/409/200/409` with equal replay hashes, three unchanged clean loopback-probe requests, exact distinct persona identities, and five visually inspected screenshots. No Python differs from the reviewed base; focused lint, script syntax, evidence leak scans, protected-file modes, and diff checks are recorded in the Task 11 report. Status remains pending controller review; no PR/push.
 
 - [x] **Step 1: Write runner contract tests before the live script**
 

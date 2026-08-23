@@ -1,5 +1,3 @@
-from contextlib import asynccontextmanager
-
 import pytest
 
 
@@ -47,7 +45,11 @@ async def test_authnz_users_repo_create_does_not_inspect_or_mutate_schema(
     tmp_path,
     monkeypatch,
 ):
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import (
+        _GuardedSQLiteConnection,
+        get_db_pool,
+        reset_db_pool,
+    )
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -58,25 +60,17 @@ async def test_authnz_users_repo_create_does_not_inspect_or_mutate_schema(
     reset_settings()
     await reset_db_pool()
     pool = await get_db_pool()
-    original_transaction = pool.transaction
+    original_execute = _GuardedSQLiteConnection.execute
     schema_queries: list[str] = []
 
-    @asynccontextmanager
-    async def track_schema_queries():
-        async with original_transaction() as conn:
-            class TrackingConnection:
-                async def execute(self, query: str, *args):
-                    statement = query.lstrip().upper()
-                    if statement.startswith(("PRAGMA TABLE_INFO", "ALTER ", "CREATE ")):
-                        schema_queries.append(statement)
-                    return await conn.execute(query, *args)
+    async def track_schema_queries(self, query: object, *args: object):
+        if isinstance(query, str):
+            statement = query.lstrip().upper()
+            if statement.startswith(("PRAGMA TABLE_INFO", "ALTER ", "CREATE ")):
+                schema_queries.append(statement)
+        return await original_execute(self, query, *args)
 
-                def __getattr__(self, name: str):
-                    return getattr(conn, name)
-
-            yield TrackingConnection()
-
-    monkeypatch.setattr(pool, "transaction", track_schema_queries)
+    monkeypatch.setattr(_GuardedSQLiteConnection, "execute", track_schema_queries)
     repo = AuthnzUsersRepo(db_pool=pool)
 
     user_id = await repo.create_user(

@@ -2,7 +2,7 @@
 
 ## Result
 
-Complete. The explicit Chrome CDP acceptance runner exercised the real multi-user SQLite backend and Next.js WebUI using `local-llm` / `Qwen2.5-0.5B-Instruct`.
+Fix Round 2 execution passed and is pending controller review. The parent task remains In Progress. The explicit Chrome CDP acceptance runner exercised the real multi-user SQLite backend and Next.js WebUI using `local-llm` / `Qwen2.5-0.5B-Instruct`.
 
 ## Live Evidence
 
@@ -80,3 +80,41 @@ Three distinct live hypotheses were tested: final28 established the owner-manage
 - No Python file differs from the reviewed base. Repo-venv Ruff found five pre-existing `auth.py` findings and Bandit found eleven pre-existing low-severity `auth.py` B106 findings; base-versus-head byte comparison proves no new Python or security finding. Bandit JSON remained in `/tmp`.
 - `git diff --check` passed. No backend unit target was affected because Fix Round 1 changes no Python; the real backend was exercised by final31.
 - No PR or push was performed. The two unrelated watchlist templates remain untouched and unstaged.
+
+## Fix Round 2/5
+
+Reviewed base: `5a648f8532cf1f86d4892ccc216cb52a5c8652a2`.
+
+### Findings Addressed
+
+- Direct GET coalescing now resolves one immutable direct configuration snapshot and uses that exact snapshot for both the non-secret server/principal scope and request execution. Runtime messaging, caller-header, cookie-session, missing-config, and anonymous-principal requests do not coalesce unless `noAuth: true` is explicit. A 401 refresh retries with current storage credentials while an old-principal in-flight result remains partitioned.
+- Every owner-management and member-Chats transition operation declares exact allowed statuses. API reads and ordinary writes require `200`, migration creation requires `201`, and only named static/font resources allow `200/304`. Proof entries record operation name, bound, count, allowed statuses, and observed statuses; any wrong method/path/ID/origin/status/count remains fatal.
+- Evidence validation requires exactly owner/member/nonmember, pairwise-distinct config, cookie, marker, and marker-cookie hashes, same-persona marker equality, and permits only the intentional shared storage-key hash. It requires exactly the two closed transition proofs, exact proof/operation fields, known operation status contracts, and observed-status multiset correlation.
+- The provider probe binds only exact `127.0.0.1` or `::1` and accepts only a credential-free, query-free, fragment-free local HTTP loopback upstream at `/v1/chat/completions`. Body bounds, JSON, request count, sentinels, mutations, tools/functions, and byte identity are checked before `fetch`; every violation is local and records no raw body.
+
+### TDD Evidence
+
+- Coalescing RED: the full proxy suite reported `3 failed, 84 passed`; a separate secret-header contract reported `1 failed, 87 skipped`. GREEN: `88 passed`.
+- Transition-status RED: `6 failed, 2 passed, 75 skipped` because proofs omitted statuses and `201/302/399/204` were accepted in the wrong contracts. GREEN: `8 passed, 75 skipped`.
+- Evidence-validator RED: `2 failed, 11 passed, 82 skipped` on the new canonical proof shape; the strengthened malformed-object contract separately failed `1` test. GREEN: `13 passed, 82 skipped`, then the strengthened malformed-object test passed.
+- Probe RED: `16 failed, 2 passed` because prohibited bodies/targets reached fetch or unsafe bind hosts were accepted; main-listen validation separately reported `2 failed, 7 passed, 20 skipped`. GREEN: `29 passed`.
+- Final amended matrix with corrected workspace-relative package paths: `260 passed` across seven files. Its component runs were `159 passed` for runner/probe/lifecycle and `101 passed` for proxy/ShareDialog/request-core; the proxy suite was also rerun after lint-only test typing and remained `88 passed`.
+
+### Fresh Live Run
+
+Fresh `final32-fix2-1787446794-16413` passed on the first live Fix Round 2 hypothesis through the loopback probe.
+
+- Evidence status is `passed`; validation is exit `0` with `failures: []`; all canonical 15 acceptance keys are true and exactly five screenshot fields are present.
+- The strict ledger is closed and clean. Owner transition recorded `56/64` requests and member Chats recorded `49/64`; both have zero unexpected requests and exact allowed/observed statuses for every used operation.
+- Settings are two `200` responses. Race statuses are `200/409/200/409`, with two successes, final `409`, and equal replay turn hashes.
+- Provider readiness is truthfully `local-llm` / `Qwen2.5-0.5B-Instruct`. Three requests traversed the probe unchanged; every input/output hash matches and sentinel, mutation, and tool/function checks are clean.
+- Exact owner/member/nonmember isolation proof is present. Credential-value, sentinel-literal, and committed-evidence machine-path scans are false. Prompt/answer bodies are absent from JSON and the protected execution log; screenshots intentionally retain the visible transcript.
+- All five regenerated screenshots were visually inspected: desktop shared sources, desktop grounded answer/citations, mobile two-tab core, mobile full-screen source preview, and revoked state. No overlap, overflow, extra banner, or revoked-data leak was visible.
+- `/tmp/tldw-shared-uat.Heaplg/cleanup-final32-fix2-1787446794-16413.json` and `/tmp/tldw-shared-uat.Heaplg/logs/uat-final32-fix2-1787446794-16413.log` are both mode `0600`.
+
+### Quality Gates
+
+- Task 11 runner/probe ESLint: zero errors or warnings. Forced shared-package lint: zero errors and `95` inherited warnings; the three new test annotations were removed and no changed line reports a warning.
+- `node --check` passed both changed `.mjs` scripts. No Python file differs from reviewed base `5a648f8532`, so touched-scope Ruff and Bandit are not applicable; Fix Round 1's base-versus-head Python security comparison remains unchanged.
+- `git diff --check` passed. Final status/staging verification and the resulting commit hash are reported by the executor because a commit cannot contain its own hash. No PR/push; the two unrelated watchlist templates remain excluded.
+- Status: implementation and live evidence passed; pending controller review, with the Backlog task left In Progress.

@@ -18,26 +18,26 @@
   },
   "contextIsolationProof": [
     {
-      "configHash": "sha256:094ec9a1c322a43e6d2da8e6129f024d00e00ca54962f9ac615ce84f930ba6fc",
-      "cookieHash": "sha256:e4f87a94da839b0e75d01221fbc7692b4a54c9ab830f7186e3f2be25efe9ce4f",
-      "markerHash": "sha256:79d7875cf5d14d8e12c1f2144689a13a1a72faa283793a578f55f9280572ae6d",
-      "markerCookieHash": "sha256:79d7875cf5d14d8e12c1f2144689a13a1a72faa283793a578f55f9280572ae6d",
+      "configHash": "sha256:565e80d113a3f0eb20d461feb95bf412830b7222e6cd43b5bc1c49713aa80ccc",
+      "cookieHash": "sha256:945bc47ee6a4f5de3df4072bbb28decc6d15d731144d16cd66ea7504dcf4453b",
+      "markerHash": "sha256:aaf19bd8bf18d0f433ea2750e012f426531ec5e5ed87f9d9b7c0ea665d6fcf40",
+      "markerCookieHash": "sha256:aaf19bd8bf18d0f433ea2750e012f426531ec5e5ed87f9d9b7c0ea665d6fcf40",
       "persona": "member",
       "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
     },
     {
-      "configHash": "sha256:3a0b2c85c7de80f2fb53907227b97e5e682e1e9e065a5911e293807e12a7585c",
-      "cookieHash": "sha256:3ff71e8b5894fb6adb3b95e138c66fe92b8d46164c77a30f768f6147e980606d",
-      "markerHash": "sha256:7aa7eac0319b0ea05a9cbfc9eb104bb0716f0659363a302d85696dd39c167cb8",
-      "markerCookieHash": "sha256:7aa7eac0319b0ea05a9cbfc9eb104bb0716f0659363a302d85696dd39c167cb8",
+      "configHash": "sha256:023f4ef7a1ced126d41f4f5ce17518c12007a3d6a62c404c44d99c91967c401c",
+      "cookieHash": "sha256:1641658b3a1b7889cefa9c2a1747e62b87c572aea649f9e06e380f246a55623b",
+      "markerHash": "sha256:415526e53b86c612f652324a685f22f3698836c9a5dc42fdf601f8b407acce52",
+      "markerCookieHash": "sha256:415526e53b86c612f652324a685f22f3698836c9a5dc42fdf601f8b407acce52",
       "persona": "nonmember",
       "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
     },
     {
-      "configHash": "sha256:a4281d0d13fed3beffaaec9eb85ddcdc76799beea274774d74763505544499ab",
-      "cookieHash": "sha256:00e98c171a32cd322497beeeef61f0646adfdd9b1aaca58fb3cc14ef24a2a650",
-      "markerHash": "sha256:87b6ba908e954a14008a72d98552d5845411ef1d0603310374dda712c83e06f1",
-      "markerCookieHash": "sha256:87b6ba908e954a14008a72d98552d5845411ef1d0603310374dda712c83e06f1",
+      "configHash": "sha256:1b669b386c85a6148345ba038ffe8d03fce8b16b3c89b154b60926a659efcaa4",
+      "cookieHash": "sha256:3509125c1428edb2423b88de10fb76e383d12cfceb396017c23eacb90b299f91",
+      "markerHash": "sha256:8ea5083526f9d7d1fabd976fcf4d7bf29be2a4c23c12dffe5cd1d8bf6b1098dd",
+      "markerCookieHash": "sha256:8ea5083526f9d7d1fabd976fcf4d7bf29be2a4c23c12dffe5cd1d8bf6b1098dd",
       "persona": "owner",
       "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
     }
@@ -58,17 +58,17 @@
   },
   "environmentHash": "sha256:813a4a4679bca81f3051b2d4ed5060e69298b80da9b87927f46a086b78f243fc",
   "failureMessageHash": null,
-  "finishedAt": "2026-08-22T23:53:21.240Z",
+  "finishedAt": "2026-08-23T01:06:37.079Z",
   "fixture": {
-    "canonicalStatusEnvelopeHash": "sha256:8fb4f64de231cb64ad4f7efa411090ac70de092576b39f39fceb90b899d1fca0",
+    "canonicalStatusEnvelopeHash": "sha256:56a99a03e667e51137c84a4bafa4908165aab33fcd36bbd8b7f9e952c5696534",
     "canonicalStatusQueryable": true,
     "provisioned": true,
-    "shareIdHash": "sha256:1a6562590ef19d1045d06c4055742d38288e9e6dcd71ccde5cee80f1d5a774eb",
+    "shareIdHash": "sha256:031b4af5197ec30a926f48cf40e11a7dbc470048a21e4003b7a3c07c5dab1baa",
     "sourceIds": [
-      "sha256:53d782882df961c95280e6843ad3f26754a0e5351d7bc199f5aab71fa9de1895",
-      "sha256:cee795a00f2fcc5ed4692c7dc6c0db5992492ee8dff756dc4ca8723f515e0c5e"
+      "sha256:ad5f6269b7e03d8ef6cd61a646c70693cd0625eb8db1864db08ec5860b0c509d",
+      "sha256:628721cc1a6c298014eb3966da82e7ca315a0388a109fcff47d300be4906658b"
     ],
-    "workspaceIdHash": "sha256:d2a30ab339e401e5eb71f4c3eb35e7052956e65dd9cfd2942dfe05d68aa1c4d4"
+    "workspaceIdHash": "sha256:5825b64fa59c951c12443cfb558827c882f9d6d56d270606ac61ed82c9ca4e11"
   },
   "ledger": {
     "closed": true,
@@ -77,31 +77,31 @@
         "context": "nonmember",
         "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
         "context": "member",
         "message": "Failed to load resource: the server responded with a status of 409 (Conflict)",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
         "context": "member",
         "message": "Failed to load resource: the server responded with a status of 409 (Conflict)",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
         "context": "member",
         "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
         "context": "member",
         "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/sources/source-amber-final31-fix1-1787442542-12131/preview"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-amber-final32-fix2-1787446794-16413/preview"
       }
     ],
     "expectedHttpFailures": [
@@ -112,25 +112,25 @@
         "method": "GET",
         "operationId": "nonmember-neutral-bootstrap",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
-        "bodyHash": "sha256:015a886f06453d39b283797e8d1588fb3ec2529d666f67f1c5e09591398e282a",
+        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
         "consoleErrorCount": 1,
         "context": "member",
         "method": "POST",
         "operationId": "race-concurrent-conflict",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
-        "bodyHash": "sha256:0bef418e2d6ea846d287b5275310992a50088682f18d69cee697efde9246d116",
+        "bodyHash": "sha256:471d1957f7d9051aa89003b2fad0731d63096879039a788631f59460e53c9478",
         "consoleErrorCount": 1,
         "context": "member",
         "method": "POST",
         "operationId": "race-fingerprint-conflict",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
         "bodyHash": null,
@@ -139,7 +139,7 @@
         "method": "GET",
         "operationId": "revoked-workspace-bootstrap",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
         "bodyHash": null,
@@ -148,7 +148,7 @@
         "method": "GET",
         "operationId": "revoked-source-preview",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/sources/source-amber-final31-fix1-1787442542-12131/preview"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-amber-final32-fix2-1787446794-16413/preview"
       }
     ],
     "pageErrors": [],
@@ -158,7 +158,14 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=50"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
         "bodyHash": null,
@@ -193,13 +200,6 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
       },
       {
@@ -214,14 +214,14 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
       },
       {
         "bodyHash": null,
@@ -312,6 +312,13 @@
         "context": "member",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/health/live"
       },
       {
@@ -320,13 +327,6 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/rag/health"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
       },
       {
         "bodyHash": null,
@@ -368,28 +368,28 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
-        "bodyHash": "sha256:155ac6bf757eeed17029d50b6bf17686dc1242534258e7bfba362382482d13ac",
+        "bodyHash": "sha256:6a388c052513b136c3e8de8e155c3c5f03af5338676fc36b748cce8b757f605b",
         "context": "member",
         "method": "POST",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/sources/source-cobalt-final31-fix1-1787442542-12131/preview?chunk_index=0"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-cobalt-final32-fix2-1787446794-16413/preview?chunk_index=0"
       },
       {
-        "bodyHash": "sha256:991be15d12dca1ed092e271309da14ed63ceeed39d9337c8dbd9ae542c39495f",
+        "bodyHash": "sha256:d187f3db6591c7431b4ac202e019a2860fdc97a359b570d6975c3e9033aee29c",
         "context": "member",
         "method": "POST",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
         "bodyHash": null,
@@ -403,7 +403,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=50"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
       },
       {
         "bodyHash": null,
@@ -424,6 +424,13 @@
         "context": "member",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
@@ -432,13 +439,6 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
       },
       {
         "bodyHash": null,
@@ -459,14 +459,14 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
       },
       {
         "bodyHash": null,
@@ -500,13 +500,6 @@
         "bodyHash": null,
         "context": "member",
         "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
       },
@@ -516,6 +509,13 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -613,14 +613,14 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
         "bodyHash": null,
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=50"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
       },
       {
         "bodyHash": null,
@@ -641,14 +641,14 @@
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
       },
       {
         "bodyHash": null,
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
         "bodyHash": null,
@@ -718,14 +718,14 @@
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
+        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
       },
       {
         "bodyHash": null,
@@ -830,7 +830,7 @@
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
         "bodyHash": null,
@@ -893,6 +893,13 @@
         "context": "member",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
       },
       {
@@ -901,13 +908,6 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
       },
       {
         "bodyHash": null,
@@ -927,13 +927,6 @@
         "bodyHash": null,
         "context": "member",
         "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
       },
@@ -943,6 +936,13 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -1047,14 +1047,7 @@
         "context": "nonmember",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=50"
-      },
-      {
-        "bodyHash": null,
-        "context": "nonmember",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
       },
       {
         "bodyHash": null,
@@ -1068,13 +1061,6 @@
         "context": "nonmember",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
-      },
-      {
-        "bodyHash": null,
-        "context": "nonmember",
-        "method": "GET",
-        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
       },
       {
@@ -1082,7 +1068,21 @@
         "context": "nonmember",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
         "bodyHash": null,
@@ -1257,14 +1257,14 @@
         "context": "nonmember",
         "method": "GET",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=50"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
       },
       {
         "bodyHash": null,
@@ -1285,14 +1285,14 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
         "bodyHash": null,
@@ -1320,6 +1320,13 @@
         "context": "member",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
       },
       {
@@ -1328,13 +1335,6 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
       },
       {
         "bodyHash": null,
@@ -1474,42 +1474,42 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
-        "bodyHash": "sha256:015a886f06453d39b283797e8d1588fb3ec2529d666f67f1c5e09591398e282a",
+        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
         "context": "member",
         "method": "POST",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
-        "bodyHash": "sha256:015a886f06453d39b283797e8d1588fb3ec2529d666f67f1c5e09591398e282a",
+        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
         "context": "member",
         "method": "POST",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
-        "bodyHash": "sha256:015a886f06453d39b283797e8d1588fb3ec2529d666f67f1c5e09591398e282a",
+        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
         "context": "member",
         "method": "POST",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
-        "bodyHash": "sha256:0bef418e2d6ea846d287b5275310992a50088682f18d69cee697efde9246d116",
+        "bodyHash": "sha256:471d1957f7d9051aa89003b2fad0731d63096879039a788631f59460e53c9478",
         "context": "member",
         "method": "POST",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/sources/source-amber-final31-fix1-1787442542-12131/preview"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-amber-final32-fix2-1787446794-16413/preview"
       },
       {
         "bodyHash": null,
@@ -1565,21 +1565,21 @@
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/shares"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/tokens"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/tokens"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/shares"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "DELETE",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shares/50"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shares/51"
       },
       {
         "bodyHash": null,
@@ -1593,49 +1593,63 @@
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/shares"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/shares"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
@@ -1653,20 +1667,6 @@
       },
       {
         "bodyHash": null,
-        "context": "owner-revocation",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
-      },
-      {
-        "bodyHash": null,
-        "context": "owner-revocation",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
-      },
-      {
-        "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
@@ -1684,14 +1684,14 @@
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
@@ -1712,21 +1712,28 @@
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/a8010183-0164-49b2-aec7-33fc5ac36cf5/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=50"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
       },
       {
         "bodyHash": null,
@@ -1740,7 +1747,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
         "bodyHash": null,
@@ -1755,13 +1762,6 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
         "bodyHash": null,
@@ -1816,6 +1816,20 @@
         "bodyHash": null,
         "context": "member",
         "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
       },
@@ -1825,20 +1839,6 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -1936,14 +1936,14 @@
         "context": "member",
         "method": "GET",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/50/sources/source-amber-final31-fix1-1787442542-12131/preview"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-amber-final32-fix2-1787446794-16413/preview"
       },
       {
         "bodyHash": null,
@@ -1972,6 +1972,34 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/webpack/4291dd380a325031.webpack.hot-update.json"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/webpack/webpack.4291dd380a325031.hot-update.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/webpack/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.4291dd380a325031.hot-update.js"
       },
       {
         "bodyHash": null,
@@ -2006,35 +2034,35 @@
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/3cf05074-77b9-488a-b851-5bc1e3fb01ff/research-runs"
+        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/research-runs"
       },
       {
         "bodyHash": null,
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/3cf05074-77b9-488a-b851-5bc1e3fb01ff/settings?scope_type=global"
+        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/settings?scope_type=global"
       },
       {
         "bodyHash": null,
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/3cf05074-77b9-488a-b851-5bc1e3fb01ff/messages?scope_type=global&include_deleted=false&include_metadata=true&limit=200&offset=0"
+        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/messages?scope_type=global&include_deleted=false&include_metadata=true&limit=200&offset=0"
       },
       {
         "bodyHash": null,
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chat/conversations/3cf05074-77b9-488a-b851-5bc1e3fb01ff/share-links?scope_type=global"
+        "url": "http://127.0.0.1:18001/api/v1/chat/conversations/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/share-links?scope_type=global"
       },
       {
         "bodyHash": null,
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_Markdown_tsx-_979b2.js"
+        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/settings?scope_type=global"
       },
       {
         "bodyHash": null,
@@ -2048,7 +2076,7 @@
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/3cf05074-77b9-488a-b851-5bc1e3fb01ff/settings?scope_type=global"
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_Markdown_tsx-_979b2.js"
       },
       {
         "bodyHash": null,
@@ -2058,7 +2086,7 @@
         "url": "http://127.0.0.1:18001/api/v1/auth/me"
       },
       {
-        "bodyHash": "sha256:ef54bb2ad5a030ba7defe897be160d74fc6ed9c280e94c8fdd744583b03f2e9a",
+        "bodyHash": "sha256:cf62f208e79e3248bd4ea76dd36a4b78fd50e8075724cae6ac1e266714f9192e",
         "context": "member-chats",
         "method": "POST",
         "status": 200,
@@ -2104,7 +2132,7 @@
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/3cf05074-77b9-488a-b851-5bc1e3fb01ff/research-runs"
+        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/research-runs"
       },
       {
         "bodyHash": null,
@@ -2136,16 +2164,16 @@
     "bodyUnchanged": true,
     "forwardedRequestCount": 3,
     "inputBodyHashes": [
-      "sha256:a955341bcf5d1d6d10f16d3c2086bc57d8cd2a5f08abc5b32e802e48236ed032",
-      "sha256:73455bdc8110590a7abf8577a62f04f94e2e60e5d3c2ddd1adb6e18d8120fee6",
-      "sha256:16ab8de853bb529e66adbb19c20034a8569f4fdce3a1008e0c1e7ab894db4d5d"
+      "sha256:2a77c21c6c411a53e5444f2d6fab3634c6ed815a5f401da7b4eaf57d9caee34a",
+      "sha256:220ba1b2c1851e26fb3254cd9a258db01438ab8753a6d636ea36ae3603cb6a42",
+      "sha256:576f928928baecba03f9f2a04a223d05ab6feed9c739949ae75d875b2c29927c"
     ],
     "maximumRequestCount": 16,
     "mutationPayloadsAbsent": true,
     "outputBodyHashes": [
-      "sha256:a955341bcf5d1d6d10f16d3c2086bc57d8cd2a5f08abc5b32e802e48236ed032",
-      "sha256:73455bdc8110590a7abf8577a62f04f94e2e60e5d3c2ddd1adb6e18d8120fee6",
-      "sha256:16ab8de853bb529e66adbb19c20034a8569f4fdce3a1008e0c1e7ab894db4d5d"
+      "sha256:2a77c21c6c411a53e5444f2d6fab3634c6ed815a5f401da7b4eaf57d9caee34a",
+      "sha256:220ba1b2c1851e26fb3254cd9a258db01438ab8753a6d636ea36ae3603cb6a42",
+      "sha256:576f928928baecba03f9f2a04a223d05ab6feed9c739949ae75d875b2c29927c"
     ],
     "ownerSentinelAbsent": true,
     "payloadJsonValid": true,
@@ -2161,24 +2189,24 @@
   "raceProbe": {
     "operations": [
       {
-        "bodyHash": "sha256:015a886f06453d39b283797e8d1588fb3ec2529d666f67f1c5e09591398e282a",
+        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
         "operationId": "race-concurrent-conflict",
         "status": 409
       },
       {
-        "bodyHash": "sha256:0bef418e2d6ea846d287b5275310992a50088682f18d69cee697efde9246d116",
+        "bodyHash": "sha256:471d1957f7d9051aa89003b2fad0731d63096879039a788631f59460e53c9478",
         "operationId": "race-fingerprint-conflict",
         "status": 409
       }
     ],
     "requestHashes": [
-      "sha256:015a886f06453d39b283797e8d1588fb3ec2529d666f67f1c5e09591398e282a",
-      "sha256:0bef418e2d6ea846d287b5275310992a50088682f18d69cee697efde9246d116"
+      "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
+      "sha256:471d1957f7d9051aa89003b2fad0731d63096879039a788631f59460e53c9478"
     ],
-    "requestIdHash": "sha256:8569834a23a1dfb823fbb9138357dc6f0a7ceace82f2876e4225b914ec41a4f7",
+    "requestIdHash": "sha256:791cc66549d807b6326226858a38919947f33cfa930682fe11673e406101736f",
     "responseHashes": [
-      "sha256:9256a476fc21933dfd2867f5917e64fb8de39df3be0187d6cbec5be3aa06750c",
-      "sha256:b1f7f2f767ad5bdc4078b4360658c6a5af4522a481a4db395bef2e63957fd4f4"
+      "sha256:122e34b65e9e2f5b53337081e2e03e4ee6a5414fe908dd6876f55cfdbc64857f",
+      "sha256:eacf7589b6c6a105e4581b0f150a3477c92ff463c6f7a63afd75ceed3067f46f"
     ],
     "statuses": [
       200,
@@ -2187,17 +2215,17 @@
       409
     ],
     "timingsMs": [
-      4059,
-      369,
-      185,
-      183
+      3251,
+      329,
+      149,
+      146
     ],
     "turnHashes": [
-      "sha256:7e533fd06f37dbd682b21f2410fce609013ec96fc12af28b267ee660d4df098a",
-      "sha256:7e533fd06f37dbd682b21f2410fce609013ec96fc12af28b267ee660d4df098a"
+      "sha256:ff9f16dd131df05206c22d09518c7cf079013f47c2e6b4131395b428483f7318",
+      "sha256:ff9f16dd131df05206c22d09518c7cf079013f47c2e6b4131395b428483f7318"
     ]
   },
-  "runIdHash": "sha256:3ccbdb1d4b3ee13a9e722c18cee08959c08007ec73b855cfab8d47cce68c9775",
+  "runIdHash": "sha256:3e05721e14a1b4f192cef88d4bb0e9739fa74c00f19345d9ede1d6b0b085d8a1",
   "settingsRequestProbe": {
     "count": 2,
     "maximum": 2,
@@ -2213,7 +2241,7 @@
     "mobileSharedWorkspace": "mobile-shared-workspace.png",
     "revokedShare": "revoked-share.png"
   },
-  "startedAt": "2026-08-22T23:49:24.079Z",
+  "startedAt": "2026-08-23T01:02:27.801Z",
   "status": "passed",
   "transitionProof": [
     {
@@ -2224,7 +2252,7 @@
           "id": "owner-workspace-context-teardown",
           "maximumCount": 1,
           "method": "GET",
-          "requestHash": "sha256:d9e21605a4423d0953795bc41c54a5ca0d4a9edcf5e344ab13edef16e4af3c7c"
+          "requestHash": "sha256:27f0cb7a8b9ce0237c4fb587bc1146e9ea55138e1659571c90032cb0c280ac7c"
         }
       ],
       "consoleErrorCount": 0,
@@ -2257,6 +2285,13 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
+          "requestHash": "sha256:1bf807e9f10245f1003f7d5ada724c67405653b818c2b95c142a89933b6c4c9d",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
           "requestHash": "sha256:8a622cf3eda4f76b8b9b208b02546d55733c23926b3d53d5b33b4a8fab9fc856",
           "status": 200
         },
@@ -2265,13 +2300,6 @@
           "kind": "response",
           "method": "GET",
           "requestHash": "sha256:40f8963443a1f84a2ccabc86b989269d3a2b21caf4d2b6b63c17325247eac1c3",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
-          "requestHash": "sha256:1bf807e9f10245f1003f7d5ada724c67405653b818c2b95c142a89933b6c4c9d",
           "status": 200
         },
         {
@@ -2320,6 +2348,13 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
+          "requestHash": "sha256:2838e1fb6479663865e06c95163415b6fc3502e2383ddd3b62a2caa92d07ad7e",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
           "requestHash": "sha256:df9d5c7e179227ba42b3904ecf9675352ddf27b8c1755e5da1e8d071f1ad5e99",
           "status": 304
         },
@@ -2329,13 +2364,6 @@
           "method": "GET",
           "requestHash": "sha256:5d5968e15c0084e46758822827737adaeaf550bee8adc8b277b0165512c854e2",
           "status": 304
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
-          "requestHash": "sha256:2838e1fb6479663865e06c95163415b6fc3502e2383ddd3b62a2caa92d07ad7e",
-          "status": 200
         },
         {
           "errorHash": null,
@@ -2459,15 +2487,22 @@
         {
           "errorHash": null,
           "kind": "response",
-          "method": "PUT",
-          "requestHash": "sha256:acb4cc48a1cf4b0c8e62d9174c0f327d206cae3bac277683db3be8c030d6d29a",
+          "method": "GET",
+          "requestHash": "sha256:e6700bbdb794b98c912c4d50666731dca73cc2fe5daf2a25db9cd1a4d3a5f6a2",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:acb4cc48a1cf4b0c8e62d9174c0f327d206cae3bac277683db3be8c030d6d29a",
+          "requestHash": "sha256:0f2707366ede2855fe878ce82f14b037bc6c5196f3470ba7a4f3cead3545368c",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "PUT",
+          "requestHash": "sha256:0f2707366ede2855fe878ce82f14b037bc6c5196f3470ba7a4f3cead3545368c",
           "status": 200
         },
         {
@@ -2481,28 +2516,14 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:8a2dc8dac537e5500e795c7eb2f4ee15c6f9a6ff8eee5be4d73d034e87f1fc66",
+          "requestHash": "sha256:67912bfeea888619dc2c24c9420357300aa9b6874c3abc358d56d3aa368e2f79",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:e34de78ff23df5c892243af53dc130101794dd6a6add08549b269a7c13a46df2",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
-          "requestHash": "sha256:d9e21605a4423d0953795bc41c54a5ca0d4a9edcf5e344ab13edef16e4af3c7c",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
-          "requestHash": "sha256:d3062964e8939a35d73458b764f21c4874a65e2b2c0aa0a5c450ac39df925859",
+          "requestHash": "sha256:27f0cb7a8b9ce0237c4fb587bc1146e9ea55138e1659571c90032cb0c280ac7c",
           "status": 200
         },
         {
@@ -2523,7 +2544,21 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:ba1060a37aa1f1f1e6e11b96ac21dd328b3e983e911ce9fead7dd010482fa8df",
+          "requestHash": "sha256:d3062964e8939a35d73458b764f21c4874a65e2b2c0aa0a5c450ac39df925859",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:e6700bbdb794b98c912c4d50666731dca73cc2fe5daf2a25db9cd1a4d3a5f6a2",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:595d566f48a1c4f1d83845a023d3c0453ca1569f88133c13e2e8fcaa7cd530cc",
           "status": 200
         },
         {
@@ -2537,35 +2572,7 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:8a2dc8dac537e5500e795c7eb2f4ee15c6f9a6ff8eee5be4d73d034e87f1fc66",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
           "requestHash": "sha256:32a4f843d9fe3a26051f7239d6b411678d05e6831907ed26173ac5da87a833bb",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "PUT",
-          "requestHash": "sha256:7a6fbb451fb902bfe415dc10ecb80f53f7e95eb4974a6f8701b636abc9836084",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "PUT",
-          "requestHash": "sha256:7a6fbb451fb902bfe415dc10ecb80f53f7e95eb4974a6f8701b636abc9836084",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "PUT",
-          "requestHash": "sha256:7f590d8cdbb228b2a244deb6e122c9eb78d01ac336c2976ddead5a60e91695cf",
           "status": 200
         },
         {
@@ -2579,238 +2586,502 @@
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:f92fe38e0a961720140f439a5079b4ab557256853a17f6a7a3af33021752e456",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
-          "requestHash": "sha256:d9e21605a4423d0953795bc41c54a5ca0d4a9edcf5e344ab13edef16e4af3c7c",
+          "requestHash": "sha256:4a96486e19043b05b92ff76fb31797db5956cd31a7ca17171abdac4efddd100e",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:df8c6631d770bd9b5020a12fa6fe0e4b460045b0053e08db77c15885c8f90d78",
+          "requestHash": "sha256:4a96486e19043b05b92ff76fb31797db5956cd31a7ca17171abdac4efddd100e",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
-          "method": "POST",
-          "requestHash": "sha256:8e4baa00c38bb0a21caef35769aed065796cbe3e023614af07e7da69273f0736",
+          "method": "PUT",
+          "requestHash": "sha256:cedbcddb70b5408c4a40c083a5f03aed7cac163038dbeb256178edbcd2eda3a1",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "PUT",
+          "requestHash": "sha256:a5c29d8d415b256efe83123a8770094b134c39f72b75e91d7f22efe8961598f9",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:d9e21605a4423d0953795bc41c54a5ca0d4a9edcf5e344ab13edef16e4af3c7c",
+          "requestHash": "sha256:27f0cb7a8b9ce0237c4fb587bc1146e9ea55138e1659571c90032cb0c280ac7c",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
-          "method": "GET",
-          "requestHash": "sha256:aa557a66fe70326abaa9c3e0b98b0e3629cf514396861759c84658a978bffadf",
+          "method": "PUT",
+          "requestHash": "sha256:f0ff2691154758ac4c3b71785a0403140944ba56bc6bcbe9704dc00b46e3f67c",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "POST",
-          "requestHash": "sha256:47e1d6be63fc5e6754623daa0723b918a4f875d97fccfbcc7a36c10b107dd27d",
+          "requestHash": "sha256:3c51cb5bd5ea5c867807acf89cb33d9e88fbef16aecaf598990bd1d6aaec540c",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:27f0cb7a8b9ce0237c4fb587bc1146e9ea55138e1659571c90032cb0c280ac7c",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:12ede85174f3185acdcba874b09574d88198571f7ac843b14b7c75cc3a6e2c66",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "POST",
+          "requestHash": "sha256:b4ca2ba03565dde4936c16301d40fcd1a8c65904e798239eb304434bc0eaa012",
           "status": 200
         }
       ],
       "maximumOperationDeclarations": 64,
       "operations": [
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "destination-document"
+          "name": "destination-document",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 2,
-          "name": "webui-runtime-config"
+          "name": "webui-runtime-config",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 17,
           "maximumCount": 32,
-          "name": "webui-next-static"
+          "name": "webui-next-static",
+          "observedStatuses": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 0,
           "maximumCount": 2,
-          "name": "webui-next-font-geist"
+          "name": "webui-next-font-geist",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "webui-font-arimo"
+          "name": "webui-font-arimo",
+          "observedStatuses": [
+            304
+          ]
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "webui-font-inter-semibold"
+          "name": "webui-font-inter-semibold",
+          "observedStatuses": [
+            304
+          ]
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "webui-font-inter-medium"
+          "name": "webui-font-inter-medium",
+          "observedStatuses": [
+            304
+          ]
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "webui-font-inter-regular"
+          "name": "webui-font-inter-regular",
+          "observedStatuses": [
+            304
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 4,
-          "name": "ambient-persona-profiles"
+          "name": "ambient-persona-profiles",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 4,
-          "name": "ambient-auth-me"
+          "name": "ambient-auth-me",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 2,
           "maximumCount": 4,
-          "name": "ambient-health"
+          "name": "ambient-health",
+          "observedStatuses": [
+            200,
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 4,
-          "name": "ambient-health-live"
+          "name": "ambient-health-live",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 4,
-          "name": "ambient-notifications"
+          "name": "ambient-notifications",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 4,
-          "name": "ambient-notification-stream"
+          "name": "ambient-notification-stream",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 4,
-          "name": "ambient-notification-count"
+          "name": "ambient-notification-count",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 4,
-          "name": "ambient-rag-health"
+          "name": "ambient-rag-health",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 4,
-          "name": "ambient-llm-providers"
+          "name": "ambient-llm-providers",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 4,
-          "name": "ambient-llm-models"
+          "name": "ambient-llm-models",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 4,
-          "name": "ambient-user-profile"
+          "name": "ambient-user-profile",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-flashcard-decks"
+          "name": "owner-flashcard-decks",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 2,
-          "name": "owner-notes-search"
+          "name": "owner-notes-search",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-slide-styles"
+          "name": "owner-slide-styles",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 2,
           "maximumCount": 2,
-          "name": "owner-user-storage"
+          "name": "owner-user-storage",
+          "observedStatuses": [
+            200,
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-chat-commands"
+          "name": "owner-chat-commands",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-workspace-capabilities"
+          "name": "owner-workspace-capabilities",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 3,
           "maximumCount": 4,
-          "name": "owner-workspace-context"
+          "name": "owner-workspace-context",
+          "observedStatuses": [
+            200,
+            200,
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 2,
           "maximumCount": 2,
-          "name": "owner-workspace-source-views"
+          "name": "owner-workspace-source-views",
+          "observedStatuses": [
+            200,
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 2,
-          "name": "owner-workspace-sources"
+          "name": "owner-workspace-sources",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 2,
           "maximumCount": 2,
-          "name": "owner-workspace-save"
+          "name": "owner-workspace-save",
+          "observedStatuses": [
+            200,
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 2,
           "maximumCount": 2,
-          "name": "owner-source-selection"
+          "name": "owner-source-selection",
+          "observedStatuses": [
+            200,
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            201
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-migration-create"
+          "name": "owner-migration-create",
+          "observedStatuses": [
+            201
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-migration-finalize"
+          "name": "owner-migration-finalize",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-migration-status"
+          "name": "owner-migration-status",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-migration-delete-ack"
+          "name": "owner-migration-delete-ack",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-migration-chunk-1"
+          "name": "owner-migration-chunk-1",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-migration-chunk-2"
+          "name": "owner-migration-chunk-2",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "owner-migration-chunk-3"
+          "name": "owner-migration-chunk-3",
+          "observedStatuses": [
+            200
+          ]
         }
       ],
       "pageErrorCount": 0,
@@ -2829,7 +3100,7 @@
           "id": "chat-share-links-teardown",
           "maximumCount": 1,
           "method": "GET",
-          "requestHash": "sha256:5ff61ce354d6167655a10082a55208250e2feb8482fcd85780d0b9f09f6e6bab"
+          "requestHash": "sha256:da9f68d35a92c5f41d3a8dec9fd17455461ad03bd1f0d25ad7bd4a95469d72fe"
         },
         {
           "count": 0,
@@ -2857,7 +3128,7 @@
           "id": "chat-research-runs-teardown",
           "maximumCount": 1,
           "method": "GET",
-          "requestHash": "sha256:e511050cea8ffe1d17ce35ef9b095ba8d8823620a2eb5742dde262239d01a255"
+          "requestHash": "sha256:bfb23545ff36acca5587e1b7c87d10064c15c4164d834467a9958b89173c7f2b"
         },
         {
           "count": 0,
@@ -2890,6 +3161,34 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
+          "requestHash": "sha256:f759ef33a750e28d8a0ee65897e7344d4e46dd6829e84e105002dd3ebb52df62",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:975920fdbcc420437516350525aecffc986f875346ec1e462ce35d97610a5723",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:c71aff375fcf3839367b0db111444d92166198aa0af8dc9807fc8cf27900b777",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:1f398b29bb355244d82ceccb33885f9d3620f8425761b8ae5607c1403dff4f6d",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
           "requestHash": "sha256:19af48021de81d55955852db5081ce5a02dbc045d56b997860df2c66fbc8d6d9",
           "status": 200
         },
@@ -2904,13 +3203,6 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:1bf807e9f10245f1003f7d5ada724c67405653b818c2b95c142a89933b6c4c9d",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
           "requestHash": "sha256:cefb177fb2be30168ffc2898cbc1810f98ec2c0dbc58b3af45d5e536d34a007b",
           "status": 200
         },
@@ -2918,7 +3210,7 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:8a622cf3eda4f76b8b9b208b02546d55733c23926b3d53d5b33b4a8fab9fc856",
+          "requestHash": "sha256:1bf807e9f10245f1003f7d5ada724c67405653b818c2b95c142a89933b6c4c9d",
           "status": 200
         },
         {
@@ -2926,6 +3218,13 @@
           "kind": "response",
           "method": "GET",
           "requestHash": "sha256:989a744a0a69faccb08603bd1919734e8fd37f2bbaf9800ddc40982cada48d3f",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:8a622cf3eda4f76b8b9b208b02546d55733c23926b3d53d5b33b4a8fab9fc856",
           "status": 200
         },
         {
@@ -2946,14 +3245,14 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:bb0fadd998ccecb821e74c935d4abc0ed9739912d4c268c04e09bc866b16c357",
+          "requestHash": "sha256:12d83ccc13b8b5a974f9ae0634e1c05a03f1e13dd52ef261e5865ec71753464e",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:12d83ccc13b8b5a974f9ae0634e1c05a03f1e13dd52ef261e5865ec71753464e",
+          "requestHash": "sha256:bb0fadd998ccecb821e74c935d4abc0ed9739912d4c268c04e09bc866b16c357",
           "status": 200
         },
         {
@@ -2962,6 +3261,13 @@
           "method": "GET",
           "requestHash": "sha256:be5aaca848498775364425e4bb077e38bac46c7ecf60cdb831baa6ca558f2a8d",
           "status": 304
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:f759ef33a750e28d8a0ee65897e7344d4e46dd6829e84e105002dd3ebb52df62",
+          "status": 200
         },
         {
           "errorHash": null,
@@ -3149,13 +3455,6 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:5c37518381e1ec9fda6c8b9c0921b896c0ff229fb54b5315a3978ec87c315f9a",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
           "requestHash": "sha256:7b0bf814c137958bafe57bf3002cdd97a9b3c32da30bf2d42946f7eb968ed48d",
           "status": 200
         },
@@ -3163,7 +3462,14 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:a22e8704cdbf9a3a43c3f9bf9273e125d32e99e6b06e7467528568d435de6668",
+          "requestHash": "sha256:5c37518381e1ec9fda6c8b9c0921b896c0ff229fb54b5315a3978ec87c315f9a",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:0094766affc754f8a58c5fb701c9223a843979423811668420a5c843ba0f5ab0",
           "status": 200
         },
         {
@@ -3177,7 +3483,7 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:0094766affc754f8a58c5fb701c9223a843979423811668420a5c843ba0f5ab0",
+          "requestHash": "sha256:a22e8704cdbf9a3a43c3f9bf9273e125d32e99e6b06e7467528568d435de6668",
           "status": 200
         },
         {
@@ -3198,185 +3504,407 @@
       "maximumOperationDeclarations": 64,
       "operations": [
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "destination-document"
+          "name": "destination-document",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 2,
-          "name": "webui-runtime-config"
+          "name": "webui-runtime-config",
+          "observedStatuses": [
+            200
+          ]
         },
         {
-          "count": 16,
+          "allowedStatuses": [
+            200,
+            304
+          ],
+          "count": 19,
           "maximumCount": 32,
-          "name": "webui-next-static"
+          "name": "webui-next-static",
+          "observedStatuses": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ]
         },
         {
-          "count": 0,
-          "maximumCount": 2,
-          "name": "webui-next-font-geist"
-        },
-        {
-          "count": 1,
-          "maximumCount": 1,
-          "name": "webui-font-arimo"
-        },
-        {
-          "count": 1,
-          "maximumCount": 1,
-          "name": "webui-font-inter-semibold"
-        },
-        {
-          "count": 1,
-          "maximumCount": 1,
-          "name": "webui-font-inter-medium"
-        },
-        {
-          "count": 1,
-          "maximumCount": 1,
-          "name": "webui-font-inter-regular"
-        },
-        {
-          "count": 2,
-          "maximumCount": 4,
-          "name": "ambient-persona-profiles"
-        },
-        {
-          "count": 1,
-          "maximumCount": 4,
-          "name": "ambient-auth-me"
-        },
-        {
-          "count": 2,
-          "maximumCount": 4,
-          "name": "ambient-health"
-        },
-        {
-          "count": 1,
-          "maximumCount": 4,
-          "name": "ambient-health-live"
-        },
-        {
-          "count": 1,
-          "maximumCount": 4,
-          "name": "ambient-notifications"
-        },
-        {
-          "count": 1,
-          "maximumCount": 4,
-          "name": "ambient-notification-stream"
-        },
-        {
-          "count": 1,
-          "maximumCount": 4,
-          "name": "ambient-notification-count"
-        },
-        {
-          "count": 1,
-          "maximumCount": 4,
-          "name": "ambient-rag-health"
-        },
-        {
-          "count": 0,
-          "maximumCount": 4,
-          "name": "ambient-llm-providers"
-        },
-        {
-          "count": 1,
-          "maximumCount": 4,
-          "name": "ambient-llm-models"
-        },
-        {
-          "count": 1,
-          "maximumCount": 4,
-          "name": "ambient-user-profile"
-        },
-        {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 2,
           "maximumCount": 2,
-          "name": "chats-openapi"
+          "name": "webui-next-font-geist",
+          "observedStatuses": [
+            200,
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "chats-docs-info"
+          "name": "webui-font-arimo",
+          "observedStatuses": [
+            304
+          ]
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "chats-ingestion-capabilities"
+          "name": "webui-font-inter-semibold",
+          "observedStatuses": [
+            304
+          ]
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "chats-audio-service-health"
+          "name": "webui-font-inter-medium",
+          "observedStatuses": [
+            304
+          ]
         },
         {
+          "allowedStatuses": [
+            200,
+            304
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "chats-character-catalog"
+          "name": "webui-font-inter-regular",
+          "observedStatuses": [
+            304
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 2,
+          "maximumCount": 4,
+          "name": "ambient-persona-profiles",
+          "observedStatuses": [
+            200,
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 4,
+          "name": "ambient-auth-me",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 2,
+          "maximumCount": 4,
+          "name": "ambient-health",
+          "observedStatuses": [
+            200,
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 4,
+          "name": "ambient-health-live",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 4,
+          "name": "ambient-notifications",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 4,
+          "name": "ambient-notification-stream",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 4,
+          "name": "ambient-notification-count",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 4,
+          "name": "ambient-rag-health",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 0,
+          "maximumCount": 4,
+          "name": "ambient-llm-providers",
+          "observedStatuses": []
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 4,
+          "name": "ambient-llm-models",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 4,
+          "name": "ambient-user-profile",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 2,
+          "maximumCount": 2,
+          "name": "chats-openapi",
+          "observedStatuses": [
+            200,
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "chats-audio-health"
+          "name": "chats-docs-info",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 1,
+          "name": "chats-ingestion-capabilities",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 1,
+          "name": "chats-audio-service-health",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 1,
+          "name": "chats-character-catalog",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
+          "count": 1,
+          "maximumCount": 1,
+          "name": "chats-audio-health",
+          "observedStatuses": [
+            200
+          ]
+        },
+        {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 1,
-          "name": "chats-voice-catalog"
+          "name": "chats-voice-catalog",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 1,
-          "name": "chats-share-links"
+          "name": "chats-share-links",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 2,
-          "name": "chats-list"
+          "name": "chats-list",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 2,
-          "name": "chats-messages"
+          "name": "chats-messages",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 1,
-          "name": "chats-research-runs"
+          "name": "chats-research-runs",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 2,
-          "name": "chats-settings"
+          "name": "chats-settings",
+          "observedStatuses": []
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "chats-provider-config"
+          "name": "chats-provider-config",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "chats-persona-catalog"
+          "name": "chats-persona-catalog",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 1,
           "maximumCount": 1,
-          "name": "chats-prompt-capabilities"
+          "name": "chats-prompt-capabilities",
+          "observedStatuses": [
+            200
+          ]
         },
         {
+          "allowedStatuses": [
+            200
+          ],
           "count": 0,
           "maximumCount": 1,
-          "name": "chats-implicit-feedback"
+          "name": "chats-implicit-feedback",
+          "observedStatuses": []
         }
       ],
       "pageErrorCount": 0,
       "registeredAbortCount": 8,
       "registeredOperationCount": 35,
-      "requestCount": 44,
+      "requestCount": 49,
       "runtimeOverlayCount": 0,
       "unexpectedRequestCount": 0,
       "withinRequestBound": true

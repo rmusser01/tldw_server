@@ -557,11 +557,12 @@ const validateEvidencePayload = (evidence) => {
     "persona",
     "storageKeyHash",
   ]
+  const distinctIdentityHashes = ["configHash", "cookieHash", "markerCookieHash", "markerHash"]
   if (
     !Array.isArray(contextProof) ||
     contextProof.length !== PERSONAS.length ||
-    new Set(contextProof.map((entry) => entry.persona)).size !== PERSONAS.length ||
-    !PERSONAS.every((persona) => contextProof.some((entry) => entry.persona === persona)) ||
+    new Set(contextProof.map((entry) => entry?.persona)).size !== PERSONAS.length ||
+    !PERSONAS.every((persona) => contextProof.some((entry) => entry?.persona === persona)) ||
     contextProof.some(
       (entry) =>
         !exactKeys(entry, contextProofKeys) ||
@@ -569,6 +570,9 @@ const validateEvidencePayload = (evidence) => {
           isSha256
         ) ||
         entry.markerHash !== entry.markerCookieHash
+    ) ||
+    distinctIdentityHashes.some(
+      (field) => new Set(contextProof.map((entry) => entry?.[field])).size !== PERSONAS.length
     )
   ) {
     failures.push("context_isolation_proof")
@@ -755,13 +759,80 @@ const validateEvidencePayload = (evidence) => {
   ]
   const abortProofKeys = ["count", "id", "maximumCount", "method", "requestHash"]
   const observedRequestProofKeys = ["errorHash", "kind", "method", "requestHash", "status"]
-  const operationProofKeys = ["count", "maximumCount", "name"]
+  const operationProofKeys = [
+    "allowedStatuses",
+    "count",
+    "maximumCount",
+    "name",
+    "observedStatuses",
+  ]
+  const expectedTransitionStatuses = (name) => {
+    if (name === "owner-migration-create") return [201]
+    if (
+      name === "webui-next-static" ||
+      name === "webui-next-font-geist" ||
+      /^webui-font-(?:arimo|inter-(?:medium|regular|semibold))$/.test(name)
+    ) {
+      return [200, 304]
+    }
+    if (
+      [
+        "destination-document",
+        "webui-runtime-config",
+        "ambient-persona-profiles",
+        "ambient-auth-me",
+        "ambient-health",
+        "ambient-health-live",
+        "ambient-notifications",
+        "ambient-notification-stream",
+        "ambient-notification-count",
+        "ambient-rag-health",
+        "ambient-llm-providers",
+        "ambient-llm-models",
+        "ambient-user-profile",
+        "owner-flashcard-decks",
+        "owner-notes-search",
+        "owner-slide-styles",
+        "owner-user-storage",
+        "owner-chat-commands",
+        "owner-workspace-capabilities",
+        "owner-workspace-context",
+        "owner-workspace-source-views",
+        "owner-workspace-sources",
+        "owner-workspace-save",
+        "owner-source-selection",
+        "owner-migration-finalize",
+        "owner-migration-status",
+        "owner-migration-delete-ack",
+        "chats-openapi",
+        "chats-docs-info",
+        "chats-ingestion-capabilities",
+        "chats-audio-service-health",
+        "chats-character-catalog",
+        "chats-audio-health",
+        "chats-voice-catalog",
+        "chats-share-links",
+        "chats-list",
+        "chats-messages",
+        "chats-research-runs",
+        "chats-settings",
+        "chats-provider-config",
+        "chats-persona-catalog",
+        "chats-prompt-capabilities",
+        "chats-implicit-feedback",
+      ].includes(name) ||
+      /^owner-migration-chunk-[1-3]$/.test(name)
+    ) {
+      return [200]
+    }
+    return null
+  }
   if (
     !Array.isArray(transitionProof) ||
     transitionProof.length !== 2 ||
-    new Set(transitionProof.map((proof) => proof.context)).size !== 2 ||
+    new Set(transitionProof.map((proof) => proof?.context)).size !== 2 ||
     !["owner-revocation", "member-chats"].every((context) =>
-      transitionProof.some((proof) => proof.context === context)
+      transitionProof.some((proof) => proof?.context === context)
     ) ||
     transitionProof.some(
       (proof) =>
@@ -793,18 +864,41 @@ const validateEvidencePayload = (evidence) => {
         new Set(proof.operations?.map((operation) => operation.name)).size !==
           proof.registeredOperationCount ||
         proof.operations?.some(
-          (operation) =>
-            !exactKeys(operation, operationProofKeys) ||
-            !String(operation.name || "").trim() ||
-            !Number.isInteger(operation.count) ||
-            !Number.isInteger(operation.maximumCount) ||
-            operation.count < 0 ||
-            operation.maximumCount < 1 ||
-            operation.maximumCount > MAX_TRANSITION_REQUESTS ||
-            operation.count > operation.maximumCount
+          (operation) => {
+            const expectedStatuses = expectedTransitionStatuses(operation?.name)
+            return (
+              !exactKeys(operation, operationProofKeys) ||
+              !String(operation.name || "").trim() ||
+              !expectedStatuses ||
+              JSON.stringify(operation.allowedStatuses) !== JSON.stringify(expectedStatuses) ||
+              !Array.isArray(operation.observedStatuses) ||
+              operation.observedStatuses.some(
+                (status) =>
+                  !Number.isInteger(status) || !operation.allowedStatuses.includes(status)
+              ) ||
+              operation.observedStatuses.length !== operation.count ||
+              !Number.isInteger(operation.count) ||
+              !Number.isInteger(operation.maximumCount) ||
+              operation.count < 0 ||
+              operation.maximumCount < 1 ||
+              operation.maximumCount > MAX_TRANSITION_REQUESTS ||
+              operation.count > operation.maximumCount
+            )
+          }
         ) ||
         proof.operations?.reduce((total, operation) => total + operation.count, 0) !==
           proof.observedRequests?.filter((request) => request.kind === "response").length ||
+        JSON.stringify(
+          proof.operations
+            ?.flatMap((operation) => operation.observedStatuses)
+            .sort((left, right) => left - right)
+        ) !==
+          JSON.stringify(
+            proof.observedRequests
+              ?.filter((request) => request.kind === "response")
+              .map((request) => request.status)
+              .sort((left, right) => left - right)
+          ) ||
         proof.registeredAbortCount !== proof.allowedAborts?.length ||
         proof.registeredAbortCount > MAX_TRANSITION_ABORT_ALLOWANCES ||
         proof.allowedAbortCount !==
@@ -1329,6 +1423,7 @@ const transitionRequestOrigin = (entry) => {
 
 const transitionOperation = ({
   allowedForbiddenKinds = [],
+  allowedStatuses,
   maximumCount,
   method,
   name,
@@ -1337,6 +1432,7 @@ const transitionOperation = ({
   pathPrefix,
 }) => ({
   allowedForbiddenKinds,
+  allowedStatuses: [...new Set(allowedStatuses)].sort((left, right) => left - right),
   maximumCount,
   method: String(method).toUpperCase(),
   name,
@@ -1347,6 +1443,7 @@ const transitionOperation = ({
 
 const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
   transitionOperation({
+    allowedStatuses: [200],
     maximumCount: 1,
     method: "GET",
     name: "destination-document",
@@ -1354,6 +1451,7 @@ const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
     path: targetPath,
   }),
   transitionOperation({
+    allowedStatuses: [200],
     maximumCount: 2,
     method: "GET",
     name: "webui-runtime-config",
@@ -1361,6 +1459,7 @@ const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
     path: "/api/_tldw-webui/runtime-config",
   }),
   transitionOperation({
+    allowedStatuses: [200, 304],
     maximumCount: 32,
     method: "GET",
     name: "webui-next-static",
@@ -1368,6 +1467,7 @@ const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
     pathPrefix: "/_next/",
   }),
   transitionOperation({
+    allowedStatuses: [200, 304],
     maximumCount: 2,
     method: "GET",
     name: "webui-next-font-geist",
@@ -1381,6 +1481,7 @@ const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
     ["webui-font-inter-regular", "/fonts/inter-regular.ttf"],
   ].map(([name, pathname]) =>
     transitionOperation({
+      allowedStatuses: [200, 304],
       maximumCount: 1,
       method: "GET",
       name,
@@ -1402,6 +1503,7 @@ const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
     ["ambient-user-profile", "/api/v1/users/me/profile"],
   ].map(([name, pathname]) =>
     transitionOperation({
+      allowedStatuses: [200],
       maximumCount: 4,
       method: "GET",
       name,
@@ -1499,6 +1601,7 @@ export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, w
   ].map(([name, method, pathname, maximumCount, allowedForbiddenKinds]) =>
     transitionOperation({
       allowedForbiddenKinds,
+      allowedStatuses: name === "owner-migration-create" ? [201] : [200],
       maximumCount,
       method,
       name,
@@ -1511,6 +1614,7 @@ export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, w
     ownerOperations.push(
       transitionOperation({
         allowedForbiddenKinds: ["local_workspace"],
+        allowedStatuses: [200],
         maximumCount: 1,
         method: "POST",
         name: "owner-migration-finalize",
@@ -1519,6 +1623,7 @@ export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, w
       }),
       transitionOperation({
         allowedForbiddenKinds: ["local_workspace"],
+        allowedStatuses: [200],
         maximumCount: 1,
         method: "GET",
         name: "owner-migration-status",
@@ -1527,6 +1632,7 @@ export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, w
       }),
       transitionOperation({
         allowedForbiddenKinds: ["local_workspace"],
+        allowedStatuses: [200],
         maximumCount: 1,
         method: "POST",
         name: "owner-migration-delete-ack",
@@ -1538,6 +1644,7 @@ export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, w
       ownerOperations.push(
         transitionOperation({
           allowedForbiddenKinds: ["local_workspace"],
+          allowedStatuses: [200],
           maximumCount: 1,
           method: "PUT",
           name: `owner-migration-chunk-${index}`,
@@ -1588,6 +1695,7 @@ export const buildMemberChatsTransitionPolicy = ({ apiUrl, conversationId, webUr
     ["chats-implicit-feedback", "POST", "/api/v1/rag/feedback/implicit", 1],
   ].map(([name, method, pathname, maximumCount]) =>
     transitionOperation({
+      allowedStatuses: [200],
       maximumCount,
       method,
       name,
@@ -1649,6 +1757,15 @@ const validateTransitionOperationPolicy = (policy) => {
         Number.isInteger(operation.maximumCount) &&
         operation.maximumCount >= 1 &&
         operation.maximumCount <= MAX_TRANSITION_REQUESTS &&
+        Array.isArray(operation.allowedStatuses) &&
+        operation.allowedStatuses.length > 0 &&
+        operation.allowedStatuses.every(
+          (status) => Number.isInteger(status) && status >= 100 && status <= 599
+        ) &&
+        new Set(operation.allowedStatuses).size === operation.allowedStatuses.length &&
+        operation.allowedStatuses.every(
+          (status, index) => index === 0 || operation.allowedStatuses[index - 1] < status
+        ) &&
         Boolean(operation.path) !== Boolean(operation.pathPrefix)
     )
   )
@@ -1669,6 +1786,7 @@ export const classifyTransitionLedger = (
   const normalizedEntry = (entry) => ({ ...entry, context: contextName })
   const allowanceUsage = new Map()
   const operationUsage = new Map()
+  const operationStatuses = new Map()
   const operationPolicyValid = validateTransitionOperationPolicy(operationPolicy)
   if (!operationPolicyValid) failures.push("malformed_transition_operation_policy")
   if (
@@ -1700,16 +1818,25 @@ export const classifyTransitionLedger = (
     } else {
       const used = (operationUsage.get(matchingOperation.name) || 0) + 1
       operationUsage.set(matchingOperation.name, used)
+      const statuses = operationStatuses.get(matchingOperation.name) || []
+      statuses.push(entry.status)
+      operationStatuses.set(matchingOperation.name, statuses)
       if (used > matchingOperation.maximumCount) {
         failures.push(`transition_operation_bound: ${matchingOperation.name}`)
+      }
+      if (
+        !Number.isInteger(entry.status) ||
+        !Array.isArray(matchingOperation.allowedStatuses) ||
+        !matchingOperation.allowedStatuses.includes(entry.status)
+      ) {
+        failures.push(
+          `unexpected_transition_status: ${matchingOperation.name} ${String(entry.status)}`
+        )
       }
     }
     const forbidden = forbiddenTransitionRequest(classifiedEntry)
     if (forbidden && !matchingOperation?.allowedForbiddenKinds?.includes(forbidden)) {
       failures.push(`${forbidden}: ${entry.method} ${requestPath(entry)}`)
-    }
-    if (Number(entry.status) >= 400 || Number(entry.status) === 0) {
-      failures.push(`unexpected_http_${entry.status}: ${entry.method} ${requestPath(entry)}`)
     }
   }
   for (const entry of ledger.requestFailures || []) {
@@ -1782,9 +1909,11 @@ export const classifyTransitionLedger = (
     observedRequests: observedRequests.slice(0, MAX_TRANSITION_REQUESTS),
     maximumOperationDeclarations: MAX_TRANSITION_OPERATION_DECLARATIONS,
     operations: (operationPolicy?.operations || []).map((operation) => ({
+      allowedStatuses: [...(operation.allowedStatuses || [])],
       count: operationUsage.get(operation.name) || 0,
       maximumCount: operation.maximumCount,
       name: operation.name,
+      observedStatuses: [...(operationStatuses.get(operation.name) || [])],
     })),
     pageErrorCount: (ledger.pageErrors || []).length,
     registeredAbortCount: abortAllowances.length,
@@ -1792,7 +1921,7 @@ export const classifyTransitionLedger = (
     requestCount: (ledger.requests || []).length + (ledger.requestFailures || []).length,
     runtimeOverlayCount: (ledger.runtimeOverlays || []).length,
     unexpectedRequestCount: failures.filter((failure) =>
-      /(?:_operation|_origin|_http_|request_failed|removed_full_media|local_workspace|local_tool|source_mutation)/.test(
+      /(?:_operation|_origin|_status|request_failed|removed_full_media|local_workspace|local_tool|source_mutation)/.test(
         failure
       )
     ).length,

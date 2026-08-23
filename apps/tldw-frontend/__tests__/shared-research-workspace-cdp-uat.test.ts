@@ -83,7 +83,7 @@ const completeContextIsolationProof = ["owner", "member", "nonmember"].map((pers
   markerCookieHash: hash(`${persona}-marker`),
   markerHash: hash(`${persona}-marker`),
   persona,
-  storageKeyHash: hash(`${persona}-storage`),
+  storageKeyHash: hash("shared-storage-key"),
 }))
 
 const completeProviderContextProof = {
@@ -128,9 +128,11 @@ const completeTransitionProof = [
     ],
     operations: [
       {
+        allowedStatuses: [200],
         count: 0,
         maximumCount: 1,
         name: "owner-workspace-context",
+        observedStatuses: [],
       },
     ],
     pageErrorCount: 0,
@@ -152,9 +154,11 @@ const completeTransitionProof = [
     observedRequests: [],
     operations: [
       {
+        allowedStatuses: [200],
         count: 0,
         maximumCount: 1,
         name: "chats-openapi",
+        observedStatuses: [],
       },
     ],
     pageErrorCount: 0,
@@ -569,7 +573,18 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(result.ok).toBe(true)
     expect(result.proof.operations).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ count: 1, name: "owner-workspace-save" }),
+        expect.objectContaining({
+          allowedStatuses: [200],
+          count: 1,
+          name: "owner-workspace-save",
+          observedStatuses: [200],
+        }),
+        expect.objectContaining({
+          allowedStatuses: [201],
+          count: 1,
+          name: "owner-migration-create",
+          observedStatuses: [201],
+        }),
         expect.objectContaining({ count: 1, name: "owner-migration-chunk-1" }),
       ])
     )
@@ -592,6 +607,99 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
         transitionLabel: "owner revocation preparation",
       }).ok
     ).toBe(false)
+  })
+
+  it.each([
+    [
+      "201 on an API read",
+      "member",
+      { method: "GET", status: 201, url: "http://127.0.0.1:18001/api/v1/health" },
+    ],
+    [
+      "redirect-like 302 on the destination document",
+      "member",
+      { method: "GET", status: 302, url: "http://127.0.0.1:18082/chat" },
+    ],
+    [
+      "arbitrary success 399 on an API read",
+      "member",
+      { method: "GET", status: 399, url: "http://127.0.0.1:18001/api/v1/config/providers" },
+    ],
+    [
+      "204 on an owner workspace write",
+      "owner",
+      {
+        method: "PUT",
+        status: 204,
+        url: "http://127.0.0.1:18001/api/v1/workspaces/644c57b8-f897-4dd0-945b-405220ea31a0",
+      },
+    ],
+    [
+      "200 on migration creation",
+      "owner",
+      {
+        method: "POST",
+        status: 200,
+        url: "http://127.0.0.1:18001/api/v1/workspaces/migrations",
+      },
+    ],
+    [
+      "599 on an API read",
+      "member",
+      { method: "GET", status: 599, url: "http://127.0.0.1:18001/api/v1/health" },
+    ],
+  ])("rejects transition status contract violation: %s", (_label, policyKind, request) => {
+    const apiUrl = "http://127.0.0.1:18001"
+    const webUrl = "http://127.0.0.1:18082"
+    const ledger = { ...transitionLedger(), requests: [request] }
+    const operationPolicy =
+      policyKind === "owner"
+        ? buildOwnerRevocationTransitionPolicy({
+            apiUrl,
+            ledger,
+            webUrl,
+            workspaceId: "644c57b8-f897-4dd0-945b-405220ea31a0",
+          })
+        : buildMemberChatsTransitionPolicy({
+            apiUrl,
+            conversationId: "conversation-17",
+            webUrl,
+          })
+
+    expect(
+      classifyTransitionLedger(ledger, {
+        contextName: policyKind === "owner" ? "owner-revocation" : "member-chats",
+        operationPolicy,
+        transitionLabel: "status contract",
+      }).ok
+    ).toBe(false)
+  })
+
+  it("allows 304 only for explicitly cacheable static transition resources", () => {
+    const apiUrl = "http://127.0.0.1:18001"
+    const webUrl = "http://127.0.0.1:18082"
+    const operationPolicy = buildMemberChatsTransitionPolicy({
+      apiUrl,
+      conversationId: "conversation-17",
+      webUrl,
+    })
+
+    expect(
+      classifyTransitionLedger(
+        {
+          ...transitionLedger(),
+          requests: [
+            { method: "GET", status: 304, url: `${webUrl}/_next/static/chunks/app.js` },
+            { method: "GET", status: 304, url: `${webUrl}/fonts/arimo.ttf` },
+          ],
+        },
+        {
+          contextName: "member-chats",
+          operationPolicy,
+          transitionLabel: "cached Chats navigation",
+        }
+      ).ok
+    ).toBe(true)
   })
 
   it.each([
@@ -1310,6 +1418,186 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
         },
       }).exitCode
     ).toBe(1)
+  })
+
+  it("requires the exact persona set and permits only storage-key hash reuse", () => {
+    const complete = makeCompleteEvidence()
+    expect(validateEvidenceRecord(complete)).toEqual({ exitCode: 0, failures: [] })
+
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        contextIsolationProof: complete.contextIsolationProof.slice(0, 2),
+      }).exitCode
+    ).toBe(1)
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        contextIsolationProof: [
+          ...complete.contextIsolationProof,
+          { ...complete.contextIsolationProof[0], persona: "extra" },
+        ],
+      }).exitCode
+    ).toBe(1)
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        contextIsolationProof: complete.contextIsolationProof.map((entry, index) =>
+          index === 1 ? { ...entry, persona: "owner" } : entry
+        ),
+      }).exitCode
+    ).toBe(1)
+    expect(new Set(complete.contextIsolationProof.map((entry) => entry.storageKeyHash))).toEqual(
+      new Set([hash("shared-storage-key")])
+    )
+  })
+
+  it.each(["configHash", "cookieHash"] as const)(
+    "rejects duplicate persona %s identities",
+    (field) => {
+      const complete = makeCompleteEvidence()
+      const duplicated = complete.contextIsolationProof.map((entry, index) =>
+        index === 1 ? { ...entry, [field]: complete.contextIsolationProof[0][field] } : entry
+      )
+
+      expect(
+        validateEvidenceRecord({ ...complete, contextIsolationProof: duplicated }).exitCode
+      ).toBe(1)
+    }
+  )
+
+  it("rejects duplicate marker identities and marker/cookie disagreement", () => {
+    const complete = makeCompleteEvidence()
+    const duplicateMarker = complete.contextIsolationProof.map((entry, index) =>
+      index === 1
+        ? {
+            ...entry,
+            markerCookieHash: complete.contextIsolationProof[0].markerCookieHash,
+            markerHash: complete.contextIsolationProof[0].markerHash,
+          }
+        : entry
+    )
+    const mismatchedMarkerCookie = complete.contextIsolationProof.map((entry, index) =>
+      index === 1 ? { ...entry, markerCookieHash: hash("different-marker-cookie") } : entry
+    )
+
+    expect(
+      validateEvidenceRecord({ ...complete, contextIsolationProof: duplicateMarker }).exitCode
+    ).toBe(1)
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        contextIsolationProof: mismatchedMarkerCookie,
+      }).exitCode
+    ).toBe(1)
+  })
+
+  it("requires exactly one closed transition proof for each destination context", () => {
+    const complete = makeCompleteEvidence()
+
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        transitionProof: complete.transitionProof.slice(0, 1),
+      }).exitCode
+    ).toBe(1)
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        transitionProof: [
+          ...complete.transitionProof,
+          { ...complete.transitionProof[0], context: "extra-transition" },
+        ],
+      }).exitCode
+    ).toBe(1)
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        transitionProof: [complete.transitionProof[0], complete.transitionProof[0]],
+      }).exitCode
+    ).toBe(1)
+  })
+
+  it("rejects missing or extra transition operation proof fields", () => {
+    const complete = makeCompleteEvidence()
+    const operation = complete.transitionProof[0].operations[0]
+    const { allowedStatuses: _missing, ...missingAllowedStatuses } = operation
+
+    for (const mutatedOperation of [
+      missingAllowedStatuses,
+      { ...operation, unexpectedField: true },
+    ]) {
+      expect(
+        validateEvidenceRecord({
+          ...complete,
+          transitionProof: [
+            {
+              ...complete.transitionProof[0],
+              operations: [mutatedOperation],
+            },
+            complete.transitionProof[1],
+          ],
+        }).exitCode
+      ).toBe(1)
+    }
+  })
+
+  it.each([201, 204, 302, 399, 599])(
+    "rejects arbitrary or undeclared transition proof status %i",
+    (status) => {
+      const complete = makeCompleteEvidence()
+      const ownerProof = complete.transitionProof[0]
+      const requestHash = hash(`mutated-owner-response-${status}`)
+      const operation = ownerProof.operations[0]
+      const mutatedOwnerProof = {
+        ...ownerProof,
+        observedRequests: [
+          ...ownerProof.observedRequests,
+          {
+            errorHash: null,
+            kind: "response",
+            method: "GET",
+            requestHash,
+            status,
+          },
+        ],
+        operations: [
+          {
+            ...operation,
+            count: 1,
+            observedStatuses: [status],
+          },
+        ],
+        requestCount: ownerProof.requestCount + 1,
+      }
+
+      expect(
+        validateEvidenceRecord({
+          ...complete,
+          transitionProof: [mutatedOwnerProof, complete.transitionProof[1]],
+        }).exitCode
+      ).toBe(1)
+    }
+  )
+
+  it("rejects malformed transition proof shape", () => {
+    const complete = makeCompleteEvidence()
+    const malformedTransition = {
+      ...complete,
+      transitionProof: [
+        { ...complete.transitionProof[0], operations: "not-an-array" },
+        complete.transitionProof[1],
+      ],
+    }
+    const malformedPersona = {
+      ...complete,
+      contextIsolationProof: [null, ...complete.contextIsolationProof.slice(1)],
+    }
+
+    expect(() => validateEvidenceRecord(malformedTransition)).not.toThrow()
+    expect(validateEvidenceRecord(malformedTransition).exitCode).toBe(1)
+    expect(() => validateEvidenceRecord(malformedPersona)).not.toThrow()
+    expect(validateEvidenceRecord(malformedPersona).exitCode).toBe(1)
   })
 
   it.each([
