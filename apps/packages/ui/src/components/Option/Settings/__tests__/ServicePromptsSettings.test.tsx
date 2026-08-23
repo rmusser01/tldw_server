@@ -183,6 +183,20 @@ const catalog: ServicePromptCatalogItem[] = [
     affected_workflows: [
       { id: "media.text.translation", label: "Text translation" }
     ]
+  },
+  {
+    id: "chat.title.generation",
+    label: "Server title prompt",
+    description: "Server title prompt description",
+    parts: [{
+      key: "user_template",
+      label: "User template",
+      mode: "template",
+      required_variables: ["query"]
+    }],
+    affected_workflows: [
+      { id: "chat.title.generation", label: "Server title workflow" }
+    ]
   }
 ]
 
@@ -201,8 +215,10 @@ const detailFor = (
       }
     : definition.id === "chat.rag.answer"
       ? { template: "Context: {context}\nQuestion: {question}" }
-      : definition.id === "chat.rag.question_rewrite"
-        ? { template: "History: {chat_history}\nQuestion: {question}" }
+    : definition.id === "chat.rag.question_rewrite"
+      ? { template: "History: {chat_history}\nQuestion: {question}" }
+      : definition.id === "chat.title.generation"
+        ? { user_template: "Create a short title for {query}" }
         : { template: "At {current_date_time}:\n{search_results}" }
   const effective = options.parts ?? defaults
   const source = options.source ?? "packaged"
@@ -429,7 +445,7 @@ describe("ServicePromptsSettings", () => {
     expect(document.querySelector("h1")).toBeNull()
   })
 
-  it("renders the four localized definitions, query selection, status, workflows, and exact scope", async () => {
+  it("renders the five localized definitions, query selection, status, workflows, and exact scope", async () => {
     window.history.replaceState(
       {},
       "",
@@ -438,7 +454,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(4)
+      .toHaveLength(5)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -447,6 +463,20 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("https://research-one.test")).toBeInTheDocument()
     expect(screen.getByText(scopeOne.scopeKey)).toBeInTheDocument()
     expect(screen.queryByText("Server translation")).not.toBeInTheDocument()
+  })
+
+  it("localizes and edits the conversation title prompt with Chat settings guidance", async () => {
+    renderSettings()
+
+    await openPrompt("Conversation title")
+
+    expect(screen.getByRole("heading", { name: "Conversation title" }))
+      .toBeVisible()
+    const userTemplate = screen.getByLabelText("User template") as HTMLTextAreaElement
+    expect(userTemplate.value).toContain("{query}")
+    expect(screen.getByText("Automatic conversation titles")).toBeVisible()
+    expect(screen.getByRole("link", { name: "Open Chat settings" }))
+      .toHaveAttribute("href", "/settings/chat")
   })
 
   it("uses the Prompts Link and reverses dirty HashRouter Back and Forward", async () => {
