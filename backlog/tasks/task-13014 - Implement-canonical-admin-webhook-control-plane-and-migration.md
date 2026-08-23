@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-23 00:32'
+updated_date: '2026-08-23 00:34'
 labels:
   - admin
   - webhooks
@@ -94,6 +94,8 @@ Known upstream admin-ui baselines are not attributed to this branch: clean origi
 2026-08-22 focused review of the first correction set found five additional hardening cases to close before PR: preserve mandatory-audit errors even when their cause chain contains a database-busy exception; clean plaintext extraction output on cancellation after publication; make cleanup inode-safe against same-UID pathname replacement; add true concurrent lock-serialization coverage on SQLite and PostgreSQL rather than only final-state recheck coverage; and add a negative resume test for an authenticated backup carrying the wrong webhook subtree. All are accepted as valid defense-in-depth or regression-proofing findings; source commit and PR remain blocked until fixed and reverified.
 
 2026-08-22 pre-PR correction set complete after two independent reviews. Fixed all confirmed findings: backup resume now authenticates and strict-parses the original artifact while comparing its durable webhook-subtree fingerprint so unrelated system_ops changes survive; extraction rechecks eligibility under the migration-state lock and holds that lock through plaintext publication; cancellation before transaction exit performs best-effort cleanup of only the exact created inode while preserving cancellation; replacement inodes are never deleted; mandatory audit failures survive both DatabasePool wrapping and repository busy-cause traversal; and import capacity excludes tombstones while retaining their IDs for deterministic collision allocation. Added SQLite and PostgreSQL coverage for fail-once audit sinks with lock-shaped causes, both rollback-closing lock orders for activity and retirement, cancellation cleanup, replacement-inode preservation, unrelated-store resume, authenticated wrong-subtree rejection, and tombstone/live-count parity. TDD RED confirmed audit misclassification plus cancellation/replacement cleanup defects (3 failed, 3 passed); focused corrected regressions passed 6/6; focused SQLite modules passed 91/91; required PostgreSQL matrix passed 24/24 with zero skips and 50 warnings; complete PR matrix passed 480/480 with zero skips and 459 warnings. Ruff, focused mypy, Bandit, and git diff --check passed. Source is ready to freeze for refreshed evidence and PR review; TASK-13014 remains In Progress until Qodo/human review closure.
+
+2026-08-22 refreshed Docs/Evidence/Admin_Webhooks_PR1_Verification.md against immutable tested source commit 08ca760b0e. Final evidence records 480/480 complete Python tests, 24/24 required PostgreSQL tests on 18.6, both independent review rounds and their regressions, Ruff, focused mypy, Bandit, UI/OpenAPI/build/browser gates, and explicit upstream baselines. PR body validation totals were updated to match. Awaiting PR creation and Qodo/human review; task remains In Progress.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

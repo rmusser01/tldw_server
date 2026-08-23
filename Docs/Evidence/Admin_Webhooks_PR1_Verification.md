@@ -2,10 +2,10 @@
 
 ## Verification Identity
 
-- Tested source commit: `a79fe91f2f`
+- Tested source commit: `08ca760b0e`
 - Rebased onto: `origin/dev` at
   `f7cc3d084affed81a7ae9e8fbbde9f5d96969fd1`
-- Final verification timestamp: `2026-08-22T23:04:02Z`
+- Final verification timestamp: `2026-08-23T00:33:00Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -23,9 +23,10 @@ that immutable source tree.
 | Gate | Result |
 | --- | --- |
 | OpenAPI fingerprint and drift | PASS |
-| Complete PR 1 Python matrix | PASS: 466 passed, 0 skipped |
-| PostgreSQL-required matrix | PASS: 19 passed, 0 skipped |
+| Complete PR 1 Python matrix | PASS: 480 passed, 0 skipped |
+| PostgreSQL-required matrix | PASS: 24 passed, 0 skipped |
 | Ruff | PASS |
+| Focused Python typecheck | PASS |
 | Bandit | PASS |
 | Backend sensitive-log scans | PASS |
 | Focused admin UI matrix | PASS: 77 passed |
@@ -102,13 +103,21 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Workflows/test_webhook_admin_endpoints.py
 ```
 
-Result: `466 passed, 449 warnings in 115.15s`; zero skips.
+Final post-review result: `480 passed, 459 warnings in 142.11s`; zero
+skips. This aggregate run executed the real PostgreSQL-marked cases as well as
+the SQLite, API, authorization, egress, system-ops, and workflow cases.
 
-The first complete run executed all 466 test bodies but exposed a teardown
-error in an egress timing test. That test had patched `time.monotonic` on the
-shared standard-library module, which also affected asyncio teardown. Its fake
-clock now replaces only the `egress.time` module binding. The focused regression
-passed, followed by the complete passing run above.
+One restricted-sandbox attempt failed only because the unchanged workflow test
+creates `Databases/test_wf_dlq.db` inside the external worktree. The exact test
+passed with normal worktree write access, followed by the complete passing run
+above under the same valid permissions.
+
+An earlier pre-review complete run executed all 466 then-current test bodies but
+exposed a teardown error in an egress timing test. That test had patched
+`time.monotonic` on the shared standard-library module, which also affected
+asyncio teardown. Its fake clock now replaces only the `egress.time` module
+binding. The focused regression passed, followed by the later complete passing
+runs.
 
 Required PostgreSQL matrix:
 
@@ -120,9 +129,34 @@ TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. \
   tldw_Server_API/tests/Admin_Webhooks/test_legacy_import_postgres.py
 ```
 
-Result: `19 passed, 40 warnings in 79.57s`; zero skips. The required flag was
+Result: `24 passed, 50 warnings in 97.78s`; zero skips. The required flag was
 set, and the tests used the running disposable PostgreSQL 18.6 container rather
 than SQLite or an availability skip.
+
+## Pre-PR Review Corrections
+
+Two independent review passes found and closed the following issues before the
+source commit was frozen:
+
+- rollback-backup resume now compares the authenticated backup's strict-parsed
+  webhook subtree with the durable source fingerprint, allowing unrelated
+  `system_ops` changes without accepting a different webhook source;
+- rollback extraction performs a final eligibility check under the shared
+  migration-state lock and holds that lock through plaintext publication, so
+  canonical activity and artifact retirement serialize on both backends;
+- cancellation before transaction exit removes only the exact plaintext inode
+  created by that invocation, while a replacement pathname is preserved;
+- mandatory audit failures survive both shared transaction wrapping and
+  repository busy-cause inspection, including lock-shaped underlying causes;
+- projected registration capacity excludes tombstones while their IDs remain
+  reserved for deterministic collision allocation.
+
+Regression coverage includes both rollback-closing lock orders for activity and
+retirement on SQLite and PostgreSQL, fail-once audit sinks, cancellation and
+replacement-inode cleanup, unrelated-store resume, authenticated wrong-subtree
+rejection, and tombstone/live-count parity. The three newly exposed defects
+first produced the expected red result (`3 failed, 3 passed`); the corrected
+focused matrix then passed `6/6`.
 
 ## Static And Sensitive-Data Gates
 
@@ -155,6 +189,10 @@ Both required ripgrep gates passed with no matches:
   response body;
 - no newly added compatibility logger/audit metadata pattern carrying those
   values relative to `origin/dev`.
+
+After the pre-PR corrections, Ruff passed on every modified production/test
+file, mypy reported no issues in the three modified production modules, Bandit
+reported no findings in those modules, and `git diff --check` passed.
 
 ## Admin UI Gates
 
@@ -242,7 +280,7 @@ browser journey establish no regression for this PR.
 
 ## Final Safety Checks
 
-- `git diff --cached --check`: PASS for the tested source/docs commit.
+- `git diff --cached --check`: PASS for tested source commit `08ca760b0e`.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,
