@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-23 19:32'
+updated_date: '2026-08-23 19:33'
 labels:
   - admin
   - webhooks
@@ -124,6 +124,8 @@ Qodo incremental review at commit 618080c00a resolved five findings and marked t
 2026-08-23 immutable CI-remediation source commit: 575616ed8bc3017555a43f8c333c1896c59d3ee9. Refreshed Docs/Evidence/Admin_Webhooks_PR1_Verification.md in a documentation-only follow-up with the five-matrix shard-coverage result, timestamp RED/GREEN and exact chat E2E proof, 301 passing non-PostgreSQL Admin_Webhooks tests, clean package lint/typecheck/security-header/build results, and exact base-versus-branch package-test counts. The evidence explicitly retains two non-green upstream gates: the package unit suite (final source 42 failed/710 passed versus base 47 failed/653 passed) and the inherited two-project Next 16 .next/dev lock collision before real-backend Playwright tests. The 24 PostgreSQL cases were not locally rerun after the fixture-only NOW correction; their last required-provider proof remains 24 passed/0 skipped. Awaiting pushed Linux CI and Qodo incremental review; task remains In Progress.
 
 2026-08-23 refreshed Qodo /review on remediation head 069c8c94cf raised one pagination observation: AdminWebhookControlPlane.list forwarded limit/offset/before_id without control-plane validation. Verification showed no database bypass because the shared SQLite/PostgreSQL unit of work rejects limit outside 1-100, offset outside 0-1000, and non-positive before_id before SQL execution. Repository-wide search also showed the method had no production caller: the canonical HTTP route and approved design use bounded list_page; only three control-plane test assertions invoked list. Removed the unsupported dead keyset-list surface and moved those assertions to list_page rather than duplicating validation for an API the product does not expose. The first full control-plane run found the two additional test-only gate calls (39 passed/1 failed); after migrating them, the module passed 40/40. Final non-PostgreSQL Admin_Webhooks suite passed 301 with 24 PostgreSQL tests deselected; focused Ruff and mypy passed. No persistence implementation changed, so the prior PostgreSQL proof remains applicable. Awaiting immutable commit, evidence refresh, pushed CI, and another Qodo review; task remains In Progress.
+
+2026-08-23 immutable refreshed-Qodo remediation source commit: e54701a402. Docs/Evidence/Admin_Webhooks_PR1_Verification.md now binds the final source identity and records Qodo's pagination observation, the shared pre-SQL repository bounds, removal of the unused keyset-list control-plane surface, 2/2 affected tests, 40/40 control-plane tests, 301/301 non-PostgreSQL Admin_Webhooks tests, and focused Ruff/mypy passes. No repository/SQL/migration path changed; the prior 24/24 required-PostgreSQL proof remains applicable. Qodo deprecated /review in favor of /agentic_review; awaiting the post-push agentic review and GitHub-hosted CI runner allocation. Task remains In Progress.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

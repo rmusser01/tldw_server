@@ -2,10 +2,10 @@
 
 ## Verification Identity
 
-- Tested source commit: `575616ed8b`
+- Tested source commit: `e54701a402`
 - Rebased onto: `origin/dev` at
   `d736368d17c92f879d0b5364b45f23488629f5b8`
-- Final verification timestamp: `2026-08-23T19:13:30Z`
+- Final verification timestamp: `2026-08-23T19:33:06Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -342,6 +342,39 @@ The build's first restricted-sandbox attempt could not bind Turbopack's local
 port. The same command passed with normal process permissions; this was an
 environment restriction, not an application failure.
 
+## Refreshed Qodo Review
+
+A manual Qodo review at remediation head `069c8c94cf` reported no security
+concerns and one pagination observation: the public control-plane `list()`
+method forwarded `limit`, `offset`, and `before_id` without repeating the
+bounds enforced by `list_page()`.
+
+The observation did not expose a database bypass. Both SQLite and PostgreSQL
+use the same unit-of-work implementation, which rejects limits outside 1-100,
+offsets outside 0-1,000, and non-positive `before_id` values before executing
+the query. Repository-wide caller and design review found a narrower issue:
+`list()` was an unsupported dead keyset-pagination surface. The canonical HTTP
+route, approved design, and admin UI all use bounded offset pagination through
+`list_page()`; only three control-plane test assertions called `list()`.
+
+Source commit `e54701a402` removes that dead method and moves the gate/read
+assertions to the supported `list_page()` path. Verification after the change:
+
+```text
+affected control-plane/API tests:        2 passed
+complete control-plane module:           40 passed
+non-PostgreSQL Admin Webhooks suite:      301 passed, 24 deselected
+focused Ruff:                            PASS
+focused mypy:                            PASS
+```
+
+The first complete control-plane run identified the two additional test-only
+gate calls as `39 passed, 1 failed`; after moving both to `list_page()`, the
+fresh complete run passed `40/40`. No repository, SQL, migration, or persistence
+code changed, so the most recent required-PostgreSQL proof remains applicable.
+Qodo marked `/review` deprecated in favor of `/agentic_review`; the latter is
+the required post-push confirmation command for this source.
+
 ## Upstream Admin UI Baselines
 
 `bun run test` is not green on the exact PR base. An isolated detached worktree
@@ -402,7 +435,7 @@ and webhook browser journey establish the scoped PR behavior.
 
 ## Final Safety Checks
 
-- `git diff --cached --check`: PASS for tested source commit `575616ed8b`.
+- `git diff --cached --check`: PASS for tested source commit `e54701a402`.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,
