@@ -709,14 +709,32 @@ describe("Service Prompt migration and runtime snapshots", () => {
     snapshot.release()
   })
 
-  it.each([
-    {
-      name: "user",
-      requestScope: {
-        config: config,
-        userId: 999
+  it("rejects a mismatched authenticated user after resolving the matching multi-user target", async () => {
+    const multiUserConfig = {
+      ...config,
+      authMode: "multi-user" as const,
+      accessToken: jwtForUser(42)
+    }
+    mocks.ensureConfig.mockResolvedValue(multiUserConfig)
+    mocks.getCurrentUser.mockResolvedValue({ id: 42, username: "resolved" })
+
+    await expect(loadServicePromptSnapshot(
+      ["chat.title.generation"],
+      {
+        requestScope: {
+          config: targetConfig(multiUserConfig),
+          userId: 999
+        }
       }
-    },
+    )).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+    expect(mocks.listServicePrompts).not.toHaveBeenCalled()
+    expect(mocks.getServicePrompt).not.toHaveBeenCalled()
+  })
+
+  it.each([
     {
       name: "server",
       requestScope: {
@@ -744,6 +762,45 @@ describe("Service Prompt migration and runtime snapshots", () => {
     })
     expect(mocks.listServicePrompts).not.toHaveBeenCalled()
     expect(mocks.getServicePrompt).not.toHaveBeenCalled()
+  })
+
+  it("loads catalog and detail when expected server, account, and API-key scope match", async () => {
+    const matchingRequestScope = {
+      config: {
+        ...targetConfig(config),
+        expectedSingleUserApiKeyScope: singleUserApiKeyScopeFor(config)
+      },
+      userId: null
+    }
+
+    const snapshot = await loadServicePromptSnapshot(
+      ["chat.title.generation"],
+      { requestScope: matchingRequestScope }
+    )
+
+    expect(snapshot.definitions["chat.title.generation"]?.parts).toEqual(
+      fixture.defaults["chat.title.generation"]
+    )
+    expect(mocks.listServicePrompts).toHaveBeenCalledOnce()
+    expect(mocks.getServicePrompt).toHaveBeenCalledOnce()
+    expect(mocks.listServicePrompts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestScope: expect.objectContaining({
+          config: matchingRequestScope.config,
+          userId: null
+        })
+      })
+    )
+    expect(mocks.getServicePrompt).toHaveBeenCalledWith(
+      "chat.title.generation",
+      expect.objectContaining({
+        requestScope: expect.objectContaining({
+          config: matchingRequestScope.config,
+          userId: null
+        })
+      })
+    )
+    snapshot.release()
   })
 
   it.each([401, 403, 500, 0])(

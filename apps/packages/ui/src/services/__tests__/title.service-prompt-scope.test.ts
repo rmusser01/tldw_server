@@ -24,10 +24,6 @@ vi.mock("@/services/settings/registry", async () => {
   }
 })
 
-vi.mock("@/libs/reasoning", () => ({
-  removeReasoning: (value: string) => value
-}))
-
 vi.mock("@/services/service-prompts", async () => {
   const actual = await vi.importActual<typeof import("@/services/service-prompts")>(
     "@/services/service-prompts"
@@ -39,7 +35,9 @@ vi.mock("@/services/service-prompts", async () => {
   }
 })
 
+import fixture from "@/utils/__fixtures__/service-prompt-rendering.json"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { HumanMessage } from "@/types/messages"
 import { generateTitle } from "../title"
 
 const requestScope = Object.freeze({
@@ -50,12 +48,16 @@ const requestScope = Object.freeze({
   userId: 7
 })
 
-const snapshotFor = (template = "Title for {query}") => {
+const snapshotFor = (
+  template = "Title for {query}",
+  snapshotRequestScope = requestScope,
+  source: "user" | "packaged" = "user"
+) => {
   const scopeController = new AbortController()
   const scopeInvalidatedController = new AbortController()
   const snapshot = Object.freeze({
     scopeKey: "scope-key",
-    requestScope,
+    requestScope: snapshotRequestScope,
     capability: "supported" as const,
     definitions: Object.freeze({
       "chat.title.generation": Object.freeze({
@@ -68,7 +70,7 @@ const snapshotFor = (template = "Title for {query}") => {
           })])
         }),
         parts: Object.freeze({ user_template: template }),
-        source: "user" as const,
+        source,
         revision: "123e4567-e89b-42d3-a456-426614174000"
       })
     }),
@@ -89,8 +91,21 @@ describe("generateTitle service-prompt scope", () => {
   })
 
   it("renders the custom title template once and sends its bytes to the provider", async () => {
-    const { snapshot } = snapshotFor("Custom title for literal {{query}}: {query}")
+    const snapshotRequestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://snapshot-scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 84
+    })
+    const { snapshot } = snapshotFor(
+      "Custom title for literal {{query}}: {query}",
+      snapshotRequestScope
+    )
     mocks.loadServicePromptSnapshot.mockResolvedValueOnce(snapshot)
+    mocks.invoke.mockResolvedValueOnce({
+      content: "  <think>private reasoning</think> Scoped title  "
+    })
 
     const result = await generateTitle(
       "model-1",
@@ -100,19 +115,67 @@ describe("generateTitle service-prompt scope", () => {
     )
 
     const invokedMessages = mocks.invoke.mock.calls[0]?.[0]
+    const invokeOptions = mocks.invoke.mock.calls[0]?.[1]
+    expect(mocks.pageAssistModel).toHaveBeenCalledWith({
+      model: "model-1",
+      toolChoice: "none",
+      saveToDb: false,
+      requestScope: snapshot.requestScope
+    })
+    expect(mocks.invoke).toHaveBeenCalledOnce()
+    expect(invokedMessages).toHaveLength(1)
+    expect(invokedMessages[0]).toBeInstanceOf(HumanMessage)
     expect(invokedMessages[0].content).toBe(
       "Custom title for literal {query}: What changed?"
     )
+    expect(invokeOptions).toEqual({ signal: snapshot.scopeSignal })
+    expect(invokeOptions?.signal).toBe(snapshot.scopeSignal)
     expect(result).toBe("Scoped title")
     expect(snapshot.release).toHaveBeenCalledOnce()
   })
 
   it.each([
-    ["custom", "Custom title: What changed?"],
-    ["packaged", "Packaged title: What changed?"]
-  ])("renders the $name template into hand-derived provider bytes", async (_name, expected) => {
-    const template = expected.replace("What changed?", "{query}")
-    mocks.loadServicePromptSnapshot.mockResolvedValueOnce(snapshotFor(template).snapshot)
+    {
+      name: "custom",
+      template: "Custom title: {query}",
+      source: "user" as const,
+      expected: "Custom title: What changed?"
+    },
+    {
+      name: "packaged",
+      template: fixture.defaults["chat.title.generation"].user_template,
+      source: "packaged" as const,
+      expected: `Here is the query:
+
+--------------
+
+What changed?
+
+--------------
+
+Create a concise, 3-5 word phrase as a title for the previous query. Avoid quotation marks or special formatting. RESPOND ONLY WITH THE TITLE TEXT. ANSWER USING THE SAME LANGUAGE AS THE QUERY.
+
+
+Examples of titles:
+
+Stellar Achievement Celebration
+Family Bonding Activities
+🇫🇷 Voyage à Paris
+🍜 Receta de Ramen Casero
+Shakespeare Analyse Literarische
+日本の春祭り体験
+Древнегреческая Философия Обзор
+
+Response:`
+    }
+  ])("renders the $name template into hand-derived provider bytes", async ({
+    template,
+    source,
+    expected
+  }) => {
+    mocks.loadServicePromptSnapshot.mockResolvedValueOnce(
+      snapshotFor(template, requestScope, source).snapshot
+    )
 
     await generateTitle("model-1", "What changed?", "fallback", { requestScope })
 
