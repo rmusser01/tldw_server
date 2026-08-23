@@ -3664,14 +3664,149 @@ describe("background proxy fallback safety", () => {
 })
 
 describe("background proxy GET coalescing", () => {
+  const ownerToken = "a.eyJzdWIiOiJvd25lciJ9.z"
+  const memberToken = "a.eyJzdWIiOiJtZW1iZXIifQ.z"
+
   beforeEach(() => {
     vi.resetModules()
     mocks.sendMessage.mockReset()
     mocks.tldwRequest.mockReset()
     mocks.storageGet.mockReset()
     mocks.storageSet.mockReset()
-    mocks.storageGet.mockResolvedValue(null)
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig"
+        ? {
+            accessToken: ownerToken,
+            authMode: "multi-user",
+            serverUrl: "https://server.example.test"
+          }
+        : null
+    )
     mocks.storageSet.mockResolvedValue(undefined)
+  })
+
+  it("partitions concurrent identical GETs by resolved server", async () => {
+    const firstConfig = {
+      serverUrl: "https://server-a.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    const secondConfig = {
+      ...firstConfig,
+      serverUrl: "https://server-b.example.test"
+    }
+    mocks.storageGet
+      .mockResolvedValueOnce(firstConfig)
+      .mockResolvedValueOnce(secondConfig)
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+    const second = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+
+    await Promise.all([first, second])
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it("partitions concurrent identical GETs by resolved principal", async () => {
+    const firstConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    const secondConfig = { ...firstConfig, accessToken: memberToken }
+    mocks.storageGet
+      .mockResolvedValueOnce(firstConfig)
+      .mockResolvedValueOnce(secondConfig)
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+    const second = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+
+    await Promise.all([first, second])
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps same-scope GET coalescing after resolving configuration", async () => {
+    const currentConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? currentConfig : null
+    )
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [409, 404, 404]
+      }),
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [404, 409]
+      })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not reuse a principal's 429 cooldown for another principal", async () => {
+    let currentConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? currentConfig : null
+    )
+    mocks.sendMessage
+      .mockResolvedValueOnce({ ok: false, status: 429, error: "rate_limited" })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { principal: "member" }
+      })
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    ).rejects.toMatchObject({ status: 429 })
+    currentConfig = { ...currentConfig, accessToken: memberToken }
+
+    await expect(
+      bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    ).resolves.toEqual({ principal: "member" })
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
   })
 
   it("coalesces concurrent identical GETs into a single underlying request", async () => {

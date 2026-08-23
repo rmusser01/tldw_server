@@ -133,7 +133,7 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(result.current.sessionScopeReady).toBe(true)
     })
 
-    await expect(result.current.restoreSession()).resolves.toBe(true)
+    await expect(result.current.restoreSession()).resolves.toBe("restored")
 
     await waitFor(() => {
       expect(useStoreMessageOption.getState().serverChatId).toBe(
@@ -146,14 +146,17 @@ describe("usePlaygroundSessionPersistence", () => {
         "char-42"
       )
       expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(true)
-      expect(mocks.setSelectedAssistant).toHaveBeenCalledWith({
-        kind: "character",
-        id: "char-42",
-        name: "Captain Redwood",
-        metadata: {
-          selectionMode: "tracked"
-        }
-      })
+      expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+        {
+          kind: "character",
+          id: "char-42",
+          name: "Captain Redwood",
+          metadata: {
+            selectionMode: "tracked"
+          }
+        },
+        expect.objectContaining({ isCurrent: expect.any(Function) })
+      )
     })
     expect(useStoreMessageOption.getState().historyId).toBeNull()
     expect(useStoreMessageOption.getState().history).toEqual([])
@@ -211,7 +214,7 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(result.current.sessionScopeReady).toBe(true)
     })
 
-    await expect(result.current.restoreSession()).resolves.toBe(true)
+    await expect(result.current.restoreSession()).resolves.toBe("restored")
 
     await waitFor(() => {
       expect(useStoreMessageOption.getState().historyId).toBe("local-history-7")
@@ -259,7 +262,9 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(result.current.persistence.sessionScopeReady).toBe(true)
     })
 
-    let restorePromise: Promise<boolean> | undefined
+    let restorePromise:
+      | ReturnType<typeof result.current.persistence.restoreSession>
+      | undefined
     act(() => {
       restorePromise = result.current.persistence.restoreSession()
     })
@@ -286,11 +291,74 @@ describe("usePlaygroundSessionPersistence", () => {
           { id: "persisted-message", role: "user", content: "stale" }
         ]
       })
-      await expect(restorePromise).resolves.toBe(false)
+      await expect(restorePromise).resolves.toBe("cancelled")
     })
 
     expect(useStoreMessageOption.getState().serverChatId).toBe("selected-chat")
     expect(useStoreMessageOption.getState().historyId).toBeNull()
+  })
+
+  it("reports cancellation when a server chat is selected during assistant persistence", async () => {
+    let releaseAssistantWrite = () => undefined
+    mocks.setSelectedAssistant.mockReturnValue(
+      new Promise<void>((resolve) => {
+        releaseAssistantWrite = resolve
+      })
+    )
+    usePlaygroundSessionStore.getState().saveSession({
+      historyId: null,
+      serverChatId: "persisted-chat",
+      trackedAssistantSelection: {
+        kind: "persona",
+        id: "persisted-persona",
+        name: "Persisted Persona",
+        metadata: { selectionMode: "tracked" }
+      },
+      trackedAssistantKind: "persona",
+      trackedAssistantId: "persisted-persona",
+      scopeKey: "global",
+      queuedMessages: []
+    })
+    const { result } = renderHook(
+      () => ({
+        persistence: usePlaygroundSessionPersistence(),
+        selectServerChat: useSelectServerChat()
+      }),
+      { wrapper: MemoryRouter }
+    )
+    await waitFor(() => {
+      expect(result.current.persistence.sessionScopeReady).toBe(true)
+    })
+
+    let restorePromise:
+      | ReturnType<typeof result.current.persistence.restoreSession>
+      | undefined
+    act(() => {
+      restorePromise = result.current.persistence.restoreSession()
+    })
+    await waitFor(() => {
+      expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "persisted-persona" }),
+        expect.objectContaining({ isCurrent: expect.any(Function) })
+      )
+    })
+
+    act(() => {
+      result.current.selectServerChat({
+        id: "explicit-chat",
+        title: "Explicit chat",
+        version: 1,
+        state: "active",
+        topic_label: null,
+        cluster_id: null,
+        source: "webui",
+        external_ref: null
+      } as ServerChatSummary)
+      releaseAssistantWrite()
+    })
+
+    await expect(restorePromise).resolves.toBe("cancelled")
+    expect(useStoreMessageOption.getState().serverChatId).toBe("explicit-chat")
   })
 
   it("keeps the richer tracked persona snapshot when autosave only has generic metadata", async () => {
@@ -332,7 +400,7 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(result.current.sessionScopeReady).toBe(true)
     })
 
-    await expect(result.current.restoreSession()).resolves.toBe(true)
+    await expect(result.current.restoreSession()).resolves.toBe("restored")
 
     useStoreMessageOption.setState({
       historyId: "local-history-9",
@@ -371,7 +439,7 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(result.current.sessionScopeReady).toBe(true)
     })
 
-    await expect(result.current.restoreSession()).resolves.toBe(false)
+    await expect(result.current.restoreSession()).resolves.toBe("not-restored")
 
     useStoreMessageOption.setState({
       historyId: "local-history-new",
@@ -432,7 +500,7 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(result.current.sessionScopeReady).toBe(true)
     })
 
-    await expect(result.current.restoreSession()).resolves.toBe(true)
+    await expect(result.current.restoreSession()).resolves.toBe("restored")
 
     await waitFor(() => {
       const optionState = useStoreMessageOption.getState()

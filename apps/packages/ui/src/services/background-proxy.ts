@@ -56,6 +56,7 @@ import {
   servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch
 } from "@/services/tldw/service-prompt-scope-error"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 const ERROR_LOG_THROTTLE_MS = 15_000
 const RATE_LIMIT_LOG_THROTTLE_MS = 60_000
@@ -531,6 +532,34 @@ const rateLimitedGetResults = new Map<
 const DEFAULT_RATE_LIMIT_GET_COOLDOWN_MS = 2_000
 const MAX_RATE_LIMIT_GET_COOLDOWN_MS = 60_000
 
+const normalizeGetScopeServer = (value: string): string | null => {
+  try {
+    const parsed = new URL(String(value || "").trim())
+    if (!/^https?:$/.test(parsed.protocol)) return null
+    return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${parsed.pathname.replace(/\/+$/, "")}`
+  } catch {
+    return null
+  }
+}
+
+const resolveGetRequestScopeFingerprint = async (): Promise<string | null> => {
+  const storage = createSafeStorage({ area: "local" })
+  const config = await resolveDirectConfig(storage)
+  if (!config || config.authSource === "cookie-session") return null
+  const server = normalizeGetScopeServer(config.serverUrl)
+  if (!server) return null
+  const authMode = String(config?.authMode || "unknown")
+    .trim()
+    .toLowerCase()
+  const org = config?.orgId == null ? "none" : String(config.orgId)
+  const principal = deriveScopedUserId({
+    accessToken: config.accessToken,
+    authMode: config.authMode
+  })
+  if (authMode === "multi-user" && principal === "user:anonymous") return null
+  return `${server}:auth:${authMode}:org:${org}:${principal}`
+}
+
 const isRateLimitedResult = (value: unknown): boolean => {
   const status = extractHttpStatus(value)
   if (status === 429) return true
@@ -822,6 +851,10 @@ export async function bgRequest<
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
   }
+  const requestScope = await resolveGetRequestScopeFingerprint()
+  if (!requestScope) {
+    return bgRequestImpl<T, P, M>(init)
+  }
   // Header keys are case-insensitive and object key order is not meaningful, so
   // normalize (lowercase + sort) for a stable key. Keep timeoutMs in the key so
   // GETs with different timeouts are not merged, and preserve the distinction
@@ -840,6 +873,7 @@ export async function bgRequest<
     normalizeExpectedStatuses(init.expectedStatuses)
   ).sort((left, right) => left - right)
   const key = JSON.stringify({
+    scope: requestScope,
     p: String(init.path),
     h: normalizedHeaders,
     noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")

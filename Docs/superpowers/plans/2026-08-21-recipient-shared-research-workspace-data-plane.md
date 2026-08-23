@@ -1064,19 +1064,24 @@ git commit -m "test(workspaces): verify shared recipient isolation"
 
 ### Task 11: Run Real Backend, WebUI, and CDP Acceptance and Close the Task
 
-**Status:** Complete. Live evidence was recorded with a real multi-user SQLite backend, Next.js WebUI, local OpenAI-compatible provider, and explicit Chrome CDP. PR preparation is intentionally omitted by executor direction.
+**Status:** Complete through Fix Round 1/5. Live evidence was recorded with a real multi-user SQLite backend, Next.js WebUI, transparent local-model forwarding probe, local OpenAI-compatible provider, and explicit Chrome CDP. PR preparation is intentionally omitted by executor direction.
 
 **Files:**
 - Create: `apps/tldw-frontend/scripts/shared-research-workspace-cdp-uat.mjs`
 - Create: `apps/tldw-frontend/__tests__/shared-research-workspace-cdp-uat.test.ts`
+- Create: `apps/tldw-frontend/scripts/local-llm-forwarding-probe.mjs`
+- Create: `apps/tldw-frontend/__tests__/local-llm-forwarding-probe.test.ts`
 - Modify: `apps/tldw-frontend/scripts/research-workspace-uat-runner.mjs`
 - Create: `Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/README.md`
 - Create: `Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/evidence.json`
 - Create: `Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-shared-workspace.png`
 - Create: `Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-grounded-answer.png`
 - Create: `Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-shared-workspace.png`
+- Create: `Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-source-preview.png`
 - Create: `Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/revoked-share.png`
 - Update through Backlog CLI: `TASK-12020.40`
+
+**Fix Round 1/5 closeout:** Partition direct/background GET reuse by resolved server and safe auth scope; fence assistant restoration against newer explicit selections; replace the transition observer with separate bounded owner-management and member-Chats operation policies; enforce multiset expected-error correlation and a closed evidence schema; and prove provider-context exclusion through an unchanged-body local forwarding probe. The fresh final31 fixture passed all 15 acceptance checks with closed strict/transition ledgers and five separately inspected screenshots. Focused changed behavior passed `191` tests, the required matched suite passed `111`, and the two correctly resolved package tests passed `13`.
 
 - [x] **Step 1: Write runner contract tests before the live script**
 

@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
@@ -5,6 +6,8 @@ import { describe, expect, it } from "vitest"
 import {
   buildAllSourcesQuestion,
   beginStrictLedgerAfterTransition,
+  buildMemberChatsTransitionPolicy,
+  buildOwnerRevocationTransitionPolicy,
   buildSharedUatConfig,
   classifyTransitionLedger,
   classifyStrictLedger,
@@ -23,7 +26,10 @@ const REQUIRED_ENV = {
   TLDW_WEB_URL: "http://127.0.0.1:18082",
 }
 
+const hash = (value: string) => `sha256:${crypto.createHash("sha256").update(value).digest("hex")}`
+
 const cleanLedger = {
+  closed: true,
   consoleErrors: [],
   expectedHttpFailures: [],
   pageErrors: [],
@@ -66,8 +72,185 @@ const completeAcceptance = {
 const completeScreenshots = {
   desktopGroundedAnswer: "desktop-grounded-answer.png",
   desktopSharedWorkspace: "desktop-shared-workspace.png",
+  mobileSourcePreview: "mobile-source-preview.png",
   mobileSharedWorkspace: "mobile-shared-workspace.png",
   revokedShare: "revoked-share.png",
+}
+
+const completeContextIsolationProof = ["owner", "member", "nonmember"].map((persona) => ({
+  configHash: hash(`${persona}-config`),
+  cookieHash: hash(`${persona}-cookie`),
+  markerCookieHash: hash(`${persona}-marker`),
+  markerHash: hash(`${persona}-marker`),
+  persona,
+  storageKeyHash: hash(`${persona}-storage`),
+}))
+
+const completeProviderContextProof = {
+  bodyUnchanged: true,
+  forwardedRequestCount: 2,
+  inputBodyHashes: [hash("provider-request-a"), hash("provider-request-b")],
+  maximumRequestCount: 16,
+  mutationPayloadsAbsent: true,
+  outputBodyHashes: [hash("provider-request-a"), hash("provider-request-b")],
+  ownerSentinelAbsent: true,
+  payloadJsonValid: true,
+  recipientSentinelAbsent: true,
+  toolPayloadsAbsent: true,
+  withinRequestBound: true,
+}
+
+const completeTransitionProof = [
+  {
+    allowedAbortCount: 1,
+    allowedAborts: [
+      {
+        count: 1,
+        id: "owner-workspace-context-teardown",
+        maximumCount: 1,
+        method: "GET",
+        requestHash: hash("owner-transition-request"),
+      },
+    ],
+    consoleErrorCount: 0,
+    context: "owner-revocation",
+    labelHash: hash("owner-transition"),
+    maximumOperationDeclarations: 64,
+    maximumRequestCount: 64,
+    observedRequests: [
+      {
+        errorHash: hash("net::ERR_ABORTED"),
+        kind: "failure",
+        method: "GET",
+        requestHash: hash("owner-transition-request"),
+        status: null,
+      },
+    ],
+    operations: [
+      {
+        count: 0,
+        maximumCount: 1,
+        name: "owner-workspace-context",
+      },
+    ],
+    pageErrorCount: 0,
+    registeredAbortCount: 1,
+    registeredOperationCount: 1,
+    requestCount: 1,
+    runtimeOverlayCount: 0,
+    unexpectedRequestCount: 0,
+    withinRequestBound: true,
+  },
+  {
+    allowedAbortCount: 0,
+    allowedAborts: [],
+    consoleErrorCount: 0,
+    context: "member-chats",
+    labelHash: hash("member-transition"),
+    maximumOperationDeclarations: 64,
+    maximumRequestCount: 64,
+    observedRequests: [],
+    operations: [
+      {
+        count: 0,
+        maximumCount: 1,
+        name: "chats-openapi",
+      },
+    ],
+    pageErrorCount: 0,
+    registeredAbortCount: 0,
+    registeredOperationCount: 1,
+    requestCount: 0,
+    runtimeOverlayCount: 0,
+    unexpectedRequestCount: 0,
+    withinRequestBound: true,
+  },
+]
+
+const makeCompleteEvidence = () => {
+  const config = buildSharedUatConfig({ env: REQUIRED_ENV })
+  const raceUrl = "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/42/chat"
+  const requestAHash = hash("request-a")
+  const requestBHash = hash("request-b")
+  const expectedRaceFailures = [
+    {
+      bodyHash: requestAHash,
+      consoleErrorCount: 1,
+      context: "member",
+      method: "POST",
+      operationId: "race-concurrent-conflict",
+      status: 409,
+      url: raceUrl,
+    },
+    {
+      bodyHash: requestBHash,
+      consoleErrorCount: 1,
+      context: "member",
+      method: "POST",
+      operationId: "race-fingerprint-conflict",
+      status: 409,
+      url: raceUrl,
+    },
+  ]
+  const completeLedger = {
+    ...cleanLedger,
+    consoleErrors: expectedRaceFailures.map((entry) => ({
+      context: entry.context,
+      message: "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      status: entry.status,
+      url: entry.url,
+    })),
+    expectedHttpFailures: expectedRaceFailures,
+    requests: [
+      ...cleanLedger.requests,
+      ...expectedRaceFailures.map(
+        ({ operationId: _operationId, consoleErrorCount: _count, ...entry }) => entry
+      ),
+    ],
+  }
+  return createEvidenceRecord({
+    acceptance: completeAcceptance,
+    config,
+    contextIsolationProof: completeContextIsolationProof,
+    finishedAt: "2026-08-22T12:01:00.000Z",
+    fixture: {
+      shareId: 42,
+      sourceDefs: [{ id: "source-a" }, { id: "source-b" }],
+      statusEnvelope: { queryable: 2, total: 2 },
+      workspaceId: "workspace-42",
+    },
+    ledger: completeLedger,
+    provider: { model: "configured-model", provider: "local-llm" },
+    providerContextProof: completeProviderContextProof,
+    providerReadiness: {
+      model: "configured-model",
+      provider: "local-llm",
+      ready: true,
+    },
+    raceProbe: {
+      operations: [
+        {
+          bodyHash: requestAHash,
+          operationId: "race-concurrent-conflict",
+          status: 409,
+        },
+        {
+          bodyHash: requestBHash,
+          operationId: "race-fingerprint-conflict",
+          status: 409,
+        },
+      ],
+      requestHashes: [requestAHash, requestBHash],
+      requestIdHash: hash("request-id"),
+      responseHashes: [hash("writer-response"), hash("replay-response")],
+      statuses: [409, 200, 200, 409],
+      timingsMs: [120, 124, 12, 8],
+      turnHashes: [hash("turn-a"), hash("turn-a")],
+    },
+    screenshots: completeScreenshots,
+    startedAt: "2026-08-22T12:00:00.000Z",
+    transitionProof: completeTransitionProof,
+  })
 }
 
 describe("shared-research-workspace-cdp-uat runner contract", () => {
@@ -79,13 +262,21 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     requestFailures: [],
     runtimeOverlays: [],
   })
+  const memberChatsPolicy = () =>
+    buildMemberChatsTransitionPolicy({
+      apiUrl: "http://127.0.0.1:18001",
+      conversationId: "conversation-17",
+      webUrl: "http://127.0.0.1:18082",
+    })
 
   it("installs the strict ledger only after a transition observer settles", async () => {
     const calls: string[] = []
     const transitionLedgerRecord = transitionLedger()
     const strictLedger = { strict: true }
     const attach = (_page: unknown, contextName: string, ledger: unknown) => {
-      calls.push(`attach:${contextName}:${ledger === transitionLedgerRecord ? "transition" : "strict"}`)
+      calls.push(
+        `attach:${contextName}:${ledger === transitionLedgerRecord ? "transition" : "strict"}`
+      )
       return {
         dispose: () => calls.push(`dispose:${contextName}`),
         waitForIdle: async (label: string) => calls.push(`idle:${contextName}:${label}`),
@@ -100,6 +291,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
       transition: async () => calls.push("transition"),
       transitionLabel: "Chats navigation",
       transitionLedger: transitionLedgerRecord,
+      transitionOperationPolicy: memberChatsPolicy(),
     })
 
     expect(calls).toEqual([
@@ -142,9 +334,25 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
   })
 
   it.each([
-    ["console", (ledger: ReturnType<typeof transitionLedger>) => ledger.consoleErrors.push({ message: "transition console error" })],
-    ["page", (ledger: ReturnType<typeof transitionLedger>) => ledger.pageErrors.push({ message: "transition page error" })],
-    ["HTTP", (ledger: ReturnType<typeof transitionLedger>) => ledger.requests.push({ method: "GET", status: 500, url: "http://127.0.0.1:18001/api/v1/health" })],
+    [
+      "console",
+      (ledger: ReturnType<typeof transitionLedger>) =>
+        ledger.consoleErrors.push({ message: "transition console error" }),
+    ],
+    [
+      "page",
+      (ledger: ReturnType<typeof transitionLedger>) =>
+        ledger.pageErrors.push({ message: "transition page error" }),
+    ],
+    [
+      "HTTP",
+      (ledger: ReturnType<typeof transitionLedger>) =>
+        ledger.requests.push({
+          method: "GET",
+          status: 500,
+          url: "http://127.0.0.1:18001/api/v1/health",
+        }),
+    ],
   ])("rejects a transition %s error before strict ledger attachment", async (_kind, addFailure) => {
     const calls: string[] = []
     const transient = transitionLedger()
@@ -165,33 +373,408 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
         transition: async () => addFailure(transient),
         transitionLabel: "Chats navigation",
         transitionLedger: transient,
+        transitionOperationPolicy: memberChatsPolicy(),
       })
     ).rejects.toThrow("Transition observation failed")
-    expect(calls).toEqual([
-      "attach:member-chats-transition",
-      "dispose:member-chats-transition",
-    ])
+    expect(calls).toEqual(["attach:member-chats-transition", "dispose:member-chats-transition"])
   })
 
-  it("allows only route-teardown GET aborts during a transition", () => {
+  it("allows only explicitly registered and bounded route-teardown GET aborts", () => {
     const abort = {
+      context: "member-chats-transition",
       error: "net::ERR_ABORTED",
       method: "GET",
       url: "http://127.0.0.1:18001/api/v1/config/providers",
     }
+    const allowance = {
+      count: 1,
+      id: "chat-config-provider-teardown",
+      method: "GET",
+      url: abort.url,
+    }
 
-    expect(
-      classifyTransitionLedger({
+    const accepted = classifyTransitionLedger(
+      {
         ...transitionLedger(),
         requestFailures: [abort],
-      }).ok
-    ).toBe(true)
+      },
+      {
+        abortAllowances: [allowance],
+        contextName: "member-chats",
+        operationPolicy: memberChatsPolicy(),
+        transitionLabel: "Chats navigation",
+      }
+    )
+    expect(accepted.ok).toBe(true)
+    expect(accepted.proof.allowedAborts).toEqual([
+      expect.objectContaining({ count: 1, id: allowance.id, maximumCount: 1, method: "GET" }),
+    ])
+    expect(accepted.proof.observedRequests).toEqual([
+      expect.objectContaining({
+        errorHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        kind: "failure",
+        method: "GET",
+        requestHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        status: null,
+      }),
+    ])
+    expect(JSON.stringify(accepted.proof)).not.toContain(abort.url)
     expect(
-      classifyTransitionLedger({
-        ...transitionLedger(),
-        requestFailures: [{ ...abort, method: "POST" }],
+      classifyTransitionLedger(
+        { ...transitionLedger(), requestFailures: [abort] },
+        {
+          abortAllowances: [],
+          contextName: "member-chats",
+          operationPolicy: memberChatsPolicy(),
+          transitionLabel: "Chats navigation",
+        }
+      ).ok
+    ).toBe(false)
+    expect(
+      classifyTransitionLedger(
+        { ...transitionLedger(), requestFailures: [abort, abort] },
+        {
+          abortAllowances: [allowance],
+          contextName: "member-chats",
+          operationPolicy: memberChatsPolicy(),
+          transitionLabel: "Chats navigation",
+        }
+      ).ok
+    ).toBe(false)
+  })
+
+  it.each([
+    ["unknown origin", "http://example.test/api/v1/config/providers"],
+    ["old media route", "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/42/media/7"],
+    ["local workspace", "http://127.0.0.1:18001/api/v1/workspaces/42/context"],
+    ["tool route", "http://127.0.0.1:18001/api/v1/mcp/tools"],
+  ])("rejects an aborted GET for an unregistered %s", (_label, url) => {
+    expect(
+      classifyTransitionLedger(
+        {
+          ...transitionLedger(),
+          requestFailures: [
+            {
+              context: "member-chats-transition",
+              error: "net::ERR_ABORTED",
+              method: "GET",
+              url,
+            },
+          ],
+        },
+        {
+          abortAllowances: [],
+          contextName: "member-chats",
+          operationPolicy: memberChatsPolicy(),
+          transitionLabel: "Chats navigation",
+        }
+      ).ok
+    ).toBe(false)
+  })
+
+  it("applies the strict successful-request allowlist during transitions", () => {
+    expect(
+      classifyTransitionLedger(
+        {
+          ...transitionLedger(),
+          requests: [
+            {
+              context: "member-chats-transition",
+              method: "GET",
+              status: 200,
+              url: "http://127.0.0.1:18001/api/v1/unknown-bootstrap",
+            },
+          ],
+        },
+        {
+          abortAllowances: [],
+          contextName: "member-chats",
+          operationPolicy: memberChatsPolicy(),
+          transitionLabel: "Chats navigation",
+        }
+      ).ok
+    ).toBe(false)
+  })
+
+  it("allows only the exact bounded owner-management transition operations", async () => {
+    const runnerModule =
+      (await import("../scripts/shared-research-workspace-cdp-uat.mjs")) as unknown as {
+        buildOwnerRevocationTransitionPolicy: (input: {
+          apiUrl: string
+          ledger: ReturnType<typeof transitionLedger>
+          webUrl: string
+          workspaceId: string
+        }) => unknown
+      }
+    expect(runnerModule.buildOwnerRevocationTransitionPolicy).toBeTypeOf("function")
+
+    const apiUrl = "http://127.0.0.1:18001"
+    const webUrl = "http://127.0.0.1:18082"
+    const workspaceId = "644c57b8-f897-4dd0-945b-405220ea31a0"
+    const migrationId = `research-workspace-${workspaceId}-a5350df9032d49e1`
+    const requests = [
+      { method: "GET", status: 200, url: `${webUrl}/research-workspace` },
+      { method: "GET", status: 200, url: `${webUrl}/fonts/arimo.ttf` },
+      { method: "GET", status: 200, url: `${webUrl}/fonts/inter-semibold.ttf` },
+      { method: "GET", status: 200, url: `${webUrl}/fonts/inter-medium.ttf` },
+      { method: "GET", status: 200, url: `${webUrl}/fonts/inter-regular.ttf` },
+      { method: "PUT", status: 200, url: `${apiUrl}/api/v1/workspaces/${workspaceId}` },
+      { method: "GET", status: 200, url: `${apiUrl}/api/v1/notes/search/` },
+      {
+        method: "PUT",
+        status: 200,
+        url: `${apiUrl}/api/v1/workspaces/${workspaceId}/sources/selection`,
+      },
+      { method: "POST", status: 201, url: `${apiUrl}/api/v1/workspaces/migrations` },
+      {
+        method: "PUT",
+        status: 200,
+        url: `${apiUrl}/api/v1/workspaces/migrations/${migrationId}/chunks/chunk-1-a390a9d0560eab4c`,
+      },
+      {
+        method: "PUT",
+        status: 200,
+        url: `${apiUrl}/api/v1/workspaces/migrations/${migrationId}/chunks/chunk-2-a783b694e4c89bdd`,
+      },
+      {
+        method: "PUT",
+        status: 200,
+        url: `${apiUrl}/api/v1/workspaces/migrations/${migrationId}/chunks/chunk-3-d680369f3a606b35`,
+      },
+      {
+        method: "POST",
+        status: 200,
+        url: `${apiUrl}/api/v1/workspaces/migrations/${migrationId}/finalize`,
+      },
+      { method: "GET", status: 200, url: `${apiUrl}/api/v1/workspaces/migrations/${migrationId}` },
+      {
+        method: "POST",
+        status: 200,
+        url: `${apiUrl}/api/v1/workspaces/migrations/${migrationId}/client-delete-ack`,
+      },
+    ]
+    const ledger = { ...transitionLedger(), requests }
+    const operationPolicy = runnerModule.buildOwnerRevocationTransitionPolicy({
+      apiUrl,
+      ledger,
+      webUrl,
+      workspaceId,
+    })
+    const result = classifyTransitionLedger(ledger, {
+      contextName: "owner-revocation",
+      operationPolicy,
+      transitionLabel: "owner revocation preparation",
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.proof.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ count: 1, name: "owner-workspace-save" }),
+        expect.objectContaining({ count: 1, name: "owner-migration-chunk-1" }),
+      ])
+    )
+    expect(JSON.stringify(result.proof.operations)).not.toContain(workspaceId)
+    expect(JSON.stringify(result.proof.operations)).not.toContain(migrationId)
+
+    const unknownFont = {
+      ...transitionLedger(),
+      requests: [{ method: "GET", status: 200, url: `${webUrl}/fonts/unknown.ttf` }],
+    }
+    expect(
+      classifyTransitionLedger(unknownFont, {
+        contextName: "owner-revocation",
+        operationPolicy: buildOwnerRevocationTransitionPolicy({
+          apiUrl,
+          ledger: unknownFont,
+          webUrl,
+          workspaceId,
+        }),
+        transitionLabel: "owner revocation preparation",
       }).ok
     ).toBe(false)
+  })
+
+  it.each([
+    [
+      "wrong workspace",
+      (apiUrl: string, workspaceId: string) => ({
+        method: "PUT",
+        status: 200,
+        url: `${apiUrl}/api/v1/workspaces/${workspaceId}-wrong`,
+      }),
+    ],
+    [
+      "wrong migration",
+      (apiUrl: string) => ({
+        method: "POST",
+        status: 200,
+        url: `${apiUrl}/api/v1/workspaces/migrations/research-workspace-wrong-a5350df9032d49e1/finalize`,
+      }),
+    ],
+    [
+      "wrong method",
+      (apiUrl: string, workspaceId: string) => ({
+        method: "PATCH",
+        status: 200,
+        url: `${apiUrl}/api/v1/workspaces/${workspaceId}`,
+      }),
+    ],
+    [
+      "wrong path",
+      (apiUrl: string) => ({ method: "POST", status: 200, url: `${apiUrl}/api/v1/notes/search/` }),
+    ],
+    [
+      "unknown origin",
+      (_apiUrl: string, workspaceId: string) => ({
+        method: "PUT",
+        status: 200,
+        url: `http://example.test/api/v1/workspaces/${workspaceId}`,
+      }),
+    ],
+  ])("rejects an owner transition operation with a %s", async (_label, makeRequest) => {
+    const runnerModule =
+      (await import("../scripts/shared-research-workspace-cdp-uat.mjs")) as unknown as {
+        buildOwnerRevocationTransitionPolicy: (input: Record<string, unknown>) => unknown
+      }
+    const apiUrl = "http://127.0.0.1:18001"
+    const webUrl = "http://127.0.0.1:18082"
+    const workspaceId = "644c57b8-f897-4dd0-945b-405220ea31a0"
+    const ledger = {
+      ...transitionLedger(),
+      requests: [makeRequest(apiUrl, workspaceId)],
+    }
+    const operationPolicy = runnerModule.buildOwnerRevocationTransitionPolicy({
+      apiUrl,
+      ledger,
+      webUrl,
+      workspaceId,
+    })
+
+    expect(
+      classifyTransitionLedger(ledger, {
+        contextName: "owner-revocation",
+        operationPolicy,
+        transitionLabel: "owner revocation preparation",
+      }).ok
+    ).toBe(false)
+  })
+
+  it("rejects owner transition operations beyond their declared count", async () => {
+    const runnerModule =
+      (await import("../scripts/shared-research-workspace-cdp-uat.mjs")) as unknown as {
+        buildOwnerRevocationTransitionPolicy: (input: Record<string, unknown>) => unknown
+      }
+    const apiUrl = "http://127.0.0.1:18001"
+    const webUrl = "http://127.0.0.1:18082"
+    const workspaceId = "644c57b8-f897-4dd0-945b-405220ea31a0"
+    const repeated = {
+      method: "PUT",
+      status: 200,
+      url: `${apiUrl}/api/v1/workspaces/${workspaceId}`,
+    }
+    const ledger = { ...transitionLedger(), requests: [repeated, repeated, repeated] }
+    const operationPolicy = runnerModule.buildOwnerRevocationTransitionPolicy({
+      apiUrl,
+      ledger,
+      webUrl,
+      workspaceId,
+    })
+
+    const result = classifyTransitionLedger(ledger, {
+      contextName: "owner-revocation",
+      operationPolicy,
+      transitionLabel: "owner revocation preparation",
+    })
+    expect(result.ok).toBe(false)
+    expect(result.failures).toContain("transition_operation_bound: owner-workspace-save")
+  })
+
+  it("rejects an extra owner migration chunk identity", () => {
+    const apiUrl = "http://127.0.0.1:18001"
+    const webUrl = "http://127.0.0.1:18082"
+    const workspaceId = "644c57b8-f897-4dd0-945b-405220ea31a0"
+    const migrationId = `research-workspace-${workspaceId}-a5350df9032d49e1`
+    const requests = [1, 2, 3, 4].map((index) => ({
+      method: "PUT",
+      status: 200,
+      url: `${apiUrl}/api/v1/workspaces/migrations/${migrationId}/chunks/chunk-${index}-${String(index).repeat(16)}`,
+    }))
+    const ledger = { ...transitionLedger(), requests }
+    const operationPolicy = buildOwnerRevocationTransitionPolicy({
+      apiUrl,
+      ledger,
+      webUrl,
+      workspaceId,
+    })
+
+    expect(
+      classifyTransitionLedger(ledger, {
+        contextName: "owner-revocation",
+        operationPolicy,
+        transitionLabel: "owner revocation preparation",
+      }).ok
+    ).toBe(false)
+  })
+
+  it("partitions the Chats transition allowlist by the exact conversation", async () => {
+    const runnerModule =
+      (await import("../scripts/shared-research-workspace-cdp-uat.mjs")) as unknown as {
+        buildMemberChatsTransitionPolicy: (input: Record<string, unknown>) => unknown
+      }
+    expect(runnerModule.buildMemberChatsTransitionPolicy).toBeTypeOf("function")
+    const apiUrl = "http://127.0.0.1:18001"
+    const webUrl = "http://127.0.0.1:18082"
+    const conversationId = "conversation-17"
+    const operationPolicy = runnerModule.buildMemberChatsTransitionPolicy({
+      apiUrl,
+      conversationId,
+      webUrl,
+    })
+    const acceptedLedger = {
+      ...transitionLedger(),
+      requests: [
+        { method: "GET", status: 200, url: `${webUrl}/chat` },
+        { method: "GET", status: 200, url: `${webUrl}/__nextjs_font/geist-latin.woff2` },
+        { method: "GET", status: 200, url: `${webUrl}/__nextjs_font/geist-latin.woff2` },
+        { method: "GET", status: 200, url: `${apiUrl}/api/v1/config/docs-info` },
+        { method: "GET", status: 200, url: `${apiUrl}/api/v1/ingestion-sources/capabilities` },
+        { method: "GET", status: 200, url: `${apiUrl}/api/v1/audio/health` },
+        { method: "GET", status: 200, url: `${apiUrl}/api/v1/characters/` },
+        {
+          method: "GET",
+          status: 200,
+          url: `${apiUrl}/api/v1/chats/${conversationId}/research-runs`,
+        },
+      ],
+    }
+    expect(
+      classifyTransitionLedger(acceptedLedger, {
+        contextName: "member-chats",
+        operationPolicy,
+        transitionLabel: "Chats navigation",
+      }).ok
+    ).toBe(true)
+
+    for (const request of [
+      {
+        method: "GET",
+        status: 200,
+        url: `${apiUrl}/api/v1/chats/wrong-conversation/research-runs`,
+      },
+      { method: "POST", status: 200, url: `${apiUrl}/api/v1/config/providers` },
+      { method: "GET", status: 200, url: "http://example.test/openapi.json" },
+    ]) {
+      expect(
+        classifyTransitionLedger(
+          { ...transitionLedger(), requests: [request] },
+          {
+            contextName: "member-chats",
+            operationPolicy,
+            transitionLabel: "Chats navigation",
+          }
+        ).ok
+      ).toBe(false)
+    }
   })
 
   it("re-resolves a message locator after one React DOM-detachment race", async () => {
@@ -224,9 +807,9 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
       waitFor: async () => undefined,
     }
 
-    await expect(
-      ensureLocatorVisibleInViewport(locator, "persisted answer")
-    ).rejects.toThrow("Target page, context or browser has been closed")
+    await expect(ensureLocatorVisibleInViewport(locator, "persisted answer")).rejects.toThrow(
+      "Target page, context or browser has been closed"
+    )
     expect(scrollAttempts).toBe(1)
   })
 
@@ -241,9 +824,9 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
       waitFor: async () => undefined,
     }
 
-    await expect(
-      ensureLocatorVisibleInViewport(locator, "persisted answer")
-    ).rejects.toThrow("Element is not attached to the DOM")
+    await expect(ensureLocatorVisibleInViewport(locator, "persisted answer")).rejects.toThrow(
+      "Element is not attached to the DOM"
+    )
     expect(scrollAttempts).toBe(3)
   })
 
@@ -318,14 +901,59 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
 
   it("fails the strict ledger on every undeclared browser or request error", () => {
     const scenarios = [
-      { requests: [{ context: "member", method: "GET", status: 500, url: "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/42/workspace" }] },
-      { requestFailures: [{ context: "member", error: "net::ERR_FAILED", method: "GET", url: "http://127.0.0.1:18001/api/v1/health" }] },
+      {
+        requests: [
+          {
+            context: "member",
+            method: "GET",
+            status: 500,
+            url: "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/42/workspace",
+          },
+        ],
+      },
+      {
+        requestFailures: [
+          {
+            context: "member",
+            error: "net::ERR_FAILED",
+            method: "GET",
+            url: "http://127.0.0.1:18001/api/v1/health",
+          },
+        ],
+      },
       { pageErrors: [{ context: "owner", message: "render failed" }] },
       { consoleErrors: [{ context: "member", message: "uncaught error" }] },
       { runtimeOverlays: [{ context: "member", text: "Unhandled Runtime Error" }] },
-      { requests: [{ context: "member", method: "GET", status: 200, url: "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/42/media/7" }] },
-      { requests: [{ context: "member", method: "GET", status: 200, url: "http://127.0.0.1:18001/api/v1/research/workspaces" }] },
-      { requests: [{ context: "member", method: "POST", status: 200, url: "http://127.0.0.1:18001/api/v1/workspaces/1/sources" }] },
+      {
+        requests: [
+          {
+            context: "member",
+            method: "GET",
+            status: 200,
+            url: "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/42/media/7",
+          },
+        ],
+      },
+      {
+        requests: [
+          {
+            context: "member",
+            method: "GET",
+            status: 200,
+            url: "http://127.0.0.1:18001/api/v1/research/workspaces",
+          },
+        ],
+      },
+      {
+        requests: [
+          {
+            context: "member",
+            method: "POST",
+            status: 200,
+            url: "http://127.0.0.1:18001/api/v1/workspaces/1/sources",
+          },
+        ],
+      },
     ]
 
     for (const scenario of scenarios) {
@@ -355,9 +983,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
       url: `http://127.0.0.1:18001${pathname}`,
     }))
 
-    expect(
-      classifyStrictLedger({ ...cleanLedger, requests: ownerRequests }).ok
-    ).toBe(true)
+    expect(classifyStrictLedger({ ...cleanLedger, requests: ownerRequests }).ok).toBe(true)
     expect(
       classifyStrictLedger({
         ...cleanLedger,
@@ -408,14 +1034,18 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
 
   it("accepts only an exactly declared neutral HTTP failure", () => {
     const request = {
+      bodyHash: null,
       context: "nonmember",
       method: "GET",
       status: 404,
       url: "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/42/workspace",
     }
     const exact = {
+      bodyHash: null,
+      consoleErrorCount: 0,
       context: "nonmember",
       method: "GET",
+      operationId: "nonmember-neutral-bootstrap",
       status: 404,
       url: request.url,
     }
@@ -431,6 +1061,89 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
       classifyStrictLedger({
         ...cleanLedger,
         expectedHttpFailures: [{ ...exact, context: "member" }],
+        requests: [request],
+      }).ok
+    ).toBe(false)
+  })
+
+  it("correlates expected failures as one-shot operations instead of a Set", () => {
+    const request = {
+      bodyHash: "sha256:matching-race-body",
+      context: "member",
+      method: "POST",
+      status: 409,
+      url: "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/42/chat",
+    }
+    const expected = {
+      ...request,
+      consoleErrorCount: 0,
+      operationId: "race-concurrent-conflict",
+    }
+
+    expect(
+      classifyStrictLedger({
+        ...cleanLedger,
+        expectedHttpFailures: [expected],
+        requests: [request, request],
+      }).ok
+    ).toBe(false)
+    expect(
+      classifyStrictLedger({
+        ...cleanLedger,
+        expectedHttpFailures: [
+          expected,
+          {
+            ...expected,
+            bodyHash: "sha256:changed-race-body",
+            operationId: "race-fingerprint-conflict",
+          },
+        ],
+        requests: [request, { ...request, bodyHash: "sha256:changed-race-body" }],
+      }).ok
+    ).toBe(true)
+  })
+
+  it("requires exact console-error multiplicity for each declared operation", () => {
+    const request = {
+      bodyHash: "sha256:race-body",
+      context: "member",
+      method: "POST",
+      status: 409,
+      url: "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/42/chat",
+    }
+    const consoleError = {
+      context: request.context,
+      message: "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      status: request.status,
+      url: request.url,
+    }
+    const expected = {
+      ...request,
+      consoleErrorCount: 1,
+      operationId: "race-concurrent-conflict",
+    }
+
+    expect(
+      classifyStrictLedger({
+        ...cleanLedger,
+        consoleErrors: [consoleError],
+        expectedHttpFailures: [expected],
+        requests: [request],
+      }).ok
+    ).toBe(true)
+    expect(
+      classifyStrictLedger({
+        ...cleanLedger,
+        consoleErrors: [consoleError, consoleError],
+        expectedHttpFailures: [expected],
+        requests: [request],
+      }).ok
+    ).toBe(false)
+    expect(
+      classifyStrictLedger({
+        ...cleanLedger,
+        consoleErrors: [],
+        expectedHttpFailures: [expected],
         requests: [request],
       }).ok
     ).toBe(false)
@@ -458,7 +1171,13 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     const accepted = {
       ...cleanLedger,
       consoleErrors: [expectedConsole],
-      expectedHttpFailures: [conflict],
+      expectedHttpFailures: [
+        {
+          ...conflict,
+          consoleErrorCount: 1,
+          operationId: "race-concurrent-conflict",
+        },
+      ],
       requests: [conflict],
     }
 
@@ -528,23 +1247,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
   })
 
   it("returns a nonzero validation result when required live evidence is incomplete", () => {
-    const config = buildSharedUatConfig({ env: REQUIRED_ENV })
-    const complete = createEvidenceRecord({
-      acceptance: completeAcceptance,
-      config,
-      finishedAt: "2026-08-22T12:01:00.000Z",
-      ledger: cleanLedger,
-      provider: { model: "configured-model", provider: "openai" },
-      raceProbe: {
-        requestHashes: ["sha256:request-a", "sha256:request-b"],
-        responseHashes: ["sha256:writer-response", "sha256:replay-response"],
-        statuses: [200, 200, 409],
-        timingsMs: [120, 124, 12],
-        turnHashes: ["sha256:turn-a", "sha256:turn-a"],
-      },
-      screenshots: completeScreenshots,
-      startedAt: "2026-08-22T12:00:00.000Z",
-    })
+    const complete = makeCompleteEvidence()
 
     expect(validateEvidenceRecord(complete)).toEqual({ exitCode: 0, failures: [] })
     expect(
@@ -582,31 +1285,115 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
           desktopSharedWorkspace:
             "/Users/example/project/.worktrees/task/desktop-shared-workspace.png",
         },
-      })
-    ).toEqual({
-      exitCode: 1,
-      failures: ["screenshot_path_not_repository_relative:desktopSharedWorkspace"],
-    })
+      }).failures
+    ).toContain("screenshot_path_not_repository_relative:desktopSharedWorkspace")
+  })
+
+  it("requires the exact canonical acceptance and screenshot keys", () => {
+    const complete = makeCompleteEvidence()
+    const { sentinelsExcluded: _missing, ...missingAcceptance } = complete.acceptance
+
+    expect(validateEvidenceRecord(complete)).toEqual({ exitCode: 0, failures: [] })
+    expect(validateEvidenceRecord({ ...complete, acceptance: missingAcceptance }).exitCode).toBe(1)
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        acceptance: { ...complete.acceptance, unexpectedAcceptance: true },
+      }).exitCode
+    ).toBe(1)
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        screenshots: {
+          ...complete.screenshots,
+          unexpectedScreenshot: "unexpected.png",
+        },
+      }).exitCode
+    ).toBe(1)
+  })
+
+  it.each([
+    [
+      "failed status",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({ ...evidence, status: "failed" }),
+    ],
+    [
+      "unready provider",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({
+        ...evidence,
+        providerReadiness: { ...evidence.providerReadiness, ready: false },
+      }),
+    ],
+    [
+      "missing isolation proof",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({
+        ...evidence,
+        contextIsolationProof: [],
+      }),
+    ],
+    [
+      "missing provider probe proof",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({
+        ...evidence,
+        providerContextProof: null,
+      }),
+    ],
+    [
+      "zero provider requests",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({
+        ...evidence,
+        providerContextProof: {
+          ...evidence.providerContextProof,
+          forwardedRequestCount: 0,
+          inputBodyHashes: [],
+          outputBodyHashes: [],
+        },
+      }),
+    ],
+    [
+      "sentinel in provider context",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({
+        ...evidence,
+        providerContextProof: { ...evidence.providerContextProof, ownerSentinelAbsent: false },
+      }),
+    ],
+    [
+      "unexpected transition traffic",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({
+        ...evidence,
+        transitionProof: [{ ...evidence.transitionProof[0], unexpectedRequestCount: 1 }],
+      }),
+    ],
+    [
+      "malformed timestamp",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({
+        ...evidence,
+        finishedAt: "not-a-timestamp",
+      }),
+    ],
+    [
+      "duplicate expected failure",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({
+        ...evidence,
+        ledger: {
+          ...evidence.ledger,
+          expectedHttpFailures: [
+            ...evidence.ledger.expectedHttpFailures,
+            evidence.ledger.expectedHttpFailures[0],
+          ],
+        },
+      }),
+    ],
+    [
+      "unknown top-level field",
+      (evidence: ReturnType<typeof makeCompleteEvidence>) => ({ ...evidence, weakOverride: true }),
+    ],
+  ])("rejects malformed evidence with %s", (_label, mutate) => {
+    expect(validateEvidenceRecord(mutate(makeCompleteEvidence())).exitCode).toBe(1)
   })
 
   it("records and bounds Chats settings requests without hiding amplification", () => {
-    const config = buildSharedUatConfig({ env: REQUIRED_ENV })
-    const complete = createEvidenceRecord({
-      acceptance: completeAcceptance,
-      config,
-      finishedAt: "2026-08-22T12:01:00.000Z",
-      ledger: cleanLedger,
-      provider: { model: "configured-model", provider: "openai" },
-      raceProbe: {
-        requestHashes: ["sha256:request-a", "sha256:request-b"],
-        responseHashes: ["sha256:writer-response", "sha256:replay-response"],
-        statuses: [200, 200, 409],
-        timingsMs: [120, 124, 12],
-        turnHashes: ["sha256:turn-a", "sha256:turn-a"],
-      },
-      screenshots: completeScreenshots,
-      startedAt: "2026-08-22T12:00:00.000Z",
-    })
+    const complete = makeCompleteEvidence()
 
     expect(complete.settingsRequestProbe).toEqual({
       count: 1,
@@ -618,15 +1405,12 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
       validateEvidenceRecord({
         ...complete,
         settingsRequestProbe: { count: 3, maximum: 2, statuses: [200, 200, 200] },
-      })
-    ).toEqual({ exitCode: 1, failures: ["settings_request_amplification"] })
+      }).failures
+    ).toContain("settings_request_amplification")
   })
 
   it("uses only connectOverCDP and creates three isolated browser contexts", () => {
-    const sourcePath = path.resolve(
-      process.cwd(),
-      "scripts/shared-research-workspace-cdp-uat.mjs"
-    )
+    const sourcePath = path.resolve(process.cwd(), "scripts/shared-research-workspace-cdp-uat.mjs")
     const source = fs.readFileSync(sourcePath, "utf8")
 
     expect(source).toContain("chromium.connectOverCDP(config.cdpUrl)")
@@ -644,9 +1428,10 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
 
     expect(source).toContain("context.cookies()")
     expect(source).toContain("cookieHash")
-    expect(source).toContain("evidence.contextIsolationProof = contextProof")
+    expect(source).toContain("contextIsolationProof: contextProof")
     expect(source).toContain('page.goto("about:blank", { waitUntil: "load" })')
-    expect(source).toContain('addExpectedFailure(ledger, "member", "POST", 409, raceUrl)')
+    expect(source).toContain('operationId: "race-concurrent-conflict"')
+    expect(source).toContain('operationId: "race-fingerprint-conflict"')
     expect(source).toContain("ownerLedger.dispose()")
     expect(source).toContain("memberLedger.dispose()")
   })
@@ -663,7 +1448,9 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).toContain('await memberLedger.waitForIdle("before malformed route")')
     expect(source).toContain('await memberLedger.waitForIdle("before member race route")')
     expect(source).toContain('await ownerLedger.waitForIdle("before owner ledger disposal")')
-    expect(source).toContain('await ownerRevocationLedger.waitForIdle("before owner revocation disposal")')
+    expect(source).toContain(
+      'await ownerRevocationLedger.waitForIdle("before owner revocation disposal")'
+    )
     expect(source).toContain('await memberChatsLedger.waitForIdle("before Chats ledger disposal")')
     expect(source).not.toContain("navigationAbortedAmbientRead")
   })
@@ -723,7 +1510,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).toContain("const unreadCountSettled = page.waitForResponse(")
     expect(source).toContain('pathname === "/api/v1/notifications/unread-count"')
     expect(source).toContain("await unreadCountSettled")
-    expect(source).not.toContain('getByLabel(/^password$/i)')
+    expect(source).not.toContain("getByLabel(/^password$/i)")
   })
 
   it("reports redacted route and request diagnostics when the shared shell times out", () => {
@@ -737,7 +1524,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).toContain("consoleErrorHashes")
     expect(source).toContain("pageErrorHashes")
     expect(source).not.toContain(
-      'memberPage.locator(\'[data-testid="shared-workspace-shell"]\').waitFor'
+      "memberPage.locator('[data-testid=\"shared-workspace-shell\"]').waitFor"
     )
   })
 
@@ -786,9 +1573,12 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).toContain('status: "failed"')
     expect(source).toContain("failureMessageHash")
     expect(source).toContain("providerReadiness = bootstrap.generation_default")
-    expect(source).toContain("evidence.providerReadiness = providerReadiness")
+    expect(source).toContain("providerReadiness,")
+    expect(source).toContain("providerContextProof,")
     expect(source).toContain("const disposeLedgers = () =>")
-    expect(source).toMatch(/try \{\s*fixture = await provisionFixture\(config\)/u)
+    expect(source).toMatch(
+      /try \{\s*await resetProviderProbe\(config\)\s*fixture = await provisionFixture\(config\)/u
+    )
     expect(source).toMatch(/catch \(error\) \{\s*disposeLedgers\(\)/u)
     expect(source).toMatch(/catch \(error\) \{[\s\S]*writeEvidence\(config, evidence\)/u)
   })
@@ -799,9 +1589,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
       "utf8"
     )
 
-    expect(source).toContain(
-      'return [key, fs.existsSync(screenshotPath) ? filename : ""]'
-    )
+    expect(source).toContain('return [key, fs.existsSync(screenshotPath) ? filename : ""]')
     expect(source).not.toMatch(
       /return \[key, fs\.existsSync\(screenshotPath\) \? screenshotPath : ""\]/u
     )
@@ -862,14 +1650,12 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).not.toContain(
       '"Amber: return both exact tokens AMBER-SIGNED-DATE-2024-03-17 and COBALT-PARTICIPANTS-43 with one citation for Amber and one for Cobalt."'
     )
-    expect(source).toContain(
-      '"Return the exact Amber protocol token from the selected source."'
-    )
+    expect(source).toContain('"Return the exact Amber protocol token from the selected source."')
     expect(source).toContain('firstAnswer.includes("COBALT-PARTICIPANTS-43")')
     expect(source).toContain('firstAnswer.includes("AMBER-SIGNED-DATE-2024-03-17")')
     expect(source).toContain('subsetText.includes("AMBER-SIGNED-DATE-2024-03-17")')
-    expect(source).toContain(
-      'getByText("COBALT-PARTICIPANTS-43", { exact: false }).waitFor()'
+    expect(source).toMatch(
+      /\.getByText\(\s*"COBALT-PARTICIPANTS-43"\s*,\s*\{\s*exact:\s*false\s*\}\s*\)\s*\.waitFor\(\)/u
     )
     expect(source).toContain("text.includes(fixture.sourceDefs[0].title)")
     expect(source).toContain("text.includes(fixture.sourceDefs[1].title)")
@@ -888,7 +1674,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).toContain("horizontalOffenderCount")
     expect(source).toContain("horizontalOffenders")
     expect(source).toContain("const intersectsViewport")
-    expect(source).toContain("controls.filter(intersectsViewport)")
+    expect(source).toMatch(/controls\s*\.filter\(intersectsViewport\)/u)
     expect(source).toContain("verticalScrollContainers")
     expect(source).toContain("activeTabs")
     expect(source).toContain(".slice(0, 8)")
@@ -907,9 +1693,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).toContain('window.scrollTo({ behavior: "instant", left: 0, top: 0 })')
     expect(source).toContain("document.fonts?.ready")
     expect(source).toContain("requestAnimationFrame")
-    expect(source).toContain(
-      'locator(\'[data-testid="shared-workspace-shell"] header p\')'
-    )
+    expect(source).toContain("locator('[data-testid=\"shared-workspace-shell\"] header p')")
     expect(source).toContain("await neutralSurface.click()")
     expect(source).not.toContain("addStyleTag")
     expect(source).toMatch(
@@ -937,9 +1721,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).toContain('getByTestId("workspace-share-button")')
     expect(source).toContain('getByRole("tab", { name: "Active Shares" })')
     expect(source).toContain('getByRole("row").filter({ hasText: teamScopeLabel })')
-    expect(source).toContain(
-      'name: `Revoke team share Team #${fixture.teamId}`'
-    )
+    expect(source).toContain("name: `Revoke team share Team #${fixture.teamId}`")
     expect(source).toContain('name: "Revoke", exact: true')
     expect(source).toContain('getByText("Share revoked", { exact: true })')
     expect(source).toContain("ownerPage.waitForResponse")
@@ -982,7 +1764,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).toContain("geometry.left < -1")
     expect(source).toContain("geometry.right > window.innerWidth + 1")
     expect(source).toMatch(
-      /await stabilizeMobilePreviewCapture\(memberPage, fixture\)[\s\S]*SCREENSHOT_NAMES\.mobileSharedWorkspace/u
+      /SCREENSHOT_NAMES\.mobileSharedWorkspace[\s\S]*await stabilizeMobilePreviewCapture\(memberPage, fixture\)[\s\S]*SCREENSHOT_NAMES\.mobileSourcePreview/u
     )
   })
 
@@ -994,12 +1776,8 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
 
     expect(source).toContain("const stabilizeRevokedCapture = async (page) =>")
     expect(source).toContain("await neutralSurface.click()")
-    expect(source).toContain(
-      "!document.activeElement?.matches(`h1[tabindex='-1']`)"
-    )
-    expect(source).toContain(
-      "requestAnimationFrame(() => requestAnimationFrame(resolve))"
-    )
+    expect(source).toContain("!document.activeElement?.matches(`h1[tabindex='-1']`)")
+    expect(source).toContain("requestAnimationFrame(() => requestAnimationFrame(resolve))")
     expect(source).not.toContain("addStyleTag")
     expect(source).toMatch(
       /await stabilizeRevokedCapture\(memberPage\)[\s\S]*SCREENSHOT_NAMES\.revokedShare/u
@@ -1024,7 +1802,9 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(source).toContain("historySurface.getByText(fixture.workspaceName")
     expect(source).toContain('getAttribute("aria-expanded")')
     expect(source).toContain("const persistedMessagesResponsePromise = memberPage.waitForResponse")
-    expect(source).toContain("const persistedMessagesResponse = await persistedMessagesResponsePromise")
+    expect(source).toContain(
+      "const persistedMessagesResponse = await persistedMessagesResponsePromise"
+    )
     expect(source).toContain("/\\/api\\/v1\\/chats\\/[^/]+\\/messages$/")
     expect(source).toContain(
       'await ensureLocatorVisibleInViewport(persistedQuestion, "Persisted question")'

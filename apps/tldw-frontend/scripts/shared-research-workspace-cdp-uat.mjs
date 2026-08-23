@@ -24,9 +24,27 @@ const DEFAULT_EVIDENCE_DIR = path.resolve(
 const SCREENSHOT_NAMES = {
   desktopGroundedAnswer: "desktop-grounded-answer.png",
   desktopSharedWorkspace: "desktop-shared-workspace.png",
+  mobileSourcePreview: "mobile-source-preview.png",
   mobileSharedWorkspace: "mobile-shared-workspace.png",
   revokedShare: "revoked-share.png",
 }
+const ACCEPTANCE_NAMES = [
+  "allSourcesGrounded",
+  "blockedRevokedPreview",
+  "citationPreview",
+  "contextIsolation",
+  "historyAfterReload",
+  "malformedNeutralFailure",
+  "memberSharedIsolation",
+  "mobileResponsive",
+  "noExtraBannerBars",
+  "nonmemberNeutralFailure",
+  "ownerRecipientView",
+  "recipientChatVisibleInChats",
+  "revocationFailClosed",
+  "sentinelsExcluded",
+  "subsetGrounded",
+]
 const OWNER_SENTINEL = "OWNER-UNRELATED-SENTINEL-7F3C9D"
 const RECIPIENT_SENTINEL = "RECIPIENT-LOCAL-SENTINEL-4A8E2B"
 const SOURCE_ONE_FACT = "Amber protocol token: AMBER-SIGNED-DATE-2024-03-17."
@@ -37,8 +55,7 @@ export const buildAllSourcesQuestion = ({ amberTitle, cobaltTitle }) =>
   `From the source titled "${cobaltTitle}", report the trial's participant-count token. ` +
   "Return both exact values from the evidence and include a citation for each source."
 
-const sleep = (milliseconds) =>
-  new Promise((resolve) => setTimeout(resolve, milliseconds))
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
 export const ensureLocatorVisibleInViewport = async (locator, label) => {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -105,12 +122,14 @@ export const buildSharedUatConfig = ({ env = process.env } = {}) => {
           path.join(os.tmpdir(), `tldw-shared-recipient-uat-${runId}-cleanup.json`)
       )
     ),
-    evidenceDir: path.resolve(
-      String(env.TLDW_SHARED_UAT_EVIDENCE_DIR || DEFAULT_EVIDENCE_DIR)
-    ),
+    evidenceDir: path.resolve(String(env.TLDW_SHARED_UAT_EVIDENCE_DIR || DEFAULT_EVIDENCE_DIR)),
     fixturePassword: String(env.TLDW_SHARED_UAT_FIXTURE_PASSWORD),
     llamaHealthUrl: "http://127.0.0.1:9099/health",
     personas: [...PERSONAS],
+    providerProbeUrl: normalizeOrigin(
+      env.TLDW_SHARED_UAT_PROVIDER_PROBE_URL || "http://127.0.0.1:19099",
+      "TLDW_SHARED_UAT_PROVIDER_PROBE_URL"
+    ),
     runId,
     usernamePrefixes: {
       member: String(env.TLDW_SHARED_UAT_MEMBER_PREFIX || "uat-member"),
@@ -130,16 +149,11 @@ export const selectEffectiveTarget = ({ llamaHealthy, targets }) => {
     }))
     .filter((target) => target.model && target.provider)
   if (llamaHealthy) {
-    const llama = ready.find((target) =>
-      /^(?:llama(?:\.cpp)?|local-llm)$/i.test(target.provider)
-    )
+    const llama = ready.find((target) => /^(?:llama(?:\.cpp)?|local-llm)$/i.test(target.provider))
     if (llama) return llama
   }
   return ready[0] || null
 }
-
-const requestIdentity = (entry) =>
-  `${String(entry.context || "")} ${String(entry.method || "").toUpperCase()} ${String(entry.url || "")} ${Number(entry.status || 0)}`
 
 const requestPath = (entry) => {
   try {
@@ -213,7 +227,30 @@ const forbiddenSharedRequest = (entry) => {
 
 const allowedSharedRequest = (entry) => {
   const pathname = requestPath(entry)
-  if (entry.context === "member-chats") return true
+  if (entry.context === "member-chats") {
+    if (!pathname.startsWith("/api/") && pathname !== "/openapi.json") return true
+    if (allowedAmbientSafeGet(entry)) return true
+    const method = String(entry.method || "GET").toUpperCase()
+    if (method === "POST" && pathname === "/api/v1/rag/feedback/implicit") {
+      return true
+    }
+    const safeReadPatterns = [
+      /^\/openapi\.json$/,
+      /^\/api\/v1\/audio\/transcriptions\/health$/,
+      /^\/api\/v1\/audio\/voices\/catalog$/,
+      /^\/api\/v1\/chat\/conversations\/[^/]+\/share-links$/,
+      /^\/api\/v1\/chats\/$/,
+      /^\/api\/v1\/chats\/[^/]+\/(?:messages|research-runs|settings)$/,
+      /^\/api\/v1\/config\/providers$/,
+      /^\/api\/v1\/persona\/catalog$/,
+      /^\/api\/v1\/prompts\/capabilities$/,
+      /^\/api\/v1\/users\/me\/profile$/,
+    ]
+    return (
+      ["GET", "OPTIONS"].includes(method) &&
+      safeReadPatterns.some((pattern) => pattern.test(pathname))
+    )
+  }
   if (entry.context === "owner-revocation") return allowedOwnerRevocationRequest(entry)
   if (!pathname.startsWith("/api/")) return true
   if (allowedAmbientSafeGet(entry)) return true
@@ -241,10 +278,28 @@ const buildSettingsRequestProbe = (ledger) => {
 export const classifyStrictLedger = (ledger) => {
   const failures = []
   const expectedEntries = ledger.expectedHttpFailures || []
-  const expected = new Set(
-    expectedEntries.map(requestIdentity)
-  )
-  const observedExpected = new Set()
+  const usedExpected = new Set()
+  const operationIds = new Set()
+  for (const [index, entry] of expectedEntries.entries()) {
+    const operationId = String(entry.operationId || "").trim()
+    if (
+      !operationId ||
+      operationIds.has(operationId) ||
+      !Number.isInteger(entry.consoleErrorCount) ||
+      entry.consoleErrorCount < 0 ||
+      entry.consoleErrorCount > 2
+    ) {
+      failures.push(`malformed_expected_http_failure:${index}`)
+    }
+    operationIds.add(operationId)
+  }
+
+  const matchesExpected = (expected, observed) =>
+    expected.context === observed.context &&
+    String(expected.method || "").toUpperCase() === String(observed.method || "").toUpperCase() &&
+    Number(expected.status) === Number(observed.status) &&
+    expected.url === observed.url &&
+    (!("bodyHash" in expected) || expected.bodyHash === observed.bodyHash)
 
   for (const entry of ledger.requests || []) {
     const forbidden = forbiddenSharedRequest(entry)
@@ -255,13 +310,17 @@ export const classifyStrictLedger = (ledger) => {
       failures.push(`undeclared_api_request: ${entry.method} ${requestPath(entry)}`)
     }
     if (Number(entry.status) >= 400 || Number(entry.status) === 0) {
-      const identity = requestIdentity(entry)
-      if (expected.has(identity)) observedExpected.add(identity)
+      const expectedIndex = expectedEntries.findIndex(
+        (expectedEntry, index) => !usedExpected.has(index) && matchesExpected(expectedEntry, entry)
+      )
+      if (expectedIndex >= 0) usedExpected.add(expectedIndex)
       else failures.push(`unexpected_http_${entry.status}: ${entry.method} ${requestPath(entry)}`)
     }
   }
-  for (const identity of expected) {
-    if (!observedExpected.has(identity)) failures.push(`expected_http_failure_not_observed: ${identity}`)
+  for (const [index, entry] of expectedEntries.entries()) {
+    if (!usedExpected.has(index)) {
+      failures.push(`expected_http_failure_not_observed: ${entry.operationId || index}`)
+    }
   }
   for (const entry of ledger.requestFailures || []) {
     failures.push(`request_failed: ${entry.method || ""} ${entry.url || ""}`)
@@ -269,16 +328,31 @@ export const classifyStrictLedger = (ledger) => {
   for (const entry of ledger.pageErrors || []) {
     failures.push(`page_error: ${entry.message || "unknown"}`)
   }
+  const usedConsoleCounts = new Map()
   for (const entry of ledger.consoleErrors || []) {
-    const declaredHttpFailure = expectedEntries.some(
-      (expectedEntry) =>
+    const expectedIndex = expectedEntries.findIndex((expectedEntry, index) => {
+      const used = usedConsoleCounts.get(index) || 0
+      return (
+        usedExpected.has(index) &&
+        used < expectedEntry.consoleErrorCount &&
         Number(entry.status) === Number(expectedEntry.status) &&
         entry.context === expectedEntry.context &&
-        entry.url === expectedEntry.url &&
-        observedExpected.has(requestIdentity(expectedEntry))
-    )
-    if (declaredHttpFailure) continue
-    failures.push(`console_error: ${entry.message || "unknown"}`)
+        entry.url === expectedEntry.url
+      )
+    })
+    if (expectedIndex < 0) {
+      failures.push(`console_error: ${entry.message || "unknown"}`)
+      continue
+    }
+    usedConsoleCounts.set(expectedIndex, (usedConsoleCounts.get(expectedIndex) || 0) + 1)
+  }
+  for (const [index, entry] of expectedEntries.entries()) {
+    if (
+      usedExpected.has(index) &&
+      (usedConsoleCounts.get(index) || 0) !== entry.consoleErrorCount
+    ) {
+      failures.push(`expected_console_error_count: ${entry.operationId || index}`)
+    }
   }
   for (const entry of ledger.runtimeOverlays || []) {
     failures.push(`runtime_overlay: ${entry.text || "detected"}`)
@@ -308,50 +382,126 @@ const redactValue = (value, secrets) => {
 export const createEvidenceRecord = ({
   acceptance,
   config,
+  contextIsolationProof = [],
   failureMessageHash = null,
   finishedAt,
+  fixture = null,
   ledger,
   provider,
+  providerContextProof = null,
+  providerReadiness = null,
   raceProbe,
   screenshots,
   startedAt,
   status = "passed",
+  transitionProof = [],
 }) => {
   const ledgerResult = classifyStrictLedger(ledger)
-  return redactValue(
+  const environment = {
+    apiUrl: config.apiUrl,
+    authMode: "multi_user",
+    cdpUrl: config.cdpUrl,
+    database: "sqlite",
+    dockerAttempted: false,
+    personas: config.personas,
+    providerProbe: true,
+    webUrl: config.webUrl,
+  }
+  const fixtureEvidence = fixture
+    ? {
+        canonicalStatusEnvelopeHash: sha256(JSON.stringify(fixture.statusEnvelope)),
+        canonicalStatusQueryable: fixture.sourceDefs?.length === 2,
+        provisioned: true,
+        shareIdHash: sha256(fixture.shareId),
+        sourceIds: fixture.sourceDefs.map((source) => sha256(source.id)),
+        workspaceIdHash: sha256(fixture.workspaceId),
+      }
+    : { provisioned: false }
+  const payload = redactValue(
     {
       acceptance,
-      environment: {
-        apiUrl: config.apiUrl,
-        authMode: "multi_user",
-        cdpUrl: config.cdpUrl,
-        database: "sqlite",
-        dockerAttempted: false,
-        personas: config.personas,
-        webUrl: config.webUrl,
-      },
+      contextIsolationProof,
+      environment,
+      environmentHash: sha256(JSON.stringify(environment)),
       failureMessageHash,
       finishedAt,
+      fixture: fixtureEvidence,
       ledger: {
         ...ledger,
         classification: ledgerResult,
       },
       provider,
+      providerContextProof,
+      providerReadiness: providerReadiness
+        ? {
+            model: String(providerReadiness.model || "").trim(),
+            provider: String(providerReadiness.provider || "").trim(),
+            ready: providerReadiness.ready === true,
+          }
+        : null,
       raceProbe,
-      runIdHash: `sha256:${crypto.createHash("sha256").update(config.runId).digest("hex")}`,
+      runIdHash: sha256(config.runId),
       settingsRequestProbe: buildSettingsRequestProbe(ledger),
       screenshots,
       startedAt,
       status,
+      transitionProof,
     },
     [config.adminPassword, config.fixturePassword, config.adminUsername]
   )
+  return { ...payload, validation: validateEvidencePayload(payload) }
 }
 
-export const validateEvidenceRecord = (evidence) => {
+const exactKeys = (value, keys) =>
+  Boolean(value && typeof value === "object" && !Array.isArray(value)) &&
+  JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort())
+
+const isSha256 = (value) => /^sha256:[a-f0-9]{64}$/.test(String(value || ""))
+
+const validateEvidencePayload = (evidence) => {
   const failures = []
-  for (const [name, passed] of Object.entries(evidence.acceptance || {})) {
-    if (passed !== true) failures.push(`acceptance:${name}`)
+  const payloadKeys = [
+    "acceptance",
+    "contextIsolationProof",
+    "environment",
+    "environmentHash",
+    "failureMessageHash",
+    "finishedAt",
+    "fixture",
+    "ledger",
+    "provider",
+    "providerContextProof",
+    "providerReadiness",
+    "raceProbe",
+    "runIdHash",
+    "screenshots",
+    "settingsRequestProbe",
+    "startedAt",
+    "status",
+    "transitionProof",
+  ]
+  if (!exactKeys(evidence, payloadKeys)) failures.push("evidence_shape")
+  if (evidence.status !== "passed") failures.push("status")
+  const startedAtMs = Date.parse(evidence.startedAt)
+  const finishedAtMs = Date.parse(evidence.finishedAt)
+  if (
+    !Number.isFinite(startedAtMs) ||
+    !Number.isFinite(finishedAtMs) ||
+    new Date(startedAtMs).toISOString() !== evidence.startedAt ||
+    new Date(finishedAtMs).toISOString() !== evidence.finishedAt ||
+    finishedAtMs < startedAtMs ||
+    evidence.failureMessageHash !== null
+  ) {
+    failures.push("run_metadata")
+  }
+  if (!exactKeys(evidence.acceptance, ACCEPTANCE_NAMES)) {
+    failures.push("acceptance_shape")
+  }
+  for (const name of ACCEPTANCE_NAMES) {
+    if (evidence.acceptance?.[name] !== true) failures.push(`acceptance:${name}`)
+  }
+  if (!exactKeys(evidence.screenshots, Object.keys(SCREENSHOT_NAMES))) {
+    failures.push("screenshots_shape")
   }
   for (const [name, screenshot] of Object.entries(SCREENSHOT_NAMES)) {
     const recordedPath = String(evidence.screenshots?.[name] || "").trim()
@@ -361,21 +511,222 @@ export const validateEvidenceRecord = (evidence) => {
       failures.push(`screenshot_path_not_repository_relative:${name}`)
     }
   }
-  if (!evidence.provider?.provider || !evidence.provider?.model) failures.push("provider")
-  if (evidence.ledger?.classification?.ok !== true) failures.push("ledger")
+  const environmentKeys = [
+    "apiUrl",
+    "authMode",
+    "cdpUrl",
+    "database",
+    "dockerAttempted",
+    "personas",
+    "providerProbe",
+    "webUrl",
+  ]
+  if (
+    !exactKeys(evidence.environment, environmentKeys) ||
+    evidence.environment?.authMode !== "multi_user" ||
+    evidence.environment?.database !== "sqlite" ||
+    evidence.environment?.dockerAttempted !== false ||
+    evidence.environment?.providerProbe !== true ||
+    JSON.stringify(evidence.environment?.personas) !== JSON.stringify(PERSONAS) ||
+    evidence.environmentHash !== sha256(JSON.stringify(evidence.environment)) ||
+    !isSha256(evidence.runIdHash)
+  ) {
+    failures.push("environment")
+  }
+  if (
+    !exactKeys(evidence.provider, ["model", "provider"]) ||
+    !evidence.provider?.provider ||
+    !evidence.provider?.model
+  ) {
+    failures.push("provider")
+  }
+  if (
+    !exactKeys(evidence.providerReadiness, ["model", "provider", "ready"]) ||
+    evidence.providerReadiness?.ready !== true ||
+    evidence.providerReadiness?.provider !== evidence.provider?.provider ||
+    evidence.providerReadiness?.model !== evidence.provider?.model
+  ) {
+    failures.push("provider_readiness")
+  }
+  const contextProof = evidence.contextIsolationProof
+  const contextProofKeys = [
+    "configHash",
+    "cookieHash",
+    "markerCookieHash",
+    "markerHash",
+    "persona",
+    "storageKeyHash",
+  ]
+  if (
+    !Array.isArray(contextProof) ||
+    contextProof.length !== PERSONAS.length ||
+    new Set(contextProof.map((entry) => entry.persona)).size !== PERSONAS.length ||
+    !PERSONAS.every((persona) => contextProof.some((entry) => entry.persona === persona)) ||
+    contextProof.some(
+      (entry) =>
+        !exactKeys(entry, contextProofKeys) ||
+        ![entry.configHash, entry.cookieHash, entry.markerHash, entry.storageKeyHash].every(
+          isSha256
+        ) ||
+        entry.markerHash !== entry.markerCookieHash
+    )
+  ) {
+    failures.push("context_isolation_proof")
+  }
+  if (
+    !exactKeys(evidence.fixture, [
+      "canonicalStatusEnvelopeHash",
+      "canonicalStatusQueryable",
+      "provisioned",
+      "shareIdHash",
+      "sourceIds",
+      "workspaceIdHash",
+    ]) ||
+    evidence.fixture?.provisioned !== true ||
+    evidence.fixture?.canonicalStatusQueryable !== true ||
+    !isSha256(evidence.fixture?.canonicalStatusEnvelopeHash) ||
+    !isSha256(evidence.fixture?.shareIdHash) ||
+    !isSha256(evidence.fixture?.workspaceIdHash) ||
+    evidence.fixture?.sourceIds?.length !== 2 ||
+    !evidence.fixture.sourceIds.every(isSha256)
+  ) {
+    failures.push("fixture_proof")
+  }
+  const providerProof = evidence.providerContextProof
+  const providerProofKeys = [
+    "bodyUnchanged",
+    "forwardedRequestCount",
+    "inputBodyHashes",
+    "maximumRequestCount",
+    "mutationPayloadsAbsent",
+    "outputBodyHashes",
+    "ownerSentinelAbsent",
+    "payloadJsonValid",
+    "recipientSentinelAbsent",
+    "toolPayloadsAbsent",
+    "withinRequestBound",
+  ]
+  if (
+    !exactKeys(providerProof, providerProofKeys) ||
+    !Number.isInteger(providerProof?.forwardedRequestCount) ||
+    providerProof.forwardedRequestCount < 1 ||
+    !Number.isInteger(providerProof.maximumRequestCount) ||
+    providerProof.maximumRequestCount < providerProof.forwardedRequestCount ||
+    providerProof.maximumRequestCount > 32 ||
+    providerProof.inputBodyHashes?.length !== providerProof.forwardedRequestCount ||
+    providerProof.outputBodyHashes?.length !== providerProof.forwardedRequestCount ||
+    !providerProof.inputBodyHashes?.every(isSha256) ||
+    !providerProof.outputBodyHashes?.every(isSha256) ||
+    providerProof.inputBodyHashes?.some(
+      (hash, index) => hash !== providerProof.outputBodyHashes[index]
+    ) ||
+    ![
+      "bodyUnchanged",
+      "mutationPayloadsAbsent",
+      "ownerSentinelAbsent",
+      "payloadJsonValid",
+      "recipientSentinelAbsent",
+      "toolPayloadsAbsent",
+      "withinRequestBound",
+    ].every((key) => providerProof?.[key] === true)
+  ) {
+    failures.push("provider_context_proof")
+  }
+  const recomputedLedger = classifyStrictLedger(evidence.ledger || {})
+  const expectedFailureKeys = [
+    "bodyHash",
+    "consoleErrorCount",
+    "context",
+    "method",
+    "operationId",
+    "status",
+    "url",
+  ]
+  if (
+    !exactKeys(evidence.ledger, [
+      "classification",
+      "closed",
+      "consoleErrors",
+      "expectedHttpFailures",
+      "pageErrors",
+      "requestFailures",
+      "requests",
+      "runtimeOverlays",
+    ]) ||
+    evidence.ledger?.closed !== true ||
+    !exactKeys(evidence.ledger?.classification, ["failures", "ok"]) ||
+    evidence.ledger.classification.ok !== recomputedLedger.ok ||
+    JSON.stringify(evidence.ledger.classification.failures) !==
+      JSON.stringify(recomputedLedger.failures) ||
+    recomputedLedger.ok !== true ||
+    evidence.ledger?.expectedHttpFailures?.some(
+      (entry) =>
+        !exactKeys(entry, expectedFailureKeys) ||
+        !String(entry.operationId || "").trim() ||
+        ![0, 1, 2].includes(entry.consoleErrorCount) ||
+        ![404, 409].includes(entry.status) ||
+        !["GET", "POST"].includes(entry.method) ||
+        (entry.bodyHash !== null && !isSha256(entry.bodyHash))
+    )
+  ) {
+    failures.push("ledger")
+  }
   const statuses = evidence.raceProbe?.statuses || []
   const successCount = statuses.filter((status) => status === 200).length
-  if (successCount < 2 || statuses.at(-1) !== 409 || statuses.some((status) => ![200, 409].includes(status))) {
+  const conflictCount = statuses.filter((status) => status === 409).length
+  if (
+    successCount < 2 ||
+    conflictCount !== 2 ||
+    statuses.at(-1) !== 409 ||
+    statuses.some((status) => ![200, 409].includes(status))
+  ) {
     failures.push("race_statuses")
   }
   const turnHashes = evidence.raceProbe?.turnHashes || []
   if (turnHashes.length < 2 || turnHashes.at(-1) !== turnHashes.at(-2)) {
     failures.push("race_replay_equivalence")
   }
-  if ((evidence.raceProbe?.requestHashes || []).length < 2) failures.push("race_request_hashes")
+  if (
+    !exactKeys(evidence.raceProbe, [
+      "operations",
+      "requestHashes",
+      "requestIdHash",
+      "responseHashes",
+      "statuses",
+      "timingsMs",
+      "turnHashes",
+    ]) ||
+    evidence.raceProbe?.requestHashes?.length !== 2 ||
+    !evidence.raceProbe.requestHashes.every(isSha256) ||
+    !isSha256(evidence.raceProbe?.requestIdHash) ||
+    evidence.raceProbe?.responseHashes?.length !== 2 ||
+    !evidence.raceProbe.responseHashes.every(isSha256) ||
+    evidence.raceProbe?.timingsMs?.length !== statuses.length ||
+    evidence.raceProbe?.operations?.length !== 2 ||
+    new Set(evidence.raceProbe.operations.map((entry) => entry.operationId)).size !== 2 ||
+    !["race-concurrent-conflict", "race-fingerprint-conflict"].every((operationId) =>
+      evidence.raceProbe.operations.some((operation) => operation.operationId === operationId)
+    ) ||
+    evidence.raceProbe.operations.some(
+      (entry) =>
+        !exactKeys(entry, ["bodyHash", "operationId", "status"]) ||
+        entry.status !== 409 ||
+        !isSha256(entry.bodyHash) ||
+        !evidence.raceProbe.requestHashes.includes(entry.bodyHash) ||
+        evidence.ledger.expectedHttpFailures.filter(
+          (expected) =>
+            expected.operationId === entry.operationId &&
+            expected.bodyHash === entry.bodyHash &&
+            expected.status === entry.status &&
+            expected.consoleErrorCount === 1
+        ).length !== 1
+    )
+  ) {
+    failures.push("race_shape")
+  }
   const settingsProbe = evidence.settingsRequestProbe
   if (
-    !settingsProbe ||
+    !exactKeys(settingsProbe, ["count", "maximum", "statuses"]) ||
     settingsProbe.count < 1 ||
     settingsProbe.count > MAX_CHAT_SETTINGS_REQUESTS ||
     settingsProbe.statuses?.length !== settingsProbe.count ||
@@ -383,7 +734,129 @@ export const validateEvidenceRecord = (evidence) => {
   ) {
     failures.push("settings_request_amplification")
   }
+  const transitionProof = evidence.transitionProof
+  const transitionProofKeys = [
+    "allowedAbortCount",
+    "allowedAborts",
+    "consoleErrorCount",
+    "context",
+    "labelHash",
+    "maximumOperationDeclarations",
+    "maximumRequestCount",
+    "observedRequests",
+    "operations",
+    "pageErrorCount",
+    "registeredAbortCount",
+    "registeredOperationCount",
+    "requestCount",
+    "runtimeOverlayCount",
+    "unexpectedRequestCount",
+    "withinRequestBound",
+  ]
+  const abortProofKeys = ["count", "id", "maximumCount", "method", "requestHash"]
+  const observedRequestProofKeys = ["errorHash", "kind", "method", "requestHash", "status"]
+  const operationProofKeys = ["count", "maximumCount", "name"]
+  if (
+    !Array.isArray(transitionProof) ||
+    transitionProof.length !== 2 ||
+    new Set(transitionProof.map((proof) => proof.context)).size !== 2 ||
+    !["owner-revocation", "member-chats"].every((context) =>
+      transitionProof.some((proof) => proof.context === context)
+    ) ||
+    transitionProof.some(
+      (proof) =>
+        !exactKeys(proof, transitionProofKeys) ||
+        !isSha256(proof.labelHash) ||
+        proof.consoleErrorCount !== 0 ||
+        proof.pageErrorCount !== 0 ||
+        proof.runtimeOverlayCount !== 0 ||
+        proof.unexpectedRequestCount !== 0 ||
+        proof.withinRequestBound !== true ||
+        proof.maximumOperationDeclarations !== MAX_TRANSITION_OPERATION_DECLARATIONS ||
+        proof.maximumRequestCount !== MAX_TRANSITION_REQUESTS ||
+        !Number.isInteger(proof.requestCount) ||
+        proof.requestCount < 0 ||
+        proof.observedRequests?.length !== proof.requestCount ||
+        proof.observedRequests?.some(
+          (request) =>
+            !exactKeys(request, observedRequestProofKeys) ||
+            !["failure", "response"].includes(request.kind) ||
+            !String(request.method || "").trim() ||
+            !isSha256(request.requestHash) ||
+            (request.kind === "failure"
+              ? request.status !== null || !isSha256(request.errorHash)
+              : !Number.isInteger(request.status) || request.errorHash !== null)
+        ) ||
+        proof.registeredOperationCount !== proof.operations?.length ||
+        proof.registeredOperationCount < 1 ||
+        proof.registeredOperationCount > MAX_TRANSITION_OPERATION_DECLARATIONS ||
+        new Set(proof.operations?.map((operation) => operation.name)).size !==
+          proof.registeredOperationCount ||
+        proof.operations?.some(
+          (operation) =>
+            !exactKeys(operation, operationProofKeys) ||
+            !String(operation.name || "").trim() ||
+            !Number.isInteger(operation.count) ||
+            !Number.isInteger(operation.maximumCount) ||
+            operation.count < 0 ||
+            operation.maximumCount < 1 ||
+            operation.maximumCount > MAX_TRANSITION_REQUESTS ||
+            operation.count > operation.maximumCount
+        ) ||
+        proof.operations?.reduce((total, operation) => total + operation.count, 0) !==
+          proof.observedRequests?.filter((request) => request.kind === "response").length ||
+        proof.registeredAbortCount !== proof.allowedAborts?.length ||
+        proof.registeredAbortCount > MAX_TRANSITION_ABORT_ALLOWANCES ||
+        proof.allowedAbortCount !==
+          proof.allowedAborts?.reduce((total, abort) => total + abort.count, 0) ||
+        proof.allowedAborts?.some(
+          (abort) =>
+            !exactKeys(abort, abortProofKeys) ||
+            !String(abort.id || "").trim() ||
+            abort.method !== "GET" ||
+            !Number.isInteger(abort.count) ||
+            !Number.isInteger(abort.maximumCount) ||
+            abort.count < 0 ||
+            abort.maximumCount < 1 ||
+            abort.count > abort.maximumCount ||
+            abort.maximumCount > 2 ||
+            !isSha256(abort.requestHash)
+        ) ||
+        proof.allowedAborts?.some(
+          (abort) =>
+            proof.observedRequests.filter(
+              (request) =>
+                request.kind === "failure" &&
+                request.method === abort.method &&
+                request.requestHash === abort.requestHash
+            ).length < abort.count
+        )
+    )
+  ) {
+    failures.push("transition_proof")
+  }
+  const serialized = JSON.stringify(evidence)
+  if (/(?:\/Users\/|\/home\/|\.worktrees\/)/.test(serialized)) {
+    failures.push("machine_path")
+  }
   return { exitCode: failures.length ? 1 : 0, failures }
+}
+
+export const validateEvidenceRecord = (evidence) => {
+  const { validation, ...payload } = evidence || {}
+  const result = validateEvidencePayload(payload)
+  if (
+    !exactKeys(evidence, [...Object.keys(payload), "validation"]) ||
+    !exactKeys(validation, ["exitCode", "failures"]) ||
+    validation.exitCode !== result.exitCode ||
+    JSON.stringify(validation.failures) !== JSON.stringify(result.failures)
+  ) {
+    return {
+      exitCode: 1,
+      failures: [...result.failures, "validation_record"],
+    }
+  }
+  return result
 }
 
 const sha256 = (value) =>
@@ -448,6 +921,23 @@ const apiCall = async (config, token, pathname, options = {}) => {
     )
   }
   return { body, status: response.status }
+}
+
+const resetProviderProbe = async (config) => {
+  const response = await fetch(`${config.providerProbeUrl}/__tldw_provider_probe/reset`, {
+    method: "POST",
+  })
+  if (response.status !== 204) {
+    throw new Error(`Provider probe reset failed with HTTP ${response.status}`)
+  }
+}
+
+const readProviderContextProof = async (config) => {
+  const response = await fetch(`${config.providerProbeUrl}/__tldw_provider_probe/proof`)
+  if (!response.ok) {
+    throw new Error(`Provider probe proof failed with HTTP ${response.status}`)
+  }
+  return response.json()
 }
 
 const loginApi = async (config, username, password) => {
@@ -595,12 +1085,9 @@ const provisionFixture = async (config) => {
     { method: "POST" }
   )
   for (const user of [owner, member, nonmember]) {
-    await apiCall(
-      config,
-      adminToken,
-      `/api/v1/admin/users/${user.id}/roles/${recipientRoleId}`,
-      { method: "POST" }
-    )
+    await apiCall(config, adminToken, `/api/v1/admin/users/${user.id}/roles/${recipientRoleId}`, {
+      method: "POST",
+    })
   }
 
   const org = await apiCall(config, adminToken, "/api/v1/admin/orgs", {
@@ -725,6 +1212,7 @@ const finalizeFixtureWorkspace = async (config, fixture, workspaceId) => {
 }
 
 const makeLedger = () => ({
+  closed: false,
   consoleErrors: [],
   expectedHttpFailures: [],
   pageErrors: [],
@@ -811,10 +1299,7 @@ const attachLedger = (page, contextName, ledger) => {
   }
   const waitForIdle = async (label, { quietMs = 500, timeoutMs = 70_000 } = {}) => {
     const deadline = Date.now() + timeoutMs
-    while (
-      inFlightApiRequests.size > 0 ||
-      Date.now() - lastApiActivity < quietMs
-    ) {
+    while (inFlightApiRequests.size > 0 || Date.now() - lastApiActivity < quietMs) {
       if (Date.now() >= deadline) {
         const outstanding = [...inFlightApiRequests].map((request) => ({
           method: request.method(),
@@ -830,22 +1315,428 @@ const attachLedger = (page, contextName, ledger) => {
   return { dispose, waitForIdle }
 }
 
-export const classifyTransitionLedger = (ledger) => {
+const MAX_TRANSITION_ABORT_ALLOWANCES = 12
+const MAX_TRANSITION_OPERATION_DECLARATIONS = 64
+const MAX_TRANSITION_REQUESTS = 64
+
+const transitionRequestOrigin = (entry) => {
+  try {
+    return new URL(entry.url).origin
+  } catch {
+    return ""
+  }
+}
+
+const transitionOperation = ({
+  allowedForbiddenKinds = [],
+  maximumCount,
+  method,
+  name,
+  origin,
+  path: exactPath,
+  pathPrefix,
+}) => ({
+  allowedForbiddenKinds,
+  maximumCount,
+  method: String(method).toUpperCase(),
+  name,
+  origin: new URL(origin).origin,
+  path: exactPath ? String(exactPath).toLowerCase() : null,
+  pathPrefix: pathPrefix ? String(pathPrefix).toLowerCase() : null,
+})
+
+const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
+  transitionOperation({
+    maximumCount: 1,
+    method: "GET",
+    name: "destination-document",
+    origin: webUrl,
+    path: targetPath,
+  }),
+  transitionOperation({
+    maximumCount: 2,
+    method: "GET",
+    name: "webui-runtime-config",
+    origin: webUrl,
+    path: "/api/_tldw-webui/runtime-config",
+  }),
+  transitionOperation({
+    maximumCount: 32,
+    method: "GET",
+    name: "webui-next-static",
+    origin: webUrl,
+    pathPrefix: "/_next/",
+  }),
+  transitionOperation({
+    maximumCount: 2,
+    method: "GET",
+    name: "webui-next-font-geist",
+    origin: webUrl,
+    path: "/__nextjs_font/geist-latin.woff2",
+  }),
+  ...[
+    ["webui-font-arimo", "/fonts/arimo.ttf"],
+    ["webui-font-inter-semibold", "/fonts/inter-semibold.ttf"],
+    ["webui-font-inter-medium", "/fonts/inter-medium.ttf"],
+    ["webui-font-inter-regular", "/fonts/inter-regular.ttf"],
+  ].map(([name, pathname]) =>
+    transitionOperation({
+      maximumCount: 1,
+      method: "GET",
+      name,
+      origin: webUrl,
+      path: pathname,
+    })
+  ),
+  ...[
+    ["ambient-persona-profiles", "/api/v1/persona/profiles"],
+    ["ambient-auth-me", "/api/v1/auth/me"],
+    ["ambient-health", "/api/v1/health"],
+    ["ambient-health-live", "/api/v1/health/live"],
+    ["ambient-notifications", "/api/v1/notifications"],
+    ["ambient-notification-stream", "/api/v1/notifications/stream"],
+    ["ambient-notification-count", "/api/v1/notifications/unread-count"],
+    ["ambient-rag-health", "/api/v1/rag/health"],
+    ["ambient-llm-providers", "/api/v1/llm/providers"],
+    ["ambient-llm-models", "/api/v1/llm/models/metadata"],
+    ["ambient-user-profile", "/api/v1/users/me/profile"],
+  ].map(([name, pathname]) =>
+    transitionOperation({
+      maximumCount: 4,
+      method: "GET",
+      name,
+      origin: apiUrl,
+      path: pathname,
+    })
+  ),
+]
+
+const transitionMigrationIdentity = ({ apiUrl, ledger, workspaceId }) => {
+  const apiOrigin = new URL(apiUrl).origin
+  const migrationIds = new Set()
+  const chunkIds = new Set()
+  const entries = [...(ledger.requests || []), ...(ledger.requestFailures || [])]
+  for (const entry of entries) {
+    if (transitionRequestOrigin(entry) !== apiOrigin) continue
+    const parts = requestPath(entry).split("/").filter(Boolean)
+    if (
+      parts[0] !== "api" ||
+      parts[1] !== "v1" ||
+      parts[2] !== "workspaces" ||
+      parts[3] !== "migrations" ||
+      !parts[4]
+    ) {
+      continue
+    }
+    const migrationId = decodeURIComponent(parts[4])
+    migrationIds.add(migrationId)
+    if (parts[5] === "chunks" && parts[6]) {
+      chunkIds.add(decodeURIComponent(parts[6]))
+    }
+  }
+  const normalizedWorkspaceId = String(workspaceId).toLowerCase()
+  const expectedMigrationPrefix = `research-workspace-${normalizedWorkspaceId}-`
+  const migrationId = [...migrationIds][0] || null
+  const invalidReasons = []
+  if (
+    migrationIds.size > 1 ||
+    (migrationId &&
+      (!migrationId.startsWith(expectedMigrationPrefix) ||
+        !/^[a-z0-9-]+$/.test(migrationId) ||
+        !/^[a-f0-9]{16}$/.test(migrationId.slice(expectedMigrationPrefix.length))))
+  ) {
+    invalidReasons.push("owner_migration_identity")
+  }
+  const orderedChunks = [...chunkIds]
+    .map((chunkId) => {
+      const match = chunkId.match(/^chunk-(\d+)-[a-f0-9]{16}$/)
+      return { chunkId, index: match ? Number(match[1]) : 0 }
+    })
+    .sort((left, right) => left.index - right.index)
+  if (
+    (migrationId && orderedChunks.length !== 3) ||
+    orderedChunks.some(({ index }, position) => index !== position + 1)
+  ) {
+    invalidReasons.push("owner_migration_chunk_identity")
+  }
+  return { chunkIds: orderedChunks, invalidReasons, migrationId }
+}
+
+export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, workspaceId }) => {
+  const workspacePath = `/api/v1/workspaces/${String(workspaceId).toLowerCase()}`
+  const migration = transitionMigrationIdentity({ apiUrl, ledger, workspaceId })
+  const ownerOperations = [
+    ["owner-flashcard-decks", "GET", "/api/v1/flashcards/decks", 1, []],
+    ["owner-notes-search", "GET", "/api/v1/notes/search/", 2, ["notes"]],
+    ["owner-slide-styles", "GET", "/api/v1/slides/styles", 1, []],
+    ["owner-user-storage", "GET", "/api/v1/users/storage", 2, []],
+    ["owner-chat-commands", "GET", "/api/v1/chat/commands", 1, []],
+    [
+      "owner-workspace-capabilities",
+      "GET",
+      "/api/v1/research-workspace/capabilities",
+      1,
+      ["local_workspace"],
+    ],
+    ["owner-workspace-context", "GET", `${workspacePath}/context`, 4, ["local_workspace"]],
+    [
+      "owner-workspace-source-views",
+      "GET",
+      `${workspacePath}/source-views`,
+      2,
+      ["local_workspace"],
+    ],
+    ["owner-workspace-sources", "GET", `${workspacePath}/sources`, 2, ["local_workspace"]],
+    ["owner-workspace-save", "PUT", workspacePath, 2, ["local_workspace"]],
+    [
+      "owner-source-selection",
+      "PUT",
+      `${workspacePath}/sources/selection`,
+      2,
+      ["local_workspace", "source_mutation"],
+    ],
+    ["owner-migration-create", "POST", "/api/v1/workspaces/migrations", 1, ["local_workspace"]],
+  ].map(([name, method, pathname, maximumCount, allowedForbiddenKinds]) =>
+    transitionOperation({
+      allowedForbiddenKinds,
+      maximumCount,
+      method,
+      name,
+      origin: apiUrl,
+      path: pathname,
+    })
+  )
+  if (migration.migrationId) {
+    const migrationPath = `/api/v1/workspaces/migrations/${migration.migrationId}`
+    ownerOperations.push(
+      transitionOperation({
+        allowedForbiddenKinds: ["local_workspace"],
+        maximumCount: 1,
+        method: "POST",
+        name: "owner-migration-finalize",
+        origin: apiUrl,
+        path: `${migrationPath}/finalize`,
+      }),
+      transitionOperation({
+        allowedForbiddenKinds: ["local_workspace"],
+        maximumCount: 1,
+        method: "GET",
+        name: "owner-migration-status",
+        origin: apiUrl,
+        path: migrationPath,
+      }),
+      transitionOperation({
+        allowedForbiddenKinds: ["local_workspace"],
+        maximumCount: 1,
+        method: "POST",
+        name: "owner-migration-delete-ack",
+        origin: apiUrl,
+        path: `${migrationPath}/client-delete-ack`,
+      })
+    )
+    for (const { chunkId, index } of migration.chunkIds) {
+      ownerOperations.push(
+        transitionOperation({
+          allowedForbiddenKinds: ["local_workspace"],
+          maximumCount: 1,
+          method: "PUT",
+          name: `owner-migration-chunk-${index}`,
+          origin: apiUrl,
+          path: `${migrationPath}/chunks/${chunkId}`,
+        })
+      )
+    }
+  }
+  return {
+    allowedOrigins: [new URL(apiUrl).origin, new URL(webUrl).origin],
+    invalidReasons: migration.invalidReasons,
+    operations: [
+      ...commonTransitionOperations({
+        apiUrl,
+        targetPath: "/research-workspace",
+        webUrl,
+      }),
+      ...ownerOperations,
+    ],
+  }
+}
+
+export const buildMemberChatsTransitionPolicy = ({ apiUrl, conversationId, webUrl }) => {
+  const encodedConversationId = encodeURIComponent(String(conversationId)).toLowerCase()
+  const chatsPath = `/api/v1/chats/${encodedConversationId}`
+  const operations = [
+    ["chats-openapi", "GET", "/openapi.json", 2],
+    ["chats-docs-info", "GET", "/api/v1/config/docs-info", 1],
+    ["chats-ingestion-capabilities", "GET", "/api/v1/ingestion-sources/capabilities", 1],
+    ["chats-audio-service-health", "GET", "/api/v1/audio/health", 1],
+    ["chats-character-catalog", "GET", "/api/v1/characters/", 1],
+    ["chats-audio-health", "GET", "/api/v1/audio/transcriptions/health", 1],
+    ["chats-voice-catalog", "GET", "/api/v1/audio/voices/catalog", 1],
+    [
+      "chats-share-links",
+      "GET",
+      `/api/v1/chat/conversations/${encodedConversationId}/share-links`,
+      1,
+    ],
+    ["chats-list", "GET", "/api/v1/chats/", 2],
+    ["chats-messages", "GET", `${chatsPath}/messages`, 2],
+    ["chats-research-runs", "GET", `${chatsPath}/research-runs`, 1],
+    ["chats-settings", "GET", `${chatsPath}/settings`, 2],
+    ["chats-provider-config", "GET", "/api/v1/config/providers", 1],
+    ["chats-persona-catalog", "GET", "/api/v1/persona/catalog", 1],
+    ["chats-prompt-capabilities", "GET", "/api/v1/prompts/capabilities", 1],
+    ["chats-implicit-feedback", "POST", "/api/v1/rag/feedback/implicit", 1],
+  ].map(([name, method, pathname, maximumCount]) =>
+    transitionOperation({
+      maximumCount,
+      method,
+      name,
+      origin: apiUrl,
+      path: pathname,
+    })
+  )
+  return {
+    allowedOrigins: [new URL(apiUrl).origin, new URL(webUrl).origin],
+    invalidReasons: [],
+    operations: [
+      ...commonTransitionOperations({ apiUrl, targetPath: "/chat", webUrl }),
+      ...operations,
+    ],
+  }
+}
+
+const forbiddenTransitionRequest = (entry) => {
+  const pathname = requestPath(entry)
+  const method = String(entry.method || "GET").toUpperCase()
+  if (/\/api\/v1\/sharing\/shared-with-me\/[^/]+\/(?:media|full-media)(?:\/|$)/.test(pathname)) {
+    return "removed_full_media"
+  }
+  if (/\/api\/v1\/(?:workspaces|research-workspace)(?:\/|$)/.test(pathname)) {
+    return "local_workspace"
+  }
+  if (/\/api\/v1\/(?:prompt-)?studio(?:\/|$)/.test(pathname)) return "studio"
+  if (/\/api\/v1\/notes?(?:\/|$)/.test(pathname)) return "notes"
+  if (/\/api\/v1\/(?:mcp|acp|sandbox|artifacts?)(?:\/|$)/.test(pathname)) {
+    return "local_tool"
+  }
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && /\/sources(?:\/|$)/.test(pathname)) {
+    return "source_mutation"
+  }
+  if (
+    !["GET", "HEAD", "OPTIONS"].includes(method) &&
+    /\/api\/v1\/(?:media|ingestion|web-clips?|web-clipper|clips?|capture)(?:\/|$)/.test(pathname)
+  ) {
+    return "extension_writable_destination"
+  }
+  return null
+}
+
+const validateTransitionOperationPolicy = (policy) => {
+  const operations = Array.isArray(policy?.operations) ? policy.operations : []
+  const allowedOrigins = Array.isArray(policy?.allowedOrigins) ? policy.allowedOrigins : []
+  return (
+    Array.isArray(policy?.invalidReasons) &&
+    policy.invalidReasons.length === 0 &&
+    operations.length > 0 &&
+    operations.length <= MAX_TRANSITION_OPERATION_DECLARATIONS &&
+    allowedOrigins.length > 0 &&
+    new Set(allowedOrigins).size === allowedOrigins.length &&
+    new Set(operations.map((operation) => operation.name)).size === operations.length &&
+    operations.every(
+      (operation) =>
+        String(operation.name || "").trim() &&
+        allowedOrigins.includes(operation.origin) &&
+        Number.isInteger(operation.maximumCount) &&
+        operation.maximumCount >= 1 &&
+        operation.maximumCount <= MAX_TRANSITION_REQUESTS &&
+        Boolean(operation.path) !== Boolean(operation.pathPrefix)
+    )
+  )
+}
+
+const transitionOperationMatches = (entry, operation) => {
+  if (String(entry.method || "").toUpperCase() !== operation.method) return false
+  if (transitionRequestOrigin(entry) !== operation.origin) return false
+  const pathname = requestPath(entry)
+  return operation.path ? pathname === operation.path : pathname.startsWith(operation.pathPrefix)
+}
+
+export const classifyTransitionLedger = (
+  ledger,
+  { abortAllowances = [], contextName = "", operationPolicy, transitionLabel = "" } = {}
+) => {
   const failures = []
+  const normalizedEntry = (entry) => ({ ...entry, context: contextName })
+  const allowanceUsage = new Map()
+  const operationUsage = new Map()
+  const operationPolicyValid = validateTransitionOperationPolicy(operationPolicy)
+  if (!operationPolicyValid) failures.push("malformed_transition_operation_policy")
+  if (
+    abortAllowances.length > MAX_TRANSITION_ABORT_ALLOWANCES ||
+    abortAllowances.some(
+      (allowance) =>
+        !String(allowance.id || "").trim() ||
+        String(allowance.method || "").toUpperCase() !== "GET" ||
+        !String(allowance.url || "").startsWith("http") ||
+        !Number.isInteger(allowance.count) ||
+        allowance.count < 1 ||
+        allowance.count > 2
+    ) ||
+    new Set(abortAllowances.map((allowance) => allowance.id)).size !== abortAllowances.length
+  ) {
+    failures.push("malformed_transition_abort_allowance")
+  }
   for (const entry of ledger.requests || []) {
+    const classifiedEntry = normalizedEntry(entry)
+    const origin = transitionRequestOrigin(classifiedEntry)
+    if (!operationPolicy?.allowedOrigins?.includes(origin)) {
+      failures.push(`unknown_origin: ${entry.method} ${requestPath(entry)}`)
+    }
+    const matchingOperation = operationPolicy?.operations?.find((operation) =>
+      transitionOperationMatches(classifiedEntry, operation)
+    )
+    if (!matchingOperation) {
+      failures.push(`undeclared_transition_operation: ${entry.method} ${requestPath(entry)}`)
+    } else {
+      const used = (operationUsage.get(matchingOperation.name) || 0) + 1
+      operationUsage.set(matchingOperation.name, used)
+      if (used > matchingOperation.maximumCount) {
+        failures.push(`transition_operation_bound: ${matchingOperation.name}`)
+      }
+    }
+    const forbidden = forbiddenTransitionRequest(classifiedEntry)
+    if (forbidden && !matchingOperation?.allowedForbiddenKinds?.includes(forbidden)) {
+      failures.push(`${forbidden}: ${entry.method} ${requestPath(entry)}`)
+    }
     if (Number(entry.status) >= 400 || Number(entry.status) === 0) {
       failures.push(`unexpected_http_${entry.status}: ${entry.method} ${requestPath(entry)}`)
     }
   }
   for (const entry of ledger.requestFailures || []) {
-    // Route changes may abort pending read-only bootstrap requests; no mutation or other failure is ignored.
-    if (
-      String(entry.error || "") === "net::ERR_ABORTED" &&
-      String(entry.method || "").toUpperCase() === "GET"
-    ) {
+    const classifiedEntry = normalizedEntry(entry)
+    const origin = transitionRequestOrigin(classifiedEntry)
+    if (!operationPolicy?.allowedOrigins?.includes(origin)) {
+      failures.push(`unknown_origin: ${entry.method} ${requestPath(entry)}`)
       continue
     }
-    failures.push(`request_failed: ${entry.method || ""} ${entry.url || ""}`)
+    const allowanceIndex = abortAllowances.findIndex((allowance, index) => {
+      const used = allowanceUsage.get(index) || 0
+      return (
+        used < allowance.count &&
+        String(entry.error || "") === "net::ERR_ABORTED" &&
+        String(entry.method || "").toUpperCase() === allowance.method &&
+        entry.url === allowance.url
+      )
+    })
+    if (allowanceIndex >= 0) {
+      allowanceUsage.set(allowanceIndex, (allowanceUsage.get(allowanceIndex) || 0) + 1)
+      continue
+    }
+    const forbidden = forbiddenTransitionRequest(classifiedEntry)
+    if (forbidden) {
+      failures.push(`${forbidden}: ${entry.method} ${requestPath(entry)}`)
+    }
+    failures.push(`request_failed: ${entry.method || ""} ${requestPath(entry)}`)
   }
   for (const entry of ledger.pageErrors || []) {
     failures.push(`page_error: ${entry.message || "unknown"}`)
@@ -856,7 +1747,58 @@ export const classifyTransitionLedger = (ledger) => {
   for (const entry of ledger.runtimeOverlays || []) {
     failures.push(`runtime_overlay: ${entry.text || "detected"}`)
   }
-  return { failures, ok: failures.length === 0 }
+  const observedRequests = [
+    ...(ledger.requests || []).map((entry) => ({
+      errorHash: null,
+      kind: "response",
+      method: String(entry.method || "").toUpperCase(),
+      requestHash: sha256(`${entry.method || ""} ${entry.url || ""}`),
+      status: Number(entry.status),
+    })),
+    ...(ledger.requestFailures || []).map((entry) => ({
+      errorHash: sha256(entry.error || "request failed"),
+      kind: "failure",
+      method: String(entry.method || "").toUpperCase(),
+      requestHash: sha256(`${entry.method || ""} ${entry.url || ""}`),
+      status: null,
+    })),
+  ]
+  if (observedRequests.length > MAX_TRANSITION_REQUESTS) {
+    failures.push("transition_request_bound_exceeded")
+  }
+  const proof = {
+    allowedAbortCount: [...allowanceUsage.values()].reduce((total, count) => total + count, 0),
+    allowedAborts: abortAllowances.map((allowance, index) => ({
+      count: allowanceUsage.get(index) || 0,
+      id: allowance.id,
+      maximumCount: allowance.count,
+      method: allowance.method,
+      requestHash: sha256(`${allowance.method} ${allowance.url}`),
+    })),
+    consoleErrorCount: (ledger.consoleErrors || []).length,
+    context: contextName,
+    labelHash: sha256(transitionLabel),
+    maximumRequestCount: MAX_TRANSITION_REQUESTS,
+    observedRequests: observedRequests.slice(0, MAX_TRANSITION_REQUESTS),
+    maximumOperationDeclarations: MAX_TRANSITION_OPERATION_DECLARATIONS,
+    operations: (operationPolicy?.operations || []).map((operation) => ({
+      count: operationUsage.get(operation.name) || 0,
+      maximumCount: operation.maximumCount,
+      name: operation.name,
+    })),
+    pageErrorCount: (ledger.pageErrors || []).length,
+    registeredAbortCount: abortAllowances.length,
+    registeredOperationCount: (operationPolicy?.operations || []).length,
+    requestCount: (ledger.requests || []).length + (ledger.requestFailures || []).length,
+    runtimeOverlayCount: (ledger.runtimeOverlays || []).length,
+    unexpectedRequestCount: failures.filter((failure) =>
+      /(?:_operation|_origin|_http_|request_failed|removed_full_media|local_workspace|local_tool|source_mutation)/.test(
+        failure
+      )
+    ).length,
+    withinRequestBound: observedRequests.length <= MAX_TRANSITION_REQUESTS,
+  }
+  return { failures, ok: failures.length === 0, proof }
 }
 
 export const beginStrictLedgerAfterTransition = async ({
@@ -865,18 +1807,26 @@ export const beginStrictLedgerAfterTransition = async ({
   ledger,
   page,
   transition,
+  transitionAbortAllowances = [],
   transitionLabel,
   transitionLedger,
+  transitionOperationPolicy,
+  transitionProof = [],
 }) => {
-  const transitionController = attach(
-    page,
-    `${contextName}-transition`,
-    transitionLedger
-  )
+  const transitionController = attach(page, `${contextName}-transition`, transitionLedger)
   try {
     await transition()
     await transitionController.waitForIdle(transitionLabel)
-    const transitionResult = classifyTransitionLedger(transitionLedger)
+    const transitionResult = classifyTransitionLedger(transitionLedger, {
+      abortAllowances: transitionAbortAllowances,
+      contextName,
+      operationPolicy:
+        typeof transitionOperationPolicy === "function"
+          ? transitionOperationPolicy(transitionLedger)
+          : transitionOperationPolicy,
+      transitionLabel,
+    })
+    transitionProof.push(transitionResult.proof)
     if (!transitionResult.ok) {
       throw new Error(
         `Transition observation failed (${transitionLabel}): ${JSON.stringify(transitionResult.failures)}`
@@ -951,8 +1901,7 @@ const loginThroughWebUi = async (page, config, username) => {
     (response) => {
       const pathname = new URL(response.url()).pathname
       return (
-        response.request().method() === "GET" &&
-        pathname === "/api/v1/notifications/unread-count"
+        response.request().method() === "GET" && pathname === "/api/v1/notifications/unread-count"
       )
     },
     { timeout: 30_000 }
@@ -962,11 +1911,7 @@ const loginThroughWebUi = async (page, config, username) => {
   await unreadCountSettled
 }
 
-const createOwnerFixtureWorkspaceThroughUi = async (
-  ownerPage,
-  config,
-  workspaceName
-) => {
+const createOwnerFixtureWorkspaceThroughUi = async (ownerPage, config, workspaceName) => {
   await ownerPage.goto(`${config.webUrl}/research-workspace`, {
     waitUntil: "domcontentloaded",
   })
@@ -989,10 +1934,7 @@ const createOwnerFixtureWorkspaceThroughUi = async (
       } catch {
         return false
       }
-      return (
-        /^\/api\/v1\/workspaces\/[^/]+$/.test(pathname) &&
-        body?.name === "New Research"
-      )
+      return /^\/api\/v1\/workspaces\/[^/]+$/.test(pathname) && body?.name === "New Research"
     },
     { timeout: 30_000 }
   )
@@ -1033,29 +1975,20 @@ const createOwnerFixtureWorkspaceThroughUi = async (
   await ownerPage.getByRole("button", { name: "Save", exact: true }).click()
   const renamedWorkspaceResponse = await renamedWorkspaceResponsePromise
   if (!renamedWorkspaceResponse.ok()) {
-    throw new Error(
-      `Owner UI workspace rename failed status=${renamedWorkspaceResponse.status()}`
-    )
+    throw new Error(`Owner UI workspace rename failed status=${renamedWorkspaceResponse.status()}`)
   }
   await ownerPage.getByRole("heading", { name: workspaceName, exact: true }).waitFor()
   return workspaceId
 }
 
-const settleOwnerFixtureWorkspaceForRevocation = async (
-  ownerPage,
-  config,
-  fixture
-) => {
+const settleOwnerFixtureWorkspaceForRevocation = async (ownerPage, config, fixture) => {
   const tracked = new WeakSet()
   let pending = 0
   let lastActivity = Date.now()
   const shouldTrack = (request) => {
     try {
       const url = new URL(request.url())
-      return (
-        url.origin === config.apiUrl &&
-        url.pathname !== "/api/v1/notifications/stream"
-      )
+      return url.origin === config.apiUrl && url.pathname !== "/api/v1/notifications/stream"
     } catch {
       return false
     }
@@ -1096,9 +2029,7 @@ const settleOwnerFixtureWorkspaceForRevocation = async (
     }
     await ownerPage.evaluate(async () => {
       await document.fonts?.ready
-      await new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      )
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     })
   } finally {
     ownerPage.off("request", onRequest)
@@ -1134,14 +2065,34 @@ const contextStorageProof = async (pages) => {
   const matchingMarkers = snapshots.every(
     (snapshot) => snapshot.markerHash === snapshot.markerCookieHash
   )
-  if (markers.size !== 3 || cookieMarkers.size !== 3 || tokenHashes.size !== 3 || !matchingMarkers) {
+  if (
+    markers.size !== 3 ||
+    cookieMarkers.size !== 3 ||
+    tokenHashes.size !== 3 ||
+    !matchingMarkers
+  ) {
     throw new Error("CDP browser contexts did not preserve isolated cookies and storage")
   }
   return snapshots
 }
 
-const addExpectedFailure = (ledger, context, method, status, url) => {
-  ledger.expectedHttpFailures.push({ context, method, status, url })
+const addExpectedFailure = (
+  ledger,
+  context,
+  method,
+  status,
+  url,
+  { bodyHash = null, consoleErrorCount = 1, operationId }
+) => {
+  ledger.expectedHttpFailures.push({
+    bodyHash,
+    consoleErrorCount,
+    context,
+    method,
+    operationId,
+    status,
+    url,
+  })
 }
 
 const assertNoSentinel = async (page) => {
@@ -1167,9 +2118,13 @@ const waitForSharedShell = async (page, phase, ledger) => {
         status: entry.status,
       })),
       route: `${pageUrl.pathname}${pageUrl.search}`,
-      routePending: (await page.locator('[data-testid="research-workspace-route-pending"]').count()) > 0,
+      routePending:
+        (await page.locator('[data-testid="research-workspace-route-pending"]').count()) > 0,
       titleHash: sha256(await page.title()),
-      unavailable: (await page.getByRole("heading", { name: "This shared workspace isn't available." }).count()) > 0,
+      unavailable:
+        (await page
+          .getByRole("heading", { name: "This shared workspace isn't available." })
+          .count()) > 0,
     }
     throw new Error(`Shared shell timeout: ${JSON.stringify(diagnostics)}`, { cause: error })
   }
@@ -1217,7 +2172,12 @@ const inspectLayout = async (page, mode) => {
     const visible = (element) => {
       const rect = element.getBoundingClientRect()
       const style = getComputedStyle(element)
-      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none"
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== "hidden" &&
+        style.display !== "none"
+      )
     }
     const controls = Array.from(document.querySelectorAll("button,input,select,textarea,a"))
       .filter(visible)
@@ -1234,9 +2194,9 @@ const inspectLayout = async (page, mode) => {
       })
     const intersectsViewport = (rect) =>
       rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight
-    const horizontalOffenders = controls.filter(intersectsViewport).filter(
-      (rect) => rect.left < -1 || rect.right > innerWidth + 1
-    )
+    const horizontalOffenders = controls
+      .filter(intersectsViewport)
+      .filter((rect) => rect.left < -1 || rect.right > innerWidth + 1)
     const verticalScrollContainers = Array.from(
       document.querySelectorAll('[data-testid^="shared-workspace-"] *')
     ).filter((element) => {
@@ -1248,7 +2208,8 @@ const inspectLayout = async (page, mode) => {
     return {
       activeTabs: tabs.filter((element) => element.getAttribute("aria-selected") === "true").length,
       bodyOverflowX: document.body.scrollWidth - document.body.clientWidth,
-      documentOverflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      documentOverflowX:
+        document.documentElement.scrollWidth - document.documentElement.clientWidth,
       horizontalOffenderCount: horizontalOffenders.length,
       horizontalOffenders: horizontalOffenders.slice(0, 8),
       panes: Array.from(document.querySelectorAll('[data-testid^="shared-workspace-"]'))
@@ -1279,17 +2240,13 @@ const inspectLayout = async (page, mode) => {
 const stabilizeInitialDesktopCapture = async (page) => {
   const headerToggle = page.getByTestId("chat-header-sidebar-toggle")
   await headerToggle.waitFor({ state: "visible", timeout: 30_000 })
-  const neutralSurface = page
-    .locator('[data-testid="shared-workspace-shell"] header p')
-    .first()
+  const neutralSurface = page.locator('[data-testid="shared-workspace-shell"] header p').first()
   await neutralSurface.waitFor({ state: "visible", timeout: 30_000 })
   await page.evaluate(async () => {
     await document.fonts?.ready
     window.scrollTo({ behavior: "instant", left: 0, top: 0 })
 
-    const headerControl = document.querySelector(
-      '[data-testid="chat-header-sidebar-toggle"]'
-    )
+    const headerControl = document.querySelector('[data-testid="chat-header-sidebar-toggle"]')
     for (
       let scrollAncestor = headerControl?.parentElement;
       scrollAncestor;
@@ -1325,14 +2282,9 @@ const stabilizeInitialDesktopCapture = async (page) => {
     throw new Error("Hosted header and shared workspace layout did not stabilize")
   })
   await neutralSurface.click()
-  await page.waitForFunction(
-    () => !document.activeElement?.matches('h1[tabindex="-1"]')
-  )
+  await page.waitForFunction(() => !document.activeElement?.matches('h1[tabindex="-1"]'))
   await page.evaluate(
-    () =>
-      new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      )
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   )
 }
 
@@ -1391,14 +2343,9 @@ const stabilizeRevokedCapture = async (page) => {
   const neutralSurface = page.locator("main").first()
   await neutralSurface.waitFor({ state: "visible", timeout: 30_000 })
   await neutralSurface.click({ position: { x: 8, y: 8 } })
-  await page.waitForFunction(
-    () => !document.activeElement?.matches(`h1[tabindex='-1']`)
-  )
+  await page.waitForFunction(() => !document.activeElement?.matches(`h1[tabindex='-1']`))
   await page.evaluate(
-    () =>
-      new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      )
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   )
 }
 
@@ -1416,7 +2363,7 @@ const fetchFromPage = async (page, url, init = {}) =>
     { requestInit: init, requestUrl: url }
   )
 
-const raceProbe = async (memberPage, config, fixture, target) => {
+const raceProbe = async (memberPage, config, fixture, ledger, target) => {
   const requestId = crypto.randomUUID()
   const baseBody = {
     model: target.model,
@@ -1426,6 +2373,17 @@ const raceProbe = async (memberPage, config, fixture, target) => {
     source_scope: { mode: "include", source_ids: [fixture.sourceDefs[0].id] },
   }
   const url = `${config.apiUrl}/api/v1/sharing/shared-with-me/${fixture.shareId}/chat`
+  const changedBody = { ...baseBody, query: `${baseBody.query} changed fingerprint` }
+  const baseBodyHash = sha256(JSON.stringify(baseBody))
+  const changedBodyHash = sha256(JSON.stringify(changedBody))
+  addExpectedFailure(ledger, "member", "POST", 409, url, {
+    bodyHash: baseBodyHash,
+    operationId: "race-concurrent-conflict",
+  })
+  addExpectedFailure(ledger, "member", "POST", 409, url, {
+    bodyHash: changedBodyHash,
+    operationId: "race-fingerprint-conflict",
+  })
   const call = (body) => {
     const started = performance.now()
     return fetchFromPage(memberPage, url, {
@@ -1436,12 +2394,14 @@ const raceProbe = async (memberPage, config, fixture, target) => {
   }
   const raced = await Promise.all([call(baseBody), call(baseBody)])
   const successful = raced.find((result) => result.status === 200)
-  if (!successful) throw new Error(`Matching request race had no successful writer: ${raced.map((r) => r.status)}`)
+  if (!successful)
+    throw new Error(`Matching request race had no successful writer: ${raced.map((r) => r.status)}`)
   const replay = await call(baseBody)
-  const changedBody = { ...baseBody, query: `${baseBody.query} changed fingerprint` }
   const conflict = await call(changedBody)
   if (replay.status !== 200 || conflict.status !== 409) {
-    throw new Error(`Race replay/conflict contract failed: replay=${replay.status} conflict=${conflict.status}`)
+    throw new Error(
+      `Race replay/conflict contract failed: replay=${replay.status} conflict=${conflict.status}`
+    )
   }
   const canonicalSuccess = JSON.parse(successful.body)
   const canonicalReplay = JSON.parse(replay.body)
@@ -1457,15 +2417,30 @@ const raceProbe = async (memberPage, config, fixture, target) => {
     throw new Error("Changed request fingerprint did not return typed request_id_conflict")
   }
   return {
-    requestHashes: [sha256(JSON.stringify(baseBody)), sha256(JSON.stringify(changedBody))],
-    requestIdHash: sha256(requestId),
-    responseHashes: [sha256(successful.body), sha256(replay.body)],
-    statuses: [...raced.map((result) => result.status), replay.status, conflict.status],
-    timingsMs: [...raced.map((result) => result.timingMs), replay.timingMs, conflict.timingMs],
-    turnHashes: [
-      sha256(canonicalSuccess.turn.assistant_message.message_id),
-      sha256(canonicalReplay.turn.assistant_message.message_id),
-    ],
+    conversationId: canonicalSuccess.conversation_id,
+    evidence: {
+      operations: [
+        {
+          bodyHash: baseBodyHash,
+          operationId: "race-concurrent-conflict",
+          status: 409,
+        },
+        {
+          bodyHash: changedBodyHash,
+          operationId: "race-fingerprint-conflict",
+          status: 409,
+        },
+      ],
+      requestHashes: [baseBodyHash, changedBodyHash],
+      requestIdHash: sha256(requestId),
+      responseHashes: [sha256(successful.body), sha256(replay.body)],
+      statuses: [...raced.map((result) => result.status), replay.status, conflict.status],
+      timingsMs: [...raced.map((result) => result.timingMs), replay.timingMs, conflict.timingMs],
+      turnHashes: [
+        sha256(canonicalSuccess.turn.assistant_message.message_id),
+        sha256(canonicalReplay.turn.assistant_message.message_id),
+      ],
+    },
   }
 }
 
@@ -1485,20 +2460,6 @@ const screenshotEvidence = (config) =>
     })
   )
 
-const attachFixtureEvidence = (evidence, fixture, contextProof) => {
-  evidence.contextIsolationProof = contextProof
-  if (!fixture) {
-    evidence.fixture = { provisioned: false }
-    return
-  }
-  evidence.fixture = {
-    canonicalStatusEnvelope: fixture.statusEnvelope,
-    shareIdHash: sha256(fixture.shareId),
-    sourceIds: fixture.sourceDefs.map((source) => sha256(source.id)),
-    workspaceIdHash: sha256(fixture.workspaceId),
-  }
-}
-
 export const runLiveUat = async (config) => {
   const startedAt = new Date().toISOString()
   fs.mkdirSync(config.evidenceDir, { recursive: true })
@@ -1506,30 +2467,15 @@ export const runLiveUat = async (config) => {
     fs.rmSync(path.join(config.evidenceDir, filename), { force: true })
   }
   const ledger = makeLedger()
-  const acceptance = Object.fromEntries(
-    [
-      "allSourcesGrounded",
-      "blockedRevokedPreview",
-      "citationPreview",
-      "contextIsolation",
-      "historyAfterReload",
-      "malformedNeutralFailure",
-      "memberSharedIsolation",
-      "mobileResponsive",
-      "noExtraBannerBars",
-      "nonmemberNeutralFailure",
-      "ownerRecipientView",
-      "recipientChatVisibleInChats",
-      "revocationFailClosed",
-      "sentinelsExcluded",
-      "subsetGrounded",
-    ].map((name) => [name, false])
-  )
+  const acceptance = Object.fromEntries(ACCEPTANCE_NAMES.map((name) => [name, false]))
   let contextProof = []
   let provider = null
+  let providerContextProof = null
   let providerReadiness = null
   let race = null
+  let recipientConversationId = null
   let fixture = null
+  const transitionProof = []
   let browser = null
   let ownerContext = null
   let memberContext = null
@@ -1537,9 +2483,11 @@ export const runLiveUat = async (config) => {
   const ledgerControllers = []
   const disposeLedgers = () => {
     while (ledgerControllers.length > 0) ledgerControllers.pop()?.dispose()
+    ledger.closed = true
   }
 
   try {
+    await resetProviderProbe(config)
     fixture = await provisionFixture(config)
     browser = await chromium.connectOverCDP(config.cdpUrl)
     ownerContext = await browser.newContext({ viewport: { height: 900, width: 1440 } })
@@ -1568,9 +2516,7 @@ export const runLiveUat = async (config) => {
     await ownerPage.goto("about:blank", { waitUntil: "load" })
     fixture = await finalizeFixtureWorkspace(config, fixture, ownerWorkspaceId)
     await Promise.all(
-      [memberPage, nonmemberPage].map((page) =>
-        page.goto("about:blank", { waitUntil: "load" })
-      )
+      [memberPage, nonmemberPage].map((page) => page.goto("about:blank", { waitUntil: "load" }))
     )
 
     const ownerRecipientPage = await ownerContext.newPage()
@@ -1656,12 +2602,12 @@ export const runLiveUat = async (config) => {
       throw new Error("All-source answer did not cite both fixture sources")
     }
     acceptance.allSourcesGrounded = true
-    await firstCitations
-      .filter({ hasText: fixture.sourceDefs[1].title })
-      .first()
-      .click()
+    await firstCitations.filter({ hasText: fixture.sourceDefs[1].title }).first().click()
     await memberPage.getByRole("dialog", { name: "Source preview" }).waitFor()
-    await memberPage.getByRole("dialog", { name: "Source preview" }).getByText("COBALT-PARTICIPANTS-43", { exact: false }).waitFor()
+    await memberPage
+      .getByRole("dialog", { name: "Source preview" })
+      .getByText("COBALT-PARTICIPANTS-43", { exact: false })
+      .waitFor()
     const previewText = await memberPage.getByRole("dialog", { name: "Source preview" }).innerText()
     if (!previewText.includes("COBALT-PARTICIPANTS-43")) {
       throw new Error("Citation preview did not expose bounded supporting evidence")
@@ -1704,9 +2650,11 @@ export const runLiveUat = async (config) => {
       path: path.join(config.evidenceDir, SCREENSHOT_NAMES.desktopGroundedAnswer),
     })
 
-    const messageIds = await memberPage.locator("[data-message-id]").evaluateAll((nodes) =>
-      nodes.map((node) => node.getAttribute("data-message-id")).filter(Boolean)
-    )
+    const messageIds = await memberPage
+      .locator("[data-message-id]")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-message-id")).filter(Boolean)
+      )
     await memberLedger.waitForIdle("before member reload")
     await memberPage.reload({ waitUntil: "domcontentloaded" })
     await waitForSharedShell(memberPage, "member-reload", ledger)
@@ -1718,7 +2666,12 @@ export const runLiveUat = async (config) => {
     await ownerRecipientPage.goto(sharedUrl, { waitUntil: "domcontentloaded" })
     await waitForSharedShell(ownerRecipientPage, "owner-recipient", ledger)
     await ownerRecipientPage.getByText(fixture.workspaceName, { exact: true }).waitFor()
-    if (await ownerRecipientPage.getByText(/Add source|Studio|General Chat/i).isVisible().catch(() => false)) {
+    if (
+      await ownerRecipientPage
+        .getByText(/Add source|Studio|General Chat/i)
+        .isVisible()
+        .catch(() => false)
+    ) {
       throw new Error("Owner recipient-style view exposed local mutation controls")
     }
     acceptance.ownerRecipientView = true
@@ -1727,34 +2680,48 @@ export const runLiveUat = async (config) => {
     await memberPage.goto(`${config.webUrl}/research-workspace?shared=invalid`, {
       waitUntil: "domcontentloaded",
     })
-    await memberPage.getByRole("heading", { name: "This shared workspace isn't available." }).waitFor()
+    await memberPage
+      .getByRole("heading", { name: "This shared workspace isn't available." })
+      .waitFor()
     await assertNoSentinel(memberPage)
     acceptance.malformedNeutralFailure = true
 
     const nonmemberApiUrl = `${config.apiUrl}/api/v1/sharing/shared-with-me/${fixture.shareId}/workspace`
-    addExpectedFailure(ledger, "nonmember", "GET", 404, nonmemberApiUrl)
+    addExpectedFailure(ledger, "nonmember", "GET", 404, nonmemberApiUrl, {
+      operationId: "nonmember-neutral-bootstrap",
+    })
     await nonmemberPage.goto(sharedUrl, { waitUntil: "domcontentloaded" })
-    await nonmemberPage.getByRole("heading", { name: "This shared workspace isn't available." }).waitFor()
+    await nonmemberPage
+      .getByRole("heading", { name: "This shared workspace isn't available." })
+      .waitFor()
     await assertNoSentinel(nonmemberPage)
     acceptance.nonmemberNeutralFailure = true
 
     await memberLedger.waitForIdle("before member race route")
     await memberPage.goto(sharedUrl, { waitUntil: "domcontentloaded" })
     await waitForSharedShell(memberPage, "member-before-race", ledger)
-    const raceUrl = `${config.apiUrl}/api/v1/sharing/shared-with-me/${fixture.shareId}/chat`
-    addExpectedFailure(ledger, "member", "POST", 409, raceUrl)
-    race = await raceProbe(memberPage, config, fixture, provider)
+    const raceResult = await raceProbe(memberPage, config, fixture, ledger, provider)
+    race = raceResult.evidence
+    recipientConversationId = String(raceResult.conversationId || "").trim()
+    if (!recipientConversationId) {
+      throw new Error("Race response did not identify the persisted recipient conversation")
+    }
 
     await memberPage.setViewportSize({ height: 844, width: 390 })
     await inspectLayout(memberPage, "mobile")
     await memberPage.getByRole("tab", { name: "Chat" }).click()
     await memberPage.getByLabel("Ask about shared sources").waitFor()
     await memberPage.getByRole("tab", { name: "Sources" }).click()
+    await memberPage.getByLabel(`Preview ${fixture.sourceDefs[0].title}`).waitFor()
+    await inspectLayout(memberPage, "mobile")
+    await memberPage.screenshot({
+      path: path.join(config.evidenceDir, SCREENSHOT_NAMES.mobileSharedWorkspace),
+    })
     await memberPage.getByLabel(`Preview ${fixture.sourceDefs[0].title}`).click()
     await stabilizeMobilePreviewCapture(memberPage, fixture)
     await inspectLayout(memberPage, "mobile")
     await memberPage.screenshot({
-      path: path.join(config.evidenceDir, SCREENSHOT_NAMES.mobileSharedWorkspace),
+      path: path.join(config.evidenceDir, SCREENSHOT_NAMES.mobileSourcePreview),
     })
     await memberPage.getByLabel("Close source preview").click()
     acceptance.mobileResponsive = true
@@ -1773,10 +2740,25 @@ export const runLiveUat = async (config) => {
       contextName: "owner-revocation",
       ledger,
       page: ownerPage,
-      transition: () =>
-        settleOwnerFixtureWorkspaceForRevocation(ownerPage, config, fixture),
+      transition: () => settleOwnerFixtureWorkspaceForRevocation(ownerPage, config, fixture),
+      transitionAbortAllowances: [
+        {
+          count: 1,
+          id: "owner-workspace-context-teardown",
+          method: "GET",
+          url: `${config.apiUrl}/api/v1/workspaces/${fixture.workspaceId}/context`,
+        },
+      ],
       transitionLabel: "owner revocation preparation",
       transitionLedger: makeLedger(),
+      transitionOperationPolicy: (transitionLedger) =>
+        buildOwnerRevocationTransitionPolicy({
+          apiUrl: config.apiUrl,
+          ledger: transitionLedger,
+          webUrl: config.webUrl,
+          workspaceId: fixture.workspaceId,
+        }),
+      transitionProof,
     })
     const shareButton = ownerPage.getByTestId("workspace-share-button")
     ledgerControllers.push(ownerRevocationLedger)
@@ -1792,10 +2774,7 @@ export const runLiveUat = async (config) => {
     const revokeResponsePromise = ownerPage.waitForResponse((response) => {
       if (response.request().method() !== "DELETE") return false
       try {
-        return (
-          new URL(response.url()).pathname ===
-          `/api/v1/sharing/shares/${fixture.shareId}`
-        )
+        return new URL(response.url()).pathname === `/api/v1/sharing/shares/${fixture.shareId}`
       } catch {
         return false
       }
@@ -1812,17 +2791,24 @@ export const runLiveUat = async (config) => {
     await ownerRevocationLedger.waitForIdle("before owner revocation disposal")
     ownerRevocationLedger.dispose()
     const revokedWorkspaceUrl = `${config.apiUrl}/api/v1/sharing/shared-with-me/${fixture.shareId}/workspace`
-    addExpectedFailure(ledger, "member", "GET", 404, revokedWorkspaceUrl)
+    addExpectedFailure(ledger, "member", "GET", 404, revokedWorkspaceUrl, {
+      operationId: "revoked-workspace-bootstrap",
+    })
     await memberLedger.waitForIdle("before revoked member route")
     await memberPage.goto(sharedUrl, { waitUntil: "domcontentloaded" })
-    await memberPage.getByRole("heading", { name: "This shared workspace isn't available." }).waitFor()
+    await memberPage
+      .getByRole("heading", { name: "This shared workspace isn't available." })
+      .waitFor()
     await assertNoSentinel(memberPage)
     acceptance.revocationFailClosed = true
 
     const revokedPreviewUrl = `${config.apiUrl}/api/v1/sharing/shared-with-me/${fixture.shareId}/sources/${fixture.sourceDefs[0].id}/preview`
-    addExpectedFailure(ledger, "member", "GET", 404, revokedPreviewUrl)
+    addExpectedFailure(ledger, "member", "GET", 404, revokedPreviewUrl, {
+      operationId: "revoked-source-preview",
+    })
     const blockedPreview = await fetchFromPage(memberPage, revokedPreviewUrl)
-    if (blockedPreview.status !== 404) throw new Error("Revoked citation preview did not fail closed")
+    if (blockedPreview.status !== 404)
+      throw new Error("Revoked citation preview did not fail closed")
     acceptance.blockedRevokedPreview = true
     await stabilizeRevokedCapture(memberPage)
     await memberPage.screenshot({
@@ -1833,6 +2819,7 @@ export const runLiveUat = async (config) => {
     await memberLedger.waitForIdle("before member ledger disposal")
     memberLedger.dispose()
     const sidebarToggle = memberPage.getByTestId("chat-header-sidebar-toggle")
+    const memberChatBaseUrl = `${config.apiUrl}/api/v1/chats/${encodeURIComponent(recipientConversationId)}`
     const memberChatsLedger = await beginStrictLedgerAfterTransition({
       contextName: "member-chats",
       ledger,
@@ -1841,8 +2828,64 @@ export const runLiveUat = async (config) => {
         await memberPage.goto(`${config.webUrl}/chat`, { waitUntil: "domcontentloaded" })
         await sidebarToggle.waitFor({ timeout: 30_000 })
       },
+      transitionAbortAllowances: [
+        {
+          count: 1,
+          id: "chat-share-links-teardown",
+          method: "GET",
+          url: `${config.apiUrl}/api/v1/chat/conversations/${encodeURIComponent(recipientConversationId)}/share-links?scope_type=global`,
+        },
+        {
+          count: 2,
+          id: "chat-openapi-teardown",
+          method: "GET",
+          url: `${config.apiUrl}/openapi.json`,
+        },
+        {
+          count: 1,
+          id: "chat-profile-preferences-teardown",
+          method: "GET",
+          url: `${config.apiUrl}/api/v1/users/me/profile?sections=preferences`,
+        },
+        {
+          count: 1,
+          id: "chat-provider-config-teardown",
+          method: "GET",
+          url: `${config.apiUrl}/api/v1/config/providers`,
+        },
+        {
+          count: 1,
+          id: "chat-research-runs-teardown",
+          method: "GET",
+          url: `${memberChatBaseUrl}/research-runs`,
+        },
+        {
+          count: 1,
+          id: "chat-persona-catalog-teardown",
+          method: "GET",
+          url: `${config.apiUrl}/api/v1/persona/catalog`,
+        },
+        {
+          count: 1,
+          id: "chat-prompt-capabilities-teardown",
+          method: "GET",
+          url: `${config.apiUrl}/api/v1/prompts/capabilities`,
+        },
+        {
+          count: 1,
+          id: "chat-voice-catalog-teardown",
+          method: "GET",
+          url: `${config.apiUrl}/api/v1/audio/voices/catalog?provider=kitten_tts`,
+        },
+      ],
       transitionLabel: "Chats navigation",
       transitionLedger: makeLedger(),
+      transitionOperationPolicy: buildMemberChatsTransitionPolicy({
+        apiUrl: config.apiUrl,
+        conversationId: recipientConversationId,
+        webUrl: config.webUrl,
+      }),
+      transitionProof,
     })
     ledgerControllers.push(memberChatsLedger)
     const sidebarLabel = await sidebarToggle.getAttribute("aria-label")
@@ -1902,9 +2945,7 @@ export const runLiveUat = async (config) => {
       (response) => {
         if (response.request().method() !== "GET") return false
         try {
-          return /\/api\/v1\/chats\/[^/]+\/messages$/.test(
-            new URL(response.url()).pathname
-          )
+          return /\/api\/v1\/chats\/[^/]+\/messages$/.test(new URL(response.url()).pathname)
         } catch {
           return false
         }
@@ -1914,9 +2955,7 @@ export const runLiveUat = async (config) => {
     await persistedConversation.click()
     const persistedMessagesResponse = await persistedMessagesResponsePromise
     if (!persistedMessagesResponse.ok()) {
-      throw new Error(
-        `Chats messages failed status=${persistedMessagesResponse.status()}`
-      )
+      throw new Error(`Chats messages failed status=${persistedMessagesResponse.status()}`)
     }
     const persistedQuestion = memberPage.getByText(firstQuestion, { exact: true })
     await ensureLocatorVisibleInViewport(persistedQuestion, "Persisted question")
@@ -1930,20 +2969,23 @@ export const runLiveUat = async (config) => {
     await detectRuntimeOverlay(nonmemberPage, "nonmember", ledger)
     await nonmemberLedger.waitForIdle("before nonmember ledger disposal")
     disposeLedgers()
+    providerContextProof = await readProviderContextProof(config)
     const evidence = createEvidenceRecord({
       acceptance,
       config,
+      contextIsolationProof: contextProof,
       finishedAt: new Date().toISOString(),
+      fixture,
       ledger,
       provider,
+      providerContextProof,
+      providerReadiness,
       raceProbe: race,
       screenshots: screenshotEvidence(config),
       startedAt,
+      transitionProof,
     })
-    attachFixtureEvidence(evidence, fixture, contextProof)
-    evidence.providerReadiness = providerReadiness
     const validation = validateEvidenceRecord(evidence)
-    evidence.validation = validation
     writeEvidence(config, evidence)
     if (validation.exitCode !== 0) {
       throw new Error(`Live evidence failed validation: ${validation.failures.join(", ")}`)
@@ -1951,22 +2993,25 @@ export const runLiveUat = async (config) => {
     return evidence
   } catch (error) {
     disposeLedgers()
+    providerContextProof ||= await readProviderContextProof(config).catch(() => null)
     const message = error instanceof Error ? error.message : String(error)
     const evidence = createEvidenceRecord({
       acceptance,
       config,
+      contextIsolationProof: contextProof,
       failureMessageHash: sha256(message),
       finishedAt: new Date().toISOString(),
+      fixture,
       ledger,
       provider,
+      providerContextProof,
+      providerReadiness,
       raceProbe: race,
       screenshots: screenshotEvidence(config),
       startedAt,
       status: "failed",
+      transitionProof,
     })
-    attachFixtureEvidence(evidence, fixture, contextProof)
-    evidence.providerReadiness = providerReadiness
-    evidence.validation = validateEvidenceRecord(evidence)
     writeEvidence(config, evidence)
     throw error
   } finally {
