@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-23 01:14'
+updated_date: '2026-08-23 01:16'
 labels:
   - admin
   - webhooks
@@ -106,6 +106,8 @@ Known upstream admin-ui baselines are not attributed to this branch: clean origi
 Qodo review 5383466884 (2026-08-23) reported six compliance findings, all accepted for remediation: (1) log sanitized context when best-effort read audit fails; (2) add explicit response typing to the redacting route handler; (3) document _request_id; (4) centralize WebhookError in app/core/exceptions.py while preserving domain imports; (5) relocate the SQL-backed canonical repository under app/core/DB_Management and update imports; (6) apply accepted module-level pytest markers to every previously unmarked Admin_Webhooks test module. Changes will retain existing API/error behavior and receive focused regression/static verification before the full parity matrix.
 
 2026-08-23 Qodo remediation verified before source commit. TDD/architecture RED reproduced all three material gaps (3 failed): silent read-audit suppression, non-central WebhookError ownership, and repository implementation outside DB_Management. Focused GREEN passed 3/3. The SQL repository was relocated as a 99%-similarity rename to core/DB_Management/admin_webhooks_repository.py with every production/test/CLI/plan reference updated; no raw SQL remains under core/Admin_Webhooks. WebhookError is now defined in core/exceptions.py and re-exported through the domain contract. Best-effort read-audit failures emit only action, normalized request_id, and exception type; exception text remains absent. All 15 Admin_Webhooks test modules now carry an accepted unit/integration marker. Verification: Admin_Webhooks 324 passed/142 warnings; required PostgreSQL 24 passed/50 warnings with zero skips; complete release matrix 482 passed/459 warnings with zero skips; Ruff passed; Bandit passed; mypy passed on all seven other changed production modules. Running mypy directly on the newly touched centralized core/exceptions.py still reports its three existing errors at unchanged code outside this diff (current lines 127, 748, 1503); the new exception hunk is clean and dependent modules type-check. git diff --check and sensitive logger/raw-SQL/stale-import scans passed.
+
+2026-08-23 immutable Qodo-remediation source commit: 35deed1e6a38f387352ba071202eff34b9f70961. Docs/Evidence/Admin_Webhooks_PR1_Verification.md now binds the 482/482 complete matrix, 24/24 required PostgreSQL gate, focused 324/324 webhook suite, six Qodo dispositions, static/security checks, and isolated pre-existing core/exceptions.py mypy baseline to that commit. Awaiting push and Qodo incremental review before review closure.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

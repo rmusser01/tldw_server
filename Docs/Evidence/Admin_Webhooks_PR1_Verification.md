@@ -2,10 +2,10 @@
 
 ## Verification Identity
 
-- Tested source commit: `8fbb29af20`
+- Tested source commit: `35deed1e6a`
 - Rebased onto: `origin/dev` at
   `d736368d17c92f879d0b5364b45f23488629f5b8`
-- Final verification timestamp: `2026-08-23T00:38:19Z`
+- Final verification timestamp: `2026-08-23T01:15:46Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -23,7 +23,7 @@ that immutable source tree.
 | Gate | Result |
 | --- | --- |
 | OpenAPI fingerprint and drift | PASS |
-| Complete PR 1 Python matrix | PASS: 480 passed, 0 skipped |
+| Complete PR 1 Python matrix | PASS: 482 passed, 0 skipped |
 | PostgreSQL-required matrix | PASS: 24 passed, 0 skipped |
 | Ruff | PASS |
 | Focused Python typecheck | PASS |
@@ -104,7 +104,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 ```
 
 Final post-review, post-rebase result:
-`480 passed, 459 warnings in 142.86s`; zero skips. This aggregate run executed
+`482 passed, 459 warnings in 138.23s`; zero skips. This aggregate run executed
 the real PostgreSQL-marked cases as well as the SQLite, API, authorization,
 egress, system-ops, and workflow cases.
 
@@ -159,6 +159,39 @@ replacement-inode cleanup, unrelated-store resume, authenticated wrong-subtree
 rejection, and tombstone/live-count parity. The three newly exposed defects
 first produced the expected red result (`3 failed, 3 passed`); the corrected
 focused matrix then passed `6/6`.
+
+## Qodo Review Corrections
+
+Qodo review comment `5383466884` reported zero bugs and six compliance
+findings. All six were accepted and corrected:
+
+- best-effort read-audit failures now emit a sanitized warning containing only
+  the static action, normalized request ID, and exception type; exception text
+  and request data are not logged;
+- the redacting route handler now declares its response type, and both the
+  handler and request-ID helper have explicit docstrings;
+- `WebhookError` is defined in `app/core/exceptions.py` and remains available
+  through the existing domain import contract;
+- the 99%-similarity repository rename places all canonical webhook SQL and
+  unit-of-work code in
+  `app/core/DB_Management/admin_webhooks_repository.py`;
+- production, test, CLI, and implementation-plan imports point to the new
+  database boundary, and no raw SQL remains under `app/core/Admin_Webhooks`;
+- every `tests/Admin_Webhooks` module now has an accepted unit or integration
+  marker.
+
+Focused architecture tests first reproduced the three material gaps as
+`3 failed`, then passed `3/3` after correction. The complete
+`tests/Admin_Webhooks` scope passed `324/324` with 142 warnings. The explicit
+required-PostgreSQL matrix passed `24/24` with 50 warnings and zero skips. The
+complete PR 1 matrix passed `482/482` with 459 warnings and zero skips.
+
+Ruff, Bandit, `git diff --check`, the sensitive-logger scan, raw-SQL boundary
+scan, and stale-import scan all passed. Mypy passed all seven other changed
+production modules. A direct check of the newly touched centralized
+`app/core/exceptions.py` still reports its three pre-existing errors at
+unchanged code outside this PR's hunks (current lines 127, 748, and 1503); the
+new exception definition and all dependent changed modules type-check.
 
 ## Static And Sensitive-Data Gates
 
@@ -282,7 +315,7 @@ browser journey establish no regression for this PR.
 
 ## Final Safety Checks
 
-- `git diff --cached --check`: PASS for tested source commit `8fbb29af20`.
+- `git diff --cached --check`: PASS for tested source commit `35deed1e6a`.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,
