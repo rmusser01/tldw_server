@@ -9,27 +9,16 @@ from tldw_Server_API.app.core.AuthNZ.repos.shared_workspace_repo import (
     SharedWorkspaceRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.exceptions import (
+    SharedWorkspaceAccessError as SharedWorkspaceAccessError,
+)
+from tldw_Server_API.app.core.exceptions import (
+    SharedWorkspaceNotFound,
+    SharedWorkspaceUnavailable,
+)
 
 _OWNER_DISPLAY_NAME_MAX_CHARS = 128
 _OWNER_DISPLAY_NAME_FALLBACK = "Workspace owner"
-
-
-class SharedWorkspaceAccessError(RuntimeError):
-    """Base error for recipient shared-workspace access resolution."""
-
-
-class SharedWorkspaceNotFound(SharedWorkspaceAccessError):
-    """Raised for every missing, inactive, or unauthorized shared target."""
-
-    def __init__(self) -> None:
-        super().__init__("Shared workspace not found")
-
-
-class SharedWorkspaceUnavailable(SharedWorkspaceAccessError):
-    """Raised when an authorized shared target cannot be resolved operationally."""
-
-    def __init__(self) -> None:
-        super().__init__("Shared workspace is temporarily unavailable")
 
 
 @dataclass(frozen=True)
@@ -51,6 +40,7 @@ class SharedWorkspaceAccessContext:
 
 
 def _recipient_policy_actions() -> dict[str, dict[str, Any]]:
+    """Return the current fail-closed recipient capability policy."""
     return {
         "inspect_sources": {"allowed": True, "reason_code": None},
         "ask_grounded_questions": {"allowed": True, "reason_code": None},

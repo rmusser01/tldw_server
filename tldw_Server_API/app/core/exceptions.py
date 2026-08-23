@@ -1226,6 +1226,122 @@ class WorkspaceMembershipServiceError(Exception):
         self.details = dict(details or {})
 
 
+class SharedWorkspaceAccessError(RuntimeError):
+    """Base error for recipient shared-workspace access resolution."""
+
+
+class SharedWorkspaceNotFound(SharedWorkspaceAccessError):
+    """Raised for every missing, inactive, or unauthorized shared target."""
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace not found")
+
+
+class SharedWorkspaceUnavailable(SharedWorkspaceAccessError):
+    """Raised when an authorized shared target cannot be resolved operationally."""
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace is temporarily unavailable")
+
+
+class SharedWorkspaceChatServiceError(RuntimeError):
+    """Base shared-chat error with a stable code and disclosure-safe message."""
+
+    code = "shared_workspace_unavailable"
+    retryable = True
+
+
+class SharedWorkspaceSourceScopeInvalid(SharedWorkspaceChatServiceError):
+    """Raised when a requested shared source scope is invalid."""
+
+    code = "invalid_shared_chat_request"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("The shared chat request is invalid.")
+
+
+class SharedWorkspaceSourceSubsetRequired(SharedWorkspaceChatServiceError):
+    """Raised when all queryable sources exceed the shared-chat cap."""
+
+    code = "source_subset_required"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("Select a smaller set of shared sources.")
+
+
+class SharedWorkspaceSourceChanged(SharedWorkspaceChatServiceError):
+    """Raised when a frozen source authorization snapshot no longer matches."""
+
+    code = "shared_source_changed"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("The selected shared sources changed.")
+
+
+class SharedWorkspaceRetrievalUnavailable(SharedWorkspaceChatServiceError):
+    """Raised when retrieval cannot produce a fully verified result."""
+
+    code = "retrieval_unavailable"
+    retryable = True
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace retrieval is temporarily unavailable.")
+
+
+class SharedWorkspaceNoRelevantEvidence(SharedWorkspaceChatServiceError):
+    """Raised when retrieval returns no usable verified evidence."""
+
+    code = "no_relevant_evidence"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("No relevant shared evidence was found.")
+
+
+class SharedWorkspaceChatContextTooLarge(SharedWorkspaceChatServiceError):
+    """Raised before credentials when a grounded prompt cannot fit."""
+
+    code = "shared_chat_context_too_large"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("The shared chat question is too large for this model.")
+
+
+class SharedWorkspaceNoProviderConfigured(SharedWorkspaceChatServiceError):
+    """Raised when no authorized recipient generation credential is usable."""
+
+    code = "no_provider_configured"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("No usable generation provider is configured.")
+
+
+class SharedWorkspaceGenerationFailed(SharedWorkspaceChatServiceError):
+    """Raised for every shared-workspace provider or structured-output failure."""
+
+    code = "generation_failed"
+    retryable = True
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace generation is temporarily unavailable.")
+
+
+class _SharedWorkspaceDataUnavailable(SharedWorkspaceChatServiceError):
+    """Internal marker for unavailable canonical shared-workspace data."""
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace data is temporarily unavailable.")
+
+
+class _NonQueryableSource(ValueError):
+    """Internal marker for canonical sources that cannot be queried."""
+
+
 class InvalidStorageUserIdError(StoragePathValidationError):
     """Raised when a storage path resolution is attempted with an invalid user id."""
 

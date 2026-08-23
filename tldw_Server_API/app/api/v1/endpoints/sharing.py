@@ -520,7 +520,14 @@ async def _project_recipient_source_status(
             try_get_job_manager(),
             owner_user_id=context.owner_user_id,
         )
-    except Exception:
+    except Exception as exc:
+        logger.bind(
+            owner_user_id=context.owner_user_id,
+            workspace_id=context.workspace_id,
+        ).warning(
+            "Recipient shared-workspace Jobs status is unavailable: {}",
+            exc,
+        )
         jobs = []
         partial_errors.append(
             _recipient_partial_error(
@@ -538,7 +545,14 @@ async def _project_recipient_source_status(
                 media_db=media_db,
                 jobs=jobs,
             )
-    except Exception:
+    except Exception as exc:
+        logger.bind(
+            owner_user_id=context.owner_user_id,
+            workspace_id=context.workspace_id,
+        ).warning(
+            "Recipient shared-workspace source readiness is unavailable: {}",
+            exc,
+        )
         projection = build_source_status_projection(
             workspace_id=context.workspace_id,
             sources=sources,

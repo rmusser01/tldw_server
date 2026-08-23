@@ -7,7 +7,7 @@ type SharedWorkspaceSafeMarkdownProps = {
   content: string
 }
 
-const safeLinkHref = (href: string | undefined): string | undefined => {
+export const safeLinkHref = (href: string | undefined): string | undefined => {
   if (!href) return undefined
   try {
     const url = new URL(href)

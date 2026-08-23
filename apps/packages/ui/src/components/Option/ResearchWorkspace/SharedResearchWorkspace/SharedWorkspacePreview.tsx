@@ -4,7 +4,10 @@ import { ExternalLink, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { SharedSourcePreview } from "@/types/shared-workspace"
 import type { SharedWorkspaceError } from "./shared-research-workspace-reducer"
-import { SharedWorkspaceSafeMarkdown } from "./SharedWorkspaceSafeMarkdown"
+import {
+  safeLinkHref,
+  SharedWorkspaceSafeMarkdown
+} from "./SharedWorkspaceSafeMarkdown"
 
 type SharedWorkspacePreviewProps = {
   error: SharedWorkspaceError | null
@@ -21,6 +24,7 @@ export const SharedWorkspacePreview: React.FC<
   const { t } = useTranslation("playground")
   const removed =
     error?.code === "shared_workspace_not_found"
+  const safeOriginHref = safeLinkHref(preview?.origin_url ?? undefined)
 
   return (
     <Drawer
@@ -87,9 +91,9 @@ export const SharedWorkspacePreview: React.FC<
               <h2 className="text-base font-semibold">{preview.title}</h2>
               <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-text-muted">
                 <span>{preview.source_type}</span>
-                {preview.origin_url ? (
+                {safeOriginHref ? (
                   <a
-                    href={preview.origin_url}
+                    href={safeOriginHref}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex min-w-0 items-center gap-1 text-primary outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -102,6 +106,10 @@ export const SharedWorkspacePreview: React.FC<
                       aria-hidden="true"
                     />
                   </a>
+                ) : preview.origin_url ? (
+                  <span className="truncate">
+                    {preview.origin_host || preview.origin_url}
+                  </span>
                 ) : null}
               </div>
             </div>
