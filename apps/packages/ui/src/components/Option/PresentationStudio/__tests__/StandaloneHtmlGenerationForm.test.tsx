@@ -57,6 +57,7 @@ const request = {
 
 const baseHook = () => ({
   scopeReady: true,
+  scopeError: null,
   draft: {
     source: "",
     presentationType: "tech-sharing",
@@ -76,6 +77,7 @@ const baseHook = () => ({
   recoveryAvailable: false,
   draftRecoveryAvailable: false,
   storageWarning: null,
+  retryScope: vi.fn(),
   updateField: vi.fn(),
   submit: vi.fn(),
   resume: vi.fn(),
@@ -93,6 +95,52 @@ const loadSubject = () =>
 describe("StandaloneHtmlGenerationForm", () => {
   beforeEach(() => {
     mocks.hook = baseHook()
+  })
+
+  it("keeps source-bearing fields and submitted state unmounted until scope authority is ready", async () => {
+    mocks.hook = {
+      ...baseHook(),
+      scopeReady: false,
+      draft: {
+        ...baseHook().draft,
+        source: "Retired principal source"
+      },
+      snapshot: request
+    }
+    const { StandaloneHtmlGenerationForm } = await loadSubject()
+    const view = render(<StandaloneHtmlGenerationForm capabilities={capabilities as any} />)
+
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Submitted request" })).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Confirming current server and account")
+    expect(screen.queryByText("Retired principal source")).not.toBeInTheDocument()
+
+    mocks.hook = baseHook()
+    view.rerender(<StandaloneHtmlGenerationForm capabilities={capabilities as any} />)
+    expect(screen.getByLabelText("Subject and material")).toHaveValue("")
+  })
+
+  it("shows only the bounded source-free scope error and a 44px scope retry", async () => {
+    mocks.hook = {
+      ...baseHook(),
+      scopeReady: false,
+      scopeError: "Current server and account could not be confirmed.",
+      draft: { ...baseHook().draft, source: "Never render this source" },
+      snapshot: request
+    }
+    const { StandaloneHtmlGenerationForm } = await loadSubject()
+    render(<StandaloneHtmlGenerationForm capabilities={capabilities as any} />)
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Current server and account could not be confirmed."
+    )
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+    expect(screen.queryByText("Never render this source")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Submitted request" })).not.toBeInTheDocument()
+    const retry = screen.getByRole("button", { name: "Retry" })
+    expect(retry).toHaveClass("min-h-[44px]")
+    fireEvent.click(retry)
+    expect(mocks.hook.retryScope).toHaveBeenCalledTimes(1)
   })
 
   it("renders the closed direct-material form, security copy, and configured target metadata", async () => {
@@ -218,11 +266,22 @@ describe("StandaloneHtmlGenerationForm", () => {
   it("exposes preserved draft recovery and Forget without a generation receipt", async () => {
     mocks.hook = {
       ...baseHook(),
+      scopeReady: false,
       draft: { ...baseHook().draft, source: "Preserved direct material", audience: "Engineers" },
       draftRecoveryAvailable: true
     }
     const { StandaloneHtmlGenerationForm } = await loadSubject()
-    render(<StandaloneHtmlGenerationForm capabilities={null} recoveryOnly />)
+    const view = render(<StandaloneHtmlGenerationForm capabilities={null} recoveryOnly />)
+
+    expect(screen.queryByDisplayValue("Preserved direct material")).not.toBeInTheDocument()
+    expect(screen.queryByText("Preserved draft")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Confirming current server and account")
+
+    mocks.hook = {
+      ...mocks.hook,
+      scopeReady: true
+    }
+    view.rerender(<StandaloneHtmlGenerationForm capabilities={null} recoveryOnly />)
 
     expect(screen.getByText("Preserved draft")).toBeVisible()
     expect(screen.getByDisplayValue("Preserved direct material")).toBeDisabled()

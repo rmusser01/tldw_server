@@ -1,4 +1,5 @@
 import React from "react"
+import { flushSync } from "react-dom"
 
 import {
   tldwClient,
@@ -83,6 +84,19 @@ type PendingAttempt = ScopeCapture & {
   key: string
 }
 
+type QuarantinedAuthority = {
+  scope: Scope
+  draft: StandaloneHtmlFormDraft
+  generationConfigRevision: string
+  snapshot: PresentationGenerationRequest | null
+  resume: ResumeRecord | null
+  phase: StandaloneHtmlGenerationPhase
+  backendStatus: PresentationGenerationReceipt["status"] | null
+  progressText: string | null
+  safeError: string | null
+  draftRecoveryAvailable: boolean
+}
+
 export const DEFAULT_STANDALONE_HTML_FORM_DRAFT: StandaloneHtmlFormDraft = {
   source: "",
   presentationType: "tech-sharing",
@@ -144,6 +158,16 @@ const freezeRequest = (request: PresentationGenerationRequest): PresentationGene
   Object.freeze(request.html_options)
   return Object.freeze(request)
 }
+
+const cloneRequest = (
+  request: PresentationGenerationRequest | null
+): PresentationGenerationRequest | null => request
+  ? freezeRequest({
+      ...request,
+      source: { ...request.source },
+      html_options: { ...request.html_options }
+    })
+  : null
 
 const digestRequest = (request: PresentationGenerationRequest): string => {
   const value = JSON.stringify(request)
@@ -395,14 +419,18 @@ export type UseStandaloneHtmlGenerationOptions = {
   onCapabilitiesChanged?: () => Promise<unknown> | unknown
   onCompleted: (presentationId: string) => void
   onStopWaiting: () => void
+  onRetainedAuthorityChange?: (retained: boolean) => void
 }
+
+const ignoreRetainedAuthorityChange = () => undefined
 
 export const useStandaloneHtmlGeneration = ({
   capability,
   contentMaxSlides = 30,
   onCapabilitiesChanged = () => undefined,
   onCompleted,
-  onStopWaiting
+  onStopWaiting,
+  onRetainedAuthorityChange = ignoreRetainedAuthorityChange
 }: UseStandaloneHtmlGenerationOptions) => {
   const maxSlides = effectiveMaxSlides(contentMaxSlides)
   const initialDraft = React.useMemo(
@@ -414,13 +442,13 @@ export const useStandaloneHtmlGeneration = ({
   const [draft, setDraft] = React.useState<StandaloneHtmlFormDraft>(initialDraft)
   const [fieldErrors, setFieldErrors] = React.useState<Partial<Record<keyof StandaloneHtmlFormDraft, string>>>({})
   const [editError, setEditError] = React.useState<string | null>(null)
-  const [phase, setPhase] = React.useState<StandaloneHtmlGenerationPhase>("idle")
+  const [phase, setPhaseState] = React.useState<StandaloneHtmlGenerationPhase>("idle")
   const [snapshot, setSnapshot] = React.useState<PresentationGenerationRequest | null>(null)
-  const [backendStatus, setBackendStatus] = React.useState<PresentationGenerationReceipt["status"] | null>(null)
-  const [progressText, setProgressText] = React.useState<string | null>(null)
-  const [safeError, setSafeError] = React.useState<string | null>(null)
+  const [backendStatus, setBackendStatusState] = React.useState<PresentationGenerationReceipt["status"] | null>(null)
+  const [progressText, setProgressTextState] = React.useState<string | null>(null)
+  const [safeError, setSafeErrorState] = React.useState<string | null>(null)
   const [recoveryAvailable, setRecoveryAvailable] = React.useState(false)
-  const [draftRecoveryAvailable, setDraftRecoveryAvailable] = React.useState(false)
+  const [draftRecoveryAvailable, setDraftRecoveryAvailableState] = React.useState(false)
   const [storageWarning, setStorageWarning] = React.useState<string | null>(null)
   const [pendingAttempt, setPendingAttempt] = React.useState<PendingAttempt | null>(null)
 
@@ -429,7 +457,15 @@ export const useStandaloneHtmlGeneration = ({
   const draftRef = React.useRef(draft)
   const snapshotRef = React.useRef<PresentationGenerationRequest | null>(null)
   const resumeRef = React.useRef<ResumeRecord | null>(null)
+  const quarantinedAuthorityRef = React.useRef<QuarantinedAuthority | null>(null)
+  const retainedAuthorityClaimedRef = React.useRef(false)
+  const onRetainedAuthorityChangeRef = React.useRef(onRetainedAuthorityChange)
   const draftRevisionRef = React.useRef(capability?.generation_config_revision ?? "")
+  const phaseRef = React.useRef(phase)
+  const backendStatusRef = React.useRef(backendStatus)
+  const progressTextRef = React.useRef(progressText)
+  const safeErrorRef = React.useRef(safeError)
+  const draftRecoveryAvailableRef = React.useRef(draftRecoveryAvailable)
   const pollTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollAttemptRef = React.useRef(0)
   const waitingRef = React.useRef(false)
@@ -442,6 +478,38 @@ export const useStandaloneHtmlGeneration = ({
   const startedAttemptIdRef = React.useRef(0)
   const initialDraftRef = React.useRef(initialDraft)
   initialDraftRef.current = initialDraft
+  onRetainedAuthorityChangeRef.current = onRetainedAuthorityChange
+  phaseRef.current = phase
+  backendStatusRef.current = backendStatus
+  progressTextRef.current = progressText
+  safeErrorRef.current = safeError
+  draftRecoveryAvailableRef.current = draftRecoveryAvailable
+
+  const setPhase = React.useCallback((next: StandaloneHtmlGenerationPhase) => {
+    phaseRef.current = next
+    setPhaseState(next)
+  }, [])
+  const setBackendStatus = React.useCallback((next: PresentationGenerationReceipt["status"] | null) => {
+    backendStatusRef.current = next
+    setBackendStatusState(next)
+  }, [])
+  const setProgressText = React.useCallback((next: string | null) => {
+    progressTextRef.current = next
+    setProgressTextState(next)
+  }, [])
+  const setSafeError = React.useCallback((next: string | null) => {
+    safeErrorRef.current = next
+    setSafeErrorState(next)
+  }, [])
+  const setDraftRecoveryAvailable = React.useCallback((next: boolean) => {
+    draftRecoveryAvailableRef.current = next
+    setDraftRecoveryAvailableState(next)
+  }, [])
+  const reportRetainedAuthority = React.useCallback((retained: boolean) => {
+    if (retainedAuthorityClaimedRef.current === retained) return
+    retainedAuthorityClaimedRef.current = retained
+    onRetainedAuthorityChangeRef.current(retained)
+  }, [])
 
   const locked = snapshot !== null && !["rejected", "failed", "cancelled", "completed_missing_binding"].includes(phase)
 
@@ -484,7 +552,7 @@ export const useStandaloneHtmlGeneration = ({
       setRecoveryAvailable(false)
       setDraftRecoveryAvailable(false)
     }
-  }, [])
+  }, [setDraftRecoveryAvailable])
 
   const persistDraft = React.useCallback((
     values: StandaloneHtmlFormDraft,
@@ -513,7 +581,7 @@ export const useStandaloneHtmlGeneration = ({
       setStorageWarning("Reload recovery is unavailable.")
       return false
     }
-  }, [capability, isCaptureCurrent, maxSlides])
+  }, [capability, isCaptureCurrent, maxSlides, setDraftRecoveryAvailable])
 
   const persistResume = React.useCallback((record: ResumeRecord, capture?: ScopeCapture) => {
     const scope = capture?.scope ?? scopeRef.current
@@ -553,15 +621,89 @@ export const useStandaloneHtmlGeneration = ({
     setFieldErrors({})
     setEditError(null)
     setPhase("idle")
-  }, [initialDraft, stopPollTimer])
+  }, [
+    initialDraft,
+    setBackendStatus,
+    setDraftRecoveryAvailable,
+    setPhase,
+    setProgressText,
+    setSafeError,
+    stopPollTimer
+  ])
 
-  const invalidateScopeBoundary = React.useCallback(() => {
+  const quarantineCurrentAuthority = React.useCallback(() => {
+    const scope = scopeRef.current
+    if (!scope) return
+    quarantinedAuthorityRef.current = {
+      scope: { ...scope },
+      draft: cloneDraft(draftRef.current),
+      generationConfigRevision: draftRevisionRef.current,
+      snapshot: cloneRequest(snapshotRef.current),
+      resume: resumeRef.current ? { ...resumeRef.current } : null,
+      phase: phaseRef.current,
+      backendStatus: backendStatusRef.current,
+      progressText: progressTextRef.current,
+      safeError: safeErrorRef.current,
+      draftRecoveryAvailable: draftRecoveryAvailableRef.current
+    }
+  }, [])
+
+  const invalidateScopeBoundary = React.useCallback((preserveQuarantine = false) => {
+    if (!preserveQuarantine) quarantinedAuthorityRef.current = null
     scopeEpochRef.current += 1
     scopeValidationIdRef.current += 1
     scopeRef.current = null
     clearSensitiveMemory()
+    if (!preserveQuarantine) reportRetainedAuthority(false)
     setScopeReady(false)
-  }, [clearSensitiveMemory])
+  }, [clearSensitiveMemory, reportRetainedAuthority])
+
+  const adoptQuarantinedAuthority = React.useCallback((authority: QuarantinedAuthority) => {
+    if (authority.phase === "completed") {
+      const draft = cloneDraft(initialDraft)
+      draftRevisionRef.current = capability?.generation_config_revision ?? ""
+      draftRef.current = draft
+      snapshotRef.current = null
+      resumeRef.current = null
+      setDraft(draft)
+      setSnapshot(null)
+      setBackendStatus(null)
+      setProgressText(null)
+      setSafeError(null)
+      setPhase("idle")
+      setRecoveryAvailable(false)
+      setDraftRecoveryAvailable(false)
+      return
+    }
+    const draft = cloneDraft(authority.draft)
+    const snapshot = cloneRequest(authority.snapshot)
+    const resume = authority.resume ? { ...authority.resume } : null
+    const restoredPhase = authority.phase === "submitting" || authority.phase === "ambiguous"
+      ? "ambiguous"
+      : ["polling", "throttled", "outage", "stopped", "auth_lost"].includes(authority.phase)
+        ? "stopped"
+        : authority.phase
+    draftRevisionRef.current = authority.generationConfigRevision
+    draftRef.current = draft
+    snapshotRef.current = snapshot
+    resumeRef.current = resume
+    setDraft(draft)
+    setSnapshot(snapshot)
+    setBackendStatus(authority.backendStatus)
+    setProgressText(authority.progressText)
+    setSafeError(authority.phase === "auth_lost" ? null : authority.safeError)
+    setPhase(restoredPhase)
+    setRecoveryAvailable(Boolean(snapshot && resume))
+    setDraftRecoveryAvailable(authority.draftRecoveryAvailable)
+  }, [
+    capability?.generation_config_revision,
+    initialDraft,
+    setBackendStatus,
+    setDraftRecoveryAvailable,
+    setPhase,
+    setProgressText,
+    setSafeError
+  ])
 
   const hydrateForScope = React.useCallback((scope: Scope) => {
     const keys = buildStandaloneHtmlStorageKeys(scope)
@@ -609,12 +751,13 @@ export const useStandaloneHtmlGeneration = ({
       setPhase("stopped")
       setRecoveryAvailable(true)
     }
-  }, [])
+  }, [setDraftRecoveryAvailable, setPhase])
 
   const revalidateScope = React.useCallback(async (clearFirst: boolean) => {
     const previous = scopeRef.current ?? lastTrustedScopeRef.current
     if (clearFirst) {
-      invalidateScopeBoundary()
+      quarantineCurrentAuthority()
+      invalidateScopeBoundary(true)
     }
     const validationId = ++scopeValidationIdRef.current
     setScopeError(null)
@@ -625,17 +768,39 @@ export const useStandaloneHtmlGeneration = ({
       setScopeError("Current server and account could not be confirmed.")
       return
     }
+    const quarantined = quarantinedAuthorityRef.current
+    const canRestoreQuarantine = Boolean(
+      quarantined && sameScope(quarantined.scope, next)
+    )
     if (previous && (previous.serverOrigin !== next.serverOrigin || previous.principalId !== next.principalId)) {
+      quarantinedAuthorityRef.current = null
       removeRecords(previous)
+      reportRetainedAuthority(false)
     }
     scopeRef.current = next
     lastTrustedScopeRef.current = next
     setScopeReady(true)
-    hydrateForScope(next)
-  }, [hydrateForScope, invalidateScopeBoundary, removeRecords])
+    if (canRestoreQuarantine && quarantined) {
+      quarantinedAuthorityRef.current = null
+      adoptQuarantinedAuthority(quarantined)
+    } else {
+      quarantinedAuthorityRef.current = null
+      hydrateForScope(next)
+    }
+    reportRetainedAuthority(true)
+  }, [
+    adoptQuarantinedAuthority,
+    hydrateForScope,
+    invalidateScopeBoundary,
+    quarantineCurrentAuthority,
+    removeRecords,
+    reportRetainedAuthority
+  ])
 
   const revalidateScopeRef = React.useRef(revalidateScope)
   revalidateScopeRef.current = revalidateScope
+
+  const retryScope = React.useCallback(() => revalidateScope(true), [revalidateScope])
 
   React.useEffect(() => {
     mountedRef.current = true
@@ -646,6 +811,7 @@ export const useStandaloneHtmlGeneration = ({
       scopeValidationIdRef.current += 1
       scopeRef.current = null
       lastTrustedScopeRef.current = null
+      quarantinedAuthorityRef.current = null
       submitAbortRef.current?.abort()
       submitAbortRef.current = null
       pollAbortRef.current?.abort()
@@ -656,8 +822,9 @@ export const useStandaloneHtmlGeneration = ({
       draftRef.current = initialDraftRef.current
       snapshotRef.current = null
       resumeRef.current = null
+      reportRetainedAuthority(false)
     }
-  }, [])
+  }, [reportRetainedAuthority])
 
   React.useEffect(() => {
     const restore = () => { void revalidateScope(true) }
@@ -680,7 +847,7 @@ export const useStandaloneHtmlGeneration = ({
         const capture = { scope, epoch: scopeEpochRef.current }
         persistDraft(values, request?.generation_config_revision ?? draftRevisionRef.current, capture)
       }
-      invalidateScopeBoundary()
+      flushSync(() => invalidateScopeBoundary())
     }
     const scopeMismatch = () => {
       const trustedScope = scopeRef.current ?? lastTrustedScopeRef.current
@@ -708,7 +875,7 @@ export const useStandaloneHtmlGeneration = ({
       window.removeEventListener("focus", restore)
       document.removeEventListener("visibilitychange", visibility)
     }
-  }, [invalidateScopeBoundary, persistDraft, revalidateScope])
+  }, [invalidateScopeBoundary, persistDraft, removeRecords, revalidateScope])
 
   const replaceDraft = React.useCallback((next: StandaloneHtmlFormDraft) => {
     if (!validateDraft(next, capability, maxSlides)) return false
@@ -812,7 +979,17 @@ export const useStandaloneHtmlGeneration = ({
     }
     setPhase("polling")
     return false
-  }, [initialDraft, isCaptureCurrent, onCompleted, removeRecords, stopPollTimer])
+  }, [
+    initialDraft,
+    isCaptureCurrent,
+    onCompleted,
+    removeRecords,
+    setBackendStatus,
+    setPhase,
+    setProgressText,
+    setSafeError,
+    stopPollTimer
+  ])
 
   const pollGenerationRef = React.useRef<(generationId: string, capture: ScopeCapture) => Promise<void>>(async () => undefined)
   const schedulePoll = React.useCallback((generationId: string, delayHint: number | null, capture: ScopeCapture) => {
@@ -849,7 +1026,7 @@ export const useStandaloneHtmlGeneration = ({
     } finally {
       if (pollAbortRef.current === controller) pollAbortRef.current = null
     }
-  }, [finishReceipt, isCaptureCurrent, schedulePoll, stopPollTimer])
+  }, [finishReceipt, isCaptureCurrent, schedulePoll, setPhase, setSafeError, stopPollTimer])
   pollGenerationRef.current = pollGeneration
 
   const acceptReceipt = React.useCallback((receipt: PresentationGenerationReceipt, key: string, request: PresentationGenerationRequest, capture: ScopeCapture) => {
@@ -904,7 +1081,7 @@ export const useStandaloneHtmlGeneration = ({
         setPendingAttempt((current) => current?.id === attempt.id ? null : current)
       }
     }
-  }, [acceptReceipt, isCaptureCurrent, onCapabilitiesChanged, removeResumeRecord])
+  }, [acceptReceipt, isCaptureCurrent, onCapabilitiesChanged, removeResumeRecord, setPhase, setSafeError])
 
   React.useEffect(() => {
     if (!pendingAttempt || startedAttemptIdRef.current >= pendingAttempt.id) return
@@ -922,7 +1099,7 @@ export const useStandaloneHtmlGeneration = ({
     const id = ++pendingAttemptIdRef.current
     setPendingAttempt({ id, request, key, scope: capture.scope, epoch: capture.epoch })
     return Promise.resolve()
-  }, [])
+  }, [setPhase, setSafeError])
 
   const submit = React.useCallback(async () => {
     const scope = scopeRef.current
@@ -957,13 +1134,13 @@ export const useStandaloneHtmlGeneration = ({
     } else {
       await queueAttempt(request, recovery.idempotencyKey, capture)
     }
-  }, [pollGeneration, queueAttempt, removeResumeRecord])
+  }, [pollGeneration, queueAttempt, removeResumeRecord, setPhase])
 
   const stopWaiting = React.useCallback(() => {
     stopPollTimer()
     setPhase("stopped")
     onStopWaiting()
-  }, [onStopWaiting, stopPollTimer])
+  }, [onStopWaiting, setPhase, stopPollTimer])
 
   const forget = React.useCallback(() => {
     removeRecords()
@@ -978,7 +1155,7 @@ export const useStandaloneHtmlGeneration = ({
     setProgressText(null)
     setSafeError(null)
     setPhase("idle")
-  }, [removeResumeRecord])
+  }, [removeResumeRecord, setBackendStatus, setPhase, setProgressText, setSafeError])
 
   const tryAgain = React.useCallback(async () => {
     const scope = scopeRef.current
@@ -997,11 +1174,12 @@ export const useStandaloneHtmlGeneration = ({
     persistDraft(draftRef.current, request.generation_config_revision, capture)
     persistResume(recovery, capture)
     await queueAttempt(request, key, capture)
-  }, [capability, persistDraft, persistResume, queueAttempt, removeResumeRecord, validateForSubmit])
+  }, [capability, persistDraft, persistResume, queueAttempt, removeResumeRecord, setPhase, validateForSubmit])
 
   return {
     scopeReady,
     scopeError,
+    retryScope,
     draft,
     fieldErrors,
     editError,

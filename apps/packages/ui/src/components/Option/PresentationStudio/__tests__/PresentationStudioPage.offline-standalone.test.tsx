@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
   getPresentationMetadata: vi.fn(),
   getPresentation: vi.fn(),
+  getSlidesCapabilities: vi.fn(),
   listVisualStyles: vi.fn(),
   saveStandaloneHtmlSource: vi.fn(),
   downloadStandaloneHtmlDraft: vi.fn(),
@@ -76,6 +77,7 @@ vi.mock("@/services/tldw/TldwApiClient", async () => {
       getConfig: (...args: any[]) => mocks.getConfig(...args),
       getPresentationMetadata: (...args: any[]) => mocks.getPresentationMetadata(...args),
       getPresentation: (...args: any[]) => mocks.getPresentation(...args),
+      getSlidesCapabilities: (...args: any[]) => mocks.getSlidesCapabilities(...args),
       listVisualStyles: (...args: any[]) => mocks.listVisualStyles(...args),
       saveStandaloneHtmlSource: (...args: any[]) => mocks.saveStandaloneHtmlSource(...args),
       downloadStandaloneHtmlDraft: (...args: any[]) => mocks.downloadStandaloneHtmlDraft(...args)
@@ -279,6 +281,7 @@ describe("PresentationStudioPage routed standalone offline lifecycle", () => {
       etag: null
     })
     mocks.getPresentation.mockReset().mockResolvedValue(detail())
+    mocks.getSlidesCapabilities.mockReset().mockResolvedValue({})
     mocks.listVisualStyles.mockReset().mockResolvedValue([])
     mocks.saveStandaloneHtmlSource.mockReset()
     mocks.downloadStandaloneHtmlDraft.mockReset().mockResolvedValue(new TextEncoder().encode(SOURCE))
@@ -888,6 +891,191 @@ describe("PresentationStudioPage routed standalone offline lifecycle", () => {
 
     await waitFor(() => expect(mocks.getPresentation).toHaveBeenCalledTimes(2))
     expect(await screen.findByLabelText("HTML source")).toHaveValue(SOURCE)
+  })
+
+  it("freezes a source-free kind-authority shell during pagehide before later observers run", async () => {
+    renderRoutedPage()
+    await screen.findByLabelText("HTML source")
+    const digestResult = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(SECOND_EDIT)
+    )
+    let resolvePendingDigest: ((value: ArrayBuffer) => void) | null = null
+    vi.spyOn(crypto.subtle, "digest").mockReturnValueOnce(
+      new Promise<ArrayBuffer>((resolve) => { resolvePendingDigest = resolve })
+    )
+    act(() => mocks.editorProps?.onChange?.(SECOND_EDIT))
+    expect(screen.getByLabelText("HTML source")).toHaveValue(SECOND_EDIT)
+    mocks.getPresentationMetadata.mockClear()
+    mocks.getPresentation.mockClear()
+
+    let sourceVisibleDuringPagehide = true
+    let guardedDuringPagehide = false
+    const observePagehide = () => {
+      sourceVisibleDuringPagehide = screen.queryByLabelText("HTML source") !== null
+      guardedDuringPagehide = screen.queryByText("Confirming current server and account…") !== null
+    }
+    window.addEventListener("pagehide", observePagehide)
+    fireEvent(window, new PageTransitionEvent("pagehide", { persisted: true }))
+    window.removeEventListener("pagehide", observePagehide)
+
+    expect(sourceVisibleDuringPagehide).toBe(false)
+    expect(guardedDuringPagehide).toBe(true)
+    expect(persistedRecoverySource()).toBe(SECOND_EDIT)
+    await act(async () => Promise.resolve())
+    expect(mocks.getPresentationMetadata).not.toHaveBeenCalled()
+    expect(mocks.getPresentation).not.toHaveBeenCalled()
+    resolvePendingDigest?.(digestResult)
+  })
+
+  it.each(["unsupported", "metadata_404"])(
+    "restores switched authority through exactly one metadata-only %s outcome",
+    async (outcome) => {
+      renderRoutedPage()
+      await screen.findByLabelText("HTML source")
+      fireEvent(window, new PageTransitionEvent("pagehide", { persisted: true }))
+      mocks.getPresentationMetadata.mockClear()
+      mocks.getPresentation.mockClear()
+      mocks.getConfig.mockResolvedValueOnce({ serverUrl: "https://TLDW.Example/path" })
+      mocks.getCurrentUser.mockResolvedValueOnce({ id: 84, username: "other", is_active: true })
+      let settleMetadata: (() => void) | null = null
+      mocks.getPresentationMetadata.mockReturnValueOnce(new Promise((resolve, reject) => {
+        settleMetadata = () => {
+          if (outcome === "metadata_404") {
+            reject(Object.assign(new Error("missing"), { status: 404 }))
+            return
+          }
+          resolve({
+            record: {
+              id: "html-1",
+              content_kind: "unsupported",
+              unsupported_content_kind: "future_canvas",
+              read_only: true
+            },
+            etag: null
+          })
+        }
+      }))
+
+      fireEvent(window, new PageTransitionEvent("pageshow", { persisted: true }))
+
+      await waitFor(() => expect(mocks.getPresentationMetadata).toHaveBeenCalledTimes(1))
+      expect(mocks.getPresentation).not.toHaveBeenCalled()
+      settleMetadata?.()
+      if (outcome === "metadata_404") {
+        expect(await screen.findByText("Presentation metadata is unavailable")).toBeVisible()
+      } else {
+        expect(await screen.findByText("Unsupported presentation kind")).toBeVisible()
+      }
+      expect(mocks.getPresentationMetadata).toHaveBeenCalledTimes(1)
+      expect(mocks.getPresentation).not.toHaveBeenCalled()
+      expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument()
+    }
+  )
+
+  it("retires a stale authority result while hidden before a fresh pageshow outcome", async () => {
+    renderRoutedPage()
+    await screen.findByLabelText("HTML source")
+    mocks.getPresentationMetadata.mockClear()
+    mocks.getPresentation.mockClear()
+    let resolveHiddenMetadata: ((value: any) => void) | null = null
+    mocks.getPresentationMetadata.mockReturnValueOnce(
+      new Promise((resolve) => { resolveHiddenMetadata = resolve })
+    )
+    fireEvent(window, new Event("focus"))
+    await waitFor(() => expect(mocks.getPresentationMetadata).toHaveBeenCalledTimes(1))
+
+    fireEvent(window, new PageTransitionEvent("pagehide", { persisted: true }))
+    resolveHiddenMetadata?.({
+      record: { id: "html-1", content_kind: "structured_slides" },
+      etag: null
+    })
+    await act(async () => Promise.resolve())
+    expect(mocks.getPresentation).not.toHaveBeenCalled()
+
+    mocks.getPresentationMetadata.mockResolvedValueOnce({
+      record: {
+        id: "html-1",
+        content_kind: "unsupported",
+        unsupported_content_kind: "future_canvas",
+        read_only: true
+      },
+      etag: null
+    })
+    fireEvent(window, new PageTransitionEvent("pageshow", { persisted: true }))
+
+    await waitFor(() => expect(mocks.getPresentationMetadata).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText("Unsupported presentation kind")).toBeVisible()
+    expect(mocks.getPresentation).not.toHaveBeenCalled()
+  })
+
+  it("coalesces a pageshow focus and visible restoration burst into one metadata request", async () => {
+    renderRoutedPage()
+    await screen.findByLabelText("HTML source")
+    fireEvent(window, new PageTransitionEvent("pagehide", { persisted: true }))
+    mocks.getPresentationMetadata.mockClear()
+    mocks.getPresentation.mockClear()
+    let resolveMetadata: ((value: any) => void) | null = null
+    mocks.getPresentationMetadata.mockReturnValueOnce(
+      new Promise((resolve) => { resolveMetadata = resolve })
+    )
+
+    fireEvent(window, new PageTransitionEvent("pageshow", { persisted: true }))
+    fireEvent(window, new Event("focus"))
+    fireEvent(document, new Event("visibilitychange"))
+
+    await waitFor(() => expect(mocks.getPresentationMetadata).toHaveBeenCalledTimes(1))
+    expect(mocks.getPresentation).not.toHaveBeenCalled()
+    resolveMetadata?.({
+      record: {
+        id: "html-1",
+        content_kind: "unsupported",
+        unsupported_content_kind: "future_canvas",
+        read_only: true
+      },
+      etag: null
+    })
+    expect(await screen.findByText("Unsupported presentation kind")).toBeVisible()
+    expect(mocks.getPresentationMetadata).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["pageshow", () => fireEvent(window, new PageTransitionEvent("pageshow", { persisted: true }))],
+    ["focus", () => fireEvent(window, new Event("focus"))],
+    ["visible", () => fireEvent(document, new Event("visibilitychange"))]
+  ])("revalidates kind authority on %s before any switched-owner source detail", async (
+    _boundary,
+    dispatchBoundary
+  ) => {
+    renderRoutedPage()
+    await screen.findByLabelText("HTML source")
+    mocks.getPresentationMetadata.mockClear()
+    mocks.getPresentation.mockClear()
+    mocks.getConfig.mockResolvedValueOnce({ serverUrl: "https://TLDW.Example/path" })
+    mocks.getCurrentUser.mockResolvedValueOnce({ id: 84, username: "other", is_active: true })
+    let resolveMetadata: ((value: any) => void) | null = null
+    mocks.getPresentationMetadata.mockReturnValueOnce(
+      new Promise((resolve) => { resolveMetadata = resolve })
+    )
+
+    dispatchBoundary()
+
+    expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument()
+    await waitFor(() => expect(mocks.getPresentationMetadata).toHaveBeenCalledTimes(1))
+    expect(mocks.getPresentation).not.toHaveBeenCalled()
+
+    resolveMetadata?.({
+      record: {
+        id: "html-1",
+        content_kind: "unsupported",
+        unsupported_content_kind: "future_canvas",
+        read_only: true
+      },
+      etag: null
+    })
+    expect(await screen.findByText("Unsupported presentation kind")).toBeVisible()
+    expect(mocks.getPresentation).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument()
   })
 
   it("does not release an immediate structured handoff before a switched principal resolves", async () => {

@@ -13,6 +13,7 @@ type StandaloneHtmlGenerationFormProps = {
   onCapabilitiesChanged?: () => Promise<unknown> | unknown
   onCompleted?: (presentationId: string) => void
   onStopWaiting?: () => void
+  onRetainedAuthorityChange?: (owner: object, retained: boolean) => void
 }
 
 const PRESENTATION_TYPES = [
@@ -76,7 +77,8 @@ export const StandaloneHtmlGenerationForm: React.FC<StandaloneHtmlGenerationForm
   refreshing = false,
   onCapabilitiesChanged = () => undefined,
   onCompleted = () => undefined,
-  onStopWaiting = () => undefined
+  onStopWaiting = () => undefined,
+  onRetainedAuthorityChange
 }) => {
   const generation = capabilities?.generation_modes.standalone_html ?? null
   const displayCapability = generation?.enabled ? generation : null
@@ -93,6 +95,7 @@ export const StandaloneHtmlGenerationForm: React.FC<StandaloneHtmlGenerationForm
       onCapabilitiesChanged={onCapabilitiesChanged}
       onCompleted={onCompleted}
       onStopWaiting={onStopWaiting}
+      onRetainedAuthorityChange={onRetainedAuthorityChange}
     />
   )
 }
@@ -111,16 +114,34 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
   onCapabilitiesChanged: () => Promise<unknown> | unknown
   onCompleted: (presentationId: string) => void
   onStopWaiting: () => void
-}> = ({ capability, displayCapability, contentMaxSlides, recoveryOnly, refreshing, onCapabilitiesChanged, onCompleted, onStopWaiting }) => {
+  onRetainedAuthorityChange?: (owner: object, retained: boolean) => void
+}> = ({
+  capability,
+  displayCapability,
+  contentMaxSlides,
+  recoveryOnly,
+  refreshing,
+  onCapabilitiesChanged,
+  onCompleted,
+  onStopWaiting,
+  onRetainedAuthorityChange
+}) => {
+  const authorityOwnerRef = React.useRef<object>({})
+  const reportRetainedAuthority = React.useCallback((retained: boolean) => {
+    onRetainedAuthorityChange?.(authorityOwnerRef.current, retained)
+  }, [onRetainedAuthorityChange])
   const generation = useStandaloneHtmlGeneration({
     capability,
     contentMaxSlides,
     onCapabilitiesChanged,
     onCompleted,
-    onStopWaiting
+    onStopWaiting,
+    onRetainedAuthorityChange: reportRetainedAuthority
   })
   const [confirmDifferent, setConfirmDifferent] = React.useState(false)
   const {
+    scopeReady,
+    scopeError,
     draft,
     fieldErrors,
     editError,
@@ -134,6 +155,35 @@ const EnabledStandaloneHtmlGenerationForm: React.FC<{
     draftRecoveryAvailable,
     storageWarning
   } = generation
+
+  if (!scopeReady) {
+    return (
+      <section
+        className="rounded-lg border border-border bg-surface p-4 sm:p-6"
+        aria-labelledby="html-generation-authority-heading"
+      >
+        <h2 id="html-generation-authority-heading" className="text-lg font-semibold text-text">
+          Standalone HTML + JavaScript
+        </h2>
+        <p
+          role={scopeError ? "alert" : "status"}
+          className="mt-2 text-sm text-text-muted"
+        >
+          {scopeError ?? "Confirming current server and account."}
+        </p>
+        {scopeError ? (
+          <Button
+            className="mt-4"
+            variant="secondary"
+            size="lg"
+            onClick={() => void generation.retryScope()}
+          >
+            Retry
+          </Button>
+        ) : null}
+      </section>
+    )
+  }
 
   const currentStatus = phaseLabel(phase) ?? statusLabel(backendStatus)
   const isSubmitting = phase === "submitting"

@@ -298,6 +298,32 @@ describe("StandaloneHtmlWorkspace", () => {
     expect(localWrite.mock.calls.some(([, value]) => String(value).includes(SOURCE))).toBe(false)
   })
 
+  it("moves and selects the mobile workspace tabs with left and right arrow keys", async () => {
+    const { StandaloneHtmlWorkspace } = await loadWorkspace()
+    render(<StandaloneHtmlWorkspace presentationId="html-1" />)
+
+    await screen.findByLabelText("HTML source")
+    const codeTab = screen.getByRole("tab", { name: "Code" })
+    const outlineTab = screen.getByRole("tab", { name: "Outline" })
+    codeTab.focus()
+
+    expect(codeTab).toHaveFocus()
+    expect(codeTab).toHaveAttribute("tabindex", "0")
+    expect(outlineTab).toHaveAttribute("tabindex", "-1")
+
+    fireEvent.keyDown(codeTab, { key: "ArrowRight" })
+
+    expect(outlineTab).toHaveFocus()
+    expect(outlineTab).toHaveAttribute("aria-selected", "true")
+    expect(outlineTab).toHaveAttribute("tabindex", "0")
+    expect(codeTab).toHaveAttribute("tabindex", "-1")
+
+    fireEvent.keyDown(outlineTab, { key: "ArrowLeft" })
+
+    expect(codeTab).toHaveFocus()
+    expect(codeTab).toHaveAttribute("aria-selected", "true")
+  })
+
   it.each([
     ["a tag list", '"v7", "v8"'],
     ["concatenated weak syntax", '"v7"W/"v8"'],
@@ -382,6 +408,45 @@ describe("StandaloneHtmlWorkspace", () => {
       "html-1",
       expect.objectContaining({ abortSignal: expect.any(AbortSignal) })
     )
+  })
+
+  it("does not start a detail request when the parent authority ref advances before passive loading", async () => {
+    const { StandaloneHtmlWorkspace } = await loadWorkspace()
+    const authorityFence = vi.fn(
+      (capturedEpoch: number | null, presentationId: string) =>
+        capturedEpoch === 7 && presentationId === "html-1"
+    )
+
+    const Parent = () => {
+      const authorityEpochRef = React.useRef(7)
+      React.useLayoutEffect(() => {
+        authorityEpochRef.current = 8
+      }, [])
+      const isKindAuthorityCurrent = React.useCallback(
+        (capturedEpoch: number | null, presentationId: string) => {
+          authorityFence(capturedEpoch, presentationId)
+          return capturedEpoch === authorityEpochRef.current && presentationId === "html-1"
+        },
+        []
+      )
+      return (
+        <StandaloneHtmlWorkspace
+          presentationId="html-1"
+          kindAuthorityEpoch={7}
+          isKindAuthorityCurrent={isKindAuthorityCurrent}
+        />
+      )
+    }
+
+    render(<Parent />)
+
+    await waitFor(() => {
+      expect(mocks.getConfig).toHaveBeenCalled()
+      expect(mocks.getCurrentUser).toHaveBeenCalled()
+      expect(authorityFence).toHaveBeenCalledWith(7, "html-1")
+    })
+    expect(mocks.getPresentation).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument()
   })
 
   it("preserves verified server source and warns when recovery getItem is unavailable", async () => {
@@ -2165,6 +2230,135 @@ describe("StandaloneHtmlWorkspace", () => {
     await act(async () => Promise.resolve())
     expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument()
   })
+
+  it("flushes an exact digest-pending candidate before a confirmed SPA route unmount", async () => {
+    const { StandaloneHtmlWorkspace } = await loadWorkspace()
+    const view = render(<StandaloneHtmlWorkspace presentationId="html-1" />)
+    await screen.findByLabelText("HTML source")
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(THIRD_EDIT)
+    )
+    let resolveDigest: ((value: ArrayBuffer) => void) | null = null
+    vi.spyOn(crypto.subtle, "digest").mockReturnValueOnce(
+      new Promise<ArrayBuffer>((resolve) => { resolveDigest = resolve })
+    )
+
+    act(() => mocks.editorProps?.onChange?.(THIRD_EDIT))
+    expect(mocks.editorProps?.value).toBe(THIRD_EDIT)
+
+    view.unmount()
+
+    const saved = Array.from({ length: sessionStorage.length }, (_, index) =>
+      sessionStorage.getItem(sessionStorage.key(index)!)
+    ).join("\n")
+    expect(saved).toContain(THIRD_EDIT)
+    resolveDigest?.(digest)
+    await act(async () => Promise.resolve())
+  })
+
+  it.each([
+    ["slides scope mismatch", () => new CustomEvent("tldw:slides-scope-mismatch")],
+    [
+      "logout",
+      () => new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })
+    ]
+  ])("never rewrites old-scope recovery when %s is followed by unmount", async (_case, eventFactory) => {
+    const { StandaloneHtmlWorkspace } = await loadWorkspace()
+    const view = render(<StandaloneHtmlWorkspace presentationId="html-1" />)
+    fireEvent.change(await screen.findByLabelText("HTML source"), {
+      target: { value: EDITED }
+    })
+    await waitFor(() => expect(sessionStorage.length).toBe(1))
+    const setItem = vi.spyOn(Object.getPrototypeOf(sessionStorage), "setItem")
+
+    act(() => window.dispatchEvent(eventFactory()))
+
+    expect(sessionStorage.length).toBe(0)
+    setItem.mockClear()
+    expect(() => view.unmount()).not.toThrow()
+    expect(setItem).not.toHaveBeenCalled()
+  })
+
+  it("writes a pagehide candidate exactly once when unmount follows", async () => {
+    const { StandaloneHtmlWorkspace } = await loadWorkspace()
+    const view = render(<StandaloneHtmlWorkspace presentationId="html-1" />)
+    await screen.findByLabelText("HTML source")
+    let resolveDigest: ((value: ArrayBuffer) => void) | null = null
+    vi.spyOn(crypto.subtle, "digest").mockReturnValueOnce(
+      new Promise<ArrayBuffer>((resolve) => { resolveDigest = resolve })
+    )
+    const setItem = vi.spyOn(Object.getPrototypeOf(sessionStorage), "setItem")
+
+    act(() => {
+      mocks.editorProps?.onChange?.(SECOND_EDIT)
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }))
+    })
+    view.unmount()
+
+    expect(
+      setItem.mock.calls.filter(([, value]) => String(value).includes(SECOND_EDIT))
+    ).toHaveLength(1)
+    resolveDigest?.(new ArrayBuffer(32))
+    await act(async () => Promise.resolve())
+  })
+
+  it("flushes the latest pending candidate from same-scope quarantine on unmount", async () => {
+    const { StandaloneHtmlWorkspace } = await loadWorkspace()
+    const view = render(<StandaloneHtmlWorkspace presentationId="html-1" />)
+    await screen.findByLabelText("HTML source")
+    let resolveDigest: ((value: ArrayBuffer) => void) | null = null
+    vi.spyOn(crypto.subtle, "digest").mockReturnValueOnce(
+      new Promise<ArrayBuffer>((resolve) => { resolveDigest = resolve })
+    )
+    mocks.getConfig.mockReturnValueOnce(new Promise(() => undefined))
+
+    act(() => {
+      mocks.editorProps?.onChange?.(THIRD_EDIT)
+      window.dispatchEvent(new Event("focus"))
+    })
+
+    expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument()
+    expect(() => view.unmount()).not.toThrow()
+    const saved = Array.from({ length: sessionStorage.length }, (_, index) =>
+      sessionStorage.getItem(sessionStorage.key(index)!)
+    ).join("\n")
+    expect(saved).toContain(THIRD_EDIT)
+    resolveDigest?.(new ArrayBuffer(32))
+    await act(async () => Promise.resolve())
+  })
+
+  it.each(["getter", "quota"])(
+    "continues unmount disposal when recovery storage %s access fails",
+    async (failure) => {
+      const { StandaloneHtmlWorkspace } = await loadWorkspace()
+      const view = render(<StandaloneHtmlWorkspace presentationId="html-1" />)
+      await screen.findByLabelText("HTML source")
+      vi.spyOn(crypto.subtle, "digest").mockReturnValueOnce(new Promise(() => undefined))
+      act(() => mocks.editorProps?.onChange?.(SECOND_EDIT))
+      mocks.monacoModelDispose.mockClear()
+      mocks.monacoEditorDispose.mockClear()
+      mocks.outlineTerminate.mockClear()
+      const storagePrototype = Object.getPrototypeOf(sessionStorage)
+      let restoreStorage = () => undefined
+      if (failure === "getter") {
+        restoreStorage = installThrowingSessionStorageGetter()
+      } else {
+        vi.spyOn(storagePrototype, "setItem").mockImplementation(() => {
+          throw new DOMException("quota", "QuotaExceededError")
+        })
+      }
+
+      try {
+        expect(() => view.unmount()).not.toThrow()
+        expect(mocks.monacoModelDispose).toHaveBeenCalled()
+        expect(mocks.monacoEditorDispose).toHaveBeenCalled()
+        expect(mocks.outlineTerminate).toHaveBeenCalled()
+      } finally {
+        restoreStorage()
+      }
+    }
+  )
 
   it("preserves a pending empty draft through same-scope reauthentication", async () => {
     const { StandaloneHtmlWorkspace } = await loadWorkspace()

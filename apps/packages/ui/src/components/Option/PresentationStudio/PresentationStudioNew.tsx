@@ -16,6 +16,8 @@ export const PresentationStudioNew: React.FC = () => {
   const slides = useSlidesCapabilities()
   const recovery = useStandaloneHtmlRecoveryProbe()
   const [creationMode, setCreationMode] = React.useState<CreationMode>("structured")
+  const [hasRetainedStandaloneAuthority, setHasRetainedStandaloneAuthority] = React.useState(false)
+  const retainedAuthorityOwnerRef = React.useRef<object | null>(null)
   const hasTrustedRecovery = recovery.kind !== null
   const capabilityConfirmed = ["ready", "generation_disabled", "validator_unavailable"].includes(slides.status)
   const htmlOptionEnabled = capabilityConfirmed || hasTrustedRecovery
@@ -26,12 +28,22 @@ export const PresentationStudioNew: React.FC = () => {
 
   const retryStandalone = React.useCallback(async () => {
     await Promise.all([slides.retry(), recovery.retry()])
-  }, [recovery.retry, slides.retry])
+  }, [recovery, slides])
+
+  const handleRetainedAuthorityChange = React.useCallback((owner: object, retained: boolean) => {
+    if (retained) {
+      retainedAuthorityOwnerRef.current = owner
+      setHasRetainedStandaloneAuthority(true)
+    } else if (retainedAuthorityOwnerRef.current === owner) {
+      retainedAuthorityOwnerRef.current = null
+      setHasRetainedStandaloneAuthority(false)
+    }
+  }, [])
 
   const standaloneContent = React.useMemo(() => {
     const retainedEnabledCapability =
       slides.capabilities?.generation_modes.standalone_html.enabled === true
-    const keepFormMounted = retainedEnabledCapability || hasTrustedRecovery
+    const keepFormMounted = retainedEnabledCapability || hasTrustedRecovery || hasRetainedStandaloneAuthority
     let state: React.ReactNode = null
 
     if (slides.status === "loading") {
@@ -98,12 +110,21 @@ export const PresentationStudioNew: React.FC = () => {
           onCapabilitiesChanged={retryStandalone}
           onCompleted={(presentationId) => navigate(`/presentation-studio/${presentationId}`, { replace: true })}
           onStopWaiting={() => navigate("/presentation-studio")}
+          onRetainedAuthorityChange={handleRetainedAuthorityChange}
         />
         {recoveryState}
         {state}
       </div>
     )
-  }, [hasTrustedRecovery, navigate, recovery.status, retryStandalone, slides])
+  }, [
+    handleRetainedAuthorityChange,
+    hasRetainedStandaloneAuthority,
+    hasTrustedRecovery,
+    navigate,
+    recovery.status,
+    retryStandalone,
+    slides
+  ])
 
   return (
     <div className="space-y-6 py-6">

@@ -103,6 +103,25 @@ const disabledCapabilities = {
     }
   }
 }
+const validatorUnavailableCapabilities = {
+  ...disabledCapabilities,
+  content_kinds: {
+    ...disabledCapabilities.content_kinds,
+    standalone_html: {
+      ...disabledCapabilities.content_kinds.standalone_html,
+      edit: false,
+      export_attachment: false,
+      reason: "validator_unavailable"
+    }
+  },
+  generation_modes: {
+    ...disabledCapabilities.generation_modes,
+    standalone_html: {
+      ...disabledCapabilities.generation_modes.standalone_html,
+      reason: "validator_unavailable"
+    }
+  }
+}
 
 const oldDraftKey = "tldw:presentation-studio:html:draft:v1:https%3A%2F%2Ftldw.example:42"
 
@@ -126,6 +145,10 @@ const loadSubject = () =>
   vi.importActual<typeof import("../PresentationStudioNew")>(
     ["..", "PresentationStudioNew"].join("/")
   )
+const loadGenerationForm = () =>
+  vi.importActual<typeof import("../StandaloneHtmlGenerationForm")>(
+    ["..", "StandaloneHtmlGenerationForm"].join("/")
+  )
 
 describe("PresentationStudioNew authority refresh integration", () => {
   beforeEach(() => {
@@ -137,6 +160,159 @@ describe("PresentationStudioNew authority refresh integration", () => {
   })
 
   afterEach(() => vi.restoreAllMocks())
+
+  it("unmounts source-bearing form state during pagehide until principal scope revalidation finishes", async () => {
+    mocks.submit.mockResolvedValue({
+      generation_id: "generation-pagehide-guard",
+      status: "queued",
+      status_url: "/api/v1/slides/generations/generation-pagehide-guard",
+      presentation_id: null
+    })
+    const { StandaloneHtmlGenerationForm } = await loadGenerationForm()
+    render(<StandaloneHtmlGenerationForm capabilities={firstCapabilities as any} />)
+
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "Generate standalone presentation" })
+    ).toBeEnabled())
+    fireEvent.change(screen.getByLabelText("Subject and material"), {
+      target: { value: "Retired submitted principal source" }
+    })
+    fireEvent.change(screen.getByLabelText("Audience"), {
+      target: { value: "Authority boundary reviewers" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Generate standalone presentation" }))
+    expect(await screen.findByRole("heading", { name: "Submitted request" })).toBeVisible()
+
+    act(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })))
+
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Submitted request" })).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Confirming current server and account")
+    expect(screen.queryByText("Retired submitted principal source")).not.toBeInTheDocument()
+
+    let resolvePrincipal: ((value: unknown) => void) | undefined
+    mocks.getCurrentUser.mockReturnValue(new Promise((resolve) => {
+      resolvePrincipal = resolve
+    }))
+    act(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })))
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+
+    await act(async () => resolvePrincipal?.({ id: 84 }))
+    expect(await screen.findByLabelText("Subject and material")).toHaveValue("")
+  })
+
+  it("hydrates the exact same-scope draft and submitted request only after pageshow revalidation", async () => {
+    mocks.submit.mockResolvedValue({
+      generation_id: "generation-same-scope-pagehide",
+      status: "queued",
+      status_url: "/api/v1/slides/generations/generation-same-scope-pagehide",
+      presentation_id: null
+    })
+    const source = "Same-scope retained submitted source"
+    const { StandaloneHtmlGenerationForm } = await loadGenerationForm()
+    render(<StandaloneHtmlGenerationForm capabilities={firstCapabilities as any} />)
+
+    const sourceField = await screen.findByLabelText("Subject and material")
+    await waitFor(() => expect(sourceField).toBeEnabled())
+    fireEvent.change(sourceField, { target: { value: source } })
+    fireEvent.change(screen.getByLabelText("Audience"), {
+      target: { value: "Same-scope reviewers" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Generate standalone presentation" }))
+    expect(await screen.findByRole("heading", { name: "Submitted request" })).toBeVisible()
+
+    act(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })))
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+    expect(screen.queryByText(source)).not.toBeInTheDocument()
+
+    let resolvePrincipal: ((value: unknown) => void) | undefined
+    mocks.getCurrentUser.mockReturnValue(new Promise((resolve) => {
+      resolvePrincipal = resolve
+    }))
+    act(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })))
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+
+    await act(async () => resolvePrincipal?.({ id: 42 }))
+    expect(await screen.findByDisplayValue(source)).toBeDisabled()
+    expect(screen.getByRole("heading", { name: "Submitted request" })).toBeVisible()
+    expect(screen.getByLabelText("Submitted request")).toHaveTextContent(source)
+  })
+
+  it("retries a failed scope resolution without mounting source before authority settles", async () => {
+    mocks.getConfig.mockRejectedValueOnce(new Error("configuration unavailable"))
+    const { StandaloneHtmlGenerationForm } = await loadGenerationForm()
+    render(<StandaloneHtmlGenerationForm capabilities={firstCapabilities as any} />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Current server and account could not be confirmed."
+    )
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+    expect(screen.queryByText("Retired authority source")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+    const source = await screen.findByLabelText("Subject and material")
+    expect(source).toHaveValue("")
+    expect(mocks.getConfig).toHaveBeenCalledTimes(2)
+    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2)
+  })
+
+  it("mounts an empty usable form with a persistent warning after recovery storage access fails", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, "sessionStorage")
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      get: () => {
+        throw new DOMException("storage unavailable", "SecurityError")
+      }
+    })
+    try {
+      const { StandaloneHtmlGenerationForm } = await loadGenerationForm()
+      render(<StandaloneHtmlGenerationForm capabilities={firstCapabilities as any} />)
+
+      const source = await screen.findByLabelText("Subject and material")
+      await waitFor(() => expect(source).toBeEnabled())
+      expect(source).toHaveValue("")
+      expect(screen.getByText("Reload recovery is unavailable.")).toBeVisible()
+    } finally {
+      if (descriptor) Object.defineProperty(window, "sessionStorage", descriptor)
+      else Reflect.deleteProperty(window, "sessionStorage")
+    }
+  })
+
+  it("restores the exact in-memory draft only after same-scope revalidation when storage writes fail", async () => {
+    const source = "Current-tab source that storage could not persist"
+    const { StandaloneHtmlGenerationForm } = await loadGenerationForm()
+    render(<StandaloneHtmlGenerationForm capabilities={firstCapabilities as any} />)
+
+    const sourceField = await screen.findByLabelText("Subject and material")
+    await waitFor(() => expect(sourceField).toBeEnabled())
+    const setItem = vi.spyOn(
+      Object.getPrototypeOf(window.sessionStorage) as Storage,
+      "setItem"
+    ).mockImplementation(() => {
+      throw new DOMException("quota unavailable", "QuotaExceededError")
+    })
+    fireEvent.change(sourceField, { target: { value: source } })
+    expect(await screen.findByText("Reload recovery is unavailable.")).toBeVisible()
+
+    let resolvePrincipal: ((value: unknown) => void) | undefined
+    mocks.getCurrentUser.mockReturnValueOnce(new Promise((resolve) => {
+      resolvePrincipal = resolve
+    }))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Confirming current server and account"
+    )
+    expect(screen.queryByText(source)).not.toBeInTheDocument()
+
+    await act(async () => resolvePrincipal?.({ id: 42 }))
+    expect(await screen.findByLabelText("Subject and material")).toHaveValue(source)
+    expect(screen.getByText("Reload recovery is unavailable.")).toBeVisible()
+    setItem.mockRestore()
+  })
 
   it("keeps the quota-failed form mounted across 409 refresh and requires the fresh revision before resubmit", async () => {
     let resolveRefresh: ((value: unknown) => void) | undefined
@@ -378,5 +554,136 @@ describe("PresentationStudioNew authority refresh integration", () => {
     expect(screen.getByRole("button", { name: "Forget preserved draft" })).toBeEnabled()
     expect(screen.getByRole("button", { name: "Retry" })).toBeVisible()
     expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["generation disabled", disabledCapabilities, "Standalone generation is disabled"],
+    ["validator unavailable", validatorUnavailableCapabilities, "Standalone validation is unavailable"]
+  ])("retains quota-only trusted draft authority when capability becomes %s", async (
+    _name,
+    unavailableCapabilities,
+    unavailableHeading
+  ) => {
+    let currentCapabilities = firstCapabilities
+    mocks.getSlidesCapabilities.mockImplementation(async () => currentCapabilities)
+    const { PresentationStudioNew } = await loadSubject()
+    render(
+      <React.StrictMode>
+        <PresentationStudioNew />
+      </React.StrictMode>
+    )
+
+    const htmlOption = await screen.findByRole("radio", { name: /Standalone HTML/ })
+    await waitFor(() => expect(htmlOption).toBeEnabled())
+    fireEvent.click(htmlOption)
+    const sourceField = await screen.findByLabelText("Subject and material")
+    await waitFor(() => expect(sourceField).toBeEnabled())
+    const setItem = vi.spyOn(
+      Object.getPrototypeOf(window.sessionStorage) as Storage,
+      "setItem"
+    ).mockImplementation(() => {
+      throw new DOMException("quota unavailable", "QuotaExceededError")
+    })
+    fireEvent.change(sourceField, { target: { value: "Quota-only retained authority" } })
+    expect(await screen.findByText("Reload recovery is unavailable.")).toBeVisible()
+
+    currentCapabilities = unavailableCapabilities as typeof firstCapabilities
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+
+    expect(await screen.findByText(unavailableHeading)).toBeVisible()
+    expect(await screen.findByDisplayValue("Quota-only retained authority")).toBeDisabled()
+    expect(mocks.submit).not.toHaveBeenCalled()
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:slides-scope-mismatch")))
+    await waitFor(() => expect(
+      screen.queryByDisplayValue("Quota-only retained authority")
+    ).not.toBeInTheDocument())
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+    setItem.mockRestore()
+  })
+
+  it("retains getter-failed ambiguous authority while disabled and scrubs it on logout", async () => {
+    let currentCapabilities = firstCapabilities
+    mocks.getSlidesCapabilities.mockImplementation(async () => currentCapabilities)
+    mocks.submit.mockRejectedValue(Object.assign(new Error("Network error"), { status: 0 }))
+    const { PresentationStudioNew } = await loadSubject()
+    render(<PresentationStudioNew />)
+
+    const htmlOption = await screen.findByRole("radio", { name: /Standalone HTML/ })
+    await waitFor(() => expect(htmlOption).toBeEnabled())
+    fireEvent.click(htmlOption)
+    const sourceField = await screen.findByLabelText("Subject and material")
+    await waitFor(() => expect(sourceField).toBeEnabled())
+    const descriptor = Object.getOwnPropertyDescriptor(window, "sessionStorage")
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      get: () => {
+        throw new DOMException("storage unavailable", "SecurityError")
+      }
+    })
+    try {
+      fireEvent.change(sourceField, { target: { value: "Getter-only ambiguous authority" } })
+      fireEvent.change(screen.getByLabelText("Audience"), { target: { value: "Reviewers" } })
+      fireEvent.click(screen.getByRole("button", { name: "Generate standalone presentation" }))
+      expect(await screen.findByText("Submission outcome unknown")).toBeVisible()
+      expect(mocks.submit).toHaveBeenCalledTimes(1)
+
+      currentCapabilities = disabledCapabilities as typeof firstCapabilities
+      act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+
+      expect(await screen.findByText("Standalone generation is disabled")).toBeVisible()
+      expect(await screen.findByDisplayValue("Getter-only ambiguous authority")).toBeDisabled()
+      expect(screen.getByRole("heading", { name: "Submitted request" })).toBeVisible()
+      expect(screen.getByText("Reload recovery is unavailable.")).toBeVisible()
+      expect(mocks.submit).toHaveBeenCalledTimes(1)
+      expect(mocks.status).not.toHaveBeenCalled()
+
+      act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
+        detail: { kind: "logout" }
+      })))
+      await waitFor(() => expect(
+        screen.queryByDisplayValue("Getter-only ambiguous authority")
+      ).not.toBeInTheDocument())
+      expect(screen.queryByRole("heading", { name: "Submitted request" })).not.toBeInTheDocument()
+    } finally {
+      if (descriptor) Object.defineProperty(window, "sessionStorage", descriptor)
+      else Reflect.deleteProperty(window, "sessionStorage")
+    }
+  })
+
+  it("retires a StrictMode child retention claim on a deliberate structured-mode switch", async () => {
+    let currentCapabilities = firstCapabilities
+    mocks.getSlidesCapabilities.mockImplementation(async () => currentCapabilities)
+    const { PresentationStudioNew } = await loadSubject()
+    render(
+      <React.StrictMode>
+        <PresentationStudioNew />
+      </React.StrictMode>
+    )
+
+    const htmlOption = await screen.findByRole("radio", { name: /Standalone HTML/ })
+    await waitFor(() => expect(htmlOption).toBeEnabled())
+    fireEvent.click(htmlOption)
+    const sourceField = await screen.findByLabelText("Subject and material")
+    await waitFor(() => expect(sourceField).toBeEnabled())
+    const setItem = vi.spyOn(
+      Object.getPrototypeOf(window.sessionStorage) as Storage,
+      "setItem"
+    ).mockImplementation(() => {
+      throw new DOMException("quota unavailable", "QuotaExceededError")
+    })
+    fireEvent.change(sourceField, { target: { value: "Retired child source" } })
+
+    fireEvent.click(screen.getByRole("radio", { name: /Structured slides/ }))
+    expect(screen.queryByDisplayValue("Retired child source")).not.toBeInTheDocument()
+    currentCapabilities = disabledCapabilities as typeof firstCapabilities
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+    await waitFor(() => expect(mocks.getSlidesCapabilities).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole("radio", { name: /Standalone HTML/ }))
+
+    expect(await screen.findByText("Standalone generation is disabled")).toBeVisible()
+    expect(screen.queryByLabelText("Subject and material")).not.toBeInTheDocument()
+    expect(screen.queryByText("Retired child source")).not.toBeInTheDocument()
+    setItem.mockRestore()
   })
 })
