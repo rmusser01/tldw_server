@@ -83,6 +83,21 @@ export const ensureLocatorVisibleInViewport = async (locator, label) => {
   }
 }
 
+export const waitForCheckboxState = async (
+  locator,
+  checked,
+  { pollIntervalMs = 50, timeoutMs = 30_000 } = {}
+) => {
+  if ((await locator.isChecked()) === checked) return
+  await locator.click()
+  const deadline = Date.now() + timeoutMs
+  do {
+    if ((await locator.isChecked()) === checked) return
+    await sleep(pollIntervalMs)
+  } while (Date.now() <= deadline)
+  throw new Error(`Checkbox did not become ${checked ? "checked" : "unchecked"}`)
+}
+
 const normalizeOrigin = (value, key) => {
   let parsed
   try {
@@ -236,12 +251,16 @@ const allowedSharedRequest = (entry) => {
     }
     const safeReadPatterns = [
       /^\/openapi\.json$/,
+      /^\/api\/v1\/audio\/health$/,
       /^\/api\/v1\/audio\/transcriptions\/health$/,
       /^\/api\/v1\/audio\/voices\/catalog$/,
+      /^\/api\/v1\/characters\/$/,
       /^\/api\/v1\/chat\/conversations\/[^/]+\/share-links$/,
       /^\/api\/v1\/chats\/$/,
       /^\/api\/v1\/chats\/[^/]+\/(?:messages|research-runs|settings)$/,
+      /^\/api\/v1\/config\/docs-info$/,
       /^\/api\/v1\/config\/providers$/,
+      /^\/api\/v1\/ingestion-sources\/capabilities$/,
       /^\/api\/v1\/persona\/catalog$/,
       /^\/api\/v1\/prompts\/capabilities$/,
       /^\/api\/v1\/users\/me\/profile$/,
@@ -2798,7 +2817,7 @@ export const runLiveUat = async (config) => {
     await memberPage.getByLabel("Close source preview").click()
 
     const selectedToRemove = memberPage.getByLabel(`Select ${fixture.sourceDefs[1].title}`)
-    await selectedToRemove.uncheck()
+    await waitForCheckboxState(selectedToRemove, false)
     if (
       !(await memberPage.getByLabel(`Select ${fixture.sourceDefs[0].title}`).isChecked()) ||
       (await selectedToRemove.isChecked())

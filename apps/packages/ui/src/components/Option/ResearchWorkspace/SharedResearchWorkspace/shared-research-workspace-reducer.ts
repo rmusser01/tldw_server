@@ -40,7 +40,9 @@ export interface SharedResearchWorkspaceState {
   sourceSummary: SharedSourceSummary | null
   sourceScopeMode: "all" | "include"
   selectedSourceIds: string[]
+  selectionMaterializing: boolean
   messages: SharedMessage[]
+  lastCompletedAssistantMessageId: string | null
   nextBefore: string | null
   draft: string
   draftRevision: number
@@ -55,6 +57,7 @@ export interface SharedResearchWorkspaceState {
   errors: {
     bootstrap: SharedWorkspaceError | null
     sources: SharedWorkspaceError | null
+    selection: SharedWorkspaceError | null
     history: SharedWorkspaceError | null
     preview: SharedWorkspaceError | null
     submission: SharedWorkspaceError | null
@@ -85,7 +88,9 @@ export const createInitialSharedResearchWorkspaceState = (
   sourceSummary: null,
   sourceScopeMode: "all",
   selectedSourceIds: [],
+  selectionMaterializing: false,
   messages: [],
+  lastCompletedAssistantMessageId: null,
   nextBefore: null,
   draft: "",
   draftRevision: 0,
@@ -100,6 +105,7 @@ export const createInitialSharedResearchWorkspaceState = (
   errors: {
     bootstrap: null,
     sources: null,
+    selection: null,
     history: null,
     preview: null,
     submission: null
@@ -128,6 +134,20 @@ export type SharedResearchWorkspaceAction =
     }
   | {
       type: "sourcesFailed"
+      generation: number
+      error: SharedWorkspaceError
+    }
+  | {
+      type: "selectionStarted"
+      generation: number
+    }
+  | {
+      type: "selectionSucceeded"
+      generation: number
+      sourceIds: string[]
+    }
+  | {
+      type: "selectionFailed"
       generation: number
       error: SharedWorkspaceError
     }
@@ -241,14 +261,13 @@ const reconcileSelectedSources = (
   query: SharedSourceQuery,
   page: SharedSourcePage
 ): string[] => {
+  if (state.sourceScopeMode === "all") return []
   const queryableIds = page.items
     .filter((source) => source.retrieval_ready)
     .map((source) => source.source_id)
   if (isCompleteUnfilteredPage(query, page)) {
     return uniqueSourceIds(
-      state.sourceScopeMode === "all"
-        ? queryableIds
-        : state.selectedSourceIds.filter((id) => queryableIds.includes(id))
+      state.selectedSourceIds.filter((id) => queryableIds.includes(id))
     )
   }
 
@@ -257,11 +276,7 @@ const reconcileSelectedSources = (
       .filter((source) => !source.retrieval_ready)
       .map((source) => source.source_id)
   )
-  const selected =
-    state.sourceScopeMode === "all"
-      ? [...state.selectedSourceIds, ...queryableIds]
-      : state.selectedSourceIds
-  return uniqueSourceIds(selected).filter(
+  return uniqueSourceIds(state.selectedSourceIds).filter(
     (id) => !returnedNonqueryableIds.has(id)
   )
 }
@@ -296,9 +311,8 @@ export const sharedResearchWorkspaceReducer = (
         },
         sourceSummary: action.bootstrap.source_summary,
         sourceScopeMode: "all",
-        selectedSourceIds: action.bootstrap.sources.items
-          .filter((source) => source.retrieval_ready)
-          .map((source) => source.source_id),
+        selectedSourceIds: [],
+        selectionMaterializing: false,
         messages: action.bootstrap.conversation.messages,
         nextBefore: action.bootstrap.conversation.next_before,
         provider: generationReady
@@ -334,6 +348,29 @@ export const sharedResearchWorkspaceReducer = (
     }
     case "sourcesFailed":
       return { ...state, errors: { ...state.errors, sources: action.error } }
+    case "selectionStarted":
+      return {
+        ...state,
+        selectionMaterializing: true,
+        errors: { ...state.errors, selection: null }
+      }
+    case "selectionSucceeded":
+      return {
+        ...state,
+        sourceScopeMode: "include",
+        selectedSourceIds: uniqueSourceIds(action.sourceIds),
+        selectionMaterializing: false,
+        pendingSubmission: clearFailedReceipt(state),
+        errors: { ...state.errors, selection: null }
+      }
+    case "selectionFailed":
+      return {
+        ...state,
+        sourceScopeMode: "all",
+        selectedSourceIds: [],
+        selectionMaterializing: false,
+        errors: { ...state.errors, selection: action.error }
+      }
     case "historySucceeded":
       return {
         ...state,
@@ -387,13 +424,18 @@ export const sharedResearchWorkspaceReducer = (
         ...state,
         sourceScopeMode: "include",
         selectedSourceIds: uniqueSourceIds(action.sourceIds),
-        pendingSubmission: clearFailedReceipt(state)
+        selectionMaterializing: false,
+        pendingSubmission: clearFailedReceipt(state),
+        errors: { ...state.errors, selection: null }
       }
     case "allSourcesSelected":
       return {
         ...state,
         sourceScopeMode: "all",
-        pendingSubmission: clearFailedReceipt(state)
+        selectedSourceIds: [],
+        selectionMaterializing: false,
+        pendingSubmission: clearFailedReceipt(state),
+        errors: { ...state.errors, selection: null }
       }
     case "providerChanged":
       return {
@@ -459,6 +501,7 @@ export const sharedResearchWorkspaceReducer = (
           userMessage,
           assistantMessage
         ]),
+        lastCompletedAssistantMessageId: assistantMessage.message_id,
         draft:
           pending &&
           state.draftRevision === pending.draftRevision &&

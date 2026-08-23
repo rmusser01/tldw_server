@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { getStructuredApiErrorDetail, TldwApiError } from "../../api-error"
-import { sharedWorkspacesApi } from "../shared-workspaces"
+import {
+  isSharedWorkspacePostCommitResponseError,
+  SharedWorkspacePostCommitResponseError,
+  sharedWorkspacesApi
+} from "../shared-workspaces"
 
 const fetchWithTldwAuth = vi.hoisted(() => vi.fn())
 const getTldwServerURL = vi.hoisted(() =>
@@ -276,11 +280,81 @@ describe("sharedWorkspacesApi", () => {
       jsonResponse({ items: [], pagination: null, summary: {}, partial_errors: [] })
     )
 
-    await expect(
-      sharedWorkspacesApi.listSources(42, { offset: 0, limit: 50 })
-    ).rejects.toMatchObject({
+    const error = await sharedWorkspacesApi
+      .listSources(42, { offset: 0, limit: 50 })
+      .catch((cause: unknown) => cause)
+
+    expect(error).toMatchObject({
       status: 502,
       detail: { code: "shared_workspace_unavailable", retryable: true }
+    })
+    expect(isSharedWorkspacePostCommitResponseError(error)).toBe(false)
+  })
+
+  it.each([
+    [
+      "truncated JSON",
+      () =>
+        new Response('{"schema_version":1', {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+    ],
+    ["a strictly invalid chat envelope", () => jsonResponse({ schema_version: 1 })]
+  ])("marks ask-only %s as post-commit ambiguous", async (_case, response) => {
+    fetchWithTldwAuth.mockResolvedValue(response())
+
+    const error = await sharedWorkspacesApi
+      .ask(42, {
+        request_id: "00000000-0000-4000-8000-000000000042",
+        query: "What changed?",
+        source_scope: { mode: "all", source_ids: [] },
+        provider: "openai",
+        model: "gpt-5-mini"
+      })
+      .catch((cause: unknown) => cause)
+
+    expect(error).toBeInstanceOf(SharedWorkspacePostCommitResponseError)
+    expect(isSharedWorkspacePostCommitResponseError(error)).toBe(true)
+    expect(error).toMatchObject({
+      status: 502,
+      detail: {
+        code: "shared_chat_response_unconfirmed",
+        retryable: true,
+        recovery_action: "retry"
+      }
+    })
+  })
+
+  it("does not mark a typed non-2xx ask error as post-commit ambiguous", async () => {
+    fetchWithTldwAuth.mockResolvedValue(
+      jsonResponse(
+        {
+          detail: {
+            code: "generation_failed",
+            message: "Generation failed.",
+            retryable: true
+          }
+        },
+        503
+      )
+    )
+
+    const error = await sharedWorkspacesApi
+      .ask(42, {
+        request_id: "00000000-0000-4000-8000-000000000042",
+        query: "What changed?",
+        source_scope: { mode: "all", source_ids: [] },
+        provider: "openai",
+        model: "gpt-5-mini"
+      })
+      .catch((cause: unknown) => cause)
+
+    expect(error).toBeInstanceOf(TldwApiError)
+    expect(isSharedWorkspacePostCommitResponseError(error)).toBe(false)
+    expect(error).toMatchObject({
+      status: 503,
+      detail: { code: "generation_failed" }
     })
   })
 

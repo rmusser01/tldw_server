@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { SharedWorkspacePostCommitResponseError } from "@/services/tldw/domains/shared-workspaces"
 import type {
   SharedChatRequest,
   SharedChatResponse,
@@ -22,11 +23,18 @@ const api = vi.hoisted(() => ({
   ask: vi.fn()
 }))
 
-vi.mock("@/services/tldw/domains/shared-workspaces", () => ({
-  sharedWorkspacesApi: api
-}))
+vi.mock(
+  "@/services/tldw/domains/shared-workspaces",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/services/tldw/domains/shared-workspaces")
+      >()
+    return { ...actual, sharedWorkspacesApi: api }
+  }
+)
 
-const deferred = <T,>() => {
+const deferred = <T>() => {
   let resolve!: (value: T) => void
   let reject!: (reason?: unknown) => void
   const promise = new Promise<T>((res, rej) => {
@@ -62,37 +70,42 @@ const bootstrap = (
     ready: true,
     reason_code: null
   }
-): SharedWorkspaceBootstrap => ({
-  schema_version: 1,
-  generated_at: "2026-08-22T00:00:00Z",
-  share: {
-    share_id: shareId,
-    access_level: "view_chat",
-    allow_clone: false,
-    owner_display_name: "Owner",
-    shared_at: null
-  },
-  workspace: {
-    workspace_id: `workspace-${shareId}`,
-    name: `Workspace ${shareId}`,
-    description: ""
-  },
-  allowed_actions: {
-    inspect_sources: { allowed: true, reason_code: null },
-    ask_grounded_questions: { allowed: true, reason_code: null },
-    add_sources: { allowed: false, reason_code: "recipient_read_only" },
-    edit_workspace: { allowed: false, reason_code: "recipient_read_only" },
-    clone_workspace: { allowed: false, reason_code: "clone_not_allowed" }
-  },
-  generation_default: generationDefault,
-  source_summary: { total: items.length, queryable: 1, processing: 1, failed: 0 },
-  sources: {
-    items,
-    pagination: { offset: 0, limit: 50, total: items.length, has_more: false }
-  },
-  conversation: { conversation_id: null, messages: [], next_before: null },
-  partial_errors: []
-})
+): SharedWorkspaceBootstrap => {
+  const queryable = items.filter((item) => item.retrieval_ready).length
+  const processing = items.filter((item) => item.state === "processing").length
+  const failed = items.filter((item) => item.state === "failed").length
+  return {
+    schema_version: 1,
+    generated_at: "2026-08-22T00:00:00Z",
+    share: {
+      share_id: shareId,
+      access_level: "view_chat",
+      allow_clone: false,
+      owner_display_name: "Owner",
+      shared_at: null
+    },
+    workspace: {
+      workspace_id: `workspace-${shareId}`,
+      name: `Workspace ${shareId}`,
+      description: ""
+    },
+    allowed_actions: {
+      inspect_sources: { allowed: true, reason_code: null },
+      ask_grounded_questions: { allowed: true, reason_code: null },
+      add_sources: { allowed: false, reason_code: "recipient_read_only" },
+      edit_workspace: { allowed: false, reason_code: "recipient_read_only" },
+      clone_workspace: { allowed: false, reason_code: "clone_not_allowed" }
+    },
+    generation_default: generationDefault,
+    source_summary: { total: items.length, queryable, processing, failed },
+    sources: {
+      items,
+      pagination: { offset: 0, limit: 50, total: items.length, has_more: false }
+    },
+    conversation: { conversation_id: null, messages: [], next_before: null },
+    partial_errors: []
+  }
+}
 
 const apiError = (
   code: string,
@@ -115,16 +128,17 @@ const sourcePage = (
     limit: 50,
     total: items.length,
     has_more: false
-  }
-): SharedSourcePage => ({
-  items,
-  pagination,
-  summary: {
+  },
+  summary: SharedSourcePage["summary"] = {
     total: pagination.total,
     queryable: items.filter((item) => item.retrieval_ready).length,
     processing: items.filter((item) => item.state === "processing").length,
     failed: items.filter((item) => item.state === "failed").length
-  },
+  }
+): SharedSourcePage => ({
+  items,
+  pagination,
+  summary,
   partial_errors: []
 })
 
@@ -226,7 +240,8 @@ describe("sharedResearchWorkspaceReducer", () => {
     })
 
     expect(state.sourceScopeMode).toBe("all")
-    expect(state.selectedSourceIds).toEqual(["source-1"])
+    expect(state.selectedSourceIds).toEqual([])
+    expect(state.lastCompletedAssistantMessageId).toBeNull()
     expect(state.provider).toBe("openai")
     expect(state.model).toBe("gpt-5-mini")
   })
@@ -261,6 +276,7 @@ describe("sharedResearchWorkspaceReducer", () => {
     )
     state = {
       ...state,
+      sourceScopeMode: "include",
       selectedSourceIds: ["source-1", "source-2", "removed"]
     }
 
@@ -298,7 +314,7 @@ describe("sharedResearchWorkspaceReducer", () => {
     expect(state.selectedSourceIds).toEqual(["source-1", "off-page"])
   })
 
-  it("keeps all-mode selection across pages and adds queryable returned sources", () => {
+  it("keeps all-mode selection implicit across source pages", () => {
     let state = sharedResearchWorkspaceReducer(
       createInitialSharedResearchWorkspaceState(4, 1),
       { type: "bootstrapSucceeded", generation: 1, bootstrap: bootstrap(4) }
@@ -317,7 +333,37 @@ describe("sharedResearchWorkspaceReducer", () => {
     })
 
     expect(state.sourceScopeMode).toBe("all")
-    expect(state.selectedSourceIds).toEqual(["source-1", "source-51"])
+    expect(state.selectedSourceIds).toEqual([])
+  })
+
+  it("records only the exact assistant message completed by a submission", () => {
+    let state = sharedResearchWorkspaceReducer(createInitialSharedResearchWorkspaceState(4, 1), {
+      type: "bootstrapSucceeded",
+      generation: 1,
+      bootstrap: bootstrap(4)
+    })
+    const request: SharedChatRequest = {
+      request_id: "request-1",
+      query: "Question",
+      source_scope: { mode: "all", source_ids: [] },
+      provider: "openai",
+      model: "gpt-5-mini"
+    }
+    state = sharedResearchWorkspaceReducer(state, {
+      type: "submissionStarted",
+      generation: 1,
+      request,
+      submittedDraft: "Question",
+      draftRevision: 0
+    })
+
+    state = sharedResearchWorkspaceReducer(state, {
+      type: "submissionSucceeded",
+      generation: 1,
+      response: chatResponse("request-1", "exact", "all")
+    })
+
+    expect(state.lastCompletedAssistantMessageId).toBe("assistant-exact")
   })
 
   it("prepends older history without duplicating message IDs", () => {
@@ -429,6 +475,158 @@ describe("useSharedResearchWorkspace", () => {
     expect(api.ask.mock.calls[1][1]).toBe(frozen)
     expect(uuid).toHaveBeenCalledTimes(1)
     expect(result.current.state.draft).toBe("")
+  })
+
+  it("materializes every unfiltered queryable source before deselecting from all mode", async () => {
+    const items = Array.from({ length: 75 }, (_, index) => source(`source-${index + 1}`))
+    const initial = bootstrap(4, items.slice(0, 50))
+    initial.source_summary = {
+      total: 75,
+      queryable: 75,
+      processing: 0,
+      failed: 0
+    }
+    initial.sources.pagination = {
+      offset: 0,
+      limit: 50,
+      total: 75,
+      has_more: true
+    }
+    const summary = initial.source_summary
+    api.bootstrap.mockResolvedValue(initial)
+    api.listSources
+      .mockResolvedValueOnce(
+        sourcePage(items.slice(0, 50), { offset: 0, limit: 50, total: 75, has_more: true }, summary)
+      )
+      .mockResolvedValueOnce(
+        sourcePage(items.slice(50), { offset: 50, limit: 50, total: 75, has_more: false }, summary)
+      )
+    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+    act(() =>
+      result.current.setSourceQuery({
+        offset: 0,
+        limit: 50,
+        q: "visible-filter"
+      })
+    )
+
+    await act(async () => result.current.toggleSource(items[0], false))
+
+    expect(api.listSources.mock.calls.map((call) => call[1])).toEqual([
+      { offset: 0, limit: 200 },
+      { offset: 50, limit: 200 }
+    ])
+    expect(result.current.state.sourceQuery).toEqual({
+      offset: 0,
+      limit: 50,
+      q: "visible-filter"
+    })
+    expect(result.current.state.sourceScopeMode).toBe("include")
+    expect(result.current.state.selectedSourceIds).toHaveLength(74)
+    expect(result.current.state.selectedSourceIds).not.toContain("source-1")
+    expect(result.current.state.selectedSourceIds).toContain("source-75")
+    expect(result.current.state.errors.selection).toBeNull()
+  })
+
+  it("leaves all mode unchanged when source materialization fails between pages", async () => {
+    const items = Array.from({ length: 75 }, (_, index) => source(`source-${index + 1}`))
+    const initial = bootstrap(4, items.slice(0, 50))
+    initial.source_summary = {
+      total: 75,
+      queryable: 75,
+      processing: 0,
+      failed: 0
+    }
+    initial.sources.pagination = {
+      offset: 0,
+      limit: 50,
+      total: 75,
+      has_more: true
+    }
+    api.bootstrap.mockResolvedValue(initial)
+    api.listSources
+      .mockResolvedValueOnce(
+        sourcePage(
+          items.slice(0, 50),
+          { offset: 0, limit: 50, total: 75, has_more: true },
+          initial.source_summary
+        )
+      )
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+
+    await act(async () => result.current.toggleSource(items[0], false))
+
+    expect(result.current.state.sourceScopeMode).toBe("all")
+    expect(result.current.state.selectedSourceIds).toEqual([])
+    expect(result.current.state.selectionMaterializing).toBe(false)
+    expect(result.current.state.errors.selection?.code).toBe("shared_source_selection_unavailable")
+  })
+
+  it("leaves all mode unchanged when paginated materialization is inconsistent", async () => {
+    const items = Array.from({ length: 75 }, (_, index) => source(`source-${index + 1}`))
+    const initial = bootstrap(4, items.slice(0, 50))
+    initial.source_summary = {
+      total: 75,
+      queryable: 75,
+      processing: 0,
+      failed: 0
+    }
+    initial.sources.pagination = {
+      offset: 0,
+      limit: 50,
+      total: 75,
+      has_more: true
+    }
+    api.bootstrap.mockResolvedValue(initial)
+    api.listSources
+      .mockResolvedValueOnce(
+        sourcePage(
+          items.slice(0, 50),
+          { offset: 0, limit: 50, total: 75, has_more: true },
+          initial.source_summary
+        )
+      )
+      .mockResolvedValueOnce(
+        sourcePage(
+          [source("source-50"), ...items.slice(51)],
+          { offset: 50, limit: 50, total: 75, has_more: false },
+          initial.source_summary
+        )
+      )
+    const { result } = renderHook(() => useSharedResearchWorkspace(4))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+
+    await act(async () => result.current.toggleSource(items[0], false))
+
+    expect(result.current.state.sourceScopeMode).toBe("all")
+    expect(result.current.state.selectedSourceIds).toEqual([])
+    expect(result.current.state.errors.selection?.code).toBe("shared_source_selection_unavailable")
+  })
+
+  it("retains an immutable receipt for an invalid successful chat response", async () => {
+    api.bootstrap.mockResolvedValue(bootstrap(4))
+    api.ask
+      .mockRejectedValueOnce(new SharedWorkspacePostCommitResponseError())
+      .mockResolvedValueOnce(chatResponse("request-1", "1", "all"))
+    const uuid = vi.fn().mockReturnValue("request-1")
+    const { result } = renderHook(() => useSharedResearchWorkspace(4, { createRequestId: uuid }))
+    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
+    act(() => result.current.setDraft("Question"))
+
+    await act(async () => result.current.submitDraft())
+
+    const frozen = api.ask.mock.calls[0][1] as SharedChatRequest
+    expect(result.current.state.pendingSubmission?.status).toBe("retryable")
+    expect(result.current.state.errors.submission?.code).toBe("shared_chat_response_unconfirmed")
+
+    await act(async () => result.current.retryPending())
+
+    expect(api.ask.mock.calls[1][1]).toBe(frozen)
+    expect(uuid).toHaveBeenCalledTimes(1)
+    expect(result.current.state.lastCompletedAssistantMessageId).toBe("assistant-1")
   })
 
   it("preserves an exact raw draft edit made while a request is in flight", async () => {
@@ -683,11 +881,12 @@ describe("useSharedResearchWorkspace", () => {
     ])
   })
 
-  it("ignores a reordered same-share submission and rejects mismatched response IDs", async () => {
+  it("ignores a reordered submission and reconciles a mismatched response with the same UUID", async () => {
     const older = deferred<SharedChatResponse>()
     const newer = deferred<SharedChatResponse>()
     api.bootstrap.mockResolvedValue(bootstrap(4))
     api.ask.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
+      .mockResolvedValueOnce(chatResponse("request-2", "3", "all"))
     const uuid = vi
       .fn()
       .mockReturnValueOnce("request-1")
@@ -719,10 +918,18 @@ describe("useSharedResearchWorkspace", () => {
 
     expect(result.current.state.messages).toEqual([])
     expect(result.current.state.draft).toBe("Second")
-    expect(result.current.state.pendingSubmission).toBeNull()
+    expect(result.current.state.pendingSubmission?.status).toBe("retryable")
+    expect(result.current.state.pendingSubmission?.request.request_id).toBe("request-2")
     expect(result.current.state.errors.submission?.code).toBe(
       "shared_chat_response_mismatch"
     )
+
+    const frozen = api.ask.mock.calls[1][1]
+    await act(async () => result.current.retryPending())
+
+    expect(api.ask.mock.calls[2][1]).toBe(frozen)
+    expect(uuid).toHaveBeenCalledTimes(2)
+    expect(result.current.state.lastCompletedAssistantMessageId).toBe("assistant-3")
   })
 
   it("aborts every active operation and clears all old share data on replacement", async () => {
@@ -839,6 +1046,7 @@ describe("useSharedResearchWorkspace", () => {
 
     act(() => result.current.selectAllSources())
     expect(result.current.state.sourceScopeMode).toBe("all")
+    expect(result.current.state.selectedSourceIds).toEqual([])
 
     act(() => result.current.clearSelectedSources())
     expect(result.current.state.sourceScopeMode).toBe("include")

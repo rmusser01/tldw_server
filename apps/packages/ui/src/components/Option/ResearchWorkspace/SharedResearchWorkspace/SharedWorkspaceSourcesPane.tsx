@@ -24,10 +24,11 @@ export const SharedWorkspaceSourcesPane: React.FC<
   const summary = state.sourceSummary
   const inspectAction = state.allowedActions.inspect_sources
   const canInspect = inspectAction.allowed
+  const selectionBusy = state.selectionMaterializing
   const inspectReason = formatSharedActionReason(inspectAction.reason_code)
 
   const runQuery = (patch: Partial<SharedSourceQuery>) => {
-    if (!canInspect) return
+    if (!canInspect || selectionBusy) return
     const query = { ...state.sourceQuery, ...patch }
     controller.setSourceQuery(query)
     void controller.refreshSources(query)
@@ -38,6 +39,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
       ? summary?.queryable ?? 0
       : state.selectedSourceIds.length
   const queryableCount = summary?.queryable ?? 0
+  const allScopeOverLimit = state.sourceScopeMode === "all" && queryableCount > 500
   const reasonLabel = (source: SharedSource): string => {
     if (source.reason_code === "transcription_pending") {
       return t("sharedWorkspace.transcriptionPending", "Transcription pending")
@@ -50,14 +52,6 @@ export const SharedWorkspaceSourcesPane: React.FC<
     }
     return source.reason_code?.replaceAll("_", " ") ||
       t("sharedWorkspace.notQueryable", "Not queryable")
-  }
-
-  const toggleSource = (source: SharedSource, checked: boolean) => {
-    if (!canInspect) return
-    const selected = new Set(state.selectedSourceIds)
-    if (checked) selected.add(source.source_id)
-    else selected.delete(source.source_id)
-    controller.setSelectedSourceIds(Array.from(selected))
   }
 
   return (
@@ -119,7 +113,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
             type="search"
             aria-label={t("sharedWorkspace.search", "Search shared sources")}
             value={state.sourceQuery.q ?? ""}
-            disabled={!canInspect}
+            disabled={!canInspect || selectionBusy}
             onChange={(event) => runQuery({ q: event.target.value, offset: 0 })}
             className="h-9 w-full rounded-md border border-border bg-surface2 pl-8 pr-3 text-sm outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-focus"
           />
@@ -139,7 +133,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
                 "Filter shared sources by state"
               )}
               value={state.sourceQuery.state ?? ""}
-              disabled={!canInspect}
+              disabled={!canInspect || selectionBusy}
               onChange={(event) =>
                 runQuery({ state: event.target.value || undefined, offset: 0 })
               }
@@ -155,7 +149,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
           </label>
           <button
             type="button"
-            disabled={!canInspect}
+            disabled={!canInspect || selectionBusy}
             onClick={controller.selectAllSources}
             className="h-9 whitespace-nowrap rounded-md px-2 text-xs font-medium text-primary outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
             aria-label={t(
@@ -167,7 +161,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
           </button>
           <button
             type="button"
-            disabled={!canInspect}
+            disabled={!canInspect || selectionBusy}
             onClick={controller.clearSelectedSources}
             className="h-9 whitespace-nowrap rounded-md px-2 text-xs font-medium text-text-muted outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
             aria-label={t(
@@ -179,12 +173,25 @@ export const SharedWorkspaceSourcesPane: React.FC<
           </button>
         </div>
 
-        {state.sourceScopeMode === "all" && queryableCount > 500 ? (
+        {allScopeOverLimit ? (
           <p className="text-xs text-warn">
             {t(
               "sharedWorkspace.scopeLimit",
-              "Choose a subset of up to 500 sources before asking a question."
+              "Clear the selection, then choose up to 500 sources."
             )}
+          </p>
+        ) : null}
+        {selectionBusy ? (
+          <p role="status" className="text-xs text-text-muted">
+            {t(
+              "sharedWorkspace.selectionPreparing",
+              "Preparing complete source selection..."
+            )}
+          </p>
+        ) : null}
+        {state.errors.selection ? (
+          <p role="alert" className="text-xs text-danger">
+            {t("sharedWorkspace.selectionUnavailable", state.errors.selection.message)}
           </p>
         ) : null}
         {state.errors.sources ? (
@@ -217,9 +224,17 @@ export const SharedWorkspaceSourcesPane: React.FC<
                         { title: source.title }
                       )}
                       checked={checked}
-                      disabled={!canInspect || !source.retrieval_ready}
+                      disabled={
+                        !canInspect ||
+                        !source.retrieval_ready ||
+                        selectionBusy ||
+                        allScopeOverLimit
+                      }
                       onChange={(event) =>
-                        toggleSource(source, event.target.checked)
+                        void controller.toggleSource(
+                          source,
+                          event.target.checked
+                        )
                       }
                       className="h-4 w-4 accent-primary focus-visible:ring-2 focus-visible:ring-focus"
                     />
@@ -293,7 +308,12 @@ export const SharedWorkspaceSourcesPane: React.FC<
                 "sharedWorkspace.previousPage",
                 "Previous source page"
               )}
-              disabled={!canInspect || !page || page.pagination.offset === 0}
+              disabled={
+                !canInspect ||
+                selectionBusy ||
+                !page ||
+                page.pagination.offset === 0
+              }
               onClick={() =>
                 runQuery({
                   offset: Math.max(
@@ -315,7 +335,9 @@ export const SharedWorkspaceSourcesPane: React.FC<
                 "sharedWorkspace.nextPage",
                 "Next source page"
               )}
-              disabled={!canInspect || !page?.pagination.has_more}
+              disabled={
+                !canInspect || selectionBusy || !page?.pagination.has_more
+              }
               onClick={() =>
                 runQuery({
                   offset:

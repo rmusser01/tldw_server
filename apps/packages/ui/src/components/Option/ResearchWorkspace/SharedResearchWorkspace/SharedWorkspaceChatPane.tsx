@@ -72,7 +72,9 @@ export const SharedWorkspaceChatPane: React.FC<
   const [selectedModel, setSelectedModel] = React.useState<string | null>(null)
   const [announcement, setAnnouncement] = React.useState("")
   const seededDefaultRef = React.useRef<string | null>(null)
-  const awaitingAnswerRef = React.useRef(false)
+  const announcedAssistantIdRef = React.useRef(
+    state.lastCompletedAssistantMessageId
+  )
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const messagesScrollRef = React.useRef<HTMLDivElement>(null)
   const historyAnchorRef = React.useRef<{
@@ -209,6 +211,7 @@ export const SharedWorkspaceChatPane: React.FC<
     generationDefault?.ready === true &&
     Boolean(state.provider && state.model && selectedModel) &&
     !invalidScope &&
+    !state.selectionMaterializing &&
     !submitting &&
     !rateLimited
   const submissionCode = state.errors.submission?.code
@@ -241,11 +244,16 @@ export const SharedWorkspaceChatPane: React.FC<
                 "sharedWorkspace.retrievalUnavailable",
                 "Shared source retrieval is temporarily unavailable. Try again."
               )
-            : state.errors.submission?.message || null
+            : submissionCode === "shared_chat_response_unconfirmed" ||
+                  submissionCode === "shared_chat_response_mismatch"
+                ? t(
+                    "sharedWorkspace.responseUnconfirmed",
+                    "The answer status is uncertain. Retry to reconcile this question without sending a duplicate."
+                  )
+                : state.errors.submission?.message || null
 
   React.useEffect(() => {
     if (!state.errors.submission) return
-    awaitingAnswerRef.current = false
     if (state.rateLimitRemainingMs > 0) {
       setAnnouncement(
         t("sharedWorkspace.rateLimited", "Try again in {{count}} second", {
@@ -258,16 +266,17 @@ export const SharedWorkspaceChatPane: React.FC<
   }, [state.errors.submission, state.rateLimitRemainingMs, t])
 
   React.useEffect(() => {
+    const completedAssistantId = state.lastCompletedAssistantMessageId
     if (
-      !awaitingAnswerRef.current ||
-      !state.messages.some((message) => message.role === "assistant")
+      !completedAssistantId ||
+      announcedAssistantIdRef.current === completedAssistantId
     ) {
       return
     }
-    awaitingAnswerRef.current = false
+    announcedAssistantIdRef.current = completedAssistantId
     setAnnouncement(t("sharedWorkspace.answerAdded", "Answer added"))
     messagesEndRef.current?.scrollIntoView?.({ block: "nearest" })
-  }, [state.messages, t])
+  }, [state.lastCompletedAssistantMessageId, t])
 
   React.useLayoutEffect(() => {
     const anchor = historyAnchorRef.current
@@ -296,11 +305,18 @@ export const SharedWorkspaceChatPane: React.FC<
 
   const submit = async () => {
     if (!canSubmit) return
-    awaitingAnswerRef.current = true
     setAnnouncement(
       t("sharedWorkspace.askingStatus", "Asking shared workspace")
     )
     await controller.submitDraft()
+  }
+
+  const retry = async () => {
+    if (state.pendingSubmission?.status !== "retryable" || rateLimited) return
+    setAnnouncement(
+      t("sharedWorkspace.askingStatus", "Asking shared workspace")
+    )
+    await controller.retryPending()
   }
 
   return (
@@ -453,7 +469,7 @@ export const SharedWorkspaceChatPane: React.FC<
               {state.pendingSubmission?.status === "retryable" ? (
                 <button
                   type="button"
-                  onClick={() => void controller.retryPending()}
+                  onClick={() => void retry()}
                   disabled={rateLimited}
                   className="h-9 rounded-md px-2 font-medium text-primary outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40"
                 >

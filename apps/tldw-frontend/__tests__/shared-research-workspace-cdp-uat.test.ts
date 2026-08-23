@@ -16,6 +16,7 @@ import {
   getTransitionEvidenceOperationContract,
   selectEffectiveTarget,
   validateEvidenceRecord,
+  waitForCheckboxState,
 } from "../scripts/shared-research-workspace-cdp-uat.mjs"
 
 const REQUIRED_ENV = {
@@ -938,6 +939,29 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     expect(scrollAttempts).toBe(3)
   })
 
+  it("waits for an asynchronously materialized checkbox selection", async () => {
+    let clicked = false
+    let reads = 0
+    const locator = {
+      click: async () => {
+        clicked = true
+      },
+      isChecked: async () => {
+        reads += 1
+        return !(clicked && reads >= 3)
+      },
+    }
+
+    await expect(
+      waitForCheckboxState(locator, false, {
+        pollIntervalMs: 0,
+        timeoutMs: 100,
+      })
+    ).resolves.toBeUndefined()
+    expect(clicked).toBe(true)
+    expect(reads).toBeGreaterThanOrEqual(3)
+  })
+
   it("asks for both source facts without leaking either expected value", () => {
     const question = buildAllSourcesQuestion({
       amberTitle: "Amber protocol final18",
@@ -1325,6 +1349,28 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     }))
 
     expect(classifyStrictLedger({ ...cleanLedger, requests }).ok).toBe(true)
+  })
+
+  it("allows exact read-only Chats bootstrap requests after transition handoff", () => {
+    const requests = [
+      "/api/v1/config/docs-info",
+      "/api/v1/ingestion-sources/capabilities",
+      "/api/v1/characters/",
+      "/api/v1/audio/health",
+    ].map((pathname) => ({
+      context: "member-chats",
+      method: "GET",
+      status: 200,
+      url: `http://127.0.0.1:18001${pathname}`,
+    }))
+
+    expect(classifyStrictLedger({ ...cleanLedger, requests }).ok).toBe(true)
+    expect(
+      classifyStrictLedger({
+        ...cleanLedger,
+        requests: [{ ...requests[0], method: "POST" }],
+      }).ok
+    ).toBe(false)
   })
 
   it("redacts credentials from nested evidence and never writes raw prompts or answers", () => {

@@ -3,9 +3,15 @@ import {
   getStructuredApiErrorDetail,
   type StructuredApiErrorDetail
 } from "@/services/tldw/api-error"
-import { sharedWorkspacesApi } from "@/services/tldw/domains/shared-workspaces"
+import {
+  isSharedWorkspacePostCommitResponseError,
+  SharedWorkspacePostCommitResponseError,
+  sharedWorkspacesApi
+} from "@/services/tldw/domains/shared-workspaces"
 import type {
   SharedChatRequest,
+  SharedSource,
+  SharedSourcePage,
   SharedSourceQuery
 } from "@/types/shared-workspace"
 import {
@@ -18,7 +24,23 @@ interface SharedResearchWorkspaceOptions {
   createRequestId?: () => string
 }
 
-type Operation = "bootstrap" | "sources" | "history" | "preview" | "submission"
+type Operation =
+  | "bootstrap"
+  | "sources"
+  | "selection"
+  | "history"
+  | "preview"
+  | "submission"
+
+const SOURCE_MATERIALIZATION_LIMIT = 200
+const MAX_SOURCE_MATERIALIZATION_PAGES = 100
+const SOURCE_SELECTION_ERROR: SharedWorkspaceError = {
+  code: "shared_source_selection_unavailable",
+  message:
+    "Couldn't load every queryable source. All queryable sources remain selected.",
+  retryable: true,
+  recovery_action: "retry"
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -28,9 +50,19 @@ const isAbortError = (error: unknown): boolean =>
     ? error.name === "AbortError"
     : isRecord(error) && error.name === "AbortError"
 
-const isAmbiguousTransportFailure = (error: unknown): boolean =>
-  error instanceof TypeError &&
-  !(isRecord(error) && typeof error.status === "number")
+const isAmbiguousPostCommitFailure = (error: unknown): boolean =>
+  isSharedWorkspacePostCommitResponseError(error) ||
+  (error instanceof TypeError &&
+    !(isRecord(error) && typeof error.status === "number"))
+
+const sourceSummariesMatch = (
+  left: SharedSourcePage["summary"],
+  right: SharedSourcePage["summary"]
+): boolean =>
+  left.total === right.total &&
+  left.queryable === right.queryable &&
+  left.processing === right.processing &&
+  left.failed === right.failed
 
 const normalizeError = (error: unknown): SharedWorkspaceError => {
   const structured: StructuredApiErrorDetail =
@@ -107,6 +139,11 @@ export const useSharedResearchWorkspace = (
     const controller = new AbortController()
     controllersRef.current[operation] = controller
     return controller
+  }, [])
+
+  const cancelOperation = React.useCallback((operation: Operation) => {
+    controllersRef.current[operation]?.abort()
+    delete controllersRef.current[operation]
   }, [])
 
   const releaseOperation = React.useCallback(
@@ -290,6 +327,136 @@ export const useSharedResearchWorkspace = (
     ]
   )
 
+  const toggleSource = React.useCallback(
+    async (source: SharedSource, checked: boolean): Promise<void> => {
+      if (
+        !state.allowedActions.inspect_sources.allowed ||
+        !source.retrieval_ready ||
+        state.selectionMaterializing
+      ) {
+        return
+      }
+
+      if (state.sourceScopeMode === "include") {
+        const selected = new Set(state.selectedSourceIds)
+        if (checked) selected.add(source.source_id)
+        else selected.delete(source.source_id)
+        dispatch({
+          type: "selectedSourcesChanged",
+          sourceIds: Array.from(selected)
+        })
+        return
+      }
+
+      if (checked) return
+      const expectedSummary = state.sourceSummary
+      if (
+        !expectedSummary ||
+        expectedSummary.queryable === 0 ||
+        expectedSummary.queryable > 500
+      ) {
+        return
+      }
+
+      const generation = generationRef.current
+      const controller = startOperation("selection")
+      dispatch({ type: "selectionStarted", generation })
+      try {
+        const seenSourceIds = new Set<string>()
+        const queryableSourceIds: string[] = []
+        let offset = 0
+        let pageCount = 0
+        let complete = false
+
+        while (!complete) {
+          pageCount += 1
+          if (pageCount > MAX_SOURCE_MATERIALIZATION_PAGES) {
+            throw new Error("Shared source selection exceeded the page limit")
+          }
+
+          const page = await sharedWorkspacesApi.listSources(
+            shareId,
+            { offset, limit: SOURCE_MATERIALIZATION_LIMIT },
+            controller.signal
+          )
+          if (!isCurrentOperation("selection", controller)) return
+
+          if (
+            page.partial_errors.length > 0 ||
+            page.pagination.offset !== offset ||
+            page.pagination.total !== expectedSummary.total ||
+            !sourceSummariesMatch(page.summary, expectedSummary) ||
+            page.items.length > page.pagination.limit
+          ) {
+            throw new Error("Shared source pagination changed")
+          }
+
+          for (const item of page.items) {
+            if (seenSourceIds.has(item.source_id)) {
+              throw new Error("Shared source pagination contained duplicates")
+            }
+            seenSourceIds.add(item.source_id)
+            if (item.retrieval_ready) queryableSourceIds.push(item.source_id)
+          }
+
+          const nextOffset = offset + page.items.length
+          if (
+            nextOffset > expectedSummary.total ||
+            (page.pagination.has_more &&
+              (page.items.length === 0 || nextOffset >= expectedSummary.total)) ||
+            (!page.pagination.has_more && nextOffset !== expectedSummary.total)
+          ) {
+            throw new Error("Shared source pagination was incomplete")
+          }
+          complete = !page.pagination.has_more
+          offset = nextOffset
+        }
+
+        if (
+          seenSourceIds.size !== expectedSummary.total ||
+          queryableSourceIds.length !== expectedSummary.queryable ||
+          !queryableSourceIds.includes(source.source_id)
+        ) {
+          throw new Error("Shared source selection was incomplete")
+        }
+
+        if (!isCurrentOperation("selection", controller)) return
+        dispatch({
+          type: "selectionSucceeded",
+          generation,
+          sourceIds: queryableSourceIds.filter(
+            (sourceId) => sourceId !== source.source_id
+          )
+        })
+      } catch (error) {
+        if (
+          !isAbortError(error) &&
+          isCurrentOperation("selection", controller) &&
+          generation === generationRef.current
+        ) {
+          dispatch({
+            type: "selectionFailed",
+            generation,
+            error: SOURCE_SELECTION_ERROR
+          })
+        }
+      } finally {
+        releaseOperation("selection", controller)
+      }
+    },
+    [
+      isCurrentOperation,
+      releaseOperation,
+      shareId,
+      startOperation,
+      state.allowedActions.inspect_sources.allowed,
+      state.selectedSourceIds,
+      state.selectionMaterializing,
+      state.sourceScopeMode,
+      state.sourceSummary
+    ]
+  )
+
   const sendRequest = React.useCallback(
     async (
       request: Readonly<SharedChatRequest>,
@@ -313,20 +480,13 @@ export const useSharedResearchWorkspace = (
         )
         if (!isCurrentOperation("submission", controller)) return
         if (response.request_id !== request.request_id) {
-          dispatch({
-            type: "submissionFailed",
-            generation,
-            error: {
-              status: 502,
-              code: "shared_chat_response_mismatch",
-              message: "Shared chat response did not match the request.",
-              retryable: false
-            },
-            retryableReceipt: false,
-            rateLimitUntil: null,
-            rateLimitRemainingMs: 0
+          throw new SharedWorkspacePostCommitResponseError({
+            code: "shared_chat_response_mismatch",
+            message:
+              "The answer status is uncertain because the response did not match the request. Retry to reconcile this question.",
+            retryable: true,
+            recovery_action: "retry"
           })
-          return
         }
         dispatch({ type: "submissionSucceeded", generation, response })
       } catch (error) {
@@ -350,7 +510,7 @@ export const useSharedResearchWorkspace = (
           type: "submissionFailed",
           generation,
           error: normalized,
-          retryableReceipt: isAmbiguousTransportFailure(error),
+          retryableReceipt: isAmbiguousPostCommitFailure(error),
           rateLimitUntil:
             rateLimitRemainingMs === 0
               ? null
@@ -378,6 +538,7 @@ export const useSharedResearchWorkspace = (
       !state.allowedActions.ask_grounded_questions.allowed ||
       !state.provider ||
       !state.model ||
+      state.selectionMaterializing ||
       (state.rateLimitUntil !== null && Date.now() < state.rateLimitUntil) ||
       (state.sourceScopeMode === "all"
         ? !state.sourceSummary ||
@@ -406,6 +567,7 @@ export const useSharedResearchWorkspace = (
     state.model,
     state.provider,
     state.rateLimitUntil,
+    state.selectionMaterializing,
     state.sourceScopeMode,
     state.sourceSummary,
     state.selectedSourceIds
@@ -451,6 +613,7 @@ export const useSharedResearchWorkspace = (
     refreshSources,
     loadOlderHistory,
     previewSource,
+    toggleSource,
     submitDraft,
     retryPending,
     setDraft: (draft: string) => dispatch({ type: "draftChanged", draft }),
@@ -461,16 +624,19 @@ export const useSharedResearchWorkspace = (
     },
     setSelectedSourceIds: (sourceIds: string[]) => {
       if (state.allowedActions.inspect_sources.allowed) {
+        cancelOperation("selection")
         dispatch({ type: "selectedSourcesChanged", sourceIds })
       }
     },
     selectAllSources: () => {
       if (state.allowedActions.inspect_sources.allowed) {
+        cancelOperation("selection")
         dispatch({ type: "allSourcesSelected" })
       }
     },
     clearSelectedSources: () => {
       if (state.allowedActions.inspect_sources.allowed) {
+        cancelOperation("selection")
         dispatch({ type: "selectedSourcesChanged", sourceIds: [] })
       }
     },

@@ -29,6 +29,34 @@ const INVALID_RESPONSE_DETAIL = {
   recovery_action: "retry"
 } as const
 
+const POST_COMMIT_RESPONSE_DETAIL = {
+  code: "shared_chat_response_unconfirmed",
+  message: "The answer status is uncertain. Retry to reconcile this question.",
+  retryable: true,
+  recovery_action: "retry"
+} as const
+
+type SharedPostCommitResponseDetail = {
+  code: string
+  message: string
+  retryable: true
+  recovery_action: "retry"
+}
+
+export class SharedWorkspacePostCommitResponseError extends TldwApiError {
+  constructor(
+    detail: SharedPostCommitResponseDetail = POST_COMMIT_RESPONSE_DETAIL
+  ) {
+    super(detail.message, 502, detail)
+    this.name = "SharedWorkspacePostCommitResponseError"
+  }
+}
+
+export const isSharedWorkspacePostCommitResponseError = (
+  error: unknown
+): error is SharedWorkspacePostCommitResponseError =>
+  error instanceof SharedWorkspacePostCommitResponseError
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
@@ -397,7 +425,8 @@ const apiUrl = async (shareId: number, suffix: string): Promise<string> => {
 const requestJson = async <T>(
   url: string,
   init: RequestInit,
-  parse: (value: unknown) => T
+  parse: (value: unknown) => T,
+  options: { postCommitOnInvalidSuccess?: boolean } = {}
 ): Promise<T> => {
   const response = await fetchWithTldwAuth(url, init)
   if (!response.ok) throw await buildTldwApiError(response)
@@ -405,6 +434,9 @@ const requestJson = async <T>(
     return parse(await response.json())
   } catch (error) {
     if (error instanceof TldwApiError) throw error
+    if (options.postCommitOnInvalidSuccess) {
+      throw new SharedWorkspacePostCommitResponseError()
+    }
     throw new TldwApiError(
       INVALID_RESPONSE_DETAIL.message,
       502,
@@ -492,7 +524,8 @@ export const sharedWorkspacesApi = {
         body: JSON.stringify(request),
         signal
       },
-      parseChatResponse
+      parseChatResponse,
+      { postCommitOnInvalidSuccess: true }
     )
   }
 }

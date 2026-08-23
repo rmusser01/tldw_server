@@ -23,9 +23,16 @@ const { api, fetchChatModels } = vi.hoisted(() => ({
   fetchChatModels: vi.fn()
 }))
 
-vi.mock("@/services/tldw/domains/shared-workspaces", () => ({
-  sharedWorkspacesApi: api
-}))
+vi.mock(
+  "@/services/tldw/domains/shared-workspaces",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/services/tldw/domains/shared-workspaces")
+      >()
+    return { ...actual, sharedWorkspacesApi: api }
+  }
+)
 vi.mock("@/services/tldw-server", () => ({ fetchChatModels }))
 
 const renderAt = (width: number, height: number) => {

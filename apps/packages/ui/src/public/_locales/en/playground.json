@@ -90,7 +90,13 @@
     "message": "Clear"
   },
   "sharedWorkspace_scopeLimit": {
-    "message": "Choose a subset of up to 500 sources before asking a question."
+    "message": "Clear the selection, then choose up to 500 sources."
+  },
+  "sharedWorkspace_selectionPreparing": {
+    "message": "Preparing complete source selection..."
+  },
+  "sharedWorkspace_selectionUnavailable": {
+    "message": "Couldn't load every queryable source. All queryable sources remain selected."
   },
   "sharedWorkspace_sourceList": {
     "message": "Shared sources"
@@ -187,6 +193,9 @@
   },
   "sharedWorkspace_retrievalUnavailable": {
     "message": "Shared source retrieval is temporarily unavailable. Try again."
+  },
+  "sharedWorkspace_responseUnconfirmed": {
+    "message": "The answer status is uncertain. Retry to reconcile this question without sending a duplicate."
   },
   "sharedWorkspace_refreshSources": {
     "message": "Refresh sources"

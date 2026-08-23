@@ -25,9 +25,16 @@ const { api, fetchChatModels } = vi.hoisted(() => ({
   fetchChatModels: vi.fn()
 }))
 
-vi.mock("@/services/tldw/domains/shared-workspaces", () => ({
-  sharedWorkspacesApi: api
-}))
+vi.mock(
+  "@/services/tldw/domains/shared-workspaces",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/services/tldw/domains/shared-workspaces")
+      >()
+    return { ...actual, sharedWorkspacesApi: api }
+  }
+)
 vi.mock("@/services/tldw-server", () => ({ fetchChatModels }))
 
 const renderWorkspace = () =>
@@ -147,5 +154,62 @@ describe("SharedResearchWorkspace accessibility", () => {
     expect(
       screen.getByRole("button", { name: "Ask shared workspace" })
     ).toBeInTheDocument()
+  })
+
+  it("announces and scrolls only for the assistant message completed by the submission", async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    let resolveAsk: (value: typeof chatResponse) => void = () => undefined
+    let resolveHistory: (
+      value: Awaited<ReturnType<typeof api.listMessages>>
+    ) => void = () => undefined
+    api.ask.mockImplementation(
+      (_shareId, request) =>
+        new Promise((resolve) => {
+          resolveAsk = (value) =>
+            resolve({ ...value, request_id: request.request_id })
+        })
+    )
+    api.listMessages.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveHistory = resolve
+        })
+    )
+    renderWorkspace()
+    await screen.findByText("Queryable report")
+    fireEvent.click(screen.getByRole("tab", { name: "Chat" }))
+    fireEvent.change(screen.getByLabelText("Ask about shared sources"), {
+      target: { value: "Pending question" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Ask shared workspace" }))
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Asking shared workspace"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Load older messages" }))
+    resolveHistory({
+      conversation_id: "conversation-1",
+      messages: [
+        {
+          message_id: "older-assistant",
+          role: "assistant",
+          content: "An older answer",
+          created_at: "2026-08-20T10:00:00Z",
+          citations: []
+        }
+      ],
+      next_before: null
+    })
+    expect(await screen.findByText("An older answer")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Asking shared workspace"
+    )
+    expect(scrollIntoView).not.toHaveBeenCalled()
+
+    resolveAsk(chatResponse)
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Answer added")
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
   })
 })

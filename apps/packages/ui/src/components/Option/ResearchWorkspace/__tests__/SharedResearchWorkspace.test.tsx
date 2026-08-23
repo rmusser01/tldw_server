@@ -25,9 +25,16 @@ const { api, fetchChatModels } = vi.hoisted(() => ({
   fetchChatModels: vi.fn()
 }))
 
-vi.mock("@/services/tldw/domains/shared-workspaces", () => ({
-  sharedWorkspacesApi: api
-}))
+vi.mock(
+  "@/services/tldw/domains/shared-workspaces",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/services/tldw/domains/shared-workspaces")
+      >()
+    return { ...actual, sharedWorkspacesApi: api }
+  }
+)
 
 vi.mock("@/services/tldw-server", () => ({ fetchChatModels }))
 
@@ -143,18 +150,79 @@ describe("SharedResearchWorkspace recipient surface", () => {
 
     expect(
       await screen.findByText(
-        "Choose a subset of up to 500 sources before asking a question."
+        "Clear the selection, then choose up to 500 sources."
       )
     ).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "Select Queryable report" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Clear selected sources" })).toBeEnabled()
     fireEvent.change(screen.getByLabelText("Ask about shared sources"), {
       target: { value: "Summarize the selected source" }
     })
     expect(screen.getByRole("button", { name: "Ask shared workspace" })).toBeDisabled()
 
     fireEvent.click(screen.getByRole("button", { name: "Clear selected sources" }))
+    expect(screen.getByRole("checkbox", { name: "Select Queryable report" })).toBeEnabled()
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Queryable report" }))
-    expect(screen.queryByText(/Choose a subset of up to 500 sources/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/Clear the selection, then choose up to 500 sources/)
+    ).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Ask shared workspace" })).toBeEnabled()
+  })
+
+  it("shows a compact fail-closed state while all-mode selection is materialized", async () => {
+    const readySources = Array.from({ length: 50 }, (_, index) => ({
+      ...sourcePage.items[0],
+      source_id: `source-${index + 1}`,
+      title: index === 0 ? "Queryable report" : `Source ${index + 1}`,
+      position: index + 1
+    }))
+    api.bootstrap.mockResolvedValue(
+      buildBootstrap({
+        source_summary: {
+          total: 75,
+          queryable: 75,
+          processing: 0,
+          failed: 0
+        },
+        sources: {
+          items: readySources,
+          pagination: {
+            offset: 0,
+            limit: 50,
+            total: 75,
+            has_more: true
+          }
+        }
+      })
+    )
+    let rejectSources: (reason?: unknown) => void = () => undefined
+    api.listSources.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSources = reject
+        })
+    )
+    renderWorkspace()
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "Select Queryable report"
+    })
+
+    fireEvent.click(checkbox)
+
+    expect(
+      await screen.findByText("Preparing complete source selection...")
+    ).toBeInTheDocument()
+    expect(checkbox).toBeChecked()
+    expect(checkbox).toBeDisabled()
+
+    rejectSources(new TypeError("connection reset"))
+
+    expect(
+      await screen.findByText(
+        "Couldn't load every queryable source. All queryable sources remain selected."
+      )
+    ).toBeInTheDocument()
+    expect(checkbox).toBeChecked()
   })
 
   it("keeps a literal view tier separate from an allowed chat capability", async () => {
