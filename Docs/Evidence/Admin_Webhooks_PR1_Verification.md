@@ -2,10 +2,10 @@
 
 ## Verification Identity
 
-- Tested source commit: `35fe956f8c`
+- Tested source commit: `575616ed8b`
 - Rebased onto: `origin/dev` at
   `d736368d17c92f879d0b5364b45f23488629f5b8`
-- Final verification timestamp: `2026-08-23T01:44:54Z`
+- Final verification timestamp: `2026-08-23T19:13:30Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -23,9 +23,12 @@ that immutable source tree.
 | Gate | Result |
 | --- | --- |
 | OpenAPI fingerprint and drift | PASS |
-| Complete PR 1 Python matrix | PASS: 483 passed, 0 skipped |
-| PostgreSQL-required matrix | PASS: 24 passed, 0 skipped |
+| Complete PR 1 Python matrix | PASS at direct-marker source: 483 passed, 0 skipped |
+| PostgreSQL-required matrix | PASS at direct-marker source: 24 passed, 0 skipped |
 | Direct pytest marker policy | PASS |
+| CI shard coverage guard | PASS: 0 newly uncovered test files |
+| Admin Webhooks non-PostgreSQL matrix | PASS: 301 passed |
+| Chat persistence ordering regression | PASS: exact failing E2E plus 4-test surrounding set |
 | Ruff | PASS |
 | Focused Python typecheck | PASS |
 | Bandit | PASS |
@@ -36,8 +39,9 @@ that immutable source tree.
 | Production admin UI build | PASS |
 | Chromium control-plane journey | PASS: 1 passed |
 | UI persistence/console sink scan | PASS |
-| Package-wide admin UI tests | KNOWN UPSTREAM BASELINE: 41 failed, 711 passed; no stable new failure |
-| Package-wide admin UI lint | KNOWN UPSTREAM BASELINE: 3 errors, 41 warnings; no changed-file finding |
+| Package-wide admin UI tests | KNOWN UPSTREAM BASELINE: final source 42 failed, 710 passed; base 47 failed, 653 passed |
+| Package-wide admin UI lint | PASS: 0 errors, 41 unchanged warnings |
+| Two-project real-backend Playwright | KNOWN UPSTREAM RUNNER FAILURE: Next 16 `.next/dev` lock collision before tests |
 
 PR 1 remains default-off. These results do not authorize outbound webhook
 delivery or canonical activation.
@@ -285,45 +289,120 @@ The required UI sink scan found no `localStorage`, `sessionStorage`,
 `document.cookie`, or `console.*` use in the webhook page, idempotent command,
 API client, or webhook types.
 
+## PR CI Remediation Follow-up
+
+CI remediation was performed from exact PR head `89f03feda2` and frozen as
+source commit `575616ed8b`. The changes are limited to CI scheduling, a
+cross-platform chat timestamp normalization defect, a time-dependent test
+fixture, and the three package lint errors described in the original evidence.
+
+The Admin Webhooks directory is now assigned to the existing
+`admin-watchlists-webhooks` shard in all five duplicated workflow matrices.
+The repository guard passed:
+
+```text
+[shard-coverage] shards=774 test_files=4298 ignored=4 baseline=130 new_uncovered=0
+```
+
+The chat regression was established with a red/green cycle. At the unmodified
+PR head, a whole-second value normalized to `2026-08-23T04:28:54Z`; the new
+regression requires the same UTC millisecond representation used by persisted
+SQLite values, `2026-08-23T04:28:54.000Z`. After applying one common formatter
+to numeric, string, and datetime inputs:
+
+- the timestamp unit regression passed;
+- the exact previously failing
+  `test_chat_completions_save_to_db_persists_and_exposes_conversation` E2E
+  passed;
+- the four-test surrounding chat-persistence set passed.
+
+Scheduling the previously unassigned webhook suite exposed a test-only
+wall-clock dependency. Its fixed rotation cutoff used the module's `NOW`, but
+the replay-secret expiry used `datetime.now() - 1 day`; after the real clock
+passed the fixed cutoff, the supposedly expired row entered the inventory.
+The fixture now derives both sides from `NOW`. The isolated regression and all
+301 locally runnable, non-PostgreSQL Admin Webhooks tests passed. The 24
+PostgreSQL cases were not rerun after this fixture-only correction because no
+local PostgreSQL service was configured; their most recent required-provider
+run remains the recorded `24 passed, 0 skipped` result at the direct-marker
+source.
+
+The package lint errors were removed by using an ESM import in the security
+header test and narrowly suppressing the two intentional conditional plugin
+`require` calls in `next.config.js`. Under Node 20.19.5 and Bun 1.3.2:
+
+```text
+bun run lint:      PASS, 0 errors and 41 unchanged warnings
+bun run typecheck: PASS
+security headers:  3 passed
+bun run build:     PASS, 49 static pages generated
+```
+
+The build's first restricted-sandbox attempt could not bind Turbopack's local
+port. The same command passed with normal process permissions; this was an
+environment restriction, not an application failure.
+
 ## Upstream Admin UI Baselines
 
-`bun run test` is not green on clean `origin/dev`. An isolated detached
-`origin/dev` worktree using the same dependency tree and Node 20 produced:
+`bun run test` is not green on the exact PR base. An isolated detached worktree
+at `d736368d17` using a clean frozen install, Node 20.19.5, and Bun 1.3.2
+produced:
 
 ```text
 47 failed, 653 passed, 700 total
 ```
 
-The tested branch produced:
+The final remediation source, under the same clean-install conditions,
+produced:
 
 ```text
-41 failed, 711 passed, 752 total
+42 failed, 710 passed, 752 total
 ```
 
-The six resolved baseline failures are all superseded legacy Webhooks-page
-tests. Structured assertion-name comparison found no stable new branch failure.
-One unchanged AI Ops timing test failed in one concurrent structured branch run
-while still loading and passed `8/8` immediately in isolation; the final exact
-package run returned the stable `41 failed, 711 passed` result.
+The branch therefore improves the base count by five failures while adding its
+new tests. One other branch run returned `41 failed, 711 passed`, exposing an
+unrelated timing fluctuation. Stable representative failures reproduce in
+isolation: BYOK, Plans, and Resource Governor tests render production components
+without the required `ConfirmProvider`, while navigation tests retain stale
+section-order and href assertions. Changed-only Vitest mode still reports 33
+failures out of 394 tests, so this remediation did not weaken or bypass the
+required package gate.
 
-`bun run lint` also reproduces the previously recorded package baseline:
+The package lint gate is now clean of errors:
 
 ```text
-44 problems: 3 errors, 41 warnings
+41 problems: 0 errors, 41 warnings
 ```
 
-The three errors are pre-existing `@typescript-eslint/no-require-imports`
-findings in `lib/__tests__/security-headers.test.ts` and `next.config.js`.
-Targeted ESLint across every changed TypeScript/TSX file, including
-`middleware.ts` and the Playwright helpers, passed with zero findings.
+The warnings are unchanged upstream debt. Targeted ESLint across every changed
+TypeScript/TSX file, including `middleware.ts` and the Playwright helpers,
+passed with zero findings.
 
-These baseline failures are not represented as passing gates. They are retained
-as explicit upstream debt; the focused tests, typecheck, production build, and
-browser journey establish no regression for this PR.
+The required two-project real-backend command was also run exactly as CI
+invokes it:
+
+```bash
+bun run test:real-backend -- \
+  --project=chromium-real-jwt \
+  --project=chromium-real-single-user \
+  --reporter=line
+```
+
+It did not reach any browser test. Playwright starts multiple Next 16 dev
+servers from the same `admin-ui` directory, and they collide on the shared
+`.next/dev` lock with `Another next dev server is already running`. The same
+multi-server structure exists at the exact PR base. The PR's Playwright change
+only prevents unrelated mocked invocations from starting these real-backend
+servers. No process remained after the failed attempt.
+
+The package test and real-backend runner failures are not represented as
+passing gates. They remain explicit upstream debt pending Linux CI and a
+separate remediation decision; the focused tests, typecheck, production build,
+and webhook browser journey establish the scoped PR behavior.
 
 ## Final Safety Checks
 
-- `git diff --cached --check`: PASS for tested source commit `35fe956f8c`.
+- `git diff --cached --check`: PASS for tested source commit `575616ed8b`.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,
