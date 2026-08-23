@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-23 00:38'
+updated_date: '2026-08-23 00:39'
 labels:
   - admin
   - webhooks
@@ -12,6 +12,8 @@ labels:
   - migrations
 dependencies:
   - TASK-13013
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2806'
 documentation:
   - Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
   - Docs/superpowers/plans/2026-08-21-canonical-admin-webhook-control-plane.md
@@ -98,6 +100,8 @@ Known upstream admin-ui baselines are not attributed to this branch: clean origi
 2026-08-22 refreshed Docs/Evidence/Admin_Webhooks_PR1_Verification.md against immutable tested source commit 08ca760b0e. Final evidence records 480/480 complete Python tests, 24/24 required PostgreSQL tests on 18.6, both independent review rounds and their regressions, Ruff, focused mypy, Bandit, UI/OpenAPI/build/browser gates, and explicit upstream baselines. PR body validation totals were updated to match. Awaiting PR creation and Qodo/human review; task remains In Progress.
 
 2026-08-22 origin/dev advanced with unrelated scheduled-task executor changes and the branch rebased cleanly onto d736368d17c92f879d0b5364b45f23488629f5b8. The reviewed source commit was rewritten from pre-rebase 08ca760b0e to 8fbb29af200824a3adb74f1724ffb9d7af3d9127; evidence identity was corrected accordingly. Post-rebase complete PR matrix passed 480/480 with zero skips and 459 warnings in 142.86s, including all 24 PostgreSQL cases and the workflow import path; Ruff, focused mypy, Bandit, and git diff --check also passed. Awaiting pushed PR and Qodo/human review.
+
+2026-08-22 implementation PR opened: https://github.com/rmusser01/tldw_server/pull/2806 against dev from codex/admin-webhooks-control-plane. Branch was cleanly rebased and post-rebase verified before push. Qodo and human review findings are the remaining closure gate; all actionable findings will be verified, fixed, retested, and resolved before TASK-13014 is completed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
