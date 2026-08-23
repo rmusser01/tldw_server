@@ -1556,12 +1556,12 @@ test.describe('Watchlists playground smoke', () => {
     await dialog.getByLabel('Add a new source').check()
     await dialog.getByLabel('Source name').fill('Guided Feed')
     await dialog.getByLabel('Source URL').fill('https://example.com/guided.xml')
-    await dialog.getByRole('button', { name: 'Next: Cadence' }).click()
+    await dialog.getByRole('button', { name: 'Continue to Cadence' }).click()
     await dialog.getByLabel('Monitor name').fill('Guided Monitor')
-    await dialog.getByRole('button', { name: 'Next: Briefing' }).click()
+    await dialog.getByRole('button', { name: 'Continue to Briefing' }).click()
     await dialog.getByRole('switch', { name: 'Audio' }).click()
-    await dialog.getByRole('button', { name: 'Next: Delivery' }).click()
-    await dialog.getByRole('button', { name: 'Next: Test' }).click()
+    await dialog.getByRole('button', { name: 'Continue to Delivery' }).click()
+    await dialog.getByRole('button', { name: 'Continue to Test' }).click()
     await dialog.getByRole('button', { name: 'Activate schedule' }).click()
 
     await expect(dialog).toBeHidden()
@@ -2219,7 +2219,7 @@ test.describe('Watchlists playground smoke', () => {
       .toBeGreaterThan(fetchCountBeforeRefresh)
 
     await page.keyboard.press('n')
-    await expect(page.getByRole('dialog', { name: 'Add Source' })).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'Add Feed' })).toBeVisible()
 
     await context.close()
   })
@@ -2808,25 +2808,34 @@ test.describe('Watchlists playground smoke', () => {
     await basePage.close().catch(() => {})
 
     await page.getByTestId('watchlists-help-icon').click()
-    await expect(page.getByTestId('watchlists-main-docs-link')).toHaveAttribute(
+    const helpDialog = page.getByRole('dialog', { name: 'Watchlists help' })
+    await expect(helpDialog).toBeVisible()
+    await expect(helpDialog.getByTestId('watchlists-main-docs-link')).toHaveAttribute(
       'href',
       'https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md'
     )
-    await expect(page.getByRole('link', { name: 'Report an issue' })).toHaveAttribute(
+    await expect(helpDialog.getByRole('link', { name: 'Report an issue' })).toHaveAttribute(
       'href',
       'https://github.com/rmusser01/tldw_server/issues/new'
     )
-    await expect(page.getByTestId('watchlists-context-docs-link')).toHaveAttribute(
+    await expect(helpDialog.getByTestId('watchlists-context-docs-link')).toHaveAttribute(
       'href',
       'https://github.com/rmusser01/tldw_server/blob/main/Docs/Product/Watchlists/Watchlist_PRD.md'
     )
 
-    await expect(page.getByTestId('watchlists-resume-guide')).toBeVisible()
-    await page.getByTestId('watchlists-resume-guide').click()
+    await expect(helpDialog.getByTestId('watchlists-resume-guide')).toBeVisible()
+    await helpDialog.getByTestId('watchlists-resume-guide').click()
     await expect(page.getByText('Watchlists guided tour')).toBeVisible()
     await expect(page.getByText('Step 3 of 5')).toBeVisible()
-
     await page.getByRole('button', { name: 'Skip' }).click()
+    await page.getByTestId('watchlists-help-icon').click()
+    await expect(page.getByTestId('watchlists-context-docs-link')).toHaveAttribute(
+      'href',
+      'https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md#runs'
+    )
+
+    await helpDialog.getByRole('button', { name: 'Close' }).click()
+    await expect(helpDialog).toBeHidden()
     await navigateWatchlistsDestination(page, 'Feeds')
     await page.getByTestId('watchlists-help-icon').click()
     await expect(page.getByTestId('watchlists-context-docs-link')).toHaveAttribute(
