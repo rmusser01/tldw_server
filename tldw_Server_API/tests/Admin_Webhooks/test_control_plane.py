@@ -1025,7 +1025,6 @@ async def test_list_get_and_status_do_not_require_decryption(
     )
 
     assert await service.get(registration.id) == registration
-    assert await service.list(limit=50) == [registration]
     page = await service.list_page(limit=25, offset=0)
     assert page.items == (registration,)
     assert page.total == 1
@@ -1098,7 +1097,7 @@ async def test_mode_and_migration_gates_but_status_remains_available(
         delivery_capability=UnavailableDeliveryCapability(),
     )
     with pytest.raises(WebhookError) as incomplete:
-        await incomplete_on.list(limit=50)
+        await incomplete_on.list_page(limit=50, offset=0)
     assert incomplete.value.code is WebhookErrorCode.MIGRATION_PENDING
 
     migrate = AdminWebhookControlPlane(
@@ -1109,7 +1108,7 @@ async def test_mode_and_migration_gates_but_status_remains_available(
     )
     assert (await migrate.status(now=NOW)).migration.phase == "database_committed"
     with pytest.raises(WebhookError) as pending:
-        await migrate.list(limit=50)
+        await migrate.list_page(limit=50, offset=0)
     assert pending.value.code is WebhookErrorCode.MIGRATION_PENDING
 
 

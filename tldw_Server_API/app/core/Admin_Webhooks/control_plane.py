@@ -1127,26 +1127,6 @@ class AdminWebhookControlPlane:
             active_limit=self._settings.active_limit,
         )
 
-    async def list(
-        self,
-        *,
-        limit: int,
-        before_id: int | None = None,
-        offset: int = 0,
-    ) -> list[WebhookRegistration]:
-        try:
-            await self._require_surface_available()
-            return await self._repository.list_registrations(
-                limit=limit,
-                before_id=before_id,
-                offset=offset,
-            )
-        except Exception as exc:
-            mapped = _map_exception(exc)
-            if mapped is not None:
-                raise mapped from None
-            raise
-
     async def list_page(self, *, limit: int, offset: int) -> WebhookRegistrationPage:
         """Return one public offset page without exposing repository primitives."""
         if not 1 <= limit <= 100 or not 0 <= offset <= 1_000:
