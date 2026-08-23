@@ -2,10 +2,10 @@
 
 ## Verification Identity
 
-- Tested source commit: `08ca760b0e`
+- Tested source commit: `8fbb29af20`
 - Rebased onto: `origin/dev` at
-  `f7cc3d084affed81a7ae9e8fbbde9f5d96969fd1`
-- Final verification timestamp: `2026-08-23T00:33:00Z`
+  `d736368d17c92f879d0b5364b45f23488629f5b8`
+- Final verification timestamp: `2026-08-23T00:38:19Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -103,9 +103,10 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Workflows/test_webhook_admin_endpoints.py
 ```
 
-Final post-review result: `480 passed, 459 warnings in 142.11s`; zero
-skips. This aggregate run executed the real PostgreSQL-marked cases as well as
-the SQLite, API, authorization, egress, system-ops, and workflow cases.
+Final post-review, post-rebase result:
+`480 passed, 459 warnings in 142.86s`; zero skips. This aggregate run executed
+the real PostgreSQL-marked cases as well as the SQLite, API, authorization,
+egress, system-ops, and workflow cases.
 
 One restricted-sandbox attempt failed only because the unchanged workflow test
 creates `Databases/test_wf_dlq.db` inside the external worktree. The exact test
@@ -131,7 +132,8 @@ TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. \
 
 Result: `24 passed, 50 warnings in 97.78s`; zero skips. The required flag was
 set, and the tests used the running disposable PostgreSQL 18.6 container rather
-than SQLite or an availability skip.
+than SQLite or an availability skip. The post-rebase aggregate run then
+executed the same 24 PostgreSQL cases with zero skips.
 
 ## Pre-PR Review Corrections
 
@@ -280,7 +282,7 @@ browser journey establish no regression for this PR.
 
 ## Final Safety Checks
 
-- `git diff --cached --check`: PASS for tested source commit `08ca760b0e`.
+- `git diff --cached --check`: PASS for tested source commit `8fbb29af20`.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,
