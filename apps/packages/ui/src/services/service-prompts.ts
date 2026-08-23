@@ -312,6 +312,14 @@ const LEGACY_RENDER_DEFINITIONS = Object.freeze({
       mode: "template",
       required_variables: ["current_date_time", "search_results"]
     }]
+  }),
+  "chat.title.generation": freezeRenderDefinition({
+    id: "chat.title.generation",
+    parts: [{
+      key: "user_template",
+      mode: "template",
+      required_variables: ["query"]
+    }]
   })
 })
 
@@ -670,18 +678,47 @@ const legacySnapshot = async (
     }
   }
 
+  if (requested.has("chat.title.generation")) {
+    definitions["chat.title.generation"] = {
+      definition: LEGACY_RENDER_DEFINITIONS["chat.title.generation"],
+      parts: {
+        user_template:
+          LEGACY_SERVICE_PROMPT_DEFAULTS["chat.title.generation"].user_template
+      },
+      source: "packaged",
+      revision: null
+    }
+  }
+
   throwIfAborted(lease.signal)
   return freezeSnapshot(scope, "legacy-404", definitions, lease)
 }
 
 export const loadServicePromptSnapshot = async (
   ids: readonly KnownServicePromptId[],
-  options: { signal?: AbortSignal } = {}
+  options: {
+    signal?: AbortSignal
+    requestScope?: ServicePromptRequestScope
+  } = {}
 ): Promise<ServicePromptSnapshot> => {
   const lease = createServicePromptScopeLease(options.signal)
   try {
     throwIfAborted(lease.signal)
     const scope = await resolveServicePromptScope({ signal: lease.signal })
+    const expectedRequestScope = options.requestScope
+    if (expectedRequestScope) {
+      const expectedMatchesResolved =
+        servicePromptTargetsMatch(expectedRequestScope.config, scope.config) &&
+        (expectedRequestScope.config.expectedSingleUserApiKeyScope ?? null) ===
+          (scope.config.expectedSingleUserApiKeyScope ?? null) &&
+        (expectedRequestScope.userId === null
+          ? scope.userId === null
+          : String(expectedRequestScope.userId) === String(scope.userId))
+
+      if (!expectedMatchesResolved) {
+        throw createServicePromptScopeChangedError()
+      }
+    }
     lease.bind(scope)
     throwIfAborted(lease.signal)
     try {

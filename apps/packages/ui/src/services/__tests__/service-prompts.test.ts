@@ -124,6 +124,12 @@ const definitions: Record<KnownServicePromptId, ServicePromptCatalogItem> = {
       required_variables: ["current_date_time", "search_results"]
     }
   ]),
+  "chat.title.generation": definition("chat.title.generation", [{
+    key: "user_template",
+    label: "User template",
+    mode: "template",
+    required_variables: ["query"]
+  }]),
   "media.text.translation": definition("media.text.translation", [
     {
       key: "system",
@@ -141,11 +147,12 @@ const definitions: Record<KnownServicePromptId, ServicePromptCatalogItem> = {
 }
 
 describe("Service Prompt validation and rendering", () => {
-  it("keeps the three old-server Chat defaults byte-equivalent to the shared fixture", () => {
+  it("keeps old-server Chat defaults byte-equivalent to the shared fixture", () => {
     expect(LEGACY_SERVICE_PROMPT_DEFAULTS).toEqual({
       "chat.rag.answer": fixture.defaults["chat.rag.answer"],
       "chat.rag.question_rewrite": fixture.defaults["chat.rag.question_rewrite"],
-      "chat.web_search.answer": fixture.defaults["chat.web_search.answer"]
+      "chat.web_search.answer": fixture.defaults["chat.web_search.answer"],
+      "chat.title.generation": fixture.defaults["chat.title.generation"]
     })
   })
 
@@ -671,6 +678,72 @@ describe("Service Prompt migration and runtime snapshots", () => {
     })
 
     expect(mocks.promptForRag).not.toHaveBeenCalled()
+  })
+
+  it("uses the packaged title template on old servers without reading legacy storage", async () => {
+    mocks.listServicePrompts.mockRejectedValue(
+      new ServicePromptApiError("Not found", { status: 404 })
+    )
+
+    const snapshot = await loadServicePromptSnapshot([
+      "chat.title.generation"
+    ])
+
+    expect(snapshot).toMatchObject({
+      capability: "legacy-404",
+      definitions: {
+        "chat.title.generation": {
+          definition: renderDefinitionFor("chat.title.generation"),
+          parts: {
+            user_template: fixture.defaults["chat.title.generation"].user_template
+          },
+          source: "packaged",
+          revision: null
+        }
+      }
+    })
+    expect(mocks.promptForRag).not.toHaveBeenCalled()
+    expect(mocks.getWebSearchPrompt).not.toHaveBeenCalled()
+    expect(mocks.localGet).not.toHaveBeenCalled()
+    expect(mocks.syncGet).not.toHaveBeenCalled()
+    snapshot.release()
+  })
+
+  it.each([
+    {
+      name: "user",
+      requestScope: {
+        config: config,
+        userId: 999
+      }
+    },
+    {
+      name: "server",
+      requestScope: {
+        config: { ...config, serverUrl: "https://other-server.example" },
+        userId: null
+      }
+    },
+    {
+      name: "single-user API-key scope",
+      requestScope: {
+        config: {
+          ...config,
+          expectedSingleUserApiKeyScope: "other-api-key-scope"
+        },
+        userId: null
+      }
+    }
+  ])("rejects a mismatched expected request scope before catalog reads: $name", async ({ requestScope }) => {
+    await expect(loadServicePromptSnapshot(
+      ["chat.title.generation"],
+      { requestScope }
+    )).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+    expect(mocks.listServicePrompts).not.toHaveBeenCalled()
+    expect(mocks.getServicePrompt).not.toHaveBeenCalled()
   })
 
   it.each([401, 403, 500, 0])(

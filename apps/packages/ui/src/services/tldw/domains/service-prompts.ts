@@ -8,6 +8,7 @@ export type KnownServicePromptId =
   | "chat.rag.answer"
   | "chat.rag.question_rewrite"
   | "chat.web_search.answer"
+  | "chat.title.generation"
   | "media.text.translation"
 
 export type ServicePromptSource = "user" | "packaged"
