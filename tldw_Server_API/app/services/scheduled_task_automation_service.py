@@ -179,15 +179,19 @@ class ScheduledTaskAutomationService:
         pending the approval-escalation design. The ``run_now`` action is
         available on both families (TASK-13022).
         """
-        def _execution_actions(tools_reason: str) -> dict[str, ScheduledTaskActionCapability]:
+        def _execution_actions(
+            tools_reason: str, execute_status: str = "available"
+        ) -> dict[str, ScheduledTaskActionCapability]:
             actions = self._definition_actions()
             actions["run_now"] = ScheduledTaskActionCapability(
                 status="available",
                 required_permissions=[TASKS_CONTROL],
             )
             actions["execute"] = ScheduledTaskActionCapability(
-                status="available",
-                reason="phase1_generation_only",
+                status=execute_status,
+                reason="phase1_generation_only"
+                if execute_status == "available"
+                else tools_reason,
                 required_permissions=[TASKS_CONTROL],
             )
             actions["execute_tools"] = ScheduledTaskActionCapability(
@@ -211,8 +215,10 @@ class ScheduledTaskAutomationService:
                     family="agent_task",
                     family_availability="available",
                     actions=_execution_actions(
-                        "tool-using agent tasks are not executable until the "
-                        "approval-escalation design lands"
+                        "agent_task is not executable in phase 1: its message "
+                        "is redacted at rest (metadata_only policy) and "
+                        "tool use awaits the approval-escalation design",
+                        execute_status="planned",
                     ),
                     related_capabilities={"acp": {"status": "not_checked"}},
                 ),

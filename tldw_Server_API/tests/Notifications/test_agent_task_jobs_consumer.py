@@ -243,12 +243,15 @@ async def test_no_executor_fails_honestly(consumer_env) -> None:
 
     result = await handle_agent_task_job(_job(definition, user_id))
 
-    assert result["status"] == "failed"
+    # Phase 1: an unwired family skips with an actionable reason (only
+    # recurring_question has a production executor; agent_task messages
+    # are redacted at rest) -- it is not a failure.
+    assert result["status"] == "skipped"
     sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
-    assert run["error"] == "no_executor_configured"
+    assert run["error"] == "family_not_wired_for_execution:recurring_question"
 
 
 # ---------------------------------------------------------------------------

@@ -176,10 +176,15 @@ def test_capabilities_report_definition_actions_but_no_execution(scheduled_tasks
         actions = families[family]["actions"]
         assert actions["preview"]["status"] == "available"  # nosec B101
         assert actions["create_definition"]["status"] == "available"  # nosec B101
-        # TASK-13022: execution truth -- phase-1 generation-only runs are
-        # executable; the run_now action is available; tools are planned.
-        assert actions["execute"]["status"] == "available"  # nosec B101
-        assert actions["execute"]["reason"] == "phase1_generation_only"  # nosec B101
+        # TASK-13022/13110: execution truth -- recurring_question runs are
+        # executable (phase-1 generation-only); agent_task is planned (its
+        # message is redacted at rest); run_now is available on both.
+        if family == "recurring_question":
+            assert actions["execute"]["status"] == "available"  # nosec B101
+            assert actions["execute"]["reason"] == "phase1_generation_only"  # nosec B101
+        else:
+            assert actions["execute"]["status"] == "planned"  # nosec B101
+            assert "redacted at rest" in actions["execute"]["reason"]  # nosec B101
         assert actions["run_now"]["status"] == "available"  # nosec B101
         assert actions["execute_tools"]["status"] == "planned"  # nosec B101
 

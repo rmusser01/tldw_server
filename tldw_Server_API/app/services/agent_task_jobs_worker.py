@@ -48,6 +48,13 @@ async def run_agent_task_jobs_worker(stop_event: asyncio.Event | None = None) ->
     worker_id = "agent-task-jobs-worker"
     queue = agent_task_jobs_queue()
     poll_sleep = float(os.getenv("JOBS_POLL_INTERVAL_SECONDS", "1.0") or "1.0")
+    # Production executors must accompany every consuming worker (TASK-13110):
+    # idempotent, so a restarted worker re-registers safely.
+    from tldw_Server_API.app.core.Scheduled_Tasks.automation_executors import (
+        register_automation_executors,
+    )
+
+    register_automation_executors()
     logger.info("Starting Agent Task Jobs worker")
     while True:
         if stop_event and stop_event.is_set():
