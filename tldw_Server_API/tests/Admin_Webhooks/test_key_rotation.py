@@ -956,7 +956,7 @@ async def test_expired_replay_secret_is_outside_rotation_inventory(
 ) -> None:
     await rotation.pool.execute(
         "UPDATE admin_webhook_idempotency SET expires_at = ?",
-        datetime.now(timezone.utc) - timedelta(days=1),
+        NOW - timedelta(days=1),
     )
 
     await rotation.start()

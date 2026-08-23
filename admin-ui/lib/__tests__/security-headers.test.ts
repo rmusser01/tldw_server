@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-const nextConfig = require('../../next.config.js');
+import nextConfig from '../../next.config.js';
 
 describe('next.config.js security', () => {
   it('enables standalone output for Docker', () => {

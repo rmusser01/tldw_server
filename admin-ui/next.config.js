@@ -1,9 +1,11 @@
 const withBundleAnalyzer =
   process.env.ANALYZE === 'true'
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     ? require('@next/bundle-analyzer')({ enabled: true })
     : (config) => config;
 
 const { withSentryConfig } = process.env.NEXT_PUBLIC_SENTRY_DSN
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   ? require('@sentry/nextjs')
   : { withSentryConfig: (config) => config };
 
