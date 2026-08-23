@@ -1,7 +1,7 @@
 ---
 id: TASK-13111
 title: Expose automatic conversation-title prompt in Service Prompts
-status: In Progress
+status: Done
 created_date: 2026-08-23 21:58
 labels:
 - service-prompts
@@ -11,8 +11,7 @@ priority: Medium
 references:
 - Docs/Design/service-prompt-inventory.md
 - Docs/superpowers/specs/2026-07-12-user-customizable-service-prompts-design.md
-documentation:
-- Docs/superpowers/plans/2026-08-23-conversation-title-service-prompt.md
+documentation: []
 modified_files:
 - tldw_Server_API/app/core/Prompt_Management/service_prompts.py
 - tldw_Server_API/tests/Prompt_Management/test_service_prompts.py
@@ -29,8 +28,7 @@ modified_files:
 - apps/packages/ui/src/components/Option/Settings/__tests__/ServicePromptsSettings.test.tsx
 - apps/packages/ui/src/assets/locale/en/settings.json
 - apps/packages/ui/src/public/_locales/en/settings.json
-- Docs/superpowers/plans/2026-08-23-conversation-title-service-prompt.md
-updated_date: 2026-08-23 23:18
+updated_date: 2026-08-23 23:26
 ---
 
 ## Description
@@ -41,18 +39,18 @@ Add the existing automatic conversation-title generation prompt as a bounded Ser
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The service-prompt registry exposes chat.title.generation with one user_template part requiring exactly {query}, and save/reset APIs work through the existing generic storage path.
-- [ ] #2 Workflow Prompts always shows a localized Conversation title definition and links users to Chat settings for enabling automatic title generation.
-- [ ] #3 Every automatic title-generation path renders one immutable scope-bound snapshot while preserving toolChoice none, saveToDb false, the disabled-by-default flag, and existing fallback cleanup.
-- [ ] #4 Ordinary prompt load, render, and model failures return the caller fallback; abort and request-scope changes fail closed without stale title writes.
-- [ ] #5 Older servers without the service-prompt catalog use the packaged title default with byte-equivalent provider content.
-- [ ] #6 Backend, frontend service, Settings, locale-sync, caller-path, compile, lint, diff, and Bandit checks pass for the touched scope.
+- [x] #1 The service-prompt registry exposes chat.title.generation with one user_template part requiring exactly {query}, and save/reset APIs work through the existing generic storage path.
+- [x] #2 Workflow Prompts always shows a localized Conversation title definition and links users to Chat settings for enabling automatic title generation.
+- [x] #3 Every automatic title-generation path renders one immutable scope-bound snapshot while preserving toolChoice none, saveToDb false, the disabled-by-default flag, and existing fallback cleanup.
+- [x] #4 Ordinary prompt load, render, and model failures return the caller fallback; abort and request-scope changes fail closed without stale title writes.
+- [x] #5 Older servers without the service-prompt catalog use the packaged title default with byte-equivalent provider content.
+- [x] #6 Backend, frontend service, Settings, locale-sync, caller-path, compile, lint, diff, and Bandit checks pass for the touched scope.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Execute the four-stage tracked plan at Docs/superpowers/plans/2026-08-23-conversation-title-service-prompt.md: (1) register the backend definition and golden API contract, (2) bind central title generation to a scope-checked immutable snapshot, (3) expose localized Settings guidance without duplicating enablement, and (4) run verification, security review, code review, and finalization.
+Execute the four-stage plan: (1) register the backend definition and golden API contract, (2) bind central title generation to a scope-checked immutable snapshot, (3) expose localized Settings guidance without duplicating enablement, and (4) run verification, security review, code review, and finalization.
 <!-- SECTION:PLAN:END -->
 ## Implementation Notes
 
@@ -77,19 +75,25 @@ Final-review fix evidence (2026-08-23):
 - PASS: from repository root, ./apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs [the nine Task 4 UI paths] => 0 errors, 11 warnings. Warnings are no-explicit-any at title.service-prompt-scope.test.ts:7:57 and tldw-server.ts:112:34, 179:31, 180:33, 190:42, 191:17, 211:19, 228:26, 391:29, 665:29, 666:32; ESLint also printed the existing pages-directory configuration notice. No unrelated warnings changed.
 - PASS post-fix commit: git diff --check 7a536e5d7aa0666cdd7af94b68a4256d315296f7..HEAD => exit 0 with no whitespace output.
 - Production source remained unchanged in this review-fix wave; these tests lock invariants that the prior Task 4 report had described from source inspection. Status stays In Progress for controller final cleanup.
+Final cleanup (2026-08-23):
+- Broad final review identified three verification gaps; test-only commits 00ef66d49d and 0b23b09b6d addressed them. The scoped fix re-review found all three addressed and no new Critical/Important breakage.
+- Focused fix verification: from apps/packages/ui, `bunx vitest run src/services/__tests__/title.service-prompt-scope.test.ts src/services/__tests__/service-prompts.test.ts` => 2 files / 92 tests passed. The locked contract now observes distinct snapshot request scope, exact provider options, one HumanMessage, snapshot signal identity, real removeReasoning cleanup, real packaged fixture bytes, user-mismatch pre-catalog 412, and matching-scope catalog/detail traffic.
+- Pinned lint verification: `./apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs [nine Task 4 UI paths]` => 0 errors / 11 pre-existing no-explicit-any warnings plus the existing pages-directory configuration notice.
+- Full branch whitespace: `git diff --check 7a536e5d7aa0666cdd7af94b68a4256d315296f7..HEAD` => exit 0.
+- Known baseline/tooling caveats retained: `bun run typecheck` in apps/tldw-frontend has unrelated diagnostics only in untouched scripts/__tests__/skills-certification-{evidence,lifecycle,profile,runner}.test.ts; the original packages/ui `bunx eslint` command cannot discover an ESLint config, so the repository-pinned lint command above is the applicable gate. Existing host Darwin confstr() temporary-directory warnings are benign.
+- Final rationale: one centrally loaded/rendered immutable request-scope-bound title snapshot protects every automatic-title caller while preserving ordinary prompt/model fallback behavior so completed chats remain usable. Settings shows the prompt without duplicating the Chat enablement control.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Exposed chat.title.generation as a Service Prompts definition and Settings entry. A centrally loaded and rendered immutable request-scope-bound title snapshot customizes every automatic-title caller while preserving disabled-by-default behavior, caller model/toolChoice none/saveToDb false, ordinary fallback-completed chats, old-server packaged compatibility, and fail-closed cancellation/account/server/API-key-scope changes. Settings exposes the prompt and directs enablement to Chat settings without duplicating the toggle.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
