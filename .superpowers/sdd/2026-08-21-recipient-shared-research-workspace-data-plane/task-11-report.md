@@ -118,3 +118,57 @@ Fresh `final32-fix2-1787446794-16413` passed on the first live Fix Round 2 hypot
 - `node --check` passed both changed `.mjs` scripts. No Python file differs from reviewed base `5a648f8532`, so touched-scope Ruff and Bandit are not applicable; Fix Round 1's base-versus-head Python security comparison remains unchanged.
 - `git diff --check` passed. Final status/staging verification and the resulting commit hash are reported by the executor because a commit cannot contain its own hash. No PR/push; the two unrelated watchlist templates remain excluded.
 - Status: implementation and live evidence passed; pending controller review, with the Backlog task left In Progress.
+
+## Fix Round 3/5
+
+Reviewed head: `79cf6dc1d4b9ba03c6b1c9fe6595c0a408812865`. Status remains In Progress pending controller review.
+
+### Findings Addressed
+
+- One canonical declaration contract now drives both runtime transition-policy construction and evidence validation. `owner-revocation` requires exactly 37 declarations and `member-chats` exactly 35; each context rejects missing, extra, duplicate, renamed, or cross-context names and requires the canonical allowed-status set and maximum count for every declaration. Existing exact origin/method/path/fixture-ID/status classification remains unchanged.
+- The local provider probe now invokes upstream `fetch` with `redirect: "error"`. Redirect responses cannot carry a provider request outside the exact loopback boundary; forwarding failures remain the bounded generic `502` response with no body or target leakage.
+
+### TDD Evidence
+
+Transition validator RED:
+
+```bash
+cd apps/tldw-frontend
+bunx vitest run __tests__/shared-research-workspace-cdp-uat.test.ts --maxWorkers=1 --no-file-parallelism -t "missing zero-count|owner operation added|member Chats operation added|duplicate or globally"
+```
+
+Result: `4 failed, 95 skipped`. Removing a zero-count owner declaration, adding an owner declaration to Chats, adding a Chats declaration to owner, and replacing an owner declaration with a globally known Chats name all incorrectly validated with exit `0`.
+
+Transition validator GREEN: the same command passed `4` tests with `95` skipped. The first full runner-file pass exposed one compatibility regression: an intentionally invalid fourth migration chunk threw during policy construction. A bounded index guard retained the prior classified fail-closed result; the rerun passed `99` tests, and the final file passed `100` after adding the exact maximum-count mutation contract.
+
+Probe redirect RED:
+
+```bash
+bunx vitest run __tests__/local-llm-forwarding-probe.test.ts --maxWorkers=1 --no-file-parallelism -t "forwards the exact|fails closed on upstream redirect"
+```
+
+Result: `6 failed, 28 skipped`; the fetch init had no redirect mode and all five `301/302/303/307/308` follow branches reached the rejected destination. GREEN: the same command passed `6` with `28` skipped. The strengthened native-fetch integration using a real loopback redirector and an instrumented rejected-host destination passed all five redirect statuses with zero destination contacts (`5 passed, 29 skipped`).
+
+Changed test files:
+
+- `apps/tldw-frontend/__tests__/shared-research-workspace-cdp-uat.test.ts`
+- `apps/tldw-frontend/__tests__/local-llm-forwarding-probe.test.ts`
+
+### Fresh Live Run
+
+Fresh `final33-fix3-1787449107-31317` passed through the updated probe on the first live attempt.
+
+- Evidence status is `passed`; independent validation returned exit `0` with `failures: []`; the exact 15 canonical acceptance keys are all true.
+- The strict ledger is closed with no request failure, page error, or runtime overlay, and every expected HTTP/console failure has exact operation correlation. Owner transition is `57/64` requests with exactly 37 declarations; member Chats is `48/64` with exactly 35. Both have zero unexpected requests/errors and canonical context-specific declarations/statuses/bounds.
+- Settings are two `200` responses. Race statuses are `409/200/200/409`, with two successes, final `409`, distinct conflict operations, and equal replay turn hashes.
+- Provider readiness is truthfully `local-llm` / `Qwen2.5-0.5B-Instruct`. Three requests traversed the probe unchanged; all input/output hashes match and sentinel, mutation, tool/function, JSON, and request-bound proofs are clean.
+- Exact owner/member/nonmember isolation proof is present. Credential-value and sentinel/body-field scans across evidence/log are clean; the committed evidence machine-path scan is clean.
+- All five regenerated screenshots were visually inspected: desktop shared sources, desktop grounded answer/citations, mobile two-tab core, mobile full-screen preview, and revoked state. No overlap, overflow, extra banner, unreadable evidence, or revoked-data leak was visible.
+- `/tmp/tldw-shared-uat.Heaplg/cleanup-final33-fix3-1787449107-31317.json` and `/tmp/tldw-shared-uat.Heaplg/logs/uat-final33-fix3-1787449107-31317.log` are both mode `0600`.
+
+### Quality Gates
+
+- Final focused Vitest matrix: `7` files and `270 passed`, including the preserved Round 2 background-proxy suite (`88 passed`).
+- `node --check` passed both executable scripts. Focused changed-file ESLint reported zero errors/warnings. Forced shared-package ESLint under the frontend config reported `0 errors, 95 inherited warnings`; those package files are unchanged from the reviewed head.
+- No Python file differs from `79cf6dc1d4`, so touched-scope Ruff and Bandit are not applicable. No backend production path changed; the real backend was exercised by final33.
+- `git diff --check`, final status/staging verification, and the resulting commit hash are recorded by the executor after the report is staged because a commit cannot contain its own hash. No PR/push; the two unrelated watchlist templates remain excluded.

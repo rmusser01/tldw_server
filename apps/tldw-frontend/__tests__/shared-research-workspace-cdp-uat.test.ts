@@ -13,6 +13,7 @@ import {
   classifyStrictLedger,
   createEvidenceRecord,
   ensureLocatorVisibleInViewport,
+  getTransitionEvidenceOperationContract,
   selectEffectiveTarget,
   validateEvidenceRecord,
 } from "../scripts/shared-research-workspace-cdp-uat.mjs"
@@ -100,6 +101,21 @@ const completeProviderContextProof = {
   withinRequestBound: true,
 }
 
+const emptyTransitionOperationProof = (operation: {
+  allowedStatuses: number[]
+  maximumCount: number
+  name: string
+}) => ({
+  allowedStatuses: [...operation.allowedStatuses],
+  count: 0,
+  maximumCount: operation.maximumCount,
+  name: operation.name,
+  observedStatuses: [],
+})
+
+const ownerTransitionOperationContract = getTransitionEvidenceOperationContract("owner-revocation")
+const memberTransitionOperationContract = getTransitionEvidenceOperationContract("member-chats")
+
 const completeTransitionProof = [
   {
     allowedAbortCount: 1,
@@ -126,18 +142,10 @@ const completeTransitionProof = [
         status: null,
       },
     ],
-    operations: [
-      {
-        allowedStatuses: [200],
-        count: 0,
-        maximumCount: 1,
-        name: "owner-workspace-context",
-        observedStatuses: [],
-      },
-    ],
+    operations: ownerTransitionOperationContract.map(emptyTransitionOperationProof),
     pageErrorCount: 0,
     registeredAbortCount: 1,
-    registeredOperationCount: 1,
+    registeredOperationCount: ownerTransitionOperationContract.length,
     requestCount: 1,
     runtimeOverlayCount: 0,
     unexpectedRequestCount: 0,
@@ -152,18 +160,10 @@ const completeTransitionProof = [
     maximumOperationDeclarations: 64,
     maximumRequestCount: 64,
     observedRequests: [],
-    operations: [
-      {
-        allowedStatuses: [200],
-        count: 0,
-        maximumCount: 1,
-        name: "chats-openapi",
-        observedStatuses: [],
-      },
-    ],
+    operations: memberTransitionOperationContract.map(emptyTransitionOperationProof),
     pageErrorCount: 0,
     registeredAbortCount: 0,
-    registeredOperationCount: 1,
+    registeredOperationCount: memberTransitionOperationContract.length,
     requestCount: 0,
     runtimeOverlayCount: 0,
     unexpectedRequestCount: 0,
@@ -1518,6 +1518,103 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     ).toBe(1)
   })
 
+  it("rejects a missing zero-count owner operation even when the declaration count is balanced", () => {
+    const complete = makeCompleteEvidence()
+    const ownerProof = complete.transitionProof[0]
+    const operations = ownerProof.operations.filter(
+      (operation) => operation.name !== "owner-flashcard-decks"
+    )
+
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        transitionProof: [
+          {
+            ...ownerProof,
+            operations,
+            registeredOperationCount: operations.length,
+          },
+          complete.transitionProof[1],
+        ],
+      }).exitCode
+    ).toBe(1)
+  })
+
+  it("rejects an owner operation added to the member Chats proof", () => {
+    const complete = makeCompleteEvidence()
+    const memberProof = complete.transitionProof[1]
+    const ownerOperation = complete.transitionProof[0].operations.find(
+      (operation) => operation.name === "owner-workspace-save"
+    )
+    const operations = [...memberProof.operations, ownerOperation]
+
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        transitionProof: [
+          complete.transitionProof[0],
+          {
+            ...memberProof,
+            operations,
+            registeredOperationCount: operations.length,
+          },
+        ],
+      }).exitCode
+    ).toBe(1)
+  })
+
+  it("rejects a member Chats operation added to the owner proof", () => {
+    const complete = makeCompleteEvidence()
+    const ownerProof = complete.transitionProof[0]
+    const memberOperation = complete.transitionProof[1].operations.find(
+      (operation) => operation.name === "chats-settings"
+    )
+    const operations = [...ownerProof.operations, memberOperation]
+
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        transitionProof: [
+          {
+            ...ownerProof,
+            operations,
+            registeredOperationCount: operations.length,
+          },
+          complete.transitionProof[1],
+        ],
+      }).exitCode
+    ).toBe(1)
+  })
+
+  it("rejects duplicate or globally known renamed operations with balanced counts", () => {
+    const complete = makeCompleteEvidence()
+    const ownerProof = complete.transitionProof[0]
+    const duplicateOperations = ownerProof.operations.map((operation, index) =>
+      index === ownerProof.operations.length - 1 ? { ...ownerProof.operations[0] } : operation
+    )
+    const renamedOperations = ownerProof.operations.map((operation) =>
+      operation.name === "owner-notes-search"
+        ? { ...operation, name: "chats-openapi" }
+        : operation
+    )
+
+    for (const operations of [duplicateOperations, renamedOperations]) {
+      expect(
+        validateEvidenceRecord({
+          ...complete,
+          transitionProof: [
+            {
+              ...ownerProof,
+              operations,
+              registeredOperationCount: operations.length,
+            },
+            complete.transitionProof[1],
+          ],
+        }).exitCode
+      ).toBe(1)
+    }
+  })
+
   it("rejects missing or extra transition operation proof fields", () => {
     const complete = makeCompleteEvidence()
     const operation = complete.transitionProof[0].operations[0]
@@ -1533,13 +1630,37 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
           transitionProof: [
             {
               ...complete.transitionProof[0],
-              operations: [mutatedOperation],
+              operations: complete.transitionProof[0].operations.map((entry, index) =>
+                index === 0 ? mutatedOperation : entry
+              ),
             },
             complete.transitionProof[1],
           ],
         }).exitCode
       ).toBe(1)
     }
+  })
+
+  it("rejects a changed transition operation bound", () => {
+    const complete = makeCompleteEvidence()
+    const ownerProof = complete.transitionProof[0]
+
+    expect(
+      validateEvidenceRecord({
+        ...complete,
+        transitionProof: [
+          {
+            ...ownerProof,
+            operations: ownerProof.operations.map((operation, index) =>
+              index === 0
+                ? { ...operation, maximumCount: operation.maximumCount + 1 }
+                : operation
+            ),
+          },
+          complete.transitionProof[1],
+        ],
+      }).exitCode
+    ).toBe(1)
   })
 
   it.each([201, 204, 302, 399, 599])(
@@ -1561,13 +1682,15 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
             status,
           },
         ],
-        operations: [
-          {
-            ...operation,
-            count: 1,
-            observedStatuses: [status],
-          },
-        ],
+        operations: ownerProof.operations.map((entry, index) =>
+          index === 0
+            ? {
+                ...operation,
+                count: 1,
+                observedStatuses: [status],
+              }
+            : entry
+        ),
         requestCount: ownerProof.requestCount + 1,
       }
 

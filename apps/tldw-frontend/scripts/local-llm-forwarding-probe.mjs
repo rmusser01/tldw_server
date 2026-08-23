@@ -188,6 +188,7 @@ export const forwardProviderRequest = async ({
     body: forwardedBody,
     headers: forwardedHeaders,
     method: "POST",
+    redirect: "error",
   })
 }
 

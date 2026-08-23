@@ -766,66 +766,104 @@ const validateEvidencePayload = (evidence) => {
     "name",
     "observedStatuses",
   ]
-  const expectedTransitionStatuses = (name) => {
-    if (name === "owner-migration-create") return [201]
+  const invalidTransitionProof = (proof) => {
+    if (!exactKeys(proof, transitionProofKeys)) return true
+    const expectedOperations = transitionOperationContract(proof.context)
+    const observedRequests = proof.observedRequests
+    const operations = proof.operations
+    const allowedAborts = proof.allowedAborts
     if (
-      name === "webui-next-static" ||
-      name === "webui-next-font-geist" ||
-      /^webui-font-(?:arimo|inter-(?:medium|regular|semibold))$/.test(name)
+      !expectedOperations ||
+      !Array.isArray(observedRequests) ||
+      !Array.isArray(operations) ||
+      !Array.isArray(allowedAborts)
     ) {
-      return [200, 304]
+      return true
     }
-    if (
-      [
-        "destination-document",
-        "webui-runtime-config",
-        "ambient-persona-profiles",
-        "ambient-auth-me",
-        "ambient-health",
-        "ambient-health-live",
-        "ambient-notifications",
-        "ambient-notification-stream",
-        "ambient-notification-count",
-        "ambient-rag-health",
-        "ambient-llm-providers",
-        "ambient-llm-models",
-        "ambient-user-profile",
-        "owner-flashcard-decks",
-        "owner-notes-search",
-        "owner-slide-styles",
-        "owner-user-storage",
-        "owner-chat-commands",
-        "owner-workspace-capabilities",
-        "owner-workspace-context",
-        "owner-workspace-source-views",
-        "owner-workspace-sources",
-        "owner-workspace-save",
-        "owner-source-selection",
-        "owner-migration-finalize",
-        "owner-migration-status",
-        "owner-migration-delete-ack",
-        "chats-openapi",
-        "chats-docs-info",
-        "chats-ingestion-capabilities",
-        "chats-audio-service-health",
-        "chats-character-catalog",
-        "chats-audio-health",
-        "chats-voice-catalog",
-        "chats-share-links",
-        "chats-list",
-        "chats-messages",
-        "chats-research-runs",
-        "chats-settings",
-        "chats-provider-config",
-        "chats-persona-catalog",
-        "chats-prompt-capabilities",
-        "chats-implicit-feedback",
-      ].includes(name) ||
-      /^owner-migration-chunk-[1-3]$/.test(name)
-    ) {
-      return [200]
-    }
-    return null
+    const expectedByName = new Map(
+      expectedOperations.map((operation) => [operation.name, operation])
+    )
+    const operationNames = operations.map((operation) => operation?.name)
+    const responseRequests = observedRequests.filter((request) => request?.kind === "response")
+    const operationStatuses = operations.flatMap((operation) => operation?.observedStatuses || [])
+    return (
+      !isSha256(proof.labelHash) ||
+      proof.consoleErrorCount !== 0 ||
+      proof.pageErrorCount !== 0 ||
+      proof.runtimeOverlayCount !== 0 ||
+      proof.unexpectedRequestCount !== 0 ||
+      proof.withinRequestBound !== true ||
+      proof.maximumOperationDeclarations !== MAX_TRANSITION_OPERATION_DECLARATIONS ||
+      proof.maximumRequestCount !== MAX_TRANSITION_REQUESTS ||
+      !Number.isInteger(proof.requestCount) ||
+      proof.requestCount < 0 ||
+      proof.requestCount > MAX_TRANSITION_REQUESTS ||
+      observedRequests.length !== proof.requestCount ||
+      observedRequests.some(
+        (request) =>
+          !exactKeys(request, observedRequestProofKeys) ||
+          !["failure", "response"].includes(request.kind) ||
+          !String(request.method || "").trim() ||
+          !isSha256(request.requestHash) ||
+          (request.kind === "failure"
+            ? request.status !== null || !isSha256(request.errorHash)
+            : !Number.isInteger(request.status) || request.errorHash !== null)
+      ) ||
+      proof.registeredOperationCount !== expectedOperations.length ||
+      operations.length !== expectedOperations.length ||
+      new Set(operationNames).size !== expectedOperations.length ||
+      operations.some((operation) => {
+        const expected = expectedByName.get(operation?.name)
+        return (
+          !exactKeys(operation, operationProofKeys) ||
+          !expected ||
+          JSON.stringify(operation.allowedStatuses) !==
+            JSON.stringify(expected.allowedStatuses) ||
+          operation.maximumCount !== expected.maximumCount ||
+          !Array.isArray(operation.observedStatuses) ||
+          operation.observedStatuses.some(
+            (status) =>
+              !Number.isInteger(status) || !operation.allowedStatuses.includes(status)
+          ) ||
+          operation.observedStatuses.length !== operation.count ||
+          !Number.isInteger(operation.count) ||
+          operation.count < 0 ||
+          operation.count > operation.maximumCount
+        )
+      }) ||
+      operations.reduce((total, operation) => total + operation.count, 0) !==
+        responseRequests.length ||
+      JSON.stringify(operationStatuses.sort((left, right) => left - right)) !==
+        JSON.stringify(
+          responseRequests.map((request) => request.status).sort((left, right) => left - right)
+        ) ||
+      proof.registeredAbortCount !== allowedAborts.length ||
+      proof.registeredAbortCount > MAX_TRANSITION_ABORT_ALLOWANCES ||
+      proof.allowedAbortCount !==
+        allowedAborts.reduce((total, abort) => total + abort.count, 0) ||
+      allowedAborts.some(
+        (abort) =>
+          !exactKeys(abort, abortProofKeys) ||
+          !String(abort.id || "").trim() ||
+          abort.method !== "GET" ||
+          !Number.isInteger(abort.count) ||
+          !Number.isInteger(abort.maximumCount) ||
+          abort.count < 0 ||
+          abort.maximumCount < 1 ||
+          abort.count > abort.maximumCount ||
+          abort.maximumCount > 2 ||
+          !isSha256(abort.requestHash)
+      ) ||
+      allowedAborts.some(
+        (abort) =>
+          observedRequests.filter(
+            (request) =>
+              request.kind === "failure" &&
+              request.method === abort.method &&
+              request.requestHash === abort.requestHash
+          ).length < abort.count
+      )
+    )
   }
   if (
     !Array.isArray(transitionProof) ||
@@ -834,98 +872,7 @@ const validateEvidencePayload = (evidence) => {
     !["owner-revocation", "member-chats"].every((context) =>
       transitionProof.some((proof) => proof?.context === context)
     ) ||
-    transitionProof.some(
-      (proof) =>
-        !exactKeys(proof, transitionProofKeys) ||
-        !isSha256(proof.labelHash) ||
-        proof.consoleErrorCount !== 0 ||
-        proof.pageErrorCount !== 0 ||
-        proof.runtimeOverlayCount !== 0 ||
-        proof.unexpectedRequestCount !== 0 ||
-        proof.withinRequestBound !== true ||
-        proof.maximumOperationDeclarations !== MAX_TRANSITION_OPERATION_DECLARATIONS ||
-        proof.maximumRequestCount !== MAX_TRANSITION_REQUESTS ||
-        !Number.isInteger(proof.requestCount) ||
-        proof.requestCount < 0 ||
-        proof.observedRequests?.length !== proof.requestCount ||
-        proof.observedRequests?.some(
-          (request) =>
-            !exactKeys(request, observedRequestProofKeys) ||
-            !["failure", "response"].includes(request.kind) ||
-            !String(request.method || "").trim() ||
-            !isSha256(request.requestHash) ||
-            (request.kind === "failure"
-              ? request.status !== null || !isSha256(request.errorHash)
-              : !Number.isInteger(request.status) || request.errorHash !== null)
-        ) ||
-        proof.registeredOperationCount !== proof.operations?.length ||
-        proof.registeredOperationCount < 1 ||
-        proof.registeredOperationCount > MAX_TRANSITION_OPERATION_DECLARATIONS ||
-        new Set(proof.operations?.map((operation) => operation.name)).size !==
-          proof.registeredOperationCount ||
-        proof.operations?.some(
-          (operation) => {
-            const expectedStatuses = expectedTransitionStatuses(operation?.name)
-            return (
-              !exactKeys(operation, operationProofKeys) ||
-              !String(operation.name || "").trim() ||
-              !expectedStatuses ||
-              JSON.stringify(operation.allowedStatuses) !== JSON.stringify(expectedStatuses) ||
-              !Array.isArray(operation.observedStatuses) ||
-              operation.observedStatuses.some(
-                (status) =>
-                  !Number.isInteger(status) || !operation.allowedStatuses.includes(status)
-              ) ||
-              operation.observedStatuses.length !== operation.count ||
-              !Number.isInteger(operation.count) ||
-              !Number.isInteger(operation.maximumCount) ||
-              operation.count < 0 ||
-              operation.maximumCount < 1 ||
-              operation.maximumCount > MAX_TRANSITION_REQUESTS ||
-              operation.count > operation.maximumCount
-            )
-          }
-        ) ||
-        proof.operations?.reduce((total, operation) => total + operation.count, 0) !==
-          proof.observedRequests?.filter((request) => request.kind === "response").length ||
-        JSON.stringify(
-          proof.operations
-            ?.flatMap((operation) => operation.observedStatuses)
-            .sort((left, right) => left - right)
-        ) !==
-          JSON.stringify(
-            proof.observedRequests
-              ?.filter((request) => request.kind === "response")
-              .map((request) => request.status)
-              .sort((left, right) => left - right)
-          ) ||
-        proof.registeredAbortCount !== proof.allowedAborts?.length ||
-        proof.registeredAbortCount > MAX_TRANSITION_ABORT_ALLOWANCES ||
-        proof.allowedAbortCount !==
-          proof.allowedAborts?.reduce((total, abort) => total + abort.count, 0) ||
-        proof.allowedAborts?.some(
-          (abort) =>
-            !exactKeys(abort, abortProofKeys) ||
-            !String(abort.id || "").trim() ||
-            abort.method !== "GET" ||
-            !Number.isInteger(abort.count) ||
-            !Number.isInteger(abort.maximumCount) ||
-            abort.count < 0 ||
-            abort.maximumCount < 1 ||
-            abort.count > abort.maximumCount ||
-            abort.maximumCount > 2 ||
-            !isSha256(abort.requestHash)
-        ) ||
-        proof.allowedAborts?.some(
-          (abort) =>
-            proof.observedRequests.filter(
-              (request) =>
-                request.kind === "failure" &&
-                request.method === abort.method &&
-                request.requestHash === abort.requestHash
-            ).length < abort.count
-        )
-    )
+    transitionProof.some(invalidTransitionProof)
   ) {
     failures.push("transition_proof")
   }
@@ -1413,6 +1360,116 @@ const MAX_TRANSITION_ABORT_ALLOWANCES = 12
 const MAX_TRANSITION_OPERATION_DECLARATIONS = 64
 const MAX_TRANSITION_REQUESTS = 64
 
+const transitionOperationDeclaration = ({
+  allowedStatuses = [200],
+  maximumCount,
+  name,
+}) =>
+  Object.freeze({
+    allowedStatuses: Object.freeze([...allowedStatuses]),
+    maximumCount,
+    name,
+  })
+
+const COMMON_TRANSITION_OPERATION_DECLARATIONS = [
+  ["destination-document", 1],
+  ["webui-runtime-config", 2],
+  ["webui-next-static", 32, [200, 304]],
+  ["webui-next-font-geist", 2, [200, 304]],
+  ["webui-font-arimo", 1, [200, 304]],
+  ["webui-font-inter-semibold", 1, [200, 304]],
+  ["webui-font-inter-medium", 1, [200, 304]],
+  ["webui-font-inter-regular", 1, [200, 304]],
+  ["ambient-persona-profiles", 4],
+  ["ambient-auth-me", 4],
+  ["ambient-health", 4],
+  ["ambient-health-live", 4],
+  ["ambient-notifications", 4],
+  ["ambient-notification-stream", 4],
+  ["ambient-notification-count", 4],
+  ["ambient-rag-health", 4],
+  ["ambient-llm-providers", 4],
+  ["ambient-llm-models", 4],
+  ["ambient-user-profile", 4],
+].map(([name, maximumCount, allowedStatuses]) =>
+  transitionOperationDeclaration({ allowedStatuses, maximumCount, name })
+)
+
+const OWNER_TRANSITION_OPERATION_DECLARATIONS = [
+  ...COMMON_TRANSITION_OPERATION_DECLARATIONS,
+  ...[
+    ["owner-flashcard-decks", 1],
+    ["owner-notes-search", 2],
+    ["owner-slide-styles", 1],
+    ["owner-user-storage", 2],
+    ["owner-chat-commands", 1],
+    ["owner-workspace-capabilities", 1],
+    ["owner-workspace-context", 4],
+    ["owner-workspace-source-views", 2],
+    ["owner-workspace-sources", 2],
+    ["owner-workspace-save", 2],
+    ["owner-source-selection", 2],
+    ["owner-migration-create", 1, [201]],
+    ["owner-migration-finalize", 1],
+    ["owner-migration-status", 1],
+    ["owner-migration-delete-ack", 1],
+    ["owner-migration-chunk-1", 1],
+    ["owner-migration-chunk-2", 1],
+    ["owner-migration-chunk-3", 1],
+  ].map(([name, maximumCount, allowedStatuses]) =>
+    transitionOperationDeclaration({ allowedStatuses, maximumCount, name })
+  ),
+]
+
+const MEMBER_TRANSITION_OPERATION_DECLARATIONS = [
+  ...COMMON_TRANSITION_OPERATION_DECLARATIONS,
+  ...[
+    ["chats-openapi", 2],
+    ["chats-docs-info", 1],
+    ["chats-ingestion-capabilities", 1],
+    ["chats-audio-service-health", 1],
+    ["chats-character-catalog", 1],
+    ["chats-audio-health", 1],
+    ["chats-voice-catalog", 1],
+    ["chats-share-links", 1],
+    ["chats-list", 2],
+    ["chats-messages", 2],
+    ["chats-research-runs", 1],
+    ["chats-settings", 2],
+    ["chats-provider-config", 1],
+    ["chats-persona-catalog", 1],
+    ["chats-prompt-capabilities", 1],
+    ["chats-implicit-feedback", 1],
+  ].map(([name, maximumCount, allowedStatuses]) =>
+    transitionOperationDeclaration({ allowedStatuses, maximumCount, name })
+  ),
+]
+
+const TRANSITION_OPERATION_CONTRACTS = Object.freeze({
+  "member-chats": Object.freeze(MEMBER_TRANSITION_OPERATION_DECLARATIONS),
+  "owner-revocation": Object.freeze(OWNER_TRANSITION_OPERATION_DECLARATIONS),
+})
+
+const transitionOperationContract = (contextName) =>
+  TRANSITION_OPERATION_CONTRACTS[contextName] || null
+
+export const getTransitionEvidenceOperationContract = (contextName) =>
+  (transitionOperationContract(contextName) || []).map((operation) => ({
+    allowedStatuses: [...operation.allowedStatuses],
+    maximumCount: operation.maximumCount,
+    name: operation.name,
+  }))
+
+const requireTransitionOperationDeclaration = (contextName, name) => {
+  const declaration = transitionOperationContract(contextName)?.find(
+    (operation) => operation.name === name
+  )
+  if (!declaration) {
+    throw new Error(`Unknown ${contextName} transition operation: ${name}`)
+  }
+  return declaration
+}
+
 const transitionRequestOrigin = (entry) => {
   try {
     return new URL(entry.url).origin
@@ -1441,34 +1498,35 @@ const transitionOperation = ({
   pathPrefix: pathPrefix ? String(pathPrefix).toLowerCase() : null,
 })
 
-const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
-  transitionOperation({
-    allowedStatuses: [200],
-    maximumCount: 1,
+const declaredTransitionOperation = ({ contextName, name, ...matcher }) => {
+  const declaration = requireTransitionOperationDeclaration(contextName, name)
+  return transitionOperation({ ...declaration, ...matcher })
+}
+
+const commonTransitionOperations = ({ apiUrl, contextName, targetPath, webUrl }) => [
+  declaredTransitionOperation({
+    contextName,
     method: "GET",
     name: "destination-document",
     origin: webUrl,
     path: targetPath,
   }),
-  transitionOperation({
-    allowedStatuses: [200],
-    maximumCount: 2,
+  declaredTransitionOperation({
+    contextName,
     method: "GET",
     name: "webui-runtime-config",
     origin: webUrl,
     path: "/api/_tldw-webui/runtime-config",
   }),
-  transitionOperation({
-    allowedStatuses: [200, 304],
-    maximumCount: 32,
+  declaredTransitionOperation({
+    contextName,
     method: "GET",
     name: "webui-next-static",
     origin: webUrl,
     pathPrefix: "/_next/",
   }),
-  transitionOperation({
-    allowedStatuses: [200, 304],
-    maximumCount: 2,
+  declaredTransitionOperation({
+    contextName,
     method: "GET",
     name: "webui-next-font-geist",
     origin: webUrl,
@@ -1480,9 +1538,8 @@ const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
     ["webui-font-inter-medium", "/fonts/inter-medium.ttf"],
     ["webui-font-inter-regular", "/fonts/inter-regular.ttf"],
   ].map(([name, pathname]) =>
-    transitionOperation({
-      allowedStatuses: [200, 304],
-      maximumCount: 1,
+    declaredTransitionOperation({
+      contextName,
       method: "GET",
       name,
       origin: webUrl,
@@ -1502,9 +1559,8 @@ const commonTransitionOperations = ({ apiUrl, targetPath, webUrl }) => [
     ["ambient-llm-models", "/api/v1/llm/models/metadata"],
     ["ambient-user-profile", "/api/v1/users/me/profile"],
   ].map(([name, pathname]) =>
-    transitionOperation({
-      allowedStatuses: [200],
-      maximumCount: 4,
+    declaredTransitionOperation({
+      contextName,
       method: "GET",
       name,
       origin: apiUrl,
@@ -1568,41 +1624,37 @@ export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, w
   const workspacePath = `/api/v1/workspaces/${String(workspaceId).toLowerCase()}`
   const migration = transitionMigrationIdentity({ apiUrl, ledger, workspaceId })
   const ownerOperations = [
-    ["owner-flashcard-decks", "GET", "/api/v1/flashcards/decks", 1, []],
-    ["owner-notes-search", "GET", "/api/v1/notes/search/", 2, ["notes"]],
-    ["owner-slide-styles", "GET", "/api/v1/slides/styles", 1, []],
-    ["owner-user-storage", "GET", "/api/v1/users/storage", 2, []],
-    ["owner-chat-commands", "GET", "/api/v1/chat/commands", 1, []],
+    ["owner-flashcard-decks", "GET", "/api/v1/flashcards/decks", []],
+    ["owner-notes-search", "GET", "/api/v1/notes/search/", ["notes"]],
+    ["owner-slide-styles", "GET", "/api/v1/slides/styles", []],
+    ["owner-user-storage", "GET", "/api/v1/users/storage", []],
+    ["owner-chat-commands", "GET", "/api/v1/chat/commands", []],
     [
       "owner-workspace-capabilities",
       "GET",
       "/api/v1/research-workspace/capabilities",
-      1,
       ["local_workspace"],
     ],
-    ["owner-workspace-context", "GET", `${workspacePath}/context`, 4, ["local_workspace"]],
+    ["owner-workspace-context", "GET", `${workspacePath}/context`, ["local_workspace"]],
     [
       "owner-workspace-source-views",
       "GET",
       `${workspacePath}/source-views`,
-      2,
       ["local_workspace"],
     ],
-    ["owner-workspace-sources", "GET", `${workspacePath}/sources`, 2, ["local_workspace"]],
-    ["owner-workspace-save", "PUT", workspacePath, 2, ["local_workspace"]],
+    ["owner-workspace-sources", "GET", `${workspacePath}/sources`, ["local_workspace"]],
+    ["owner-workspace-save", "PUT", workspacePath, ["local_workspace"]],
     [
       "owner-source-selection",
       "PUT",
       `${workspacePath}/sources/selection`,
-      2,
       ["local_workspace", "source_mutation"],
     ],
-    ["owner-migration-create", "POST", "/api/v1/workspaces/migrations", 1, ["local_workspace"]],
-  ].map(([name, method, pathname, maximumCount, allowedForbiddenKinds]) =>
-    transitionOperation({
+    ["owner-migration-create", "POST", "/api/v1/workspaces/migrations", ["local_workspace"]],
+  ].map(([name, method, pathname, allowedForbiddenKinds]) =>
+    declaredTransitionOperation({
       allowedForbiddenKinds,
-      allowedStatuses: name === "owner-migration-create" ? [201] : [200],
-      maximumCount,
+      contextName: "owner-revocation",
       method,
       name,
       origin: apiUrl,
@@ -1612,28 +1664,25 @@ export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, w
   if (migration.migrationId) {
     const migrationPath = `/api/v1/workspaces/migrations/${migration.migrationId}`
     ownerOperations.push(
-      transitionOperation({
+      declaredTransitionOperation({
         allowedForbiddenKinds: ["local_workspace"],
-        allowedStatuses: [200],
-        maximumCount: 1,
+        contextName: "owner-revocation",
         method: "POST",
         name: "owner-migration-finalize",
         origin: apiUrl,
         path: `${migrationPath}/finalize`,
       }),
-      transitionOperation({
+      declaredTransitionOperation({
         allowedForbiddenKinds: ["local_workspace"],
-        allowedStatuses: [200],
-        maximumCount: 1,
+        contextName: "owner-revocation",
         method: "GET",
         name: "owner-migration-status",
         origin: apiUrl,
         path: migrationPath,
       }),
-      transitionOperation({
+      declaredTransitionOperation({
         allowedForbiddenKinds: ["local_workspace"],
-        allowedStatuses: [200],
-        maximumCount: 1,
+        contextName: "owner-revocation",
         method: "POST",
         name: "owner-migration-delete-ack",
         origin: apiUrl,
@@ -1641,11 +1690,11 @@ export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, w
       })
     )
     for (const { chunkId, index } of migration.chunkIds) {
+      if (index < 1 || index > 3) continue
       ownerOperations.push(
-        transitionOperation({
+        declaredTransitionOperation({
           allowedForbiddenKinds: ["local_workspace"],
-          allowedStatuses: [200],
-          maximumCount: 1,
+          contextName: "owner-revocation",
           method: "PUT",
           name: `owner-migration-chunk-${index}`,
           origin: apiUrl,
@@ -1660,6 +1709,7 @@ export const buildOwnerRevocationTransitionPolicy = ({ apiUrl, ledger, webUrl, w
     operations: [
       ...commonTransitionOperations({
         apiUrl,
+        contextName: "owner-revocation",
         targetPath: "/research-workspace",
         webUrl,
       }),
@@ -1672,31 +1722,29 @@ export const buildMemberChatsTransitionPolicy = ({ apiUrl, conversationId, webUr
   const encodedConversationId = encodeURIComponent(String(conversationId)).toLowerCase()
   const chatsPath = `/api/v1/chats/${encodedConversationId}`
   const operations = [
-    ["chats-openapi", "GET", "/openapi.json", 2],
-    ["chats-docs-info", "GET", "/api/v1/config/docs-info", 1],
-    ["chats-ingestion-capabilities", "GET", "/api/v1/ingestion-sources/capabilities", 1],
-    ["chats-audio-service-health", "GET", "/api/v1/audio/health", 1],
-    ["chats-character-catalog", "GET", "/api/v1/characters/", 1],
-    ["chats-audio-health", "GET", "/api/v1/audio/transcriptions/health", 1],
-    ["chats-voice-catalog", "GET", "/api/v1/audio/voices/catalog", 1],
+    ["chats-openapi", "GET", "/openapi.json"],
+    ["chats-docs-info", "GET", "/api/v1/config/docs-info"],
+    ["chats-ingestion-capabilities", "GET", "/api/v1/ingestion-sources/capabilities"],
+    ["chats-audio-service-health", "GET", "/api/v1/audio/health"],
+    ["chats-character-catalog", "GET", "/api/v1/characters/"],
+    ["chats-audio-health", "GET", "/api/v1/audio/transcriptions/health"],
+    ["chats-voice-catalog", "GET", "/api/v1/audio/voices/catalog"],
     [
       "chats-share-links",
       "GET",
       `/api/v1/chat/conversations/${encodedConversationId}/share-links`,
-      1,
     ],
-    ["chats-list", "GET", "/api/v1/chats/", 2],
-    ["chats-messages", "GET", `${chatsPath}/messages`, 2],
-    ["chats-research-runs", "GET", `${chatsPath}/research-runs`, 1],
-    ["chats-settings", "GET", `${chatsPath}/settings`, 2],
-    ["chats-provider-config", "GET", "/api/v1/config/providers", 1],
-    ["chats-persona-catalog", "GET", "/api/v1/persona/catalog", 1],
-    ["chats-prompt-capabilities", "GET", "/api/v1/prompts/capabilities", 1],
-    ["chats-implicit-feedback", "POST", "/api/v1/rag/feedback/implicit", 1],
-  ].map(([name, method, pathname, maximumCount]) =>
-    transitionOperation({
-      allowedStatuses: [200],
-      maximumCount,
+    ["chats-list", "GET", "/api/v1/chats/"],
+    ["chats-messages", "GET", `${chatsPath}/messages`],
+    ["chats-research-runs", "GET", `${chatsPath}/research-runs`],
+    ["chats-settings", "GET", `${chatsPath}/settings`],
+    ["chats-provider-config", "GET", "/api/v1/config/providers"],
+    ["chats-persona-catalog", "GET", "/api/v1/persona/catalog"],
+    ["chats-prompt-capabilities", "GET", "/api/v1/prompts/capabilities"],
+    ["chats-implicit-feedback", "POST", "/api/v1/rag/feedback/implicit"],
+  ].map(([name, method, pathname]) =>
+    declaredTransitionOperation({
+      contextName: "member-chats",
       method,
       name,
       origin: apiUrl,
@@ -1707,7 +1755,12 @@ export const buildMemberChatsTransitionPolicy = ({ apiUrl, conversationId, webUr
     allowedOrigins: [new URL(apiUrl).origin, new URL(webUrl).origin],
     invalidReasons: [],
     operations: [
-      ...commonTransitionOperations({ apiUrl, targetPath: "/chat", webUrl }),
+      ...commonTransitionOperations({
+        apiUrl,
+        contextName: "member-chats",
+        targetPath: "/chat",
+        webUrl,
+      }),
       ...operations,
     ],
   }

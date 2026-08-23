@@ -18,26 +18,26 @@
   },
   "contextIsolationProof": [
     {
-      "configHash": "sha256:565e80d113a3f0eb20d461feb95bf412830b7222e6cd43b5bc1c49713aa80ccc",
-      "cookieHash": "sha256:945bc47ee6a4f5de3df4072bbb28decc6d15d731144d16cd66ea7504dcf4453b",
-      "markerHash": "sha256:aaf19bd8bf18d0f433ea2750e012f426531ec5e5ed87f9d9b7c0ea665d6fcf40",
-      "markerCookieHash": "sha256:aaf19bd8bf18d0f433ea2750e012f426531ec5e5ed87f9d9b7c0ea665d6fcf40",
+      "configHash": "sha256:13dc2a06cfcdfcf04267f95925ba9838d3e5df6568663eb447277517d55d1bf7",
+      "cookieHash": "sha256:1db178e66cbe5483e59263b065e228a6f5ad6b2ee7f3c5bc26af150d0be1b1e5",
+      "markerHash": "sha256:d9711f8f49481d807fbf323f383c07bef25b36e7433faeae112705dca4ff9a26",
+      "markerCookieHash": "sha256:d9711f8f49481d807fbf323f383c07bef25b36e7433faeae112705dca4ff9a26",
       "persona": "member",
       "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
     },
     {
-      "configHash": "sha256:023f4ef7a1ced126d41f4f5ce17518c12007a3d6a62c404c44d99c91967c401c",
-      "cookieHash": "sha256:1641658b3a1b7889cefa9c2a1747e62b87c572aea649f9e06e380f246a55623b",
-      "markerHash": "sha256:415526e53b86c612f652324a685f22f3698836c9a5dc42fdf601f8b407acce52",
-      "markerCookieHash": "sha256:415526e53b86c612f652324a685f22f3698836c9a5dc42fdf601f8b407acce52",
+      "configHash": "sha256:fa4262ed92084de97dcff05dc69e88a0fb2d01333f678fb312c754f76ecbafca",
+      "cookieHash": "sha256:d96a634aa260241237a858e13f1c6e7bbb7642ea6f7a36d12512e000f10d6f32",
+      "markerHash": "sha256:30127268bedc259c6505bd91eafaccd006fde71ff3a4ac0fe1670dfd16c070f3",
+      "markerCookieHash": "sha256:30127268bedc259c6505bd91eafaccd006fde71ff3a4ac0fe1670dfd16c070f3",
       "persona": "nonmember",
       "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
     },
     {
-      "configHash": "sha256:1b669b386c85a6148345ba038ffe8d03fce8b16b3c89b154b60926a659efcaa4",
-      "cookieHash": "sha256:3509125c1428edb2423b88de10fb76e383d12cfceb396017c23eacb90b299f91",
-      "markerHash": "sha256:8ea5083526f9d7d1fabd976fcf4d7bf29be2a4c23c12dffe5cd1d8bf6b1098dd",
-      "markerCookieHash": "sha256:8ea5083526f9d7d1fabd976fcf4d7bf29be2a4c23c12dffe5cd1d8bf6b1098dd",
+      "configHash": "sha256:fcf5607551de8b626771702667e4e806105c5f6dbf40ae2fc017b0ed8e9fd7af",
+      "cookieHash": "sha256:f9080fc144a42756505fad5e78533dab3793af6dfbe38a443ca0cf40f59581c0",
+      "markerHash": "sha256:5cb25878f4572b0335a14ddfeb751f655cc7396dca2cd6e08c1f11b6f6887bb3",
+      "markerCookieHash": "sha256:5cb25878f4572b0335a14ddfeb751f655cc7396dca2cd6e08c1f11b6f6887bb3",
       "persona": "owner",
       "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
     }
@@ -58,17 +58,17 @@
   },
   "environmentHash": "sha256:813a4a4679bca81f3051b2d4ed5060e69298b80da9b87927f46a086b78f243fc",
   "failureMessageHash": null,
-  "finishedAt": "2026-08-23T01:06:37.079Z",
+  "finishedAt": "2026-08-23T01:42:43.431Z",
   "fixture": {
-    "canonicalStatusEnvelopeHash": "sha256:56a99a03e667e51137c84a4bafa4908165aab33fcd36bbd8b7f9e952c5696534",
+    "canonicalStatusEnvelopeHash": "sha256:1f7af4cd1258dacd626432c9c8ba5b20c2e5f494c7ac85afc6a2428f1109191b",
     "canonicalStatusQueryable": true,
     "provisioned": true,
-    "shareIdHash": "sha256:031b4af5197ec30a926f48cf40e11a7dbc470048a21e4003b7a3c07c5dab1baa",
+    "shareIdHash": "sha256:41cfc0d1f2d127b04555b7246d84019b4d27710a3f3aff6e7764375b1e06e05d",
     "sourceIds": [
-      "sha256:ad5f6269b7e03d8ef6cd61a646c70693cd0625eb8db1864db08ec5860b0c509d",
-      "sha256:628721cc1a6c298014eb3966da82e7ca315a0388a109fcff47d300be4906658b"
+      "sha256:1ddff5072abc1bbce90684398c37ffdba7d0dbcfa8e1c7f39cb33894ad7ca05d",
+      "sha256:33c91d662b3cf064c43f44bc3eea4d5533c5579dcc9b4b0aa9dfef15b2ef46cd"
     ],
-    "workspaceIdHash": "sha256:5825b64fa59c951c12443cfb558827c882f9d6d56d270606ac61ed82c9ca4e11"
+    "workspaceIdHash": "sha256:8a5c95902aecbe0e9fa2f47e23654958330260287a4b67c011d4d0ae18b1def6"
   },
   "ledger": {
     "closed": true,
@@ -77,31 +77,31 @@
         "context": "nonmember",
         "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
         "context": "member",
         "message": "Failed to load resource: the server responded with a status of 409 (Conflict)",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
         "context": "member",
         "message": "Failed to load resource: the server responded with a status of 409 (Conflict)",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
         "context": "member",
         "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
         "context": "member",
         "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-amber-final32-fix2-1787446794-16413/preview"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-amber-final33-fix3-1787449107-31317/preview"
       }
     ],
     "expectedHttpFailures": [
@@ -112,25 +112,25 @@
         "method": "GET",
         "operationId": "nonmember-neutral-bootstrap",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
-        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
+        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
         "consoleErrorCount": 1,
         "context": "member",
         "method": "POST",
         "operationId": "race-concurrent-conflict",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
-        "bodyHash": "sha256:471d1957f7d9051aa89003b2fad0731d63096879039a788631f59460e53c9478",
+        "bodyHash": "sha256:03be089e1fbc222c1a617b3931d9180dfdd169103856aa05673a75de3af659ec",
         "consoleErrorCount": 1,
         "context": "member",
         "method": "POST",
         "operationId": "race-fingerprint-conflict",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
         "bodyHash": null,
@@ -139,7 +139,7 @@
         "method": "GET",
         "operationId": "revoked-workspace-bootstrap",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
         "bodyHash": null,
@@ -148,7 +148,7 @@
         "method": "GET",
         "operationId": "revoked-source-preview",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-amber-final32-fix2-1787446794-16413/preview"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-amber-final33-fix3-1787449107-31317/preview"
       }
     ],
     "pageErrors": [],
@@ -158,14 +158,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
       },
       {
         "bodyHash": null,
@@ -194,6 +187,13 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
         "bodyHash": null,
@@ -235,6 +235,13 @@
         "context": "member",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
       },
       {
@@ -243,6 +250,13 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -257,13 +271,6 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -312,13 +319,6 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/health/live"
       },
       {
@@ -327,6 +327,13 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/rag/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
       },
       {
         "bodyHash": null,
@@ -368,28 +375,28 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
-        "bodyHash": "sha256:6a388c052513b136c3e8de8e155c3c5f03af5338676fc36b748cce8b757f605b",
+        "bodyHash": "sha256:2311bce1327bd106deb0d69b85afc2f72f61fc6df1964b4cdffd7392338564b9",
         "context": "member",
         "method": "POST",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-cobalt-final32-fix2-1787446794-16413/preview?chunk_index=0"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-cobalt-final33-fix3-1787449107-31317/preview?chunk_index=0"
       },
       {
-        "bodyHash": "sha256:d187f3db6591c7431b4ac202e019a2860fdc97a359b570d6975c3e9033aee29c",
+        "bodyHash": "sha256:43111665fa13658f20f0798438430ba2ed16a5c6c2e8f7138a8db1c546daa3db",
         "context": "member",
         "method": "POST",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
         "bodyHash": null,
@@ -403,14 +410,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
       },
       {
         "bodyHash": null,
@@ -424,7 +424,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
       },
       {
         "bodyHash": null,
@@ -432,6 +432,13 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
       },
       {
         "bodyHash": null,
@@ -480,6 +487,13 @@
         "context": "member",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
       },
       {
@@ -488,13 +502,6 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/auth/me"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -509,6 +516,13 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -613,21 +627,14 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
         "bodyHash": null,
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
-      },
-      {
-        "bodyHash": null,
-        "context": "owner",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
       },
       {
         "bodyHash": null,
@@ -641,7 +648,7 @@
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
       },
       {
         "bodyHash": null,
@@ -649,6 +656,13 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
       },
       {
         "bodyHash": null,
@@ -676,14 +690,14 @@
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
+        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
       },
       {
         "bodyHash": null,
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
+        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
       },
       {
         "bodyHash": null,
@@ -718,14 +732,14 @@
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
+        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
       },
       {
         "bodyHash": null,
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -830,7 +844,7 @@
         "context": "owner",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
         "bodyHash": null,
@@ -851,13 +865,6 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
@@ -865,7 +872,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
       },
       {
         "bodyHash": null,
@@ -873,6 +880,13 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
       },
       {
         "bodyHash": null,
@@ -908,6 +922,13 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
       },
       {
         "bodyHash": null,
@@ -1047,21 +1068,7 @@
         "context": "nonmember",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
-      },
-      {
-        "bodyHash": null,
-        "context": "nonmember",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
-      },
-      {
-        "bodyHash": null,
-        "context": "nonmember",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
       },
       {
         "bodyHash": null,
@@ -1075,7 +1082,7 @@
         "context": "nonmember",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
       },
       {
         "bodyHash": null,
@@ -1083,6 +1090,20 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
       },
       {
         "bodyHash": null,
@@ -1118,6 +1139,13 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "nonmember",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
       },
       {
         "bodyHash": null,
@@ -1257,14 +1285,14 @@
         "context": "nonmember",
         "method": "GET",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
       },
       {
         "bodyHash": null,
@@ -1278,13 +1306,6 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
       },
       {
@@ -1292,7 +1313,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
+        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
       },
       {
         "bodyHash": null,
@@ -1300,6 +1321,13 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
       },
       {
         "bodyHash": null,
@@ -1341,6 +1369,13 @@
         "context": "member",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
       },
       {
@@ -1349,6 +1384,13 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/auth/me"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -1363,13 +1405,6 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -1474,42 +1509,42 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
-        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
+        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
         "context": "member",
         "method": "POST",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
-        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
+        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
         "context": "member",
         "method": "POST",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
-        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
+        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
         "context": "member",
         "method": "POST",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
-        "bodyHash": "sha256:471d1957f7d9051aa89003b2fad0731d63096879039a788631f59460e53c9478",
+        "bodyHash": "sha256:03be089e1fbc222c1a617b3931d9180dfdd169103856aa05673a75de3af659ec",
         "context": "member",
         "method": "POST",
         "status": 409,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/chat"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-amber-final32-fix2-1787446794-16413/preview"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-amber-final33-fix3-1787449107-31317/preview"
       },
       {
         "bodyHash": null,
@@ -1572,14 +1607,21 @@
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/shares"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/shares"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "DELETE",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shares/51"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shares/52"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/shares"
       },
       {
         "bodyHash": null,
@@ -1593,63 +1635,42 @@
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/shares"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
-      },
-      {
-        "bodyHash": null,
-        "context": "owner-revocation",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
-      },
-      {
-        "bodyHash": null,
-        "context": "owner-revocation",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
-      },
-      {
-        "bodyHash": null,
-        "context": "owner-revocation",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
@@ -1667,6 +1688,20 @@
       },
       {
         "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
+      },
+      {
+        "bodyHash": null,
+        "context": "owner-revocation",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
+      },
+      {
+        "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
@@ -1684,14 +1719,14 @@
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
@@ -1712,21 +1747,21 @@
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
         "context": "owner-revocation",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/workspaces/7f6fbccb-f344-4b92-8dde-78831f8da733/context"
+        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/research-workspace?shared=51"
+        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
       },
       {
         "bodyHash": null,
@@ -1754,14 +1789,14 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
+        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
+        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
       },
       {
         "bodyHash": null,
@@ -1803,6 +1838,13 @@
         "context": "member",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
       },
       {
@@ -1811,20 +1853,6 @@
         "method": "GET",
         "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/auth/me"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -1839,6 +1867,20 @@
         "method": "GET",
         "status": 304,
         "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:18001/api/v1/health"
       },
       {
         "bodyHash": null,
@@ -1880,6 +1922,13 @@
         "context": "member",
         "method": "GET",
         "status": 200,
+        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+      },
+      {
+        "bodyHash": null,
+        "context": "member",
+        "method": "GET",
+        "status": 200,
         "url": "http://127.0.0.1:18001/api/v1/health/live"
       },
       {
@@ -1887,7 +1936,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
       },
       {
         "bodyHash": null,
@@ -1901,7 +1950,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
       },
       {
         "bodyHash": null,
@@ -1915,7 +1964,7 @@
         "context": "member",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
+        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
       },
       {
         "bodyHash": null,
@@ -1928,22 +1977,15 @@
         "bodyHash": null,
         "context": "member",
         "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+        "status": 404,
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
       },
       {
         "bodyHash": null,
         "context": "member",
         "method": "GET",
         "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/workspace"
-      },
-      {
-        "bodyHash": null,
-        "context": "member",
-        "method": "GET",
-        "status": 404,
-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/51/sources/source-amber-final32-fix2-1787446794-16413/preview"
+        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-amber-final33-fix3-1787449107-31317/preview"
       },
       {
         "bodyHash": null,
@@ -1978,28 +2020,21 @@
         "context": "nonmember",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
+        "url": "http://127.0.0.1:18082/_next/static/webpack/d902ae78ab151429.webpack.hot-update.json"
       },
       {
         "bodyHash": null,
         "context": "nonmember",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/webpack/4291dd380a325031.webpack.hot-update.json"
+        "url": "http://127.0.0.1:18082/_next/static/webpack/webpack.d902ae78ab151429.hot-update.js"
       },
       {
         "bodyHash": null,
         "context": "nonmember",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/webpack/webpack.4291dd380a325031.hot-update.js"
-      },
-      {
-        "bodyHash": null,
-        "context": "nonmember",
-        "method": "GET",
-        "status": 200,
-        "url": "http://127.0.0.1:18082/_next/static/webpack/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.4291dd380a325031.hot-update.js"
+        "url": "http://127.0.0.1:18082/_next/static/webpack/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.d902ae78ab151429.hot-update.js"
       },
       {
         "bodyHash": null,
@@ -2034,35 +2069,35 @@
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/research-runs"
+        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/settings?scope_type=global"
       },
       {
         "bodyHash": null,
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/settings?scope_type=global"
+        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/research-runs"
       },
       {
         "bodyHash": null,
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/messages?scope_type=global&include_deleted=false&include_metadata=true&limit=200&offset=0"
+        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/messages?scope_type=global&include_deleted=false&include_metadata=true&limit=200&offset=0"
       },
       {
         "bodyHash": null,
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chat/conversations/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/share-links?scope_type=global"
+        "url": "http://127.0.0.1:18001/api/v1/chat/conversations/a0a951c9-0ef1-4624-a78b-dd5928b145c8/share-links?scope_type=global"
       },
       {
         "bodyHash": null,
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/settings?scope_type=global"
+        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/settings?scope_type=global"
       },
       {
         "bodyHash": null,
@@ -2086,7 +2121,7 @@
         "url": "http://127.0.0.1:18001/api/v1/auth/me"
       },
       {
-        "bodyHash": "sha256:cf62f208e79e3248bd4ea76dd36a4b78fd50e8075724cae6ac1e266714f9192e",
+        "bodyHash": "sha256:fe2b6fc4d5ea10554081e02b5e94000db7311bc1aea2dc240ce37e51373e6c89",
         "context": "member-chats",
         "method": "POST",
         "status": 200,
@@ -2132,7 +2167,7 @@
         "context": "member-chats",
         "method": "GET",
         "status": 200,
-        "url": "http://127.0.0.1:18001/api/v1/chats/8487cdf0-4955-4ba9-96fd-7a5ef3bca2a2/research-runs"
+        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/research-runs"
       },
       {
         "bodyHash": null,
@@ -2164,16 +2199,16 @@
     "bodyUnchanged": true,
     "forwardedRequestCount": 3,
     "inputBodyHashes": [
-      "sha256:2a77c21c6c411a53e5444f2d6fab3634c6ed815a5f401da7b4eaf57d9caee34a",
-      "sha256:220ba1b2c1851e26fb3254cd9a258db01438ab8753a6d636ea36ae3603cb6a42",
-      "sha256:576f928928baecba03f9f2a04a223d05ab6feed9c739949ae75d875b2c29927c"
+      "sha256:34e78115573e5445f086d901a9736123aa6ed0dd2af9a38a0fe43cffc8aa57e5",
+      "sha256:aaf74105210d7b88d8ec650a0e7b26e724b52211d6ec5ab6e4ae36166cc20020",
+      "sha256:8fb7fa5070d3f239a49cea3ddd17a7a41767a26101b3fe52b2fea4a228061c3b"
     ],
     "maximumRequestCount": 16,
     "mutationPayloadsAbsent": true,
     "outputBodyHashes": [
-      "sha256:2a77c21c6c411a53e5444f2d6fab3634c6ed815a5f401da7b4eaf57d9caee34a",
-      "sha256:220ba1b2c1851e26fb3254cd9a258db01438ab8753a6d636ea36ae3603cb6a42",
-      "sha256:576f928928baecba03f9f2a04a223d05ab6feed9c739949ae75d875b2c29927c"
+      "sha256:34e78115573e5445f086d901a9736123aa6ed0dd2af9a38a0fe43cffc8aa57e5",
+      "sha256:aaf74105210d7b88d8ec650a0e7b26e724b52211d6ec5ab6e4ae36166cc20020",
+      "sha256:8fb7fa5070d3f239a49cea3ddd17a7a41767a26101b3fe52b2fea4a228061c3b"
     ],
     "ownerSentinelAbsent": true,
     "payloadJsonValid": true,
@@ -2189,43 +2224,43 @@
   "raceProbe": {
     "operations": [
       {
-        "bodyHash": "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
+        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
         "operationId": "race-concurrent-conflict",
         "status": 409
       },
       {
-        "bodyHash": "sha256:471d1957f7d9051aa89003b2fad0731d63096879039a788631f59460e53c9478",
+        "bodyHash": "sha256:03be089e1fbc222c1a617b3931d9180dfdd169103856aa05673a75de3af659ec",
         "operationId": "race-fingerprint-conflict",
         "status": 409
       }
     ],
     "requestHashes": [
-      "sha256:99e91763ea592d2d46f5c4972b7831f6657c8f7772b9c87d63efadc03eb60490",
-      "sha256:471d1957f7d9051aa89003b2fad0731d63096879039a788631f59460e53c9478"
+      "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
+      "sha256:03be089e1fbc222c1a617b3931d9180dfdd169103856aa05673a75de3af659ec"
     ],
-    "requestIdHash": "sha256:791cc66549d807b6326226858a38919947f33cfa930682fe11673e406101736f",
+    "requestIdHash": "sha256:be9fcd3dc9a1d392ff40c11b3af9a4bac8295a77a86a87c29ffb724834f5ea7e",
     "responseHashes": [
-      "sha256:122e34b65e9e2f5b53337081e2e03e4ee6a5414fe908dd6876f55cfdbc64857f",
-      "sha256:eacf7589b6c6a105e4581b0f150a3477c92ff463c6f7a63afd75ceed3067f46f"
+      "sha256:4b20595f7083f4c622f232ed493ea02675f3b18f527eaa1de1ea2a139ecfa3d4",
+      "sha256:8b2169d34cfe17e3d21ce7f307c585622e236189238fdea631ad6708dc820556"
     ],
     "statuses": [
-      200,
       409,
+      200,
       200,
       409
     ],
     "timingsMs": [
-      3251,
-      329,
-      149,
-      146
+      383,
+      4026,
+      170,
+      179
     ],
     "turnHashes": [
-      "sha256:ff9f16dd131df05206c22d09518c7cf079013f47c2e6b4131395b428483f7318",
-      "sha256:ff9f16dd131df05206c22d09518c7cf079013f47c2e6b4131395b428483f7318"
+      "sha256:9808a9012f5ffcd8cd271db876693960ad444ca07ed604aab638a8c28a7a853f",
+      "sha256:9808a9012f5ffcd8cd271db876693960ad444ca07ed604aab638a8c28a7a853f"
     ]
   },
-  "runIdHash": "sha256:3e05721e14a1b4f192cef88d4bb0e9739fa74c00f19345d9ede1d6b0b085d8a1",
+  "runIdHash": "sha256:951500f99033420ff8f839d2c9354820500a4e05247ce72967de790f43922909",
   "settingsRequestProbe": {
     "count": 2,
     "maximum": 2,
@@ -2241,7 +2276,7 @@
     "mobileSharedWorkspace": "mobile-shared-workspace.png",
     "revokedShare": "revoked-share.png"
   },
-  "startedAt": "2026-08-23T01:02:27.801Z",
+  "startedAt": "2026-08-23T01:38:27.980Z",
   "status": "passed",
   "transitionProof": [
     {
@@ -2252,7 +2287,7 @@
           "id": "owner-workspace-context-teardown",
           "maximumCount": 1,
           "method": "GET",
-          "requestHash": "sha256:27f0cb7a8b9ce0237c4fb587bc1146e9ea55138e1659571c90032cb0c280ac7c"
+          "requestHash": "sha256:a7e53aa96bd4175a870d56e991ddb41488456a45073176fd54f0aa59541a3ba6"
         }
       ],
       "consoleErrorCount": 0,
@@ -2285,14 +2320,14 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:1bf807e9f10245f1003f7d5ada724c67405653b818c2b95c142a89933b6c4c9d",
+          "requestHash": "sha256:8a622cf3eda4f76b8b9b208b02546d55733c23926b3d53d5b33b4a8fab9fc856",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:8a622cf3eda4f76b8b9b208b02546d55733c23926b3d53d5b33b4a8fab9fc856",
+          "requestHash": "sha256:1bf807e9f10245f1003f7d5ada724c67405653b818c2b95c142a89933b6c4c9d",
           "status": 200
         },
         {
@@ -2341,14 +2376,14 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:7ad16eccc7dcb05d4239a8b717ffe59b3b50cbc69c2442414c6e5ba6a89fde9c",
+          "requestHash": "sha256:f759ef33a750e28d8a0ee65897e7344d4e46dd6829e84e105002dd3ebb52df62",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:2838e1fb6479663865e06c95163415b6fc3502e2383ddd3b62a2caa92d07ad7e",
+          "requestHash": "sha256:7ad16eccc7dcb05d4239a8b717ffe59b3b50cbc69c2442414c6e5ba6a89fde9c",
           "status": 200
         },
         {
@@ -2364,6 +2399,13 @@
           "method": "GET",
           "requestHash": "sha256:5d5968e15c0084e46758822827737adaeaf550bee8adc8b277b0165512c854e2",
           "status": 304
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
+          "requestHash": "sha256:2838e1fb6479663865e06c95163415b6fc3502e2383ddd3b62a2caa92d07ad7e",
+          "status": 200
         },
         {
           "errorHash": null,
@@ -2488,21 +2530,21 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:e6700bbdb794b98c912c4d50666731dca73cc2fe5daf2a25db9cd1a4d3a5f6a2",
+          "requestHash": "sha256:015587216e55bb1774fb0bf3bad138aaaa877366104b099b19daf90f7d1b4b0a",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:0f2707366ede2855fe878ce82f14b037bc6c5196f3470ba7a4f3cead3545368c",
+          "requestHash": "sha256:3c57747a00e59e4ee2b2a892fc0b30f26a6e7ad6b29fbdfbc0e40a20277ab060",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:0f2707366ede2855fe878ce82f14b037bc6c5196f3470ba7a4f3cead3545368c",
+          "requestHash": "sha256:3c57747a00e59e4ee2b2a892fc0b30f26a6e7ad6b29fbdfbc0e40a20277ab060",
           "status": 200
         },
         {
@@ -2516,21 +2558,14 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:67912bfeea888619dc2c24c9420357300aa9b6874c3abc358d56d3aa368e2f79",
+          "requestHash": "sha256:42322a55b1694a7ed8b8478edf5cfed568d6a3b5e9b3386c6d12a86e8205aa1a",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:27f0cb7a8b9ce0237c4fb587bc1146e9ea55138e1659571c90032cb0c280ac7c",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
-          "requestHash": "sha256:adb695c8b6d99d1cc0ba3c6fddf7a4960617ef5809880d07470abe7e2b739321",
+          "requestHash": "sha256:a7e53aa96bd4175a870d56e991ddb41488456a45073176fd54f0aa59541a3ba6",
           "status": 200
         },
         {
@@ -2544,6 +2579,13 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
+          "requestHash": "sha256:adb695c8b6d99d1cc0ba3c6fddf7a4960617ef5809880d07470abe7e2b739321",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
           "requestHash": "sha256:d3062964e8939a35d73458b764f21c4874a65e2b2c0aa0a5c450ac39df925859",
           "status": 200
         },
@@ -2551,14 +2593,14 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:e6700bbdb794b98c912c4d50666731dca73cc2fe5daf2a25db9cd1a4d3a5f6a2",
+          "requestHash": "sha256:015587216e55bb1774fb0bf3bad138aaaa877366104b099b19daf90f7d1b4b0a",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:595d566f48a1c4f1d83845a023d3c0453ca1569f88133c13e2e8fcaa7cd530cc",
+          "requestHash": "sha256:bd7b6c02717e9411be48a5ec5d2515c3a45782ff2ebaa6dc5568729617a7c58e",
           "status": 200
         },
         {
@@ -2586,70 +2628,70 @@
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:4a96486e19043b05b92ff76fb31797db5956cd31a7ca17171abdac4efddd100e",
+          "requestHash": "sha256:bc357e2ce2623948349aa096567904334b83b8414dff89cbe7bab32e563c4d7e",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:4a96486e19043b05b92ff76fb31797db5956cd31a7ca17171abdac4efddd100e",
+          "requestHash": "sha256:bc357e2ce2623948349aa096567904334b83b8414dff89cbe7bab32e563c4d7e",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:cedbcddb70b5408c4a40c083a5f03aed7cac163038dbeb256178edbcd2eda3a1",
+          "requestHash": "sha256:19013efc2690977ed5e9bceab85e6d196fd828a162c64f83ec06b06aa982f916",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:a5c29d8d415b256efe83123a8770094b134c39f72b75e91d7f22efe8961598f9",
+          "requestHash": "sha256:fe52e29a057af56c7174c837cc99f41dcfd43433b8493fcd907f3732a41d8a96",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:27f0cb7a8b9ce0237c4fb587bc1146e9ea55138e1659571c90032cb0c280ac7c",
+          "requestHash": "sha256:a7e53aa96bd4175a870d56e991ddb41488456a45073176fd54f0aa59541a3ba6",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "PUT",
-          "requestHash": "sha256:f0ff2691154758ac4c3b71785a0403140944ba56bc6bcbe9704dc00b46e3f67c",
+          "requestHash": "sha256:68be8d5b9edae5a1f8eedd3b99b0c6baadbf05efe6dbd75743f58a0df7afd785",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "POST",
-          "requestHash": "sha256:3c51cb5bd5ea5c867807acf89cb33d9e88fbef16aecaf598990bd1d6aaec540c",
+          "requestHash": "sha256:f374e83a5b4e31a0482657352eb08517c52c7ff3886ddfeaffa1afad61ab9f8c",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:27f0cb7a8b9ce0237c4fb587bc1146e9ea55138e1659571c90032cb0c280ac7c",
+          "requestHash": "sha256:a7e53aa96bd4175a870d56e991ddb41488456a45073176fd54f0aa59541a3ba6",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:12ede85174f3185acdcba874b09574d88198571f7ac843b14b7c75cc3a6e2c66",
+          "requestHash": "sha256:4b245dd6d1fc10857141c22ad187993c30c8145a8c45c510b37c617e4adee162",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "POST",
-          "requestHash": "sha256:b4ca2ba03565dde4936c16301d40fcd1a8c65904e798239eb304434bc0eaa012",
+          "requestHash": "sha256:de74d5ddd95931802c5b28e8275162a7db88cf9496d779bf70cf541a15d03598",
           "status": 200
         }
       ],
@@ -2710,10 +2752,12 @@
             200,
             304
           ],
-          "count": 0,
+          "count": 1,
           "maximumCount": 2,
           "name": "webui-next-font-geist",
-          "observedStatuses": []
+          "observedStatuses": [
+            200
+          ]
         },
         {
           "allowedStatuses": [
@@ -3087,7 +3131,7 @@
       "pageErrorCount": 0,
       "registeredAbortCount": 1,
       "registeredOperationCount": 37,
-      "requestCount": 56,
+      "requestCount": 57,
       "runtimeOverlayCount": 0,
       "unexpectedRequestCount": 0,
       "withinRequestBound": true
@@ -3100,7 +3144,7 @@
           "id": "chat-share-links-teardown",
           "maximumCount": 1,
           "method": "GET",
-          "requestHash": "sha256:da9f68d35a92c5f41d3a8dec9fd17455461ad03bd1f0d25ad7bd4a95469d72fe"
+          "requestHash": "sha256:6a431897a8b67764615aa92e461ebb22a31e4835a8d7c72872be672d21ce0c5e"
         },
         {
           "count": 0,
@@ -3128,7 +3172,7 @@
           "id": "chat-research-runs-teardown",
           "maximumCount": 1,
           "method": "GET",
-          "requestHash": "sha256:bfb23545ff36acca5587e1b7c87d10064c15c4164d834467a9958b89173c7f2b"
+          "requestHash": "sha256:1b905ec9f3367556dd5e6419a9d037584b5a5a12761399a40f06b20ad66f14b1"
         },
         {
           "count": 0,
@@ -3161,28 +3205,21 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:f759ef33a750e28d8a0ee65897e7344d4e46dd6829e84e105002dd3ebb52df62",
+          "requestHash": "sha256:74e1d3d2ac815b2863b9d58f0c3c779c895a75ef1f7a1a75ac811df6bf289bf0",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:975920fdbcc420437516350525aecffc986f875346ec1e462ce35d97610a5723",
+          "requestHash": "sha256:b02179300ee59a0c59356da9b0d5fad55212d0563362acfd76fb74bdedc92b39",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:c71aff375fcf3839367b0db111444d92166198aa0af8dc9807fc8cf27900b777",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
-          "requestHash": "sha256:1f398b29bb355244d82ceccb33885f9d3620f8425761b8ae5607c1403dff4f6d",
+          "requestHash": "sha256:dcf0713139d92af04ba5dd9e927cca4d6825c7adca8e786b92860363e4a92c5c",
           "status": 200
         },
         {
@@ -3210,6 +3247,13 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
+          "requestHash": "sha256:8a622cf3eda4f76b8b9b208b02546d55733c23926b3d53d5b33b4a8fab9fc856",
+          "status": 200
+        },
+        {
+          "errorHash": null,
+          "kind": "response",
+          "method": "GET",
           "requestHash": "sha256:1bf807e9f10245f1003f7d5ada724c67405653b818c2b95c142a89933b6c4c9d",
           "status": 200
         },
@@ -3218,13 +3262,6 @@
           "kind": "response",
           "method": "GET",
           "requestHash": "sha256:989a744a0a69faccb08603bd1919734e8fd37f2bbaf9800ddc40982cada48d3f",
-          "status": 200
-        },
-        {
-          "errorHash": null,
-          "kind": "response",
-          "method": "GET",
-          "requestHash": "sha256:8a622cf3eda4f76b8b9b208b02546d55733c23926b3d53d5b33b4a8fab9fc856",
           "status": 200
         },
         {
@@ -3455,14 +3492,14 @@
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:7b0bf814c137958bafe57bf3002cdd97a9b3c32da30bf2d42946f7eb968ed48d",
+          "requestHash": "sha256:5c37518381e1ec9fda6c8b9c0921b896c0ff229fb54b5315a3978ec87c315f9a",
           "status": 200
         },
         {
           "errorHash": null,
           "kind": "response",
           "method": "GET",
-          "requestHash": "sha256:5c37518381e1ec9fda6c8b9c0921b896c0ff229fb54b5315a3978ec87c315f9a",
+          "requestHash": "sha256:7b0bf814c137958bafe57bf3002cdd97a9b3c32da30bf2d42946f7eb968ed48d",
           "status": 200
         },
         {
@@ -3560,11 +3597,10 @@
             200,
             304
           ],
-          "count": 2,
+          "count": 1,
           "maximumCount": 2,
           "name": "webui-next-font-geist",
           "observedStatuses": [
-            200,
             200
           ]
         },
@@ -3904,7 +3940,7 @@
       "pageErrorCount": 0,
       "registeredAbortCount": 8,
       "registeredOperationCount": 35,
-      "requestCount": 49,
+      "requestCount": 48,
       "runtimeOverlayCount": 0,
       "unexpectedRequestCount": 0,
       "withinRequestBound": true

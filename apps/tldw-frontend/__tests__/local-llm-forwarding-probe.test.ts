@@ -1,3 +1,5 @@
+import http from "node:http"
+
 import { describe, expect, it, vi } from "vitest"
 
 import {
@@ -25,6 +27,7 @@ describe("local LLM forwarding probe", () => {
     })
     const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
       expect(Buffer.from(init.body as Uint8Array)).toEqual(body)
+      expect(init.redirect).toBe("error")
       return new Response('{"choices":[]}', {
         headers: { "content-type": "application/json" },
         status: 200,
@@ -58,6 +61,91 @@ describe("local LLM forwarding probe", () => {
     expect(JSON.stringify(proof)).not.toContain("Use only shared evidence")
     expect(JSON.stringify(proof)).not.toContain("messages")
   })
+
+  it.each([301, 302, 303, 307, 308])(
+    "fails closed on upstream redirect %i without contacting its non-loopback target",
+    async (status) => {
+      const requestBodyMarker = `redirect-body-${status}`
+      const redirectTargetMarker = `external-target-${status}`
+      let initialUpstreamRequests = 0
+      let externalTargetRequests = 0
+      const externalTarget = http.createServer((request, response) => {
+        externalTargetRequests += 1
+        request.resume()
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end('{"choices":[]}')
+      })
+      const externalTargetPort = await new Promise<number>((resolve, reject) => {
+        externalTarget.once("error", reject)
+        externalTarget.listen(0, "127.0.0.1", () => {
+          externalTarget.off("error", reject)
+          const address = externalTarget.address()
+          if (!address || typeof address === "string") {
+            reject(new Error("external target did not expose a TCP address"))
+            return
+          }
+          resolve(address.port)
+        })
+      })
+      const redirector = http.createServer((_request, response) => {
+        initialUpstreamRequests += 1
+        response.writeHead(status, {
+          location: `http://0.0.0.0:${externalTargetPort}/${redirectTargetMarker}`,
+        })
+        response.end()
+      })
+      const redirectorPort = await new Promise<number>((resolve, reject) => {
+        redirector.once("error", reject)
+        redirector.listen(0, "127.0.0.1", () => {
+          redirector.off("error", reject)
+          const address = redirector.address()
+          if (!address || typeof address === "string") {
+            reject(new Error("redirector did not expose a TCP address"))
+            return
+          }
+          resolve(address.port)
+        })
+      })
+      const probe = createLocalLlmForwardingProbe({
+        ownerSentinel: OWNER_SENTINEL,
+        recipientSentinel: RECIPIENT_SENTINEL,
+        targetUrl: `http://127.0.0.1:${redirectorPort}/v1/chat/completions`,
+      })
+      let responseStatus = 0
+      let responseText = ""
+      try {
+        const probeAddress = (await probe.listen({ host: "127.0.0.1", port: 0 })) as {
+          port: number
+        }
+        const response = await fetch(
+          `http://127.0.0.1:${probeAddress.port}/v1/chat/completions`,
+          {
+            body: JSON.stringify({ messages: [{ content: requestBodyMarker, role: "user" }] }),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+          }
+        )
+        responseStatus = response.status
+        responseText = await response.text()
+      } finally {
+        await probe.close()
+        await new Promise<void>((resolve, reject) =>
+          redirector.close((error) => (error ? reject(error) : resolve()))
+        )
+        await new Promise<void>((resolve, reject) =>
+          externalTarget.close((error) => (error ? reject(error) : resolve()))
+        )
+      }
+
+      expect(initialUpstreamRequests).toBe(1)
+      expect(externalTargetRequests).toBe(0)
+      expect(responseStatus).toBe(502)
+      expect(responseText).toBe('{"detail":"Provider forwarding failed"}')
+      expect(responseText.length).toBeLessThan(64)
+      expect(responseText).not.toContain(requestBodyMarker)
+      expect(responseText).not.toContain(redirectTargetMarker)
+    }
+  )
 
   it.each([
     ["owner sentinel", { messages: [{ content: OWNER_SENTINEL, role: "user" }] }],
