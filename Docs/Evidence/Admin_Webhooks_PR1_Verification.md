@@ -2,10 +2,10 @@
 
 ## Verification Identity
 
-- Tested source commit: `e54701a402`
+- Tested source commit: `ebbe6d30da`
 - Rebased onto: `origin/dev` at
   `d736368d17c92f879d0b5364b45f23488629f5b8`
-- Final verification timestamp: `2026-08-23T19:33:06Z`
+- Final verification timestamp: `2026-08-23T19:56:55Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -184,8 +184,8 @@ findings. All six were accepted and corrected:
   database boundary, and no raw SQL remains under `app/core/Admin_Webhooks`;
 - every test function in `tests/Admin_Webhooks` and the six additional
   webhook-related PR test modules now has exactly one direct accepted unit or
-  integration marker; inherited accepted markers were removed while
-  `asyncio` and `postgres` execution markers were preserved.
+  integration marker; inherited accepted markers and redundant `asyncio`
+  markers were removed while required `postgres` execution markers remain.
 
 Focused architecture tests first reproduced the three material gaps as
 `3 failed`, then passed `3/3` after correction. Qodo's incremental review then
@@ -327,9 +327,10 @@ local PostgreSQL service was configured; their most recent required-provider
 run remains the recorded `24 passed, 0 skipped` result at the direct-marker
 source.
 
-The package lint errors were removed by using an ESM import in the security
-header test and narrowly suppressing the two intentional conditional plugin
-`require` calls in `next.config.js`. Under Node 20.19.5 and Bun 1.3.2:
+The package lint errors are removed without suppressions. The security-header
+test uses an ESM import, and the active configuration is now
+`next.config.mjs` with static ESM plugin imports and equivalent conditional
+wrappers. Under Node 20.19.5 and Bun 1.3.2:
 
 ```text
 bun run lint:      PASS, 0 errors and 41 unchanged warnings
@@ -374,6 +375,44 @@ fresh complete run passed `40/40`. No repository, SQL, migration, or persistence
 code changed, so the most recent required-PostgreSQL proof remains applicable.
 Qodo marked `/review` deprecated in favor of `/agentic_review`; the latter is
 the required post-push confirmation command for this source.
+
+## Agentic Qodo Follow-Up
+
+Qodo's refreshed agentic review at head `a66e255495` reported three rule
+violations. Source commit `ebbe6d30da` addresses all three:
+
+- renamed the active Next configuration to `next.config.mjs`, replaced both
+  conditional CommonJS imports with static ESM imports, and removed both lint
+  suppressions while retaining conditional analyzer and Sentry wrapping;
+- removed the exact mocked `logger.warning` call assertion from the read-audit
+  failure test while preserving the observable successful response and
+  response-redaction assertions;
+- removed redundant `asyncio` markers from the complete PR-touched Python test
+  surface because repository `asyncio_mode=auto` supplies execution handling;
+  direct unit/integration classifications and PostgreSQL execution markers are
+  unchanged.
+
+Verification against that source:
+
+```text
+focused API/control-plane/system-ops tests: 42 passed, 6 warnings
+affected non-PostgreSQL Python matrix:      323 passed, 24 deselected
+focused Ruff:                              PASS
+redundant-marker/suppression scan:          PASS, no matches
+admin security-header tests:               3 passed
+admin package lint:                        PASS, 0 errors, 41 baseline warnings
+admin typecheck:                           PASS
+admin production build:                    PASS, 49 pages
+analyzer and Sentry config branches:       PASS
+git diff --cached --check:                 PASS
+```
+
+The first production-build attempt failed only because the restricted sandbox
+forbids Turbopack's internal local port bind. The identical Node 20 command
+passed with normal process permissions. These Python changes are test-only and
+do not alter repository, migration, or PostgreSQL behavior, so the prior
+required-provider proof remains `24 passed, 0 skipped`. Post-push Qodo
+confirmation and GitHub-hosted CI remain pending.
 
 ## Upstream Admin UI Baselines
 
@@ -435,7 +474,7 @@ and webhook browser journey establish the scoped PR behavior.
 
 ## Final Safety Checks
 
-- `git diff --cached --check`: PASS for tested source commit `e54701a402`.
+- `git diff --cached --check`: PASS for tested source commit `ebbe6d30da`.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,
