@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Generic, NoReturn, Protocol, TypeAlias, TypeVar
 
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
 from .audit import MutationAction, MutationAudit, MutationAuditSink, MutationOutcome
@@ -286,7 +287,7 @@ class _MutationContext:
         )
 
 
-class _AuditSinkUnavailable(RuntimeError):
+class _AuditSinkUnavailable(MandatoryAuditWriteError):
     pass
 
 

@@ -51,7 +51,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.repository import (
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseLockError, TransactionError
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
@@ -400,6 +400,26 @@ async def test_audit_failure_rolls_back_create_claim_and_activity(
         audit_sink=_recording_sink(records),
     )
     assert retried.replayed is False
+
+
+async def test_fail_once_audit_error_is_preserved_across_sqlite_transaction(
+    plane: ControlPlaneFixture,
+) -> None:
+    calls = 0
+
+    async def fail_once(_record: MutationAudit) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise MandatoryAuditWriteError("audit unavailable") from DatabaseLockError()
+
+    with pytest.raises(WebhookError) as exc_info:
+        await plane.service.create(_create_command(), audit_sink=fail_once)
+
+    assert exc_info.value.code is WebhookErrorCode.AUDIT_UNAVAILABLE
+    assert calls == 1
+    assert await plane.repository.count_registrations() == 0
+    assert (await plane.repository.get_migration_state()).first_canonical_activity_at is None
 
 
 async def test_audit_failure_rolls_back_patch_delete_and_rotation(

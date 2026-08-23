@@ -612,7 +612,7 @@ def _strict_json_object(payload: bytes, *, maximum_bytes: int) -> dict[str, obje
     return value
 
 
-def _publish_exclusive_output(path: Path, payload: bytes) -> None:
+def _publish_exclusive_output(path: Path, payload: bytes) -> _FileEvidence:
     if _path_exists(path):
         raise LegacyImportError(LegacyImportErrorCode.PATH_UNSAFE)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -632,7 +632,7 @@ def _publish_exclusive_output(path: Path, payload: bytes) -> None:
         os.close(descriptor)
         descriptor = None
         _fsync_directory(path.parent)
-        _file_evidence(path, expected_payload=payload)
+        return _file_evidence(path, expected_payload=payload)
     except LegacyImportError:
         if created:
             with suppress(OSError):
@@ -649,6 +649,24 @@ def _publish_exclusive_output(path: Path, payload: bytes) -> None:
         if descriptor is not None:
             with suppress(OSError):
                 os.close(descriptor)
+
+
+def _remove_published_output_if_same(path: Path, evidence: _FileEvidence) -> None:
+    try:
+        metadata = os.lstat(path)
+    except OSError:
+        return
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != evidence.owner_id
+        or metadata.st_gid != evidence.group_id
+        or stat.S_IMODE(metadata.st_mode) != evidence.mode
+        or f"{metadata.st_dev}:{metadata.st_ino}" != evidence.identity
+    ):
+        return
+    with suppress(OSError):
+        path.unlink()
+        _fsync_directory(path.parent)
 
 
 def _record_payload(
@@ -1344,7 +1362,7 @@ class LegacyImportService:
                     ),
                 )
             ),
-            projected_non_deleted_count=(len(snapshot.database.canonical_registration_ids) + len(accepted)),
+            projected_non_deleted_count=(snapshot.database.canonical_non_deleted_count + len(accepted)),
             source_mapping=mapping,
             requires_system_ops_backup=snapshot.requires_system_ops_backup,
             report_digest="",
@@ -1658,7 +1676,6 @@ class LegacyImportService:
                         payload=backup_payload,
                         ring=rollback_ring,
                         plan=plan,
-                        expected_plaintext=snapshot.store_bytes,
                     )
                 except LegacyImportError:
                     if backup_candidate == paths.backup:
@@ -1747,13 +1764,12 @@ class LegacyImportService:
             raise LegacyImportError(LegacyImportErrorCode.OPERATION_FAILED)
         return raw
 
-    @staticmethod
     def _verify_backup_payload(
+        self,
         *,
         payload: bytes,
         ring: WebhookKeyRing,
         plan: LegacyImportPlan,
-        expected_plaintext: bytes,
     ) -> None:
         value = _strict_json_object(payload, maximum_bytes=70_000_000)
         if (
@@ -1780,7 +1796,14 @@ class LegacyImportService:
             )
         except Exception:  # noqa: BLE001 - expose only a closed artifact failure
             raise LegacyImportError(LegacyImportErrorCode.OPERATION_FAILED) from None
-        if not hmac.compare_digest(plaintext, expected_plaintext):
+        plaintext_store = _strict_json_object(
+            plaintext,
+            maximum_bytes=67_108_864,
+        )
+        if not hmac.compare_digest(
+            self._system_subtree_fingerprint(plaintext_store),
+            plan.source_fingerprints["system_ops"],
+        ):
             raise LegacyImportError(LegacyImportErrorCode.OPERATION_FAILED)
 
     def _system_subtree_fingerprint(self, store: Mapping[str, object]) -> str:
@@ -2187,26 +2210,24 @@ class LegacyImportService:
         ):
             raise LegacyImportError(LegacyImportErrorCode.PRECONDITION_FAILED)
         state = await self._repository.get_migration_state()
-        if (
-            state.phase != "complete"
-            or state.rollback_retirement_phase != "retained"
-            or state.rollback_expires_at is None
-            or now.astimezone(timezone.utc) >= state.rollback_expires_at
-            or state.first_canonical_activity_at is not None
-        ):
-            raise LegacyImportError(LegacyImportErrorCode.ROLLBACK_WINDOW_CLOSED)
+        self._require_extractable_rollback_state(state=state, now=now)
         if not confirmed or state.import_operation_id is None:
             raise LegacyImportError(LegacyImportErrorCode.PRECONDITION_FAILED)
+        operation_id = state.import_operation_id
+
         try:
             await self._emit_rollback_audit(
                 operator_id=operator_id,
                 action="admin_webhook.rollback.extract",
-                operation_id=state.import_operation_id,
+                operation_id=operation_id,
                 outcome="accepted",
                 request_id=request_id,
             )
         except Exception:  # noqa: BLE001 - mandatory audit fails closed
             raise LegacyImportError(LegacyImportErrorCode.AUDIT_UNAVAILABLE) from None
+        normalized_output: Path | None = None
+        published_output: _FileEvidence | None = None
+        transaction_exited = False
         try:
             normalized_backup = _normalize_output_path(backup_path)
             normalized_key = _normalize_output_path(rollback_key_path)
@@ -2216,22 +2237,38 @@ class LegacyImportService:
                 or str(normalized_key) != state.active_key_path
                 or len({normalized_backup, normalized_key, normalized_output}) != 3
                 or normalized_output == self._system_ops_path.resolve(strict=False)
-                or any(_is_within(normalized_output, root) for root in self._application_data_paths)
+                or any(
+                    _is_within(normalized_output, root)
+                    for root in self._application_data_paths
+                )
                 or _path_exists(normalized_output)
             ):
                 raise LegacyImportError(LegacyImportErrorCode.PATH_UNSAFE)
-            plaintext = self._read_rollback_backup(
-                state=state,
-                backup_path=normalized_backup,
-                rollback_key_path=normalized_key,
-            )
-            _publish_exclusive_output(normalized_output, plaintext)
+            async with self._repository.transaction() as tx:
+                current = await tx.lock_migration_state()
+                self._require_extractable_rollback_state(state=current, now=now)
+                if (
+                    current.import_operation_id != operation_id
+                    or str(normalized_backup) != current.active_backup_path
+                    or str(normalized_key) != current.active_key_path
+                ):
+                    raise LegacyImportError(LegacyImportErrorCode.PRECONDITION_FAILED)
+                plaintext = self._read_rollback_backup(
+                    state=current,
+                    backup_path=normalized_backup,
+                    rollback_key_path=normalized_key,
+                )
+                published_output = _publish_exclusive_output(
+                    normalized_output,
+                    plaintext,
+                )
+            transaction_exited = True
         except Exception as exc:  # noqa: BLE001 - sanitize operational boundary
             with suppress(Exception):
                 await self._emit_rollback_audit(
                     operator_id=operator_id,
                     action="admin_webhook.rollback.extract",
-                    operation_id=state.import_operation_id,
+                    operation_id=operation_id,
                     outcome="failed",
                     request_id=request_id,
                     reason_code=WebhookOperationalReasonCode.OPERATION_FAILED,
@@ -2239,15 +2276,37 @@ class LegacyImportService:
             if isinstance(exc, LegacyImportError):
                 raise
             raise LegacyImportError(LegacyImportErrorCode.OPERATION_FAILED) from None
+        finally:
+            if (
+                published_output is not None
+                and not transaction_exited
+                and normalized_output is not None
+            ):
+                _remove_published_output_if_same(normalized_output, published_output)
         with suppress(Exception):
             await self._emit_rollback_audit(
                 operator_id=operator_id,
                 action="admin_webhook.rollback.extract",
-                operation_id=state.import_operation_id,
+                operation_id=operation_id,
                 outcome="completed",
                 request_id=request_id,
             )
         return "admin_webhook_rollback_backup_extracted"
+
+    @staticmethod
+    def _require_extractable_rollback_state(
+        *,
+        state: MigrationState,
+        now: datetime,
+    ) -> None:
+        if (
+            state.phase != "complete"
+            or state.rollback_retirement_phase != "retained"
+            or state.rollback_expires_at is None
+            or now.astimezone(timezone.utc) >= state.rollback_expires_at
+            or state.first_canonical_activity_at is not None
+        ):
+            raise LegacyImportError(LegacyImportErrorCode.ROLLBACK_WINDOW_CLOSED)
 
     async def _retire_artifact(
         self,
@@ -2620,9 +2679,9 @@ class LegacyImportService:
             raise LegacyImportError(LegacyImportErrorCode.SOURCE_CHANGED)
         imported = len(accepted)
         projected_count = (
-            len(snapshot.database.canonical_registration_ids)
+            snapshot.database.canonical_non_deleted_count
             if state.phase in {"database_committed", "complete"}
-            else len(snapshot.database.canonical_registration_ids) + imported
+            else snapshot.database.canonical_non_deleted_count + imported
         )
         provisional = LegacyImportPlan(
             operation_id=state.import_operation_id,

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
 import sqlite3
 import stat
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -270,6 +272,7 @@ async def test_repository_snapshot_reads_legacy_rows_and_canonical_allocator_sta
     assert snapshot.rows[0].source_identity == "17"
     assert snapshot.rows[0].values["secret_encrypted"] == '{"_enc":"legacy"}'
     assert snapshot.canonical_registration_ids == ()
+    assert snapshot.canonical_non_deleted_count == 0
     assert snapshot.next_registration_id == 1
 
 
@@ -419,7 +422,7 @@ async def test_database_only_import_preserves_collision_mapping_and_advances_seq
     legacy_import.store_path.write_text('{"incidents":[]}', encoding="utf-8")
     ring = _ring()
     async with legacy_import.repository.transaction() as tx:
-        await tx.insert_registration(
+        existing = await tx.insert_registration(
             RegistrationInsert(
                 id=1,
                 description="Existing canonical",
@@ -444,6 +447,12 @@ async def test_database_only_import_preserves_collision_mapping_and_advances_seq
                 actor_user_id=9,
                 now=NOW,
             )
+        )
+        await tx.soft_delete_registration(
+            existing.id,
+            expected_revision=existing.revision,
+            actor_user_id=9,
+            at=NOW + timedelta(minutes=1),
         )
         await tx.ensure_registration_sequence_above(1)
     with sqlite3.connect(legacy_import.repository.database_path) as connection:
@@ -492,6 +501,7 @@ async def test_database_only_import_preserves_collision_mapping_and_advances_seq
     plan = await service.build_plan(request)
 
     assert plan.source_mapping == {"database:1": 2}
+    assert plan.projected_non_deleted_count == 1
     completed = await service.apply_plan(
         request,
         approved_report_digest=plan.report_digest,
@@ -619,6 +629,184 @@ async def test_extract_rollback_backup_writes_distinct_private_plaintext_file(
     ]
 
 
+async def test_extract_cleans_created_plaintext_when_transaction_exit_is_cancelled(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-cancelled-extract",
+    )
+    output = tmp_path / "cancelled-extraction.json"
+    original_transaction = legacy_import.repository.transaction
+
+    @asynccontextmanager
+    async def cancel_after_transaction_exit():
+        async with original_transaction() as tx:
+            yield tx
+        if output.exists():
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(
+        legacy_import.repository,
+        "transaction",
+        cancel_after_transaction_exit,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await legacy_import.service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id="legacy-extract-cancelled-on-exit",
+        )
+
+    assert not output.exists()
+
+
+async def test_extract_failure_cleanup_preserves_replaced_output_inode(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-replaced-output",
+    )
+    output = tmp_path / "replaced-extraction.json"
+    replacement = b"replacement-owned-by-another-process"
+    original_transaction = legacy_import.repository.transaction
+
+    @asynccontextmanager
+    async def replace_output_then_fail():
+        async with original_transaction() as tx:
+            yield tx
+        if output.exists():
+            output.unlink()
+            output.write_bytes(replacement)
+            os.chmod(output, 0o600)
+            raise RuntimeError("injected transaction-exit failure")
+
+    monkeypatch.setattr(
+        legacy_import.repository,
+        "transaction",
+        replace_output_then_fail,
+    )
+
+    with pytest.raises(LegacyImportError):
+        await legacy_import.service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id="legacy-extract-replaced-on-exit",
+        )
+
+    assert output.read_bytes() == replacement
+
+
+@pytest.mark.parametrize("closing_action", ["activity", "retirement"])
+async def test_extract_holds_migration_lock_through_plaintext_publication(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    closing_action: str,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id=f"legacy-import-before-locked-{closing_action}",
+    )
+    output = tmp_path / f"locked-extraction-{closing_action}.json"
+    published_while_locked = asyncio.Event()
+    release_extraction = asyncio.Event()
+    original_transaction = legacy_import.repository.transaction
+
+    @asynccontextmanager
+    async def pause_before_transaction_exit():
+        async with original_transaction() as tx:
+            yield tx
+            if output.exists():
+                published_while_locked.set()
+                await release_extraction.wait()
+
+    monkeypatch.setattr(
+        legacy_import.repository,
+        "transaction",
+        pause_before_transaction_exit,
+    )
+    writer_repository = AdminWebhookRepository(legacy_import.pool)
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    writer_service = LegacyImportService(
+        repository=writer_repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+    )
+
+    async def close_rollback_window() -> None:
+        if closing_action == "activity":
+            async with writer_repository.transaction() as tx:
+                await tx.mark_first_canonical_activity(
+                    "registration_mutation",
+                    NOW + timedelta(hours=1),
+                )
+            return
+        await writer_service.destroy_rollback_key(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            operator_id=10,
+            now=NOW + timedelta(days=8),
+            confirmed=True,
+            request_id="legacy-retirement-waits-for-extraction",
+        )
+
+    extraction_task = asyncio.create_task(
+        legacy_import.service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id=f"legacy-extract-holds-lock-{closing_action}",
+        )
+    )
+    closing_task: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(published_while_locked.wait(), timeout=3)
+        assert output.read_bytes() == legacy_import.original_store_bytes
+        closing_task = asyncio.create_task(close_rollback_window())
+        await asyncio.sleep(0.1)
+        assert not closing_task.done()
+    finally:
+        release_extraction.set()
+        pending = [extraction_task]
+        if closing_task is not None:
+            pending.append(closing_task)
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    assert extraction_task.result() == "admin_webhook_rollback_backup_extracted"
+    assert closing_task is not None
+    closing_task.result()
+
+
 async def test_extract_checks_closed_window_before_artifact_access_or_audit(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -652,6 +840,99 @@ async def test_extract_checks_closed_window_before_artifact_access_or_audit(
     assert caught.value.code.value == "admin_webhook_rollback_window_closed"
     assert len(legacy_import.audits) == audit_count
     assert not (tmp_path / "must-not-exist.json").exists()
+
+
+async def test_extract_rechecks_activity_after_accepted_audit_before_artifact_access(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-racing-activity",
+    )
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+        if record.action == "admin_webhook.rollback.extract" and record.outcome == "accepted":
+            async with legacy_import.repository.transaction() as tx:
+                await tx.mark_first_canonical_activity(
+                    "registration_mutation",
+                    NOW + timedelta(hours=1),
+                )
+
+    racing_service = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+    )
+    output = tmp_path / "must-not-extract-after-activity.json"
+
+    with pytest.raises(LegacyImportError) as caught:
+        await racing_service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id="legacy-extract-racing-activity",
+        )
+
+    assert caught.value.code.value == "admin_webhook_rollback_window_closed"
+    assert not output.exists()
+
+
+async def test_extract_rechecks_retirement_after_accepted_audit_before_artifact_access(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-racing-retirement",
+    )
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+        if record.action == "admin_webhook.rollback.extract" and record.outcome == "accepted":
+            await legacy_import.service.destroy_rollback_key(
+                backup_path=legacy_import.request.backup_path,
+                rollback_key_path=legacy_import.request.rollback_key_path,
+                operator_id=10,
+                now=NOW + timedelta(days=8),
+                confirmed=True,
+                request_id="legacy-retirement-races-extraction",
+            )
+
+    racing_service = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+    )
+    output = tmp_path / "must-not-extract-after-retirement.json"
+
+    with pytest.raises(LegacyImportError) as caught:
+        await racing_service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id="legacy-extract-racing-retirement",
+        )
+
+    assert caught.value.code.value == "admin_webhook_rollback_window_closed"
+    assert not output.exists()
 
 
 async def test_destroy_rollback_key_requires_expiry_then_retires_idempotently(
@@ -756,6 +1037,123 @@ async def test_apply_resumes_from_every_durable_stage_without_duplicate_import(
     sanitized = json.loads(legacy_import.store_path.read_text(encoding="utf-8"))
     assert "webhooks" not in sanitized
     assert "webhook_deliveries" not in sanitized
+
+
+async def test_resume_after_backup_publish_preserves_unrelated_store_changes(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    def inject(stage: str) -> None:
+        if stage == "after_backup_publish":
+            raise RuntimeError("injected crash")
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    crashing = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+        failure_injector=inject,
+    )
+    with pytest.raises(LegacyImportError):
+        await crashing.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="crash-after-backup-before-unrelated-change",
+        )
+
+    changed = json.loads(legacy_import.store_path.read_text(encoding="utf-8"))
+    changed["incidents"][0]["status"] = "resolved"
+    changed["incident_notes"] = ["preserve-on-resume"]
+    legacy_import.store_path.write_text(json.dumps(changed), encoding="utf-8")
+
+    completed = await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="resume-after-unrelated-change",
+    )
+
+    assert completed.phase == "complete"
+    assert json.loads(legacy_import.store_path.read_text(encoding="utf-8")) == {
+        "incidents": [{"id": "incident-1", "status": "resolved"}],
+        "incident_notes": ["preserve-on-resume"],
+    }
+
+
+async def test_resume_rejects_authenticated_backup_with_wrong_webhook_subtree(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    def inject(stage: str) -> None:
+        if stage == "after_backup_publish":
+            raise RuntimeError("injected crash")
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    crashing = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+        failure_injector=inject,
+    )
+    with pytest.raises(LegacyImportError):
+        await crashing.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="crash-before-authenticated-backup-replacement",
+        )
+
+    key_payload = json.loads(
+        legacy_import.request.rollback_key_path.read_text(encoding="utf-8")
+    )
+    rollback_ring = WebhookKeyRing(
+        {"rollback": key_payload["key_b64"]},
+        primary_id="rollback",
+    )
+    protected = rollback_ring.encrypt_bytes(
+        purpose="legacy.system_ops.backup",
+        identity={
+            "operation_id": plan.operation_id,
+            "source_fingerprint": plan.source_fingerprints["system_ops"],
+        },
+        plaintext=json.dumps(
+            {"incidents": [], "webhooks": [], "webhook_deliveries": []},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+    )
+    replacement = json.dumps(
+        {
+            "schema_version": 1,
+            "key_id": protected.key_id,
+            "ciphertext_json": protected.ciphertext_json,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    legacy_import.request.backup_path.write_bytes(replacement)
+    os.chmod(legacy_import.request.backup_path, 0o600)
+
+    with pytest.raises(LegacyImportError) as caught:
+        await legacy_import.service.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="resume-with-wrong-authenticated-backup",
+        )
+
+    assert caught.value.code.value == "admin_webhook_operation_failed"
+    assert legacy_import.request.backup_path.read_bytes() == replacement
+    assert await legacy_import.repository.count_registrations() == 0
 
 
 async def test_reserved_operation_resumes_when_reviewed_report_is_missing(

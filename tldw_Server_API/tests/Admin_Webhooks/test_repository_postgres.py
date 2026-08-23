@@ -1,14 +1,35 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
 
-from tldw_Server_API.app.core.Admin_Webhooks.crypto import ProtectedValue
+from tldw_Server_API.app.core.Admin_Webhooks import control_plane
+from tldw_Server_API.app.core.Admin_Webhooks.audit import MutationAudit
+from tldw_Server_API.app.core.Admin_Webhooks.config import (
+    AdminWebhookMode,
+    AdminWebhookSettings,
+    WebhookRouteSelection,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.control_plane import (
+    AdminWebhookControlPlane,
+    CreateRegistrationCommand,
+    UnavailableDeliveryCapability,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
+    ProtectedValue,
+    WebhookKeyLoadCode,
+    WebhookKeyRing,
+    WebhookKeyRingLoadResult,
+)
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    ValidatedWebhookTarget,
+    WebhookError,
+    WebhookErrorCode,
     build_idempotency_scope,
     canonical_request_hash,
     idempotency_lookup_digest,
@@ -23,7 +44,8 @@ from tldw_Server_API.app.core.Admin_Webhooks.repository import (
     WebhookRepositoryError,
     WebhookRepositoryErrorCode,
 )
-from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseLockError, TransactionError
 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
     ensure_admin_webhook_canonical_tables_pg,
 )
@@ -484,6 +506,72 @@ async def test_postgres_revision_noop_versions_soft_delete_and_limits(
     assert await pg_repo.repository.get_registration(webhook_id) is None
     assert await pg_repo.repository.count_registrations() == 0
     assert (await pg_repo.repository.registration_limit_state(limit=1)).current == 0
+    snapshot = await pg_repo.repository.get_legacy_import_snapshot()
+    assert snapshot.canonical_registration_ids == (webhook_id,)
+    assert snapshot.canonical_non_deleted_count == 0
+
+
+async def test_fail_once_audit_error_is_preserved_across_postgres_transaction(
+    pg_repo: PostgreSQLRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _complete_migration(pg_repo.repository, primary_key_id="primary")
+    monkeypatch.setattr(
+        control_plane,
+        "validate_webhook_target",
+        lambda url, *, allow_http_dev: ValidatedWebhookTarget(
+            url=url,
+            hostname="hooks.example.com",
+            target_display="https://hooks.example.com",
+        ),
+    )
+    ring = WebhookKeyRing(
+        {"primary": base64.b64encode(b"p" * 32).decode("ascii")},
+        primary_id="primary",
+    )
+    service = AdminWebhookControlPlane(
+        repository=pg_repo.repository,
+        settings=AdminWebhookSettings(
+            mode=AdminWebhookMode.ON,
+            route_selection=WebhookRouteSelection.CANONICAL,
+            registration_limit=100,
+            active_limit=25,
+            allow_http_dev=False,
+            idempotency_ttl_seconds=86_400,
+            rollback_window_days=7,
+        ),
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        delivery_capability=UnavailableDeliveryCapability(),
+    )
+    calls = 0
+
+    async def fail_once(_record: MutationAudit) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise MandatoryAuditWriteError("audit unavailable") from DatabaseLockError()
+
+    with pytest.raises(WebhookError) as exc_info:
+        await service.create(
+            CreateRegistrationCommand(
+                actor_id=7,
+                idempotency_key="0123456789abcdef0123456789abcdef",
+                url="https://hooks.example.com/private",
+                event_types=("user.created",),
+                description="PostgreSQL audit boundary",
+                timeout_seconds=10,
+                request_id="postgres-audit-fail-once",
+                now=NOW,
+            ),
+            audit_sink=fail_once,
+        )
+
+    assert exc_info.value.code is WebhookErrorCode.AUDIT_UNAVAILABLE
+    assert calls == 1
+    assert await pg_repo.repository.count_registrations() == 0
 
 
 async def _run_idempotent_create(

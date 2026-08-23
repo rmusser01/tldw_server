@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 import asyncpg
 
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
@@ -181,6 +182,7 @@ class LegacyImportDatabaseSnapshot:
     table_present: bool
     rows: tuple[LegacyWebhookRow, ...]
     canonical_registration_ids: tuple[int, ...]
+    canonical_non_deleted_count: int
     next_registration_id: int
 
     def __post_init__(self) -> None:
@@ -192,6 +194,12 @@ class LegacyImportDatabaseSnapshot:
             self.canonical_registration_ids
         ):
             raise ValueError("canonical registration IDs must be unique and sorted")
+        if (
+            isinstance(self.canonical_non_deleted_count, bool)
+            or not isinstance(self.canonical_non_deleted_count, int)
+            or not 0 <= self.canonical_non_deleted_count <= len(self.canonical_registration_ids)
+        ):
+            raise ValueError("canonical non-deleted count is invalid")
 
 
 class _Unset:
@@ -758,6 +766,8 @@ class AdminWebhookRepository:
                         (f"{self._postgres_statement_timeout_ms}ms",),
                     )
                 yield unit
+        except MandatoryAuditWriteError:
+            raise
         except Exception as exc:
             if _is_database_busy(exc):
                 raise WebhookRepositoryError(WebhookRepositoryErrorCode.DATABASE_BUSY) from None
@@ -975,7 +985,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                 legacy_query += " FOR SHARE"
             raw_rows = await self._fetch(legacy_query)
 
-        canonical_query = "SELECT id FROM admin_webhook_registrations ORDER BY id ASC"
+        canonical_query = "SELECT id, deleted_at FROM admin_webhook_registrations ORDER BY id ASC"
         if lock and self._is_postgres:
             canonical_query += " FOR SHARE"
         canonical_rows = await self._fetch(canonical_query)
@@ -1012,6 +1022,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             table_present=table_present,
             rows=tuple(rows),
             canonical_registration_ids=canonical_ids,
+            canonical_non_deleted_count=sum(row["deleted_at"] is None for row in canonical_rows),
             next_registration_id=int(sequence_row["next_value"]),
         )
 
