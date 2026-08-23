@@ -1,7 +1,7 @@
 ---
 id: TASK-13113
 title: Address Qodo review feedback on PR 2808
-status: In Progress
+status: Done
 created_date: 2026-08-23 04:42
 labels:
 - research-workspace
@@ -24,7 +24,7 @@ modified_files:
 - tldw_Server_API/tests/DB_Management/test_pg_sharing_schema_ownership.py
 - tldw_Server_API/tests/Sharing/test_shared_workspace_exception_ownership.py
 - tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_status_logging.py
-updated_date: 2026-08-23 18:50
+updated_date: 2026-08-23 18:53
 ---
 
 ## Description
@@ -42,32 +42,34 @@ Validate and address every Qodo review thread on PR #2808 for the recipient shar
 - [x] #5 _recipient_policy_actions has a meaningful docstring.
 - [x] #6 The setup_database CLI print finding is either fixed or answered with verified rationale.
 - [x] #7 Focused tests, touched-scope lint/type checks, Bandit, and diff checks pass.
-- [ ] #8 Every Qodo inline thread receives an evidence-backed reply and is resolved.
+- [x] #8 Every Qodo inline thread receives an evidence-backed reply and is resolved.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-- Validated all six Qodo threads against rebased head `e94aa6fc`.
-- Implemented the actionable findings. The `initialize.py` print finding is intentionally retained: `setup_database()` is an interactive CLI flow with extensive user-facing terminal output, while its PostgreSQL failure branch already emits `logger.exception` for operational observability.
-- TDD red evidence: unsafe `javascript:`/`data:` origins rendered as anchors; source-status fallbacks emitted no structured logs; shared exceptions remained feature-owned; and PostgreSQL sharing schema remained outside `DB_Management`.
-- Broad verification: 432 backend Sharing/PostgreSQL/startup tests passed in 1466.57s; 48 shared Research Workspace UI tests passed.
-- Final focused verification: 22 backend tests passed; 4 frontend security/markdown tests passed; Ruff passed; dedicated shared-with-me TypeScript check passed; pinned ESLint exited 0; Prettier passed; Bandit found no issues; `git diff --check` passed.
-- The two unrelated untracked watchlist template files were not modified or staged.
-Independent review found no additional correctness, security, or architecture defects. Its requested positive-scheme coverage was added: the origin-link component test now covers blocked `javascript:`/`data:` URLs and allowed `http:`, `https:`, and `mailto:` URLs. The exact-tree frontend security/markdown run now passes 7 tests; TypeScript, Ruff, Bandit, and `git diff --check` remain green.
+- Validated all seven Qodo inline threads against PR head `45ca9a79a2`.
+- Implemented the five actionable findings: safe origin-link protocols, structured fallback warnings, centralized shared-workspace exceptions, DB_Management-owned PostgreSQL sharing schema SQL, and the missing recipient-policy docstring.
+- Intentionally retained the setup CLI `print()`: it is user-facing terminal progress output, and the PostgreSQL failure branch already emits `logger.exception`.
+- Intentionally retained the pagination matrix route: the generated document explicitly inventories local paths and states that parent-router prefixes may be omitted.
+- TDD red evidence covered unsafe origin anchors, unlogged status fallbacks, feature-owned exceptions, and sharing SQL outside DB_Management.
+- Broad verification: 432 backend Sharing/PostgreSQL/startup tests and 48 shared Research Workspace UI tests passed.
+- Final exact-tree verification: 22 focused backend tests and 7 frontend security/markdown tests passed; Ruff, dedicated TypeScript, pinned ESLint, Prettier, Bandit, and `git diff --check` passed.
+- Independent review found no additional correctness, security, or architecture defects after positive URL-scheme coverage was added.
+- Live PostgreSQL integration was not rerun; existing migration tests, architecture coverage, and the broad backend suite cover the moved schema contract.
+- All seven Qodo threads received inline evidence-backed replies and were resolved. The unrelated untracked watchlist templates were not modified or staged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Commit `45ca9a79a2` addresses every actionable Qodo finding on PR #2808 while preserving verified CLI and generated-document conventions. Shared preview links now enforce the existing safe-scheme allowlist; partial-success fallbacks are observable; shared-workspace exceptions and PostgreSQL sharing schema SQL follow repository ownership boundaries; and the missing policy docstring is present. Regression and architecture tests were added, broad and focused verification passed, and all seven Qodo threads were answered inline and resolved.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
