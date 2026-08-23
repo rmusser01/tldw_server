@@ -2,10 +2,10 @@
 
 ## Verification Identity
 
-- Tested source commit: `35deed1e6a`
+- Tested source commit: `35fe956f8c`
 - Rebased onto: `origin/dev` at
   `d736368d17c92f879d0b5364b45f23488629f5b8`
-- Final verification timestamp: `2026-08-23T01:15:46Z`
+- Final verification timestamp: `2026-08-23T01:44:54Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -23,8 +23,9 @@ that immutable source tree.
 | Gate | Result |
 | --- | --- |
 | OpenAPI fingerprint and drift | PASS |
-| Complete PR 1 Python matrix | PASS: 482 passed, 0 skipped |
+| Complete PR 1 Python matrix | PASS: 483 passed, 0 skipped |
 | PostgreSQL-required matrix | PASS: 24 passed, 0 skipped |
+| Direct pytest marker policy | PASS |
 | Ruff | PASS |
 | Focused Python typecheck | PASS |
 | Bandit | PASS |
@@ -104,7 +105,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 ```
 
 Final post-review, post-rebase result:
-`482 passed, 459 warnings in 138.23s`; zero skips. This aggregate run executed
+`483 passed, 459 warnings in 148.36s`; zero skips. This aggregate run executed
 the real PostgreSQL-marked cases as well as the SQLite, API, authorization,
 egress, system-ops, and workflow cases.
 
@@ -130,7 +131,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. \
   tldw_Server_API/tests/Admin_Webhooks/test_legacy_import_postgres.py
 ```
 
-Result: `24 passed, 50 warnings in 97.78s`; zero skips. The required flag was
+Result: `24 passed, 50 warnings in 95.74s`; zero skips. The required flag was
 set, and the tests used the running disposable PostgreSQL 18.6 container rather
 than SQLite or an availability skip. The post-rebase aggregate run then
 executed the same 24 PostgreSQL cases with zero skips.
@@ -177,14 +178,21 @@ findings. All six were accepted and corrected:
   `app/core/DB_Management/admin_webhooks_repository.py`;
 - production, test, CLI, and implementation-plan imports point to the new
   database boundary, and no raw SQL remains under `app/core/Admin_Webhooks`;
-- every `tests/Admin_Webhooks` module now has an accepted unit or integration
-  marker.
+- every test function in `tests/Admin_Webhooks` and the six additional
+  webhook-related PR test modules now has exactly one direct accepted unit or
+  integration marker; inherited accepted markers were removed while
+  `asyncio` and `postgres` execution markers were preserved.
 
 Focused architecture tests first reproduced the three material gaps as
-`3 failed`, then passed `3/3` after correction. The complete
-`tests/Admin_Webhooks` scope passed `324/324` with 142 warnings. The explicit
+`3 failed`, then passed `3/3` after correction. Qodo's incremental review then
+showed that module-level markers did not satisfy its direct-marker rule. An AST
+regression reproduced that policy gap across all PR-related webhook tests,
+including 70 additional unmarked functions outside `tests/Admin_Webhooks`, and
+now fails if a covered function has zero or multiple accepted direct markers.
+The six expanded modules passed `108/108` with 2 warnings. The complete
+`tests/Admin_Webhooks` scope passed `325/325` with 142 warnings. The explicit
 required-PostgreSQL matrix passed `24/24` with 50 warnings and zero skips. The
-complete PR 1 matrix passed `482/482` with 459 warnings and zero skips.
+complete PR 1 matrix passed `483/483` with 459 warnings and zero skips.
 
 Ruff, Bandit, `git diff --check`, the sensitive-logger scan, raw-SQL boundary
 scan, and stale-import scan all passed. Mypy passed all seven other changed
@@ -315,7 +323,7 @@ browser journey establish no regression for this PR.
 
 ## Final Safety Checks
 
-- `git diff --cached --check`: PASS for tested source commit `35deed1e6a`.
+- `git diff --cached --check`: PASS for tested source commit `35fe956f8c`.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,

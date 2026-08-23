@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-23 01:43'
+updated_date: '2026-08-23 01:45'
 labels:
   - admin
   - webhooks
@@ -114,6 +114,8 @@ Qodo incremental review at commit 618080c00a resolved five findings and marked t
 2026-08-23 Qodo direct-marker correction verified. The new AST compliance regression first failed and enumerated all 203 previously unmarked Admin_Webhooks test functions. Every unit/PostgreSQL test now carries exactly one direct accepted @pytest.mark.unit or @pytest.mark.integration decorator; inherited accepted markers were removed while pytest.mark.asyncio and pytest.mark.postgres execution markers were preserved. The regression now validates all 204 test functions including itself. Verification: collection 325 tests; Admin_Webhooks 325 passed/143 warnings; required PostgreSQL 24 passed/50 warnings with zero skips; complete release matrix 483 passed/459 warnings with zero skips; Ruff and git diff --check passed. Ready to freeze the marker-remediation source and request Qodo incremental confirmation.
 
 2026-08-23 expanded direct-marker remediation to the complete webhook-related PR test surface after verifying Qodo's rule applies per function/class rather than per module. The AST regression now scans all Admin_Webhooks tests plus the six PR-touched Admin, Security, and Services modules; RED enumerated 70 additional unmarked functions. Added exactly one direct @pytest.mark.unit marker to each, removed redundant module-level unit markers, and preserved asyncio execution markers. Ruff also normalized two assertion-order findings in the touched startup-auth test. Final source-tree verification: six expanded modules 108 passed/2 warnings; Admin_Webhooks 325 passed/142 warnings; complete release matrix 483 passed/459 warnings with zero skips; required PostgreSQL 24 passed/50 warnings with zero skips; Ruff and git diff --check passed. Next gate is immutable source/evidence commits followed by Qodo incremental confirmation.
+
+2026-08-23 immutable direct-marker remediation source commit: 35fe956f8c178bd67b8396ed6548ca99d14653bd. Docs/Evidence/Admin_Webhooks_PR1_Verification.md is being refreshed as a documentation-only follow-up to bind the direct-marker policy regression and final 108/325/483/24 passing results to that source commit. Awaiting push and Qodo incremental confirmation before review closure.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
