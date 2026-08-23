@@ -54,8 +54,6 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     RegistrationTarget,
 )
 
-pytestmark = pytest.mark.asyncio
-
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
 RAW_URL = "https://hooks.example.com/private/receive?token=url-query-canary"
 RAW_SECRET_CANARY = "whsec_" + ("a" * 64)

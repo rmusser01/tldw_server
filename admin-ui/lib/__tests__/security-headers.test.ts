@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 
-import nextConfig from '../../next.config.js';
+import nextConfig from '../../next.config.mjs';
 
-describe('next.config.js security', () => {
+describe('next.config.mjs security', () => {
   it('enables standalone output for Docker', () => {
     expect(nextConfig.output).toBe('standalone');
   });

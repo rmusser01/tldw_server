@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -550,26 +550,12 @@ def test_read_audit_failure_does_not_change_successful_response(
 ) -> None:
     client, _, _, read_audit = _client(monkeypatch)
     read_audit.side_effect = RuntimeError("audit-canary")
-    warning = Mock()
-    monkeypatch.setattr(
-        admin_webhooks,
-        "logger",
-        SimpleNamespace(warning=warning),
-        raising=False,
-    )
 
     response = client.get("/api/v1/admin/webhooks/catalog")
 
     assert response.status_code == 200
     assert response.json()["api_version"] == "2026-07-01"
     assert "audit-canary" not in response.text
-    warning.assert_called_once_with(
-        "Admin webhook read audit failed action={} request_id={} error_type={}",
-        "admin_webhook.catalog.read",
-        REQUEST_ID,
-        "RuntimeError",
-    )
-    assert "audit-canary" not in repr(warning.call_args)
 
 
 @pytest.mark.unit

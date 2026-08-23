@@ -1,21 +1,25 @@
+import bundleAnalyzer from '@next/bundle-analyzer';
+import { withSentryConfig as configureSentry } from '@sentry/nextjs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 const withBundleAnalyzer =
   process.env.ANALYZE === 'true'
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    ? require('@next/bundle-analyzer')({ enabled: true })
+    ? bundleAnalyzer({ enabled: true })
     : (config) => config;
 
-const { withSentryConfig } = process.env.NEXT_PUBLIC_SENTRY_DSN
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  ? require('@sentry/nextjs')
-  : { withSentryConfig: (config) => config };
+const withSentryConfig = process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? configureSentry
+  : (config) => config;
 
 const isDev = process.env.NODE_ENV !== 'production';
+const configDirectory = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
-  outputFileTracingRoot: `${__dirname}/..`,
+  outputFileTracingRoot: resolve(configDirectory, '..'),
   poweredByHeader: false,
 
   async headers() {
@@ -62,7 +66,7 @@ const nextConfig = {
   },
 };
 
-module.exports = withSentryConfig(withBundleAnalyzer(nextConfig), {
+export default withSentryConfig(withBundleAnalyzer(nextConfig), {
   silent: true,
   disableLogger: true,
 });

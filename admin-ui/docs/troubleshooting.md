@@ -51,7 +51,7 @@ The admin UI's backend proxy (`/api/proxy/...`) could not reach the backend.
 The backend took too long to respond.
 
 1. Check backend logs for slow queries or blocked threads.
-2. Increase the proxy timeout in `next.config.js` if the operation is legitimately slow (e.g. large exports).
+2. Increase the proxy timeout in `next.config.mjs` if the operation is legitimately slow (e.g. large exports).
 3. Consider moving long-running operations to background jobs.
 
 ### Backend unreachable after deploy
@@ -144,7 +144,7 @@ If tests hang or time out:
 
 ### Standalone output issues
 
-The admin UI uses `output: 'standalone'` in `next.config.js` for container deployments. Common issues:
+The admin UI uses `output: 'standalone'` in `next.config.mjs` for container deployments. Common issues:
 
 **Missing files in standalone output:**
 
@@ -152,7 +152,7 @@ The admin UI uses `output: 'standalone'` in `next.config.js` for container deplo
 
 **Module not found in standalone:**
 
-- Standalone mode tree-shakes aggressively. If a dynamic import fails, ensure the module is referenced statically somewhere or add it to `serverExternalPackages` in `next.config.js`.
+- Standalone mode tree-shakes aggressively. If a dynamic import fails, ensure the module is referenced statically somewhere or add it to `serverExternalPackages` in `next.config.mjs`.
 
 ### Sentry wrapping errors
 

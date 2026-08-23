@@ -61,7 +61,6 @@ def test_startup_auth_exception_guards_match_lifespan_contract() -> None:
     ) == startup_auth._IMPORT_EXCEPTIONS
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_init_auth_services_runs_sqlite_startup_chain(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[object] = []
@@ -116,7 +115,6 @@ async def test_init_auth_services_runs_sqlite_startup_chain(monkeypatch: pytest.
     ]
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_init_auth_services_runs_pg_extras_when_pool_present(
     monkeypatch: pytest.MonkeyPatch,
@@ -200,7 +198,6 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     ]
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_pg_ensure_false_emits_high_signal_warning(
     monkeypatch: pytest.MonkeyPatch,
@@ -242,7 +239,6 @@ async def test_pg_ensure_false_emits_high_signal_warning(
     ]
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_pg_authnz_core_readiness_failure_blocks_startup(
     monkeypatch: pytest.MonkeyPatch,
@@ -398,7 +394,6 @@ async def test_init_auth_services_raises_auth_startup_error_when_db_pool_init_fa
     assert exc_info.value.__cause__ is None
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_init_auth_services_raises_auth_startup_error_when_db_pool_is_missing(
     monkeypatch: pytest.MonkeyPatch,
@@ -421,7 +416,6 @@ async def test_init_auth_services_raises_auth_startup_error_when_db_pool_is_miss
         await startup_auth.init_auth_services()
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_db_pool_startup_failure_log_does_not_expose_exception_text(
     monkeypatch: pytest.MonkeyPatch,
@@ -522,7 +516,6 @@ async def test_init_auth_services_aborts_when_schema_readiness_import_is_unavail
     assert exc_info.value.__cause__ is None
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_init_auth_services_skips_provider_override_runtime_failures(
     monkeypatch: pytest.MonkeyPatch,

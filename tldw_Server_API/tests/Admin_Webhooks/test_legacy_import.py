@@ -37,8 +37,6 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     RegistrationTarget,
 )
 
-pytestmark = pytest.mark.asyncio
-
 NOW = datetime(2026, 8, 22, 20, 0, tzinfo=timezone.utc)
 CATALOG_EVENTS = tuple(item.event_type for item in EVENT_CATALOG)
 

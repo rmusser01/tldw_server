@@ -25,8 +25,6 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     MandatoryAuditWriteError,
 )
 
-pytestmark = pytest.mark.asyncio
-
 
 class RecordingAuditService:
     def __init__(

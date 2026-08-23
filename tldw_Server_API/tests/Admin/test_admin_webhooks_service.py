@@ -156,7 +156,6 @@ def webhook_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"w"))
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_create_webhook_generates_secret(svc: AdminWebhooksService):
     async def _return_inserted_row(_query: str, params: tuple[object, ...]) -> dict[str, object]:
@@ -185,7 +184,6 @@ async def test_create_webhook_generates_secret(svc: AdminWebhooksService):
     assert params[1] != record.secret
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_list_webhooks(svc: AdminWebhooksService):
     svc.db_pool.fetchone.return_value = {"cnt": 2}
@@ -213,7 +211,6 @@ async def test_list_webhooks(svc: AdminWebhooksService):
     assert items[1].active is False
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_update_webhook_skips_none_fields(svc: AdminWebhooksService):
     encrypted = encrypt_admin_webhook_secret("s")
@@ -231,7 +228,6 @@ async def test_update_webhook_skips_none_fields(svc: AdminWebhooksService):
     assert params[2] is None
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_delete_webhook(svc: AdminWebhooksService):
     result = await svc.delete_webhook(42)
@@ -244,7 +240,6 @@ async def test_delete_webhook(svc: AdminWebhooksService):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_deliver_success(svc: AdminWebhooksService):
     wh = WebhookRecord(
@@ -275,7 +270,6 @@ async def test_deliver_success(svc: AdminWebhooksService):
     mock_client.post.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_deliver_refreshes_signature_and_timestamp_for_each_retry_attempt(svc: AdminWebhooksService):
     wh = WebhookRecord(
@@ -316,7 +310,6 @@ async def test_deliver_refreshes_signature_and_timestamp_for_each_retry_attempt(
     assert first_call.kwargs["headers"]["X-Admin-Webhook-Signature"] != second_call.kwargs["headers"]["X-Admin-Webhook-Signature"]
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_dispatch_event_filters_by_event_type(svc: AdminWebhooksService):
     svc.db_pool.fetchone.side_effect = [
@@ -358,7 +351,6 @@ async def test_dispatch_event_filters_by_event_type(svc: AdminWebhooksService):
     assert delivered == 1
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_dispatch_event_counts_only_2xx_deliveries(svc: AdminWebhooksService):
     webhooks = [

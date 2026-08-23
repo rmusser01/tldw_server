@@ -28,8 +28,6 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     WebhookRepositoryErrorCode,
 )
 
-pytestmark = pytest.mark.asyncio
-
 NOW = datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc)
 
 

@@ -39,8 +39,6 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 )
 from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
-pytestmark = pytest.mark.asyncio
-
 NOW = datetime(2026, 8, 22, 14, 0, tzinfo=timezone.utc)
 SOURCE_KEY_ID = "key-2026-01"
 TARGET_KEY_ID = "key-2026-08"

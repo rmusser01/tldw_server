@@ -11,7 +11,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_migration_sqlite import (
 )
 
 pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
-pytestmark = [pytest.mark.postgres, pytest.mark.asyncio]
+pytestmark = pytest.mark.postgres
 
 CANONICAL_TABLES = {
     "admin_webhook_sequences",
