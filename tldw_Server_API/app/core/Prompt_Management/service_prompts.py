@@ -89,6 +89,15 @@ Generate a response that is informative and relevant to the user's query based o
 </search-results>
 """
 
+_TITLE_GENERATION_USER_TEMPLATE_DEFAULT = (
+    "Here is the query:\n\n--------------\n\n{query}\n\n--------------\n\n"
+    "Create a concise, 3-5 word phrase as a title for the previous query. Avoid quotation marks or special "
+    "formatting. RESPOND ONLY WITH THE TITLE TEXT. ANSWER USING THE SAME LANGUAGE AS THE QUERY.\n\n\n"
+    "Examples of titles:\n\nStellar Achievement Celebration\nFamily Bonding Activities\n🇫🇷 Voyage à Paris\n"
+    "🍜 Receta de Ramen Casero\nShakespeare Analyse Literarische\n日本の春祭り体験\nДревнегреческая Философия Обзор\n\n"
+    "Response:"
+)
+
 _TRANSLATION_SYSTEM_DEFAULT = """You are an expert translator. Your task is to provide accurate,
 natural-sounding translations that preserve the original meaning, tone, and formatting.
 Do not add explanations or notes - only provide the translation."""
@@ -156,6 +165,28 @@ _DEFINITION_SEQUENCE = (
         affected_workflows=(
             ServicePromptWorkflow(id="chat.main.web_search", label="Main chat web search"),
             ServicePromptWorkflow(id="chat.compare.web_search", label="Compare web search"),
+        ),
+    ),
+    ServicePromptDefinition(
+        id="chat.title.generation",
+        label="Conversation title",
+        description="Controls the instruction used to generate automatic conversation titles.",
+        parts=(
+            ServicePromptPart(
+                key="user_template",
+                label="User template",
+                mode="template",
+                required_variables=("query",),
+            ),
+        ),
+        default_parts=MappingProxyType(
+            {"user_template": _TITLE_GENERATION_USER_TEMPLATE_DEFAULT}
+        ),
+        affected_workflows=(
+            ServicePromptWorkflow(
+                id="chat.title.generation",
+                label="Automatic conversation titles",
+            ),
         ),
     ),
     ServicePromptDefinition(

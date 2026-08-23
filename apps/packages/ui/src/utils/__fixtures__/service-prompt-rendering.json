@@ -9,6 +9,9 @@
     "chat.web_search.answer": {
       "template": "You are an AI model who is expert at searching the web and answering user's queries.\n\nGenerate a response that is informative and relevant to the user's query based on provided search results. the current date and time are {current_date_time}.\n\n`search-results` block provides knowledge from the web search results. You can use this information to generate a meaningful response.\n\n<search-results>\n {search_results}\n</search-results>\n"
     },
+    "chat.title.generation": {
+      "user_template": "Here is the query:\n\n--------------\n\n{query}\n\n--------------\n\nCreate a concise, 3-5 word phrase as a title for the previous query. Avoid quotation marks or special formatting. RESPOND ONLY WITH THE TITLE TEXT. ANSWER USING THE SAME LANGUAGE AS THE QUERY.\n\n\nExamples of titles:\n\nStellar Achievement Celebration\nFamily Bonding Activities\n🇫🇷 Voyage à Paris\n🍜 Receta de Ramen Casero\nShakespeare Analyse Literarische\n日本の春祭り体験\nДревнегреческая Философия Обзор\n\nResponse:"
+    },
     "media.text.translation": {
       "system": "You are an expert translator. Your task is to provide accurate,\nnatural-sounding translations that preserve the original meaning, tone, and formatting.\nDo not add explanations or notes - only provide the translation.",
       "user_template": "Translate the following text to {target_language}.\nPreserve the original formatting, meaning, and tone.\nOnly output the translation, no explanations, notes, or additional text.\n\nText to translate:\n{text}"
@@ -91,6 +94,16 @@
         "question": "value contains {search_results}"
       },
       "expected": "value contains {question} then value contains {search_results}"
+    },
+    {
+      "name": "title query remains single-pass",
+      "definition_id": "chat.title.generation",
+      "part_key": "user_template",
+      "authored_text": "Title literal {{query}} from {query}",
+      "values": {
+        "query": "Explain {query} literally"
+      },
+      "expected": "Title literal {query} from Explain {query} literally"
     }
   ]
 }

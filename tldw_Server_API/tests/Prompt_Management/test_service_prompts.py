@@ -59,6 +59,12 @@ EXPECTED_REGISTRY = {
             ("chat.compare.web_search", "Compare web search"),
         ),
     },
+    "chat.title.generation": {
+        "label": "Conversation title",
+        "description": "Controls the instruction used to generate automatic conversation titles.",
+        "parts": (("user_template", "User template", "template", ("query",)),),
+        "workflows": (("chat.title.generation", "Automatic conversation titles"),),
+    },
     "media.text.translation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation.",
