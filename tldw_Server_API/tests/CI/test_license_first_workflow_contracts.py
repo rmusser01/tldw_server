@@ -63,7 +63,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "frontend-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
     "frontend-ux-gates.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
     "jobs-suite.yml": "023309eacbc53b533c94c56e00e710422e6e5885ba06a0921524964db7cf4476",
-    "mcp-unified-rc.yml": "ea068480ced74050907f60b459dd2ce5b5c33abf348e45286b904644645fe84b",
+    "mcp-unified-rc.yml": "8b1a9335ecab966807fcf0a8c81560b264942decc458cd9bc98275d6062310aa",
     "notes-remediation-targeted.yml": "090c7ff3c4b668cd6c76fc3b9fc9a1b3be128b21b3b2b236cdfe33dd6f5edb5a",
     "onboarding-docs-gate.yml": "38fc27642d68b7b198e20a9e910ddfa2e1f626b32be5911df63d64c89cb60afa",
     "pre-commit.yml": "d3d381eead20326078cb0268da7340f8217d95336af86c8d9701419c5e67d3be",
@@ -75,7 +75,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "ui-playground-quality-gates.yml": "af4b03b1d48dd12b93e1bd39a8036109b26a7890ee5cd8ef8ed57b7d2da3008a",
     "ui-research-workspace-parity.yml": "aa73478a8917cbf0eb7be01e1f4212f1a0692200919d9a09982ab6525af49503",
     "ui-watchlists-a11y-gates.yml": "3c66abf5ccddb422faad37764afec0e3c9d0ec66e74c36844f99425eb0214526",
-    "ui-watchlists-extension-e2e.yml": "6a6261171eac7c6c12ddc95f3916bc22b0023d5398b06237db4d1fc0e85f6a6b",
+    "ui-watchlists-extension-e2e.yml": "4252eda6295ace0621dc9b3bc1a98e157753a6ba984218103942fbf6bbcdda42",
     "ui-watchlists-help-tests.yml": "fe0ad30818f046c2ae0c54a10a1bb9f481968d8b73545ebe934135b2fed88907",
     "ui-watchlists-scale-gates.yml": "9001042a9f6b85245d7f80dc4d13e16b214df17c2629e1c733ee691e99a4c884",
     "ui-worldbooks-tests.yml": "c09cbf04ae823361ff2fb13da6b9c4c2b55773a2e58e88bf8bea635f30221ed2",
@@ -86,6 +86,7 @@ ORIGINAL_JOB_NAMES = {
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
+        "preflight-python-310",
         "shard-coverage",
         "quickstart-dry-run",
         "lint",
@@ -110,10 +111,10 @@ ORIGINAL_JOB_NAMES = {
     "e2e-required.yml": ("changes", "e2e-required"),
     "e2e-smoke.yml": ("e2e-smoke",),
     "frontend-e2e-tiers.yml": ("critical", "features", "admin"),
-    "frontend-required.yml": ("changes", "frontend-required"),
+    "frontend-required.yml": ("changes", "frontend-unit-tests", "frontend-required"),
     "frontend-ux-gates.yml": ("onboarding-gate", "smoke-gate"),
     "jobs-suite.yml": ("jobs-sqlite", "jobs-postgres"),
-    "mcp-unified-rc.yml": ("internal-rc",),
+    "mcp-unified-rc.yml": ("internal-rc", "portable-stdio"),
     "notes-remediation-targeted.yml": ("notes-ui-remediation", "notes-backend-remediation"),
     "onboarding-docs-gate.yml": ("onboarding-docs-gate",),
     "pre-commit.yml": ("run-pre-commit",),
@@ -153,7 +154,11 @@ ORIGINAL_DEPENDENCIES = {
     ("container-build-check.yml", "container-build-check"): ("build",),
     ("coverage-required.yml", "coverage-required"): ("changes",),
     ("e2e-required.yml", "e2e-required"): ("changes",),
-    ("frontend-required.yml", "frontend-required"): ("changes",),
+    ("frontend-required.yml", "frontend-unit-tests"): ("changes",),
+    ("frontend-required.yml", "frontend-required"): (
+        "changes",
+        "frontend-unit-tests",
+    ),
     ("jobs-suite.yml", "jobs-postgres"): ("jobs-sqlite",),
     ("security-required.yml", "security-required"): ("changes",),
 }
@@ -166,8 +171,12 @@ ALWAYS_ROLLUPS = {
 }
 DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | {
     ("backend-required.yml", "backend-required"),
+    ("frontend-required.yml", "frontend-unit-tests"),
     ("frontend-required.yml", "frontend-required"),
     ("security-required.yml", "security-required"),
+}
+NON_ADMITTED_ROOT_JOBS = {
+    ("ci.yml", "preflight-python-310"),
 }
 BACKEND_CHANGED_JOBS = {
     "full-suite-linux-311-smoke",
@@ -188,6 +197,7 @@ FETCH_DEPTH_CHECKOUTS = {
     ("coverage-required.yml", "changes"),
     ("e2e-required.yml", "changes"),
     ("frontend-required.yml", "changes"),
+    ("frontend-required.yml", "frontend-unit-tests"),
     ("frontend-required.yml", "frontend-required"),
     ("onboarding-docs-gate.yml", "onboarding-docs-gate"),
     ("pre-commit.yml", "run-pre-commit"),
@@ -396,7 +406,12 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
 
             root = not original_needs
             directly_guarded = (name, job_name) in DIRECT_ADMISSION_JOBS
+            non_admitted_root = (name, job_name) in NON_ADMITTED_ROOT_JOBS
             if root or directly_guarded:
+                if non_admitted_root:
+                    assert "admission" not in needs, (name, job_name)
+                    assert job.get("if") is None, (name, job_name)
+                    continue
                 assert needs.count("admission") == 1, (name, job_name)
                 extra_condition = None
                 if name == "frontend-e2e-tiers.yml":
@@ -405,10 +420,18 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     extra_condition = backend_changed
                 elif (name, job_name) in {
                     ("backend-required.yml", "backend-required"),
+                    ("frontend-required.yml", "frontend-unit-tests"),
                     ("frontend-required.yml", "frontend-required"),
                     ("security-required.yml", "security-required"),
                 }:
                     extra_condition = "needs.changes.result == 'success'"
+                    if (name, job_name) == (
+                        "frontend-required.yml",
+                        "frontend-unit-tests",
+                    ):
+                        extra_condition += (
+                            " && needs.changes.outputs.tldw_frontend_changed == 'true'"
+                        )
                 expected_condition = admission_clause
                 if extra_condition:
                     expected_condition += f" && ({extra_condition})"
@@ -446,7 +469,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 )
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 53
+    assert checkout_count == 55
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -478,8 +501,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 53
-    assert combined_text.count("github.event.pull_request.head.sha") == 50
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 55
+    assert combined_text.count("github.event.pull_request.head.sha") == 52
     assert combined_text.count("github.event.pull_request.base.sha") == 4
     assert combined_text.count("needs.admission.outputs.base_sha") == 10
 
@@ -548,21 +571,22 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         'BASE_SHA="${{ needs.admission.outputs.base_sha || '
         'github.event.pull_request.base.sha }}"'
     ) in frontend_text
+    frontend_unit_job = workflows["frontend-required.yml"][0]["jobs"]["frontend-unit-tests"]
     frontend_checkout = next(
         step
-        for step in workflows["frontend-required.yml"][0]["jobs"]["frontend-required"]["steps"]
+        for step in frontend_unit_job["steps"]
         if step.get("name") == "Checkout"
     )
     assert frontend_checkout["with"]["fetch-depth"] == 0
     frontend_unit_script = next(
         step["run"]
-        for step in workflows["frontend-required.yml"][0]["jobs"]["frontend-required"]["steps"]
+        for step in frontend_unit_job["steps"]
         if step.get("name") == "Run frontend unit tests"
     )
     assert 'git cat-file -e "${BASE_SHA}^{commit}"' in frontend_unit_script
     assert 'git fetch --no-tags --depth=1 origin "$BASE_SHA"' in frontend_unit_script
     assert frontend_unit_script.index('git cat-file -e "${BASE_SHA}^{commit}"') < (
-        frontend_unit_script.index('bunx vitest run --changed="${BASE_SHA}"')
+        frontend_unit_script.index('vitest_args=("--changed=${BASE_SHA}"')
     )
 
     pre_commit = workflows["pre-commit.yml"][0]

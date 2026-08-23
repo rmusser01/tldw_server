@@ -16,7 +16,7 @@ def test_frontend_required_budget_covers_broad_changed_suite() -> None:
 def test_frontend_required_bounds_pathological_impact_expansion() -> None:
     workflow_path = Path(".github/workflows/frontend-required.yml")
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-    steps = data["jobs"]["frontend-required"]["steps"]
+    steps = data["jobs"]["frontend-unit-tests"]["steps"]
     unit_step = next(
         step for step in steps if step.get("name") == "Run frontend unit tests"
     )
@@ -25,7 +25,8 @@ def test_frontend_required_bounds_pathological_impact_expansion() -> None:
     assert 'IMPACTED_TEST_LIMIT="500"' in script
     assert 'bunx vitest list --changed="${BASE_SHA}" --filesOnly' in script
     assert 'git diff --name-only --diff-filter=ACMR "${BASE_SHA}"...HEAD' in script
-    assert 'bunx vitest run "${DIRECT_TEST_FILES[@]}"' in script
+    assert 'vitest_args=("${DIRECT_TEST_FILES[@]}" "${vitest_args[@]}")' in script
+    assert 'bunx vitest run "${vitest_args[@]}"' in script
     assert "No directly changed frontend tests were found" in script
 
 
@@ -57,6 +58,35 @@ def test_frontend_required_does_not_publish_or_enforce_license_policy() -> None:
     assert "Enforce temporary frontend licensing contribution freeze" not in step_names
     assert "check_frontend_license_gate.py" not in workflow_text
     assert "frontend-license-policy/trusted/" not in workflow_text
+
+
+@pytest.mark.unit
+def test_frontend_required_fails_closed_on_unit_shard_outcomes() -> None:
+    workflow_path = Path(".github/workflows/frontend-required.yml")
+    data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    jobs = data["jobs"]
+    unit_job = jobs["frontend-unit-tests"]
+    final_job = jobs["frontend-required"]
+
+    assert "needs.admission.outputs.should_run == 'true'" in unit_job["if"]
+    assert "needs.changes.result == 'success'" in unit_job["if"]
+    assert "needs.changes.outputs.tldw_frontend_changed == 'true'" in unit_job["if"]
+    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests"]
+
+    guard = next(
+        step
+        for step in final_job["steps"]
+        if step.get("name") == "Require frontend unit shard success"
+    )
+    assert guard["env"] == {
+        "TLDW_FRONTEND_CHANGED": "${{ needs.changes.outputs.tldw_frontend_changed }}",
+        "UNIT_SHARDS_RESULT": "${{ needs.frontend-unit-tests.result }}",
+    }
+    assert '"$TLDW_FRONTEND_CHANGED" == "false"' in guard["run"]
+    assert '"$TLDW_FRONTEND_CHANGED" != "true"' not in guard["run"]
+    assert '"$UNIT_SHARDS_RESULT" == "success"' in guard["run"]
+    assert '"$UNIT_SHARDS_RESULT" == "skipped"' in guard["run"]
+    assert "exit 1" in guard["run"]
 
 
 @pytest.mark.unit

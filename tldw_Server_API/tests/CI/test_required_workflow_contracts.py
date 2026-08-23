@@ -1,5 +1,6 @@
 import ast
 import fnmatch
+import json
 import re
 from pathlib import Path
 
@@ -166,37 +167,84 @@ def test_frontend_required_lane_exists() -> None:
     assert "frontend-required" in jobs
 
 
-def test_frontend_required_does_not_require_missing_lockfile_cache() -> None:
+def test_frontend_required_uses_isolated_vitest_shards() -> None:
     workflow = _load(".github/workflows/frontend-required.yml")
-    steps = workflow["jobs"]["frontend-required"]["steps"]
+    jobs = workflow["jobs"]
+    unit_job = jobs["frontend-unit-tests"]
+    steps = unit_job["steps"]
+
+    assert unit_job["needs"] == ["changes", "admission"]
+    assert unit_job["timeout-minutes"] == 60
+    assert unit_job["strategy"] == {
+        "fail-fast": False,
+        "max-parallel": 8,
+        "matrix": {"shard": list(range(1, 9))},
+    }
 
     setup_node = _get_step(steps, "Setup Node.js")
     setup_with = setup_node.get("with") or {}
     cache_dependency_path = setup_with.get("cache-dependency-path")
     if cache_dependency_path and not Path(str(cache_dependency_path)).exists():
         raise AssertionError(
-            f"frontend-required references missing cache dependency path: {cache_dependency_path}"
+            f"frontend-unit-tests references missing cache dependency path: {cache_dependency_path}"
         )
 
     setup_bun = _get_step(steps, "Setup Bun")
     if setup_bun.get("uses") != "oven-sh/setup-bun@v2":
-        raise AssertionError("frontend-required must configure Bun with oven-sh/setup-bun@v2")
+        raise AssertionError("frontend-unit-tests must configure Bun with oven-sh/setup-bun@v2")
 
     install_step = _get_step(steps, "Install frontend dependencies")
     if install_step.get("working-directory") != "apps":
-        raise AssertionError("frontend-required must install workspace dependencies from apps/")
+        raise AssertionError("frontend-unit-tests must install workspace dependencies from apps/")
     run_script = str(install_step.get("run") or "")
     if "bun install" not in run_script:
-        raise AssertionError("frontend-required must install dependencies with bun install")
+        raise AssertionError("frontend-unit-tests must install dependencies with bun install")
     if "npm ci" in run_script:
-        raise AssertionError("frontend-required should not use npm ci for Bun workspace dependencies")
+        raise AssertionError("frontend-unit-tests should not use npm ci for Bun workspace dependencies")
 
     test_step = _get_step(steps, "Run frontend unit tests")
     test_run_script = str(test_step.get("run") or "")
-    if "bunx vitest run --changed=" not in test_run_script:
-        raise AssertionError("frontend-required unit tests must use changed-only vitest execution in PRs")
-    if "bun run test:run" not in test_run_script:
-        raise AssertionError("frontend-required must keep full-suite fallback when base SHA is unavailable")
+    assert 'bunx vitest run "${vitest_args[@]}"' in test_run_script
+    assert '"--changed=${BASE_SHA}"' in test_run_script
+    assert '"--shard=${{ matrix.shard }}/8"' in test_run_script
+    assert '"--maxWorkers=1"' in test_run_script
+    assert '"--passWithNoTests"' in test_run_script
+    assert "bun run test:run" not in test_run_script
+
+    frontend_config = Path("apps/tldw-frontend/vitest.config.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "../packages/ui/src/**/__tests__" in frontend_config
+
+    apps_package = json.loads(Path("apps/package.json").read_text(encoding="utf-8"))
+    frontend_package = json.loads(
+        Path("apps/tldw-frontend/package.json").read_text(encoding="utf-8")
+    )
+    ui_package = json.loads(
+        Path("apps/packages/ui/package.json").read_text(encoding="utf-8")
+    )
+    assert {
+        apps_package["dependencies"]["jsdom"],
+        frontend_package["devDependencies"]["jsdom"],
+        ui_package["devDependencies"]["jsdom"],
+    } == {"^28.1.0"}
+
+    final_job = jobs["frontend-required"]
+    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests"]
+    assert final_job["timeout-minutes"] == 120
+    final_steps = final_job["steps"]
+    assert not any(step.get("name") == "Run frontend unit tests" for step in final_steps)
+    shard_guard = _get_step(final_steps, "Require frontend unit shard success")
+    shard_guard_script = str(shard_guard.get("run") or "")
+    assert shard_guard["env"] == {
+        "TLDW_FRONTEND_CHANGED": "${{ needs.changes.outputs.tldw_frontend_changed }}",
+        "UNIT_SHARDS_RESULT": "${{ needs.frontend-unit-tests.result }}",
+    }
+    assert "$TLDW_FRONTEND_CHANGED" in shard_guard_script
+    assert "$UNIT_SHARDS_RESULT" in shard_guard_script
+    assert '"$TLDW_FRONTEND_CHANGED" == "false"' in shard_guard_script
+    assert '"$TLDW_FRONTEND_CHANGED" != "true"' not in shard_guard_script
+    assert "exit 1" in shard_guard_script
 
 
 def test_e2e_required_lane_exists_and_is_conditional() -> None:
