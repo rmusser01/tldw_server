@@ -43,7 +43,8 @@ type EnsurePersonaServerChatArgs = {
   ) => Promise<any>
   ensureServerChatHistoryId: (
     chatId: string,
-    title?: string
+    title?: string,
+    scopeInvalidatedSignal?: AbortSignal
   ) => Promise<string | null>
   invalidateServerChatHistory: () => void
   setServerChatId: (value: string | null) => void
@@ -204,6 +205,7 @@ export const ensurePersonaServerChat = async ({
   }
 
   let chatId = shouldResetServerChat ? null : resolvedServerChatId
+  let publishServerChatState: (() => void) | null = null
   if (!chatId) {
     const created = await createChat({
       assistant_kind: "persona",
@@ -236,7 +238,6 @@ export const ensurePersonaServerChat = async ({
       throw new Error("Failed to create persona-backed chat session")
     }
     chatId = normalizedId
-    setServerChatId(normalizedId)
     const createdState =
       typeof createdMeta?.state === "string"
         ? createdMeta.state
@@ -280,27 +281,30 @@ export const ensurePersonaServerChat = async ({
         ? createdMeta.persona_memory_mode
         : personaMemoryMode
 
-    setServerChatState(
-      normalizeConversationState(createdState)
-    )
-    setServerChatVersion(createdVersion)
-    setServerChatTopic(createdTopic)
-    setServerChatClusterId(createdClusterId)
-    setServerChatSource(createdSource)
-    setServerChatExternalRef(createdExternalRef)
-    setServerChatTitle(createdTitle)
-    setServerChatCharacterId(createdCharacterId)
-    setServerChatAssistantKind(createdAssistantKind)
-    setServerChatAssistantId(createdAssistantId)
-    setServerChatPersonaMemoryMode(createdPersonaMemoryMode)
-    setServerChatMetaLoaded(true)
-    invalidateServerChatHistory()
+    publishServerChatState = () => {
+      setServerChatId(normalizedId)
+      setServerChatState(normalizeConversationState(createdState))
+      setServerChatVersion(createdVersion)
+      setServerChatTopic(createdTopic)
+      setServerChatClusterId(createdClusterId)
+      setServerChatSource(createdSource)
+      setServerChatExternalRef(createdExternalRef)
+      setServerChatTitle(createdTitle)
+      setServerChatCharacterId(createdCharacterId)
+      setServerChatAssistantKind(createdAssistantKind)
+      setServerChatAssistantId(createdAssistantId)
+      setServerChatPersonaMemoryMode(createdPersonaMemoryMode)
+      setServerChatMetaLoaded(true)
+      invalidateServerChatHistory()
+    }
   } else {
     throwIfScopeInvalidated()
-    setServerChatAssistantKind("persona")
-    setServerChatAssistantId(assistantId)
-    setServerChatPersonaMemoryMode(personaMemoryMode)
-    setServerChatCharacterId(null)
+    publishServerChatState = () => {
+      setServerChatAssistantKind("persona")
+      setServerChatAssistantId(assistantId)
+      setServerChatPersonaMemoryMode(personaMemoryMode)
+      setServerChatCharacterId(null)
+    }
   }
 
   let resolvedHistoryId = historyId
@@ -308,10 +312,13 @@ export const ensurePersonaServerChat = async ({
     throwIfScopeInvalidated()
     resolvedHistoryId = await ensureServerChatHistoryId(
       chatId,
-      serverChatTitle || undefined
+      serverChatTitle || undefined,
+      scopeInvalidatedSignal
     )
     throwIfScopeInvalidated()
   }
+  throwIfScopeInvalidated()
+  publishServerChatState?.()
 
   return {
     chatId,

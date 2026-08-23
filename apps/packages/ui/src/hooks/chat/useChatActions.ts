@@ -463,7 +463,8 @@ type UseChatActionsOptions = {
   setServerChatExternalRef: (ref: string | null) => void
   ensureServerChatHistoryId: (
     chatId: string,
-    title?: string
+    title?: string,
+    scopeInvalidatedSignal?: AbortSignal
   ) => Promise<string | null>
   contextFiles: UploadedFile[]
   setContextFiles: (files: UploadedFile[]) => void
@@ -1291,7 +1292,10 @@ export const useChatActions = ({
     return historyKey
   }
 
-  const buildChatModeParams = async (overrides: ChatModeOverrides = {}) => {
+  const buildChatModeParams = async (
+    overrides: ChatModeOverrides = {},
+    scopeInvalidatedSignal?: AbortSignal
+  ) => {
     const hasHistoryOverride = Object.prototype.hasOwnProperty.call(
       overrides,
       "historyId"
@@ -1303,7 +1307,8 @@ export const useChatActions = ({
       : resolvedServerChatId && !temporaryChat
         ? await ensureServerChatHistoryId(
             resolvedServerChatId,
-            serverChatTitle || undefined
+            serverChatTitle || undefined,
+            scopeInvalidatedSignal
           )
         : historyId
 
@@ -1522,7 +1527,8 @@ export const useChatActions = ({
           throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
           const ensuredHistoryId = await ensureServerChatHistoryId(
             validatedServerChatId,
-            serverChatTitle || undefined
+            serverChatTitle || undefined,
+            servicePromptSnapshot?.scopeInvalidatedSignal
           )
           throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
           return { chatId: validatedServerChatId, historyId: ensuredHistoryId }
@@ -1547,6 +1553,7 @@ export const useChatActions = ({
       throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
 
       let rawId: string | number | undefined
+      let publishCreatedMetadata: (() => void) | null = null
       if (created && typeof created === "object") {
         const {
           id,
@@ -1560,14 +1567,16 @@ export const useChatActions = ({
           external_ref
         } = created
         rawId = id ?? chat_id
-        setServerChatState(
-          normalizeConversationState(state ?? conversation_state ?? null)
-        )
-        setServerChatVersion(typeof version === "number" ? version : null)
-        setServerChatTopic(topic_label ?? null)
-        setServerChatClusterId(cluster_id ?? null)
-        setServerChatSource(source ?? null)
-        setServerChatExternalRef(external_ref ?? null)
+        publishCreatedMetadata = () => {
+          setServerChatState(
+            normalizeConversationState(state ?? conversation_state ?? null)
+          )
+          setServerChatVersion(typeof version === "number" ? version : null)
+          setServerChatTopic(topic_label ?? null)
+          setServerChatClusterId(cluster_id ?? null)
+          setServerChatSource(source ?? null)
+          setServerChatExternalRef(external_ref ?? null)
+        }
       } else if (typeof created === "string" || typeof created === "number") {
         rawId = created
       }
@@ -1581,6 +1590,14 @@ export const useChatActions = ({
         created && typeof created === "object"
           ? String(created.title ?? "")
           : titleSeed
+
+      const ensuredHistoryId = await ensureServerChatHistoryId(
+        normalizedId,
+        createdTitle || titleSeed || undefined,
+        servicePromptSnapshot?.scopeInvalidatedSignal
+      )
+      throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+      publishCreatedMetadata?.()
       setServerChatId(normalizedId)
       setServerChatTitle(createdTitle)
       setServerChatCharacterId(null)
@@ -1589,12 +1606,6 @@ export const useChatActions = ({
       setServerChatPersonaMemoryMode(null)
       setServerChatMetaLoaded(true)
       invalidateServerChatHistory()
-
-      const ensuredHistoryId = await ensureServerChatHistoryId(
-        normalizedId,
-        createdTitle || titleSeed || undefined
-      )
-      throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
       return { chatId: normalizedId, historyId: ensuredHistoryId }
     },
     [
@@ -3287,24 +3298,29 @@ export const useChatActions = ({
           getRequiredServicePrompt(loadedSnapshot, promptId)
         }
       }
-      const chatModeParams = await buildChatModeParams({
-        ...(requestOverrides ?? {}),
-        ragMediaIds: turnRagMediaIds,
-        fileRetrievalEnabled: turnFileRetrievalEnabled,
-        selectedKnowledge: turnSelectedKnowledge,
-        selectedModel: effectiveSelectedModel,
-        messageSteering: messageSteeringForTurn,
-        userMessageType,
-        assistantMessageType,
-        imageGenerationRequest,
-        imageGenerationRefine,
-        imageGenerationPromptMode,
-        imageGenerationSource,
-        imageEventSyncPolicy,
-        researchContext,
-        dynamicUIRequest: turnDynamicUIRequest,
-        userMetadataExtra: turnUserMetadataExtra
-      })
+      const chatModeParams = await buildChatModeParams(
+        {
+          ...(requestOverrides ?? {}),
+          ragMediaIds: turnRagMediaIds,
+          fileRetrievalEnabled: turnFileRetrievalEnabled,
+          selectedKnowledge: turnSelectedKnowledge,
+          selectedModel: effectiveSelectedModel,
+          messageSteering: messageSteeringForTurn,
+          userMessageType,
+          assistantMessageType,
+          imageGenerationRequest,
+          imageGenerationRefine,
+          imageGenerationPromptMode,
+          imageGenerationSource,
+          imageEventSyncPolicy,
+          researchContext,
+          dynamicUIRequest: turnDynamicUIRequest,
+          userMetadataExtra: turnUserMetadataExtra
+        },
+        (
+          turnServicePromptSnapshot ?? compareServicePromptSnapshot
+        )?.scopeInvalidatedSignal
+      )
       const baseMessages = chatHistory || messages
       const baseHistory = memory || history
       const replyOverrides = replyActive
@@ -3866,18 +3882,21 @@ export const useChatActions = ({
 
           setIsProcessing(true)
 
-          const compareChatModeParams = await buildChatModeParams({
-            ...(requestOverrides ?? {}),
-            historyId: activeHistoryId,
-            setHistory: () => {},
-            setStreaming: () => {},
-            setIsProcessing: () => {},
-            setAbortController: () => {},
-            // Compare owns the shared controller for the whole turn (see the
-            // single reset after Promise.all). Sub-turns must not release it.
-            releaseAbortControllerIfOwned: () => false,
-            messageSteering: messageSteeringForTurn
-          })
+          const compareChatModeParams = await buildChatModeParams(
+            {
+              ...(requestOverrides ?? {}),
+              historyId: activeHistoryId,
+              setHistory: () => {},
+              setStreaming: () => {},
+              setIsProcessing: () => {},
+              setAbortController: () => {},
+              // Compare owns the shared controller for the whole turn (see the
+              // single reset after Promise.all). Sub-turns must not release it.
+              releaseAbortControllerIfOwned: () => false,
+              messageSteering: messageSteeringForTurn
+            },
+            compareServicePromptSnapshot?.scopeInvalidatedSignal
+          )
           const compareEnhancedParams = {
             ...compareChatModeParams,
             uploadedFiles: turnUploadedFiles,
@@ -4156,9 +4175,10 @@ export const useChatActions = ({
           getRequiredServicePrompt(replyServicePromptSnapshot, promptId)
         }
       }
-      const chatModeParams = await buildChatModeParams({
-        messageSteering: messageSteeringForTurn
-      })
+      const chatModeParams = await buildChatModeParams(
+        { messageSteering: messageSteeringForTurn },
+        replyServicePromptSnapshot?.scopeInvalidatedSignal
+      )
       const enhancedChatModeParams = {
         ...chatModeParams,
         uploadedFiles: uploadedFiles,

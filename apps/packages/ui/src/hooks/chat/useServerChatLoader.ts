@@ -38,7 +38,8 @@ type NotificationApi = {
 type UseServerChatLoaderOptions = {
   ensureServerChatHistoryId: (
     chatId: string,
-    title?: string
+    title?: string,
+    scopeInvalidatedSignal?: AbortSignal
   ) => Promise<string | null>
   notification: NotificationApi
   t: TFunction
@@ -149,6 +150,7 @@ export const shouldCommitServerChatLoadResult = ({
 }): boolean => {
   if (!requestedChatId || !activeServerChatId) return false
   if (requestedChatId !== activeServerChatId) return false
+  if (requestController?.signal.aborted) return false
   return requestController != null && requestController === activeController
 }
 
@@ -1031,11 +1033,18 @@ export const useServerChatLoader = ({
               })
           }
           if (!temporaryChat && !shouldPreserveLocal && !shouldPreserveAtCommit) {
+            if (!canCommitCurrentLoad()) {
+              return
+            }
             try {
               const localHistoryId = await ensureServerChatHistoryId(
                 serverChatId,
-                chatTitle || undefined
+                chatTitle || undefined,
+                controller.signal
               )
+              if (!canCommitCurrentLoad()) {
+                return
+              }
               if (localHistoryId) {
                 try {
                   await syncChatSettingsForServerChat({
@@ -1092,8 +1101,14 @@ export const useServerChatLoader = ({
                 }
               }
             } catch {
+              if (!canCommitCurrentLoad()) {
+                return
+              }
               // Local mirror is best-effort for server chats.
             }
+          }
+          if (!canCommitCurrentLoad()) {
+            return
           }
           if (chatTitle) {
             updatePageTitle(chatTitle)
