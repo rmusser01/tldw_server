@@ -30,7 +30,7 @@ modified_files:
 - apps/packages/ui/src/assets/locale/en/settings.json
 - apps/packages/ui/src/public/_locales/en/settings.json
 - Docs/superpowers/plans/2026-08-23-conversation-title-service-prompt.md
-updated_date: 2026-08-23 22:55
+updated_date: 2026-08-23 23:18
 ---
 
 ## Description
@@ -70,6 +70,13 @@ Task 4 pre-final-review verification (2026-08-23):
 - Mutation-focused self-review passed by direct source/test inspection: registry removal is caught by backend/client catalog tests; .replace/reparse is caught by one-pass inserted-brace fixture tests; expected scope mismatch is checked before catalog I/O; 412/AbortError rethrow and no stale writes are covered in title/persistence callers; release is asserted after all exits; generic logging has sentinel coverage; Settings is catalog-driven and always visible; provider invariants toolChoice none/saveToDb false/model are asserted.
 - Central rationale: one immutable scope-bound snapshot protects every automatic-title caller from account/server changes while ordinary prompt/model failures retain completed-chat fallback behavior.
 - Broad final review and final metadata cleanup remain controller-owned; status stays In Progress and the plan documentation link remains until that review package is generated. See .superpowers/sdd/2026-08-23-conversation-title-service-prompt/task-4-report.md for full command output.
+Final-review fix evidence (2026-08-23):
+- Newly test-asserted (not merely source-inspected): generateTitle selects the caller model with toolChoice "none", saveToDb false, and the distinct snapshot request scope; invokes exactly one HumanMessage with snapshot.scopeSignal; and returns a real removeReasoning-cleaned title. The packaged-template case now uses fixture.defaults["chat.title.generation"].user_template and hand-derived provider bytes.
+- Newly test-asserted scope paths: a mismatched user ID is evaluated after a fully matching multi-user target resolves and rejects canonical 412 before catalog/detail traffic; a fully matching single-user server, null account, and expected API-key fingerprint reaches both catalog and detail reads.
+- PASS: from apps/packages/ui, bunx vitest run src/services/__tests__/title.service-prompt-scope.test.ts src/services/__tests__/service-prompts.test.ts => Test Files 2 passed (2), Tests 92 passed (92). Expected stderr: five generic "Error generating title" fallback logs and Node localStorage experimental warnings.
+- PASS: from repository root, ./apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs [the nine Task 4 UI paths] => 0 errors, 11 warnings. Warnings are no-explicit-any at title.service-prompt-scope.test.ts:7:57 and tldw-server.ts:112:34, 179:31, 180:33, 190:42, 191:17, 211:19, 228:26, 391:29, 665:29, 666:32; ESLint also printed the existing pages-directory configuration notice. No unrelated warnings changed.
+- PASS post-fix commit: git diff --check 7a536e5d7aa0666cdd7af94b68a4256d315296f7..HEAD => exit 0 with no whitespace output.
+- Production source remained unchanged in this review-fix wave; these tests lock invariants that the prior Task 4 report had described from source inspection. Status stays In Progress for controller final cleanup.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
