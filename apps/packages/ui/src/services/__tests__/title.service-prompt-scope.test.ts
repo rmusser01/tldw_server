@@ -227,4 +227,55 @@ describe("generateTitle service-prompt scope", () => {
 
     expect(snapshot.release).toHaveBeenCalledOnce()
   })
+
+  it.each([
+    ["model creation", "caller"],
+    ["model creation", "scope"],
+    ["invocation", "caller"],
+    ["invocation", "scope"]
+  ])("does not return a signal-ignoring provider result after $phase $cancellation cancellation", async (phase, cancellation) => {
+    const { snapshot, scopeInvalidatedController } = snapshotFor()
+    const caller = new AbortController()
+    const cancel = () => {
+      if (cancellation === "scope") {
+        scopeInvalidatedController.abort()
+      } else {
+        caller.abort()
+      }
+    }
+    mocks.loadServicePromptSnapshot.mockResolvedValueOnce(snapshot)
+    if (phase === "model creation") {
+      mocks.pageAssistModel.mockImplementationOnce(async () => {
+        cancel()
+        return { invoke: mocks.invoke }
+      })
+    } else {
+      mocks.invoke.mockImplementationOnce(async () => {
+        cancel()
+        return { content: "late provider title" }
+      })
+    }
+
+    const title = generateTitle(
+      "model-1",
+      "question",
+      "fallback",
+      { signal: caller.signal, requestScope }
+    )
+
+    if (cancellation === "scope") {
+      await expect(title).rejects.toMatchObject({
+        status: 412,
+        details: { detail: { code: "request_config_scope_changed" } }
+      })
+    } else {
+      await expect(title).rejects.toMatchObject({ name: "AbortError" })
+    }
+    if (phase === "model creation") {
+      expect(mocks.invoke).not.toHaveBeenCalled()
+    } else {
+      expect(mocks.invoke).toHaveBeenCalledOnce()
+    }
+    expect(snapshot.release).toHaveBeenCalledOnce()
+  })
 })

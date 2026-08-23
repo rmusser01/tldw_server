@@ -46,6 +46,16 @@ const throwIfAborted = (signal?: AbortSignal): void => {
     throw error
 }
 
+const throwIfTitleRequestInvalidated = (
+    snapshot: Awaited<ReturnType<typeof loadServicePromptSnapshot>>,
+    signal?: AbortSignal
+): void => {
+    if (snapshot.scopeInvalidatedSignal.aborted) {
+        throw createServicePromptScopeChangedError()
+    }
+    throwIfAborted(signal)
+}
+
 export const generateTitle = async (
     model: string,
     query: string,
@@ -78,10 +88,12 @@ export const generateTitle = async (
             saveToDb: false,
             requestScope: snapshot.requestScope
         })
+        throwIfTitleRequestInvalidated(snapshot, options.signal)
         const title = await titleModel.invoke(
             [new HumanMessage({ content: prompt })],
             { signal: snapshot.scopeSignal }
         )
+        throwIfTitleRequestInvalidated(snapshot, options.signal)
 
         return removeReasoning(title.content.toString())
     } catch (error) {

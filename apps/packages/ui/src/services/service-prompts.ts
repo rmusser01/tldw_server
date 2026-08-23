@@ -777,7 +777,11 @@ export const loadServicePromptSnapshot = async (
     }
     return freezeSnapshot(scope, "supported", definitions, lease)
   } catch (error) {
+    const scopeInvalidated = lease.scopeInvalidatedSignal.aborted
     lease.release()
+    if (scopeInvalidated) {
+      throw createServicePromptScopeChangedError()
+    }
     throw error
   }
 }

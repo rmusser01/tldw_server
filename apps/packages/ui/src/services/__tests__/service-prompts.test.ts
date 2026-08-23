@@ -866,7 +866,7 @@ describe("Service Prompt migration and runtime snapshots", () => {
     snapshot.release()
   })
 
-  it("propagates invocation aborts", async () => {
+  it("keeps a parent caller abort as AbortError", async () => {
     let detailSignal: AbortSignal | undefined
     mocks.getServicePrompt.mockImplementation(
       async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
@@ -889,7 +889,7 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(detailSignal?.aborted).toBe(true)
   })
 
-  it("aborts when hosted credentials change during principal resolution", async () => {
+  it("normalizes hosted credential invalidation during principal resolution", async () => {
     let resolveUser!: (user: { id: number; username: string }) => void
     mocks.isHosted.mockReturnValue(true)
     mocks.getCurrentUser.mockImplementation(() =>
@@ -903,11 +903,14 @@ describe("Service Prompt migration and runtime snapshots", () => {
     window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
     resolveUser({ id: 99, username: "changed" })
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
     expect(mocks.listServicePrompts).not.toHaveBeenCalled()
   })
 
-  it("aborts during an unabortable catalog-404 compatibility getter", async () => {
+  it("normalizes invalidation during an unabortable catalog-404 compatibility getter", async () => {
     let resolvePrompts!: (value: {
       ragPrompt: string
       ragQuestionPrompt: string
@@ -934,10 +937,13 @@ describe("Service Prompt migration and runtime snapshots", () => {
       ragQuestionPrompt: "legacy {chat_history} {question}"
     })
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
   })
 
-  it("aborts during the supported raw migration probe", async () => {
+  it("normalizes invalidation during the supported raw migration probe", async () => {
     let resolveRaw!: (value: undefined) => void
     mocks.localGet.mockImplementationOnce(() =>
       new Promise((resolve) => {
@@ -950,11 +956,14 @@ describe("Service Prompt migration and runtime snapshots", () => {
     window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
     resolveRaw(undefined)
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
     expect(mocks.getServicePrompt).not.toHaveBeenCalled()
   })
 
-  it("aborts an active read when the cross-context config watcher fires", async () => {
+  it("normalizes cross-context scope invalidation during an active read", async () => {
     let detailSignal: AbortSignal | undefined
     mocks.getServicePrompt.mockImplementation(
       async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
@@ -981,12 +990,15 @@ describe("Service Prompt migration and runtime snapshots", () => {
       external.abort()
     }
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
     expect(watched?.tldwConfig).toBeTypeOf("function")
     expect(mocks.localUnwatch).toHaveBeenCalledWith(watched)
   })
 
-  it("aborts a single-user lease when the API-key account changes", async () => {
+  it("normalizes a single-user lease invalidation when the API-key account changes", async () => {
     let detailSignal: AbortSignal | undefined
     mocks.getServicePrompt.mockImplementation(
       async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
@@ -1007,7 +1019,10 @@ describe("Service Prompt migration and runtime snapshots", () => {
       newValue: { ...config, apiKey: "different-account-key" }
     })
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
     expect(watched?.tldwConfig).toBeTypeOf("function")
   })
 
