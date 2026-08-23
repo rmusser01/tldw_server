@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError, MacroValidationError
@@ -13,9 +16,11 @@ from tldw_Server_API.app.core.Chat_Macros.service import ChatMacrosService
 from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture()
-def raw_db(tmp_path):
+def raw_db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
     db = CharactersRAGDB(str(tmp_path / "macros.db"), client_id="test_client")
     try:
         yield db
@@ -24,7 +29,7 @@ def raw_db(tmp_path):
 
 
 @pytest.fixture()
-def service(tmp_path, raw_db):
+def service(tmp_path: Path, raw_db: CharactersRAGDB) -> ChatMacrosService:
     return ChatMacrosService(
         user_id="1",
         storage=ChatMacroStorage(tmp_path / "user"),
@@ -46,7 +51,7 @@ def _user_macro_yaml(name: str = "daily_digest", command: str | None = None) -> 
     )
 
 
-def test_lists_builtin_wrapup_and_can_disable_it(service):
+def test_lists_builtin_wrapup_and_can_disable_it(service: ChatMacrosService) -> None:
     wrapup = next(item for item in service.list_macros() if item.name == "wrapup")
 
     assert wrapup.command == "wrapup"
@@ -63,7 +68,7 @@ def test_lists_builtin_wrapup_and_can_disable_it(service):
         service.delete_macro("wrapup")
 
 
-def test_clone_builtin_creates_user_macro_with_non_conflicting_command(service):
+def test_clone_builtin_creates_user_macro_with_non_conflicting_command(service: ChatMacrosService) -> None:
     cloned = service.clone_builtin("wrapup", new_name="my_wrapup", command="my_wrapup")
 
     assert cloned.name == "my_wrapup"
@@ -76,7 +81,7 @@ def test_clone_builtin_creates_user_macro_with_non_conflicting_command(service):
         service.clone_builtin("wrapup", new_name="weather_wrapup", command="weather")
 
 
-def test_create_update_delete_user_macro_and_validate_without_saving(service):
+def test_create_update_delete_user_macro_and_validate_without_saving(service: ChatMacrosService) -> None:
     validated = service.validate_macro(_user_macro_yaml())
     assert validated.command == "daily_digest"
     assert service.storage.list() == []
@@ -106,7 +111,7 @@ def test_create_update_delete_user_macro_and_validate_without_saving(service):
     assert registry_commands == {"wrapup"}
 
 
-def test_service_rejects_non_empty_future_permissions(service):
+def test_service_rejects_non_empty_future_permissions(service: ChatMacrosService) -> None:
     raw = (
         "schema_version: 1\n"
         "name: bad\n"
@@ -120,7 +125,7 @@ def test_service_rejects_non_empty_future_permissions(service):
         service.validate_macro(raw)
 
 
-def test_output_profiles_resolve_from_settings_and_render_default_order(service):
+def test_output_profiles_resolve_from_settings_and_render_default_order(service: ChatMacrosService) -> None:
     assert DEFAULT_OUTPUT_PROFILE.sections == [
         "summary",
         "decisions",
@@ -161,9 +166,38 @@ def test_output_profiles_resolve_from_settings_and_render_default_order(service)
     assert rendered.index("## Open Questions") < rendered.index("## Failed Branches")
 
 
-def test_output_profile_local_overrides_are_bounded(service):
+def test_output_profile_local_overrides_are_bounded(service: ChatMacrosService) -> None:
     with pytest.raises(MacroValidationError, match="too many sections"):
         service.resolve_output_profile("default", local_overrides={"sections": [f"s{i}" for i in range(20)]})
 
     with pytest.raises(MacroValidationError, match="invalid output profile format"):
         normalize_output_profile("bad", {"format": "multiple_messages"})
+
+
+def test_list_macros_does_not_rewrite_an_unchanged_registry(
+    service: ChatMacrosService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.list_macros()
+
+    def fail_write(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("unchanged catalog should not write registry rows")
+
+    monkeypatch.setattr(service.repository, "upsert_registry_entry", fail_write)
+    monkeypatch.setattr(service.repository, "mark_registry_entries_deleted_except", fail_write)
+
+    assert [item.name for item in service.list_macros()] == ["wrapup"]
+
+
+def test_get_macro_does_not_rewrite_an_unchanged_registry(
+    service: ChatMacrosService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.list_macros()
+
+    def fail_write(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("unchanged macro reads should not write registry rows")
+
+    monkeypatch.setattr(service.repository, "upsert_registry_entry", fail_write)
+
+    assert service.get_macro("wrapup").name == "wrapup"

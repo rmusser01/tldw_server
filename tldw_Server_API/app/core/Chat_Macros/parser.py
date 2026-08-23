@@ -10,7 +10,7 @@ import yaml
 from pydantic import ValidationError
 
 from .exceptions import MacroValidationError
-from .models import MacroArgSpec, MacroDefinition
+from .models import MacroArgSpec, MacroDefinition, matches_arg_type
 
 
 def load_macro_definition(raw: str) -> MacroDefinition:
@@ -83,6 +83,42 @@ def parse_macro_args(
         index += 1
 
     return values
+
+
+def normalize_structured_macro_args(
+    definition: MacroDefinition,
+    args: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate API-supplied macro arguments and apply definition defaults."""
+    normalized = {name: _default_value(spec) for name, spec in definition.args.items()}
+    for name, value in args.items():
+        spec = definition.args.get(name)
+        if spec is None:
+            raise MacroValidationError(f"unknown macro argument: {name}")
+        if spec.repeated:
+            if not isinstance(value, list):
+                raise MacroValidationError(f"macro argument must be a list: {name}")
+            if name == "question" and len(value) > definition.execution.max_branches:
+                raise MacroValidationError(
+                    f"too many question arguments; max is {definition.execution.max_branches}"
+                )
+            if any(not matches_arg_type(item, spec.type) for item in value):
+                raise MacroValidationError(f"macro argument has invalid item type: {name}")
+            normalized[name] = list(value)
+            continue
+        if not matches_arg_type(value, spec.type):
+            raise MacroValidationError(f"macro argument has invalid type: {name}")
+        normalized[name] = value
+    return normalized
+
+
+def enforce_background_execution(args: Mapping[str, Any]) -> None:
+    """Reject foreground execution controls that are reserved beyond v1."""
+    if args.get("sync") is True:
+        raise MacroValidationError("synchronous macro execution is not supported in v1")
+    mode = str(args.get("mode") or "background").strip().lower()
+    if mode != "background":
+        raise MacroValidationError("only background macro execution is supported in v1")
 
 
 def _arg_aliases(arg_specs: Mapping[str, MacroArgSpec]) -> dict[str, str]:

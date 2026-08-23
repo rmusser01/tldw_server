@@ -529,6 +529,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "chat-macros",
             "chat_macros_jobs_task",
             "_run_chat_macros_jobs_worker_service",
+            {},
         ),
         (
             "_start_llamacpp_acquisition_jobs_worker",

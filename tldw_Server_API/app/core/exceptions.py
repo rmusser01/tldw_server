@@ -1472,6 +1472,22 @@ class AdapterError(WorkflowAdapterError):
     """Workflow adapter-specific error."""
 
 
+class MacroValidationError(ValueError):
+    """Raised when a chat macro definition or invocation fails validation."""
+
+
+class MacroStorageError(RuntimeError):
+    """Raised when chat macro definition or run storage fails."""
+
+
+class MacroNotFoundError(MacroStorageError):
+    """Raised when a requested chat macro or run record is missing."""
+
+
+class MacroExecutionError(RuntimeError):
+    """Raised when chat macro execution fails."""
+
+
 async def video_processing_exception_handler(
     _request: Request,
     exc: VideoProcessingError,

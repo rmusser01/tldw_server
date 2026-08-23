@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Chat_Macros.context_snapshot import MacroContextSnapshot
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
 
 pytestmark = pytest.mark.unit
 
@@ -69,6 +69,48 @@ def test_chat_macro_jobs_queue_uses_env_override(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("CHAT_MACROS_JOBS_QUEUE", "high")
 
     assert jobs.chat_macro_jobs_queue() == "high"
+
+
+@pytest.mark.asyncio
+async def test_production_branch_runner_dispatches_bounded_context_to_chat_service() -> None:
+    jobs = _jobs_module()
+    captured: dict[str, Any] = {}
+
+    async def fake_chat_call(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "choices": [{"message": {"content": "Branch answer"}}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 4},
+        }
+
+    runner = jobs.ChatMacroLLMBranchRunner(chat_call=fake_chat_call)
+    result = await runner.run_branch(
+        prompt="Extract decisions.",
+        snapshot=MacroContextSnapshot(
+            messages=[
+                {"id": "1", "role": "user", "excerpt": "Ship the parser."},
+                {"id": "2", "role": "assistant", "excerpt": "Agreed."},
+            ]
+        ),
+        model_selection={"api_provider": "openai", "model": "gpt-test"},
+    )
+
+    assert result.status == "completed"
+    assert result.text == "Branch answer"
+    assert result.usage == {"prompt_tokens": 12, "completion_tokens": 4}
+    assert captured["api_provider"] == "openai"
+    assert captured["model"] == "gpt-test"
+    assert captured["stream"] is False
+    assert "Ship the parser." in captured["messages"][0]["content"]
+    assert "Extract decisions." in captured["messages"][0]["content"]
+
+
+def test_job_executor_uses_production_branch_runner_by_default(chat_db: CharactersRAGDB) -> None:
+    jobs = _jobs_module()
+
+    executor = jobs.build_chat_macro_executor(chat_db=chat_db, user_id="42")
+
+    assert isinstance(executor.branch_runner, jobs.ChatMacroLLMBranchRunner)
 
 
 @pytest.mark.asyncio
@@ -307,6 +349,36 @@ def test_post_chat_macro_final_output_persists_visible_assistant_message_with_me
         "output_profile": "default",
         "post_idempotency_key": "chat_macro:run-1:final",
     }
+
+
+def test_post_chat_macro_final_output_without_conversation_is_a_noop(
+    chat_db: CharactersRAGDB,
+) -> None:
+    jobs = _jobs_module()
+    repository = ChatMacroRepository(chat_db)
+    run = repository.create_run(
+        run_id="run-without-conversation",
+        user_id="42",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        macro_source="builtin",
+        macro_version=1,
+        macro_digest="digest-1",
+        normalized_args={},
+        status="completed",
+        surface="rest",
+        output_profile="default",
+    )
+
+    message_id = jobs.post_chat_macro_final_output(
+        chat_db=chat_db,
+        repository=repository,
+        run_id=run.run_id,
+        final_output="Final wrapup.",
+        post_idempotency_key="chat_macro:run-without-conversation:final",
+    )
+
+    assert message_id == ""
 
 
 def test_duplicate_chat_macro_postback_reuses_existing_message_for_idempotency_key(

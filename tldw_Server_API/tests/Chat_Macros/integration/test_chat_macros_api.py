@@ -226,7 +226,18 @@ def test_run_detail_and_cancel(api_client: MacroApiClient):
             "surface": "chat",
             "conversation_id": "conv-1",
             "output_profile": "default",
-            "context_snapshot": {"message_count": 3},
+            "context_snapshot": {
+                "messages": [
+                    {"role": "user", "content": "token=secret-value summarize this"}
+                ],
+                "authorization": "Bearer secret-value",
+                "unexpected": "discard me",
+            },
+            "model_selection": {
+                "api_provider": "openai",
+                "model": "gpt-test",
+                "api_key": "sk-secret123456",
+            },
         },
     )
     assert created.status_code == 202, created.text
@@ -234,6 +245,13 @@ def test_run_detail_and_cancel(api_client: MacroApiClient):
     assert run["status"] == "pending"
     assert run["run_id"]
     assert run["detail_url"].endswith(f"/runs/{run['run_id']}")
+
+    stored_run = ChatMacroRepository(api_client.db).get_run(run["run_id"])
+    assert stored_run is not None
+    assert stored_run.context_snapshot["messages"][0]["excerpt"] == "token=[redacted] summarize this"
+    assert "authorization" not in stored_run.context_snapshot
+    assert "unexpected" not in stored_run.context_snapshot
+    assert stored_run.model_selection == {"api_provider": "openai", "model": "gpt-test"}
 
     repo = ChatMacroRepository(api_client.db)
     repo.upsert_branch(
@@ -266,6 +284,15 @@ def test_run_detail_and_cancel(api_client: MacroApiClient):
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancel_requested"
     assert cancelled.json()["cancel_requested_at"]
+
+
+def test_run_rejects_unimplemented_foreground_mode(api_client: MacroApiClient) -> None:
+    response = api_client.client.post(
+        f"{PREFIX}/run",
+        json={"macro_name": "wrapup", "mode": "foreground"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_run_endpoint_enqueues_background_job(api_client: MacroApiClient):
@@ -305,7 +332,6 @@ def test_run_endpoint_enqueues_background_job(api_client: MacroApiClient):
         "keep_forks": False,
         "mode": "background",
         "output_profile": "default",
-        "sync": False,
         "include_branches": False,
         "question": ["Check blockers"],
     }

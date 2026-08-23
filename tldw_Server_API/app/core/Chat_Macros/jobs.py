@@ -10,8 +10,7 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
 from tldw_Server_API.app.core.Chat.command_router import reserved_core_command_names
-from tldw_Server_API.app.core.Chat_Macros.branch_runner import BranchPromptResult
-from tldw_Server_API.app.core.Chat_Macros.context_snapshot import MacroContextSnapshot
+from tldw_Server_API.app.core.Chat_Macros.branch_runner import ChatMacroLLMBranchRunner
 from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError
 from tldw_Server_API.app.core.Chat_Macros.executor import ChatMacroExecutor, MacroExecutorSettings
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
@@ -136,7 +135,7 @@ def build_chat_macro_executor(
     output_settings = settings or MacroExecutorSettings(
         output_profiles=_output_profiles_from_service(service),
     )
-    runner = branch_runner or _UnavailableBranchRunner()
+    runner = branch_runner or ChatMacroLLMBranchRunner()
 
     def _macro_loader(run: Any) -> Any:
         return _load_macro_definition_for_run(service, run)
@@ -173,7 +172,7 @@ def post_chat_macro_final_output(
     if run is None:
         raise MacroStorageError(f"macro run not found: {run_id}")
     if not run.conversation_id:
-        raise MacroStorageError("macro run has no conversation_id for post-back")
+        return ""
 
     existing = _find_existing_macro_post(
         chat_db,
@@ -334,25 +333,10 @@ def _close_worker_database(db: Any) -> None:
         logger.debug("Chat macro worker DB cleanup skipped for {}.", type(db).__name__)
 
 
-class _UnavailableBranchRunner:
-    async def run_branch(
-        self,
-        *,
-        prompt: str,
-        snapshot: MacroContextSnapshot,
-        model_selection: dict[str, Any],
-    ) -> BranchPromptResult:
-        del prompt, snapshot, model_selection
-        return BranchPromptResult(
-            status="failed",
-            error_code="branch_runner_unavailable",
-            error_message="Chat macro branch runner is not configured.",
-        )
-
-
 __all__ = [
     "CHAT_MACROS_DOMAIN",
     "CHAT_MACROS_JOB_TYPE",
+    "ChatMacroLLMBranchRunner",
     "build_chat_macro_executor",
     "chat_macro_jobs_queue",
     "enqueue_chat_macro_run_job",

@@ -60,7 +60,7 @@ export interface ChatMacroValidateResponse {
 export interface ChatMacroRunRequest {
   macro_name: string
   args?: Record<string, unknown>
-  mode?: "background" | "chat_native" | "foreground"
+  mode?: "background"
   surface?: string | null
   conversation_id?: string | null
   workspace_id?: string | null

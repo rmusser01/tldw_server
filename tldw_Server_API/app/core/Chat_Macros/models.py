@@ -25,17 +25,17 @@ class MacroArgSpec(_StrictModel):
     aliases: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_default_type(self) -> "MacroArgSpec":
+    def _validate_default_type(self) -> MacroArgSpec:
         if self.default is None:
             return self
         if self.repeated:
             if not isinstance(self.default, list):
                 raise ValueError("repeated arg default must be a list")
             for item in self.default:
-                if not _matches_arg_type(item, self.type):
+                if not matches_arg_type(item, self.type):
                     raise ValueError(f"default item does not match arg type: {self.type}")
             return self
-        if not _matches_arg_type(self.default, self.type):
+        if not matches_arg_type(self.default, self.type):
             raise ValueError(f"default does not match arg type: {self.type}")
         return self
 
@@ -50,7 +50,7 @@ class MacroStep(_StrictModel):
     branch_strategy: Literal["auto", "chat_native", "acp_fork"] | None = None
 
     @model_validator(mode="after")
-    def _requires_output_for_producers(self) -> "MacroStep":
+    def _requires_output_for_producers(self) -> MacroStep:
         if self.type in {"prompt", "branch_prompt", "merge"} and not self.output:
             raise ValueError(f"{self.type} step requires output")
         return self
@@ -61,7 +61,7 @@ class MacroPermissions(_StrictModel):
     skills: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _reject_capabilities(self) -> "MacroPermissions":
+    def _reject_capabilities(self) -> MacroPermissions:
         if self.tool_calls:
             raise ValueError("tool_calls are not allowed in chat macro definitions")
         if self.skills:
@@ -110,7 +110,7 @@ class MacroDefinition(_StrictModel):
     permissions: MacroPermissions = Field(default_factory=MacroPermissions)
 
     @model_validator(mode="after")
-    def _validate_arg_options(self) -> "MacroDefinition":
+    def _validate_arg_options(self) -> MacroDefinition:
         seen: dict[str, str] = {}
         for name, spec in self.args.items():
             if not _ARG_NAME_RE.fullmatch(name):
@@ -135,7 +135,7 @@ class MacroDefinition(_StrictModel):
         return self
 
     @model_validator(mode="after")
-    def _validate_step_consumes(self) -> "MacroDefinition":
+    def _validate_step_consumes(self) -> MacroDefinition:
         previous_outputs: set[str] = set()
         for step in self.steps:
             if step.type in {"merge", "post_result"}:
@@ -207,7 +207,8 @@ class MacroBranchRecord(_StrictModel):
     finished_at: str | None = None
 
 
-def _matches_arg_type(value: Any, arg_type: str) -> bool:
+def matches_arg_type(value: Any, arg_type: str) -> bool:
+    """Return whether a value matches a supported macro argument type."""
     if arg_type == "string":
         return isinstance(value, str)
     if arg_type == "boolean":

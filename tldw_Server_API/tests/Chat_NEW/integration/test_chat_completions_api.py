@@ -10,8 +10,7 @@ import os
 import pytest
 from fastapi import status
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME, get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -148,6 +147,7 @@ class TestChatCompletionsEndpoint:
     def test_time_slash_command_still_injects_and_calls_provider(self, monkeypatch, test_client, auth_headers):
         monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
         monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
 
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
@@ -212,6 +212,13 @@ class TestChatCompletionsEndpoint:
             assert run is not None
             assert run.macro_command == "wrapup"
             assert run.normalized_args["question"] == ["What changed?"]
+            assert [message["excerpt"] for message in run.context_snapshot["messages"]] == [
+                '/wrapup --question "What changed?"'
+            ]
+            assert run.context_snapshot["model_selection"] == {
+                "api_provider": "openai",
+                "model": "gpt-4o-mini",
+            }
             assert len(job_manager.created) == 1
             queued = job_manager.created[0]
             assert queued["domain"] == "chat_macros"
@@ -224,7 +231,7 @@ class TestChatCompletionsEndpoint:
             db.close_all_connections()
 
     @pytest.mark.integration
-    def test_wrapup_macro_stream_request_returns_json_status(
+    def test_wrapup_macro_stream_request_returns_openai_sse_status(
         self,
         monkeypatch,
         test_client,
@@ -255,10 +262,16 @@ class TestChatCompletionsEndpoint:
             )
 
             assert response.status_code == status.HTTP_200_OK, response.text
-            assert response.headers["content-type"].startswith("application/json")
-            body = response.json()
-            assert body["object"] == "chat.completion"
-            macro_meta = body["choices"][0]["message"]["metadata"]["chat_macro"]
+            assert response.headers["content-type"].startswith("text/event-stream")
+            frames = [line[6:] for line in response.text.splitlines() if line.startswith("data: ")]
+            assert frames[-1] == "[DONE]"
+            import json
+
+            first_chunk = json.loads(frames[0])
+            assert first_chunk["object"] == "chat.completion.chunk"
+            delta = first_chunk["choices"][0]["delta"]
+            macro_meta = delta["metadata"]["chat_macro"]
+            assert "Started /wrapup" in delta["content"]
             assert macro_meta["command"] == "wrapup"
             assert macro_meta["status"] == "pending"
             assert len(job_manager.created) == 1
@@ -310,7 +323,7 @@ class TestChatCompletionsEndpoint:
             db.close_all_connections()
 
     @pytest.mark.integration
-    def test_wrapup_macro_discovery_failure_does_not_fall_through_to_provider(
+    def test_wrapup_macro_discovery_failure_falls_through_to_provider(
         self,
         monkeypatch,
         test_client,
@@ -318,17 +331,21 @@ class TestChatCompletionsEndpoint:
         tmp_path,
     ):
         monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
         db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
 
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
-        def fail_call(**_kwargs):
-            raise AssertionError("provider path should not receive failed macro invocations")
+        calls = []
+
+        def fake_call(**kwargs):
+            calls.append(kwargs)
+            return {"choices": [{"message": {"role": "assistant", "content": "provider fallback"}}]}
 
         def fail_list(_service):
             raise RuntimeError("api_key=secret should not leak")
 
-        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
         monkeypatch.setattr(chat_endpoint.ChatMacrosService, "list_macros", fail_list)
 
         try:
@@ -343,12 +360,10 @@ class TestChatCompletionsEndpoint:
             )
 
             assert response.status_code == status.HTTP_200_OK, response.text
+            assert calls
             message = response.json()["choices"][0]["message"]
-            macro_meta = message["metadata"]["chat_macro"]
-            assert "Could not run /wrapup: Macro storage is unavailable." in message["content"]
-            assert "secret" not in message["content"]
-            assert macro_meta["status"] == "error"
-            assert macro_meta["error_code"] == "storage_error"
+            assert message["content"] == "provider fallback"
+            assert "metadata" not in message
         finally:
             test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
             db.close_all_connections()
@@ -440,6 +455,7 @@ class TestChatCompletionsEndpoint:
     @pytest.mark.integration
     def test_unknown_slash_candidate_preserves_provider_flow(self, monkeypatch, test_client, auth_headers):
         monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
 
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
@@ -638,6 +654,7 @@ class TestErrorHandling:
     def test_auth_error_handling(self, credentialed_test_client, auth_headers):
         """Test handling of authentication errors by forcing provider to raise ChatAuthenticationError."""
         from unittest.mock import patch
+
         from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
         def raise_auth(*args, **kwargs):
             raise ChatAuthenticationError("Invalid API key", provider="openai")

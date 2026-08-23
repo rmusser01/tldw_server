@@ -90,11 +90,6 @@ def select_branch_strategy(
                 "session_id": capability.session_id,
             },
         )
-    if capability.available and step_strategy == "acp_fork":
-        return BranchStrategyDecision(
-            strategy="acp_fork",
-            metadata={"requested": "auto", "session_id": capability.session_id},
-        )
     return BranchStrategyDecision(
         strategy="chat_native",
         fallback=not capability.available,

@@ -4,9 +4,11 @@ import os
 
 import pytest
 
-from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError, MacroValidationError
 from tldw_Server_API.app.core.Chat_Macros import storage as storage_module
+from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError, MacroValidationError
 from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
+
+pytestmark = pytest.mark.unit
 
 
 def _macro_yaml(name: str = "daily_digest", command: str | None = None) -> str:

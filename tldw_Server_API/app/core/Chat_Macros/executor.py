@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .acp_adapter import resolve_acp_branch_capability, select_branch_strategy
-from .branch_runner import BranchPromptResult, BranchPromptRunner
+from .branch_runner import BranchPromptRunner
 from .context_snapshot import MacroContextSnapshot, redact_sensitive_text, snapshot_from_mapping
 from .exceptions import MacroExecutionError, MacroStorageError
 from .models import MacroBranchRecord, MacroDefinition, MacroRunRecord, MacroStep
@@ -357,6 +357,7 @@ class ChatMacroExecutor:
     ) -> MacroBranchRecord:
         attempts = 0
         last_error = "branch failed"
+        last_error_code = "branch_failed"
         max_attempts = max(1, macro.execution.retries_per_branch + 1)
         prompt = step.prompt or ""
         for _ in range(max_attempts):
@@ -365,12 +366,20 @@ class ChatMacroExecutor:
                 return cancelled_branch
             attempts += 1
             try:
-                result = await self.branch_runner.run_branch(
-                    prompt=prompt,
-                    snapshot=snapshot,
-                    model_selection=model_selection,
+                result = await asyncio.wait_for(
+                    self.branch_runner.run_branch(
+                        prompt=prompt,
+                        snapshot=snapshot,
+                        model_selection=model_selection,
+                    ),
+                    timeout=macro.execution.timeout_seconds,
                 )
+            except TimeoutError:
+                last_error_code = "timeout"
+                last_error = f"Branch timed out after {macro.execution.timeout_seconds} seconds."
+                continue
             except Exception as exc:  # noqa: BLE001 - branch failures are recorded per branch
+                last_error_code = "branch_failed"
                 last_error = redact_sensitive_text(str(exc) or type(exc).__name__)
                 continue
             if result.status == "completed":
@@ -400,7 +409,7 @@ class ChatMacroExecutor:
             prompt_digest=_digest(prompt),
             usage={"branch_strategy": strategy_metadata},
             retained=_retain_branch(normalized_args, macro, self.settings),
-            error_code="branch_failed",
+            error_code=last_error_code,
             error_message=last_error,
         )
 
@@ -507,7 +516,8 @@ def _dev_handoff_steps() -> list[MacroStep]:
 
 
 def _default_model_available(selection: dict[str, Any]) -> bool:
-    return bool(selection.get("model"))
+    del selection
+    return True
 
 
 def _sync_requested(args: dict[str, Any]) -> bool:
@@ -528,7 +538,7 @@ def _retain_branch(
 
 def _estimated_total_tokens(snapshot: MacroContextSnapshot, steps: list[MacroStep]) -> int:
     prompt_tokens = sum(max(1, len(step.prompt or "") // 4) for step in steps)
-    return int(snapshot.token_estimate or 0) + prompt_tokens
+    return (int(snapshot.token_estimate or 0) * len(steps)) + prompt_tokens
 
 
 def _all_failed_report(branches: list[MacroBranchRecord]) -> str:

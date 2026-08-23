@@ -4,7 +4,13 @@ import pytest
 
 from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroValidationError
 from tldw_Server_API.app.core.Chat_Macros.models import MacroArgSpec
-from tldw_Server_API.app.core.Chat_Macros.parser import load_macro_definition, parse_macro_args
+from tldw_Server_API.app.core.Chat_Macros.parser import (
+    load_macro_definition,
+    normalize_structured_macro_args,
+    parse_macro_args,
+)
+
+pytestmark = pytest.mark.unit
 
 
 BUILTIN_WRAPUP_PATH = (
@@ -135,6 +141,23 @@ def test_parse_slash_args_rejects_duplicate_alias_and_canonical_arg():
     spec = WrapupArgsSpec()
     with pytest.raises(MacroValidationError, match="duplicate"):
         parse_macro_args("--output-profile compact --output_profile full", spec)
+
+
+def test_normalize_structured_args_applies_defaults_and_validates_values():
+    macro = load_macro_definition(BUILTIN_WRAPUP_PATH.read_text())
+
+    args = normalize_structured_macro_args(
+        macro,
+        {"keep_forks": True, "question": ["What changed?"]},
+    )
+
+    assert args["preset"] == "general"
+    assert args["keep_forks"] is True
+    assert args["question"] == ["What changed?"]
+    with pytest.raises(MacroValidationError, match="unknown macro argument"):
+        normalize_structured_macro_args(macro, {"unknown": "value"})
+    with pytest.raises(MacroValidationError, match="invalid type"):
+        normalize_structured_macro_args(macro, {"keep_forks": "yes"})
 
 
 def test_merge_and_post_result_consumes_must_reference_previous_outputs():

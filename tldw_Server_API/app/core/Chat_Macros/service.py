@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import yaml
 
@@ -55,12 +56,12 @@ class ChatMacrosService:
     def get_macro(self, name: str) -> ChatMacroCatalogItem:
         builtin = self._builtin_item(name)
         if builtin is not None:
-            self._sync_registry(builtin)
+            self._sync_registry_if_changed(builtin)
             return builtin
         stored = self.storage.read(name)
         item = self._user_item(stored)
         self._reject_core_collision(item.definition)
-        self._sync_registry(item)
+        self._sync_registry_if_changed(item)
         return item
 
     def validate_macro(self, raw: str) -> MacroDefinition:
@@ -233,6 +234,8 @@ class ChatMacrosService:
             raise MacroValidationError("tool_calls are not allowed in chat macro definitions")
         if definition.permissions.skills:
             raise MacroValidationError("skills are not allowed in chat macro definitions")
+        if definition.execution.mode_default != "background":
+            raise MacroValidationError("only background macro execution is supported in v1")
 
     def _sync_registry(self, item: ChatMacroCatalogItem) -> None:
         self.repository.upsert_registry_entry(
@@ -249,12 +252,45 @@ class ChatMacrosService:
             validation_error=None,
         )
 
-    def _sync_registry_catalog(self, items: list[ChatMacroCatalogItem]) -> None:
-        for item in items:
+    def _sync_registry_if_changed(self, item: ChatMacroCatalogItem) -> None:
+        existing = next(
+            (
+                row
+                for row in self.repository.list_registry_entries(self.user_id)
+                if row.get("command") == item.command
+            ),
+            None,
+        )
+        if not self._registry_entry_matches(existing, item):
             self._sync_registry(item)
-        self.repository.mark_registry_entries_deleted_except(
-            self.user_id,
-            {item.command for item in items},
+
+    def _sync_registry_catalog(self, items: list[ChatMacroCatalogItem]) -> None:
+        existing = {
+            str(row["command"]): row
+            for row in self.repository.list_registry_entries(self.user_id)
+        }
+        active_commands = {item.command for item in items}
+        for item in items:
+            if not self._registry_entry_matches(existing.get(item.command), item):
+                self._sync_registry(item)
+        if set(existing) != active_commands:
+            self.repository.mark_registry_entries_deleted_except(self.user_id, active_commands)
+
+    @staticmethod
+    def _registry_entry_matches(row: dict[str, Any] | None, item: ChatMacroCatalogItem) -> bool:
+        if row is None:
+            return False
+        return (
+            row.get("name") == item.name
+            and row.get("command") == item.command
+            and row.get("description") == item.description
+            and bool(row.get("enabled")) is item.enabled
+            and row.get("source") == item.source
+            and row.get("builtin_version") == item.builtin_version
+            and row.get("schema_version") == item.definition.schema_version
+            and row.get("digest") == item.digest
+            and row.get("validation_status") == "valid"
+            and row.get("validation_error") is None
         )
 
     @staticmethod
@@ -270,6 +306,6 @@ def _builtin_root() -> Path:
 def _default_core_commands() -> set[str]:
     try:
         from tldw_Server_API.app.core.Chat.command_router import list_commands
-    except Exception:
+    except ImportError:
         return set()
     return {str(command["name"]).lower() for command in list_commands()}

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from tldw_Server_API.app.core.Chat_Macros.acp_adapter import (
     resolve_acp_branch_capability,
     select_branch_strategy,
 )
 from tldw_Server_API.app.core.Chat_Macros.context_snapshot import MacroContextSnapshot
+
+pytestmark = pytest.mark.unit
 
 
 def test_resolve_acp_branch_capability_records_resumable_session_metadata():

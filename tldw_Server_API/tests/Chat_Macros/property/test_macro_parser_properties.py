@@ -10,7 +10,9 @@ fix c1f4e6eb95 (see audits/2026-07-04-test-suite-audit-round2.md, RA4).
 import shlex
 
 import pytest
-from hypothesis import HealthCheck, given, settings as hyp_settings, strategies as st
+from hypothesis import HealthCheck, given
+from hypothesis import settings as hyp_settings
+from hypothesis import strategies as st
 
 parser = pytest.importorskip(
     "tldw_Server_API.app.core.Chat_Macros.parser",

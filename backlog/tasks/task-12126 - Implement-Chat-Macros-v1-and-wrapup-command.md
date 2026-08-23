@@ -4,7 +4,7 @@ title: Implement Chat Macros v1 and wrapup command
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-08-23 04:45
+updated_date: 2026-08-23 16:03
 labels: []
 dependencies: []
 documentation:
@@ -72,6 +72,8 @@ Task 8 complete: added the minimal chat macro frontend service, settings manager
 
 Task 9 verification/docs complete: updated tldw_Server_API/app/core/Chat_Macros/README.md for current v1 macro definitions, /wrapup options, API/settings, Jobs execution, UI behavior, and security notes. Final verification passed: focused backend suite 133 passed / 9 skipped / 5 warnings; frontend macro/nav suite 6 files / 44 tests passed; OpenAPI/config smoke 4 passed / 3 warnings; bun run verify:openapi passed with existing reviewed exceptions only; compileall passed for touched backend Chat_Macros/API/jobs scope; git diff --check passed; Bandit /tmp/bandit_chat_macros.json errors/results empty. Manual local-server smoke was not run because it needs a configured Jobs manager plus real LLM/ACP branch runner; automated TestClient/executor/Jobs/frontend tests cover the implemented contract and the conservative unavailable branch runner is documented.
 2026-08-22: Rebase and review follow-up requested for PR #2618. Preserve pre-rebase head ef4e58d6029a796529d77660ebadf26925f5bacb, rebase onto latest origin/dev, evaluate all Qodo and existing inline review findings against current code, rerun focused backend/frontend verification and Bandit, then merge only after required checks and review threads are clean.
+2026-08-23 PR review follow-up: addressed all existing Qodo comments plus independent review findings. Added route rate limiting, core-owned structured arg normalization, async offloading for macro filesystem/DB endpoint work, contextual exception logging, centralized exceptions, endpoint/schema docstrings, pytest markers/type hints, OpenAI-compatible SSE framing, slash discovery fallthrough, enforced branch timeouts, no-conversation post-back, registry no-op reads, production chat-native LLM branch runner, bounded/redacted chat and REST snapshots, per-branch context token accounting, and explicit background-only v1 execution semantics. Latest verification before final rebase: Chat Macros unit 84 passed; property/API 17 passed; slash integration 8 passed; frontend 34 passed; Ruff passed; frontend ESLint zero errors; Bandit must be rerun after final rebase. origin/dev advanced during review with PRs #2799/#2804, so a second rebase and post-rebase verification remain before push/merge.
+Final post-rebase local verification (2026-08-23): 189 passed, 9 skipped across Chat_Macros, chat command/completions integration, and worker startup suites; frontend Chat Macros Vitest suite 37 passed; PR-owned Ruff scope passed; Bandit reported no findings; ESLint reported 0 errors and 5 pre-existing warnings in WorkspaceChatPanel/test; git diff --check passed. Rebase fixture fixes: corrected the Chat Macros startup worker parametrize row and updated sync token-threshold test for per-branch context accounting.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

@@ -988,19 +988,20 @@ In another terminal, send a normal chat command and a macro command against a lo
 - Cancelling a running run transitions run and job status.
 - Re-running post-back for the same run does not create duplicate final messages.
 
-Not run in this slice: the automated TestClient, executor, Jobs, OpenAPI, and
-frontend suites cover the implemented contract. A meaningful manual server smoke
-requires a configured Jobs manager plus a real LLM/ACP branch runner; the branch
-currently documents and tests the conservative unavailable branch runner.
+Not run in this slice: a live-provider manual smoke still requires configured
+provider credentials and a running Chat Macros Jobs worker. The Jobs runtime now
+uses the canonical async chat provider service for chat-native branch execution;
+unit tests inject a fake provider call and do not contact external services.
 
 - [x] **Step 6: Update README/docs**
 
 Document:
 
 - v1 macro command names use word/underscore identifiers.
-- `/wrapup` options: `--preset`, repeated `--question`, `--output-profile`, `--keep-forks`, `--sync`, `--include-branches`.
+- `/wrapup` options: `--preset`, repeated `--question`, `--output-profile`, `--keep-forks`, `--include-branches`.
 - v1 rejects tools/skills permissions.
-- Background mode requires macro Jobs worker for async processing.
+- V1 supports background execution only and rejects reserved foreground/sync modes.
+- Background mode requires a macro Jobs worker for async processing.
 
 - [x] **Step 7: Final commit**
 
@@ -1021,6 +1022,24 @@ Only include docs paths that actually changed.
 - `compileall` passed for the touched backend Chat_Macros/API/jobs scope.
 - `git diff --check` passed.
 - Bandit `/tmp/bandit_chat_macros.json` had `errors: []` and `results: []`.
+
+**PR #2618 rebase/review follow-up (2026-08-23):**
+
+- Rebasing target changed from `main` to current `dev`; a second rebase is required
+  because `dev` advanced with server-chat scope isolation while review fixes were
+  being prepared.
+- Qodo findings were addressed for rate limiting, parser ownership, async endpoint
+  work, contextual logging, centralized exceptions, docstrings, pytest markers,
+  type hints, SSE framing, slash-command fallthrough, and branch timeouts.
+- Independent review additionally found and fixed the unavailable production branch
+  runner, empty chat snapshots, unsanitized REST snapshots, writes-on-read, and
+  misleading execution modes.
+- Production chat-native branches now use `perform_chat_api_call_async`; persisted
+  snapshots are bounded/redacted before storage; context token estimates are charged
+  once per branch.
+- Verification: Chat Macros unit `84 passed`; property/API `17 passed`; selected chat
+  integration `8 passed`; frontend macro/workspace `34 passed`; Ruff passed; frontend
+  ESLint completed with zero errors and five pre-existing warnings.
 
 ## Implementation Notes
 

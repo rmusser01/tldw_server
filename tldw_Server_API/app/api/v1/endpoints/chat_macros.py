@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -9,6 +10,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.Chat_Macros_Deps import get_chat_macros_service
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.schemas.chat_macros import (
@@ -29,16 +31,21 @@ from tldw_Server_API.app.api.v1.schemas.chat_macros import (
     ChatMacroValidateRequest,
     ChatMacroValidateResponse,
 )
+from tldw_Server_API.app.core.Chat_Macros.context_snapshot import build_macro_context_snapshot
 from tldw_Server_API.app.core.Chat_Macros.exceptions import (
     MacroNotFoundError,
     MacroStorageError,
     MacroValidationError,
 )
 from tldw_Server_API.app.core.Chat_Macros.jobs import enqueue_chat_macro_run_job
-from tldw_Server_API.app.core.Chat_Macros.models import MacroArgSpec, MacroBranchRecord, MacroDefinition, MacroRunRecord
+from tldw_Server_API.app.core.Chat_Macros.models import MacroBranchRecord, MacroRunRecord
+from tldw_Server_API.app.core.Chat_Macros.parser import (
+    enforce_background_execution,
+    normalize_structured_macro_args,
+)
 from tldw_Server_API.app.core.Chat_Macros.service import ChatMacroCatalogItem, ChatMacrosService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(check_rate_limit)])
 
 _SECRET_BEARER_RE = re.compile(r"(?i)\b(authorization\s*:\s*bearer\s+|bearer\s+)[^\s,;]+")
 _SECRET_JSON_RE = re.compile(
@@ -70,11 +77,11 @@ def _summary(item: ChatMacroCatalogItem) -> ChatMacroSummary:
     )
 
 
-def _detail(service: ChatMacrosService, item: ChatMacroCatalogItem) -> ChatMacroDetail:
+async def _detail(service: ChatMacrosService, item: ChatMacroCatalogItem) -> ChatMacroDetail:
     raw = yaml.safe_dump(item.definition.model_dump(mode="json"), sort_keys=False)
     supporting_files: dict[str, str] = {}
     if item.source == "user":
-        stored = service.storage.read(item.name)
+        stored = await asyncio.to_thread(service.storage.read, item.name)
         raw = stored.raw
         supporting_files = stored.supporting_files
     return ChatMacroDetail(
@@ -101,46 +108,6 @@ def _macro_http_exception(exc: Exception) -> HTTPException:
 
 def _raise_macro_http(exc: Exception) -> None:
     raise _macro_http_exception(exc) from exc
-
-
-def _default_arg_value(spec: MacroArgSpec) -> Any:
-    if spec.repeated:
-        return list(spec.default or [])
-    return spec.default
-
-
-def _matches_arg_type(value: Any, arg_type: str) -> bool:
-    if arg_type == "string":
-        return isinstance(value, str)
-    if arg_type == "boolean":
-        return isinstance(value, bool)
-    if arg_type == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
-    if arg_type == "number":
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
-    return False
-
-
-def _normalize_structured_args(definition: MacroDefinition, args: dict[str, Any]) -> dict[str, Any]:
-    normalized = {name: _default_arg_value(spec) for name, spec in definition.args.items()}
-    for name, value in args.items():
-        spec = definition.args.get(name)
-        if spec is None:
-            raise MacroValidationError(f"unknown macro argument: {name}")
-        if spec.repeated:
-            if not isinstance(value, list):
-                raise MacroValidationError(f"macro argument must be a list: {name}")
-            if name == "question" and len(value) > definition.execution.max_branches:
-                raise MacroValidationError(f"too many question arguments; max is {definition.execution.max_branches}")
-            for item in value:
-                if not _matches_arg_type(item, spec.type):
-                    raise MacroValidationError(f"macro argument has invalid item type: {name}")
-            normalized[name] = list(value)
-            continue
-        if not _matches_arg_type(value, spec.type):
-            raise MacroValidationError(f"macro argument has invalid type: {name}")
-        normalized[name] = value
-    return normalized
 
 
 def _safe_error(value: str | None) -> str | None:
@@ -222,13 +189,15 @@ def _get_user_run(service: ChatMacrosService, run_id: str) -> MacroRunRecord:
 async def list_chat_macros(
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroListResponse:
+    """List built-in and user-defined macros available to the current user."""
     try:
-        macros = [_summary(item) for item in service.list_macros()]
+        items = await asyncio.to_thread(service.list_macros)
+        macros = [_summary(item) for item in items]
         return ChatMacroListResponse(macros=macros, count=len(macros))
     except (MacroNotFoundError, MacroStorageError, MacroValidationError) as exc:
         _raise_macro_http(exc)
     except Exception as exc:
-        logger.error("Failed to list chat macros")
+        logger.exception("Failed to list chat macros for user_id={}", service.user_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list chat macros") from exc
 
 
@@ -237,9 +206,15 @@ async def create_chat_macro(
     request: ChatMacroCreateRequest,
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroDetail:
+    """Create and persist a user-defined chat macro."""
     try:
-        item = service.create_macro(request.name, request.raw, request.supporting_files)
-        return _detail(service, item)
+        item = await asyncio.to_thread(
+            service.create_macro,
+            request.name,
+            request.raw,
+            request.supporting_files,
+        )
+        return await _detail(service, item)
     except (MacroNotFoundError, MacroStorageError, MacroValidationError) as exc:
         _raise_macro_http(exc)
 
@@ -249,8 +224,9 @@ async def validate_chat_macro(
     request: ChatMacroValidateRequest,
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroValidateResponse:
+    """Validate a macro definition without persisting it."""
     try:
-        definition = service.validate_macro(request.raw)
+        definition = await asyncio.to_thread(service.validate_macro, request.raw)
         return ChatMacroValidateResponse(valid=True, macro=definition.model_dump(mode="json"), error=None)
     except (MacroValidationError, MacroStorageError) as exc:
         return ChatMacroValidateResponse(valid=False, macro=None, error=str(exc))
@@ -260,8 +236,10 @@ async def validate_chat_macro(
 async def get_chat_macro_settings(
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroSettingsResponse:
+    """Return the current user's chat macro settings."""
     try:
-        return ChatMacroSettingsResponse(settings=service.get_settings())
+        settings_payload = await asyncio.to_thread(service.get_settings)
+        return ChatMacroSettingsResponse(settings=settings_payload)
     except MacroStorageError as exc:
         _raise_macro_http(exc)
 
@@ -271,8 +249,10 @@ async def update_chat_macro_settings(
     request: ChatMacroSettingsRequest,
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroSettingsResponse:
+    """Validate and persist the current user's chat macro settings."""
     try:
-        return ChatMacroSettingsResponse(settings=service.save_settings(request.settings))
+        settings_payload = await asyncio.to_thread(service.save_settings, request.settings)
+        return ChatMacroSettingsResponse(settings=settings_payload)
     except (MacroValidationError, MacroStorageError) as exc:
         _raise_macro_http(exc)
 
@@ -283,14 +263,16 @@ async def create_chat_macro_run(
     service: ChatMacrosService = Depends(get_chat_macros_service),
     job_manager: Any = Depends(try_get_job_manager),
 ) -> ChatMacroRunResponse:
+    """Create a durable macro run and enqueue it for background execution."""
     try:
-        item = service.get_macro(request.macro_name)
+        item = await asyncio.to_thread(service.get_macro, request.macro_name)
         if not item.enabled:
             raise MacroValidationError("macro is disabled")
-        normalized_args = _normalize_structured_args(item.definition, request.args)
+        normalized_args = normalize_structured_macro_args(item.definition, request.args)
+        enforce_background_execution(normalized_args)
         normalized_args["mode"] = request.mode
         output_profile = request.output_profile or str(normalized_args.get("output_profile") or item.definition.output_profile)
-        resolved_profile = service.resolve_output_profile(output_profile)
+        resolved_profile = await asyncio.to_thread(service.resolve_output_profile, output_profile)
         output_profile = resolved_profile.name
         normalized_args["output_profile"] = output_profile
         if job_manager is None:
@@ -298,7 +280,19 @@ async def create_chat_macro_run(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Jobs manager unavailable.",
             )
-        run = service.repository.create_run(
+        raw_context = dict(request.context_snapshot or {})
+        snapshot = build_macro_context_snapshot(
+            chat_db=None,
+            conversation_id=request.conversation_id or raw_context.get("conversation_id"),
+            workspace_id=request.workspace_id or raw_context.get("workspace_id"),
+            acp_session_id=request.acp_session_id or raw_context.get("acp_session_id"),
+            request_messages=raw_context.get("messages"),
+            model_selection=request.model_selection or raw_context.get("model_selection"),
+            output_profile=output_profile,
+            request_metadata=raw_context,
+        )
+        run = await asyncio.to_thread(
+            service.repository.create_run,
             user_id=service.user_id,
             macro_name=item.name,
             macro_command=item.command,
@@ -308,16 +302,17 @@ async def create_chat_macro_run(
             normalized_args=normalized_args,
             status="pending",
             surface=request.surface,
-            conversation_id=request.conversation_id,
-            workspace_id=request.workspace_id,
-            acp_session_id=request.acp_session_id,
+            conversation_id=snapshot.conversation_id,
+            workspace_id=snapshot.workspace_id,
+            acp_session_id=snapshot.acp_session_id,
             output_profile=output_profile,
-            context_snapshot=request.context_snapshot,
-            model_selection=request.model_selection,
+            context_snapshot=snapshot.model_dump(mode="json"),
+            model_selection=snapshot.model_selection,
         )
         if job_manager is not None:
             try:
-                enqueue_chat_macro_run_job(
+                await asyncio.to_thread(
+                    enqueue_chat_macro_run_job,
                     macro_run_id=run.run_id,
                     user_id=service.user_id,
                     macro_digest=item.digest,
@@ -325,7 +320,8 @@ async def create_chat_macro_run(
                     job_manager=job_manager,
                 )
             except (MacroStorageError, TypeError, ValueError, RuntimeError) as exc:
-                service.repository.update_run_status(
+                await asyncio.to_thread(
+                    service.repository.update_run_status,
                     run.run_id,
                     status="failed",
                     error_code="job_enqueue_failed",
@@ -346,9 +342,11 @@ async def get_chat_macro_run(
     run_id: str,
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroRunDetailResponse:
+    """Return a user-owned macro run and its branch records."""
     try:
-        run = _get_user_run(service, run_id)
-        branches = [_branch_summary(branch) for branch in service.repository.list_branches(run_id)]
+        run = await asyncio.to_thread(_get_user_run, service, run_id)
+        stored_branches = await asyncio.to_thread(service.repository.list_branches, run_id)
+        branches = [_branch_summary(branch) for branch in stored_branches]
         return ChatMacroRunDetailResponse(run=_run_record_response(run), branches=branches)
     except HTTPException:
         raise
@@ -361,9 +359,10 @@ async def cancel_chat_macro_run(
     run_id: str,
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroCancelResponse:
+    """Request cancellation of a user-owned macro run."""
     try:
-        _get_user_run(service, run_id)
-        run = service.repository.request_cancel(run_id)
+        await asyncio.to_thread(_get_user_run, service, run_id)
+        run = await asyncio.to_thread(service.repository.request_cancel, run_id)
         return ChatMacroCancelResponse(
             run_id=run.run_id,
             status=run.status,
@@ -381,9 +380,15 @@ async def clone_chat_macro(
     request: ChatMacroCloneRequest,
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroDetail:
+    """Clone an immutable built-in macro into user storage."""
     try:
-        item = service.clone_builtin(name, new_name=request.name, command=request.command)
-        return _detail(service, item)
+        item = await asyncio.to_thread(
+            service.clone_builtin,
+            name,
+            new_name=request.name,
+            command=request.command,
+        )
+        return await _detail(service, item)
     except (MacroNotFoundError, MacroStorageError, MacroValidationError) as exc:
         _raise_macro_http(exc)
 
@@ -393,8 +398,10 @@ async def get_chat_macro(
     name: str,
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroDetail:
+    """Return one built-in or user-defined macro."""
     try:
-        return _detail(service, service.get_macro(name))
+        item = await asyncio.to_thread(service.get_macro, name)
+        return await _detail(service, item)
     except (MacroNotFoundError, MacroStorageError, MacroValidationError) as exc:
         _raise_macro_http(exc)
 
@@ -405,12 +412,18 @@ async def update_chat_macro(
     request: ChatMacroUpdateRequest,
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroDetail:
+    """Update a user macro definition or a macro's enabled state."""
     try:
         if request.raw is None:
-            item = service.set_macro_enabled(name, bool(request.enabled))
+            item = await asyncio.to_thread(service.set_macro_enabled, name, bool(request.enabled))
         else:
-            item = service.update_macro(name, request.raw, request.supporting_files)
-        return _detail(service, item)
+            item = await asyncio.to_thread(
+                service.update_macro,
+                name,
+                request.raw,
+                request.supporting_files,
+            )
+        return await _detail(service, item)
     except (MacroNotFoundError, MacroStorageError, MacroValidationError) as exc:
         _raise_macro_http(exc)
 
@@ -420,8 +433,9 @@ async def delete_chat_macro(
     name: str,
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> Response:
+    """Delete a mutable user-defined macro."""
     try:
-        service.delete_macro(name)
+        await asyncio.to_thread(service.delete_macro, name)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except (MacroNotFoundError, MacroStorageError, MacroValidationError) as exc:
         _raise_macro_http(exc)

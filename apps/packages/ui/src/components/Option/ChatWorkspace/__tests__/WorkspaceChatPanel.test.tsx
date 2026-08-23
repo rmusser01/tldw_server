@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { useMessageOption as useMessageOptionHook } from "@/hooks/useMessageOption"
-import { WorkspaceChatPanel } from "../WorkspaceChatPanel"
 import type { StagedWorkspaceSource } from "../types"
 import type { EffectiveWorkspaceAssistantDefault } from "@/types/workspace"
 
@@ -39,6 +38,21 @@ vi.mock("@/hooks/useMessageOption", () => ({
     chatHookState.useMessageOption(...args)
 }))
 
+vi.mock("@/hooks/chat/chat-action-utils", () => ({
+  isChatSubmitSuccess: (result: { status: string }) => result.status === "submitted",
+  normalizeChatSubmitResult: (result?: { status: string }) =>
+    result ?? { status: "submitted" }
+}))
+
+vi.mock("@/services/chat-macros", () => ({
+  cancelChatMacroRun: vi.fn(),
+  getChatMacroRun: vi.fn()
+}))
+
+vi.mock("../MacroRunDetailDrawer", () => ({
+  MacroRunDetailDrawer: () => null
+}))
+
 vi.mock("@/components/Common/Playground/Message", () => ({
   PlaygroundMessage: (props: { conversationInstanceId: string; message: string }) => (
     <article
@@ -49,6 +63,12 @@ vi.mock("@/components/Common/Playground/Message", () => ({
     </article>
   )
 }))
+
+let WorkspaceChatPanel: typeof import("../WorkspaceChatPanel").WorkspaceChatPanel
+
+beforeAll(async () => {
+  WorkspaceChatPanel = (await import("../WorkspaceChatPanel")).WorkspaceChatPanel
+})
 
 const staged: StagedWorkspaceSource[] = [
   {
@@ -131,6 +151,66 @@ describe("WorkspaceChatPanel", () => {
     chatHookState.value.serverChatAssistantId = null
     chatHookState.value.serverChatMetaLoaded = false
     chatHookState.onSubmit.mockResolvedValue({ status: "submitted" })
+  })
+
+  it("renders an active macro response as a status card", () => {
+    chatHookState.value.messages = [
+      {
+        id: "macro-status-1",
+        role: "assistant",
+        message: "Started /wrapup.",
+        metadataExtra: {
+          chat_macro: {
+            run_id: "run-1",
+            command: "wrapup",
+            status: "pending",
+            detail_url: "/api/v1/chat/macros/runs/run-1",
+            output_profile: "default"
+          }
+        }
+      }
+    ] as any
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    expect(screen.getByRole("article", { name: "/wrapup macro run pending" })).toBeVisible()
+    expect(screen.queryByTestId("workspace-panel-message")).not.toBeInTheDocument()
+  })
+
+  it("renders completed macro output as a normal assistant message", () => {
+    chatHookState.value.messages = [
+      {
+        id: "macro-result-1",
+        role: "assistant",
+        message: "## Summary\nFinal wrapup.",
+        metadataExtra: {
+          chat_macro: {
+            run_id: "run-1",
+            command: "wrapup",
+            status: "completed"
+          }
+        }
+      }
+    ] as any
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    expect(screen.getByTestId("workspace-panel-message")).toHaveTextContent("Final wrapup.")
+    expect(screen.queryByRole("article", { name: /macro run/ })).not.toBeInTheDocument()
   })
 
   it("inserts staged source summary into the composer without sending and clears structured staging", () => {

@@ -13,16 +13,10 @@ args:
     type: boolean
     default: false
     aliases: ["keep-forks"]
-  mode:
-    type: string
-    default: background
   output_profile:
     type: string
     default: default
     aliases: ["output-profile"]
-  sync:
-    type: boolean
-    default: false
   include_branches:
     type: boolean
     default: false

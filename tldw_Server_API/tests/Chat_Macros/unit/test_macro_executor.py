@@ -12,12 +12,15 @@ from tldw_Server_API.app.core.Chat_Macros.context_snapshot import (
     build_macro_context_snapshot,
     snapshot_from_mapping,
 )
+from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroValidationError
 from tldw_Server_API.app.core.Chat_Macros.executor import ChatMacroExecutor, MacroExecutorSettings
 from tldw_Server_API.app.core.Chat_Macros.models import MacroDefinition
 from tldw_Server_API.app.core.Chat_Macros.output_profiles import MacroOutputProfile
 from tldw_Server_API.app.core.Chat_Macros.parser import load_macro_definition, parse_macro_args
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+pytestmark = pytest.mark.unit
 
 
 BUILTIN_WRAPUP_PATH = (
@@ -287,11 +290,14 @@ def test_snapshot_from_mapping_redacts_selected_id_values():
     assert "[redacted]" in str(payload)
 
 
-def test_builtin_wrapup_supports_sync_and_include_branches_args(wrapup_definition):
-    args = parse_macro_args("--sync --include-branches", wrapup_definition.args)
+def test_builtin_wrapup_supports_include_branches_but_rejects_unimplemented_sync(
+    wrapup_definition,
+):
+    args = parse_macro_args("--include-branches", wrapup_definition.args)
 
-    assert args["sync"] is True
     assert args["include_branches"] is True
+    with pytest.raises(MacroValidationError, match="unknown macro argument"):
+        parse_macro_args("--sync", wrapup_definition.args)
 
 
 @pytest.mark.asyncio
@@ -316,6 +322,28 @@ async def test_executor_fails_early_when_model_unavailable_and_does_not_start_br
 async def test_executor_fails_early_when_token_cap_is_exceeded(repo, wrapup_definition):
     runner = RecordingBranchRunner()
     run = _create_run(repo, wrapup_definition, context_snapshot=_snapshot_dict(token_estimate=10_000))
+    executor = _executor(
+        repo,
+        wrapup_definition,
+        runner,
+        settings=MacroExecutorSettings(max_total_estimated_tokens=100),
+    )
+
+    saved = await executor.execute_run(run.run_id)
+
+    assert saved.status == "failed"
+    assert saved.error_code == "token_cap_exceeded"
+    assert runner.prompts == []
+
+
+@pytest.mark.asyncio
+async def test_token_cap_counts_snapshot_context_for_each_branch(repo, wrapup_definition):
+    runner = RecordingBranchRunner()
+    run = _create_run(
+        repo,
+        wrapup_definition,
+        context_snapshot=_snapshot_dict(token_estimate=30),
+    )
     executor = _executor(
         repo,
         wrapup_definition,
@@ -502,7 +530,7 @@ async def test_include_branches_adds_appendix_only_when_profile_allows(repo, wra
 @pytest.mark.asyncio
 async def test_sync_mode_runs_only_under_configured_thresholds(repo, wrapup_definition):
     runner = RecordingBranchRunner()
-    settings = MacroExecutorSettings(sync_max_branches=4, sync_max_estimated_tokens=500)
+    settings = MacroExecutorSettings(sync_max_branches=4, sync_max_estimated_tokens=2_000)
     sync_run = _create_run(
         repo,
         wrapup_definition,
@@ -611,6 +639,32 @@ async def test_all_branches_failed_stores_failure_report(repo, wrapup_definition
     assert saved.status == "failed"
     assert "All branch prompts failed" in saved.final_output
     assert "## Summary" not in saved.final_output
+
+
+@pytest.mark.asyncio
+async def test_branch_timeout_is_enforced_and_recorded(
+    repo: ChatMacroRepository,
+    wrapup_definition: MacroDefinition,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timeouts: list[float | None] = []
+
+    async def fake_wait_for(awaitable: Any, timeout: float | None) -> Any:
+        timeouts.append(timeout)
+        awaitable.close()
+        raise TimeoutError
+
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+    wrapup_definition.execution.timeout_seconds = 1
+    run = _create_run(repo, wrapup_definition)
+    executor = _executor(repo, wrapup_definition, RecordingBranchRunner())
+
+    saved = await executor.execute_run(run.run_id)
+    branches = repo.list_branches(run.run_id)
+
+    assert saved.status == "failed"
+    assert timeouts and set(timeouts) == {1}
+    assert all(branch.error_code == "timeout" for branch in branches)
 
 
 @pytest.mark.asyncio

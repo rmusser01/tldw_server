@@ -36,7 +36,6 @@ Supported options:
 - `--output-profile <name>`: select a global output profile, falling back to
   `default` when missing.
 - `--keep-forks`: retain scratch branches when the runner supports that mode.
-- `--sync`: request synchronous behavior where the surface supports it.
 - `--include-branches`: include branch outputs in the final response when the
   selected output profile allows it.
 
@@ -68,15 +67,18 @@ macro YAML, and renders workspace status cards plus lazy run detail.
 
 ## Execution And Jobs
 
-Chat macro runs are persisted before branch execution. Background mode requires
+Chat macro runs are persisted before branch execution. V1 supports background
+execution only; foreground and synchronous modes are reserved for a later
+version and are rejected instead of being silently enqueued. Background mode requires
 the Jobs manager and the `chat_macros` Jobs worker; if the Jobs manager is not
 available, `/wrapup` and direct `POST /run` fail closed instead of leaving an
 unexecutable pending run.
 
-The current Jobs worker builds a `ChatMacroExecutor` and supports cancellation,
+The current Jobs worker builds a `ChatMacroExecutor`, runs chat-native branches
+through the canonical async LLM provider service, and supports cancellation,
 branch/run status persistence, final output persistence, and idempotent
-post-back. The conservative default branch runner returns failed branch records
-until a real LLM/ACP runner is wired into the Jobs runtime.
+post-back. ACP-specific fork execution remains capability-gated and falls back
+to chat-native execution when the macro allows it.
 
 ## Security Notes
 

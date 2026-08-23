@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import inspect
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
 from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture()
@@ -279,7 +281,7 @@ def test_registry_settings_and_status_methods(repo):
 
 
 def test_fresh_db_creates_chat_macro_tables_and_indexes(raw_db):
-    assert _schema_version(raw_db) == 52
+    assert _schema_version(raw_db) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
     assert {
         "chat_macro_registry",
         "chat_macro_settings",
@@ -296,8 +298,8 @@ def test_fresh_db_creates_chat_macro_tables_and_indexes(raw_db):
     assert "run_id, post_idempotency_key" in index_sql
 
 
-def test_sqlite_v51_migration_routes_to_v52(tmp_path):
-    db_path = tmp_path / "migrating.db"
+def test_current_schema_self_heals_missing_chat_macro_tables(tmp_path):
+    db_path = tmp_path / "drifted.db"
     db = CharactersRAGDB(str(db_path), client_id="test_client")
     db.close_connection()
 
@@ -308,46 +310,42 @@ def test_sqlite_v51_migration_routes_to_v52(tmp_path):
             DROP TABLE IF EXISTS chat_macro_runs;
             DROP TABLE IF EXISTS chat_macro_settings;
             DROP TABLE IF EXISTS chat_macro_registry;
-            UPDATE db_schema_version
-               SET version = 51
-             WHERE schema_name = 'rag_char_chat_schema';
             """
         )
 
-    migrated = CharactersRAGDB(str(db_path), client_id="test_client")
+    healed = CharactersRAGDB(str(db_path), client_id="test_client")
     try:
-        assert _schema_version(migrated) == 52
-        assert "chat_macro_runs" in _table_names(migrated)
-        assert "idx_chat_macro_runs_run_post_idempotency_key_unique" in _index_names(migrated)
+        assert _schema_version(healed) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        assert "chat_macro_runs" in _table_names(healed)
+        assert "idx_chat_macro_runs_run_post_idempotency_key_unique" in _index_names(healed)
     finally:
-        migrated.close_connection()
+        healed.close_connection()
 
 
-def test_postgres_v51_migration_script_contract_and_routing():
-    script = getattr(CharactersRAGDB, "_MIGRATION_SQL_V51_TO_V52_POSTGRES", "")
+def test_postgres_chat_macro_schema_extension_contract_and_routing():
+    script = getattr(CharactersRAGDB, "_CHAT_MACROS_SCHEMA_SQL", "")
     assert "CREATE TABLE IF NOT EXISTS chat_macro_registry" in script
     assert "CREATE TABLE IF NOT EXISTS chat_macro_settings" in script
     assert "CREATE TABLE IF NOT EXISTS chat_macro_runs" in script
     assert "CREATE TABLE IF NOT EXISTS chat_macro_run_branches" in script
-    assert "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" in script
-    assert "BOOLEAN NOT NULL DEFAULT FALSE" in script
     assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_macro_runs_run_post_idempotency_key_unique" in script
     assert "ON chat_macro_runs(run_id, post_idempotency_key)" in script
     assert "WHERE post_idempotency_key IS NOT NULL" in script
-    assert "UPDATE db_schema_version" in script
-    assert "SET version = 52" in script
+    assert "UPDATE db_schema_version" not in script
 
-    steps = CharactersRAGDB(":memory:", client_id="test_client")._sqlite_linear_migration_steps()
-    assert 51 in steps
-    assert steps[51].__name__ == "_migrate_from_v51_to_v52"
+    db = CharactersRAGDB(":memory:", client_id="test_client")
+    try:
+        postgres_script = "\n".join(db._convert_sqlite_schema_to_postgres_statements(script))
+    finally:
+        db.close_connection()
+    assert "TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP" in postgres_script
+    assert "BOOLEAN NOT NULL DEFAULT FALSE" in postgres_script
 
     postgres_initializer = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
-    assert "_MIGRATION_SQL_V51_TO_V52_POSTGRES" in postgres_initializer
-    assert "expected_version=52" in postgres_initializer
     assert "_ensure_chat_macros_schema_postgres" in postgres_initializer
 
     postgres_ensure = inspect.getsource(CharactersRAGDB._ensure_chat_macros_schema_postgres)
-    assert 'partition("UPDATE db_schema_version")' in postgres_ensure
+    assert "_CHAT_MACROS_SCHEMA_SQL" in postgres_ensure
 
 
 def test_row_mapping_normalizes_datetime_timestamps():
