@@ -24,9 +24,11 @@ from tldw_Server_API.app.core.Admin_Webhooks.legacy_import import (
     LegacyImportService,
     LegacySecretDecryptor,
 )
-from tldw_Server_API.app.core.Admin_Webhooks.repository import AdminWebhookRepository
 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
     ensure_admin_webhook_canonical_tables_pg,
+)
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
 )
 
 pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)

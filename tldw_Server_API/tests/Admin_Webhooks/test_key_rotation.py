@@ -28,15 +28,15 @@ from tldw_Server_API.app.core.Admin_Webhooks.key_rotation import (
     PROTECTED_TABLE_ORDER,
     WebhookKeyRotationService,
 )
-from tldw_Server_API.app.core.Admin_Webhooks.repository import (
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
     ProtectedRow,
     RegistrationInsert,
     RegistrationTarget,
 )
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
-from tldw_Server_API.app.core.AuthNZ.settings import Settings
 from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]

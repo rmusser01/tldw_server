@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
@@ -18,6 +19,7 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
@@ -118,6 +120,8 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 
 def _request_id(request: Request) -> str:
+    """Return the normalized request correlation identifier."""
+
     return normalize_request_id(getattr(request.state, "request_id", None))
 
 
@@ -167,10 +171,16 @@ def _filtered_http_exception_headers(exc: HTTPException) -> dict[str, str]:
 class AdminWebhookRoute(APIRoute):
     """Map expected failures without reflecting rejected request data."""
 
-    def get_route_handler(self):
+    def get_route_handler(
+        self,
+    ) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        """Return a route handler that maps failures to bounded responses."""
+
         original = super().get_route_handler()
 
-        async def redacted_handler(request: Request):
+        async def redacted_handler(request: Request) -> Response:
+            """Execute the route while redacting expected failure details."""
+
             try:
                 return await original(request)
             except RequestValidationError:
@@ -316,7 +326,13 @@ async def _emit_read_audit(
             action=action,
             metadata=metadata,
         )
-    except Exception:  # noqa: BLE001 - canonical reads retain best-effort audit semantics
+    except Exception as exc:  # noqa: BLE001 - reads retain best-effort audit semantics
+        logger.warning(
+            "Admin webhook read audit failed action={} request_id={} error_type={}",
+            action,
+            request_id,
+            type(exc).__name__,
+        )
         return
 
 

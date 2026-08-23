@@ -23,6 +23,13 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
+    LegacyImportDatabaseSnapshot,
+    MigrationState,
+    RegistrationInsert,
+    RegistrationTarget,
+)
 from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
 from .audit import (
@@ -48,13 +55,6 @@ from .crypto import (
     WebhookKeyRing,
 )
 from .domain import WebhookError, validate_webhook_target
-from .repository import (
-    AdminWebhookRepository,
-    LegacyImportDatabaseSnapshot,
-    MigrationState,
-    RegistrationInsert,
-    RegistrationTarget,
-)
 
 MAX_CANONICAL_REGISTRATION_ID = 2**63 - 1
 MAX_LEGACY_SOURCE_ROWS = 1_000

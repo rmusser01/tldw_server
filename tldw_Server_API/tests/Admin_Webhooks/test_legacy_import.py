@@ -29,13 +29,13 @@ from tldw_Server_API.app.core.Admin_Webhooks.legacy_import import (
     LegacyRejectionReason,
     LegacySecretDecryptor,
 )
-from tldw_Server_API.app.core.Admin_Webhooks.repository import (
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
     RegistrationInsert,
     RegistrationTarget,
 )
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.settings import Settings
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 

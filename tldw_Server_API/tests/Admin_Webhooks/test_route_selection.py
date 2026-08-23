@@ -10,6 +10,8 @@ from tldw_Server_API.app.api.v1.endpoints import admin as admin_endpoints
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
+pytestmark = pytest.mark.unit
+
 
 def _pairs(router: APIRouter) -> list[tuple[str, str]]:
     return [(method, route.path) for route in router.routes for method in (route.methods or set())]

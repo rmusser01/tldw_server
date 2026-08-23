@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Any
 from urllib.parse import SplitResult, urlsplit
 
+from tldw_Server_API.app.core.exceptions import WebhookError
 from tldw_Server_API.app.core.Security.egress import (
     evaluate_platform_webhook_url_policy,
 )
@@ -53,6 +54,12 @@ class WebhookErrorCode(str, Enum):
     USER_PRINCIPAL_REQUIRED = "admin_webhook_user_principal_required"
     DELIVERY_UNAVAILABLE = "admin_webhook_delivery_unavailable"
 
+    @property
+    def http_status(self) -> int:
+        """Return the default HTTP status for this closed error code."""
+
+        return _ERROR_STATUS[self]
+
 
 _ERROR_STATUS = {
     WebhookErrorCode.VALIDATION_FAILED: 422,
@@ -81,19 +88,6 @@ _ERROR_STATUS = {
     WebhookErrorCode.DELIVERY_UNAVAILABLE: 503,
     WebhookErrorCode.REQUEST_REJECTED: 400,
 }
-
-
-class WebhookError(Exception):
-    """Expected domain failure with no caller-controlled message text."""
-
-    def __init__(
-        self,
-        code: WebhookErrorCode,
-        http_status: int | None = None,
-    ) -> None:
-        self.code = code
-        self.http_status = http_status or _ERROR_STATUS[code]
-        super().__init__(code.value)
 
 
 @dataclass(frozen=True)

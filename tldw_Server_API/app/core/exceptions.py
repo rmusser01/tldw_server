@@ -5,7 +5,7 @@ import re
 import weakref
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any, Literal, NoReturn
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -13,6 +13,9 @@ from loguru import logger
 
 from .AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
 from .exception_types import PromptCatalogError  # noqa: F401 - re-exported for compatibility.
+
+if TYPE_CHECKING:
+    from .Admin_Webhooks.domain import WebhookErrorCode
 
 if hasattr(status, "HTTP_422_UNPROCESSABLE_CONTENT"):
     DEFAULT_VALIDATION_STATUS = status.HTTP_422_UNPROCESSABLE_CONTENT
@@ -32,6 +35,19 @@ _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
     "internal_error": "The prompt improvement request could not be completed.",
 }
 _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
+
+
+class WebhookError(Exception):
+    """Expected webhook domain failure with no caller-controlled message text."""
+
+    def __init__(
+        self,
+        code: WebhookErrorCode,
+        http_status: int | None = None,
+    ) -> None:
+        self.code = code
+        self.http_status = http_status or code.http_status
+        super().__init__(code.value)
 
 
 class PromptImprovementError(RuntimeError):

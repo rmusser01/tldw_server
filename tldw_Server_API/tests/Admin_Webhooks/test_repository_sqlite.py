@@ -15,7 +15,10 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     canonical_request_hash,
     idempotency_lookup_digest,
 )
-from tldw_Server_API.app.core.Admin_Webhooks.repository import (
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
     IdempotencyLookupKind,
     RegistrationInsert,
@@ -24,9 +27,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.repository import (
     WebhookRepositoryError,
     WebhookRepositoryErrorCode,
 )
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
-from tldw_Server_API.app.core.AuthNZ.settings import Settings
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 

@@ -34,7 +34,12 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     canonical_request_hash,
     idempotency_lookup_digest,
 )
-from tldw_Server_API.app.core.Admin_Webhooks.repository import (
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseLockError, TransactionError
+from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+    ensure_admin_webhook_canonical_tables_pg,
+)
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     DATABASE_PROTECTED_TABLE_ORDER,
     AdminWebhookRepository,
     IdempotencyLookupKind,
@@ -43,11 +48,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.repository import (
     RegistrationTarget,
     WebhookRepositoryError,
     WebhookRepositoryErrorCode,
-)
-from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseLockError, TransactionError
-from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
-    ensure_admin_webhook_canonical_tables_pg,
 )
 
 pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)

@@ -29,9 +29,11 @@ from tldw_Server_API.app.core.Admin_Webhooks.legacy_import import (
     LegacyImportService,
     LegacyRejectionReason,
 )
-from tldw_Server_API.app.core.Admin_Webhooks.repository import AdminWebhookRepository
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
+)
 from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
 T = TypeVar("T")

@@ -12,6 +12,22 @@ from typing import Generic, NoReturn, Protocol, TypeAlias, TypeVar
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    UNSET as REPOSITORY_UNSET,
+)
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
+    AdminWebhookUnitOfWork,
+    IdempotencyLookup,
+    IdempotencyLookupKind,
+    MigrationState,
+    RegistrationInsert,
+    RegistrationPatch,
+    RegistrationTarget,
+    StoredWebhookRegistration,
+    WebhookRepositoryError,
+    WebhookRepositoryErrorCode,
+)
 
 from .audit import MutationAction, MutationAudit, MutationAuditSink, MutationOutcome
 from .catalog import (
@@ -44,20 +60,6 @@ from .domain import (
     parse_registration_etag,
     validate_idempotency_key,
     validate_webhook_target,
-)
-from .repository import UNSET as REPOSITORY_UNSET
-from .repository import (
-    AdminWebhookRepository,
-    AdminWebhookUnitOfWork,
-    IdempotencyLookup,
-    IdempotencyLookupKind,
-    MigrationState,
-    RegistrationInsert,
-    RegistrationPatch,
-    RegistrationTarget,
-    StoredWebhookRegistration,
-    WebhookRepositoryError,
-    WebhookRepositoryErrorCode,
 )
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")

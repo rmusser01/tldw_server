@@ -2,12 +2,15 @@
 
 import json
 
+import pytest
 from fastapi import FastAPI
 
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_webhooks
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_webhooks import (
     webhooks_router as evaluation_webhooks_router,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _openapi() -> dict[str, object]:

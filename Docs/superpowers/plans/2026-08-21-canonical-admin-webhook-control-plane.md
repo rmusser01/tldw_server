@@ -73,7 +73,7 @@
 - `tldw_Server_API/app/core/Admin_Webhooks/catalog.py` - versioned six-event catalog and subscription validation.
 - `tldw_Server_API/app/core/Admin_Webhooks/crypto.py` - dedicated contextual key ring and protected-byte envelopes.
 - `tldw_Server_API/app/core/Admin_Webhooks/audit.py` - bounded mandatory unified-audit adapters and closed API/host-operation sink protocols.
-- `tldw_Server_API/app/core/Admin_Webhooks/repository.py` - all canonical webhook SQL and transaction/unit-of-work operations.
+- `tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py` - all canonical webhook SQL and transaction/unit-of-work operations.
 - `tldw_Server_API/app/core/Admin_Webhooks/control_plane.py` - registration, precondition, idempotency, status, and secret lifecycle rules.
 - `tldw_Server_API/app/core/Admin_Webhooks/key_rotation.py` - durable resumable re-encryption scanner and verification pass.
 - `tldw_Server_API/app/core/Admin_Webhooks/legacy_import.py` - dry-run plan, source fingerprints, import, readback, sanitization, non-destructive backup extraction, and backup/key destruction.
@@ -529,7 +529,7 @@ Expected: all configured matrices PASS; PostgreSQL absence is recorded as an env
 ### Task 4: Implement Repository-Owned Transactions And Idempotency
 
 **Files:**
-- Create: `tldw_Server_API/app/core/Admin_Webhooks/repository.py`
+- Create: `tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py`
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_repository_sqlite.py`
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py`
 
@@ -608,7 +608,7 @@ Implement `claim_idempotency() -> IdempotencyLookup`, `complete_idempotency()`, 
 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_repository_sqlite.py
 rg -n "pool\.(execute|fetchone|fetchall|fetchval)" \
-  tldw_Server_API/app/core/Admin_Webhooks/repository.py
+  tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py
 ```
 
 Expected: tests PASS and the scan finds no write performed outside `DatabasePool.transaction()`.
@@ -637,7 +637,7 @@ Expected: PASS when the disposable database is configured; a local SKIP must bec
 - [ ] **Step 6: Commit the repository unit**
 
 ```bash
-git add tldw_Server_API/app/core/Admin_Webhooks/repository.py \
+git add tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
   tldw_Server_API/tests/Admin_Webhooks/test_repository_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py \
   "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
@@ -899,7 +899,7 @@ git commit -m "feat(webhooks): implement canonical registration lifecycle"
 **Files:**
 - Create: `tldw_Server_API/app/core/Admin_Webhooks/key_rotation.py`
 - Modify: `tldw_Server_API/app/core/Admin_Webhooks/domain.py`
-- Modify: `tldw_Server_API/app/core/Admin_Webhooks/repository.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py`
 - Modify: `tldw_Server_API/app/services/admin_system_ops_service.py`
 - Test: `tldw_Server_API/tests/Admin_Webhooks/test_key_rotation.py`
 - Modify: `tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py`
@@ -1054,7 +1054,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q -
   -k 'protected or rotation or cursor'
 git add tldw_Server_API/app/core/Admin_Webhooks/key_rotation.py \
   tldw_Server_API/app/core/Admin_Webhooks/domain.py \
-  tldw_Server_API/app/core/Admin_Webhooks/repository.py \
+  tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
   tldw_Server_API/app/services/admin_system_ops_service.py \
   tldw_Server_API/tests/Admin_Webhooks/test_key_rotation.py \
   tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py \

@@ -10,6 +10,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypeAlias
 
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    DATABASE_PROTECTED_TABLE_ORDER,
+    AdminWebhookRepository,
+    MigrationState,
+    WebhookRepositoryError,
+    WebhookRepositoryErrorCode,
+)
 from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
 from .audit import (
@@ -25,13 +32,6 @@ from .domain import (
     PendingIncidentWebhookMarker,
     WebhookError,
     WebhookErrorCode,
-)
-from .repository import (
-    DATABASE_PROTECTED_TABLE_ORDER,
-    AdminWebhookRepository,
-    MigrationState,
-    WebhookRepositoryError,
-    WebhookRepositoryErrorCode,
 )
 
 PENDING_INCIDENT_MARKER_TABLE = "pending_incident_markers"

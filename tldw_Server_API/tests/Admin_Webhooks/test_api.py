@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -27,6 +27,8 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     parse_registration_etag,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+pytestmark = pytest.mark.unit
 
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
 REQUEST_ID = "4aa1324c-7fb7-49cf-9058-ce0df25d5932"
@@ -539,12 +541,26 @@ def test_read_audit_failure_does_not_change_successful_response(
 ) -> None:
     client, _, _, read_audit = _client(monkeypatch)
     read_audit.side_effect = RuntimeError("audit-canary")
+    warning = Mock()
+    monkeypatch.setattr(
+        admin_webhooks,
+        "logger",
+        SimpleNamespace(warning=warning),
+        raising=False,
+    )
 
     response = client.get("/api/v1/admin/webhooks/catalog")
 
     assert response.status_code == 200
     assert response.json()["api_version"] == "2026-07-01"
     assert "audit-canary" not in response.text
+    warning.assert_called_once_with(
+        "Admin webhook read audit failed action={} request_id={} error_type={}",
+        "admin_webhook.catalog.read",
+        REQUEST_ID,
+        "RuntimeError",
+    )
+    assert "audit-canary" not in repr(warning.call_args)
 
 
 def test_domain_failures_use_closed_status_code_and_message(

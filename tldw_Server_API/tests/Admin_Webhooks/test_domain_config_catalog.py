@@ -4,6 +4,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from tldw_Server_API.app.core import exceptions as core_exceptions
 from tldw_Server_API.app.core.Admin_Webhooks import domain
 from tldw_Server_API.app.core.Admin_Webhooks.catalog import (
     EVENT_API_VERSION,
@@ -29,6 +30,9 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     redact_target,
     validate_idempotency_key,
     validate_webhook_target,
+)
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
 )
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
@@ -409,3 +413,13 @@ def test_redact_target_returns_origin_without_default_port(
     expected: str,
 ) -> None:
     assert redact_target(url) == expected
+
+
+def test_webhook_error_is_centralized_in_core_exceptions() -> None:
+    assert core_exceptions.WebhookError is WebhookError
+
+
+def test_repository_implementation_lives_in_db_management() -> None:
+    assert AdminWebhookRepository.__module__ == (
+        "tldw_Server_API.app.core.DB_Management.admin_webhooks_repository"
+    )

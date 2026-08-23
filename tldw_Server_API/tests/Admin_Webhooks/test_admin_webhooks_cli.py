@@ -10,6 +10,8 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
 )
 from tldw_Server_API.cli.commands import admin_webhooks
 
+pytestmark = pytest.mark.unit
+
 
 def test_command_tree_exposes_import_rollback_and_rotation_operations() -> None:
     runner = CliRunner()
