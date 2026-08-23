@@ -4,13 +4,15 @@ title: Implement Chat Macros v1 and wrapup command
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-04 06:56'
+updated_date: 2026-08-23 04:45
 labels: []
 dependencies: []
 documentation:
-  - Docs/superpowers/specs/2026-07-03-chat-macros-design.md
-  - Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md
+- Docs/superpowers/specs/2026-07-03-chat-macros-design.md
+- Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md
 priority: medium
+references:
+- https://github.com/rmusser01/tldw_server/pull/2618
 ---
 
 ## Description
@@ -43,7 +45,7 @@ Task 3 complete: added file-backed user macro storage, chat macro settings/outpu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation should follow Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md. The plan was produced from the approved design spec and reviewed in three subagent passes; blocking review comments were folded into the plan. Start implementation with the plan Task 1 and keep commits task-sized.
 
 Implementation started in worktree .worktrees/chat-macros-v1 on branch codex/chat-macros-v1.
@@ -69,8 +71,8 @@ Task 7 complete: added Chat Macros Jobs enqueue/handler/cancellation/post-back i
 Task 8 complete: added the minimal chat macro frontend service, settings manager at /settings/chat-macros, settings navigation entry, status card, lazy run-detail drawer, workspace macro status rendering, OpenAPI path guard entries, and tests. Added backend enabled-only update support for PUT /api/v1/chat/macros/{name} so the UI toggle works for built-in and user macros without full YAML replacement. Verification: frontend macro/nav suite 6 files / 44 tests passed; backend chat macro API integration suite 6 tests passed; bun run verify:openapi passed with existing reviewed exceptions only; compileall passed for touched backend files; git diff --check passed; Bandit /tmp/bandit_chat_macros_task8.json errors/results empty.
 
 Task 9 verification/docs complete: updated tldw_Server_API/app/core/Chat_Macros/README.md for current v1 macro definitions, /wrapup options, API/settings, Jobs execution, UI behavior, and security notes. Final verification passed: focused backend suite 133 passed / 9 skipped / 5 warnings; frontend macro/nav suite 6 files / 44 tests passed; OpenAPI/config smoke 4 passed / 3 warnings; bun run verify:openapi passed with existing reviewed exceptions only; compileall passed for touched backend Chat_Macros/API/jobs scope; git diff --check passed; Bandit /tmp/bandit_chat_macros.json errors/results empty. Manual local-server smoke was not run because it needs a configured Jobs manager plus real LLM/ACP branch runner; automated TestClient/executor/Jobs/frontend tests cover the implemented contract and the conservative unavailable branch runner is documented.
-<!-- SECTION:NOTES:END -->
-
+2026-08-22: Rebase and review follow-up requested for PR #2618. Preserve pre-rebase head ef4e58d6029a796529d77660ebadf26925f5bacb, rebase onto latest origin/dev, evaluate all Qodo and existing inline review findings against current code, rerun focused backend/frontend verification and Bandit, then merge only after required checks and review threads are clean.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
