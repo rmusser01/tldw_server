@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from loguru import logger
 
 from .exceptions import MacroNotFoundError, MacroStorageError, MacroValidationError
 from .models import MacroDefinition
@@ -21,6 +22,8 @@ from .storage import MACRO_NAME_RE, ChatMacroStorage, StoredMacro
 
 @dataclass(slots=True)
 class ChatMacroCatalogItem:
+    """Resolved built-in or user macro metadata exposed by the service."""
+
     name: str
     command: str
     description: str | None
@@ -33,6 +36,8 @@ class ChatMacroCatalogItem:
 
 
 class ChatMacrosService:
+    """Coordinate macro definitions, settings overlays, and registry state."""
+
     def __init__(
         self,
         *,
@@ -41,12 +46,14 @@ class ChatMacrosService:
         repository: ChatMacroRepository,
         core_commands: Iterable[str] | None = None,
     ) -> None:
+        """Create a user-scoped service with reserved core commands."""
         self.user_id = str(user_id)
         self.storage = storage
         self.repository = repository
         self.core_commands = {command.lower() for command in (core_commands or _default_core_commands())}
 
     def list_macros(self) -> list[ChatMacroCatalogItem]:
+        """List resolved macros and synchronize changed registry rows."""
         items = self._catalog_items()
         for item in items:
             self._reject_core_collision(item.definition)
@@ -54,17 +61,20 @@ class ChatMacrosService:
         return sorted(items, key=lambda item: (item.command, item.source))
 
     def get_macro(self, name: str) -> ChatMacroCatalogItem:
+        """Load one macro and synchronize its registry row when changed."""
         builtin = self._builtin_item(name)
         if builtin is not None:
             self._sync_registry_if_changed(builtin)
             return builtin
         stored = self.storage.read(name)
-        item = self._user_item(stored)
+        enabled_overrides = dict(self.get_settings().get("user_macro_enabled", {}))
+        item = self._user_item(stored, enabled_overrides=enabled_overrides)
         self._reject_core_collision(item.definition)
         self._sync_registry_if_changed(item)
         return item
 
     def validate_macro(self, raw: str) -> MacroDefinition:
+        """Validate a user definition without persisting it."""
         definition = load_macro_definition(raw)
         self._validate_macro_name(definition.name)
         self._validate_future_permissions(definition)
@@ -77,6 +87,7 @@ class ChatMacrosService:
         raw: str,
         supporting_files: dict[str, str | bytes] | None = None,
     ) -> ChatMacroCatalogItem:
+        """Create a validated user macro and synchronize the catalog."""
         definition = self.validate_macro(raw)
         self._reject_macro_collision(definition, exclude_name=name)
         stored = self.storage.create(name, raw, supporting_files)
@@ -90,6 +101,7 @@ class ChatMacrosService:
         raw: str,
         supporting_files: dict[str, str | bytes] | None = None,
     ) -> ChatMacroCatalogItem:
+        """Replace a user macro; built-in definitions remain immutable."""
         if self._builtin_item(name) is not None:
             raise MacroStorageError("built-in macros are immutable")
         definition = self.validate_macro(raw)
@@ -100,24 +112,34 @@ class ChatMacrosService:
         return item
 
     def set_macro_enabled(self, name: str, enabled: bool) -> ChatMacroCatalogItem:
+        """Persist a built-in or user enabled-state override without rewriting YAML."""
         if self._load_builtin(name) is not None:
             return self.set_builtin_enabled(name, enabled)
 
         stored = self.storage.read(name)
-        loaded = yaml.safe_load(stored.raw)
-        if not isinstance(loaded, dict):
-            raise MacroValidationError("macro definition must be a YAML mapping")
-        loaded["enabled"] = enabled
-        raw = yaml.safe_dump(loaded, sort_keys=False)
-        return self.update_macro(name, raw)
+        settings = self.get_settings()
+        overrides = dict(settings.get("user_macro_enabled", {}))
+        overrides[name] = enabled
+        settings["user_macro_enabled"] = overrides
+        self.save_settings(settings)
+        item = self._user_item(stored, enabled_overrides=overrides)
+        self._sync_registry_if_changed(item)
+        return item
 
     def delete_macro(self, name: str) -> None:
+        """Delete a user macro and remove its settings override and registry row."""
         if self._builtin_item(name) is not None:
             raise MacroStorageError("built-in macros are immutable")
         self.storage.delete(name)
+        settings = self.get_settings()
+        overrides = dict(settings.get("user_macro_enabled", {}))
+        if overrides.pop(name, None) is not None:
+            settings["user_macro_enabled"] = overrides
+            self.save_settings(settings)
         self._sync_registry_catalog(self._catalog_items())
 
     def set_builtin_enabled(self, name: str, enabled: bool) -> ChatMacroCatalogItem:
+        """Enable or disable an immutable built-in through user settings."""
         if self._load_builtin(name) is None:
             raise MacroNotFoundError(f"built-in macro not found: {name}")
         settings = self.get_settings()
@@ -135,6 +157,7 @@ class ChatMacrosService:
         return item
 
     def clone_builtin(self, name: str, *, new_name: str, command: str | None = None) -> ChatMacroCatalogItem:
+        """Clone a built-in definition into mutable user storage."""
         builtin = self._load_builtin(name)
         if builtin is None:
             raise MacroNotFoundError(f"built-in macro not found: {name}")
@@ -145,9 +168,11 @@ class ChatMacrosService:
         return self.create_macro(new_name, raw)
 
     def get_settings(self) -> dict[str, Any]:
+        """Return normalized user-scoped chat macro settings."""
         return normalize_settings(self.repository.get_settings(self.user_id))
 
     def save_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Validate and persist user-scoped chat macro settings."""
         normalized = normalize_settings(settings)
         return self.repository.save_settings(self.user_id, normalized)
 
@@ -157,6 +182,7 @@ class ChatMacrosService:
         *,
         local_overrides: dict[str, Any] | None = None,
     ) -> MacroOutputProfile:
+        """Resolve a named output profile with optional macro-local overrides."""
         settings = self.get_settings()
         profile_name = name or "default"
         raw_profile = settings.get("output_profiles", {}).get(profile_name)
@@ -166,20 +192,48 @@ class ChatMacrosService:
         return merge_output_profile(normalize_output_profile(profile_name, raw_profile), local_overrides)
 
     def _builtin_items(self) -> list[ChatMacroCatalogItem]:
+        settings = self.get_settings()
+        disabled = set(settings.get("disabled_builtins", []))
         return [
             item
-            for item in (self._builtin_item(path.name) for path in _builtin_root().iterdir() if path.is_dir())
+            for item in (
+                self._builtin_item(path.name, disabled=disabled)
+                for path in _builtin_root().iterdir()
+                if path.is_dir()
+            )
             if item is not None
         ]
 
     def _catalog_items(self) -> list[ChatMacroCatalogItem]:
-        return self._builtin_items() + [self._user_item(stored) for stored in self.storage.list()]
+        settings = self.get_settings()
+        disabled = set(settings.get("disabled_builtins", []))
+        enabled_overrides = dict(settings.get("user_macro_enabled", {}))
+        builtins = [
+            item
+            for item in (
+                self._builtin_item(path.name, disabled=disabled)
+                for path in _builtin_root().iterdir()
+                if path.is_dir()
+            )
+            if item is not None
+        ]
+        return builtins + [
+            self._user_item(stored, enabled_overrides=enabled_overrides)
+            for stored in self.storage.list()
+        ]
 
-    def _builtin_item(self, name: str) -> ChatMacroCatalogItem | None:
+    def _builtin_item(
+        self,
+        name: str,
+        *,
+        disabled: set[str] | None = None,
+    ) -> ChatMacroCatalogItem | None:
         loaded = self._load_builtin(name)
         if loaded is None:
             return None
-        disabled = set(self.get_settings().get("disabled_builtins", []))
+        disabled = disabled if disabled is not None else set(
+            self.get_settings().get("disabled_builtins", [])
+        )
         return ChatMacroCatalogItem(
             name=loaded.name,
             command=loaded.definition.command,
@@ -202,12 +256,17 @@ class ChatMacrosService:
         return StoredMacro(name=definition.name, definition=definition, raw=raw, digest=digest, supporting_files={})
 
     @staticmethod
-    def _user_item(stored: StoredMacro) -> ChatMacroCatalogItem:
+    def _user_item(
+        stored: StoredMacro,
+        *,
+        enabled_overrides: dict[str, bool] | None = None,
+    ) -> ChatMacroCatalogItem:
+        override = (enabled_overrides or {}).get(stored.name)
         return ChatMacroCatalogItem(
             name=stored.name,
             command=stored.definition.command,
             description=stored.definition.description,
-            enabled=stored.definition.enabled,
+            enabled=stored.definition.enabled if override is None else override,
             source="user",
             immutable=False,
             digest=stored.digest,
@@ -220,7 +279,7 @@ class ChatMacrosService:
             raise MacroValidationError("macro command conflicts with core command")
 
     def _reject_macro_collision(self, definition: MacroDefinition, *, exclude_name: str) -> None:
-        for item in self.list_macros():
+        for item in self._catalog_items():
             if item.name == exclude_name and item.source == "user":
                 continue
             if item.name == definition.name:
@@ -304,8 +363,10 @@ def _builtin_root() -> Path:
 
 
 def _default_core_commands() -> set[str]:
+    """Return reserved built-in slash command names, failing closed on import errors."""
     try:
         from tldw_Server_API.app.core.Chat.command_router import list_commands
-    except ImportError:
-        return set()
+    except ImportError as exc:
+        logger.exception("Failed to load reserved chat command names")
+        raise MacroStorageError("chat command router is unavailable") from exc
     return {str(command["name"]).lower() for command in list_commands()}

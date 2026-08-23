@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -290,6 +291,56 @@ def test_snapshot_from_mapping_redacts_selected_id_values():
     assert "[redacted]" in str(payload)
 
 
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "Basic dXNlcjpwYXNzd29yZA==",
+        "AKIAIOSFODNN7EXAMPLE",
+        "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        "gho_abcdefghijklmnopqrstuvwxyz0123456789",
+        "ghs_abcdefghijklmnopqrstuvwxyz0123456789",
+        "github_pat_11AA0_example_token_value",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature",
+    ],
+)
+def test_snapshot_redacts_common_provider_credentials(secret: str) -> None:
+    snapshot = build_macro_context_snapshot(
+        chat_db=None,
+        conversation_id="conv-1",
+        workspace_id=None,
+        acp_session_id=None,
+        request_messages=[],
+        model_selection={},
+        output_profile="default",
+        request_metadata={"acp": {"safe": [[f"provider failed with {secret}"]]}},
+    )
+
+    payload = str(snapshot.model_dump(mode="json"))
+    assert secret not in payload
+    assert "[redacted]" in payload
+
+
+def test_snapshot_sanitization_limits_recursive_sequences() -> None:
+    nested: object = "token=stored-secret"
+    for _ in range(30):
+        nested = [nested]
+
+    snapshot = build_macro_context_snapshot(
+        chat_db=None,
+        conversation_id="conv-1",
+        workspace_id=None,
+        acp_session_id=None,
+        request_messages=[],
+        model_selection={},
+        output_profile="default",
+        request_metadata={"acp": {"nested": nested}},
+    )
+
+    payload = str(snapshot.model_dump(mode="json"))
+    assert "stored-secret" not in payload
+    assert "[truncated]" in payload
+
+
 def test_builtin_wrapup_supports_include_branches_but_rejects_unimplemented_sync(
     wrapup_definition,
 ):
@@ -381,6 +432,21 @@ async def test_executor_fails_early_when_branch_cap_is_exceeded(repo, wrapup_def
 
 
 @pytest.mark.asyncio
+async def test_empty_branch_plan_fails_before_execution(repo, wrapup_definition):
+    definition = wrapup_definition.model_copy(deep=True)
+    definition.steps = []
+    runner = RecordingBranchRunner()
+    run = _create_run(repo, definition)
+    executor = _executor(repo, definition, runner)
+
+    saved = await executor.execute_run(run.run_id)
+
+    assert saved.status == "failed"
+    assert saved.error_code == "no_branches_planned"
+    assert runner.prompts == []
+
+
+@pytest.mark.asyncio
 async def test_executor_does_not_start_branches_for_pre_cancelled_run(repo, wrapup_definition):
     runner = RecordingBranchRunner()
     run = _create_run(repo, wrapup_definition)
@@ -461,6 +527,44 @@ async def test_completed_unposted_run_retries_post_back_without_replanning(repo,
     assert posted == ["stored final output"]
     assert post_keys == [f"chat_macro:{run.run_id}:final"]
     assert saved.status == "completed"
+    assert saved.final_message_id == "msg-final"
+    assert runner.prompts == []
+
+
+@pytest.mark.asyncio
+async def test_completed_posted_run_rechecks_idempotent_postback_for_metadata_repair(
+    repo,
+    wrapup_definition,
+):
+    posted: list[str] = []
+    runner = RecordingBranchRunner()
+    run = _create_run(repo, wrapup_definition)
+    repo.store_final_output(
+        run.run_id,
+        final_output="stored final output",
+        final_output_format="markdown",
+    )
+    repo.update_run_status(run.run_id, status="completed")
+    repo.mark_final_posted(
+        run.run_id,
+        final_message_id="msg-final",
+        post_idempotency_key=f"chat_macro:{run.run_id}:final",
+    )
+
+    async def post_back(*, run_id: str, final_output: str, post_idempotency_key: str) -> str:
+        posted.append(final_output)
+        return "msg-final"
+
+    executor = ChatMacroExecutor(
+        repository=repo,
+        macro_loader=lambda _run: wrapup_definition,
+        branch_runner=runner,
+        post_back=post_back,
+    )
+
+    saved = await executor.execute_run(run.run_id)
+
+    assert posted == ["stored final output"]
     assert saved.final_message_id == "msg-final"
     assert runner.prompts == []
 
@@ -609,6 +713,76 @@ async def test_failed_branch_retries_once_and_partial_failure_is_rendered(repo, 
     assert branches["action_items"].status == "failed"
     assert "## Failed Branches" in saved.final_output
     assert "Action items" in saved.final_output
+
+
+@pytest.mark.asyncio
+async def test_failed_branch_waits_before_retry(
+    repo,
+    wrapup_definition,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    definition = wrapup_definition.model_copy(deep=True)
+    definition.steps = definition.steps[:1]
+    prompt = definition.steps[0].prompt or ""
+    runner = RecordingBranchRunner(fail_first_for=(prompt,))
+    delays: list[float] = []
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", record_sleep)
+    run = _create_run(repo, definition)
+    executor = _executor(repo, definition, runner)
+
+    saved = await executor.execute_run(run.run_id)
+
+    assert saved.status == "completed"
+    assert delays == [0.25]
+
+
+@pytest.mark.asyncio
+async def test_branch_persistence_failure_marks_run_failed(
+    repo,
+    wrapup_definition,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    run = _create_run(repo, wrapup_definition)
+    executor = _executor(repo, wrapup_definition, RecordingBranchRunner())
+
+    def fail_upsert(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(repo, "upsert_branch", fail_upsert)
+
+    saved = await executor.execute_run(run.run_id)
+
+    assert saved.status == "failed"
+    assert saved.error_code == "branch_persistence_failed"
+
+
+@pytest.mark.asyncio
+async def test_repository_access_is_offloaded_from_event_loop_thread(
+    repo,
+    wrapup_definition,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    event_loop_thread = threading.get_ident()
+    repository_threads: list[int] = []
+    run = _create_run(repo, wrapup_definition)
+    original_get_run = repo.get_run
+
+    def recording_get_run(run_id: str):
+        repository_threads.append(threading.get_ident())
+        return original_get_run(run_id)
+
+    monkeypatch.setattr(repo, "get_run", recording_get_run)
+    executor = _executor(repo, wrapup_definition, RecordingBranchRunner())
+
+    saved = await executor.execute_run(run.run_id)
+
+    assert saved.status == "completed"
+    assert repository_threads
+    assert all(thread_id != event_loop_thread for thread_id in repository_threads)
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import shlex
 from collections.abc import Mapping
 from typing import Any
@@ -33,7 +34,7 @@ def parse_macro_args(
     raw: str | None,
     arg_specs: Mapping[str, MacroArgSpec],
     *,
-    max_questions: int = 8,
+    max_repeated_values: int = 8,
 ) -> dict[str, Any]:
     """Parse shell-style slash args and return canonical argument names."""
     values = {name: _default_value(spec) for name, spec in arg_specs.items()}
@@ -73,10 +74,15 @@ def parse_macro_args(
             value = _coerce_value(raw_value, spec)
 
         if spec.repeated:
+            if name not in seen_names:
+                values[name] = []
+                seen_names.add(name)
             values.setdefault(name, [])
             values[name].append(value)
-            if name == "question" and len(values[name]) > max_questions:
-                raise MacroValidationError(f"too many question arguments; max is {max_questions}")
+            if len(values[name]) > max_repeated_values:
+                raise MacroValidationError(
+                    f"too many {name} arguments; max is {max_repeated_values}"
+                )
         else:
             values[name] = value
             seen_names.add(name)
@@ -98,9 +104,9 @@ def normalize_structured_macro_args(
         if spec.repeated:
             if not isinstance(value, list):
                 raise MacroValidationError(f"macro argument must be a list: {name}")
-            if name == "question" and len(value) > definition.execution.max_branches:
+            if len(value) > definition.execution.max_branches:
                 raise MacroValidationError(
-                    f"too many question arguments; max is {definition.execution.max_branches}"
+                    f"too many {name} arguments; max is {definition.execution.max_branches}"
                 )
             if any(not matches_arg_type(item, spec.type) for item in value):
                 raise MacroValidationError(f"macro argument has invalid item type: {name}")
@@ -151,9 +157,12 @@ def _coerce_value(raw_value: str, spec: MacroArgSpec) -> Any:
             raise MacroValidationError(f"invalid integer macro argument: {raw_value}") from exc
     if spec.type == "number":
         try:
-            return float(raw_value)
+            value = float(raw_value)
         except ValueError as exc:
             raise MacroValidationError(f"invalid numeric macro argument: {raw_value}") from exc
+        if not math.isfinite(value):
+            raise MacroValidationError(f"invalid numeric macro argument: {raw_value}")
+        return value
     raise MacroValidationError(f"unsupported macro argument type: {spec.type}")
 
 

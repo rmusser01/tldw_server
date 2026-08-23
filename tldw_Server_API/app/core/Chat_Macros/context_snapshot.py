@@ -24,12 +24,20 @@ _SECRET_ASSIGNMENT_RE = re.compile(
     re.IGNORECASE,
 )
 _OPENAI_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{6,}\b")
+_BASIC_AUTH_RE = re.compile(r"\bBasic\s+[A-Za-z0-9+/=]+", re.IGNORECASE)
+_AWS_ACCESS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")
+_GITHUB_TOKEN_RE = re.compile(
+    r"\b(?:gh[opsu]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,})\b"
+)
+_JWT_RE = re.compile(r"\b[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")
+DEFAULT_MAX_EXCERPT_CHARS = 800
+MAX_SANITIZE_DEPTH = 8
 
 
 class MacroContextSnapshot(BaseModel):
     """JSON-safe, bounded macro execution context captured at dispatch time."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
     conversation_id: str | None = None
     workspace_id: str | None = None
@@ -53,7 +61,7 @@ def build_macro_context_snapshot(
     model_selection: Mapping[str, Any] | None,
     output_profile: str | None,
     request_metadata: Mapping[str, Any] | None = None,
-    max_excerpt_chars: int = 800,
+    max_excerpt_chars: int = DEFAULT_MAX_EXCERPT_CHARS,
 ) -> MacroContextSnapshot:
     """Build a bounded, secret-safe snapshot for later macro execution."""
     del chat_db  # Reserved for future DB-backed message/source lookups.
@@ -142,7 +150,7 @@ def _stored_messages(raw_messages: Any) -> list[dict[str, Any]]:
             {
                 "id": str(message.get("id")) if message.get("id") is not None else None,
                 "role": str(message.get("role") or "unknown"),
-                "excerpt": redact_sensitive_text(excerpt)[:800],
+                "excerpt": redact_sensitive_text(excerpt)[:DEFAULT_MAX_EXCERPT_CHARS],
             }
         )
     return messages
@@ -176,27 +184,38 @@ def _sanitize_model_selection(raw: Mapping[str, Any]) -> dict[str, Any]:
     return allowed
 
 
-def _sanitize_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
+def _sanitize_mapping(raw: Mapping[str, Any], *, depth: int = 0) -> dict[str, Any]:
+    if depth >= MAX_SANITIZE_DEPTH:
+        return {"_truncated": True}
     safe: dict[str, Any] = {}
     for key, value in raw.items():
         key_text = str(key)
         if _is_secret_key(key_text):
             continue
         if isinstance(value, Mapping):
-            safe[key_text] = _sanitize_mapping(value)
-        elif isinstance(value, list):
-            safe[key_text] = [
-                _sanitize_mapping(item)
-                if isinstance(item, Mapping)
-                else redact_sensitive_text(item)
-                if isinstance(item, str)
-                else item
-                for item in value
-            ]
+            safe[key_text] = _sanitize_mapping(value, depth=depth + 1)
+        elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
+            safe[key_text] = _sanitize_sequence(value, depth=depth + 1)
         elif isinstance(value, str):
             safe[key_text] = redact_sensitive_text(value)
         else:
             safe[key_text] = value
+    return safe
+
+
+def _sanitize_sequence(raw: Sequence[Any], *, depth: int) -> list[Any]:
+    if depth >= MAX_SANITIZE_DEPTH:
+        return ["[truncated]"]
+    safe: list[Any] = []
+    for value in raw:
+        if isinstance(value, Mapping):
+            safe.append(_sanitize_mapping(value, depth=depth + 1))
+        elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
+            safe.append(_sanitize_sequence(value, depth=depth + 1))
+        elif isinstance(value, str):
+            safe.append(redact_sensitive_text(value))
+        else:
+            safe.append(value)
     return safe
 
 
@@ -215,6 +234,10 @@ def redact_sensitive_text(value: Any) -> str:
     """Redact common secret-bearing value patterns in persisted macro context/errors."""
     text = str(value or "")
     text = _BEARER_RE.sub("Bearer [redacted]", text)
+    text = _BASIC_AUTH_RE.sub("Basic [redacted]", text)
     text = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=[redacted]", text)
     text = _OPENAI_KEY_RE.sub("sk-[redacted]", text)
+    text = _AWS_ACCESS_KEY_RE.sub("[redacted]", text)
+    text = _GITHUB_TOKEN_RE.sub("[redacted]", text)
+    text = _JWT_RE.sub("[redacted]", text)
     return text

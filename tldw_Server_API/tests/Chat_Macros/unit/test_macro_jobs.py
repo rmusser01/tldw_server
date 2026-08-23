@@ -195,6 +195,54 @@ async def test_handle_chat_macro_job_loads_user_db_and_executes_macro_run(
 
 
 @pytest.mark.asyncio
+async def test_handle_chat_macro_job_marks_run_failed_on_unexpected_executor_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jobs = _jobs_module()
+    fake_db = object()
+    status_updates: list[tuple[str, dict[str, Any]]] = []
+
+    class _FakeRepository:
+        def update_run_status(self, run_id: str, **kwargs: Any) -> SimpleNamespace:
+            status_updates.append((run_id, kwargs))
+            return SimpleNamespace(run_id=run_id, status=kwargs["status"])
+
+    class _FakeExecutor:
+        repository = _FakeRepository()
+
+        async def execute_run(self, run_id: str) -> SimpleNamespace:
+            raise RuntimeError(f"unexpected failure for {run_id}")
+
+    async def fake_get_db_for_user(_user_id: int, client_id: str | None = None) -> object:
+        return fake_db
+
+    monkeypatch.setattr(jobs, "get_chacha_db_for_user_id", fake_get_db_for_user)
+    monkeypatch.setattr(jobs, "build_chat_macro_executor", lambda **_kwargs: _FakeExecutor())
+    monkeypatch.setattr(jobs, "_close_worker_database", lambda _db: None)
+
+    with pytest.raises(RuntimeError, match="unexpected failure"):
+        await jobs.handle_chat_macro_job(
+            {
+                "id": 4,
+                "domain": jobs.CHAT_MACROS_DOMAIN,
+                "job_type": jobs.CHAT_MACROS_JOB_TYPE,
+                "payload": {"macro_run_id": "run-1", "user_id": "42", "normalized_args": {}},
+            }
+        )
+
+    assert status_updates == [
+        (
+            "run-1",
+            {
+                "status": "failed",
+                "error_code": "unexpected_execution_error",
+                "error_message": "Macro execution failed unexpectedly.",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_should_cancel_chat_macro_job_finalizes_job_and_marks_run_cancelled() -> None:
     jobs = _jobs_module()
 
@@ -422,3 +470,55 @@ def test_duplicate_chat_macro_postback_reuses_existing_message_for_idempotency_k
     assert second_id == first_id
     assert len(messages) == 1
     assert messages[0]["content"] == "Final wrapup."
+
+
+def test_postback_metadata_retry_reuses_created_message(
+    chat_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jobs = _jobs_module()
+    repository = ChatMacroRepository(chat_db)
+    conversation_id = _conversation_id(chat_db)
+    run = repository.create_run(
+        run_id="run-metadata-retry",
+        user_id="42",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+        status="completed",
+        conversation_id=conversation_id,
+    )
+    original_add_metadata = chat_db.add_message_metadata
+    attempts = 0
+
+    def fail_once(message_id: str, *args: Any, **kwargs: Any) -> bool:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return False
+        return original_add_metadata(message_id, *args, **kwargs)
+
+    monkeypatch.setattr(chat_db, "add_message_metadata", fail_once)
+
+    with pytest.raises(jobs.MacroStorageError, match="metadata"):
+        jobs.post_chat_macro_final_output(
+            chat_db=chat_db,
+            repository=repository,
+            run_id=run.run_id,
+            final_output="Final wrapup.",
+            post_idempotency_key="chat_macro:run-metadata-retry:final",
+        )
+    message_id = jobs.post_chat_macro_final_output(
+        chat_db=chat_db,
+        repository=repository,
+        run_id=run.run_id,
+        final_output="Final wrapup.",
+        post_idempotency_key="chat_macro:run-metadata-retry:final",
+    )
+
+    messages = chat_db.get_messages_for_conversation(conversation_id)
+    assert len(messages) == 1
+    assert message_id == str(messages[0]["id"])
+    metadata = chat_db.get_message_metadata(message_id)
+    assert metadata is not None
+    assert metadata["extra"]["chat_macro"]["run_id"] == run.run_id

@@ -111,6 +111,38 @@ def test_create_update_delete_user_macro_and_validate_without_saving(service: Ch
     assert registry_commands == {"wrapup"}
 
 
+def test_user_enabled_override_preserves_authored_yaml(service: ChatMacrosService) -> None:
+    raw = _user_macro_yaml() + "# keep this comment\n"
+    service.create_macro("daily_digest", raw)
+
+    disabled = service.set_macro_enabled("daily_digest", False)
+
+    assert disabled.enabled is False
+    assert service.storage.read("daily_digest").raw == raw
+    assert service.get_macro("daily_digest").enabled is False
+
+    enabled = service.set_macro_enabled("daily_digest", True)
+
+    assert enabled.enabled is True
+    assert service.storage.read("daily_digest").raw == raw
+
+
+def test_collision_validation_does_not_sync_registry(
+    service: ChatMacrosService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.list_macros()
+
+    def fail_write(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("collision validation must be read-only")
+
+    monkeypatch.setattr(service.repository, "upsert_registry_entry", fail_write)
+    monkeypatch.setattr(service.repository, "mark_registry_entries_deleted_except", fail_write)
+
+    with pytest.raises(MacroValidationError, match="another macro"):
+        service.create_macro("wrapup", _user_macro_yaml("wrapup", "wrapup"))
+
+
 def test_service_rejects_non_empty_future_permissions(service: ChatMacrosService) -> None:
     raw = (
         "schema_version: 1\n"
@@ -172,6 +204,25 @@ def test_output_profile_local_overrides_are_bounded(service: ChatMacrosService) 
 
     with pytest.raises(MacroValidationError, match="invalid output profile format"):
         normalize_output_profile("bad", {"format": "multiple_messages"})
+
+    with pytest.raises(MacroValidationError, match="unknown output profile keys"):
+        normalize_output_profile("bad", {"sectons": ["summary"]})
+
+
+def test_single_response_output_includes_failed_branches() -> None:
+    profile = normalize_output_profile(
+        "single",
+        {"format": "single_response", "sections": ["summary", "failed_branches"]},
+    )
+
+    rendered = render_output_profile(
+        profile,
+        {"summary": "Done."},
+        failed_branches=[{"label": "Risks", "error": "timed out"}],
+    )
+
+    assert "Done." in rendered
+    assert "Risks: timed out" in rendered
 
 
 def test_list_macros_does_not_rewrite_an_unchanged_registry(

@@ -114,7 +114,7 @@ def test_non_empty_tool_or_skill_permissions_rejected():
         load_macro_definition(raw)
 
 def test_parse_slash_args_normalizes_aliases_and_repeated_questions():
-    spec = WrapupArgsSpec()
+    spec = wrapup_args_spec()
     args = parse_macro_args(
         '--preset dev_handoff --keep-forks --output-profile compact '
         '--question "What changed?" --question "What is next?"',
@@ -143,7 +143,7 @@ Implement:
 - `MacroValidationError`, `MacroStorageError`, `MacroNotFoundError`, `MacroExecutionError` in `exceptions.py`.
 - Pydantic models in `models.py`: `MacroDefinition`, `MacroArgSpec`, `MacroStep`, `MacroPermissions`, `MacroExecution`, `MacroContext`, `OutputProfile`, `MacroRunRecord`, `MacroBranchRecord`.
 - `load_macro_definition(raw: str) -> MacroDefinition` in `parser.py`.
-- `parse_macro_args(raw: str | None, arg_specs: Mapping[str, MacroArgSpec], *, max_questions: int) -> dict[str, Any]` using `shlex.split`.
+- `parse_macro_args(raw: str | None, arg_specs: Mapping[str, MacroArgSpec], *, max_repeated_values: int) -> dict[str, Any]` using `shlex.split`.
 - Command validation pattern `^[a-z][a-z0-9_]{0,63}$`.
 - Permission validation that rejects non-empty `tool_calls` and `skills`.
 - Step validation that every `merge.consumes` and `post_result.consumes` target exists as a previous `output`.

@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPri
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.tests.chat_macros_test_helpers import FakeJobManager
 
 pytestmark = pytest.mark.integration
 
@@ -35,15 +36,6 @@ TEST_USER_ID = 4242
 class MacroApiClient:
     client: TestClient
     db: CharactersRAGDB
-
-
-class FakeJobManager:
-    def __init__(self) -> None:
-        self.created: list[dict] = []
-
-    def create_job(self, **kwargs):
-        self.created.append(kwargs)
-        return {"id": len(self.created), **kwargs}
 
 
 @pytest.fixture()
@@ -81,7 +73,8 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Macr
         with TestClient(fastapi_app) as client:
             yield MacroApiClient(client=client, db=db)
     finally:
-        fastapi_app.dependency_overrides.clear()
+        fastapi_app.dependency_overrides.pop(auth_deps.get_auth_principal, None)
+        fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
         db.close_connection()
 
 
@@ -188,9 +181,10 @@ def test_update_macro_enabled_state_without_replacing_definition(api_client: Mac
     assert enabled_builtin.status_code == 200, enabled_builtin.text
     assert enabled_builtin.json()["summary"]["enabled"] is True
 
+    original_raw = _macro_yaml()
     created = api_client.client.post(
         PREFIX,
-        json={"name": "daily_digest", "raw": _macro_yaml()},
+        json={"name": "daily_digest", "raw": original_raw},
     )
     assert created.status_code == 201, created.text
 
@@ -198,7 +192,7 @@ def test_update_macro_enabled_state_without_replacing_definition(api_client: Mac
     assert disabled_user.status_code == 200, disabled_user.text
     assert disabled_user.json()["summary"]["enabled"] is False
     assert disabled_user.json()["definition"]["command"] == "daily_digest"
-    assert "enabled: false" in disabled_user.json()["raw"]
+    assert disabled_user.json()["raw"] == original_raw
 
 
 def test_run_detail_and_cancel(api_client: MacroApiClient):

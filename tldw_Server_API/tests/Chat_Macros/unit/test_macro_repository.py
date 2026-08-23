@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import inspect
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import pytest
@@ -233,16 +233,56 @@ def test_cancel_requested_run_cannot_be_started_or_completed(repo):
     assert repo.update_run_status(run.run_id, status="cancelled").status == "cancelled"
 
 
-def test_repository_uses_guarded_updates_for_race_sensitive_fields():
-    status_source = inspect.getsource(ChatMacroRepository.update_run_status)
-    cancel_source = inspect.getsource(ChatMacroRepository.request_cancel)
-    post_source = inspect.getsource(ChatMacroRepository.mark_final_posted)
+def test_terminal_run_cannot_be_changed_to_cancel_requested(repo):
+    run = repo.create_run(
+        user_id="1",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+    )
+    repo.update_run_status(run.run_id, status="completed")
 
-    assert "status NOT IN ('completed', 'failed', 'cancelled')" in status_source
-    assert "status != 'cancel_requested' OR ? IN ('cancelled', 'failed')" in status_source
-    assert "status NOT IN ('completed', 'failed', 'cancelled')" in cancel_source
-    assert "final_message_id IS NULL" in post_source
-    assert "post_idempotency_key IS NULL" in post_source
+    saved = repo.request_cancel(run.run_id)
+
+    assert saved.status == "completed"
+    assert saved.cancel_requested_at is None
+
+
+def test_final_post_cannot_be_reassigned(repo):
+    run = repo.create_run(
+        user_id="1",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+    )
+    repo.mark_final_posted(
+        run.run_id,
+        final_message_id="message-1",
+        post_idempotency_key="post-1",
+    )
+
+    with pytest.raises(MacroStorageError, match="different idempotency key"):
+        repo.mark_final_posted(
+            run.run_id,
+            final_message_id="message-2",
+            post_idempotency_key="post-2",
+        )
+
+
+def test_ensure_ready_wraps_database_errors(raw_db, monkeypatch: pytest.MonkeyPatch):
+    repo = ChatMacroRepository(raw_db)
+
+    @contextmanager
+    def failing_transaction():
+        raise sqlite3.OperationalError("database is locked")
+        yield
+
+    monkeypatch.setattr(raw_db, "transaction", failing_transaction)
+
+    with pytest.raises(MacroStorageError, match="chat macro tables") as exc_info:
+        repo.ensure_ready()
+
+    assert isinstance(exc_info.value.__cause__, sqlite3.OperationalError)
 
 
 def test_registry_settings_and_status_methods(repo):
@@ -341,11 +381,8 @@ def test_postgres_chat_macro_schema_extension_contract_and_routing():
     assert "TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP" in postgres_script
     assert "BOOLEAN NOT NULL DEFAULT FALSE" in postgres_script
 
-    postgres_initializer = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
-    assert "_ensure_chat_macros_schema_postgres" in postgres_initializer
-
-    postgres_ensure = inspect.getsource(CharactersRAGDB._ensure_chat_macros_schema_postgres)
-    assert "_CHAT_MACROS_SCHEMA_SQL" in postgres_ensure
+    migration_steps = db._sqlite_linear_migration_steps()
+    assert migration_steps[51].__name__ == "_migrate_from_v51_to_v52"
 
 
 def test_row_mapping_normalizes_datetime_timestamps():

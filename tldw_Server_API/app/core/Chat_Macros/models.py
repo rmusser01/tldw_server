@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 COMMAND_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 ARG_NAME_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
@@ -15,7 +15,7 @@ _ARG_OPTION_RE = re.compile(ARG_OPTION_PATTERN)
 
 
 class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
 
 class MacroArgSpec(_StrictModel):
@@ -78,14 +78,14 @@ class MacroContext(_StrictModel):
 
 
 class MacroExecution(_StrictModel):
-    mode_default: str = "background"
-    branch_strategy: str = "auto"
+    mode_default: Literal["background"] = "background"
+    branch_strategy: Literal["auto", "chat_native", "acp_fork"] = "auto"
     max_branches: int = Field(default=6, ge=1)
     max_concurrency: int = Field(default=3, ge=1)
     timeout_seconds: int = Field(default=180, ge=1)
     retries_per_branch: int = Field(default=1, ge=0)
     merge_retries: int = Field(default=1, ge=0)
-    partial_failure: str = "best_effort"
+    partial_failure: Literal["best_effort"] = "best_effort"
     retain_scratch_branches: bool = False
 
 
@@ -156,7 +156,9 @@ class MacroRunRecord(_StrictModel):
     macro_version: int | None = None
     macro_digest: str | None = None
     normalized_args: dict[str, Any] = Field(default_factory=dict)
-    status: str = "pending"
+    status: Literal[
+        "pending", "running", "cancel_requested", "cancelled", "completed", "failed"
+    ] = "pending"
     surface: str | None = None
     source_surface: str | None = None
     conversation_id: str | None = None
@@ -175,11 +177,16 @@ class MacroRunRecord(_StrictModel):
     cancel_requested_at: str | None = None
     error_code: str | None = None
     error_message: str | None = None
-    error: str | None = None
     created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
     updated_at: str | None = None
+
+    @computed_field
+    @property
+    def error(self) -> str | None:
+        """Expose the canonical run error through the compatibility field."""
+        return self.error_message or self.error_code
 
 
 class MacroBranchRecord(_StrictModel):
@@ -188,23 +195,38 @@ class MacroBranchRecord(_StrictModel):
     step_id: str
     label: str | None = None
     output_name: str | None = None
-    status: str = "pending"
+    status: Literal["pending", "running", "cancelled", "completed", "failed"] = "pending"
     attempt_count: int = 0
     prompt_digest: str | None = None
     prompt: str | None = None
     output_text: str | None = None
-    output: str | None = None
     citations: list[Any] = Field(default_factory=list)
     usage: dict[str, Any] = Field(default_factory=dict)
     acp_child_session_id: str | None = None
     retained: bool = False
     error_code: str | None = None
     error_message: str | None = None
-    error: str | None = None
     created_at: str | None = None
     completed_at: str | None = None
     started_at: str | None = None
-    finished_at: str | None = None
+
+    @computed_field
+    @property
+    def output(self) -> str | None:
+        """Expose canonical branch output through the compatibility field."""
+        return self.output_text
+
+    @computed_field
+    @property
+    def error(self) -> str | None:
+        """Expose the canonical branch error through the compatibility field."""
+        return self.error_message or self.error_code
+
+    @computed_field
+    @property
+    def finished_at(self) -> str | None:
+        """Expose canonical completion time through the compatibility field."""
+        return self.completed_at
 
 
 def matches_arg_type(value: Any, arg_type: str) -> bool:

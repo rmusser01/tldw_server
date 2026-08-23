@@ -24,7 +24,8 @@ BUILTIN_WRAPUP_PATH = (
 )
 
 
-def WrapupArgsSpec() -> dict[str, MacroArgSpec]:
+def wrapup_args_spec() -> dict[str, MacroArgSpec]:
+    """Return the representative wrapup argument contract used by parser tests."""
     return {
         "preset": MacroArgSpec(type="string", default="general"),
         "keep_forks": MacroArgSpec(type="boolean", default=False, aliases=["keep-forks"]),
@@ -120,7 +121,7 @@ def test_arg_alias_collision_rejected():
 
 
 def test_parse_slash_args_normalizes_aliases_and_repeated_questions():
-    spec = WrapupArgsSpec()
+    spec = wrapup_args_spec()
     args = parse_macro_args(
         '--preset dev_handoff --keep-forks --output-profile compact '
         '--question "What changed?" --question "What is next?"',
@@ -131,14 +132,37 @@ def test_parse_slash_args_normalizes_aliases_and_repeated_questions():
     assert args["question"] == ["What changed?", "What is next?"]
 
 
+def test_explicit_repeated_values_replace_declared_defaults() -> None:
+    spec = {"tag": MacroArgSpec(type="string", repeated=True, default=["seed"])}
+
+    assert parse_macro_args("--tag first --tag second", spec) == {
+        "tag": ["first", "second"]
+    }
+
+
+def test_repeated_value_limit_applies_to_every_repeated_argument() -> None:
+    spec = {"tag": MacroArgSpec(type="string", repeated=True)}
+
+    with pytest.raises(MacroValidationError, match="too many tag arguments"):
+        parse_macro_args("--tag one --tag two", spec, max_repeated_values=1)
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "Infinity"])
+def test_number_arguments_reject_non_finite_values(value: str) -> None:
+    spec = {"threshold": MacroArgSpec(type="number")}
+
+    with pytest.raises(MacroValidationError, match="invalid numeric"):
+        parse_macro_args(f"--threshold {value}", spec)
+
+
 def test_parse_slash_args_rejects_duplicate_non_repeated_arg():
-    spec = WrapupArgsSpec()
+    spec = wrapup_args_spec()
     with pytest.raises(MacroValidationError, match="duplicate"):
         parse_macro_args("--mode foreground --mode background", spec)
 
 
 def test_parse_slash_args_rejects_duplicate_alias_and_canonical_arg():
-    spec = WrapupArgsSpec()
+    spec = wrapup_args_spec()
     with pytest.raises(MacroValidationError, match="duplicate"):
         parse_macro_args("--output-profile compact --output_profile full", spec)
 
@@ -158,6 +182,22 @@ def test_normalize_structured_args_applies_defaults_and_validates_values():
         normalize_structured_macro_args(macro, {"unknown": "value"})
     with pytest.raises(MacroValidationError, match="invalid type"):
         normalize_structured_macro_args(macro, {"keep_forks": "yes"})
+
+
+def test_macro_execution_rejects_unsupported_modes_and_strategies() -> None:
+    base = (
+        "schema_version: 1\n"
+        "name: bad\n"
+        "command: bad\n"
+        "execution:\n"
+    )
+
+    with pytest.raises(MacroValidationError, match="mode_default"):
+        load_macro_definition(base + "  mode_default: foreground\n")
+    with pytest.raises(MacroValidationError, match="branch_strategy"):
+        load_macro_definition(base + "  branch_strategy: unknown\n")
+    with pytest.raises(MacroValidationError, match="partial_failure"):
+        load_macro_definition(base + "  partial_failure: ignore_everything\n")
 
 
 def test_merge_and_post_result_consumes_must_reference_previous_outputs():

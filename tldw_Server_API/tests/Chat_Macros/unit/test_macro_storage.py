@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -154,3 +155,72 @@ def test_failed_supporting_file_update_keeps_existing_macro(tmp_path, monkeypatc
     stored = storage.read("daily_digest")
     assert stored.definition.command == "daily_digest"
     assert stored.supporting_files == {"notes.txt": "alpha"}
+
+
+def test_failed_create_removes_partial_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = ChatMacroStorage(tmp_path)
+
+    def fail_write(_path: Path, _data: bytes) -> None:
+        raise MacroStorageError("disk full")
+
+    monkeypatch.setattr(storage, "_replace_regular_file_no_follow", fail_write)
+
+    with pytest.raises(MacroStorageError, match="disk full"):
+        storage.create("daily_digest", _macro_yaml())
+
+    assert not (tmp_path / "macros" / "daily_digest").exists()
+
+
+def test_concurrent_create_uses_storage_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = ChatMacroStorage(tmp_path)
+    original_mkdir = storage_module.Path.mkdir
+
+    def concurrent_mkdir(path: Path, *args: object, **kwargs: object) -> None:
+        if path.name == "daily_digest":
+            raise FileExistsError("raced")
+        original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(storage_module.Path, "mkdir", concurrent_mkdir)
+
+    with pytest.raises(MacroStorageError, match="already exists"):
+        storage.create("daily_digest", _macro_yaml())
+
+
+def test_list_skips_unreadable_entries(tmp_path: Path) -> None:
+    storage = ChatMacroStorage(tmp_path)
+    storage.create("daily_digest", _macro_yaml())
+    (tmp_path / "macros" / "not valid").mkdir()
+    (tmp_path / "macros" / "stray_file").write_text("bad", encoding="utf-8")
+
+    assert [item.name for item in storage.list()] == ["daily_digest"]
+
+
+def test_post_publish_cleanup_failure_does_not_fail_update(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = ChatMacroStorage(tmp_path)
+    storage.create("daily_digest", _macro_yaml(), {"notes.txt": "alpha"})
+    original_rmtree = storage_module.shutil.rmtree
+
+    def fail_backup_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+        if ".old." in path.name:
+            raise OSError("cleanup failed")
+        original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(storage_module.shutil, "rmtree", fail_backup_cleanup)
+
+    updated = storage.update(
+        "daily_digest",
+        _macro_yaml("daily_digest", "team_digest"),
+        {"notes.txt": "beta"},
+    )
+
+    assert updated.definition.command == "team_digest"
+    assert storage.read("daily_digest").supporting_files == {"notes.txt": "beta"}

@@ -763,6 +763,7 @@ async def _start_chat_macros_jobs_worker(
 ) -> tuple[Any | None, Any | None]:
     """Start the chat macro jobs poller and return its shutdown handles."""
 
+    task = None
     try:
         enabled = should_start_worker("CHAT_MACROS_JOBS_WORKER_ENABLED", "chat-macros")
         if not enabled:
@@ -790,6 +791,7 @@ async def _start_chat_macros_jobs_worker(
         )
         return stop_event, task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
+        _safe_cancel_task(task)
         logger.warning(f"Failed to start Chat macro Jobs worker: {exc}")
         return None, None
 
@@ -1100,6 +1102,7 @@ def _run_reading_digest_jobs_worker_service(stop_event: Any) -> Any:
 
 
 def _run_chat_macros_jobs_worker_service(stop_event: Any) -> Any:
+    """Build the chat macro worker coroutine bound to its lifecycle stop event."""
     from tldw_Server_API.app.services.chat_macros_jobs_worker import (
         run_chat_macros_jobs_worker as _run_chat_macros_jobs_worker,
     )

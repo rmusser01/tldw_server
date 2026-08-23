@@ -136,14 +136,14 @@ class TestParseMacroArgsProperties:
 
     @_COMMON
     @given(count=st.integers(min_value=0, max_value=12), limit=st.integers(min_value=1, max_value=8))
-    def test_max_questions_bound_is_exact(self, count, limit):
+    def test_max_repeated_values_bound_is_exact(self, count, limit):
         specs = {"question": MacroArgSpec(type="string", repeated=True)}
         raw = " ".join(f"--question=q{i}" for i in range(count))
         if count > limit:
             with pytest.raises(MacroValidationError):
-                parser.parse_macro_args(raw, specs, max_questions=limit)
+                parser.parse_macro_args(raw, specs, max_repeated_values=limit)
         else:
-            parsed = parser.parse_macro_args(raw, specs, max_questions=limit)
+            parsed = parser.parse_macro_args(raw, specs, max_repeated_values=limit)
             assert parsed["question"] == [f"q{i}" for i in range(count)]
 
     @_COMMON

@@ -52,6 +52,8 @@ def resolve_acp_branch_capability(snapshot: MacroContextSnapshot) -> AcpBranchCa
     reason = "acp_unavailable"
     if snapshot.acp_session_id and not resumable:
         reason = "acp_not_resumable"
+    elif snapshot.acp_session_id and not forkable:
+        reason = "acp_not_forkable"
     return AcpBranchCapability(
         available=False,
         resumable=resumable,
@@ -63,8 +65,8 @@ def resolve_acp_branch_capability(snapshot: MacroContextSnapshot) -> AcpBranchCa
 
 def select_branch_strategy(
     *,
-    step_strategy: str | None,
-    macro_strategy: str | None,
+    step_strategy: BranchStrategy | None,
+    macro_strategy: BranchStrategy | None,
     capability: AcpBranchCapability,
 ) -> BranchStrategyDecision:
     """Select chat-native, ACP fork, or required-ACP failure for one branch."""

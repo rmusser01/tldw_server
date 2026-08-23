@@ -4,6 +4,7 @@ import type {
   ChatMacroBranchSummary,
   ChatMacroRunDetailResponse
 } from "@/services/chat-macros"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 export interface ChatMacroStatusMetadata {
   run_id: string
@@ -24,13 +25,6 @@ export interface MacroStatusCardProps {
 }
 
 const CANCELLABLE_STATUSES = new Set(["pending", "queued", "running", "processing"])
-
-const redactSensitiveText = (value: string): string =>
-  value
-    .replace(/Authorization:\s*Bearer\s+\S+/gi, "[redacted bearer token]")
-    .replace(/\b(?:api[_-]?key|x-api-key|token)\s*[:=]\s*["']?[^"',\s}]+/gi, "[redacted secret]")
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted secret]")
-    .replace(/\bAIza[0-9A-Za-z_-]{8,}\b/g, "[redacted secret]")
 
 const branchLabel = (branch: ChatMacroBranchSummary): string =>
   branch.label || branch.output_name || branch.step_id || branch.branch_id
@@ -122,7 +116,9 @@ export const MacroStatusCard = ({
       {branches.length > 0 ? (
         <ul className="mt-3 space-y-2">
           {branches.map((branch) => {
-            const safeError = branch.error ? redactSensitiveText(branch.error) : null
+            const safeError = branch.error
+              ? sanitizeServerErrorMessage(branch.error, "Branch failed")
+              : null
             return (
               <li
                 key={branch.branch_id}

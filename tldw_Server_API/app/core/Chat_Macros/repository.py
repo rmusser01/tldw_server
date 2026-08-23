@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from datetime import date, datetime
 from json import JSONDecodeError
@@ -51,11 +52,14 @@ class ChatMacroRepository:
 
     def ensure_ready(self) -> None:
         """Verify that the expected chat macro tables are available."""
-        with self.db.transaction() as conn:
-            conn.execute("SELECT 1 FROM chat_macro_registry LIMIT 1")
-            conn.execute("SELECT 1 FROM chat_macro_settings LIMIT 1")
-            conn.execute("SELECT 1 FROM chat_macro_runs LIMIT 1")
-            conn.execute("SELECT 1 FROM chat_macro_run_branches LIMIT 1")
+        try:
+            with self.db.transaction() as conn:
+                conn.execute("SELECT 1 FROM chat_macro_registry LIMIT 1")
+                conn.execute("SELECT 1 FROM chat_macro_settings LIMIT 1")
+                conn.execute("SELECT 1 FROM chat_macro_runs LIMIT 1")
+                conn.execute("SELECT 1 FROM chat_macro_run_branches LIMIT 1")
+        except sqlite3.Error as exc:
+            raise MacroStorageError("Unable to verify chat macro tables.") from exc
 
     def upsert_registry_entry(
         self,
@@ -501,7 +505,6 @@ class ChatMacroRepository:
                 payload.get("model_selection"), None, field_name="model_selection"
             )
             payload["source_surface"] = payload.get("surface")
-            payload["error"] = payload.get("error_message")
             return MacroRunRecord(**payload)
         except MacroStorageError:
             raise
@@ -514,9 +517,6 @@ class ChatMacroRepository:
             payload = _normalize_datetimes(_row_to_dict(row))
             payload["citations"] = _json_loads(payload.get("citations"), [], field_name="citations")
             payload["usage"] = _json_loads(payload.get("usage"), {}, field_name="usage")
-            payload["output"] = payload.get("output_text")
-            payload["finished_at"] = payload.get("completed_at")
-            payload["error"] = payload.get("error_message")
             return MacroBranchRecord(**payload)
         except MacroStorageError:
             raise

@@ -12,6 +12,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from loguru import logger
+
 from .exceptions import MacroNotFoundError, MacroStorageError, MacroValidationError
 from .models import COMMAND_PATTERN, MacroDefinition
 from .parser import load_macro_definition
@@ -25,6 +27,8 @@ MAX_SUPPORTING_FILES_TOTAL_BYTES = 5 * 1024 * 1024
 
 @dataclass(slots=True)
 class StoredMacro:
+    """Validated macro definition and supporting files loaded from disk."""
+
     name: str
     definition: MacroDefinition
     raw: str
@@ -46,15 +50,25 @@ class ChatMacroStorage:
         raw: str,
         supporting_files: dict[str, str | bytes] | None = None,
     ) -> StoredMacro:
+        """Create a macro atomically enough to leave no partial directory on failure."""
         name = self._validate_macro_name(name)
         definition, raw_bytes, file_bytes = self._validate_payload(name, raw, supporting_files)
         macro_dir = self.macros_dir / name
         if macro_dir.exists() or macro_dir.is_symlink():
             raise MacroStorageError(f"macro already exists: {name}")
-        macro_dir.mkdir(parents=False)
-        self._replace_regular_file_no_follow(macro_dir / MACRO_FILENAME, raw_bytes)
-        for filename, content in file_bytes.items():
-            self._replace_regular_file_no_follow(macro_dir / filename, content)
+        try:
+            macro_dir.mkdir(parents=False)
+        except FileExistsError as exc:
+            raise MacroStorageError(f"macro already exists: {name}") from exc
+        except OSError as exc:
+            raise MacroStorageError(f"failed to create macro directory: {name}") from exc
+        try:
+            self._replace_regular_file_no_follow(macro_dir / MACRO_FILENAME, raw_bytes)
+            for filename, content in file_bytes.items():
+                self._replace_regular_file_no_follow(macro_dir / filename, content)
+        except BaseException:
+            _cleanup_tree(macro_dir)
+            raise
         return self._stored(name, definition, raw, file_bytes)
 
     def update(
@@ -63,6 +77,7 @@ class ChatMacroStorage:
         raw: str,
         supporting_files: dict[str, str | bytes] | None = None,
     ) -> StoredMacro:
+        """Replace one user macro while preserving its previous state on failure."""
         name = self._validate_macro_name(name)
         macro_dir = self._existing_macro_dir(name)
         definition, raw_bytes, file_bytes = self._validate_payload(name, raw, supporting_files)
@@ -76,6 +91,7 @@ class ChatMacroStorage:
         return self._stored(name, definition, raw, file_bytes)
 
     def read(self, name: str) -> StoredMacro:
+        """Load and validate one macro without following filesystem symlinks."""
         name = self._validate_macro_name(name)
         macro_dir = self._existing_macro_dir(name)
         raw_bytes = self._read_regular_file_bytes_no_follow(macro_dir / MACRO_FILENAME)
@@ -90,18 +106,23 @@ class ChatMacroStorage:
         return self._stored(name, definition, raw, file_bytes)
 
     def delete(self, name: str) -> None:
+        """Delete one validated user macro directory."""
         name = self._validate_macro_name(name)
         macro_dir = self._existing_macro_dir(name)
         shutil.rmtree(macro_dir)
 
     def list(self) -> list[StoredMacro]:
+        """Return valid macros in name order while isolating unreadable entries."""
         if not self.macros_dir.exists():
             return []
         macros: list[StoredMacro] = []
         for path in sorted(self.macros_dir.iterdir(), key=lambda item: item.name):
             if path.name.startswith("."):
                 continue
-            macros.append(self.read(path.name))
+            try:
+                macros.append(self.read(path.name))
+            except (MacroValidationError, MacroStorageError) as exc:
+                logger.warning("Skipping unreadable chat macro {}: {}", path.name, exc)
         return macros
 
     def _validate_payload(
@@ -244,17 +265,29 @@ class ChatMacroStorage:
 
             self._existing_macro_dir(macro_dir.name)
             os.rename(macro_dir, backup_path)
-            try:
-                os.rename(staging_path, macro_dir)
-            except OSError as exc:
-                os.rename(backup_path, macro_dir)
-                raise MacroStorageError(f"failed to publish macro directory: {macro_dir}") from exc
-            shutil.rmtree(backup_path)
         except OSError as exc:
             raise MacroStorageError(f"failed to update macro directory: {macro_dir}") from exc
+
+        try:
+            os.rename(staging_path, macro_dir)
+        except OSError as exc:
+            try:
+                os.rename(backup_path, macro_dir)
+            except OSError as restore_exc:
+                logger.exception(
+                    "Failed to restore chat macro {}; original content remains at {}",
+                    macro_dir.name,
+                    backup_path,
+                )
+                raise MacroStorageError(
+                    f"failed to restore macro directory: {macro_dir}"
+                ) from restore_exc
+            raise MacroStorageError(f"failed to publish macro directory: {macro_dir}") from exc
         finally:
             if staging_path.exists():
-                shutil.rmtree(staging_path)
+                _cleanup_tree(staging_path)
+
+        _cleanup_tree(backup_path)
 
     @staticmethod
     def _replace_regular_file_no_follow(path: Path, data: bytes) -> None:
@@ -292,6 +325,16 @@ def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
         right.st_ino,
         stat.S_IFMT(right.st_mode),
     )
+
+
+def _cleanup_tree(path: Path) -> None:
+    """Best-effort cleanup that never changes the outcome of a completed publish."""
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        logger.warning("Failed to clean chat macro temporary directory {}: {}", path, exc)
 
 
 def _digest(definition: MacroDefinition, supporting_files: dict[str, bytes]) -> str:

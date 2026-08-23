@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import suppress
 from typing import Any
@@ -22,6 +23,7 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 CHAT_MACROS_DOMAIN = "chat_macros"
 CHAT_MACROS_JOB_TYPE = "chat_macro_run"
 _POST_BACK_SCAN_LIMIT = 500
+_DEFAULT_JOB_MANAGER: JobManager | None = None
 
 
 def chat_macro_jobs_queue() -> str:
@@ -70,6 +72,7 @@ async def handle_chat_macro_job(job: dict[str, Any]) -> dict[str, Any]:
     user_id = str(payload["user_id"])
     user_id_int = int(user_id)
     chat_db = None
+    executor = None
     try:
         chat_db = await get_chacha_db_for_user_id(
             user_id_int,
@@ -78,6 +81,23 @@ async def handle_chat_macro_job(job: dict[str, Any]) -> dict[str, Any]:
         executor = build_chat_macro_executor(chat_db=chat_db, user_id=user_id)
         run = await executor.execute_run(run_id)
         return {"macro_run_id": run.run_id, "status": run.status}
+    except Exception:  # noqa: BLE001 - preserve the worker error after terminalizing the run
+        if executor is not None:
+            try:
+                await asyncio.to_thread(
+                    executor.repository.update_run_status,
+                    run_id,
+                    status="failed",
+                    error_code="unexpected_execution_error",
+                    error_message="Macro execution failed unexpectedly.",
+                )
+            except Exception as status_exc:  # noqa: BLE001 - original worker failure takes precedence
+                logger.error(
+                    "Failed to mark chat macro run {} terminal after worker error: {}",
+                    run_id,
+                    type(status_exc).__name__,
+                )
+        raise
     finally:
         _close_worker_database(chat_db)
 
@@ -90,7 +110,7 @@ async def should_cancel_chat_macro_job(
 ) -> bool:
     """Return true when a macro job should stop and mirror cancellation to the run."""
 
-    jm = job_manager or JobManager()
+    jm = job_manager or _default_job_manager()
     job_id = int(job["id"])
     current = jm.get_job(job_id)
     if not current:
@@ -174,25 +194,36 @@ def post_chat_macro_final_output(
     if not run.conversation_id:
         return ""
 
-    existing = _find_existing_macro_post(
+    existing = run.final_message_id or _find_existing_macro_post(
         chat_db,
         conversation_id=run.conversation_id,
         post_idempotency_key=post_idempotency_key,
     )
     if existing:
-        return existing
-
-    content = final_output if final_output else "Macro completed with no output."
-    message_id = chat_db.add_message(
-        {
-            "conversation_id": run.conversation_id,
-            "sender": "assistant",
-            "content": content,
-            "client_id": f"chat_macro:{run.user_id}",
-        }
-    )
-    if not message_id:
-        raise MacroStorageError("failed to persist chat macro final message")
+        message_id = str(existing)
+        repository.mark_final_posted(
+            run_id,
+            final_message_id=message_id,
+            post_idempotency_key=post_idempotency_key,
+        )
+    else:
+        content = final_output if final_output else "Macro completed with no output."
+        message_id = chat_db.add_message(
+            {
+                "conversation_id": run.conversation_id,
+                "sender": "assistant",
+                "content": content,
+                "client_id": f"chat_macro:{run.user_id}",
+            }
+        )
+        if not message_id:
+            raise MacroStorageError("failed to persist chat macro final message")
+        message_id = str(message_id)
+        repository.mark_final_posted(
+            run_id,
+            final_message_id=message_id,
+            post_idempotency_key=post_idempotency_key,
+        )
 
     metadata = {
         "chat_macro": {
@@ -205,9 +236,17 @@ def post_chat_macro_final_output(
             "post_idempotency_key": post_idempotency_key,
         }
     }
-    if not chat_db.add_message_metadata(str(message_id), extra=metadata):
+    if not chat_db.add_message_metadata(message_id, extra=metadata):
         raise MacroStorageError(f"failed to persist chat macro metadata for message {message_id}")
-    return str(message_id)
+    return message_id
+
+
+def _default_job_manager() -> JobManager:
+    """Reuse the fallback manager used by cancellation polling."""
+    global _DEFAULT_JOB_MANAGER
+    if _DEFAULT_JOB_MANAGER is None:
+        _DEFAULT_JOB_MANAGER = JobManager()
+    return _DEFAULT_JOB_MANAGER
 
 
 def _validated_payload(job: dict[str, Any]) -> dict[str, Any]:
@@ -255,11 +294,12 @@ async def _mark_macro_run_cancelled(
                 client_id=f"chat-macro-cancel-{user_id}",
             )
             repo = ChatMacroRepository(owned_db)
-            repo.ensure_ready()
+            await asyncio.to_thread(repo.ensure_ready)
         with suppress(MacroStorageError):
-            repo.request_cancel(run_id)
+            await asyncio.to_thread(repo.request_cancel, run_id)
         with suppress(MacroStorageError):
-            repo.update_run_status(
+            await asyncio.to_thread(
+                repo.update_run_status,
                 run_id,
                 status="cancelled",
                 error_code="cancelled",

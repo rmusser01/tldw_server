@@ -22,6 +22,8 @@ VALID_PROFILE_FORMATS = {"structured_sections", "single_response"}
 
 @dataclass(slots=True)
 class MacroOutputProfile:
+    """Normalized output rendering configuration for one macro response."""
+
     name: str = "default"
     format: str = "structured_sections"
     sections: list[str] = field(default_factory=lambda: list(DEFAULT_PROFILE_SECTIONS))
@@ -32,6 +34,7 @@ DEFAULT_OUTPUT_PROFILE = MacroOutputProfile()
 
 
 def profile_to_dict(profile: MacroOutputProfile) -> dict[str, Any]:
+    """Serialize a normalized profile to its accepted settings keys."""
     return {
         "format": profile.format,
         "sections": list(profile.sections),
@@ -40,7 +43,13 @@ def profile_to_dict(profile: MacroOutputProfile) -> dict[str, Any]:
 
 
 def normalize_output_profile(name: str, raw: Mapping[str, Any] | None = None) -> MacroOutputProfile:
+    """Validate profile settings and return a normalized profile."""
     raw = raw or {}
+    unknown_keys = sorted(set(raw) - {"format", "sections", "include_branch_outputs"})
+    if unknown_keys:
+        raise MacroValidationError(
+            f"unknown output profile keys: {', '.join(str(key) for key in unknown_keys)}"
+        )
     profile_format = str(raw.get("format") or DEFAULT_OUTPUT_PROFILE.format)
     if profile_format not in VALID_PROFILE_FORMATS:
         raise MacroValidationError(f"invalid output profile format: {profile_format}")
@@ -63,6 +72,7 @@ def merge_output_profile(
     profile: MacroOutputProfile,
     overrides: Mapping[str, Any] | None = None,
 ) -> MacroOutputProfile:
+    """Apply validated overrides on top of an existing output profile."""
     if not overrides:
         return MacroOutputProfile(
             name=profile.name,
@@ -82,8 +92,17 @@ def render_output_profile(
     failed_branches: Sequence[Mapping[str, Any]] | None = None,
     branch_outputs: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
+    """Render structured or single-response output with optional branch details."""
     if profile.format == "single_response":
-        rendered = "\n\n".join(str(outputs.get(section, "")).strip() for section in profile.sections).strip()
+        parts = []
+        for section in profile.sections:
+            if section == "failed_branches":
+                body = _format_failed_branches(failed_branches or [])
+            else:
+                body = str(outputs.get(section, "")).strip()
+            if body:
+                parts.append(body)
+        rendered = "\n\n".join(parts).strip()
         appendix = _format_branch_outputs(branch_outputs or []) if profile.include_branch_outputs else ""
         return "\n\n".join(part for part in (rendered, appendix) if part).strip()
 

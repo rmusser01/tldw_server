@@ -4,6 +4,7 @@ import {
   getChatMacroRun,
   type ChatMacroRunDetailResponse
 } from "@/services/chat-macros"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 export interface MacroRunDetailDrawerProps {
   runId: string | null
@@ -36,14 +37,19 @@ export const MacroRunDetailDrawer = ({
       .then((response) => {
         if (cancelled) return
         if (!response.ok || !response.data) {
-          setError(response.error || `Unable to load macro run (${response.status})`)
+          setError(
+            sanitizeServerErrorMessage(
+              response.error,
+              `Unable to load macro run (${response.status})`
+            )
+          )
           return
         }
         setDetail(response.data)
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : "Unable to load macro run")
+        setError(sanitizeServerErrorMessage(err, "Unable to load macro run"))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -131,7 +137,8 @@ export const MacroRunDetailDrawer = ({
                       ) : null}
                       {branch.error_code || branch.error ? (
                         <p className="mt-2 break-words text-sm text-danger">
-                          {branch.error_code || branch.error}
+                          {branch.error_code ||
+                            sanitizeServerErrorMessage(branch.error, "Branch failed")}
                         </p>
                       ) : null}
                     </article>

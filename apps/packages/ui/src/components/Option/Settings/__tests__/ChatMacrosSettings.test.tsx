@@ -125,4 +125,18 @@ describe("ChatMacrosSettings", () => {
 
     expect(await screen.findByText("unknown macro argument: nope")).toBeInTheDocument()
   })
+
+  it("shows settings load failures and disables saving", async () => {
+    mocks.getChatMacroSettings.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      error: "Settings unavailable"
+    })
+
+    render(<ChatMacrosSettings />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Settings unavailable")
+    expect(screen.getByRole("button", { name: "Save macro settings" })).toBeDisabled()
+    expect(screen.getByLabelText("Macro settings JSON")).toHaveValue("{}")
+  })
 })

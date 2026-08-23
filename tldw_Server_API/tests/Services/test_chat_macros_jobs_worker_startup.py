@@ -76,6 +76,37 @@ async def test_run_chat_macros_jobs_worker_uses_domain_queue_and_handler(
     assert callable(captured["run_kwargs"]["cancel_check"])
 
 
+@pytest.mark.asyncio
+async def test_run_chat_macros_jobs_worker_defaults_invalid_numeric_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker_mod = _import_worker_module()
+    captured: dict[str, Any] = {}
+
+    class _FakeSDK:
+        def __init__(self, _job_manager: Any, config: Any) -> None:
+            captured["config"] = config
+
+        async def run(self, **_kwargs: Any) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    monkeypatch.setenv("CHAT_MACROS_JOBS_LEASE_SECONDS", "invalid")
+    monkeypatch.setenv("CHAT_MACROS_JOBS_RENEW_THRESHOLD_SECONDS", "-1")
+    monkeypatch.setenv("CHAT_MACROS_JOBS_RENEW_JITTER_SECONDS", "invalid")
+    monkeypatch.setattr(worker_mod, "JobManager", lambda: "job-manager")
+    monkeypatch.setattr(worker_mod, "WorkerSDK", _FakeSDK)
+
+    await worker_mod.run_chat_macros_jobs_worker()
+
+    config = captured["config"]
+    assert config.lease_seconds == 120
+    assert config.renew_threshold_seconds == 10
+    assert config.renew_jitter_seconds == 0
+
+
 def test_chat_macros_content_worker_spec_is_registered_and_delegates_to_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -174,3 +205,38 @@ async def test_start_chat_macros_jobs_worker_registers_owned_poller_when_enabled
             "stop_event": "chat-stop",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_start_chat_macros_jobs_worker_cancels_task_when_registration_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+
+    class _FakeTask:
+        cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    task = _FakeTask()
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: "chat-stop")
+    monkeypatch.setattr(startup_pollers, "_create_task", lambda _coro: task)
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_chat_macros_jobs_worker_service",
+        lambda _stop_event: "chat-coro",
+    )
+
+    def fail_registration(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("ownership registration failed")
+
+    result = await startup_pollers._start_chat_macros_jobs_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=fail_registration,
+        should_start_worker=lambda *_args, **_kwargs: True,
+    )
+
+    assert result == (None, None)
+    assert task.cancelled is True

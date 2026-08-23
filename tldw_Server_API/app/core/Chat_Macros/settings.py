@@ -9,8 +9,10 @@ from .output_profiles import DEFAULT_OUTPUT_PROFILE, normalize_output_profile, p
 
 
 def default_settings() -> dict[str, Any]:
+    """Return a fresh copy of the v1 chat macro settings defaults."""
     return {
         "disabled_builtins": [],
+        "user_macro_enabled": {},
         "output_profiles": {
             "default": profile_to_dict(DEFAULT_OUTPUT_PROFILE),
         },
@@ -18,12 +20,21 @@ def default_settings() -> dict[str, Any]:
 
 
 def normalize_settings(raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Normalize built-in toggles, user overrides, and output profiles."""
     settings = default_settings()
     raw = raw or {}
 
     disabled = raw.get("disabled_builtins", [])
     if isinstance(disabled, list):
         settings["disabled_builtins"] = sorted({str(name) for name in disabled})
+
+    user_enabled = raw.get("user_macro_enabled", {})
+    if isinstance(user_enabled, Mapping):
+        settings["user_macro_enabled"] = {
+            str(name): enabled
+            for name, enabled in user_enabled.items()
+            if isinstance(enabled, bool)
+        }
 
     raw_profiles = raw.get("output_profiles", {})
     if isinstance(raw_profiles, list):

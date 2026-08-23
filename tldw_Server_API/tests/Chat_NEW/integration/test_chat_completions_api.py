@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHA
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.tests.chat_macros_test_helpers import FakeJobManager
 
 
 def _install_isolated_chat_db(test_client, tmp_path, monkeypatch):
@@ -37,14 +38,6 @@ def _message_text(message: dict) -> str:
         )
     return ""
 
-
-class FakeJobManager:
-    def __init__(self) -> None:
-        self.created: list[dict] = []
-
-    def create_job(self, **kwargs):
-        self.created.append(kwargs)
-        return {"id": len(self.created), **kwargs}
 
 # ========================================================================
 # Basic Endpoint Tests
@@ -314,9 +307,9 @@ class TestChatCompletionsEndpoint:
             assert response.status_code == status.HTTP_200_OK, response.text
             message = response.json()["choices"][0]["message"]
             macro_meta = message["metadata"]["chat_macro"]
-            assert "Could not run /wrapup: Macro storage is unavailable." in message["content"]
+            assert "Could not run /wrapup: Jobs manager unavailable." in message["content"]
             assert macro_meta["status"] == "error"
-            assert macro_meta["error_code"] == "storage_error"
+            assert macro_meta["error_code"] == "jobs_unavailable"
         finally:
             test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
             test_client.app.dependency_overrides.pop(try_get_job_manager, None)

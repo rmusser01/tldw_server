@@ -15,6 +15,7 @@ import type {
   EffectiveWorkspaceAssistantDefault,
   WorkspacePersonaMemoryMode
 } from "@/types/workspace"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 import { ContextStagingCard } from "./ContextStagingCard"
 import { MacroRunDetailDrawer } from "./MacroRunDetailDrawer"
@@ -146,6 +147,9 @@ export const WorkspaceChatPanel = ({
   const [draft, setDraft] = React.useState("")
   const [sendError, setSendError] = React.useState<string | null>(null)
   const [detailRunId, setDetailRunId] = React.useState<string | null>(null)
+  const [macroStatusOverrides, setMacroStatusOverrides] = React.useState<
+    Record<string, string>
+  >({})
   const normalizedWorkspaceId = React.useMemo(
     () => normalizeWorkspaceId(workspaceId),
     [workspaceId]
@@ -191,7 +195,6 @@ export const WorkspaceChatPanel = ({
     selectedModel,
     selectedAssistant,
     selectedAssistantSource,
-    serverChatId,
     serverChatAssistantKind,
     serverChatAssistantId
   } = useMessageOption(messageOptionArgs)
@@ -231,6 +234,7 @@ export const WorkspaceChatPanel = ({
   React.useEffect(() => {
     setDraft("")
     setSendError(null)
+    setMacroStatusOverrides({})
   }, [normalizedWorkspaceId])
 
   React.useEffect(() => {
@@ -339,6 +343,7 @@ export const WorkspaceChatPanel = ({
   }, [
     chatBackendAvailable,
     hasReadyMedia,
+    hasStagedContext,
     hasUncarriedStagedContext,
     inheritedAssistant,
     inheritedPersonaMemoryMode,
@@ -369,8 +374,26 @@ export const WorkspaceChatPanel = ({
     [submitMessage]
   )
 
-  const handleCancelMacroRun = React.useCallback((runId: string) => {
-    void cancelChatMacroRun(runId)
+  const handleCancelMacroRun = React.useCallback(async (runId: string) => {
+    setSendError(null)
+    try {
+      const response = await cancelChatMacroRun(runId)
+      if (!response.ok || !response.data) {
+        setSendError(
+          sanitizeServerErrorMessage(
+            response.error,
+            `Unable to cancel macro run (${response.status})`
+          )
+        )
+        return
+      }
+      setMacroStatusOverrides((current) => ({
+        ...current,
+        [runId]: response.data.status
+      }))
+    } catch (error) {
+      setSendError(sanitizeServerErrorMessage(error, "Unable to cancel macro run"))
+    }
   }, [])
 
   const handleOpenMacroRunDetail = React.useCallback((runId: string) => {
@@ -391,7 +414,15 @@ export const WorkspaceChatPanel = ({
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
         {Array.isArray(messages) && messages.length > 0 ? (
           messages.map((message: WorkspacePanelMessage, index: number) => {
-            const macroMetadata = getChatMacroMetadata(message?.metadataExtra)
+            const rawMacroMetadata = getChatMacroMetadata(message?.metadataExtra)
+            const macroMetadata = rawMacroMetadata
+              ? {
+                  ...rawMacroMetadata,
+                  status:
+                    macroStatusOverrides[rawMacroMetadata.run_id] ||
+                    rawMacroMetadata.status
+                }
+              : null
             if (macroMetadata && !isChatMacroStatusComplete(macroMetadata.status)) {
               return (
                 <MacroStatusCard

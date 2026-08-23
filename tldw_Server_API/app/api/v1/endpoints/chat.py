@@ -2190,6 +2190,10 @@ def _chat_macro_error_payload(
     )
 
 
+class _ChatMacroJobsUnavailableError(RuntimeError):
+    """Raised when a macro run cannot be dispatched because Jobs is unavailable."""
+
+
 def _create_chat_macro_run_payload(
     *,
     request_data: ChatCompletionRequest,
@@ -2204,7 +2208,7 @@ def _create_chat_macro_run_payload(
     normalized_args = parse_macro_args(
         raw_args,
         item.definition.args,
-        max_questions=item.definition.execution.max_branches,
+        max_repeated_values=item.definition.execution.max_branches,
     )
     enforce_background_execution(normalized_args)
     normalized_args["mode"] = str(
@@ -2214,7 +2218,7 @@ def _create_chat_macro_run_payload(
     resolved_profile = service.resolve_output_profile(output_profile)
     normalized_args["output_profile"] = resolved_profile.name
     if job_manager is None:
-        raise MacroStorageError("Jobs manager unavailable.")
+        raise _ChatMacroJobsUnavailableError("Jobs manager unavailable.")
 
     request_metadata = dict(request_data.__pydantic_extra__ or {})
     snapshot = build_macro_context_snapshot(
@@ -4192,6 +4196,14 @@ async def create_chat_completion(
                         command=macro_command,
                         error_code="validation_error",
                         public_error=str(macro_error)[:500],
+                    )
+                except _ChatMacroJobsUnavailableError:
+                    macro_payload = _chat_macro_error_payload(
+                        request_data=request_data,
+                        model=selected_model,
+                        command=macro_command,
+                        error_code="jobs_unavailable",
+                        public_error="Jobs manager unavailable.",
                     )
                 except MacroStorageError as macro_error:
                     logger.warning(

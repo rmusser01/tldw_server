@@ -68,7 +68,7 @@ class ChatMacroExecutor:
 
     async def execute_run(self, run_id: str) -> MacroRunRecord:
         """Execute one pending macro run and return the saved run record."""
-        run = self.repository.get_run(run_id)
+        run = await self._repo_call("get_run", run_id)
         if run is None:
             raise MacroStorageError(f"macro run not found: {run_id}")
         if run.status == "completed":
@@ -76,37 +76,49 @@ class ChatMacroExecutor:
         if run.status in _TERMINAL_RUN_STATUSES:
             return run
         if run.status == "cancel_requested" or run.cancel_requested_at:
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="cancelled",
                 error_code="cancelled",
                 error_message="Macro run was cancelled before execution started.",
             )
 
-        macro = self.macro_loader(run)
+        macro = await asyncio.to_thread(self.macro_loader, run)
         snapshot = snapshot_from_mapping(run.context_snapshot)
         model_selection = dict(run.model_selection or snapshot.model_selection or {})
         try:
             planned_steps = _planned_branch_steps(macro, run.normalized_args, self.settings)
         except MacroExecutionError as exc:
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="failed",
                 error_code="branch_limit_exceeded",
                 error_message=str(exc),
             )
+        if not planned_steps:
+            return await self._repo_call(
+                "update_run_status",
+                run_id,
+                status="failed",
+                error_code="no_branches_planned",
+                error_message="Macro run does not contain any branch prompts.",
+            )
         profile = self._resolve_output_profile(run, macro)
         estimated_tokens = _estimated_total_tokens(snapshot, planned_steps)
 
         if not self.model_available(model_selection):
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="failed",
                 error_code="model_unavailable",
                 error_message="No usable model is available for this macro run.",
             )
         if estimated_tokens > self.settings.max_total_estimated_tokens:
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="failed",
                 error_code="token_cap_exceeded",
@@ -116,16 +128,18 @@ class ChatMacroExecutor:
             len(planned_steps) > self.settings.sync_max_branches
             or estimated_tokens > self.settings.sync_max_estimated_tokens
         ):
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="failed",
                 error_code="sync_limit_exceeded",
                 error_message="Macro run is too large for synchronous execution.",
             )
 
-        started = self.repository.update_run_status(run_id, status="running")
+        started = await self._repo_call("update_run_status", run_id, status="running")
         if started.status == "cancel_requested":
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="cancelled",
                 error_code="cancelled",
@@ -133,28 +147,39 @@ class ChatMacroExecutor:
             )
         if started.status != "running":
             return started
-        branches = await self._run_branches(
-            run_id=run_id,
-            macro=macro,
-            steps=planned_steps,
-            snapshot=snapshot,
-            model_selection=model_selection,
-            normalized_args=run.normalized_args,
-        )
+        try:
+            branches = await self._run_branches(
+                run_id=run_id,
+                macro=macro,
+                steps=planned_steps,
+                snapshot=snapshot,
+                model_selection=model_selection,
+                normalized_args=run.normalized_args,
+            )
+        except Exception:  # noqa: BLE001 - persistence failures must terminally fail the run
+            return await self._repo_call(
+                "update_run_status",
+                run_id,
+                status="failed",
+                error_code="branch_persistence_failed",
+                error_message="A branch result could not be persisted.",
+            )
 
         completed = [branch for branch in branches if branch.status == "completed"]
         failed = [branch for branch in branches if branch.status != "completed"]
-        latest = self.repository.get_run(run_id)
+        latest = await self._repo_call("get_run", run_id)
         if (
             latest is not None
             and (latest.status == "cancel_requested" or latest.cancel_requested_at)
         ) or (branches and all(branch.status == "cancelled" for branch in branches)):
-            self.repository.store_final_output(
+            await self._repo_call(
+                "store_final_output",
                 run_id,
                 final_output="Macro run cancelled.",
                 final_output_format="markdown",
             )
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="cancelled",
                 error_code="cancelled",
@@ -162,12 +187,14 @@ class ChatMacroExecutor:
             )
         if not completed:
             final_output = _all_failed_report(failed)
-            self.repository.store_final_output(
+            await self._repo_call(
+                "store_final_output",
                 run_id,
                 final_output=final_output,
                 final_output_format="markdown",
             )
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="failed",
                 error_code="all_branches_failed",
@@ -183,46 +210,52 @@ class ChatMacroExecutor:
                 branch_outputs=completed if _include_branch_outputs(run.normalized_args, profile) else [],
             )
         except Exception as exc:  # noqa: BLE001 - merge failure should preserve branch detail
-            if self._run_cancel_requested(run_id):
-                self.repository.store_final_output(
+            if await self._run_cancel_requested(run_id):
+                await self._repo_call(
+                    "store_final_output",
                     run_id,
                     final_output="Macro run cancelled.",
                     final_output_format="markdown",
                 )
-                return self.repository.update_run_status(
+                return await self._repo_call(
+                    "update_run_status",
                     run_id,
                     status="cancelled",
                     error_code="cancelled",
                     error_message="Macro run was cancelled during merge.",
                 )
             final_output = _merge_failed_report(exc, completed)
-            self.repository.store_final_output(
+            await self._repo_call(
+                "store_final_output",
                 run_id,
                 final_output=final_output,
                 final_output_format="markdown",
             )
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="failed",
                 error_code="merge_failed",
                 error_message="Macro merge failed.",
             )
 
-        self.repository.store_final_output(
+        await self._repo_call(
+            "store_final_output",
             run_id,
             final_output=final_output,
             final_output_format="markdown",
         )
-        cancelled = self._cancelled_run_if_requested(
+        cancelled = await self._cancelled_run_if_requested(
             run_id,
             message="Macro run was cancelled before final post.",
         )
         if cancelled is not None:
             return cancelled
 
-        completed_run = self.repository.update_run_status(run_id, status="completed")
+        completed_run = await self._repo_call("update_run_status", run_id, status="completed")
         if completed_run.status == "cancel_requested" or completed_run.cancel_requested_at:
-            return self.repository.update_run_status(
+            return await self._repo_call(
+                "update_run_status",
                 run_id,
                 status="cancelled",
                 error_code="cancelled",
@@ -247,7 +280,7 @@ class ChatMacroExecutor:
         semaphore = asyncio.Semaphore(max(1, min(self.settings.max_concurrency, macro.execution.max_concurrency)))
 
         async def run_step(step: MacroStep) -> MacroBranchRecord:
-            cancelled_branch = self._cancelled_branch_if_requested(run_id, step)
+            cancelled_branch = await self._cancelled_branch_if_requested(run_id, step)
             if cancelled_branch is not None:
                 return cancelled_branch
 
@@ -258,7 +291,8 @@ class ChatMacroExecutor:
             )
             strategy_metadata = decision.model_dump(mode="json")
             if decision.required_failed:
-                return self.repository.upsert_branch(
+                return await self._repo_call(
+                    "upsert_branch",
                     run_id,
                     step_id=step.id,
                     label=step.label,
@@ -272,7 +306,7 @@ class ChatMacroExecutor:
                 )
 
             async with semaphore:
-                cancelled_branch = self._cancelled_branch_if_requested(run_id, step)
+                cancelled_branch = await self._cancelled_branch_if_requested(run_id, step)
                 if cancelled_branch is not None:
                     return cancelled_branch
                 return await self._run_branch_with_retries(
@@ -285,17 +319,22 @@ class ChatMacroExecutor:
                     strategy_metadata=strategy_metadata,
                 )
 
-        return await asyncio.gather(*(run_step(step) for step in steps))
+        results = await asyncio.gather(*(run_step(step) for step in steps), return_exceptions=True)
+        failures = [result for result in results if isinstance(result, BaseException)]
+        if failures:
+            raise MacroStorageError("one or more branch results could not be persisted") from failures[0]
+        return [result for result in results if isinstance(result, MacroBranchRecord)]
 
-    def _cancelled_branch_if_requested(
+    async def _cancelled_branch_if_requested(
         self,
         run_id: str,
         step: MacroStep,
     ) -> MacroBranchRecord | None:
-        current = self.repository.get_run(run_id)
+        current = await self._repo_call("get_run", run_id)
         if current is None or (current.status != "cancel_requested" and not current.cancel_requested_at):
             return None
-        return self.repository.upsert_branch(
+        return await self._repo_call(
+            "upsert_branch",
             run_id,
             step_id=step.id,
             label=step.label,
@@ -304,29 +343,35 @@ class ChatMacroExecutor:
             error_message="Macro run was cancelled before this branch started.",
         )
 
-    def _cancelled_run_if_requested(
+    async def _cancelled_run_if_requested(
         self,
         run_id: str,
         *,
         message: str,
     ) -> MacroRunRecord | None:
-        if not self._run_cancel_requested(run_id):
+        if not await self._run_cancel_requested(run_id):
             return None
-        return self.repository.update_run_status(
+        return await self._repo_call(
+            "update_run_status",
             run_id,
             status="cancelled",
             error_code="cancelled",
             error_message=message,
         )
 
-    def _run_cancel_requested(self, run_id: str) -> bool:
-        current = self.repository.get_run(run_id)
+    async def _run_cancel_requested(self, run_id: str) -> bool:
+        current = await self._repo_call("get_run", run_id)
         return current is not None and (
             current.status == "cancel_requested" or bool(current.cancel_requested_at)
         )
 
+    async def _repo_call(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
+        """Run one synchronous repository operation outside the event-loop thread."""
+        method = getattr(self.repository, method_name)
+        return await asyncio.to_thread(method, *args, **kwargs)
+
     async def _post_final_output_if_needed(self, run: MacroRunRecord) -> MacroRunRecord:
-        if self.post_back is None or run.final_message_id or run.final_output is None:
+        if self.post_back is None or run.final_output is None:
             return run
         post_idempotency_key = f"chat_macro:{run.run_id}:final"
         final_message_id = await _maybe_await(
@@ -337,12 +382,13 @@ class ChatMacroExecutor:
             )
         )
         if final_message_id:
-            return self.repository.mark_final_posted(
+            return await self._repo_call(
+                "mark_final_posted",
                 run.run_id,
                 final_message_id=str(final_message_id),
                 post_idempotency_key=post_idempotency_key,
             )
-        return self.repository.get_run(run.run_id) or run
+        return await self._repo_call("get_run", run.run_id) or run
 
     async def _run_branch_with_retries(
         self,
@@ -361,7 +407,7 @@ class ChatMacroExecutor:
         max_attempts = max(1, macro.execution.retries_per_branch + 1)
         prompt = step.prompt or ""
         for _ in range(max_attempts):
-            cancelled_branch = self._cancelled_branch_if_requested(run_id, step)
+            cancelled_branch = await self._cancelled_branch_if_requested(run_id, step)
             if cancelled_branch is not None:
                 return cancelled_branch
             attempts += 1
@@ -377,30 +423,40 @@ class ChatMacroExecutor:
             except TimeoutError:
                 last_error_code = "timeout"
                 last_error = f"Branch timed out after {macro.execution.timeout_seconds} seconds."
-                continue
             except Exception as exc:  # noqa: BLE001 - branch failures are recorded per branch
                 last_error_code = "branch_failed"
                 last_error = redact_sensitive_text(str(exc) or type(exc).__name__)
-                continue
-            if result.status == "completed":
-                usage = dict(result.usage)
-                usage["branch_strategy"] = strategy_metadata
-                return self.repository.upsert_branch(
-                    run_id,
-                    step_id=step.id,
-                    label=step.label,
-                    status="completed",
-                    output_text=result.text,
-                    attempt_count=attempts,
-                    prompt_digest=_digest(prompt),
-                    citations=result.citations,
-                    usage=usage,
-                    acp_child_session_id=result.acp_child_session_id,
-                    retained=_retain_branch(normalized_args, macro, self.settings),
-                )
-            last_error = redact_sensitive_text(result.error_message or result.error_code or "branch failed")
+            else:
+                if result.status != "completed":
+                    last_error_code = result.error_code or "branch_failed"
+                    last_error = redact_sensitive_text(
+                        result.error_message or result.error_code or "branch failed"
+                    )
+                else:
+                    usage = dict(result.usage)
+                    usage["branch_strategy"] = strategy_metadata
+                    return await self._repo_call(
+                        "upsert_branch",
+                        run_id,
+                        step_id=step.id,
+                        label=step.label,
+                        status="completed",
+                        output_text=result.text,
+                        attempt_count=attempts,
+                        prompt_digest=_digest(prompt),
+                        citations=result.citations,
+                        usage=usage,
+                        acp_child_session_id=result.acp_child_session_id,
+                        retained=_retain_branch(normalized_args, macro, self.settings),
+                    )
+            if attempts < max_attempts:
+                cancelled_branch = await self._cancelled_branch_if_requested(run_id, step)
+                if cancelled_branch is not None:
+                    return cancelled_branch
+                await asyncio.sleep(min(2.0, 0.25 * (2 ** (attempts - 1))))
 
-        return self.repository.upsert_branch(
+        return await self._repo_call(
+            "upsert_branch",
             run_id,
             step_id=step.id,
             label=step.label,

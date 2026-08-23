@@ -23,6 +23,8 @@ export const ChatMacrosSettings = () => {
   const [error, setError] = React.useState<string | null>(null)
   const [cloneName, setCloneName] = React.useState("")
   const [settingsText, setSettingsText] = React.useState("{}")
+  const [settingsLoaded, setSettingsLoaded] = React.useState(false)
+  const [settingsLoadError, setSettingsLoadError] = React.useState<string | null>(null)
   const [settingsMessage, setSettingsMessage] = React.useState<string | null>(null)
   const [validateRaw, setValidateRaw] = React.useState("")
   const [validationMessage, setValidationMessage] = React.useState<string | null>(null)
@@ -30,6 +32,8 @@ export const ChatMacrosSettings = () => {
   const loadData = React.useCallback(async () => {
     setLoading(true)
     setError(null)
+    setSettingsLoaded(false)
+    setSettingsLoadError(null)
     const [macroResponse, settingsResponse] = await Promise.all([
       listChatMacros(),
       getChatMacroSettings()
@@ -43,6 +47,9 @@ export const ChatMacrosSettings = () => {
 
     if (settingsResponse.ok && settingsResponse.data) {
       setSettingsText(stringifySettings(settingsResponse.data.settings))
+      setSettingsLoaded(true)
+    } else {
+      setSettingsLoadError(responseError(settingsResponse.status, settingsResponse.error))
     }
     setLoading(false)
   }, [])
@@ -53,6 +60,8 @@ export const ChatMacrosSettings = () => {
     const run = async () => {
       setLoading(true)
       setError(null)
+      setSettingsLoaded(false)
+      setSettingsLoadError(null)
       const [macroResponse, settingsResponse] = await Promise.all([
         listChatMacros(),
         getChatMacroSettings()
@@ -67,6 +76,9 @@ export const ChatMacrosSettings = () => {
 
       if (settingsResponse.ok && settingsResponse.data) {
         setSettingsText(stringifySettings(settingsResponse.data.settings))
+        setSettingsLoaded(true)
+      } else {
+        setSettingsLoadError(responseError(settingsResponse.status, settingsResponse.error))
       }
       setLoading(false)
     }
@@ -115,6 +127,7 @@ export const ChatMacrosSettings = () => {
   )
 
   const saveSettings = React.useCallback(async () => {
+    if (!settingsLoaded) return
     setSettingsMessage(null)
     setError(null)
     let parsed: Record<string, unknown>
@@ -135,7 +148,7 @@ export const ChatMacrosSettings = () => {
       return
     }
     setSettingsMessage("Macro settings saved")
-  }, [settingsText])
+  }, [settingsLoaded, settingsText])
 
   const validateRawMacro = React.useCallback(async () => {
     setValidationMessage(null)
@@ -285,13 +298,19 @@ export const ChatMacrosSettings = () => {
         />
         <button
           type="button"
-          className="mt-3 inline-flex min-h-[36px] items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primaryStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className="mt-3 inline-flex min-h-[36px] items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primaryStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={loading || !settingsLoaded}
           onClick={() => void saveSettings()}
         >
           Save macro settings
         </button>
         {settingsMessage ? (
           <p className="mt-2 text-sm text-text-muted">{settingsMessage}</p>
+        ) : null}
+        {settingsLoadError ? (
+          <p className="mt-2 text-sm font-medium text-danger" role="alert">
+            {settingsLoadError}
+          </p>
         ) : null}
       </section>
     </div>

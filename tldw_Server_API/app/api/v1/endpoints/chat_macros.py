@@ -64,6 +64,7 @@ _OPENAI_KEY_RE = re.compile(r"sk-[A-Za-z0-9_-]{6,}")
 
 
 def _summary(item: ChatMacroCatalogItem) -> ChatMacroSummary:
+    """Map an internal catalog item to its public summary."""
     return ChatMacroSummary(
         name=item.name,
         command=item.command,
@@ -78,6 +79,7 @@ def _summary(item: ChatMacroCatalogItem) -> ChatMacroSummary:
 
 
 async def _detail(service: ChatMacrosService, item: ChatMacroCatalogItem) -> ChatMacroDetail:
+    """Load editable source and map one catalog item to API detail."""
     raw = yaml.safe_dump(item.definition.model_dump(mode="json"), sort_keys=False)
     supporting_files: dict[str, str] = {}
     if item.source == "user":
@@ -93,6 +95,7 @@ async def _detail(service: ChatMacrosService, item: ChatMacroCatalogItem) -> Cha
 
 
 def _macro_http_exception(exc: Exception) -> HTTPException:
+    """Translate a typed macro-domain exception to an HTTP response."""
     if isinstance(exc, MacroNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, MacroValidationError):
@@ -107,10 +110,12 @@ def _macro_http_exception(exc: Exception) -> HTTPException:
 
 
 def _raise_macro_http(exc: Exception) -> None:
+    """Raise the HTTP equivalent of a macro-domain exception."""
     raise _macro_http_exception(exc) from exc
 
 
 def _safe_error(value: str | None) -> str | None:
+    """Redact and bound a persisted error before returning it to clients."""
     if not value:
         return None
     redacted = _SECRET_BEARER_RE.sub(r"\1[redacted]", value)
@@ -121,6 +126,7 @@ def _safe_error(value: str | None) -> str | None:
 
 
 def _run_response(run: MacroRunRecord) -> ChatMacroRunResponse:
+    """Map a durable run to the dispatch response shape."""
     return ChatMacroRunResponse(
         run_id=run.run_id,
         status=run.status,
@@ -130,6 +136,7 @@ def _run_response(run: MacroRunRecord) -> ChatMacroRunResponse:
 
 
 def _run_record_response(run: MacroRunRecord) -> ChatMacroRunRecordResponse:
+    """Map a durable run to the public status record."""
     return ChatMacroRunRecordResponse(
         run_id=run.run_id,
         macro_name=run.macro_name,
@@ -161,6 +168,7 @@ def _run_record_response(run: MacroRunRecord) -> ChatMacroRunRecordResponse:
 
 
 def _branch_summary(branch: MacroBranchRecord) -> ChatMacroBranchSummary:
+    """Map a durable branch record to its public status summary."""
     return ChatMacroBranchSummary(
         branch_id=branch.branch_id,
         step_id=branch.step_id,
@@ -179,6 +187,7 @@ def _branch_summary(branch: MacroBranchRecord) -> ChatMacroBranchSummary:
 
 
 def _get_user_run(service: ChatMacrosService, run_id: str) -> MacroRunRecord:
+    """Load a user-owned run or raise the domain not-found error."""
     run = service.repository.get_run(run_id)
     if run is None or run.user_id != service.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Macro run not found")

@@ -56,6 +56,7 @@ class ChatMacroUpdateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _requires_update_body(self) -> ChatMacroUpdateRequest:
+        """Require a source or enabled-state change and reject orphaned files."""
         if self.raw is None and self.enabled is None:
             raise ValueError("raw or enabled is required")
         if self.raw is None and self.supporting_files is not None:

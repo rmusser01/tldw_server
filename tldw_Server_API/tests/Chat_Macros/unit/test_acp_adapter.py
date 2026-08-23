@@ -84,3 +84,28 @@ def test_required_acp_fork_strategy_fails_when_unavailable():
     assert decision.strategy == "failed"
     assert decision.required_failed is True
     assert decision.error_code == "acp_unavailable"
+
+
+def test_acp_capability_distinguishes_not_resumable_and_not_forkable() -> None:
+    not_resumable = resolve_acp_branch_capability(
+        MacroContextSnapshot(
+            acp_session_id="session-1",
+            acp={"forkable": True, "resumable": False},
+        )
+    )
+    not_forkable = resolve_acp_branch_capability(
+        MacroContextSnapshot(
+            acp_session_id="session-2",
+            acp={"forkable": False, "resumable": True},
+        )
+    )
+
+    assert not_resumable.reason == "acp_not_resumable"
+    assert not_forkable.reason == "acp_not_forkable"
+    decision = select_branch_strategy(
+        step_strategy="acp_fork",
+        macro_strategy="auto",
+        capability=not_forkable,
+    )
+    assert decision.required_failed is True
+    assert decision.metadata["reason"] == "acp_not_forkable"
