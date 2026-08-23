@@ -172,3 +172,46 @@ Fresh `final33-fix3-1787449107-31317` passed through the updated probe on the fi
 - `node --check` passed both executable scripts. Focused changed-file ESLint reported zero errors/warnings. Forced shared-package ESLint under the frontend config reported `0 errors, 95 inherited warnings`; those package files are unchanged from the reviewed head.
 - No Python file differs from `79cf6dc1d4`, so touched-scope Ruff and Bandit are not applicable. No backend production path changed; the real backend was exercised by final33.
 - `git diff --check`, final status/staging verification, and the resulting commit hash are recorded by the executor after the report is staged because a commit cannot contain its own hash. No PR/push; the two unrelated watchlist templates remain excluded.
+
+## Final Whole-Workstream Fix Pass
+
+Reviewed base: `22c9b62f69610b26daff52c4f1e47ea0f2f116d2`. Fix commit: `d51f8d1be5`.
+
+### Findings Addressed
+
+- Implicit all-source selection no longer stores loaded-page IDs. Deselecting one source first materializes the complete unfiltered paginated queryable source snapshot, validates stable totals and summaries, duplicate-free IDs, exact offset progress, no partial errors, and the target's continued presence, then atomically switches to include mode. Any inconsistency leaves all-source mode intact with a bounded recovery error.
+- A successful ask response that is malformed, truncated, or has a different `request_id` is now typed as post-commit ambiguous. Retry reuses the exact frozen request object and UUID. Ordinary non-2xx typed API errors retain their existing classification and are not offered as ambiguous retries.
+- The chat pane announces and scrolls only when the reducer records the exact newly completed assistant message ID. Bootstrap and reload history cannot consume or synthesize an `Answer added` announcement.
+- The live CDP harness now clicks and waits for asynchronous source materialization. Its strict member-Chats ledger permits the exact four read-only bootstrap paths already allowed during the transition observer, while method/path broadening remains rejected.
+
+### TDD And Focused Verification
+
+- Initial final-finding RED: `16 failed, 57 passed` across the shared service, reducer/controller, component, accessibility, and responsive suites.
+- Final shared UI/API/locale matrix: `6` files, `78 passed`.
+- CDP runner matrix after the live harness findings: `102 passed`.
+- Production-only TypeScript check passed before the harness-only JavaScript changes. Targeted harness ESLint, `node --check`, locale byte-parity, evidence validator, bounded credential/path/sentinel/body-field scans, screenshot contract, and `git diff --check` all passed.
+- The broader Research Workspace family run retained only 14 unrelated existing local-workspace failures (`845 passed`); no shared recipient test failed. Full frontend typecheck retained only unrelated skills-certification diagnostics with no touched-path diagnostic.
+- No Python changed in this pass, so Ruff and Bandit are not applicable.
+
+### Fresh Live Acceptance
+
+The first fresh run correctly failed because the temporary backend process lacked `DEFAULT_MODEL_LOCAL_LLM`; the backend was restarted with the existing local provider/model and the missing non-secret default-model fixture setting. A second run exposed the expected asynchronous deselection contract in Playwright's synchronous `uncheck()` helper, and a later complete run exposed four exact read-only Chats bootstrap requests crossing the transition/strict-ledger timing boundary. Both harness defects received RED/GREEN regression coverage without weakening the product boundary.
+
+Fresh `final34-fix4d` then passed through the real multi-user SQLite backend, Next.js WebUI, Chrome `connectOverCDP`, forwarding probe, and `local-llm` / `Qwen2.5-0.5B-Instruct` target.
+
+- All 15 canonical acceptance checks are true.
+- The strict ledger is closed and clean across 282 requests, with zero request failures, page errors, runtime overlays, or classification failures.
+- Three provider requests traversed unchanged; input/output hashes match and sentinel, mutation, tool, JSON, and request-bound proofs are clean.
+- Race statuses are `409/200/200/409`; replay turn hashes match.
+- Evidence validation returned exit `0` with no failures. Credential, absolute-path, sentinel, prompt, and answer-body scans passed.
+- All five screenshots were visually inspected: desktop sources, desktop grounded/cited answers, mobile source list, mobile full-screen preview, and revoked state. No overlap, horizontal overflow, extra banner stack, unreadable evidence, or revoked-data leak was visible.
+- Temporary WebUI, backend, and forwarding-probe processes were stopped after evidence capture.
+
+### Final Review
+
+- Review package: `review-22c9b62f69..d51f8d1be5.diff`.
+- Reviewer: `01a02ca6-a0ad-7022-8bcc-f1cad8e49b25` (`Sartre`).
+- Verdict: no Critical, Important, or Minor actionable findings remain; all three original findings are resolved; no forbidden local/shared scope regression found.
+- Non-blocking residual: partial errors, summary/offset drift, missing target, and incomplete terminal pagination are explicit fail-closed branches but do not each have a separate direct test. Multi-page success, transport failure, and duplicate IDs are directly covered.
+
+Status: complete. No PR or push was performed. The two unrelated untracked watchlist templates remain untouched and unstaged.

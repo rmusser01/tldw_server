@@ -1064,7 +1064,7 @@ git commit -m "test(workspaces): verify shared recipient isolation"
 
 ### Task 11: Run Real Backend, WebUI, and CDP Acceptance and Close the Task
 
-**Status:** Fix Round 3/5 implementation and fresh live evidence passed from reviewed head `79cf6dc1d4`; pending controller review. The Backlog task remains In Progress and PR preparation is intentionally omitted by executor direction.
+**Status:** Complete through the final whole-workstream fix pass at `d51f8d1be5`. Fresh live backend/WebUI/CDP evidence and the final scoped review passed. PR preparation remains intentionally omitted until explicitly requested.
 
 **Files:**
 - Create: `apps/tldw-frontend/scripts/shared-research-workspace-cdp-uat.mjs`
@@ -1090,6 +1090,8 @@ git commit -m "test(workspaces): verify shared recipient isolation"
 **Fix Round 3/5 scope:** Require an exact declaration contract separately for owner revocation and member Chats evidence, using one canonical policy source for runtime and validation; reject all upstream provider-probe redirects before they can leave the exact loopback boundary. Preserve every cleared Round 2 coalescing and exact-status contract.
 
 **Fix Round 3/5 closeout:** Context-contract RED produced `4 failed, 95 skipped` and GREEN passed all four; redirect RED produced `6 failed, 28 skipped` and GREEN passed all six, with all five native-fetch redirect-family integrations proving zero destination contacts. The final focused matrix passed `270` tests. Fresh `final33-fix3-1787449107-31317` passed all 15 checks with closed strict and exact owner/member declaration proofs (`37/35` declarations, `57/48` observed requests), settings `2x200`, race `409/200/200/409` with equal replay hashes, three unchanged clean probe requests, exact persona isolation, and five visually inspected screenshots. Cleanup/log modes and evidence leak scans passed. Status remains pending controller review; no PR/push.
+
+**Final whole-workstream fix closeout:** Starting from reviewed head `22c9b62f69`, implicit all-source deselection now materializes the complete unfiltered paginated queryable source set before changing to include mode and fails closed on inconsistent snapshots. Malformed successful chat responses and mismatched response IDs now retain the exact immutable request object and UUID for retry without reclassifying typed non-2xx errors. Answer announcements and scrolling now use the exact completed assistant message ID, so restored history cannot announce a new answer. The CDP runner waits for asynchronous materialization and applies the same exact read-only Chats bootstrap contract on both sides of its transition handoff. Focused verification passed `78` shared UI/API/locale tests and `102` CDP-runner tests; targeted ESLint, Node syntax, production-only TypeScript, evidence validation/privacy scans, and diff checks passed. Fresh `final34-fix4d` live evidence passed all 15 acceptance checks with a closed clean 282-request ledger, three unchanged provider calls, and race `409/200/200/409` with matching replay hashes. All five screenshots were visually inspected. Final reviewer `01a02ca6-a0ad-7022-8bcc-f1cad8e49b25` (`Sartre`) found no actionable findings and confirmed all three original defects resolved. The only residual is non-blocking direct test depth for several explicit fail-closed pagination branches. No Python changed, so Bandit is not applicable to this final pass. No PR/push was performed.
 
 - [x] **Step 1: Write runner contract tests before the live script**
 
