@@ -25,7 +25,10 @@ const MAX_OUTLINE_BLOCKS = 50_000
 const MAX_OUTLINE_SCALARS = 100_000
 
 export const createStandaloneHtmlOutlineWorker = (_ignoredSource?: string): Worker =>
-  new Worker(new URL("./standalone-html-outline.worker.ts", import.meta.url), { type: "module" })
+  new Worker(new URL("./standalone-html-outline.worker.ts", import.meta.url), {
+    type: "module",
+    name: "StandaloneHtmlOutlineWorker"
+  })
 
 const hasExactKeys = (value: Record<string, unknown>, keys: string[]): boolean => {
   const actual = Object.keys(value)

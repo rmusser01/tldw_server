@@ -541,7 +541,10 @@ describe("StandaloneHtmlOutlineController", () => {
     const [url, options] = WorkerConstructor.mock.calls[0]
     expect(String(url)).toMatch(/standalone-html-outline\.worker/)
     expect(String(url)).not.toContain("source-must-not-in-url")
-    expect(options).toEqual({ type: "module" })
+    expect(options).toEqual({
+      type: "module",
+      name: "StandaloneHtmlOutlineWorker"
+    })
   })
 
   it("contains a synchronous worker-factory failure and accepts the next request", async () => {

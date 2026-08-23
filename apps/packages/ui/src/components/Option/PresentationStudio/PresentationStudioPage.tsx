@@ -1,4 +1,5 @@
 import React from "react"
+import { flushSync } from "react-dom"
 import { useNavigate } from "react-router-dom"
 
 import { ProjectWorkspace } from "./ProjectWorkspace"
@@ -143,12 +144,12 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   const detailRequestRef = React.useRef<InFlightProjectRequest | null>(null)
   const bufferedDetailOutcomeRef = React.useRef<BufferedDetailOutcome | null>(null)
   const authorityEpochRef = React.useRef(authorityEpoch)
+  const authoritySuspendedRef = React.useRef(false)
   const standaloneAuthoritySettlementRef = React.useRef<{
     authorityEpoch: number
     releaseSafe: boolean
   } | null>(null)
   const detailStateRef = React.useRef(detailState)
-  authorityEpochRef.current = authorityEpoch
   detailStateRef.current = detailState
   const detailContextRef = React.useRef({ mode, projectId, authorityEpoch })
   const detailErrorContextRef = React.useRef<string | null>(null)
@@ -188,29 +189,91 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
       previous.authorityEpoch !== authorityEpoch
     ) {
       invalidateDetailRequest()
+      if (authoritySuspendedRef.current) setKindAuthorityReleaseRequired(true)
       standaloneAuthoritySettlementRef.current = null
       detailContextRef.current = { mode, projectId, authorityEpoch }
     }
   }, [authorityEpoch, invalidateDetailRequest, mode, projectId])
 
+  const isStandaloneKindAuthorityCurrent = React.useCallback(
+    (capturedAuthorityEpoch: number | null, candidatePresentationId: string) => {
+      const committedContext = detailContextRef.current
+      return (
+        !authoritySuspendedRef.current &&
+        capturedAuthorityEpoch !== null &&
+        capturedAuthorityEpoch === authorityEpochRef.current &&
+        committedContext.mode === "detail" &&
+        committedContext.projectId === candidatePresentationId &&
+        committedContext.authorityEpoch === capturedAuthorityEpoch
+      )
+    },
+    []
+  )
+
   React.useEffect(() => {
-    const handleAuthorityBoundary = () => {
+    const reserveAuthorityBoundary = () => {
+      const nextEpoch = authorityEpochRef.current + 1
+      authorityEpochRef.current = nextEpoch
+      standaloneAuthoritySettlementRef.current = null
+      return nextEpoch
+    }
+    const commitAuthorityBoundary = (nextEpoch: number) => {
       invalidateDetailRequest()
       detailErrorContextRef.current = null
       setLoadError(null)
       if (mode === "detail") setIsProjectLoading(true)
-      const nextEpoch = authorityEpochRef.current + 1
-      authorityEpochRef.current = nextEpoch
-      standaloneAuthoritySettlementRef.current = null
       setAuthorityEpoch(nextEpoch)
+    }
+    const handleAuthorityBoundary = () => {
+      const nextEpoch = reserveAuthorityBoundary()
+      commitAuthorityBoundary(nextEpoch)
+    }
+    const handleRestorationBoundary = () => {
+      if (authoritySuspendedRef.current) {
+        const nextEpoch = reserveAuthorityBoundary()
+        authoritySuspendedRef.current = false
+        flushSync(() => commitAuthorityBoundary(nextEpoch))
+        return
+      }
+      const retained = detailStateRef.current
+      const context = detailContextRef.current
+      if (
+        retained?.kind === "standalone_html" &&
+        retained.projectId === context.projectId &&
+        retained.authorityEpoch !== authorityEpochRef.current
+      ) {
+        return
+      }
+      const nextEpoch = reserveAuthorityBoundary()
+      flushSync(() => commitAuthorityBoundary(nextEpoch))
+    }
+    const handlePagehideBoundary = () => {
+      if (authoritySuspendedRef.current) return
+      authoritySuspendedRef.current = true
+      const nextEpoch = reserveAuthorityBoundary()
+      flushSync(() => {
+        commitAuthorityBoundary(nextEpoch)
+        setKindAuthorityReleaseRequired(true)
+      })
+    }
+    const handleVisibilityBoundary = () => {
+      if (document.visibilityState === "visible") handleRestorationBoundary()
     }
     window.addEventListener("tldw:config-updated", handleAuthorityBoundary)
     window.addEventListener("tldw:auth-principal-changed", handleAuthorityBoundary)
     window.addEventListener("tldw:slides-scope-mismatch", handleAuthorityBoundary)
+    window.addEventListener("pagehide", handlePagehideBoundary, true)
+    window.addEventListener("pageshow", handleRestorationBoundary, true)
+    window.addEventListener("focus", handleRestorationBoundary, true)
+    document.addEventListener("visibilitychange", handleVisibilityBoundary, true)
     return () => {
       window.removeEventListener("tldw:config-updated", handleAuthorityBoundary)
       window.removeEventListener("tldw:auth-principal-changed", handleAuthorityBoundary)
       window.removeEventListener("tldw:slides-scope-mismatch", handleAuthorityBoundary)
+      window.removeEventListener("pagehide", handlePagehideBoundary, true)
+      window.removeEventListener("pageshow", handleRestorationBoundary, true)
+      window.removeEventListener("focus", handleRestorationBoundary, true)
+      document.removeEventListener("visibilitychange", handleVisibilityBoundary, true)
     }
   }, [invalidateDetailRequest, mode])
 
@@ -355,7 +418,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   }, [currentDetailState?.kind, currentProjectId, isOnline, isProjectLoading, mode, projectId, refreshVisualStyles])
 
   React.useEffect(() => {
-    if (mode !== "detail" || !projectId) {
+    if (authoritySuspendedRef.current || mode !== "detail" || !projectId) {
       return
     }
     let cancelled = false
@@ -626,6 +689,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
       kindAuthorityEpoch={authorityEpoch}
       kindAuthorityReleaseRequired={kindAuthorityReleaseRequired}
       onKindAuthoritySettled={handleStandaloneAuthoritySettled}
+      isKindAuthorityCurrent={isStandaloneKindAuthorityCurrent}
     />
   ) : null
 

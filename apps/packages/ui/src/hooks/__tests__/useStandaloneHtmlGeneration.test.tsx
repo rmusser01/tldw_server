@@ -91,7 +91,10 @@ describe("useStandaloneHtmlGeneration", () => {
     mocks.getCurrentUser.mockResolvedValue({ id: 42, username: "researcher", is_active: true })
   })
 
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
 
   it("rejects NUL, unpaired surrogates, effective limits, and invalid slide counts before state or persistence", async () => {
     const { result } = await setup()
@@ -119,6 +122,264 @@ describe("useStandaloneHtmlGeneration", () => {
     expect(result.current.scopeReady).toBe(false)
     await act(async () => result.current.submit())
     expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("ignores a late first scope Retry after a second Retry confirms current authority", async () => {
+    mocks.getConfig.mockRejectedValueOnce(new Error("configuration unavailable"))
+    const module = await loadSubject()
+    const hook = renderHook(() => module.useStandaloneHtmlGeneration({
+      capability: capability as any,
+      onCompleted: mocks.onCompleted,
+      onStopWaiting: mocks.onStopWaiting
+    }))
+
+    await waitFor(() => expect(hook.result.current.scopeError).toBe(
+      "Current server and account could not be confirmed."
+    ))
+
+    const retiredDraft = {
+      schemaVersion: 1,
+      timestamp: Date.now(),
+      values: { ...validDraft, source: "Retired authority source" },
+      generationConfigRevision: capability.generation_config_revision
+    }
+    sessionStorage.setItem(
+      module.buildStandaloneHtmlStorageKeys({
+        serverOrigin: "https://retired.example",
+        principalId: "84"
+      }).draft,
+      JSON.stringify(retiredDraft)
+    )
+
+    let resolveRetiredConfig: ((value: unknown) => void) | undefined
+    let resolveRetiredUser: ((value: unknown) => void) | undefined
+    mocks.getConfig
+      .mockReturnValueOnce(new Promise((resolve) => { resolveRetiredConfig = resolve }))
+      .mockResolvedValueOnce({ serverUrl: "https://tldw.example/base" })
+    mocks.getCurrentUser
+      .mockReturnValueOnce(new Promise((resolve) => { resolveRetiredUser = resolve }))
+      .mockResolvedValueOnce({ id: 42 })
+
+    let firstRetry!: Promise<void>
+    act(() => { firstRetry = hook.result.current.retryScope() })
+    expect(hook.result.current.scopeReady).toBe(false)
+    expect(hook.result.current.draft.source).toBe("")
+
+    await act(async () => hook.result.current.retryScope())
+    expect(hook.result.current.scopeReady).toBe(true)
+    expect(hook.result.current.draft.source).toBe("")
+
+    await act(async () => {
+      resolveRetiredConfig?.({ serverUrl: "https://retired.example/base" })
+      resolveRetiredUser?.({ id: 84 })
+      await firstRetry
+    })
+    expect(hook.result.current.scopeReady).toBe(true)
+    expect(hook.result.current.draft.source).toBe("")
+    expect(mocks.getConfig).toHaveBeenCalledTimes(3)
+    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(3)
+    hook.unmount()
+  })
+
+  it("keeps the exact in-memory draft across repeated same-scope retries when storage is unavailable", async () => {
+    const setItem = vi.spyOn(
+      Object.getPrototypeOf(window.sessionStorage) as Storage,
+      "setItem"
+    ).mockImplementation(() => {
+      throw new DOMException("quota unavailable", "QuotaExceededError")
+    })
+    const hook = await setup()
+    const latestSource = "Latest source after quota failure"
+    act(() => expect(hook.result.current.updateField(
+      "source",
+      latestSource
+    )).toBe(true))
+    await waitFor(() => expect(hook.result.current.storageWarning).toBe(
+      "Reload recovery is unavailable."
+    ))
+
+    let resolveFirstConfig: ((value: unknown) => void) | undefined
+    let resolveFirstUser: ((value: unknown) => void) | undefined
+    mocks.getConfig
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirstConfig = resolve }))
+      .mockResolvedValueOnce({ serverUrl: "https://tldw.example/base" })
+    mocks.getCurrentUser
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirstUser = resolve }))
+      .mockResolvedValueOnce({ id: 42 })
+
+    let firstRetry!: Promise<void>
+    act(() => { firstRetry = hook.result.current.retryScope() })
+    expect(hook.result.current.scopeReady).toBe(false)
+    expect(hook.result.current.draft.source).toBe("")
+
+    await act(async () => hook.result.current.retryScope())
+    expect(hook.result.current.scopeReady).toBe(true)
+    expect(hook.result.current.draft.source).toBe(latestSource)
+
+    await act(async () => {
+      resolveFirstConfig?.({ serverUrl: "https://tldw.example/base" })
+      resolveFirstUser?.({ id: 42 })
+      await firstRetry
+    })
+    expect(hook.result.current.draft.source).toBe(latestSource)
+    expect(hook.result.current.storageWarning).toBe("Reload recovery is unavailable.")
+    setItem.mockRestore()
+    hook.unmount()
+  })
+
+  it.each([
+    {
+      name: "failed",
+      submitResult: {
+        ...pendingReceipt,
+        status: "failed",
+        progress_text: "Provider reached terminal state",
+        error_code: "provider_failed",
+        error_message: "Provider failed"
+      },
+      phase: "failed",
+      backendStatus: "failed",
+      progressText: "Provider reached terminal state",
+      safeError: "provider_failed"
+    },
+    {
+      name: "ambiguous",
+      submitResult: Object.assign(new Error("Network error"), { status: 0 }),
+      phase: "ambiguous",
+      backendStatus: null,
+      progressText: null,
+      safeError: "generation_submission_unknown"
+    }
+  ])("keeps $name authority across an immediate second same-scope boundary", async ({
+    name,
+    submitResult,
+    phase,
+    backendStatus,
+    progressText,
+    safeError
+  }) => {
+    if (name === "ambiguous") mocks.submit.mockRejectedValue(submitResult)
+    else mocks.submit.mockResolvedValue(submitResult)
+    const hook = await setup()
+    await act(async () => hook.result.current.submit())
+    await waitFor(() => expect(hook.result.current.phase).toBe(phase))
+    expect(hook.result.current.draftRecoveryAvailable).toBe(true)
+
+    mocks.getConfig.mockRejectedValueOnce(new Error("scope temporarily unavailable"))
+    await act(async () => hook.result.current.retryScope())
+    expect(hook.result.current.scopeReady).toBe(false)
+
+    await act(async () => {
+      await hook.result.current.retryScope()
+      await hook.result.current.retryScope()
+    })
+
+    expect(hook.result.current.scopeReady).toBe(true)
+    expect(hook.result.current.phase).toBe(phase)
+    expect(hook.result.current.backendStatus).toBe(backendStatus)
+    expect(hook.result.current.progressText).toBe(progressText)
+    expect(hook.result.current.safeError).toBe(safeError)
+    expect(hook.result.current.snapshot).not.toBeNull()
+    expect(hook.result.current.recoveryAvailable).toBe(true)
+    expect(hook.result.current.draftRecoveryAvailable).toBe(true)
+    expect(mocks.submit).toHaveBeenCalledTimes(1)
+    hook.unmount()
+  })
+
+  it("keeps same-scope in-memory source when the sessionStorage getter throws and scrubs it on mismatch", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, "sessionStorage")
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      get: () => {
+        throw new DOMException("storage unavailable", "SecurityError")
+      }
+    })
+    try {
+      const module = await loadSubject()
+      const hook = renderHook(() => module.useStandaloneHtmlGeneration({
+        capability: capability as any,
+        onCompleted: mocks.onCompleted,
+        onStopWaiting: mocks.onStopWaiting
+      }))
+      await waitFor(() => expect(hook.result.current.scopeReady).toBe(true))
+      act(() => hook.result.current.updateField("source", "Getter-failed current source"))
+      expect(hook.result.current.storageWarning).toBe("Reload recovery is unavailable.")
+
+      await act(async () => hook.result.current.retryScope())
+      expect(hook.result.current.scopeReady).toBe(true)
+      expect(hook.result.current.draft.source).toBe("Getter-failed current source")
+
+      act(() => window.dispatchEvent(new CustomEvent("tldw:slides-scope-mismatch")))
+      expect(hook.result.current.scopeReady).toBe(false)
+      expect(hook.result.current.draft.source).toBe("")
+      hook.unmount()
+    } finally {
+      if (descriptor) Object.defineProperty(window, "sessionStorage", descriptor)
+      else Reflect.deleteProperty(window, "sessionStorage")
+    }
+  })
+
+  it("pauses quarantined polling and Resume continues status without another provider submission", async () => {
+    mocks.submit.mockResolvedValue(pendingReceipt)
+    mocks.status.mockResolvedValue({
+      receipt: { ...pendingReceipt, status: "running" },
+      retryAfterMs: 10_000
+    })
+    const hook = await setup()
+    const setItem = vi.spyOn(
+      Object.getPrototypeOf(window.sessionStorage) as Storage,
+      "setItem"
+    ).mockImplementation(() => {
+      throw new DOMException("quota unavailable", "QuotaExceededError")
+    })
+    await act(async () => hook.result.current.submit())
+    await waitFor(() => expect(hook.result.current.phase).toBe("polling"))
+    await waitFor(() => expect(mocks.status).toHaveBeenCalledTimes(1))
+
+    await act(async () => hook.result.current.retryScope())
+    expect(hook.result.current.phase).toBe("stopped")
+    expect(hook.result.current.draft.source).toBe("Bounded source")
+    expect(hook.result.current.snapshot).not.toBeNull()
+    expect(hook.result.current.recoveryAvailable).toBe(true)
+
+    await act(async () => hook.result.current.resume())
+    expect(mocks.submit).toHaveBeenCalledTimes(1)
+    expect(mocks.status).toHaveBeenCalledTimes(2)
+    setItem.mockRestore()
+    hook.unmount()
+  })
+
+  it("replays a quarantined pre-receipt attempt with the exact idempotency key and request", async () => {
+    mocks.submit
+      .mockRejectedValueOnce(Object.assign(new Error("Network error"), { status: 0 }))
+      .mockResolvedValueOnce({
+        ...pendingReceipt,
+        status: "failed",
+        error_code: "provider_failed",
+        error_message: "Provider failed"
+      })
+    const hook = await setup()
+    vi.spyOn(
+      Object.getPrototypeOf(window.sessionStorage) as Storage,
+      "setItem"
+    ).mockImplementation(() => {
+      throw new DOMException("quota unavailable", "QuotaExceededError")
+    })
+
+    await act(async () => hook.result.current.submit())
+    await waitFor(() => expect(hook.result.current.phase).toBe("ambiguous"))
+    const [firstRequest, firstOptions] = mocks.submit.mock.calls[0]
+
+    await act(async () => hook.result.current.retryScope())
+    expect(hook.result.current.phase).toBe("ambiguous")
+    expect(hook.result.current.recoveryAvailable).toBe(true)
+
+    await act(async () => hook.result.current.resume())
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2))
+    const [secondRequest, secondOptions] = mocks.submit.mock.calls[1]
+    expect(secondRequest).toEqual(firstRequest)
+    expect(secondOptions.idempotencyKey).toBe(firstOptions.idempotencyKey)
+    hook.unmount()
   })
 
   it("captures and persists an immutable canonical snapshot before POST with a random URL-safe key", async () => {
@@ -412,11 +673,16 @@ describe("useStandaloneHtmlGeneration", () => {
   })
 
   it.each([
-    [401, "auth_lost"],
-    [404, "missing"],
-    [429, "throttled"],
-    [503, "outage"]
-  ])("retains recoverable form state for polling HTTP %s", async (status, phase) => {
+    [401, "auth_lost", "stopped", null],
+    [404, "missing", "missing", "generation_not_found"],
+    [429, "throttled", "stopped", "generation_status_throttled"],
+    [503, "outage", "stopped", "generation_status_unavailable"]
+  ])("retains recoverable form state for polling HTTP %s", async (
+    status,
+    phase,
+    restoredPhase,
+    restoredError
+  ) => {
     mocks.submit.mockResolvedValue(pendingReceipt)
     mocks.status.mockRejectedValue(Object.assign(new Error("safe failure"), { status }))
     const { result } = await setup()
@@ -425,6 +691,18 @@ describe("useStandaloneHtmlGeneration", () => {
     await waitFor(() => expect(result.current.phase).toBe(phase))
     expect(result.current.snapshot?.source.kind === "prompt" ? result.current.snapshot.source.prompt : null).toBe("Bounded source")
     expect(result.current.recoveryAvailable).toBe(true)
+    const submitCalls = mocks.submit.mock.calls.length
+    const statusCalls = mocks.status.mock.calls.length
+
+    await act(async () => result.current.retryScope())
+
+    expect(result.current.phase).toBe(restoredPhase)
+    expect(result.current.safeError).toBe(restoredError)
+    expect(result.current.snapshot?.source.kind === "prompt" ? result.current.snapshot.source.prompt : null).toBe("Bounded source")
+    expect(result.current.recoveryAvailable).toBe(true)
+    expect(result.current.draftRecoveryAvailable).toBe(true)
+    expect(mocks.submit).toHaveBeenCalledTimes(submitCalls)
+    expect(mocks.status).toHaveBeenCalledTimes(statusCalls)
   })
 
   it.each([429, 503])("retries transient polling HTTP %s with bounded backoff", async (status) => {
@@ -460,6 +738,40 @@ describe("useStandaloneHtmlGeneration", () => {
     await act(async () => result.current.submit())
     expect(result.current.phase).toBe(phase)
     expect(result.current.draft.source).toBe("Bounded source")
+    const submitCalls = mocks.submit.mock.calls.length
+    const statusCalls = mocks.status.mock.calls.length
+
+    await act(async () => result.current.retryScope())
+
+    expect(result.current.phase).toBe(phase)
+    expect(result.current.draft.source).toBe("Bounded source")
+    expect(result.current.snapshot).not.toBeNull()
+    expect(result.current.recoveryAvailable).toBe(true)
+    expect(result.current.draftRecoveryAvailable).toBe(true)
+    expect(mocks.submit).toHaveBeenCalledTimes(submitCalls)
+    expect(mocks.status).toHaveBeenCalledTimes(statusCalls)
+  })
+
+  it("normalizes a quarantined in-flight submission to ambiguous without automatic replay", async () => {
+    let resolveSubmit: ((value: unknown) => void) | undefined
+    mocks.submit.mockReturnValue(new Promise((resolve) => { resolveSubmit = resolve }))
+    const hook = await setup()
+
+    await act(async () => hook.result.current.submit())
+    await waitFor(() => expect(hook.result.current.phase).toBe("submitting"))
+    expect(mocks.submit).toHaveBeenCalledTimes(1)
+
+    await act(async () => hook.result.current.retryScope())
+
+    expect(hook.result.current.phase).toBe("ambiguous")
+    expect(hook.result.current.snapshot).not.toBeNull()
+    expect(hook.result.current.recoveryAvailable).toBe(true)
+    expect(mocks.submit).toHaveBeenCalledTimes(1)
+    resolveSubmit?.(pendingReceipt)
+    await act(async () => Promise.resolve())
+    expect(hook.result.current.phase).toBe("ambiguous")
+    expect(mocks.submit).toHaveBeenCalledTimes(1)
+    hook.unmount()
   })
 
   it("uses principal and canonical origin scoped 24-hour records and expires invalid recovery before reading values", async () => {
@@ -516,6 +828,15 @@ describe("useStandaloneHtmlGeneration", () => {
     expect(first.result.current.phase).toBe("rejected")
     expect(storedValues()).toContain("Bounded source")
     expect(storedValues()).not.toContain(pendingReceipt.generation_id)
+
+    await act(async () => first.result.current.retryScope())
+    expect(first.result.current.phase).toBe("rejected")
+    expect(first.result.current.safeError).toBe("generation_request_invalid")
+    expect(first.result.current.draft.source).toBe("Bounded source")
+    expect(first.result.current.snapshot).toBeNull()
+    expect(first.result.current.recoveryAvailable).toBe(false)
+    expect(first.result.current.draftRecoveryAvailable).toBe(true)
+    expect(mocks.submit).toHaveBeenCalledTimes(1)
     first.unmount()
 
     const second = renderHook(() => first.module.useStandaloneHtmlGeneration({
@@ -715,6 +1036,44 @@ describe("useStandaloneHtmlGeneration", () => {
     expect(storedValues()).not.toContain("late-bfcache-presentation")
   })
 
+  it("commits a source-free submitted state during pagehide before a bfcache snapshot can retain it", async () => {
+    mocks.submit.mockResolvedValue(pendingReceipt)
+    mocks.status.mockReturnValue(new Promise(() => undefined))
+    const hook = await setup()
+    await act(async () => hook.result.current.submit())
+    await waitFor(() => expect(hook.result.current.snapshot).not.toBeNull())
+    const keys = hook.module.buildStandaloneHtmlStorageKeys({
+      serverOrigin: "https://tldw.example",
+      principalId: "42"
+    })
+
+    let observedSnapshot: unknown = "not observed"
+    let observedSource = "not observed"
+    let observedPhase = "not observed"
+    const observePagehide = () => {
+      observedSnapshot = hook.result.current.snapshot
+      observedSource = hook.result.current.draft.source
+      observedPhase = hook.result.current.phase
+    }
+    window.addEventListener("pagehide", observePagehide)
+    act(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })))
+    window.removeEventListener("pagehide", observePagehide)
+
+    expect(observedSnapshot).toBeNull()
+    expect(observedSource).toBe("")
+    expect(observedPhase).toBe("idle")
+    expect(sessionStorage.getItem(keys.draft)).toContain("Bounded source")
+    expect(sessionStorage.getItem(keys.resume)).not.toBeNull()
+
+    mocks.getCurrentUser.mockResolvedValue({ id: 84, username: "other", is_active: true })
+    act(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })))
+    await waitFor(() => expect(hook.result.current.scopeReady).toBe(true))
+    expect(hook.result.current.snapshot).toBeNull()
+    expect(hook.result.current.draft.source).toBe("")
+    expect(sessionStorage.getItem(keys.draft)).toBeNull()
+    expect(sessionStorage.getItem(keys.resume)).toBeNull()
+  })
+
   it("scrubs refs and ignores late POST completion after unmount", async () => {
     let resolveSubmit: ((value: unknown) => void) | undefined
     mocks.submit.mockReturnValue(new Promise((resolve) => { resolveSubmit = resolve }))
@@ -836,6 +1195,15 @@ describe("useStandaloneHtmlGeneration", () => {
     expect(result.current.snapshot).toBeNull()
     expect(result.current.recoveryAvailable).toBe(false)
     expect(refreshed).toHaveBeenCalledTimes(1)
+
+    await act(async () => result.current.retryScope())
+    expect(result.current.phase).toBe("configuration_changed")
+    expect(result.current.safeError).toBe("generation_configuration_changed")
+    expect(result.current.draft.source).toBe("Bounded source")
+    expect(result.current.snapshot).toBeNull()
+    expect(result.current.recoveryAvailable).toBe(false)
+    expect(result.current.draftRecoveryAvailable).toBe(true)
+    expect(mocks.submit).toHaveBeenCalledTimes(1)
   })
 
   it("bounds receipt progress and never renders an arbitrary error payload", async () => {

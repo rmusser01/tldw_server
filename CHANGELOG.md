@@ -10,6 +10,13 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
+- **Standalone HTML Presentations** - Added a default-off, owner-scoped
+  standalone presentation kind with closed-adapter Jobs generation, bounded
+  validation, strong-ETag explicit editing, immutable versions, fixed
+  attachment downloads, a no-preview WebUI workspace with a trusted text-only
+  outline, and source-free extension handoff. Existing structured Slides
+  behavior remains compatible.
+
 ### Changed
 
 ### Fixed

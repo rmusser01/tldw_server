@@ -2,7 +2,7 @@ import React from "react"
 import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/Common/Button"
-import { RouteLeavePrompt } from "@/entries/shared/router-utils"
+import { RouteLeavePrompt } from "@/entries/shared/route-leave-prompt"
 import { usePresentationPrincipalScope, type PresentationPrincipalBoundaryKind } from "@/hooks/usePresentationPrincipalScope"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useSlidesCapabilities } from "@/hooks/useSlidesCapabilities"
@@ -148,12 +148,17 @@ export const StandaloneHtmlWorkspace: React.FC<{
   kindAuthorityEpoch?: number | null
   kindAuthorityReleaseRequired?: boolean
   onKindAuthoritySettled?: (authorityEpoch: number, releaseSafe: boolean) => void
+  isKindAuthorityCurrent?: (
+    capturedAuthorityEpoch: number | null,
+    presentationId: string
+  ) => boolean
 }> = ({
   presentationId,
   kindAuthorityPending = false,
   kindAuthorityEpoch = null,
   kindAuthorityReleaseRequired = false,
-  onKindAuthoritySettled
+  onKindAuthoritySettled,
+  isKindAuthorityCurrent
 }) => {
   const navigate = useNavigate()
   const online = useServerOnline()
@@ -207,10 +212,23 @@ export const StandaloneHtmlWorkspace: React.FC<{
   const [confirmServerDiscard, setConfirmServerDiscard] = React.useState(false)
   const [authoritySettlementReady, setAuthoritySettlementReady] = React.useState(true)
   const [authorityReleaseReady, setAuthorityReleaseReady] = React.useState(true)
+  const codeTabRef = React.useRef<HTMLButtonElement | null>(null)
+  const outlineTabRef = React.useRef<HTMLButtonElement | null>(null)
   const codeTabId = React.useId()
   const outlineTabId = React.useId()
   const codePanelId = React.useId()
   const outlinePanelId = React.useId()
+
+  const handleTabKeyDown = React.useCallback((
+    event: React.KeyboardEvent<HTMLButtonElement>
+  ) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+    event.preventDefault()
+    const nextTab = activeTab === "code" ? "outline" : "code"
+    const nextTabRef = nextTab === "code" ? codeTabRef : outlineTabRef
+    setActiveTab(nextTab)
+    nextTabRef.current?.focus()
+  }, [activeTab])
 
   const workspaceStateRef = React.useRef({ title, saveStatus, message, recovery })
   workspaceStateRef.current = { title, saveStatus, message, recovery }
@@ -450,6 +468,18 @@ export const StandaloneHtmlWorkspace: React.FC<{
       recoveryScopeKey
     ]
   )
+
+  const flushDraftAuthority = React.useCallback(() => {
+    const authority = readDraftAuthority()
+    if (!authority) return
+    const preflight = preflightStandaloneHtmlSource(authority.source)
+    if (preflight.ok === false) return
+    if (authority.source === authority.base.acceptedSource.source) {
+      clearRecoveryForScope(authority.scope)
+      return
+    }
+    writeRecoveryFor(authority.scope, authority.base, { source: authority.source })
+  }, [clearRecoveryForScope, readDraftAuthority, writeRecoveryFor])
 
   const quarantineActive = React.useCallback(() => {
     const scope = scopeRef.current
@@ -853,10 +883,12 @@ export const StandaloneHtmlWorkspace: React.FC<{
         operationEpochRef.current === epoch &&
         scopeRef.current?.principalScope === scope.principalScope &&
         isReadCapabilitySettled(capabilities.status) &&
-        capabilities.canReadStandalone
+        capabilities.canReadStandalone &&
+        (!isKindAuthorityCurrent ||
+          isKindAuthorityCurrent(kindAuthorityEpoch, presentationId))
       )
     },
-    []
+    [isKindAuthorityCurrent, kindAuthorityEpoch, presentationId]
   )
 
   const capabilityReadReady =
@@ -963,6 +995,12 @@ export const StandaloneHtmlWorkspace: React.FC<{
       }
       return
     }
+    if (
+      isKindAuthorityCurrent &&
+      !isKindAuthorityCurrent(kindAuthorityEpoch, presentationId)
+    ) {
+      return
+    }
 
     scopeRef.current = scope
     lastTrustedScopeRef.current = scope
@@ -979,6 +1017,12 @@ export const StandaloneHtmlWorkspace: React.FC<{
     void (async () => {
       let detail: PresentationDetailResult | StandalonePresentationDetailResult | null = null
       try {
+        if (
+          isKindAuthorityCurrent &&
+          !isKindAuthorityCurrent(kindAuthorityEpoch, presentationId)
+        ) {
+          return
+        }
         detail = await tldwClient.getPresentation(presentationId, {
           abortSignal: controller.signal
         })
@@ -1053,11 +1097,13 @@ export const StandaloneHtmlWorkspace: React.FC<{
     markRecoveryUnavailable,
     kindAuthorityPending,
     kindAuthorityReleaseRequired,
+    kindAuthorityEpoch,
+    isKindAuthorityCurrent,
     online,
     operationIsCurrent,
     persistCurrentDraft,
     presentationId,
-    principal.scope?.principalScope,
+    principal.scope,
     principal.status,
     publishAccepted,
     publishRecoveryAvailability,
@@ -1392,17 +1438,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
     }
     const pagehide = () => {
       try {
-        const authority = readDraftAuthority()
-        if (authority) {
-          const preflight = preflightStandaloneHtmlSource(authority.source)
-          if (preflight.ok) {
-            if (authority.source === authority.base.acceptedSource.source) {
-              clearRecoveryForScope(authority.scope)
-            } else {
-              writeRecoveryFor(authority.scope, authority.base, { source: authority.source })
-            }
-          }
-        }
+        flushDraftAuthority()
       } finally {
         scrubActive(false)
       }
@@ -1413,28 +1449,32 @@ export const StandaloneHtmlWorkspace: React.FC<{
       window.removeEventListener("beforeunload", beforeUnload)
       window.removeEventListener("pagehide", pagehide)
     }
-  }, [clearRecoveryForScope, readDraftAuthority, scrubActive, writeRecoveryFor])
+  }, [flushDraftAuthority, readDraftAuthority, scrubActive])
 
   React.useEffect(() => {
     mountedRef.current = true
     return () => {
-      mountedRef.current = false
-      workspaceStateRef.current = {
-        title: "Standalone HTML presentation",
-        saveStatus: "Saved",
-        message: null,
-        recovery: null
+      try {
+        flushDraftAuthority()
+      } finally {
+        mountedRef.current = false
+        workspaceStateRef.current = {
+          title: "Standalone HTML presentation",
+          saveStatus: "Saved",
+          message: null,
+          recovery: null
+        }
+        stopOwnedWork()
+        quarantineRef.current = null
+        acceptedRef.current = null
+        baseRef.current = null
+        scopeRef.current = null
+        lastTrustedScopeRef.current = null
+        latestPreflightCandidateRef.current = null
+        pendingCandidateRef.current = null
       }
-      stopOwnedWork()
-      quarantineRef.current = null
-      acceptedRef.current = null
-      baseRef.current = null
-      scopeRef.current = null
-      lastTrustedScopeRef.current = null
-      latestPreflightCandidateRef.current = null
-      pendingCandidateRef.current = null
     }
-  }, [stopOwnedWork])
+  }, [flushDraftAuthority, stopOwnedWork])
 
   const renderWorkspaceShell = (content: React.ReactNode) => (
     <>
@@ -1695,23 +1735,29 @@ export const StandaloneHtmlWorkspace: React.FC<{
 
       <div role="tablist" aria-label="Standalone HTML workspace views" className="flex gap-2 md:hidden">
         <button
+          ref={codeTabRef}
           id={codeTabId}
           type="button"
           role="tab"
           aria-controls={codePanelId}
           aria-selected={activeTab === "code"}
+          tabIndex={activeTab === "code" ? 0 : -1}
           onClick={() => setActiveTab("code")}
+          onKeyDown={handleTabKeyDown}
           className="min-h-[44px] rounded-md px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           Code
         </button>
         <button
+          ref={outlineTabRef}
           id={outlineTabId}
           type="button"
           role="tab"
           aria-controls={outlinePanelId}
           aria-selected={activeTab === "outline"}
+          tabIndex={activeTab === "outline" ? 0 : -1}
           onClick={() => setActiveTab("outline")}
+          onKeyDown={handleTabKeyDown}
           className="min-h-[44px] rounded-md px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           Outline
