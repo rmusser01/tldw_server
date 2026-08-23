@@ -1,10 +1,10 @@
 ---
 id: TASK-12126
 title: Implement Chat Macros v1 and wrapup command
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-08-23 17:32
+updated_date: 2026-08-23 18:06
 labels: []
 dependencies: []
 documentation:
@@ -40,10 +40,10 @@ Implement the approved Chat Macros v1 system and built-in /wrapup command accord
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Backend Chat_Macros module supports built-in /wrapup, user macro storage, settings/output profiles, run records, branch records, and validation.
-- [ ] #2 Macro invocation works from chat/workspace surfaces with chat-native branch execution, background Jobs mode, cancellation, final result persistence, and idempotent post-back.
-- [ ] #3 WebUI exposes minimal macro settings/manager controls and renders macro status/final output/run detail states.
-- [ ] #4 Focused backend/frontend tests pass and Bandit is run on touched backend scope.
+- [x] #1 Backend Chat_Macros module supports built-in /wrapup, user macro storage, settings/output profiles, run records, branch records, and validation.
+- [x] #2 Macro invocation works from chat/workspace surfaces with chat-native branch execution, background Jobs mode, cancellation, final result persistence, and idempotent post-back.
+- [x] #3 WebUI exposes minimal macro settings/manager controls and renders macro status/final output/run detail states.
+- [x] #4 Focused backend/frontend tests pass and Bandit is run on touched backend scope.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -96,16 +96,16 @@ Final post-rebase local verification (2026-08-23): 189 passed, 9 skipped across 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented Chat Macros v1 and the built-in `/wrapup` workflow across the backend, Jobs runtime, chat/workspace UI, settings UI, persistence, and documentation. The design uses background Jobs for durable multi-branch execution and cancellation, file-backed user definitions for editable/portable macro bundles, database run records for recovery and status, bounded/redacted context snapshots for privacy, and idempotent final post-back for retry safety. Rebased PR #2618 onto `dev` at 7a536e5d7a, addressed all Qodo/Gemini/CodeRabbit findings, and resolved every review thread. Final local verification: backend affected suite 186 passed and 9 skipped; frontend affected suite 42 passed; Ruff, ESLint, Bandit, and git diff --check passed. The requester supplied the required human-authored Change summary on PR #2618.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Implementation plan followed or deviations documented
-- [ ] #3 Focused backend tests passing
-- [ ] #4 Focused frontend tests passing
-- [ ] #5 Bandit run for touched backend scope and new findings fixed
-- [ ] #6 Documentation updated
-- [ ] #7 Final summary added
-- [ ] #8 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Implementation plan followed or deviations documented
+- [x] #3 Focused backend tests passing
+- [x] #4 Focused frontend tests passing
+- [x] #5 Bandit run for touched backend scope and new findings fixed
+- [x] #6 Documentation updated
+- [x] #7 Final summary added
+- [x] #8 Known skips or blockers documented
 <!-- DOD:END -->
