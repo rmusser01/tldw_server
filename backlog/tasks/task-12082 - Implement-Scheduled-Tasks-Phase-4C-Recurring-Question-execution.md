@@ -1,10 +1,10 @@
 ---
 id: TASK-12082
 title: Implement Scheduled Tasks Phase 4C Recurring Question execution
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-08-24 04:14
+updated_date: 2026-08-24 06:01
 labels:
 - scheduled-tasks
 - phase-4c
@@ -50,13 +50,13 @@ Implement the approved API-first Scheduled Tasks Phase 4C Recurring Question exe
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Recurring Question definitions support preview, create/update, inspect, run now, scheduled execution, mark solved, reopen, review state, retention metadata, and durable run/result history through API-first contracts.
-- [ ] #2 Every execution attempt creates a run record; surfaced findings and attention-worthy failures create normalized result records; routine no-match runs remain discoverable in run history without polluting Home.
-- [ ] #3 Execution uses Jobs for queueing/worker lifecycle and APScheduler only for due schedule claims, with reconciliation for divergent Jobs/run state.
-- [ ] #4 WebUI and extension behave as reference/main enterprise API clients, including Home surfacing and `/scheduled-tasks` monitoring, without defining product boundaries in UI-only logic.
-- [ ] #5 Watchlists functionality and UX remain unchanged as a separate persona/job; GitHub and YouTube are treated only as examples, not privileged source assumptions.
-- [ ] #6 Storage, API, service, worker, scheduler, frontend client, UI, retention/privacy, accessibility, and Watchlists compatibility tests cover the implemented behavior.
-- [ ] #7 Bandit and targeted backend/frontend verification are run before completion, with any skips documented.
+- [x] #1 Recurring Question definitions support preview, create/update, inspect, run now, scheduled execution, mark solved, reopen, review state, retention metadata, and durable run/result history through API-first contracts.
+- [x] #2 Every execution attempt creates a run record; surfaced findings and attention-worthy failures create normalized result records; routine no-match runs remain discoverable in run history without polluting Home.
+- [x] #3 Execution uses Jobs for queueing/worker lifecycle and APScheduler only for due schedule claims, with reconciliation for divergent Jobs/run state.
+- [x] #4 WebUI and extension behave as reference/main enterprise API clients, including Home surfacing and `/scheduled-tasks` monitoring, without defining product boundaries in UI-only logic.
+- [x] #5 Watchlists functionality and UX remain unchanged as a separate persona/job; GitHub and YouTube are treated only as examples, not privileged source assumptions.
+- [x] #6 Storage, API, service, worker, scheduler, frontend client, UI, retention/privacy, accessibility, and Watchlists compatibility tests cover the implemented behavior.
+- [x] #7 Bandit and targeted backend/frontend verification are run before completion, with any skips documented.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -92,17 +92,16 @@ Stage 7 retention/privacy/accessibility hardening added repository pruning for o
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stage 7 verification is recorded in Implementation Notes. Final PR summary pending.
+Implemented Scheduled Tasks Phase 4C Recurring Question execution and merged it into dev in PR #2566 (merge commit 4958cfed65). The API-first slice includes definition preview/lifecycle, manual and scheduled Jobs execution, APScheduler due-run claims, durable run/result history, result review, mark solved/reopen, retention/privacy controls, /scheduled-tasks monitoring, and Home Automation Inbox surfacing while preserving Watchlists as a separate workflow. Final review remediation resolved all 28 PR threads. Verification passed: 115 focused backend tests, 94 focused frontend tests, git diff --check, and Bandit with zero findings. WebUI smoke remained the documented skip; route and component coverage exercised the relevant surfaces.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Run History
