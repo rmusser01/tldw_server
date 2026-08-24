@@ -1,5 +1,22 @@
-import os
 import pytest
+
+
+def _install_request_user_override(app, *, permissions=None, roles=None, is_admin=False):
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+
+    async def _override_user():
+        return User(
+            id=42,
+            username="command-audit-user",
+            email=None,
+            is_active=True,
+            roles=list(roles or []),
+            permissions=list(permissions or []),
+            is_admin=is_admin,
+        )
+
+    app.dependency_overrides[get_request_user] = _override_user
+    return get_request_user
 
 
 @pytest.mark.integration
@@ -104,6 +121,11 @@ def test_chat_command_rbac_enforcement(monkeypatch, test_client, auth_headers):
     # Force multi-user mode in router and steer permission checks
     from tldw_Server_API.app.core.Chat import command_router
     monkeypatch.setattr(command_router, "is_single_user_mode", lambda: False)
+    user_override_key = _install_request_user_override(
+        test_client.app,
+        is_admin=False,
+        permissions=[],
+    )
 
     captured = {"events": []}
     class DummyAudit:
@@ -119,18 +141,21 @@ def test_chat_command_rbac_enforcement(monkeypatch, test_client, auth_headers):
 
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
 
-    # Deny: no permission
-    monkeypatch.setattr(command_router, "_user_has_permission", lambda uid, perm: False)
-    _ = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
-    denied_found = any(e.get("kwargs", {}).get("action") == "chat.command.executed" and (e.get("kwargs", {}).get("metadata", {}) or {}).get("result_ok") is False for e in captured["events"])
-    assert denied_found
+    try:
+        # Deny: no permission
+        monkeypatch.setattr(command_router, "_user_has_permission", lambda uid, perm: False)
+        _ = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+        denied_found = any(e.get("kwargs", {}).get("action") == "chat.command.executed" and (e.get("kwargs", {}).get("metadata", {}) or {}).get("result_ok") is False for e in captured["events"])
+        assert denied_found
 
-    # Allow: grant permission
-    captured["events"].clear()
-    monkeypatch.setattr(command_router, "_user_has_permission", lambda uid, perm: True)
-    _ = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
-    allowed_found = any(e.get("kwargs", {}).get("action") == "chat.command.executed" and (e.get("kwargs", {}).get("metadata", {}) or {}).get("result_ok") is True for e in captured["events"])
-    assert allowed_found
+        # Allow: grant permission
+        captured["events"].clear()
+        monkeypatch.setattr(command_router, "_user_has_permission", lambda uid, perm: True)
+        _ = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+        allowed_found = any(e.get("kwargs", {}).get("action") == "chat.command.executed" and (e.get("kwargs", {}).get("metadata", {}) or {}).get("result_ok") is True for e in captured["events"])
+        assert allowed_found
+    finally:
+        test_client.app.dependency_overrides.pop(user_override_key, None)
 
 
 @pytest.mark.integration

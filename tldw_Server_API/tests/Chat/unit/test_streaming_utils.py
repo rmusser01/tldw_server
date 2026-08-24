@@ -15,12 +15,82 @@ from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import streaming_utils
 from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+from tldw_Server_API.app.core.Chat.streaming_pipeline import (
+    StreamingPipelineRequest,
+    create_chat_streaming_response,
+)
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     HEARTBEAT_INTERVAL,
     STREAMING_IDLE_TIMEOUT,
     StreamingResponseHandler,
     create_streaming_response_with_timeout,
 )
+
+
+def test_create_chat_streaming_response_forwards_request_fields():
+    stream = object()
+    save_callback = object()
+    finalize_callback = object()
+    text_transform = object()
+    before_success_callback = object()
+    continuation_metadata = {"parent_message_id": "msg-1"}
+    captured = {}
+
+    def fake_stream_factory(**kwargs):
+        captured.update(kwargs)
+        return "stream-result"
+
+    result = create_chat_streaming_response(
+        request=StreamingPipelineRequest(
+            stream=stream,
+            conversation_id="conv-1",
+            model_name="model-1",
+            save_callback=save_callback,
+            finalize_callback=finalize_callback,
+            idle_timeout=12.5,
+            heartbeat_interval=3.0,
+            text_transform=text_transform,
+            before_success_callback=before_success_callback,
+            system_message_id="sys-1",
+            continuation_metadata=continuation_metadata,
+        ),
+        stream_factory=fake_stream_factory,
+    )
+
+    assert result == "stream-result"
+    assert captured == {
+        "stream": stream,
+        "conversation_id": "conv-1",
+        "model_name": "model-1",
+        "save_callback": save_callback,
+        "finalize_callback": finalize_callback,
+        "idle_timeout": 12.5,
+        "heartbeat_interval": 3.0,
+        "text_transform": text_transform,
+        "before_success_callback": before_success_callback,
+        "system_message_id": "sys-1",
+        "continuation_metadata": continuation_metadata,
+    }
+
+
+def test_create_chat_streaming_response_preserves_factory_defaults():
+    captured = {}
+
+    def fake_stream_factory(**kwargs):
+        captured.update(kwargs)
+        return "stream-result"
+
+    result = create_chat_streaming_response(
+        request=StreamingPipelineRequest(
+            stream=object(),
+            conversation_id="conv-1",
+            model_name="model-1",
+        ),
+        stream_factory=fake_stream_factory,
+    )
+
+    assert result == "stream-result"
+    assert set(captured) == {"stream", "conversation_id", "model_name"}
 
 
 async def _collect_handler_wire(handler, stream) -> str:
@@ -31,6 +101,32 @@ async def _collect_handler_wire(handler, stream) -> str:
 
 async def _collect_async_items(stream) -> list[object]:
     return [item async for item in stream]
+
+
+def test_trusted_local_stream_error_frame_rejects_unknown_code():
+    with pytest.raises(ValueError, match="Unsupported local stream error code"):
+        streaming_utils.trusted_local_stream_error_frame("provider_controlled_code")
+
+
+@pytest.mark.asyncio
+async def test_trusted_local_stream_error_frame_is_forwarded_once():
+    handler = StreamingResponseHandler("conv_local_error", "gpt-4")
+    frame = streaming_utils.trusted_local_stream_error_frame(
+        "unsupported_multi_choice_tool_autoexec"
+    )
+
+    async def local_stream():
+        yield frame
+        yield "provider output after local terminal error"
+
+    messages = [
+        message async for message in handler.safe_stream_generator(local_stream())
+    ]
+
+    assert messages.count(frame) == 1
+    assert all("provider output after local terminal error" not in message for message in messages)
+    assert handler.error_occurred is True
+    assert handler.full_response == []
 
 
 class TestStreamingResponseHandler:

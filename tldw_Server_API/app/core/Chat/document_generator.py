@@ -25,7 +25,6 @@ Key Adaptations from Single-User:
 import asyncio
 import base64
 import json
-import sqlite3
 import time
 from datetime import datetime
 from enum import Enum
@@ -54,7 +53,6 @@ _DOCGEN_NONCRITICAL_EXCEPTIONS = (
     ConnectionError,
     TimeoutError,
     json.JSONDecodeError,
-    sqlite3.Error,
     ChatAPIError,
     CharactersRAGDBError,
 )
@@ -214,8 +212,21 @@ class DocumentGeneratorService:
                         max_tokens INTEGER DEFAULT 2000,
                         is_active BOOLEAN DEFAULT 1,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                self._repair_user_prompts_schema(conn)
+
+                # Create legacy custom prompt table used by save_prompt_config/get_prompt_config.
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS user_prompt_configs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
+                        document_type TEXT NOT NULL,
+                        custom_prompt TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(document_type, is_active)
+                        UNIQUE(user_id, document_type)
                     )
                 """)
 
@@ -247,6 +258,90 @@ class DocumentGeneratorService:
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to initialize document generator tables: {e}")
             raise CharactersRAGDBError(f"Failed to initialize document generator tables: {e}") from e
+
+    def _repair_user_prompts_schema(self, conn) -> None:
+        """Migrate legacy prompt tables so inactive prompt history is not unique-limited."""
+        cursor = conn.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'user_prompts'
+            """
+        )
+        row = cursor.fetchone()
+        table_sql = row[0] if row else ""
+        compact_sql = "".join(str(table_sql).lower().split())
+
+        if "unique(document_type,is_active)" in compact_sql:
+            logger.info("Repairing legacy user_prompts uniqueness constraint")
+            conn.execute("DROP TABLE IF EXISTS user_prompts_new")
+            conn.execute("""
+                CREATE TABLE user_prompts_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_type TEXT NOT NULL,
+                    system_prompt TEXT NOT NULL,
+                    user_prompt TEXT NOT NULL,
+                    temperature REAL DEFAULT 0.7,
+                    max_tokens INTEGER DEFAULT 2000,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                INSERT INTO user_prompts_new (
+                    id,
+                    document_type,
+                    system_prompt,
+                    user_prompt,
+                    temperature,
+                    max_tokens,
+                    is_active,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    id,
+                    document_type,
+                    system_prompt,
+                    user_prompt,
+                    temperature,
+                    max_tokens,
+                    is_active,
+                    created_at,
+                    updated_at
+                FROM user_prompts
+            """)
+            conn.execute("""
+                UPDATE user_prompts_new
+                SET is_active = 0
+                WHERE is_active = 1
+                  AND id NOT IN (
+                      SELECT MAX(id)
+                      FROM user_prompts_new
+                      WHERE is_active = 1
+                      GROUP BY document_type
+                  )
+            """)
+            conn.execute("DROP TABLE user_prompts")
+            conn.execute("ALTER TABLE user_prompts_new RENAME TO user_prompts")
+
+        conn.execute("""
+            UPDATE user_prompts
+            SET is_active = 0
+            WHERE is_active = 1
+              AND id NOT IN (
+                  SELECT MAX(id)
+                  FROM user_prompts
+                  WHERE is_active = 1
+                  GROUP BY document_type
+              )
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_active_document_type
+            ON user_prompts(document_type)
+            WHERE is_active = 1
+        """)
 
     def get_conversation_context(
         self,
@@ -446,54 +541,6 @@ class DocumentGeneratorService:
         self._prompt_cache[document_type] = default_config
         return default_config
 
-    def _save_prompt_rows(self, prompt_rows: list[tuple[DocumentType, str, str, float, int]]) -> bool:
-        """Replace prompt rows for document types in one transaction."""
-        if not prompt_rows:
-            return True
-
-        try:
-            with self.db.get_connection() as conn:
-                try:
-                    for document_type, *_ in prompt_rows:
-                        conn.execute(
-                            "DELETE FROM user_prompts WHERE document_type = ?",
-                            (document_type.value,),
-                        )
-
-                    conn.executemany(
-                        """
-                        INSERT INTO user_prompts
-                        (document_type, system_prompt, user_prompt, temperature, max_tokens, is_active)
-                        VALUES (?, ?, ?, ?, ?, 1)
-                        """,
-                        [
-                            (
-                                document_type.value,
-                                system_prompt,
-                                user_prompt,
-                                temperature,
-                                max_tokens,
-                            )
-                            for document_type, system_prompt, user_prompt, temperature, max_tokens
-                            in prompt_rows
-                        ],
-                    )
-                    conn.commit()
-                except _DOCGEN_NONCRITICAL_EXCEPTIONS:
-                    try:
-                        conn.rollback()
-                    except _DOCGEN_NONCRITICAL_EXCEPTIONS as rollback_err:
-                        logger.debug(f"Prompt config rollback failed: {rollback_err}")
-                    raise
-
-            for document_type, *_ in prompt_rows:
-                self._prompt_cache.pop(document_type, None)
-            return True
-
-        except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to save prompt config rows: {e}")
-            return False
-
     def save_user_prompt_config(
         self,
         document_type: DocumentType,
@@ -516,23 +563,30 @@ class DocumentGeneratorService:
             True if saved successfully
         """
         try:
-            normalized_doc_type = (
-                document_type
-                if isinstance(document_type, DocumentType)
-                else DocumentType(str(document_type))
-            )
-            saved = self._save_prompt_rows([
-                (
-                    normalized_doc_type,
-                    str(system_prompt),
-                    str(user_prompt),
-                    float(temperature),
-                    int(max_tokens),
+            with self.db.get_connection() as conn:
+                # Deactivate existing active prompt
+                conn.execute(
+                    "UPDATE user_prompts SET is_active = 0 WHERE document_type = ? AND is_active = 1",
+                    (document_type.value,)
                 )
-            ])
-            if saved:
-                logger.info(f"Saved user prompt config for {normalized_doc_type.value}")
-            return saved
+
+                # Insert new prompt
+                conn.execute(
+                    """
+                    INSERT INTO user_prompts
+                    (document_type, system_prompt, user_prompt, temperature, max_tokens, is_active)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                    """,
+                    (document_type.value, system_prompt, user_prompt, temperature, max_tokens)
+                )
+                conn.commit()
+
+                # Clear cache
+                if document_type in self._prompt_cache:
+                    del self._prompt_cache[document_type]
+
+                logger.info(f"Saved user prompt config for {document_type.value}")
+                return True
 
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to save user prompt config: {e}")
@@ -1282,7 +1336,7 @@ class DocumentGeneratorService:
 
     def save_prompt_config(self, config: dict[DocumentType, str]) -> bool:
         """
-        Save legacy custom prompt configuration.
+        Save custom prompt configuration.
 
         Args:
             config: Dictionary mapping document types to custom prompts
@@ -1291,21 +1345,18 @@ class DocumentGeneratorService:
             True if saved successfully
         """
         try:
-            prompt_rows_by_type: dict[DocumentType, tuple[DocumentType, str, str, float, int]] = {}
-            for doc_type, prompt in config.items():
-                normalized_doc_type = doc_type if isinstance(doc_type, DocumentType) else DocumentType(str(doc_type))
-                default_prompt = self.DEFAULT_PROMPTS.get(
-                    normalized_doc_type,
-                    self.DEFAULT_PROMPTS[DocumentType.SUMMARY],
-                )
-                prompt_rows_by_type[normalized_doc_type] = (
-                    normalized_doc_type,
-                    str(default_prompt["system"]),
-                    str(prompt),
-                    float(default_prompt.get("temperature", 0.7)),
-                    int(default_prompt.get("max_tokens", 2000)),
-                )
-            return self._save_prompt_rows(list(prompt_rows_by_type.values()))
+            with self.db.get_connection() as conn:
+                for doc_type, prompt in config.items():
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO user_prompt_configs
+                        (user_id, document_type, custom_prompt, updated_at)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (self.user_id, doc_type.value, prompt)
+                    )
+                conn.commit()
+                return True
 
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error saving prompt config: {e}")
@@ -1325,17 +1376,14 @@ class DocumentGeneratorService:
             with self.db.get_connection() as conn:
                 cursor = conn.execute(
                     """
-                    SELECT user_prompt FROM user_prompts
-                    WHERE document_type = ? AND is_active = 1
+                    SELECT custom_prompt FROM user_prompt_configs
+                    WHERE user_id = ? AND document_type = ?
                     """,
-                    (document_type.value,)
+                    (self.user_id, document_type.value)
                 )
                 row = cursor.fetchone()
                 if row:
-                    try:
-                        return row["user_prompt"]
-                    except (AttributeError, TypeError, KeyError, IndexError):
-                        return row[0]
+                    return row['custom_prompt']
                 return None
 
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:

@@ -73,8 +73,23 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
 )
+from tldw_Server_API.app.core.Chat.chat_logging import (
+    exception_summary,
+    prompt_template_summary,
+    text_summary,
+)
 from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
+from tldw_Server_API.app.core.Chat.completion_pipeline import ChatCompletionPipeline
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
+from tldw_Server_API.app.core.Chat.moderation_pipeline import (
+    OutputModerationRuntime,
+    apply_output_safety_to_choices,
+)
+from tldw_Server_API.app.core.Chat.persistence_service import (
+    build_assistant_message_payload,
+    save_assistant_message,
+    save_tool_messages,
+)
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     PromptCostGuardrailDecision,
@@ -92,9 +107,22 @@ from tldw_Server_API.app.core.Chat.request_queue import (
     RequestPriority,
     get_request_queue,
 )
+from tldw_Server_API.app.core.Chat.response_processor import (
+    NonStreamChoice,
+    collect_non_stream_choices,
+    estimate_completion_tokens_from_choices,
+    extract_text_from_content,
+    inject_assistant_name_into_choices,
+    primary_choice,
+    validate_structured_choices,
+)
 from tldw_Server_API.app.core.Chat.run_first_presentation import (
     present_chat_tools,
     tool_names_from_definitions,
+)
+from tldw_Server_API.app.core.Chat.streaming_pipeline import (
+    StreamingPipelineRequest,
+    create_chat_streaming_response,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
@@ -109,6 +137,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_allows_replay,
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
+    trusted_local_stream_error_frame,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
@@ -117,6 +146,10 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
+from tldw_Server_API.app.core.Chat.tool_execution_service import (
+    UnsupportedMultiChoiceToolAutoexecError,
+    ensure_tool_autoexec_supports_request,
+)
 from tldw_Server_API.app.core.config import (
     load_comprehensive_config,
     resolve_chat_run_first_presentation_variant,
@@ -1424,11 +1457,19 @@ def _load_models_with_case_cached(provider: str) -> list[str]:
                 return list(prov_block.keys())
     except (OSError, ValueError, KeyError, AttributeError) as _e:
         # Expected file/format issues: fall back to normalized catalog
-        logger.debug(f"Model catalog raw load fallback for provider '{provider}': {_e}")
+        logger.debug(
+            "Model catalog raw load fallback for provider '{}': {}",
+            provider,
+            exception_summary(_e),
+        )
     except _CHAT_NONCRITICAL_EXCEPTIONS as _ue:
         # Unexpected exceptions should be visible in production logs
         pass
-        logger.warning(f"Unexpected error loading model catalog for provider '{provider}': {_ue}")
+        logger.warning(
+            "Unexpected error loading model catalog for provider '{}': {}",
+            provider,
+            exception_summary(_ue),
+        )
 
     # Fallback: use the normalized list (lowercase keys)
     return list_provider_models(provider) or []
@@ -1455,11 +1496,11 @@ def _load_alias_overrides_cached() -> dict[str, dict[str, str]]:
                     if isinstance(v, dict)
                 }
     except (ValueError, TypeError) as _e:
-        logger.debug(f"CHAT_MODEL_ALIAS_OVERRIDES parse failed: {_e}")
+        logger.debug("CHAT_MODEL_ALIAS_OVERRIDES parse failed: {}", exception_summary(_e))
     except _CHAT_NONCRITICAL_EXCEPTIONS as _ue:
         # Unexpected exceptions should be visible in production logs
         pass
-        logger.warning(f"Unexpected error parsing CHAT_MODEL_ALIAS_OVERRIDES: {_ue}")
+        logger.warning("Unexpected error parsing CHAT_MODEL_ALIAS_OVERRIDES: {}", exception_summary(_ue))
 
     # 2) File keys in pricing catalog
     try:
@@ -1475,11 +1516,11 @@ def _load_alias_overrides_cached() -> dict[str, dict[str, str]]:
                         if isinstance(v, dict)
                     }
     except (OSError, ValueError, KeyError, AttributeError) as _e:
-        logger.debug(f"Alias overrides load fallback: {_e}")
+        logger.debug("Alias overrides load fallback: {}", exception_summary(_e))
     except _CHAT_NONCRITICAL_EXCEPTIONS as _ue:
         # Unexpected exceptions should be visible in production logs
         pass
-        logger.warning(f"Unexpected error loading alias overrides: {_ue}")
+        logger.warning("Unexpected error loading alias overrides: {}", exception_summary(_ue))
 
     # 3) Test-friendly defaults (preserve legacy behavior under pytest only)
     if os.getenv("PYTEST_CURRENT_TEST"):
@@ -1845,7 +1886,10 @@ def normalize_request_provider_and_model(
         pass
     except _CHAT_NONCRITICAL_EXCEPTIONS as _unexpected:
         # Unexpected exceptions should be visible in production logs
-        logger.warning(f"Unexpected error during model alias resolution: {_unexpected}")
+        logger.warning(
+            "Unexpected error during model alias resolution: {}",
+            exception_summary(_unexpected),
+        )
     provider = normalize_catalog_provider_for_chat(
         ((api_provider or default_provider) or "").strip().lower()
     )
@@ -2040,7 +2084,7 @@ def resolve_provider_api_key(
     except _CHAT_NONCRITICAL_EXCEPTIONS as _err:
         # API key loading errors should be visible in production
         pass
-        logger.warning(f"resolve_provider_api_key failed to load dynamic keys: {_err}")
+        logger.warning("resolve_provider_api_key failed to load dynamic keys: {}", exception_summary(_err))
         dynamic_keys = {}
 
     module_keys: dict[str, str | None] = {}
@@ -2051,7 +2095,10 @@ def resolve_provider_api_key(
                 module_keys.update(schema_keys)
                 debug_info["module_sources"].append("chat_request_schemas")
         except _CHAT_NONCRITICAL_EXCEPTIONS as _schema_err:
-            logger.warning(f"resolve_provider_api_key skipped schema module keys: {_schema_err}")
+            logger.warning(
+                "resolve_provider_api_key skipped schema module keys: {}",
+                exception_summary(_schema_err),
+            )
         try:
             from tldw_Server_API.app.api.v1.endpoints import chat as _chat_mod  # type: ignore
 
@@ -2061,7 +2108,10 @@ def resolve_provider_api_key(
                 module_keys.update(endpoint_keys)
                 debug_info["module_sources"].append("chat_endpoint")
         except _CHAT_NONCRITICAL_EXCEPTIONS as _chat_err:
-            logger.warning(f"resolve_provider_api_key skipped endpoint module keys: {_chat_err}")
+            logger.warning(
+                "resolve_provider_api_key skipped endpoint module keys: {}",
+                exception_summary(_chat_err),
+            )
 
     module_override_present = use_module_overrides and provider_key in module_keys
     override_value = None
@@ -2897,38 +2947,9 @@ def _estimate_tokens_from_messages(messages: list[dict[str, Any]]) -> int:
         return 1
 
 
-def _extract_text_from_content(content: Any) -> str:
-    """Extract text from a message content payload (string or list parts)."""
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for part in content:
-            if isinstance(part, str):
-                if part:
-                    parts.append(part)
-                continue
-            p_type = None
-            p_text = None
-            if isinstance(part, dict):
-                p_type = part.get("type")
-                p_text = part.get("text")
-            else:
-                try:
-                    p_type = getattr(part, "type", None)
-                    p_text = getattr(part, "text", None)
-                except _CHAT_NONCRITICAL_EXCEPTIONS:
-                    p_type = None
-                    p_text = None
-            if p_type == "text" and isinstance(p_text, str) and p_text:
-                parts.append(p_text)
-        return "\n".join(parts)
-    try:
-        return str(content)
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return ""
+def _extract_text_from_content(content: Any | None) -> str:
+    """Delegate response content extraction to the response processor."""
+    return extract_text_from_content(content)
 
 
 _NONSTREAM_REASONING_FIELDS = (
@@ -3308,7 +3329,7 @@ def build_structured_http_exception(exc: StructuredGenerationError) -> HTTPExcep
 def _is_trusted_local_chat_http_exception(exc: BaseException) -> bool:
     """Return whether an HTTP error was created and bounded by this service."""
 
-    return (
+    return isinstance(exc, UnsupportedMultiChoiceToolAutoexecError) or (
         isinstance(exc, HTTPException)
         and trusted_local_chat_signal_kind(exc) is not None
     )
@@ -3361,25 +3382,19 @@ def _build_assistant_message_payload(
     *,
     character_card_for_context: dict[str, Any] | None,
     assistant_parent_message_id: str | None,
-    content: Any,
-    tool_calls: Any,
-    function_call: Any,
+    content: Any | None,
+    tool_calls: Any | None,
+    function_call: Any | None,
 ) -> dict[str, Any]:
-    """Build the persisted assistant message payload for the current turn."""
+    """Compatibility wrapper for tests/imports that use the old local helper."""
 
-    asst_name = sanitize_sender_name(
-        character_card_for_context.get("name") if character_card_for_context else None
+    return build_assistant_message_payload(
+        character_card_for_context=character_card_for_context,
+        assistant_parent_message_id=assistant_parent_message_id,
+        content=content,
+        tool_calls=tool_calls,
+        function_call=function_call,
     )
-    message_payload: dict[str, Any] = {"role": "assistant", "name": asst_name}
-    if assistant_parent_message_id:
-        message_payload["parent_message_id"] = assistant_parent_message_id
-    if content is not None:
-        message_payload["content"] = content
-    if tool_calls is not None:
-        message_payload["tool_calls"] = tool_calls
-    if function_call is not None:
-        message_payload["function_call"] = function_call
-    return message_payload
 
 
 async def write_mandatory_moderation_audit(
@@ -3449,7 +3464,7 @@ def _capture_moderation_review_item_safely(
             session_id=session_id,
         )
     except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Moderation review capture failed in chat service: {}: {}", type(exc).__name__, str(exc))
+        logger.warning("Moderation review capture failed in chat service: {}", exception_summary(exc))
 
 
 async def _capture_moderation_review_item_safely_async(**kwargs: Any) -> None:
@@ -3500,7 +3515,7 @@ async def moderate_input_messages(
                 dependent_user_id, eff_policy, chat_type=chat_type,
             )
         except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Guardian policy overlay skipped: {e}")
+            logger.debug("Guardian policy overlay skipped: {}", exception_summary(e))
         # Guardian notification dispatch: check supervised policies directly
         # and send notification to guardian if a rule triggers.
         # Also stores transparent rule_name for enriched block messages.
@@ -3525,7 +3540,7 @@ async def moderate_input_messages(
                 if _sup_result.notify_guardian and _sup_result.action != "pass":
                     dispatch_guardian_notification(_sup_result, dependent_user_id)
         except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Guardian notification dispatch skipped: {e}")
+            logger.debug("Guardian notification dispatch skipped: {}", exception_summary(e))
     conv_id = None
     try:
         conv_id = getattr(request_data, "conversation_id", None)
@@ -3556,7 +3571,7 @@ async def moderate_input_messages(
                     source_id=str(conv_id) if conv_id is not None else None,
                 )
         except _CHAT_NONCRITICAL_EXCEPTIONS as _e:
-            logger.debug(f"Topic monitoring (input) skipped: {_e}")
+            logger.debug("Topic monitoring (input) skipped: {}", exception_summary(_e))
 
         # Self-monitoring check (awareness/notifications)
         if self_monitoring_service and text:
@@ -3582,7 +3597,7 @@ async def moderate_input_messages(
             except HTTPException:
                 raise
             except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Self-monitoring check skipped: {e}")
+                logger.debug("Self-monitoring check skipped: {}", exception_summary(e))
 
         if not eff_policy.enabled or not eff_policy.input_enabled:
             return text
@@ -3695,7 +3710,7 @@ async def moderate_input_messages(
     except MandatoryAuditWriteError:
         raise
     except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"Moderation input processing error: {e}")
+        logger.warning("Moderation input processing error: {}", exception_summary(e))
 
 
 def _extract_tldw_continuation_spec(request_data: Any) -> tuple[str, str, str | None] | None:
@@ -3835,12 +3850,11 @@ async def build_context_and_messages(
         conversation_id=final_conversation_id,
     )
     if character_card:
-        system_prompt_preview = character_card.get("system_prompt")
-        if system_prompt_preview:
-            system_prompt_preview = system_prompt_preview[:50] + "..." if len(system_prompt_preview) > 50 else system_prompt_preview
-        else:
-            system_prompt_preview = "None"
-        logger.debug(f"Loaded assistant context: {character_card.get('name')} with system_prompt: {system_prompt_preview}")
+        logger.debug(
+            "Loaded assistant context name={} system_prompt_summary={}",
+            character_card.get("name"),
+            text_summary(character_card.get("system_prompt")),
+        )
 
     if character_card and character_db_id is not None:
         with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
@@ -4015,7 +4029,11 @@ async def build_context_and_messages(
                         "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}"}
                     })
                 except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Error encoding DB image for history (msg_id {db_msg.get('id')}): {e}")
+                    logger.warning(
+                        "Error encoding DB image for history msg_id={} error={}",
+                        db_msg.get("id"),
+                        exception_summary(e),
+                    )
             if msg_parts:
                 hist_entry = {"role": role}
                 if role == "tool" and len(msg_parts) == 1 and msg_parts[0].get("type") == "text":
@@ -4277,28 +4295,32 @@ def apply_prompt_templating(
 
     final_system_message: str | None = None
     logger.debug(
-        f"sys_msg_from_req: {sys_msg_from_req}, active_template: {active_template}, character: {character_card.get('name') if character_card else None}"
+        "Prompt templating inputs {}",
+        prompt_template_summary(
+            template_name=getattr(active_template, "name", None),
+            system_message=sys_msg_from_req,
+            payload_system_messages=system_msgs_from_payload,
+            request_system_messages=system_msgs_from_request,
+            character_name=character_card.get("name") if character_card else None,
+        ),
     )
     if active_template and active_template.system_message_template:
         final_system_message = apply_template_to_string(active_template.system_message_template, template_data)
         if not final_system_message and payload_system_message:
             final_system_message = payload_system_message
-            system_prompt_preview = final_system_message[:50] if final_system_message else ""
-            logger.debug(f"Template empty, using payload system message: {repr(system_prompt_preview)}...")
+            logger.debug("Template empty, using payload system message summary {}", text_summary(final_system_message))
         if not final_system_message and character_card and character_card.get("system_prompt"):
             final_system_message = character_card.get("system_prompt")
-            system_prompt_preview = final_system_message[:50] if final_system_message else ""
-            logger.debug(f"Template empty, using character system prompt: {repr(system_prompt_preview)}...")
+            logger.debug("Template empty, using character system prompt summary {}", text_summary(final_system_message))
     elif sys_msg_from_req:
         final_system_message = sys_msg_from_req
     elif payload_system_message:
         final_system_message = payload_system_message
     elif character_card and character_card.get("system_prompt"):
         final_system_message = character_card.get("system_prompt")
-        system_prompt_preview = final_system_message[:50] if final_system_message else ""
-        logger.debug(f"Using character system prompt: {repr(system_prompt_preview)}...")
+        logger.debug("Using character system prompt summary {}", text_summary(final_system_message))
 
-    logger.debug(f"Final system message: {repr(final_system_message)}")
+    logger.debug("Final system message summary {}", text_summary(final_system_message))
 
     if final_system_message:
         llm_payload_messages = [m for m in llm_payload_messages if m.get("role") != "system"]
@@ -4533,7 +4555,16 @@ async def execute_streaming_call(
     queue_enabled = False
 
     def _public_stream_error_payload(value: Any) -> dict[str, Any]:
-        payload: dict[str, Any] = provider_stream_error_payload(value)
+        if isinstance(value, UnsupportedMultiChoiceToolAutoexecError):
+            payload: dict[str, Any] = {
+                "error": {
+                    "code": value.error_code,
+                    "type": value.error_code,
+                    "message": value.public_message,
+                }
+            }
+        else:
+            payload = provider_stream_error_payload(value)
         if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
             payload["conversation_id"] = final_conversation_id
             payload["tldw_conversation_id"] = final_conversation_id
@@ -4558,6 +4589,10 @@ async def execute_streaming_call(
             apply_structured_response_request(
                 cleaned_args=cleaned_args,
                 structured_request_context=structured_request_context,
+            )
+            ensure_tool_autoexec_supports_request(
+                cleaned_args=cleaned_args,
+                should_run_tool_autoexec=should_run_legacy_tool_autoexec,
             )
             _evaluate_chat_prompt_cost_guardrails(
                 cleaned_args=cleaned_args,
@@ -4692,6 +4727,19 @@ async def execute_streaming_call(
                                         )
                                     raise_detached_error(
                                         _bound_provider_http_exception(refresh_error)
+                                    )
+                                try:
+                                    ensure_tool_autoexec_supports_request(
+                                        cleaned_args=refreshed_args,
+                                        should_run_tool_autoexec=should_run_legacy_tool_autoexec,
+                                    )
+                                except UnsupportedMultiChoiceToolAutoexecError as guard_error:
+                                    return iter(
+                                        [
+                                            trusted_local_stream_error_frame(
+                                                guard_error.error_code
+                                            )
+                                        ]
                                     )
                                 model = refreshed_model or model
                                 def llm_call_func_fb():
@@ -4940,6 +4988,28 @@ async def execute_streaming_call(
                             sanitized_provider_stream_exception(refresh_error),
                         )
                         raise
+                    try:
+                        ensure_tool_autoexec_supports_request(
+                            cleaned_args=refreshed_args,
+                            should_run_tool_autoexec=should_run_legacy_tool_autoexec,
+                        )
+                    except HTTPException as guard_error:
+                        _emit_chat_run_first_completion_metric(
+                            metrics,
+                            context=run_first_metric_context,
+                            outcome="error",
+                        )
+                        await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
+                        return StreamingResponse(
+                            _terminal_stream_error(
+                                _public_stream_error_payload(guard_error)
+                            ),
+                            media_type="text/event-stream",
+                            headers={
+                                "Cache-Control": "no-cache",
+                                "X-Accel-Buffering": "no",
+                            },
+                        )
                     cleaned_args = refreshed_args
                     model = refreshed_model or model
                     fallback_start_time = time.time()
@@ -5304,26 +5374,18 @@ async def execute_streaming_call(
         if should_persist and final_conversation_id and not post_stream_blocked and (
             full_reply_to_save or tool_calls or function_call
         ):
-            asst_name = sanitize_sender_name(
-                character_card_for_context.get("name") if character_card_for_context else None
+            message_payload = build_assistant_message_payload(
+                character_card_for_context=character_card_for_context,
+                assistant_parent_message_id=assistant_parent_message_id,
+                content=full_reply_to_save,
+                tool_calls=tool_calls,
+                function_call=function_call,
             )
-            message_payload: dict[str, Any] = {
-                "role": "assistant",
-                "name": asst_name,
-            }
-            if assistant_parent_message_id:
-                message_payload["parent_message_id"] = assistant_parent_message_id
-            if full_reply_to_save is not None:
-                message_payload["content"] = full_reply_to_save
-            if tool_calls:
-                message_payload["tool_calls"] = tool_calls
-            if function_call:
-                message_payload["function_call"] = function_call
-            saved_message_id = await save_message_fn(
-                chat_db,
-                final_conversation_id,
-                message_payload,
-                use_transaction=True,
+            saved_message_id = await save_assistant_message(
+                chat_db=chat_db,
+                conversation_id=final_conversation_id,
+                save_message_fn=save_message_fn,
+                payload=message_payload,
             )
 
         if (
@@ -5353,13 +5415,12 @@ async def execute_streaming_call(
                 tool_execution_payload = autoexec_result.event_payload().get("tool_results", [])
 
                 if should_persist and final_conversation_id:
-                    for tool_message in autoexec_result.tool_messages():
-                        await save_message_fn(
-                            chat_db,
-                            final_conversation_id,
-                            tool_message,
-                            use_transaction=True,
-                        )
+                    await save_tool_messages(
+                        chat_db=chat_db,
+                        conversation_id=final_conversation_id,
+                        save_message_fn=save_message_fn,
+                        tool_messages=autoexec_result.tool_messages(),
+                    )
             except _CHAT_NONCRITICAL_EXCEPTIONS as autoexec_err:
                 logger.warning(
                     "Streaming chat tool auto-execution skipped error_type={}",
@@ -5617,7 +5678,7 @@ async def execute_streaming_call(
                             chunk_seq=chunk_seq,
                         )
                 except _CHAT_NONCRITICAL_EXCEPTIONS as _e:
-                    logger.debug(f"Topic monitoring (stream chunk) skipped: {_e}")
+                    logger.debug("Topic monitoring (stream chunk) skipped: {}", exception_summary(_e))
                 if not eff_policy.enabled or not eff_policy.output_enabled:
                     if stream_holdback:
                         out = f"{stream_holdback}{s}"
@@ -5760,19 +5821,22 @@ async def execute_streaming_call(
                     if hasattr(res, "__await__"):
                         await res  # type: ignore[misc]
 
-            generator = create_streaming_response_with_timeout(
-                stream=raw_stream_iter,  # type: ignore[arg-type]
-                conversation_id=final_conversation_id,
-                model_name=model,
-                save_callback=save_callback,
-                finalize_callback=_finalize_stream,
-                on_first_output=_record_provider_output_once,
-                idle_timeout=CHAT_IDLE_TIMEOUT,
-                heartbeat_interval=CHAT_HEARTBEAT_INTERVAL,
-                text_transform=_out_transform,
-                before_success_callback=_await_mandatory_moderation_audits,
-                system_message_id=system_message_id,
-                continuation_metadata=normalized_continuation_metadata,
+            generator = get_chat_completion_pipeline().execute_streaming(
+                request=StreamingPipelineRequest(
+                    stream=raw_stream_iter,  # type: ignore[arg-type]
+                    conversation_id=final_conversation_id,
+                    model_name=model,
+                    save_callback=save_callback,
+                    finalize_callback=_finalize_stream,
+                    on_first_output=_record_provider_output_once,
+                    idle_timeout=CHAT_IDLE_TIMEOUT,
+                    heartbeat_interval=CHAT_HEARTBEAT_INTERVAL,
+                    text_transform=_out_transform,
+                    before_success_callback=_await_mandatory_moderation_audits,
+                    system_message_id=system_message_id,
+                    continuation_metadata=normalized_continuation_metadata,
+                ),
+                stream_factory=create_streaming_response_with_timeout,
             )
             try:
                 async for chunk in generator:
@@ -5866,7 +5930,7 @@ async def execute_streaming_call(
     )
 
 
-async def execute_non_stream_call(
+async def _execute_non_stream_call_impl(
     *,
     current_loop: Any,
     cleaned_args: dict[str, Any],
@@ -6020,9 +6084,11 @@ async def execute_non_stream_call(
                 prompt_tokens = _estimate_tokens_from_messages(messages)
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 prompt_tokens = 0
-            completion_tokens = max(
-                0,
-                len(_extract_text_from_content(content)) // 4,
+            response_choices = collect_non_stream_choices(response)
+            completion_tokens = (
+                estimate_completion_tokens_from_choices(response_choices)
+                if response_choices
+                else max(0, len(_extract_text_from_content(content)) // 4)
             )
             metrics.track_tokens(
                 prompt_tokens=int(prompt_tokens),
@@ -6079,6 +6145,10 @@ async def execute_non_stream_call(
             apply_structured_response_request(
                 cleaned_args=cleaned_args,
                 structured_request_context=structured_request_context,
+            )
+            ensure_tool_autoexec_supports_request(
+                cleaned_args=cleaned_args,
+                should_run_tool_autoexec=should_run_legacy_tool_autoexec,
             )
             prompt_guardrail_decision = _evaluate_chat_prompt_cost_guardrails(
                 cleaned_args=cleaned_args,
@@ -6312,6 +6382,18 @@ async def execute_non_stream_call(
                         )
                         bounded_error = _bound_provider_http_exception(refresh_error)
                         raise_detached_error(bounded_error)
+                    try:
+                        ensure_tool_autoexec_supports_request(
+                            cleaned_args=refreshed_args,
+                            should_run_tool_autoexec=should_run_legacy_tool_autoexec,
+                        )
+                    except HTTPException:
+                        _emit_chat_run_first_completion_metric(
+                            metrics,
+                            context=run_first_metric_context,
+                            outcome="error",
+                        )
+                        raise
                     cleaned_args = refreshed_args
                     model = refreshed_model or model
                     fallback_start_time = time.time()
@@ -6395,21 +6477,14 @@ async def execute_non_stream_call(
     if isinstance(llm_response, str) and should_force_normalize_string_responses():
         llm_response = _wrap_raw_string_response(llm_response, model)
 
-    content_to_save: Any | None = None
-    tool_calls_to_save: Any | None = None
-    function_call_to_save: Any | None = None
-    first_turn_tool_calls: Any | None = None
-    first_turn_function_call: Any | None = None
+    processed_choices: list[NonStreamChoice] = collect_non_stream_choices(llm_response)
+    first_choice = primary_choice(processed_choices)
+    content_to_save: Any | None = first_choice.content if first_choice else None
+    tool_calls_to_save: Any | None = first_choice.tool_calls if first_choice else None
+    function_call_to_save: Any | None = first_choice.function_call if first_choice else None
+    first_turn_tool_calls: Any | None = tool_calls_to_save
+    first_turn_function_call: Any | None = function_call_to_save
     if llm_response and isinstance(llm_response, dict):
-        choices = llm_response.get("choices")
-        if choices and isinstance(choices, list) and len(choices) > 0:
-            message_block = choices[0].get("message") or {}
-            if isinstance(message_block, dict):
-                content_to_save = message_block.get("content")
-                tool_calls_to_save = message_block.get("tool_calls")
-                function_call_to_save = message_block.get("function_call")
-                first_turn_tool_calls = tool_calls_to_save
-                first_turn_function_call = function_call_to_save
         await _record_dict_response_usage(
             response=llm_response,
             messages=templated_llm_payload,
@@ -6439,233 +6514,47 @@ async def execute_non_stream_call(
     # Cache content text for moderation/usage when content is non-string
     content_text_for_usage = _extract_text_from_content(content_to_save)
 
-    # Self-monitoring output check (awareness/notifications)
-    if self_monitoring_service and content_text_for_usage:
-        try:
-            _sm_uid = None
-            try:
-                if request is not None and hasattr(request, "state"):
-                    _sm_uid = getattr(request.state, "user_id", None)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                _sm_uid = None
-            _sm_user = str(_sm_uid or client_id)
-            _sm_loop = asyncio.get_running_loop()
-            sm_result = await _sm_loop.run_in_executor(
-                None,
-                lambda: self_monitoring_service.check_text(
-                    text=content_text_for_usage,
-                    user_id=_sm_user,
-                    phase="output",
-                    conversation_id=str(final_conversation_id) if final_conversation_id else None,
-                ),
-            )
-            if sm_result.action == "block":
-                _emit_chat_run_first_completion_metric(
+    def _refresh_primary_choice_state() -> None:
+        nonlocal first_choice, content_to_save, tool_calls_to_save, function_call_to_save, content_text_for_usage
+        first_choice = primary_choice(processed_choices)
+        if first_choice is not None:
+            content_to_save = first_choice.content
+            tool_calls_to_save = first_choice.tool_calls
+            function_call_to_save = first_choice.function_call
+            content_text_for_usage = first_choice.content_text
+        else:
+            content_text_for_usage = _extract_text_from_content(content_to_save)
+
+    async def _apply_output_safety_to_current_choices() -> None:
+        nonlocal content_to_save, content_text_for_usage
+
+        result = await apply_output_safety_to_choices(
+            choices=processed_choices,
+            fallback_content=content_to_save,
+            fallback_content_text=content_text_for_usage,
+            runtime=OutputModerationRuntime(
+                request=request,
+                client_id=client_id,
+                conversation_id=final_conversation_id,
+                metrics=metrics,
+                audit_service=audit_service,
+                audit_context=audit_context,
+                moderation_getter=moderation_getter,
+                self_monitoring_service=self_monitoring_service,
+                topic_monitoring_getter=get_topic_monitoring_service,
+                review_item_callback=_capture_moderation_review_item_safely_async,
+                completion_metric_callback=lambda outcome: _emit_chat_run_first_completion_metric(
                     metrics,
                     context=run_first_metric_context,
-                    outcome="blocked",
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=sm_result.block_message or "Output blocked by self-monitoring rule",
-                )
-            if sm_result.action == "redact" and sm_result.redacted_text is not None:
-                content_to_save = sm_result.redacted_text
-                content_text_for_usage = sm_result.redacted_text
-                # Update llm_response dict if applicable
-                try:
-                    if isinstance(llm_response, dict):
-                        choices = llm_response.get("choices")
-                        if choices and isinstance(choices, list) and choices:
-                            msg = choices[0].get("message") or {}
-                            if isinstance(msg, dict):
-                                msg["content"] = sm_result.redacted_text
-                except _CHAT_NONCRITICAL_EXCEPTIONS:
-                    pass
-        except HTTPException:
-            raise
-        except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Self-monitoring output check skipped: {e}")
+                    outcome=outcome,
+                ),
+            ),
+        )
+        content_to_save = result.content_to_save
+        content_text_for_usage = result.content_text_for_usage
+        _refresh_primary_choice_state()
 
-    # Output moderation (non-streaming)
-    try:
-        if content_text_for_usage:
-            _get_mod = moderation_getter or get_moderation_service
-            moderation = _get_mod()
-            req_user_id = None
-            try:
-                if request is not None and hasattr(request, "state"):
-                    req_user_id = getattr(request.state, "user_id", None)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                req_user_id = None
-            eff_policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id)
-            if eff_policy.enabled and eff_policy.output_enabled:
-                resolved_action = None
-                sample = None
-                redacted_val = None
-                out_category2 = None
-                matched_pattern = None
-                match_span = None
-                if hasattr(moderation, "evaluate_action_with_match"):
-                    try:
-                        eval_res = moderation.evaluate_action_with_match(content_text_for_usage, eff_policy, "output")
-                        if isinstance(eval_res, tuple) and len(eval_res) >= 3:
-                            resolved_action, redacted_val, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
-                            out_category2 = eval_res[3] if len(eval_res) >= 4 else None
-                            match_span = eval_res[4] if len(eval_res) >= 5 else None
-                        else:
-                            resolved_action, redacted_val, matched_pattern = eval_res  # type: ignore
-                    except _CHAT_NONCRITICAL_EXCEPTIONS:
-                        resolved_action = None
-                    if match_span and hasattr(moderation, "build_sanitized_snippet"):
-                        try:
-                            sample = moderation.build_sanitized_snippet(content_text_for_usage, eff_policy, match_span, matched_pattern)
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            sample = None
-                elif hasattr(moderation, "evaluate_action"):
-                    try:
-                        eval_res = moderation.evaluate_action(content_text_for_usage, eff_policy, "output")
-                        if isinstance(eval_res, tuple) and len(eval_res) >= 3:
-                            resolved_action, redacted_val, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
-                            out_category2 = eval_res[3] if len(eval_res) >= 4 else None
-                        else:
-                            resolved_action, redacted_val, matched_pattern = eval_res  # type: ignore
-                    except _CHAT_NONCRITICAL_EXCEPTIONS:
-                        resolved_action = None
-                if resolved_action and resolved_action != "pass" and sample is None:
-                    try:
-                        _, sample = moderation.check_text(content_text_for_usage, eff_policy, "output")
-                    except _CHAT_NONCRITICAL_EXCEPTIONS:
-                        sample = None
-                if not resolved_action:
-                    flagged, sample = moderation.check_text(content_text_for_usage, eff_policy, "output")
-                    if flagged:
-                        resolved_action = eff_policy.output_action
-                        redacted_val = moderation.redact_text(content_text_for_usage, eff_policy) if resolved_action == "redact" else None
-                # Topic monitoring (final output)
-                try:
-                    mon3 = None
-                    try:
-                        mon3 = get_topic_monitoring_service()
-                    except _CHAT_NONCRITICAL_EXCEPTIONS:
-                        mon3 = None
-                    team_ids = None
-                    org_ids = None
-                    try:
-                        if request is not None and hasattr(request, "state"):
-                            team_ids = getattr(request.state, "team_ids", None)
-                            org_ids = getattr(request.state, "org_ids", None)
-                    except _CHAT_NONCRITICAL_EXCEPTIONS:
-                        pass
-                    if mon3 is not None and content_text_for_usage:
-                        mon3.schedule_evaluate_and_alert(
-                            user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                            text=content_text_for_usage,
-                            source="chat.output",
-                            scope_type="user",
-                            scope_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                            team_ids=team_ids,
-                            org_ids=org_ids,
-                            source_id=str(final_conversation_id) if final_conversation_id else None,
-                        )
-                except _CHAT_NONCRITICAL_EXCEPTIONS as _ex:
-                    logger.debug(f"Topic monitoring (non-stream final) skipped: {_ex}")
-
-                if resolved_action == "block":
-                    if audit_service and audit_context:
-                        await write_mandatory_moderation_audit(
-                            audit_service=audit_service,
-                            audit_context=audit_context,
-                            audit_event_type=AuditEventType.SECURITY_VIOLATION,
-                            action="moderation.output",
-                            result="failure",
-                            metadata={
-                                "phase": "output",
-                                "streaming": False,
-                                "action": "block",
-                                "pattern": sample,
-                            },
-                        )
-                    await _capture_moderation_review_item_safely_async(
-                        phase="output",
-                        action="block",
-                        excerpt=sample,
-                        category=out_category2,
-                        matched_pattern=matched_pattern,
-                        effective_policy=eff_policy,
-                        source_id=str(final_conversation_id) if final_conversation_id else None,
-                        user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                    )
-                    _emit_chat_run_first_completion_metric(
-                        metrics,
-                        context=run_first_metric_context,
-                        outcome="blocked",
-                    )
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Output violates moderation policy")
-                if resolved_action == "redact":
-                    try:
-                        if sample is not None:
-                            metrics.track_moderation_output(str(req_user_id or client_id), "redact", streaming=False, category=(out_category2 or "default"))
-                    except _CHAT_NONCRITICAL_EXCEPTIONS:
-                        pass
-                    if audit_service and audit_context:
-                        await write_mandatory_moderation_audit(
-                            audit_service=audit_service,
-                            audit_context=audit_context,
-                            audit_event_type=AuditEventType.SECURITY_VIOLATION,
-                            action="moderation.output",
-                            result="success",
-                            metadata={
-                                "phase": "output",
-                                "streaming": False,
-                                "action": "redact",
-                                "pattern": sample,
-                            },
-                        )
-                    await _capture_moderation_review_item_safely_async(
-                        phase="output",
-                        action="redact",
-                        excerpt=sample,
-                        category=out_category2,
-                        matched_pattern=matched_pattern,
-                        effective_policy=eff_policy,
-                        source_id=str(final_conversation_id) if final_conversation_id else None,
-                        user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                    )
-                    if isinstance(content_to_save, str):
-                        content_to_save = (
-                            redacted_val
-                            if isinstance(redacted_val, str)
-                            else moderation.redact_text(content_text_for_usage, eff_policy)
-                        )
-                    else:
-                        content_to_save = _apply_redaction_to_content(content_to_save, moderation, eff_policy)
-                    # Update llm_response dict if applicable
-                    try:
-                        if isinstance(llm_response, dict):
-                            if llm_response.get("choices") and isinstance(llm_response["choices"], list) and llm_response["choices"]:
-                                msg = llm_response["choices"][0].get("message") or {}
-                                if isinstance(msg, dict):
-                                    msg["content"] = content_to_save
-                    except _CHAT_NONCRITICAL_EXCEPTIONS:
-                        pass
-                if resolved_action == "warn":
-                    await _capture_moderation_review_item_safely_async(
-                        phase="output",
-                        action="warn",
-                        excerpt=sample,
-                        category=out_category2,
-                        matched_pattern=matched_pattern,
-                        effective_policy=eff_policy,
-                        source_id=str(final_conversation_id) if final_conversation_id else None,
-                        user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                    )
-    except HTTPException:
-        raise
-    except MandatoryAuditWriteError:
-        raise
-    except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"Moderation output processing error: {e}")
+    await _apply_output_safety_to_current_choices()
 
     assistant_message_id: str | None = None
     tool_execution_payload: list[dict[str, Any]] | None = None
@@ -6679,9 +6568,11 @@ async def execute_non_stream_call(
     )
     if structured_request_context is not None and not defer_structured_persistence:
         try:
-            structured_metadata = validate_structured_response(
-                raw_text=content_to_save,
+            structured_metadata = validate_structured_choices(
+                choices=processed_choices,
                 structured_request_context=structured_request_context,
+                validate_structured_response=validate_structured_response,
+                fallback_content=content_to_save,
             )
         except (
             StructuredGenerationCapabilityError,
@@ -6708,11 +6599,11 @@ async def execute_non_stream_call(
             tool_calls=tool_calls_to_save,
             function_call=function_call_to_save,
         )
-        assistant_message_id = await save_message_fn(
-            chat_db,
-            final_conversation_id,
-            message_payload,
-            use_transaction=True,
+        assistant_message_id = await save_assistant_message(
+            chat_db=chat_db,
+            conversation_id=final_conversation_id,
+            save_message_fn=save_message_fn,
+            payload=message_payload,
         )
     elif should_save_response and defer_structured_persistence:
         pending_assistant_payload = _build_assistant_message_payload(
@@ -6762,13 +6653,12 @@ async def execute_non_stream_call(
                 if defer_structured_persistence:
                     pending_tool_messages = list(tool_messages)
                 else:
-                    for tool_message in tool_messages:
-                        await save_message_fn(
-                            chat_db,
-                            final_conversation_id,
-                            tool_message,
-                            use_transaction=True,
-                        )
+                    await save_tool_messages(
+                        chat_db=chat_db,
+                        conversation_id=final_conversation_id,
+                        save_message_fn=save_message_fn,
+                        tool_messages=list(tool_messages),
+                    )
 
             if should_auto_continue_tools_once() and tool_messages:
                 tool_auto_continue_meta = {"attempted": True, "succeeded": False}
@@ -6834,16 +6724,12 @@ async def execute_non_stream_call(
                         continuation_response = _wrap_raw_string_response(continuation_response, model)
 
                     continuation_content: Any | None = None
-                    continuation_tool_calls: Any | None = None
-                    continuation_function_call: Any | None = None
                     if continuation_response and isinstance(continuation_response, dict):
                         continuation_choices = continuation_response.get("choices")
                         if continuation_choices and isinstance(continuation_choices, list):
                             continuation_message = continuation_choices[0].get("message") or {}
                             if isinstance(continuation_message, dict):
                                 continuation_content = continuation_message.get("content")
-                                continuation_tool_calls = continuation_message.get("tool_calls")
-                                continuation_function_call = continuation_message.get("function_call")
                     elif isinstance(continuation_response, str):
                         continuation_content = continuation_response
 
@@ -6867,10 +6753,24 @@ async def execute_non_stream_call(
                         )
 
                     if continuation_response is not None:
+                        llm_response = continuation_response
+                        processed_choices = collect_non_stream_choices(llm_response)
+                        first_choice = primary_choice(processed_choices)
+                        content_to_save = first_choice.content if first_choice else None
+                        tool_calls_to_save = first_choice.tool_calls if first_choice else None
+                        function_call_to_save = first_choice.function_call if first_choice else None
+                        if first_choice is None and isinstance(llm_response, str):
+                            content_to_save = llm_response
+                        content_text_for_usage = _extract_text_from_content(content_to_save)
+                        await _apply_output_safety_to_current_choices()
+                        if not processed_choices and isinstance(llm_response, str):
+                            llm_response = content_to_save
                         try:
-                            continuation_structured_metadata = validate_structured_response(
-                                raw_text=continuation_content,
+                            continuation_structured_metadata = validate_structured_choices(
+                                choices=processed_choices,
                                 structured_request_context=structured_request_context,
+                                validate_structured_response=validate_structured_response,
+                                fallback_content=content_to_save,
                             )
                         except (
                             StructuredGenerationCapabilityError,
@@ -6885,10 +6785,6 @@ async def execute_non_stream_call(
                             raise_detached_error(
                                 build_structured_http_exception(structured_exc)
                             )
-                        llm_response = continuation_response
-                        content_to_save = continuation_content
-                        tool_calls_to_save = continuation_tool_calls
-                        function_call_to_save = continuation_function_call
                         if continuation_structured_metadata is not None:
                             structured_metadata = continuation_structured_metadata
 
@@ -6898,21 +6794,20 @@ async def execute_non_stream_call(
                             and (content_to_save or tool_calls_to_save or function_call_to_save)
                         ):
                             if pending_assistant_payload is not None:
-                                assistant_message_id = await save_message_fn(
-                                    chat_db,
-                                    final_conversation_id,
-                                    pending_assistant_payload,
-                                    use_transaction=True,
+                                assistant_message_id = await save_assistant_message(
+                                    chat_db=chat_db,
+                                    conversation_id=final_conversation_id,
+                                    save_message_fn=save_message_fn,
+                                    payload=pending_assistant_payload,
                                 )
                                 pending_assistant_payload = None
                             if pending_tool_messages:
-                                for tool_message in pending_tool_messages:
-                                    await save_message_fn(
-                                        chat_db,
-                                        final_conversation_id,
-                                        tool_message,
-                                        use_transaction=True,
-                                    )
+                                await save_tool_messages(
+                                    chat_db=chat_db,
+                                    conversation_id=final_conversation_id,
+                                    save_message_fn=save_message_fn,
+                                    tool_messages=pending_tool_messages,
+                                )
                                 pending_tool_messages = []
                             continuation_payload = _build_assistant_message_payload(
                                 character_card_for_context=character_card_for_context,
@@ -6921,11 +6816,11 @@ async def execute_non_stream_call(
                                 tool_calls=tool_calls_to_save,
                                 function_call=function_call_to_save,
                             )
-                            continuation_message_id = await save_message_fn(
-                                chat_db,
-                                final_conversation_id,
-                                continuation_payload,
-                                use_transaction=True,
+                            continuation_message_id = await save_assistant_message(
+                                chat_db=chat_db,
+                                conversation_id=final_conversation_id,
+                                save_message_fn=save_message_fn,
+                                payload=continuation_payload,
                             )
                             if continuation_message_id:
                                 assistant_message_id = continuation_message_id
@@ -6933,15 +6828,25 @@ async def execute_non_stream_call(
                 except HTTPException:
                     raise
                 except _CHAT_NONCRITICAL_EXCEPTIONS as continue_err:
-                    logger.warning("Chat tool auto-continue skipped due to error: {}", continue_err)
+                    logger.warning(
+                        "Chat tool auto-continue skipped due to error: {}",
+                        exception_summary(continue_err),
+                    )
+        except HTTPException:
+            raise
         except _CHAT_NONCRITICAL_EXCEPTIONS as autoexec_err:
-            logger.warning("Chat tool auto-execution skipped due to error: {}", autoexec_err)
+            logger.warning(
+                "Chat tool auto-execution skipped due to error: {}",
+                exception_summary(autoexec_err),
+            )
 
     if structured_request_context is not None and structured_metadata is None:
         try:
-            structured_metadata = validate_structured_response(
-                raw_text=content_to_save,
+            structured_metadata = validate_structured_choices(
+                choices=processed_choices,
                 structured_request_context=structured_request_context,
+                validate_structured_response=validate_structured_response,
+                fallback_content=content_to_save,
             )
         except (
             StructuredGenerationCapabilityError,
@@ -6956,21 +6861,20 @@ async def execute_non_stream_call(
             raise_detached_error(build_structured_http_exception(structured_exc))
 
     if pending_assistant_payload is not None and should_persist and final_conversation_id:
-        assistant_message_id = await save_message_fn(
-            chat_db,
-            final_conversation_id,
-            pending_assistant_payload,
-            use_transaction=True,
+        assistant_message_id = await save_assistant_message(
+            chat_db=chat_db,
+            conversation_id=final_conversation_id,
+            save_message_fn=save_message_fn,
+            payload=pending_assistant_payload,
         )
         pending_assistant_payload = None
     if pending_tool_messages and should_persist and final_conversation_id:
-        for tool_message in pending_tool_messages:
-            await save_message_fn(
-                chat_db,
-                final_conversation_id,
-                tool_message,
-                use_transaction=True,
-            )
+        await save_tool_messages(
+            chat_db=chat_db,
+            conversation_id=final_conversation_id,
+            save_message_fn=save_message_fn,
+            tool_messages=pending_tool_messages,
+        )
         pending_tool_messages = []
 
     _emit_chat_run_first_tool_path_metrics(
@@ -6987,15 +6891,10 @@ async def execute_non_stream_call(
 
     if INJECT_ASSISTANT_NAME and isinstance(llm_response, dict):
         try:
-            choices = llm_response.get("choices")
-            if choices and isinstance(choices, list):
-                message_block = choices[0].get("message") or {}
-                if isinstance(message_block, dict) and not message_block.get("name"):
-                    asst_name = sanitize_sender_name(
-                        character_card_for_context.get("name") if character_card_for_context else None
-                    )
-                    if asst_name:
-                        message_block["name"] = asst_name
+            asst_name = sanitize_sender_name(
+                character_card_for_context.get("name") if character_card_for_context else None
+            )
+            inject_assistant_name_into_choices(collect_non_stream_choices(llm_response), asst_name)
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -7009,15 +6908,10 @@ async def execute_non_stream_call(
     if isinstance(encoded_payload, dict):
         if INJECT_ASSISTANT_NAME:
             try:
-                choices = encoded_payload.get("choices")
-                if choices and isinstance(choices, list):
-                    message_block = choices[0].get("message") or {}
-                    if isinstance(message_block, dict) and not message_block.get("name"):
-                        asst_name = sanitize_sender_name(
-                            character_card_for_context.get("name") if character_card_for_context else None
-                        )
-                        if asst_name:
-                            message_block["name"] = asst_name
+                asst_name = sanitize_sender_name(
+                    character_card_for_context.get("name") if character_card_for_context else None
+                )
+                inject_assistant_name_into_choices(collect_non_stream_choices(encoded_payload), asst_name)
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
         encoded_payload["tldw_conversation_id"] = final_conversation_id
@@ -7058,3 +6952,14 @@ async def execute_non_stream_call(
     await _record_provider_use(selected_provider)
 
     return encoded_payload
+
+
+def get_chat_completion_pipeline() -> ChatCompletionPipeline:
+    return ChatCompletionPipeline(
+        non_stream_executor=_execute_non_stream_call_impl,
+        streaming_executor=create_chat_streaming_response,
+    )
+
+
+async def execute_non_stream_call(**kwargs: Any) -> dict[str, Any]:
+    return await get_chat_completion_pipeline().execute_non_stream(**kwargs)
