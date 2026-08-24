@@ -776,11 +776,11 @@ export const loadServicePromptSnapshot = async (
     }
 
     const advertisedIds = new Set(catalog.map((definition) => definition.id))
-    const usePackagedImageRefinement =
+    const catalogOmitsImageRefinement =
       requested.includes("image.prompt.refinement") &&
       !advertisedIds.has("image.prompt.refinement")
     const requestedFromServer = requested.filter(
-      (id) => id !== "image.prompt.refinement" || !usePackagedImageRefinement
+      (id) => id !== "image.prompt.refinement" || !catalogOmitsImageRefinement
     )
     const candidates = requestedFromServer.length > 0
       ? await readLegacyServicePromptCandidates({ signal: lease.signal })
@@ -799,15 +799,29 @@ export const loadServicePromptSnapshot = async (
       throw error
     }
 
-    const details = await Promise.all(requestedFromServer.map((id) =>
-      tldwClient.getServicePrompt(id, {
-        signal: lease.signal,
-        requestScope: scope
-      })
-    ))
+    const details = await Promise.all(requestedFromServer.map(async (id) => {
+      try {
+        return await tldwClient.getServicePrompt(id, {
+          signal: lease.signal,
+          requestScope: scope
+        })
+      } catch (error) {
+        if (
+          id === "image.prompt.refinement" &&
+          error instanceof ServicePromptApiError &&
+          error.status === 404
+        ) {
+          return null
+        }
+        throw error
+      }
+    }))
     throwIfAborted(lease.signal)
+    const usePackagedImageRefinement =
+      catalogOmitsImageRefinement || details.some((detail) => detail === null)
     const definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>> = {}
     for (const detail of details) {
+      if (!detail) continue
       definitions[detail.id as KnownServicePromptId] = {
         definition: detail,
         parts: { ...detail.effective_parts },

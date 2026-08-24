@@ -805,6 +805,47 @@ describe("Service Prompt migration and runtime snapshots", () => {
     snapshot.release()
   })
 
+  it("uses packaged image-refinement semantics when an advertised detail returns 404", async () => {
+    mocks.getServicePrompt.mockRejectedValueOnce(
+      new ServicePromptApiError("Not found", { status: 404 })
+    )
+
+    const snapshot = await loadServicePromptSnapshot([
+      "image.prompt.refinement"
+    ])
+
+    expect(snapshot).toMatchObject({
+      capability: "supported",
+      definitions: {
+        "image.prompt.refinement": {
+          definition: renderDefinitionFor("image.prompt.refinement"),
+          parts: fixture.defaults["image.prompt.refinement"],
+          source: "packaged",
+          revision: null
+        }
+      }
+    })
+    expect(mocks.getServicePrompt).toHaveBeenCalledWith(
+      "image.prompt.refinement",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    expect(mocks.promptForRag).not.toHaveBeenCalled()
+    expect(mocks.getWebSearchPrompt).not.toHaveBeenCalled()
+    snapshot.release()
+  })
+
+  it.each([412, 500])(
+    "does not fallback when an advertised image-refinement detail returns %s",
+    async (status) => {
+      const error = new ServicePromptApiError("Detail failed", { status })
+      mocks.getServicePrompt.mockRejectedValueOnce(error)
+
+      await expect(
+        loadServicePromptSnapshot(["image.prompt.refinement"])
+      ).rejects.toBe(error)
+    }
+  )
+
   it("rejects a mismatched authenticated user after resolving the matching multi-user target", async () => {
     const multiUserConfig = {
       ...config,
