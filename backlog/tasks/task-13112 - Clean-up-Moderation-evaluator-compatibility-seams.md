@@ -1,0 +1,75 @@
+---
+id: TASK-13112
+title: Clean up Moderation evaluator compatibility seams
+status: In Progress
+created_date: 2026-08-24 04:57
+dependencies:
+- TASK-13011
+labels:
+- Moderation
+- refactor
+- behavior-preserving
+priority: medium
+references:
+- Docs/superpowers/specs/2026-08-01-moderation-shared-models-extraction-design.md
+- Docs/superpowers/specs/2026-07-20-moderation-policy-evaluator-refactor-design.md
+- tldw_Server_API/app/core/Moderation/moderation_service.py
+documentation:
+- Docs/superpowers/specs/2026-08-23-moderation-compatibility-seams-cleanup-design.md
+- Docs/superpowers/plans/2026-08-23-moderation-compatibility-seams-cleanup.md
+modified_files:
+- Docs/superpowers/specs/2026-08-23-moderation-compatibility-seams-cleanup-design.md
+- Docs/superpowers/plans/2026-08-23-moderation-compatibility-seams-cleanup.md
+- tldw_Server_API/app/core/Moderation/moderation_service.py
+- tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
+- tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
+- backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
+updated_date: 2026-08-24 05:28
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Remove repository-unused private ModerationService delegates superseded by PolicyEvaluator while preserving all public facade behavior, dynamic dispatch through _evaluate_text_core(), policy_types() compatibility, and regex/redaction semantics. This is a strict structural cleanup following TASK-13011.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Repository and test usage of candidate private ModerationService evaluator delegates is documented.
+- [ ] #2 Only private delegates with no required production or extension-point role are removed.
+- [ ] #3 Public ModerationService signatures and behavior remain unchanged.
+- [ ] #4 _evaluate_text_core() and policy_types() compatibility remain unchanged.
+- [ ] #5 Characterization, evaluator, caller-contract, compilation, and security checks pass.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Inventory candidate private delegates and compatibility tests. 2. Preserve public and dynamic-dispatch contracts with focused tests. 3. Remove only obsolete delegates and update tests. 4. Run focused/full moderation, compilation, and Bandit verification.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Created isolated worktree `codex/moderation-compatibility-seams` from current `origin/dev` (`2c3589fa09`).
+
+Repository compatibility inventory and the exact eight-method removal set are documented in the design spec. Independent review retained `_evaluate_action_internal()` because it preserves public `evaluate_text()` dispatch, documented the intentional private-surface compatibility risk, made the absence invariant class-local, specified the exact verification matrix, removed a duplicate endpoint gate, and corrected whitespace.
+
+Pre-change verification passed: 318 unit Moderation tests, 89 Guardian tests, 16 Chat tests, 12 selected Workflow tests, and 1 targeted Audio test.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
