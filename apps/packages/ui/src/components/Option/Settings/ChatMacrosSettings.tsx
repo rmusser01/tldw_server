@@ -324,18 +324,22 @@ export const ChatMacrosSettings = () => {
 
       <div className="flex border-b border-border" role="tablist" aria-label="Chat macro settings views">
         <button
+          id="chat-macros-tab"
           type="button"
           role="tab"
           aria-selected={activeTab === "macros"}
+          aria-controls="chat-macros-panel"
           className={tabClassName(activeTab === "macros")}
           onClick={() => setActiveTab("macros")}
         >
           Macros
         </button>
         <button
+          id="chat-macro-profiles-tab"
           type="button"
           role="tab"
           aria-selected={activeTab === "profiles"}
+          aria-controls="chat-macro-profiles-panel"
           className={tabClassName(activeTab === "profiles")}
           onClick={() => setActiveTab("profiles")}
         >
@@ -343,7 +347,12 @@ export const ChatMacrosSettings = () => {
         </button>
       </div>
 
-      {activeTab === "macros" ? (
+      <div
+        id="chat-macros-panel"
+        role="tabpanel"
+        aria-labelledby="chat-macros-tab"
+        hidden={activeTab !== "macros"}
+      >
         <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]">
           <aside className="min-w-0 border-b border-border pb-4 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-4" aria-label="Macro catalog">
             <div className="mb-2 flex items-center justify-between gap-3">
@@ -464,10 +473,14 @@ export const ChatMacrosSettings = () => {
             />
           </div>
         </div>
-      ) : null}
+      </div>
 
-      {activeTab === "profiles" ? (
-        <section aria-label="Output profile manager">
+      <section
+        id="chat-macro-profiles-panel"
+        role="tabpanel"
+        aria-labelledby="chat-macro-profiles-tab"
+        hidden={activeTab !== "profiles"}
+      >
           {settingsLoading ? <p className="text-sm text-text-muted">Loading output profiles</p> : null}
           {!settingsLoading && settingsError ? (
             <div className="flex flex-wrap items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2" role="alert">
@@ -484,8 +497,7 @@ export const ChatMacrosSettings = () => {
           {!settingsLoading && !settingsError && settings ? (
             <OutputProfileEditor settings={settings} onSaved={handleSettingsSaved} />
           ) : null}
-        </section>
-      ) : null}
+      </section>
     </div>
   )
 }

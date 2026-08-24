@@ -213,7 +213,7 @@ describe("ChatMacrosSettings", () => {
     expect(mocks.updateChatMacro).not.toHaveBeenCalled()
   })
 
-  it("does not replay an imported draft after the editor remounts", async () => {
+  it("preserves an edited imported draft across tab changes without replaying it", async () => {
     const user = userEvent.setup()
     render(<ChatMacrosSettings />)
 
@@ -228,8 +228,10 @@ describe("ChatMacrosSettings", () => {
     await user.click(screen.getByRole("tab", { name: "Output profiles" }))
     await user.click(screen.getByRole("tab", { name: "Macros" }))
 
-    expect(await screen.findByLabelText("Name")).toHaveValue("")
-    expect(screen.queryByLabelText("Macro YAML")).not.toBeInTheDocument()
+    expect(await screen.findByLabelText("Name")).toHaveValue("imported")
+    expect(screen.getByLabelText("Macro YAML")).toHaveValue(
+      "name: imported\nchanged: true"
+    )
   })
 
   it("loads a selected user macro and exposes only disable and clone actions for a selected built-in", async () => {
