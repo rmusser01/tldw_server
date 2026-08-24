@@ -1,20 +1,49 @@
 import { describe, expect, it } from "vitest"
 
-import type { PersonaVisualPack } from "@/types/persona-visuals"
+import type {
+  PersonaVisualAsset,
+  PersonaVisualPack
+} from "@/types/persona-visuals"
 
 import {
   getPrimaryPersonaVisualDiagnostic,
   resolvePersonaVisualDiagnostics
 } from "../personaVisualDiagnostics"
 
+const buildAsset = (
+  id: string,
+  overrides: Partial<PersonaVisualAsset> = {}
+): PersonaVisualAsset => ({
+  id,
+  pack_id: "pack-1",
+  persona_id: "persona-1",
+  asset_role: "frame",
+  storage_key: `persona-1/pack-1/${id}`,
+  url: `/assets/${id}.png`,
+  original_filename: `${id}.png`,
+  mime_type: "image/png",
+  byte_size: 1,
+  checksum_sha256: "0".repeat(64),
+  width: null,
+  height: null,
+  duration_ms: null,
+  provenance: "uploaded",
+  created_at: "2026-08-23T00:00:00Z",
+  last_modified: "2026-08-23T00:00:00Z",
+  version: 1,
+  ...overrides
+})
+
 const buildPack = (
   overrides: Partial<PersonaVisualPack> = {}
 ): PersonaVisualPack => ({
   id: "pack-1",
   persona_id: "persona-1",
+  user_id: "user-1",
   title: "Reliable buddy",
   renderer_type: "sprite_frames",
   status: "active",
+  manifest_version: 1,
   manifest: {
     manifest_version: 1,
     renderer_type: "sprite_frames",
@@ -34,20 +63,20 @@ const buildPack = (
       thinking: ["idle"]
     }
   },
+  companion_behavior: null,
+  review: null,
+  parent_pack_id: null,
+  revision_number: 1,
+  provenance: "uploaded",
+  active_at: "2026-08-23T00:00:00Z",
+  assets: [],
   assets_by_id: {
-    "idle-asset": {
-      id: "idle-asset",
-      asset_role: "frame",
-      url: "/assets/idle.png",
-      mime_type: "image/png"
-    },
-    "tool-asset": {
-      id: "tool-asset",
-      asset_role: "frame",
-      url: "/assets/tool.png",
-      mime_type: "image/png"
-    }
+    "idle-asset": buildAsset("idle-asset"),
+    "tool-asset": buildAsset("tool-asset")
   },
+  created_at: "2026-08-23T00:00:00Z",
+  last_modified: "2026-08-23T00:00:00Z",
+  version: 1,
   ...overrides
 })
 
@@ -146,12 +175,7 @@ describe("resolvePersonaVisualDiagnostics", () => {
       getPrimaryPersonaVisualDiagnostic({
         pack: buildPack({
           assets_by_id: {
-            "idle-asset": {
-              id: "idle-asset",
-              asset_role: "frame",
-              url: "/assets/idle.png",
-              mime_type: "image/png"
-            }
+            "idle-asset": buildAsset("idle-asset")
           }
         }),
         visualState: "tool_running"

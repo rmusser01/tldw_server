@@ -266,6 +266,23 @@ describe("persona visual asset loader", () => {
     expect(mocks.revokeObjectURL).toHaveBeenCalledTimes(1)
   })
 
+  it("does not double-revoke a released asset when the cache is cleared before reacquisition", async () => {
+    const asset = await assetFor()
+    mocks.fetchWithAuth
+      .mockResolvedValueOnce(successfulByteResponse(pngBytes))
+      .mockResolvedValueOnce(successfulByteResponse(pngBytes))
+
+    const released = await acquirePersonaVisualAsset(asset)
+    released.release()
+    clearPersonaVisualAssetCache()
+
+    expect(mocks.revokeObjectURL).toHaveBeenCalledTimes(1)
+    const reacquired = await acquirePersonaVisualAsset(asset)
+    expect(mocks.fetchWithAuth).toHaveBeenCalledTimes(2)
+    reacquired.release()
+    expect(mocks.revokeObjectURL).toHaveBeenCalledTimes(2)
+  })
+
   it("does not let a cleared in-flight load evict a newer acquisition", async () => {
     const asset = await assetFor()
     const firstLoad = deferred<ReturnType<typeof successfulByteResponse>>()

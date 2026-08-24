@@ -8,31 +8,45 @@ import type {
   PersonaVisualManifest
 } from "@/types/persona-visuals"
 
+const buildAsset = (
+  id: string,
+  overrides: Partial<PersonaVisualAsset> = {}
+): PersonaVisualAsset => ({
+  id,
+  pack_id: "pack-1",
+  persona_id: "persona-1",
+  asset_role: "frame",
+  storage_key: `persona-1/pack-1/${id}`,
+  url: `/assets/${id}.png`,
+  original_filename: `${id}.png`,
+  mime_type: "image/png",
+  byte_size: 1,
+  checksum_sha256: "0".repeat(64),
+  width: null,
+  height: null,
+  duration_ms: null,
+  provenance: "uploaded",
+  created_at: "2026-08-23T00:00:00Z",
+  last_modified: "2026-08-23T00:00:00Z",
+  version: 1,
+  ...overrides
+})
+
 const assets: Record<string, PersonaVisualAsset> = {
-  "idle-1": {
-    id: "idle-1",
-    url: "/assets/idle-1.png",
-    mime_type: "image/png",
-    asset_role: "frame",
+  "idle-1": buildAsset("idle-1", {
     width: 32,
     height: 32
-  },
-  "idle-2": {
-    id: "idle-2",
-    url: "/assets/idle-2.png",
-    mime_type: "image/png",
-    asset_role: "frame",
+  }),
+  "idle-2": buildAsset("idle-2", {
     width: 32,
     height: 32
-  },
-  "sheet-1": {
-    id: "sheet-1",
-    url: "/assets/sheet.png",
-    mime_type: "image/png",
+  }),
+  "sheet-1": buildAsset("sheet-1", {
     asset_role: "sprite_sheet",
+    url: "/assets/sheet.png",
     width: 64,
     height: 64
-  }
+  })
 }
 
 const baseManifest = (
