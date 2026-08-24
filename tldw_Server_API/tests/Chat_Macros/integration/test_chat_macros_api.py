@@ -31,6 +31,7 @@ TEST_USER_ID = 4242
 class MacroApiClient:
     client: TestClient
     db: CharactersRAGDB
+    user_base: Path
 
 
 @pytest.fixture()
@@ -66,7 +67,7 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Macr
 
     try:
         with TestClient(fastapi_app) as client:
-            yield MacroApiClient(client=client, db=db)
+            yield MacroApiClient(client=client, db=db, user_base=user_base)
     finally:
         fastapi_app.dependency_overrides.pop(auth_deps.get_auth_principal, None)
         fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -113,6 +114,7 @@ def test_list_get_and_settings_round_trip(api_client: MacroApiClient):
                     "compact": {
                         "format": "single_response",
                         "sections": ["summary"],
+                        "section_titles": {"summary": "Executive brief"},
                     }
                 }
             }
@@ -120,6 +122,15 @@ def test_list_get_and_settings_round_trip(api_client: MacroApiClient):
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["settings"]["output_profiles"]["compact"]["format"] == "single_response"
+    assert updated.json()["settings"]["output_profiles"]["compact"]["section_titles"] == {
+        "summary": "Executive brief"
+    }
+
+    persisted = api_client.client.get(f"{PREFIX}/settings")
+    assert persisted.status_code == 200, persisted.text
+    assert persisted.json()["settings"]["output_profiles"]["compact"]["section_titles"] == {
+        "summary": "Executive brief"
+    }
 
 
 def test_macro_crud_validate_and_clone(api_client: MacroApiClient):
@@ -164,6 +175,32 @@ def test_macro_crud_validate_and_clone(api_client: MacroApiClient):
     assert cloned.status_code == 201, cloned.text
     assert cloned.json()["summary"]["name"] == "my_wrapup"
     assert cloned.json()["definition"]["command"] == "my_wrapup"
+
+
+def test_macro_api_rejects_mismatched_definition_names_without_storage_changes(api_client: MacroApiClient) -> None:
+    rejected_create = api_client.client.post(
+        PREFIX,
+        json={"name": "daily_digest", "raw": _macro_yaml("other_name")},
+    )
+
+    assert rejected_create.status_code == 400, rejected_create.text
+    assert "must match" in rejected_create.json()["detail"]
+    assert not (api_client.user_base / "macros" / "daily_digest").exists()
+    assert not (api_client.user_base / "macros" / "other_name").exists()
+
+    original_raw = _macro_yaml("daily_digest")
+    created = api_client.client.post(PREFIX, json={"name": "daily_digest", "raw": original_raw})
+    assert created.status_code == 201, created.text
+
+    rejected_update = api_client.client.put(
+        f"{PREFIX}/daily_digest",
+        json={"raw": _macro_yaml("renamed")},
+    )
+
+    assert rejected_update.status_code == 400, rejected_update.text
+    assert "must match" in rejected_update.json()["detail"]
+    assert (api_client.user_base / "macros" / "daily_digest" / "MACRO.yaml").read_text(encoding="utf-8") == original_raw
+    assert not (api_client.user_base / "macros" / "renamed").exists()
 
 
 def test_update_macro_enabled_state_without_replacing_definition(api_client: MacroApiClient):

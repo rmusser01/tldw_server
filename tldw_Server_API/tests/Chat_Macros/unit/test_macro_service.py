@@ -111,6 +111,31 @@ def test_create_update_delete_user_macro_and_validate_without_saving(service: Ch
     assert registry_commands == {"wrapup"}
 
 
+def test_create_macro_rejects_definition_name_mismatch_before_storage(service: ChatMacrosService) -> None:
+    with pytest.raises(
+        MacroValidationError,
+        match="macro definition name 'other_name' must match resource name 'daily_digest'",
+    ):
+        service.create_macro("daily_digest", _user_macro_yaml("other_name"))
+
+    assert not (service.storage.macros_dir / "daily_digest").exists()
+    assert not (service.storage.macros_dir / "other_name").exists()
+
+
+def test_update_macro_rejects_definition_rename_before_storage(service: ChatMacrosService) -> None:
+    original_raw = _user_macro_yaml("daily_digest")
+    service.create_macro("daily_digest", original_raw)
+
+    with pytest.raises(
+        MacroValidationError,
+        match="macro definition name 'renamed' must match resource name 'daily_digest'",
+    ):
+        service.update_macro("daily_digest", _user_macro_yaml("renamed"))
+
+    assert service.storage.read("daily_digest").raw == original_raw
+    assert not (service.storage.macros_dir / "renamed").exists()
+
+
 def test_user_enabled_override_preserves_authored_yaml(service: ChatMacrosService) -> None:
     raw = _user_macro_yaml() + "# keep this comment\n"
     service.create_macro("daily_digest", raw)
@@ -207,6 +232,33 @@ def test_output_profile_local_overrides_are_bounded(service: ChatMacrosService) 
 
     with pytest.raises(MacroValidationError, match="unknown output profile keys"):
         normalize_output_profile("bad", {"sectons": ["summary"]})
+
+
+def test_output_profile_renders_custom_section_titles() -> None:
+    profile = normalize_output_profile(
+        "handoff",
+        {
+            "format": "structured_sections",
+            "sections": ["summary", "action_items"],
+            "section_titles": {
+                "summary": "Executive brief",
+                "action_items": "Owners and dates",
+            },
+        },
+    )
+
+    rendered = render_output_profile(profile, {"summary": "S", "action_items": "A"})
+
+    assert "## Executive brief" in rendered
+    assert "## Owners and dates" in rendered
+
+
+def test_output_profile_rejects_titles_for_unknown_sections() -> None:
+    with pytest.raises(MacroValidationError, match="unknown section"):
+        normalize_output_profile(
+            "bad",
+            {"sections": ["summary"], "section_titles": {"risks": "Risk register"}},
+        )
 
 
 def test_single_response_output_includes_failed_branches() -> None:
