@@ -7,7 +7,6 @@ from typing import Any
 
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import sanitize_sender_name
 
-
 SaveMessageFn = Callable[..., Awaitable[str | None]]
 
 

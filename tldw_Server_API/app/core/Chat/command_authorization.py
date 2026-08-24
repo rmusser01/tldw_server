@@ -108,7 +108,8 @@ def authorize_command(
 
     try:
         permitted = bool(permission_checker(int(context.auth_user_id), required_permission))
-    except Exception as exc:
+    # The injected checker is a trust boundary; every checker failure must deny access.
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Slash command permission check failed; denying command. user_id={} permission={} error={}",
             context.auth_user_id,

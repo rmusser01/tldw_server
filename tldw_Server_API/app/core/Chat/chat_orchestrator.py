@@ -573,7 +573,6 @@ def chat_api_call(
             raise ChatAPIError(provider=endpoint_lower,
                                message=f"Unexpected error (Status {status_code}). {sanitized_error}",
                                status_code=status_code) from e
-        mapped_error = map_stream_error(e)
         if _is_network_exception(e):
             logger.error(
                 "Network error connecting to {}: {}",

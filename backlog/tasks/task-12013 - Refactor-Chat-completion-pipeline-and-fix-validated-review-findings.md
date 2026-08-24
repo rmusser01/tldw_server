@@ -1,7 +1,7 @@
 ---
 id: TASK-12013
 title: Refactor Chat completion pipeline and fix validated review findings
-status: In Progress
+status: Done
 created_date: 2026-06-24 04:50
 labels:
 - chat
@@ -21,6 +21,7 @@ documentation:
 modified_files:
 - Docs/Design/2026-06-24-chat-completion-pipeline-refactor-design.md
 - Docs/superpowers/plans/2026-06-24-chat-completion-pipeline-refactor.md
+- apps/tldw-frontend/lib/api/openapi.fingerprint.json
 - tldw_Server_API/app/core/Chat/README.md
 - tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md
 - tldw_Server_API/app/core/Chat/response_processor.py
@@ -45,7 +46,7 @@ modified_files:
 - tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py
 - tldw_Server_API/tests/Chat_NEW/integration/test_chat_command_audit.py
 - tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py
-updated_date: 2026-08-24 05:29
+updated_date: 2026-08-24 06:20
 ---
 
 ## Description
@@ -104,6 +105,9 @@ Task 13 verification update 2026-06-24: Wide Chat regression rerun after fixing 
 2026-07-14 final base correction and refresh: the prior rebase note named ancestor 38bc70fd02, while the rebase reflog confirms the actual checkout tip was its descendant 83428eff33. origin/dev subsequently advanced to f05fe296db with no new Chat changes, and all six PR commits were replayed cleanly onto f05fe296db. Fresh final verification: 163 passed, 1 skipped across the combined PR/conflict-sensitive slice; compileall passed; Bandit over changed Chat/API production files reported 0 findings in /tmp/bandit_chat_completion_pipeline_f05_rebase.json.
 2026-08-23 latest-dev rebase and compatibility repair: fetched origin/dev at 2c3589fa09, rebased all seven PR commits, and resolved Chat endpoint/service/test conflicts by retaining current-dev provider error sanitization, cancellation accounting, macro behavior, and replay-certified fallback rules while preserving the extracted completion services. Focused debugging found that the extracted multi-choice local tool guard was being normalized as an untrusted provider failure after the rebase. Added a canonical local exception plus an allowlisted private-provenance SSE frame so direct, fallback, and queued streaming paths return the intended bounded 400/error code without allowing provider-controlled frames to bypass sanitization. Updated stale tests to current-dev malformed-provider and replay-safety contracts and added utility-boundary tests for the trusted local frame allowlist/terminal behavior. Verification before publish: conflict-sensitive Chat suite 643 passed, 1 skipped; new boundary tests 2 passed; compileall passed; Bandit reported zero findings in all production files touched by the PR. A broad Chat scan retained the same seven historical low-severity findings in untouched chat_exceptions.py, chat_helpers.py, and tool_auto_exec.py.
 2026-08-23 post-review verification: Ruff passed on all files modified during the latest-dev repair. The final conflict-sensitive suite, including the new trusted-frame boundary coverage, passed with 645 passed and 1 skipped. `git diff --check` remained clean; generated watchlist templates created by test startup were removed from the worktree.
+2026-08-23 CI follow-up: GitHub's required `backend-required` aggregate failed only at the OpenAPI contract drift gate (checked-in 2012 paths/2941 schemas versus generated 2021/2958). Reproducing the check on the then-current origin/dev tip showed the base branch itself was stale; dev subsequently advanced to 4958cfed65 with additional scheduled-task APIs and still failed locally at 2028 paths/2965 schemas. Rebased the PR's eight commits cleanly onto 4958cfed65. This task will refresh the single committed OpenAPI fingerprint and regenerate/review the ignored frontend type artifacts so the required gate represents the actual latest-dev contract.
+2026-08-23 final latest-dev remediation and pre-merge verification: rebased cleanly onto origin/dev 4958cfed65, regenerated the OpenAPI fingerprint with Python 3.12 to 2028 paths/2965 schemas (sha256 76dd350a574288b456c7e680a0130e8aaa770d20f8023ba4e91fbebd4ec0567c), regenerated the ignored frontend schema types, and passed the exact fingerprint drift check. Broad Ruff comparison against the same dev base identified four PR-only warnings: a dead stream-error assignment, an intentionally broad fail-closed authorization catch needing an explicit trust-boundary suppression, one import-spacing issue, and a missing test `Any` import; all were corrected and the differential lint result is now clean. Latest checks: compileall passed; Bandit reported zero findings in every production file changed by the PR; `git diff --check` passed; the post-fix 12-file Chat regression passed with 292 passed/1 skipped, following the earlier full conflict-sensitive run of 645 passed/1 skipped on this rebase. Implementation is ready for final GitHub CI, Qodo review of the published head, and merge.
+2026-08-23 final merge-window base refresh: origin/dev advanced twice after the prior verification, first to 2ebf14c145 (Web Scraping phase 4C) and then to 1885fe8ee2 (Claims analytics exports). Both rebases were clean for Chat code. The Claims merge overlapped the OpenAPI fingerprint, so the conflict was resolved by regenerating the combined latest-dev contract under Python 3.12 instead of choosing either snapshot. Final combined contract remains 2028 paths/2965 schemas with sha256 8aa01ac97bebf2b3ae48467a4aedc3a10ee1da424413609f9a3d3eb5275b5de3; ignored frontend schema types were regenerated and the exact fingerprint drift check passed. Chat regression on the immediately preceding Web Scraping base remained 292 passed/1 skipped and touched-scope Bandit remained 0 findings; the subsequent Claims delta does not touch Chat code.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
