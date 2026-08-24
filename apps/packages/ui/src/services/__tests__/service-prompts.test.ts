@@ -143,6 +143,20 @@ const definitions: Record<KnownServicePromptId, ServicePromptCatalogItem> = {
       mode: "template",
       required_variables: ["target_language", "text"]
     }
+  ]),
+  "notes.title.generate": definition("notes.title.generate", [
+    {
+      key: "system",
+      label: "System instructions",
+      mode: "literal",
+      required_variables: []
+    },
+    {
+      key: "title_instruction",
+      label: "Title instruction",
+      mode: "literal",
+      required_variables: []
+    }
   ])
 }
 

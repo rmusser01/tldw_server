@@ -10,6 +10,7 @@ export type KnownServicePromptId =
   | "chat.web_search.answer"
   | "chat.title.generation"
   | "media.text.translation"
+  | "notes.title.generate"
 
 export type ServicePromptSource = "user" | "packaged"
 export type ServicePromptPartMode = "literal" | "template"

@@ -48,6 +48,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     resolve_chacha_user_base_dir,
 )
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
     NOTES_SYNC_EXCEPTIONS,
@@ -174,6 +175,10 @@ from tldw_Server_API.app.core.Personalization import (
     record_note_restored,
     record_note_updated,
 )
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
+    ResolvedServicePrompt,
+    resolve_service_prompt,
+)
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
@@ -243,6 +248,8 @@ _NOTES_NONCRITICAL_EXCEPTIONS = (
 
 router = APIRouter()
 
+_NOTES_TITLE_SERVICE_PROMPT_ID = "notes.title.generate"
+
 _NOTES_ATTACHMENT_DEFAULT_MAX_BYTES = 25 * 1024 * 1024
 _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT = 1000
 _NOTES_ATTACHMENT_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)\Z")
@@ -251,6 +258,43 @@ _NOTES_ATTACHMENT_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)\Z")
 def get_notes_task_service() -> NotesTaskService:
     """Provide the stateless notes task service for note-save reconciliation."""
     return NotesTaskService()
+
+
+async def _resolve_note_title_service_prompt(
+    request: Request,
+    current_user: User,
+    options: TitleGenOptions,
+) -> ResolvedServicePrompt | None:
+    """Resolve the title prompt only for an active LLM title strategy."""
+
+    if options.strategy not in ("llm", "llm_fallback"):
+        return None
+    db = await get_prompts_db_for_user(request, current_user)
+
+    def resolve_and_close() -> ResolvedServicePrompt:
+        try:
+            return resolve_service_prompt(db, _NOTES_TITLE_SERVICE_PROMPT_ID)
+        finally:
+            db.close_connection()
+
+    return await asyncio.to_thread(resolve_and_close)
+
+
+def _generate_note_title_with_service_prompt(
+    content: str,
+    *,
+    options: TitleGenOptions,
+    service_prompt: ResolvedServicePrompt | None,
+) -> str:
+    """Preserve the legacy generator call shape for heuristic titles."""
+
+    if options.strategy == "heuristic" or service_prompt is None:
+        return generate_note_title(content, options=options)
+    return generate_note_title(
+        content,
+        options=options,
+        service_prompt=service_prompt,
+    )
 
 
 def _resolve_notes_attachment_max_bytes() -> int:
@@ -2132,18 +2176,18 @@ async def create_note(
         )
         if not effective_title:
             if getattr(note_in, "auto_title", False):
-                try:
-                    opts = _build_title_opts(note_in)
-                    effective_title = await asyncio.to_thread(
-                        generate_note_title,
-                        note_in.content,
-                        options=opts,
-                    )
-                except _NOTES_NONCRITICAL_EXCEPTIONS as gen_err:
-                    logger.warning(f"Auto-title generation failed, falling back: {gen_err}")
-                    effective_title = await asyncio.to_thread(
-                        generate_note_title, note_in.content
-                    )
+                opts = _build_title_opts(note_in)
+                service_prompt = await _resolve_note_title_service_prompt(
+                    request,
+                    current_user,
+                    opts,
+                )
+                effective_title = await asyncio.to_thread(
+                    _generate_note_title_with_service_prompt,
+                    note_in.content,
+                    options=opts,
+                    service_prompt=service_prompt,
+                )
             else:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -6668,6 +6712,7 @@ async def restore_note(
     tags=["notes"],
 )
 async def suggest_note_title(
+        request: Request,
         payload: TitleSuggestRequest,
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
@@ -6684,7 +6729,17 @@ async def suggest_note_title(
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
 
         opts = _build_title_opts(payload)
-        title = await asyncio.to_thread(generate_note_title, payload.content, options=opts)
+        service_prompt = await _resolve_note_title_service_prompt(
+            request,
+            current_user,
+            opts,
+        )
+        title = await asyncio.to_thread(
+            _generate_note_title_with_service_prompt,
+            payload.content,
+            options=opts,
+            service_prompt=service_prompt,
+        )
         return TitleSuggestResponse(title=title)
     except HTTPException:
         raise
@@ -6710,6 +6765,7 @@ async def bulk_create_notes(
     companion_events: list[dict[str, Any]] = []
     created = 0
     failed = 0
+    title_service_prompt: ResolvedServicePrompt | None = None
     # Enforce centralized per-request rate limit (notes.bulk_create)
     try:
         allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.bulk_create")
@@ -6793,21 +6849,19 @@ async def bulk_create_notes(
             )
             if not effective_title:
                 if getattr(item, "auto_title", False):
-                    try:
-                        opts = _build_title_opts(item)
-                        effective_title = await asyncio.to_thread(
-                            generate_note_title,
-                            item.content,
-                            options=opts,
+                    opts = _build_title_opts(item)
+                    if title_service_prompt is None:
+                        title_service_prompt = await _resolve_note_title_service_prompt(
+                            http_request,
+                            current_user,
+                            opts,
                         )
-                    except _NOTES_NONCRITICAL_EXCEPTIONS as gen_err:
-                        logger.warning(
-                            "[Bulk] Auto-title generation failed, falling back: {}",
-                            gen_err,
-                        )
-                        effective_title = await asyncio.to_thread(
-                            generate_note_title, item.content
-                        )
+                    effective_title = await asyncio.to_thread(
+                        _generate_note_title_with_service_prompt,
+                        item.content,
+                        options=opts,
+                        service_prompt=title_service_prompt,
+                    )
                 else:
                     raise InputError(
                         "Title is required for bulk item unless auto_title=true."

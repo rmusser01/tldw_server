@@ -6296,8 +6296,20 @@
   "servicePrompts_definitions_chatTitleGeneration_description": {
     "message": "Controls the instruction used to generate automatic conversation titles."
   },
+  "servicePrompts_definitions_notesTitleGenerate_label": {
+    "message": "Notes title"
+  },
+  "servicePrompts_definitions_notesTitleGenerate_description": {
+    "message": "Controls the wording used by LLM-backed automatic Notes titles."
+  },
   "servicePrompts_workflows_automaticConversationTitles": {
     "message": "Automatic conversation titles"
+  },
+  "servicePrompts_workflows_automaticNotesTitles": {
+    "message": "Automatic Notes titles"
+  },
+  "servicePrompts_parts_titleInstruction": {
+    "message": "Title instruction"
   },
   "servicePrompts_titleGeneration_note": {
     "message": "Automatic title generation is enabled or disabled in Chat settings."

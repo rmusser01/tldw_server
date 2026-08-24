@@ -109,6 +109,9 @@ Only output the translation, no explanations, notes, or additional text.
 Text to translate:
 {text}"""
 
+_NOTES_TITLE_SYSTEM_DEFAULT = "You are a helpful assistant that writes concise document titles."
+_NOTES_TITLE_INSTRUCTION_DEFAULT = "Write a descriptive title"
+
 _DEFINITION_SEQUENCE = (
     ServicePromptDefinition(
         id="chat.rag.answer",
@@ -214,6 +217,37 @@ _DEFINITION_SEQUENCE = (
             }
         ),
         affected_workflows=(ServicePromptWorkflow(id="media.text.translation", label="Text translation"),),
+    ),
+    ServicePromptDefinition(
+        id="notes.title.generate",
+        label="Notes title",
+        description="Controls the wording used by LLM-backed automatic Notes titles.",
+        parts=(
+            ServicePromptPart(
+                key="system",
+                label="System instructions",
+                mode="literal",
+                required_variables=(),
+            ),
+            ServicePromptPart(
+                key="title_instruction",
+                label="Title instruction",
+                mode="literal",
+                required_variables=(),
+            ),
+        ),
+        default_parts=MappingProxyType(
+            {
+                "system": _NOTES_TITLE_SYSTEM_DEFAULT,
+                "title_instruction": _NOTES_TITLE_INSTRUCTION_DEFAULT,
+            }
+        ),
+        affected_workflows=(
+            ServicePromptWorkflow(
+                id="notes.title.generate",
+                label="Automatic Notes titles",
+            ),
+        ),
     ),
 )
 

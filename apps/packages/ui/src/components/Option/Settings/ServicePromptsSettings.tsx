@@ -137,6 +137,12 @@ const KNOWN_DEFINITIONS = {
     label: "Text translation",
     description:
       "Controls the visible instructions used by synchronous text translation."
+  },
+  "notes.title.generate": {
+    key: "notesTitleGenerate",
+    label: "Notes title",
+    description:
+      "Controls the wording used by LLM-backed automatic Notes titles."
   }
 } as const
 
@@ -163,12 +169,17 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "media.text.translation": {
     key: "textTranslation",
     label: "Text translation"
+  },
+  "notes.title.generate": {
+    key: "automaticNotesTitles",
+    label: "Automatic Notes titles"
   }
 }
 
 const KNOWN_PARTS: Record<string, { key: string; label: string }> = {
   template: { key: "template", label: "Template" },
   system: { key: "system", label: "System instructions" },
+  title_instruction: { key: "titleInstruction", label: "Title instruction" },
   user_template: { key: "userTemplate", label: "User template" }
 }
 
