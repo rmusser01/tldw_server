@@ -14,7 +14,8 @@ const PROFILE_KEY = /^[a-z][a-z0-9_]{0,63}$/
 const MAX_SECTIONS = 10
 const MAX_HEADING_LENGTH = 128
 
-type ProfileDrafts = Record<string, ChatMacroOutputProfile>
+type ProfileDraft = ChatMacroOutputProfile & { sectionHeadings: string[] }
+type ProfileDrafts = Record<string, ProfileDraft>
 
 export interface OutputProfileEditorProps {
   settings: ChatMacroSettings
@@ -34,29 +35,39 @@ const segmentClassName = (selected: boolean): string =>
       : "bg-surface text-text hover:bg-surface2"
   }`
 
-const createProfile = (): ChatMacroOutputProfile => ({
+const createProfile = (): ProfileDraft => ({
   format: "structured_sections",
   sections: ["summary"],
   section_titles: {},
-  include_branch_outputs: false
+  include_branch_outputs: false,
+  sectionHeadings: [""]
 })
 
-const cloneProfile = (profile: ChatMacroOutputProfile): ChatMacroOutputProfile => ({
-  format: profile.format,
-  sections: Array.isArray(profile.sections) ? [...profile.sections] : [],
-  section_titles:
+const cloneProfile = (profile: ChatMacroOutputProfile): ProfileDraft => {
+  const sections = Array.isArray(profile.sections) ? [...profile.sections] : []
+  const section_titles =
     profile.section_titles && typeof profile.section_titles === "object"
       ? { ...profile.section_titles }
-      : {},
-  include_branch_outputs: Boolean(profile.include_branch_outputs)
-})
+      : {}
+  const sourceHeadings = (profile as Partial<ProfileDraft>).sectionHeadings
 
-const cloneProfiles = (profiles: ProfileDrafts): ProfileDrafts =>
+  return {
+    format: profile.format,
+    sections,
+    section_titles,
+    include_branch_outputs: Boolean(profile.include_branch_outputs),
+    sectionHeadings: Array.isArray(sourceHeadings)
+      ? [...sourceHeadings]
+      : sections.map((section) => section_titles[section] || "")
+  }
+}
+
+const cloneProfiles = (profiles: Record<string, ChatMacroOutputProfile>): ProfileDrafts =>
   Object.fromEntries(
     Object.entries(profiles).map(([name, profile]) => [name, cloneProfile(profile)])
   )
 
-const firstProfileName = (profiles: ProfileDrafts): string =>
+const firstProfileName = (profiles: Record<string, ChatMacroOutputProfile>): string =>
   profiles.default ? "default" : Object.keys(profiles)[0] || "default"
 
 export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorProps) => {
@@ -99,7 +110,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
   }, [])
 
   const updateCurrentProfile = React.useCallback(
-    (update: (profile: ChatMacroOutputProfile) => ChatMacroOutputProfile) => {
+    (update: (profile: ProfileDraft) => ProfileDraft) => {
       clearFeedback()
       setDrafts((current) => ({
         ...current,
@@ -142,23 +153,16 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
     (index: number, key: "section" | "heading", value: string) => {
       updateCurrentProfile((profile) => {
         if (key === "section") {
-          const previousSection = profile.sections[index]
           const sections = [...profile.sections]
           sections[index] = value
-          const { [previousSection]: heading, ...section_titles } = profile.section_titles
-          return {
-            ...profile,
-            sections,
-            section_titles: Object.hasOwn(profile.section_titles, previousSection)
-              ? { ...section_titles, [value]: heading }
-              : section_titles
-          }
+          return { ...profile, sections }
         }
 
-        const section = profile.sections[index]
+        const sectionHeadings = [...profile.sectionHeadings]
+        sectionHeadings[index] = value
         return {
           ...profile,
-          section_titles: { ...profile.section_titles, [section]: value }
+          sectionHeadings
         }
       })
     },
@@ -171,8 +175,13 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
         const destination = index + direction
         if (destination < 0 || destination >= profile.sections.length) return profile
         const sections = [...profile.sections]
+        const sectionHeadings = [...profile.sectionHeadings]
         ;[sections[index], sections[destination]] = [sections[destination], sections[index]]
-        return { ...profile, sections }
+        ;[sectionHeadings[index], sectionHeadings[destination]] = [
+          sectionHeadings[destination],
+          sectionHeadings[index]
+        ]
+        return { ...profile, sections, sectionHeadings }
       })
     },
     [updateCurrentProfile]
@@ -181,12 +190,10 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
   const removeSection = React.useCallback(
     (index: number) => {
       updateCurrentProfile((profile) => {
-        const section = profile.sections[index]
-        const { [section]: _removed, ...sectionTitles } = profile.section_titles
         return {
           ...profile,
           sections: profile.sections.filter((_, sectionIndex) => sectionIndex !== index),
-          section_titles: sectionTitles
+          sectionHeadings: profile.sectionHeadings.filter((_, sectionIndex) => sectionIndex !== index)
         }
       })
     },
@@ -194,7 +201,11 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
   )
 
   const addSection = React.useCallback(() => {
-    updateCurrentProfile((profile) => ({ ...profile, sections: [...profile.sections, ""] }))
+    updateCurrentProfile((profile) => ({
+      ...profile,
+      sections: [...profile.sections, ""],
+      sectionHeadings: [...profile.sectionHeadings, ""]
+    }))
   }, [updateCurrentProfile])
 
   const validationErrors = React.useCallback(
@@ -220,7 +231,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
             )
           )
         }
-        if (Object.values(profile.section_titles).some((heading) => heading.trim().length > MAX_HEADING_LENGTH)) {
+        if (profile.sectionHeadings.some((heading) => heading.trim().length > MAX_HEADING_LENGTH)) {
           errors.push(label("validation.headingLength", "Section headings must be 128 characters or fewer."))
         }
       }
@@ -230,19 +241,20 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
   )
 
   const normalizedProfiles = React.useCallback(
-    (profiles: ProfileDrafts): ProfileDrafts =>
+    (profiles: ProfileDrafts): Record<string, ChatMacroOutputProfile> =>
       Object.fromEntries(
         Object.entries(profiles).map(([name, profile]) => {
+          const { sectionHeadings, ...profileWithoutHeadings } = profile
           const sections = profile.sections.map((section) => section.trim())
           const section_titles = sections.reduce<Record<string, string>>((titles, section, index) => {
-            const heading = profile.section_titles[profile.sections[index]]?.trim()
+            const heading = sectionHeadings[index]?.trim()
             if (heading) titles[section] = heading
             return titles
           }, {})
           return [
             name,
             {
-              ...profile,
+              ...profileWithoutHeadings,
               sections,
               section_titles
             }
@@ -452,7 +464,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
                 <input
                   id={`output-profile-section-heading-${index}`}
                   className={`${fieldClassName} mt-1`}
-                  value={currentProfile.section_titles[section] || ""}
+                  value={currentProfile.sectionHeadings[index] || ""}
                   disabled={saving}
                   onChange={(event) => updateSection(index, "heading", event.target.value)}
                 />

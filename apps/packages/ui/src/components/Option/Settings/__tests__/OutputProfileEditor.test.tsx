@@ -114,6 +114,36 @@ describe("OutputProfileEditor", () => {
     })
   })
 
+  it("retains both row headings when a duplicate section key is corrected", async () => {
+    const user = userEvent.setup()
+    const settings = makeSettings()
+    settings.output_profiles.default.section_titles = {
+      summary: "Executive summary",
+      action_items: "Action plan"
+    }
+    renderProfileEditor({ settings })
+
+    await user.clear(screen.getByLabelText("Section key 1"))
+    await user.type(screen.getByLabelText("Section key 1"), "action_items")
+    await user.click(screen.getByRole("button", { name: "Save profiles" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Section keys must be unique.")
+    expect(mocks.updateChatMacroSettings).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("Section heading 1")).toHaveValue("Executive summary")
+    expect(screen.getByLabelText("Section heading 2")).toHaveValue("Action plan")
+
+    await user.clear(screen.getByLabelText("Section key 1"))
+    await user.type(screen.getByLabelText("Section key 1"), "overview")
+    await user.click(screen.getByRole("button", { name: "Save profiles" }))
+
+    await waitFor(() => expect(mocks.updateChatMacroSettings).toHaveBeenCalled())
+    const [savedSettings] = mocks.updateChatMacroSettings.mock.calls[0] as [ChatMacroSettings]
+    expect(savedSettings.output_profiles.default.section_titles).toEqual({
+      overview: "Executive summary",
+      action_items: "Action plan"
+    })
+  })
+
   it("saves single response format and branch-output inclusion", async () => {
     const user = userEvent.setup()
     renderProfileEditor()
