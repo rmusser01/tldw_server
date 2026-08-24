@@ -248,7 +248,7 @@ export const ChatMacroEditor = ({
       )
       return
     }
-    setDraft(parsed.draft)
+    setDraft(selected ? { ...parsed.draft, name: selected.name } : parsed.draft)
     setValidationError(null)
     setValidationMessage(null)
     setMode("guided")
