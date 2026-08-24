@@ -25,7 +25,7 @@ The user promise is:
 
 Scheduled Tasks owns the definition, immutable revisions, schedule, authorization, runs, attention state, result summaries, delivery, and audit. A provider-neutral execution adapter owns the detailed agent execution record. ACP is the first adapter. Full transcripts and artifacts remain in the adapter's permissioned storage and are linked from Scheduled Tasks.
 
-The product remains API-first. The WebUI is the reference and main enterprise client, and the browser extension is a context-capture client. Neither client defines the product boundary.
+The product remains API-first. The WebUI is the reference and main enterprise client, and the browser extension is a context-capture and compact-updates client. Neither client defines the product boundary.
 
 Phase 4D does not replace the standalone Agent Tasks project workflow or Watchlists. Watchlists remains the source-monitoring and change-detection workspace for its existing persona and job. Standalone Agent Tasks remains the project-oriented planning, dependency, review, and artifact workflow.
 
@@ -65,9 +65,9 @@ This design does not assume that secure payload storage, durable Agent Task appr
 10. Automatic retries are allowed before adapter execution starts. After session start, retry requires proof of no effects or an idempotent checkpoint.
 11. Cancellation is confirmed-state only. Unconfirmed termination becomes an unresolved cancellation with unknown effect handling.
 12. Scheduled Tasks retains redacted summaries, typed effect evidence, and permission-checked adapter links. Full output remains in adapter-owned secure storage.
-13. Meaningful outputs create Agent Results. Safety and recovery conditions create approval or attention resources; all are projected into Inbox according to surfacing policy. Routine no-ops and skips remain in run history unless `record_policy=every_run`.
+13. `record_policy=noteworthy_only` creates Agent Results for meaningful outputs and confirmed external actions. `every_run` uses the same behavior and creates one typed run-summary Result only when a terminal run produced no output/action Result, ensuring each terminal run has at least one Result without duplicating it. `history_only` keeps ordinary output in run history without Agent Results. Safety and recovery conditions always create approval or attention resources; Home projection remains governed by surfacing policy.
 14. Home shows unread outputs and unresolved attention according to policy, not every execution.
-15. Legacy ACP schedules migrate automatically. Safe schedules continue under an immutable read-only migration grant; ambiguous or side-effect-capable schedules migrate paused with `review_required` in `attention_states[]` and present as `Needs review`.
+15. Legacy ACP schedules migrate automatically only after the deployment class passes execution certification and cutover gates. Safe schedules then continue under an immutable read-only migration grant; ambiguous or side-effect-capable schedules migrate paused with `review_required` in `attention_states[]` and present as `Needs review`. Uncertified deployments remain in visible inventory/dry-run state and never silently transfer execution ownership.
 16. Phase 4D is delivered in stages, but write-capable execution and durable approval recovery are required before general availability.
 17. Watchlists and standalone Agent Tasks retain their current ownership and workflows.
 18. Every scheduled agent execution runs inside an attested, deny-by-default isolation profile. An authority envelope is not considered enforceable when the agent can bypass mediation through host filesystem, network, subprocess, MCP, or ambient credentials.
@@ -249,24 +249,28 @@ The following independent permissions are normative endpoint requirements:
 - `TASKS_AUTHORIZE`
 - `TASKS_APPROVE`
 - `TASKS_PROMPT_REVEAL`
-- `TASKS_SECURE_PAYLOAD_COPY`
+- `TASKS_PROMPT_COPY`
+- `TASKS_PROMPT_DELETE`
+- `TASKS_SECURE_PAYLOAD_CLONE`
 - `TASKS_SECURE_OUTPUT_READ`
 
-Deployments may assign several permissions to one role, but they must not alias or omit the permission checks. `TASKS_CONTROL` alone cannot authorize, approve, reveal, copy secure payloads, or read secure transcripts.
+Deployments may assign several permissions to one role, but they must not alias or omit the permission checks. `TASKS_CONTROL` alone cannot authorize, approve, reveal, copy plaintext, clone or delete secure payloads, or read secure transcripts.
 
 Permission matrix:
 
 | Action | Required permission |
 | --- | --- |
-| List/detail definitions, capabilities, targets, revisions, redacted runs, redacted Results, Inbox, approvals, attention, and audit | `TASKS_READ` plus source resource access. |
-| Preview, draft create/update, pause, archive, restore, forget message, cancel, ordinary safe retry, Run Now with an existing grant, review-state mutation, bulk preview, and supported bulk action | `TASKS_CONTROL` plus source resource access. |
+| List capabilities, targets, and caller-visible collections | `TASKS_READ`; collection responses remain permission-filtered. |
+| Detail definitions, revisions, redacted runs, redacted Results, Inbox items, approvals, attention, and audit | `TASKS_READ` plus source resource access. |
+| Preview, draft create/update, pause, archive, restore, cancel, ordinary safe retry, Run Now with an existing grant, review-state mutation, bulk preview, and supported bulk action | `TASKS_CONTROL` plus source resource access. |
 | Create-and-authorize, update-and-reauthorize, renew, expand authority | `TASKS_AUTHORIZE` plus `TASKS_CONTROL`. |
 | Authorize-and-run or acknowledge possible duplicates and start a linked attempt | `TASKS_AUTHORIZE` plus `TASKS_CONTROL`, exact source access, and configured step-up. |
 | Resolve an approval | `TASKS_APPROVE` plus source resource access. |
 | Reveal the stored message for view or edit | `TASKS_PROMPT_REVEAL` plus step-up when configured. |
-| Copy revealed message text | `TASKS_PROMPT_REVEAL` plus `TASKS_SECURE_PAYLOAD_COPY` and configured step-up. |
+| Copy revealed message text | `TASKS_PROMPT_REVEAL` plus `TASKS_PROMPT_COPY` and configured step-up. |
+| Forget stored message content | `TASKS_CONTROL` plus `TASKS_PROMPT_DELETE`, exact source access, and mandatory step-up. |
 | Duplicate task structure | `TASKS_CONTROL` plus source resource access. |
-| Duplicate encrypted message content | `TASKS_SECURE_PAYLOAD_COPY` in addition to duplicate-structure permission. |
+| Clone encrypted message content server-side | `TASKS_SECURE_PAYLOAD_CLONE` in addition to duplicate-structure permission; plaintext is never returned. |
 | Read or export full scheduled-mode transcript/output | `TASKS_SECURE_OUTPUT_READ`; also require `TASKS_PROMPT_REVEAL` whenever prompt echo is present or cannot be conservatively excluded. |
 
 ### Actor And Resource Relationships
@@ -375,29 +379,29 @@ Existing query-based WebUI deep links and `/scheduled-tasks/results` remain vali
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /scheduled-tasks/agent-targets` | Discover permission-filtered targets and capability freshness. |
-| `GET /scheduled-tasks/definitions/{id}/revisions` | Inspect redacted immutable revision history. |
-| `POST /scheduled-tasks/definitions/{id}/authorizations` | Consume a valid preview for update-and-authorize or authorize-and-run, creating the matching grant and lifecycle or one-run dispatch atomically. |
-| `POST /scheduled-tasks/definitions/{id}/prompt-reveal` | Step-up-aware, audited, no-store prompt reveal. |
-| `POST /scheduled-tasks/definitions/{id}/forget-message` | Revoke grants and delete eligible Scheduled Tasks payloads with a deletion-scope report. |
-| `POST /scheduled-tasks/definitions/{id}/restore` | Restore an archived definition into paused state without restoring authority. |
-| `POST /scheduled-tasks/runs/{id}/cancel` | Request cancellation without claiming termination. |
-| `POST /scheduled-tasks/runs/{id}/retry` | Create a linked attempt only under the reported retry mode. |
+| `GET /scheduled-tasks/definitions/{definition_id}/revisions` | Inspect redacted immutable revision history. |
+| `POST /scheduled-tasks/definitions/{definition_id}/authorizations` | Consume a valid preview for update-and-authorize or authorize-and-run, creating the matching grant and lifecycle or one-run dispatch atomically. |
+| `POST /scheduled-tasks/definitions/{definition_id}/prompt-reveal` | Step-up-aware, audited, no-store prompt reveal. |
+| `POST /scheduled-tasks/definitions/{definition_id}/forget-message` | Revoke grants and delete eligible Scheduled Tasks payloads with a deletion-scope report. |
+| `POST /scheduled-tasks/definitions/{definition_id}/restore` | Restore an archived definition into paused state without restoring authority. |
+| `POST /scheduled-tasks/runs/{run_id}/cancel` | Request cancellation without claiming termination. |
+| `POST /scheduled-tasks/runs/{run_id}/retry` | Create a linked attempt only under the reported retry mode. |
 | `GET /scheduled-tasks/approvals` | List durable pre-action approvals only. |
-| `GET /scheduled-tasks/approvals/{id}` | Inspect one approval and its revision/checkpoint context. |
-| `POST /scheduled-tasks/approvals/{id}/resolve` | Deny, approve a safe retry, or begin a future-policy update. |
-| `POST /scheduled-tasks/approvals/{id}/review` | Mark an approval read or snoozed without resolving it. |
+| `GET /scheduled-tasks/approvals/{approval_id}` | Inspect one approval and its revision/checkpoint context. |
+| `POST /scheduled-tasks/approvals/{approval_id}/resolve` | Deny, approve a safe retry, or begin a future-policy update. |
+| `POST /scheduled-tasks/approvals/{approval_id}/review` | Mark an approval read or snoozed without resolving it. |
 | `GET /scheduled-tasks/attention` | List non-approvable policy, effect, cancellation, expiry, and delivery attention records. |
-| `GET /scheduled-tasks/attention/{id}` | Inspect one permission-checked attention record and its evidence and recovery links. |
-| `POST /scheduled-tasks/attention/{id}/review` | Mark an attention record read or snoozed with version preconditions. |
-| `GET /scheduled-tasks/agent-results` | List versioned Agent Task output/action Results without changing Phase 4C Result enums. |
-| `GET /scheduled-tasks/agent-results/{id}` | Inspect one canonical Agent Task Result. |
-| `POST /scheduled-tasks/agent-results/{id}/review` | Mutate Agent Task Result review state. |
+| `GET /scheduled-tasks/attention/{attention_id}` | Inspect one permission-checked attention record and its evidence and recovery links. |
+| `POST /scheduled-tasks/attention/{attention_id}/review` | Mark an attention record read or snoozed with version preconditions. |
+| `GET /scheduled-tasks/agent-results` | List versioned Agent Task output, action, and run-summary Results without changing Phase 4C Result enums. |
+| `GET /scheduled-tasks/agent-results/{agent_result_id}` | Inspect one canonical Agent Task Result. |
+| `POST /scheduled-tasks/agent-results/{agent_result_id}/review` | Mutate Agent Task Result review state. |
 | `GET /scheduled-tasks/inbox` | Read the additive normalized Home Automation Inbox projection without breaking canonical Result or attention schemas. |
-| `GET /scheduled-tasks/inbox/{id}` | Read one projected item and its canonical action links. |
+| `GET /scheduled-tasks/inbox/{inbox_item_id}` | Read one projected item and its canonical action links. |
 | `POST /scheduled-tasks/bulk-previews` | Preview eligible, blocked, and consequential definition mutations. |
 | `POST /scheduled-tasks/bulk-actions` | Consume a valid bulk preview for supported pause/archive operations. |
 
-The additive Agent Results and Inbox routes avoid expanding closed existing Result enums in ways that can break generated clients. Existing `/results` resources remain canonical Recurring Question records. `/agent-results/{id}` never returns an Inbox item, and `/inbox/{id}` never masquerades as a canonical Result. The Inbox union projects legacy Results, Agent Results, approvals, policy blocks, unknown effects, expiry warnings, and delivery failures for Home. The reference-client Results route reads canonical legacy and Agent Results; it does not list attention-only Inbox items.
+The additive Agent Results and Inbox routes avoid expanding closed existing Result enums in ways that can break generated clients. Existing `/results` resources remain canonical Recurring Question records. `/agent-results/{agent_result_id}` never returns an Inbox item, and `/inbox/{inbox_item_id}` never masquerades as a canonical Result. Resource-specific path parameter names are normative because they become generated-client parameter names. The Inbox union projects legacy Results, Agent Results, approvals, policy blocks, unknown effects, expiry warnings, and delivery failures for Home. The reference-client Results route reads canonical legacy and Agent Results; it does not list attention-only Inbox items.
 
 ### Preview And Save
 
@@ -430,9 +434,9 @@ Agent Task mutations are five mutually exclusive typed transactions:
 | --- | --- | --- |
 | Draft create | `POST /definitions`, `operation=create_draft` | Consume a save-valid preview; create paused definition and revision with no grant. |
 | Create and authorize | `POST /definitions`, `operation=create_and_authorize` | Consume an enable-valid preview; create definition, revision, authorization assertion, grant, and configured lifecycle. |
-| Update only | `PATCH /definitions/{id}`, `operation=update` | Consume one preview; apply non-material changes, or require `apply_mode=save_and_pause` for material changes and revoke/supersede authority. |
-| Update and reauthorize | `POST /definitions/{id}/authorizations`, `operation=update_and_authorize` | Consume one enable-valid update preview; commit revision, assertion, grant, and configured lifecycle. |
-| Authorize and run once | `POST /definitions/{id}/authorizations`, `operation=authorize_and_run` | Consume one enable-valid preview; atomically apply its revision, create a one-use grant, root run, and unique dispatch intent while leaving the definition paused. |
+| Update only | `PATCH /definitions/{definition_id}`, `operation=update` | Consume one preview; apply non-material changes, or require `apply_mode=save_and_pause` for material changes and revoke/supersede authority. |
+| Update and reauthorize | `POST /definitions/{definition_id}/authorizations`, `operation=update_and_authorize` | Consume one enable-valid update preview; commit revision, assertion, grant, and configured lifecycle. |
+| Authorize and run once | `POST /definitions/{definition_id}/authorizations`, `operation=authorize_and_run` | Consume one enable-valid preview; atomically apply its revision, create a one-use grant, root run, and unique dispatch intent while leaving the definition paused. |
 
 Each request includes preview ID, expected preview fingerprint, expected definition version where applicable, operation, and idempotency key. Authorization operations additionally include the exact authorization assertion. Responses identify consumed preview, resulting revision, grant, lifecycle, and next eligible run.
 
@@ -444,7 +448,7 @@ Resume never bypasses missing, expired, revoked, or drifted authorization. Agent
 
 Authorization confirmation includes exact revision, authority, target, prompt, policy, and risk-summary fingerprints. A generic `confirmed=true` is insufficient.
 
-An unknown-effect manual override is a typed retry request, not an ordinary Run Now. `POST /runs/{id}/retry` uses `mode=acknowledge_possible_duplicates` and requires mandatory `Idempotency-Key`, expected evidence version, duplicate-effect evidence digest, expected definition revision, expected grant ID and version, a bounded reason code, configured step-up, `TASKS_CONTROL`, and `TASKS_AUTHORIZE`. In one transaction it records the acknowledgement and creates at most one linked attempt and unique dispatch intent. Any stale evidence, revision, grant, or acknowledgement digest refuses the request.
+An unknown-effect manual override is a typed retry request, not an ordinary Run Now. `POST /runs/{run_id}/retry` uses `mode=acknowledge_possible_duplicates` and requires mandatory `Idempotency-Key`, expected evidence version, duplicate-effect evidence digest, expected definition revision, expected grant ID and version, a bounded reason code, configured step-up, `TASKS_CONTROL`, and `TASKS_AUTHORIZE`. In one transaction it records the acknowledgement and creates at most one linked attempt and unique dispatch intent. Any stale evidence, revision, grant, or acknowledgement digest refuses the request.
 
 ### Prompt Reveal And Copy
 
@@ -457,11 +461,13 @@ Prompt reveal:
 - is displayed in a temporary client panel that remasks on close, navigation, or session expiry;
 - does not copy automatically.
 
-The reference client sends `purpose=copy` before placing revealed text on the clipboard and records success or client-reported failure in a follow-up audit event. Copy purpose additionally requires `TASKS_SECURE_PAYLOAD_COPY`. The product does not claim it can observe later operating-system or application copies. Audit stores only the bounded reason code and purpose; no caller-supplied free text is stored in ordinary or protected audit. If a deployment needs support notes, it stores them separately under encrypted prompt-reveal access and never joins them into ordinary audit, logs, metrics, or notifications.
+The reference client sends `purpose=copy` before placing revealed text on the clipboard and records success or client-reported failure in a follow-up audit event. Copy purpose additionally requires `TASKS_PROMPT_COPY`. The product does not claim it can observe later operating-system or application copies. Audit stores only the bounded reason code and purpose; no caller-supplied free text is stored in ordinary or protected audit. If a deployment needs support notes, it stores them separately under encrypted prompt-reveal access and never joins them into ordinary audit, logs, metrics, or notifications.
 
-Server-side duplication of encrypted content also requires `TASKS_SECURE_PAYLOAD_COPY`; it creates a new opaque payload without revealing plaintext to the caller.
+Server-side duplication of encrypted content requires `TASKS_SECURE_PAYLOAD_CLONE`; it creates a new opaque payload without revealing plaintext to the caller and does not grant clipboard-copy authority.
 
-Duplicate copies permitted structure and starts paused without a reusable grant. Without `TASKS_SECURE_PAYLOAD_COPY`, the new task requires a replacement message. A copied secure payload receives a new opaque reference and cannot preserve an authority grant.
+Duplicate copies permitted structure and starts paused without a reusable grant. Without `TASKS_SECURE_PAYLOAD_CLONE`, the new task requires a replacement message. A cloned secure payload receives a new opaque reference and cannot preserve an authority grant.
+
+`Forget message` requires `TASKS_PROMPT_DELETE`, `TASKS_CONTROL`, exact source access, and mandatory step-up even when other destructive task controls do not require step-up. Deletion authority never implies reveal, plaintext copy, or encrypted clone authority.
 
 ## Preview, Risk, And Material Change
 
@@ -727,8 +733,8 @@ Policies are separated:
 surfacing_policy_v2:
   record_policy: noteworthy_only | every_run | history_only
   event_selection:
-    output | external_action | execution_failure | approval | safety_attention |
-    policy_review | authorization_expiry | delivery_failure
+    output | external_action | run_summary | execution_failure | approval |
+    safety_attention | policy_review | authorization_expiry | delivery_failure
   destinations:
     results_enabled
     home_enabled
@@ -746,7 +752,7 @@ Agent Task defaults are:
 
 The new policy is stored as versioned `surfacing_policy_v2`. It preserves existing `home_enabled`, `results_enabled`, `notifications_enabled`, `dedupe_key_strategy`, `failure_severity_threshold`, and `finding_confidence_threshold` values, plus destination, aggregation, and quiet-hour settings, as independently addressable subordinate fields. `event_selection` chooses eligible event classes; destination toggles then narrow where those selected events may appear. No compatibility mapping may enable a destination, broaden an event class, weaken a threshold, or remove dedupe that the user previously disabled or narrowed.
 
-`record_policy` controls creation of ordinary output/action Agent Results. `results_enabled` controls their projection into the user-facing Results surface, while `home_enabled` and `notifications_enabled` control those destinations independently. A canonical Agent Result excluded from Results remains permission-visible from its task and run because run history is exhaustive; it is not projected into a disabled destination. Approval and safety attention follow the non-optional persistence rule below.
+`record_policy` controls creation of ordinary Agent Results. `noteworthy_only` creates output and confirmed-action Results. `every_run` uses the same rules and creates one `result_type=run_summary` only for a terminal run that created no output or confirmed-action Result; it never adds a summary merely to duplicate a run already represented in Results. `history_only` creates no ordinary Agent Result, even when output remains permission-visible from run history. `results_enabled` controls projection into the user-facing Results surface, while `home_enabled` and `notifications_enabled` control those destinations independently. A canonical Agent Result excluded from Results remains permission-visible from its task and run; it is not projected into a disabled destination. Approval and safety attention follow the non-optional persistence rule below.
 
 The Phase 4B/4C `visibility_policy` field remains as a deprecated compatibility projection during the migration window. When both are present, `surfacing_policy_v2` is authoritative, and an old-client update cannot erase fields it cannot represent. Old clients update only fields they own; omitted v2 fields retain their prior values.
 
@@ -754,7 +760,7 @@ Deterministic compatibility mapping:
 
 | Legacy visibility value | `record_policy` | `home_policy` | Initial `event_selection` |
 | --- | --- | --- | --- |
-| `every_run` | `every_run` | `outputs_and_attention` | All event classes allowed by existing thresholds and destination toggles. |
+| `every_run` | `every_run` | `outputs_and_attention` | All event classes, including `run_summary`, allowed by existing thresholds and destination toggles. |
 | `findings_only` | `noteworthy_only` | `outputs_and_attention` | Output or external action plus execution failure, approval, and safety attention. |
 | `failures_only` | `noteworthy_only` | `attention_only` | Execution failure, safety attention, and delivery failure. |
 | `failures_and_approvals` | `noteworthy_only` | `attention_only` | Execution failure, approval, safety attention, and delivery failure. |
@@ -773,13 +779,13 @@ A noteworthy canonical Result or attention source is created when:
 - execution, result finalization, or delivery failed;
 - effects or cancellation remain uncertain.
 
-`record_policy=every_run` also creates Results for otherwise routine terminal runs. `history_only` leaves ordinary output data in run history without Agent Results or Home projection.
+`result_type=run_summary` contains terminal state, timing, redacted summary, and provenance but never fabricates output, an artifact, or an external effect. `history_only` leaves ordinary output data in run history without Agent Results or Home projection.
 
 Approval and safety resources are control-plane records, not optional Results. Approvals, execution or cancellation uncertainty, policy blocks, revocation, and other required recovery attention are always persisted and visible on task detail and in Attention to authorized users, regardless of `record_policy`, `results_enabled`, or event selection. Home and external notifications may be narrowed or disabled, but policy cannot erase canonical attention or its task-level indicator.
 
 Meaningful output is based on typed adapter output, artifact, and effect fields. It is not classified by another model.
 
-Canonical Agent Task output and action Results use the versioned `/agent-results` resource with an open `result_type`, common provenance, redacted summary, artifact references, effect summary, and review state. Existing Phase 4C `/results` and its closed `finding|failure` schema remain unchanged. Approvals and unknown-effect incidents are not Agent Results; they remain canonical approval or attention resources and are only projected into Inbox.
+Canonical Agent Task output, confirmed-action, and user-selected run-summary Results use the versioned `/agent-results` resource with an open `result_type`, common provenance, redacted summary, artifact references, effect summary, and review state. Existing Phase 4C `/results` and its closed `finding|failure` schema remain unchanged. Approvals and unknown-effect incidents are not Agent Results; they remain canonical approval or attention resources and are only projected into Inbox.
 
 ### Normalized Home Inbox Projection
 
@@ -799,16 +805,16 @@ The projection does not duplicate approval, Result, or run state. Mutations targ
 
 When one run has output plus approval, unknown effect, or delivery failure, the Home Inbox groups the sources under one presentation item while preserving all source IDs and actions. It renders separate state rows in deterministic order: uncertain effect or approval, execution failure, delivery recovery, then output review. Reading or snoozing output never clears an unresolved-risk row.
 
-The Results surface is output/action-result only. It lists canonical Recurring Question and Agent Results and may show linked attention rows only in the context of a Result from the same run. Those rows link to Attention detail for evidence and resolution. An approval, unknown effect, policy block, expiry warning, or delivery issue without a Result appears in Attention and Home when enabled, never as a standalone Results item.
+The Results surface lists canonical Recurring Question findings/failures and Agent output, confirmed-action, and user-requested run-summary Results. Run summaries appear only for definitions configured with `record_policy=every_run` and are filterable separately from outputs and actions. Linked attention rows may appear only in the context of a Result from the same run and link to Attention detail for evidence and resolution. An approval, unknown effect, policy block, expiry warning, or delivery issue without a Result appears in Attention and Home when enabled, never as a standalone Results item.
 
 Required-action items can be marked read or snoozed. Snooze suppresses only Home placement and configured notifications until `snooze_until`; it never removes the task-level attention indicator, Attention count, canonical Attention entry, or run-detail warning. Required-action items cannot be dismissed until resolved or expired. Read state never implies action resolution.
 
 Inbox itself is read-only. Review mutations go to the canonical source routes:
 
 - legacy Result review endpoint for Recurring Question Results;
-- `/agent-results/{id}/review` for Agent Results;
-- `/approvals/{id}/review` and `/resolve` for approvals;
-- `/attention/{id}/review` for non-approvable attention.
+- `/agent-results/{agent_result_id}/review` for Agent Results;
+- `/approvals/{approval_id}/review` and `/resolve` for approvals;
+- `/attention/{attention_id}/review` for non-approvable attention.
 
 Review requests include source version, idempotency key, and optional `snooze_until`. A grouped Home Inbox item has no bulk review mutation; the client updates each eligible source and reports partial outcomes. Read and snooze operations can never resolve an approval, clear unknown effects, or unblock execution.
 
@@ -847,6 +853,27 @@ Grant-expiry warning identity is stable per definition, grant, and expiry. Renew
 - Webhook destinations require ownership verification, redaction preview, test delivery, allowlisting when configured, and secret rotation.
 - A useful output with failed delivery remains one item with both facts visible.
 
+## Retention, Deletion, And Evidence
+
+Exact durations are deployment-configurable, but safety and product semantics are normative. Every retained resource exposes `retention_class`, `retained_until` when finite, `deletion_state`, and legal-hold or policy-block status without leaking protected content. `deletion_state` distinguishes `active`, `deletion_pending`, `deleted`, `tombstoned`, `retained_by_policy`, and `outside_managed_scope`.
+
+| Resource | Minimum retention and deletion rule |
+| --- | --- |
+| Provisional previews and payloads | Expire deterministically when unused. A consumed payload follows its definition and revision policy. |
+| Active and superseded secure prompts | Archive does not delete them. `Forget message` performs immediate logical revocation, then physical deletion where eligible; legal hold and external/backup scope are reported explicitly. |
+| Definitions and immutable revisions | Retain while any run, grant, approval, Result, attention, audit, migration, or adapter reference depends on them. Later purge leaves a non-sensitive identity/version tombstone. |
+| Runs, attempts, and effect evidence | Retain through the maximum retry, cancellation, reconciliation, dispute, and delivery-recovery horizon. Unknown effects, unresolved cancellation, and active reconciliation cannot be purged. |
+| Agent Results and review state | Retain according to policy after their source run reaches a stable terminal outcome. Removing a Result projection never removes source run/effect evidence or causes re-surfacing. |
+| Approvals and attention | Unresolved items cannot be purged. Resolved or expired items retain resolution evidence and a dedupe tombstone through the audit and recovery floor. |
+| Grants, delegations, and credential-use references | Retain normalized scope, version, actor, and revocation evidence for every dependent run; never retain credential material. |
+| Audit, migration journal, dispatch intents, execution fences, and Jobs idempotency ledger | Retain through the longest dependent recovery or compliance floor. Purge preserves the minimum immutable identity, digest, and terminal-state tombstone required to prevent replay or dual dispatch. |
+| Delivery receipts and dedupe records | Retain through destination retry and dedupe horizons; deleting them never reruns the agent. |
+| Adapter transcripts, artifacts, and backups | Follow adapter-owned policy and legal hold. Scheduled Tasks reports retention/deletion scope and never claims deletion it cannot verify. |
+
+Retention configuration may lengthen these floors but cannot shorten them while a safety, recovery, idempotency, migration, audit, or legal-hold dependency remains. Shortening retention requires a preview of affected resource classes and schedules asynchronous deletion rather than claiming immediate removal. Policy changes and deletion transitions are audited without storing prompt or output content.
+
+Archive, review/dismiss, `Forget message`, and automatic retention are distinct actions. Archive stops future scheduling but retains evidence and secure content. Review changes presentation state only. `Forget message` targets prompt content and authority but does not erase external effects or unrelated evidence. Automatic retention removes eligible content while preserving required non-sensitive tombstones.
+
 ## Reference Client Information Architecture
 
 Recommended canonical routes:
@@ -855,11 +882,11 @@ Recommended canonical routes:
 | --- | --- |
 | `/scheduled-tasks` | Operational overview and task inventory. |
 | `/scheduled-tasks/runs` | Cross-task execution log. |
-| `/scheduled-tasks/results` | Output and external-action Results; attention appears only when related to a listed Result. |
+| `/scheduled-tasks/results` | Output, external-action, and user-requested run-summary Results; attention appears only when related to a listed Result. |
 | `/scheduled-tasks/attention` | Attention center with separate Approval requests and Uncertain effects sections. |
 | `/scheduled-tasks/new` | Full-page creation. |
-| `/scheduled-tasks/definitions/{id}` | Task detail and management. |
-| `/scheduled-tasks/runs/{id}` | Run and attempt detail. |
+| `/scheduled-tasks/definitions/{definition_id}` | Task detail and management. |
+| `/scheduled-tasks/runs/{run_id}` | Run and attempt detail. |
 | `/scheduled-tasks/results/{result_item_id}` | Client Result detail for a canonical legacy or Agent Result; linked attention resolves in Attention. |
 
 Existing query links redirect to canonical routes.
@@ -903,6 +930,8 @@ Normal edit views keep the message masked and show prompt version, fingerprint, 
 
 Task detail uses Summary, Authority, Runs, Results, Configuration, and Audit tabs. Authority is not optional: it shows execution subject, authorizer, target and isolation profile, allowed and denied actions, workspace/path/network/data boundaries, credential references and owners, runtime/cost limits, expiry, definition/grant fingerprints, drift, and last authorization event. Run detail shows timeline, revision, grant, attempts, current freshness, tool/effect evidence, cancellation request time and confirmation source, output summary, delivery, adapter links, and one emphasized recovery action with secondary alternatives.
 
+Configuration includes a Data and retention section showing retention class, retained-until dates, legal-hold or policy blocks, adapter deletion scope, and pending deletion state. `Forget message` is a separate destructive flow, never an overflow-menu shortcut. Its confirmation states that future runs pause, authority is revoked, active cancellation is requested, prompt recovery may be impossible, generated output and external effects are not erased, and some storage may remain under policy. It requires step-up immediately before commit and leaves a persistent deletion-scope report.
+
 Edit and management outcomes are explicit:
 
 - `Save changes` applies only non-material edits and retains the grant.
@@ -927,6 +956,19 @@ The extension may create an Agent automation draft from selected text, the curre
 - deep-link to `Review and schedule` in the canonical WebUI.
 
 The handoff URL contains only an opaque server-side draft ID. It never contains selected text, prompt content, page references, target details, or credentials. The WebUI rechecks ownership and capabilities before opening the draft. If WebUI launch fails, the encrypted server draft remains available and the extension states that it is neither scheduled nor authorized. The failure surface shows the draft's exact expiry or retention time and offers `Retry opening review` and `Discard draft`; discard uses the secure-payload deletion report and does not imply deletion beyond its reported scope.
+
+The extension also provides a compact, read-focused Automation updates surface. It may mutate review presentation state but never execution, authority, approval, or safety resolution:
+
+- separate counts for unread output and unresolved attention, derived from canonical Inbox sources;
+- a bounded list showing task name, plain-language state, redacted safe summary, and time;
+- output links to canonical Results and attention links to canonical Attention detail in the WebUI;
+- review-state actions such as mark read or snooze only when the same API capability is available;
+- no approval, authority expansion, unknown-effect acknowledgement, prompt reveal, secure-output read, or destructive action in the first release;
+- authentication and resource access rechecked when a notification or deep link opens;
+- stale, offline, partial-load, and signed-out states that never render a false caught-up state;
+- no persistent local cache of prompts, secure outputs, credentials, or unredacted summaries.
+
+Extension notifications use redacted canonical Inbox data. Snooze follows destination policy, while unresolved attention remains visible in the extension's Attention count. High-risk recovery always deep-links to the full WebUI evidence and step-up flow.
 
 ## UX Status And Copy
 
@@ -1014,6 +1056,7 @@ Watchlists appears as a separate contextual destination for continuous source mo
 - Pause: `Future runs paused.` plus active-run warning when applicable.
 - Cancel request: `Cancellation requested.` until confirmed.
 - Approval and retry report each durable outcome. A failed queue after approval says `Approval recorded. The retry could not be queued.`
+- Forget message: `Message access revoked. Deletion is being verified.` followed by persistent per-location deleted, retained, pending, or outside-scope status.
 - Result review and delivery changes update persistent state and use idempotent server responses.
 
 ## Accessibility And Usability Requirements
@@ -1050,7 +1093,7 @@ Before any 4D revision-dependent execution or legacy ACP row movement, Phase 4D 
 1. Expand canonical Scheduled Tasks, Jobs, and migration-control schemas with nullable revision, grant, dispatch, generation, and writer-epoch fields that old code can tolerate.
 2. Deploy compatible readers and writers that preserve unknown v2 policy fields and report a new `schema_writer_epoch` in health and worker registration.
 3. Wait until every scheduler, API, publisher, and consumer instance reports the required epoch; drain or quarantine old Jobs and block stale-epoch writers at the server boundary.
-4. Briefly fence relevant mutations, backfill canonical rows, verify invariants, and then enable revision-dependent 4D.1 execution through an activation flag.
+4. Briefly fence relevant mutations, backfill canonical rows, verify invariants, and then enable 4D.1A revision-dependent data paths through an activation flag. Execution remains disabled until the deployment passes 4D.0F and the 4D.1B vertical slice.
 
 Mixed old/new writers are never allowed after activation. A stale writer or consumer receives a typed epoch error and cannot create, mutate, publish, or consume revision-dependent work. Backfill is restartable and does not infer security authority from absent legacy fields.
 
@@ -1152,6 +1195,9 @@ Migration reports separately cover active storage, transaction/WAL logs, backups
 
 Activation preconditions are:
 
+- the deployment class is `certified` by the 4D.0F execution feasibility gate;
+- 4D.1B end-to-end tests prove migrated read-only fixtures produce inspectable runs, an Agent Result when output exists, a run-history record when output does not exist, a typed run-summary Result for that no-output case only under `record_policy=every_run`, Attention when applicable, and stable API deep links without legacy ownership transfer;
+- the supported API operator workflow can display migration state, pause a definition, inspect run history, open Results and Attention, and explain blocked recovery before legacy writes become `410 Gone`; bundled enterprise deployments additionally prove the same 4D.1C WebUI workflow, while headless deployments provide equivalent supported API or CLI runbook evidence without requiring WebUI installation;
 - every running instance supports and enforces the legacy fence;
 - every running instance and worker reports the required schema writer epoch;
 - the legacy scheduler generation is revoked;
@@ -1177,9 +1223,9 @@ Activation postconditions are:
 
 - draft storage;
 - encrypted prompt persistence;
-- prompt reveal and secure copy;
+- prompt reveal, plaintext prompt copy, encrypted payload clone, and prompt deletion as separate capabilities;
 - target discovery;
-- attested scheduled-execution isolation;
+- certified attested scheduled-execution isolation and certification evidence ID;
 - scheduled-mode secure transcripts;
 - read-only execution;
 - tool-enabled execution;
@@ -1199,6 +1245,7 @@ Clients hide families only when unsupported or undiscoverable to the caller. Adv
 
 - No raw prompt in ordinary API responses, definitions, revisions, previews, audit, Results, Inbox, Home, notifications, webhooks, logs, metrics, or errors.
 - No unkeyed prompt fingerprint.
+- No prompt deletion, plaintext copy, or encrypted clone through `TASKS_CONTROL` or reveal permission alone.
 - No execution under worker-service authority.
 - No scheduled execution outside an attested deny-by-default isolation profile.
 - No self-asserted or stale isolation evidence; attestation must verify against a live configured trust root and match tenant, workspace, runtime, policy, and dispatch fingerprints.
@@ -1215,7 +1262,8 @@ Clients hide families only when unsupported or undiscoverable to the caller. Adv
 - No `cancelled` state without adapter confirmation.
 - No approval for an action that may already have occurred.
 - No future authority expansion through one-run approval.
-- No secure-payload duplication without separate permission.
+- No plaintext prompt copy, encrypted payload clone, or prompt deletion without its separate permission and any operation-specific step-up.
+- No purge of unresolved safety/recovery evidence or deletion of the minimum tombstones required to prevent replay, duplicate effects, or dual dispatch.
 - No cross-user target, preview, grant, payload, run, approval, Result, or adapter-link existence leak.
 - No Home or webhook surfacing before redaction and data-classification policy succeeds.
 - No client-side storage, URL, history, or analytics persistence of revealed prompts.
@@ -1228,8 +1276,9 @@ Clients hide families only when unsupported or undiscoverable to the caller. Adv
 The implementation plan must treat these as dependencies, not assume they exist:
 
 - secure payload store with key lifecycle, quotas, deletion, and provisional cleanup;
+- cross-resource retention policy, legal-hold evaluation, asynchronous deletion, deletion-scope reporting, and non-sensitive replay/dedupe tombstones;
 - scheduled-mode secure adapter transcript storage and permission gates;
-- attested isolation backend, egress enforcement, minimal mounts, and brokered credentials;
+- 4D.0F-certified isolation backend, egress enforcement, minimal mounts, and brokered credentials;
 - server-side attestation verification, trust-root rotation, signer revocation, and evidence freshness;
 - provider-neutral target registry and capability freshness;
 - ACP adapter with durable execution references;
@@ -1294,17 +1343,42 @@ Typed errors must include safe recovery metadata. Initial Agent Task additions s
 
 Errors never include raw message, output, tool arguments, credentials, filesystem secrets, or cross-tenant resource detail.
 
+## Phase 4D.0F Execution Feasibility Gate
+
+Executable Phase 4D work does not begin from an assumed isolation backend. Before revision-dependent execution implementation, an ADR and reproducible proof must certify each supported deployment class that may advertise Agent Task execution.
+
+The proof covers:
+
+- server-verified isolation attestation with tenant, workspace, runtime, image, mount, egress, credential, signer, and expiry binding;
+- hostile-agent attempts to access host files, uncontrolled network, subprocesses, direct MCP/tools, inherited secrets, and ambient credentials;
+- scheduled-mode transcript storage proving prompt sentinels do not appear in ordinary ACP detail, fork, export, bootstrap, search, logs, errors, or audit;
+- idempotent adapter session creation and exact dispatch-token lookup after process loss;
+- durable terminal, timeout, pre-action approval, effect, and cancellation evidence with monotonic cancellation ordering;
+- brokered identity and credentials plus a credible pre-action mediation path for the later write-capable slice;
+- operational installation, upgrade, health, and fail-closed behavior on every deployment class claimed as supported.
+
+Outcomes are explicit:
+
+- `certified`: execution implementation may proceed for that deployment class under the proved isolation profile;
+- `draft_only`: definitions, encrypted prompts, previews, authorization review, and migration dry-run may ship, but execution and canonical migration activation remain unavailable;
+- `unsupported`: Agent automation creation remains undiscoverable or visibly unavailable with a reason and recovery guidance.
+
+A failed or partial proof never relaxes isolation requirements. It narrows the advertised capability and rollout. M2 cutover cannot activate a migrated definition on a deployment class that lacks certification.
+
 ## Rollout
 
 | Stage | Product capability |
 | --- | --- |
 | 4D.0 | Fix TASK-13113 with pre-run missing-definition handling and establish a green focused baseline. |
+| 4D.0F | Certify or reject execution feasibility per deployment class; publish the isolation/adapter ADR and capability outcome. |
 | 4D.0E | Expand canonical schemas, deploy epoch-compatible readers/writers, converge every process on the required `schema_writer_epoch`, drain stale work, and backfill before revision-dependent execution is enabled. |
-| 4D.1 | Revisions, normative RBAC, secure payload/transcript storage, attested isolation, target discovery, typed mutations, transactional outboxes, and adapter-enforced no-side-effect ACP execution. |
 | 4D.M1 | Deploy legacy generation/idempotency fields and handler fencing to every instance; run migration inventory and dry-run without ownership transfer. |
-| 4D.M2 | Verify the completed 4D.0E backfill, execute journaled legacy migration, drain/reconcile legacy work, and activate the canonical scheduler generation after all cutover gates pass. |
+| 4D.1A | Revisions, normative RBAC, secure payload/transcript storage, certified isolation, target discovery, typed mutations, and transactional outboxes. Draft-only deployments stop here with execution disabled. |
+| 4D.1B | Adapter-enforced no-side-effect ACP execution plus durable runs, Agent Results including run summaries, Attention, Inbox/Home delivery, retention state, and end-to-end recovery APIs. |
+| 4D.1C | Migration-readiness acceptance: minimum WebUI inventory, migration state, task detail, pause, run history, Results, Attention, secure deep links, and recovery guidance for bundled enterprise deployments; equivalent supported API or CLI operator evidence for headless deployments. |
+| 4D.M2 | After 4D.1B and applicable 4D.1C distribution gates pass, verify the completed 4D.0E backfill, execute journaled legacy migration, drain/reconcile legacy work, and activate the canonical scheduler generation. |
 | 4D.2 | Revision-bound grants, bounded tools, pre-action mediation, durable approvals, effect evidence, cancellation, and safe retry. |
-| 4D.3 | Complete WebUI, extension draft capture, Results/Home integration, accessibility, and migration operations. |
+| 4D.3 | Complete creation/Authority/power-user WebUI, extension draft capture and Automation updates, advanced delivery, accessibility validation, and migration operations. |
 | GA | All security, migration, contract, observability, recovery, and usability gates satisfied. |
 
 Read-only pilot execution requires enforced denial of every side-effect-capable adapter and built-in action. Write-capable scheduling remains disabled until 4D.2 gates pass. API-first does not mean safety depends on the reference client; direct API clients receive the same previews, typed refusals, grants, approval contract, and audit.
@@ -1313,9 +1387,9 @@ Read-only pilot execution requires enforced denial of every side-effect-capable 
 
 ### Contract And Security
 
-- OpenAPI snapshot and generated-client compatibility tests.
+- OpenAPI snapshot and generated-client compatibility tests, including stable resource-specific path parameter names.
 - Additive enum and legacy status mapping tests.
-- Route-by-route positive and negative RBAC tests for every listed read, control, authorization, approval, reveal/copy, secure-output, forget, retry, cancellation, duplicate, audit, and bulk endpoint, including proof that `TASKS_CONTROL` alone cannot authorize, approve, reveal, copy, or read secure output.
+- Route-by-route positive and negative RBAC tests for every listed read, control, authorization, approval, reveal, plaintext copy, encrypted clone, prompt deletion, secure-output, retry, cancellation, duplicate, audit, and bulk endpoint. Prove `TASKS_CONTROL` alone cannot authorize, approve, reveal, copy, clone, delete prompt content, or read secure output.
 - Tenant isolation and actor-matrix tests for same-tenant cross-user delegation, inactive principals, revoked act-as, foreign credentials, and concealed `404` behavior.
 - Scheduled-authority precedence tests proving ACP remembered allows, session or batch approvals, wildcard adapter permissions, and model-selected automatic tiers cannot expand an exact grant or override a live deny.
 - Attestation verification tests for forged signatures, stale evidence, not-yet-valid evidence, wrong tenant or workspace binding, runtime or policy digest mismatch, and revoked signer or trust root.
@@ -1329,6 +1403,8 @@ Read-only pilot execution requires enforced denial of every side-effect-capable 
 - Adversarial output redaction and data-classification checks.
 - Credential, key rotation, key outage, quota, and cryptographic deletion checks.
 - Hostile-agent isolation checks proving direct file write, socket, subprocess, ambient-secret, MCP, and tool bypass attempts are blocked.
+- 4D.0F certification tests and ADR evidence for every deployment class that advertises execution, plus `draft_only` and `unsupported` capability behavior.
+- Cross-resource retention tests for unresolved-evidence floors, legal hold, policy shortening, asynchronous deletion, adapter-scope reporting, and replay/dedupe tombstones.
 
 ### Scheduling And Execution
 
@@ -1350,6 +1426,7 @@ Read-only pilot execution requires enforced denial of every side-effect-capable 
 - Delivery retry tests proving no agent redispatch.
 - Review/snooze race tests proving Inbox mutations never resolve approval or unknown-effect state.
 - Phase 4B/4C surfacing-policy mapping, including `failures_only`, disabled destination toggles, thresholds and dedupe, and old-client round-trip tests that never broaden prior choices.
+- `noteworthy_only`, `every_run`, and `history_only` tests proving output/action Results, typed no-output run-summary Results, Results filters, and run-history-only behavior remain distinct.
 - Attention persistence tests proving record, Results, Home, notification, read, and snooze policy cannot remove canonical approval or safety state from task detail and Attention.
 
 ### Migration
@@ -1369,6 +1446,7 @@ Read-only pilot execution requires enforced denial of every side-effect-capable 
 - Plaintext cleanup and residual storage-scope reporting.
 - Existing Phase 4B/4C schema backfill plus stale old-Job rejection.
 - Deleted, never-created, redelivered, and cross-owner missing-definition Jobs with `run_id=null`.
+- M2 refusal until certified execution, the 4D.1B run/Result/Attention vertical slice, the API operator workflow, and the applicable bundled-WebUI or headless-operator 4D.1C gate pass.
 
 ### Reference Clients
 
@@ -1377,6 +1455,7 @@ Read-only pilot execution requires enforced denial of every side-effect-capable 
 - Power-user create, edit, pause, inspect, duplicate, filter, and debug journeys.
 - Approval, stale approval, unknown effect, cancellation, and delivery recovery.
 - Results and Home canonical identity and dedupe.
+- Extension Automation updates counts, output/attention distinction, redacted notifications, read/snooze behavior, stale/offline/signed-out states, and high-risk WebUI handoff.
 - Keyboard, screen reader, 200 percent zoom, responsive, high-contrast, dark/light, and reduced-motion validation.
 - Explicit Watchlists and standalone Agent Tasks non-regression coverage.
 
@@ -1395,6 +1474,7 @@ Read-only pilot execution requires enforced denial of every side-effect-capable 
 - At least 5 of 6 experienced users can create, pause, inspect, duplicate, and locate a failed run without assistance.
 - At least 5 of 6 experienced users can reauthorize a material edit, resolve a coalesced approval, recover an extension handoff, inspect an uncertain one-time cancellation, and navigate correctly between Results and Attention without unintended authorization, rerun, dismissal, or disclosure.
 - At least 5 of 6 representative users can distinguish an Agent automation from a Watchlist and a standalone Agent Tasks project and choose the correct destination for a described job.
+- At least 5 of 6 extension users can distinguish unread output from unresolved attention, open the correct canonical WebUI destination, and understand that high-risk recovery cannot be completed in the extension.
 - No participant mistakes unresolved cancellation, approval required, or delivery failure for successful completion.
 - Keyboard-only users can complete creation, authorization review, run inspection, and approval recovery.
 - Testing with 200 percent text resize and at 320 CSS px reflow leaves no hidden state, obscured focus, or unreachable action.
@@ -1404,6 +1484,7 @@ Read-only pilot execution requires enforced denial of every side-effect-capable 
 ## Technical Acceptance Criteria
 
 - No tested surface leaks raw prompt text.
+- No execution capability is advertised without a current 4D.0F certification for that deployment class.
 - No scheduled adapter path can bypass isolation through host filesystem, uncontrolled egress, subprocess, direct MCP/tool access, or ambient credentials.
 - No ordinary ACP transcript/detail/fork/export/bootstrap path exposes the scheduled prompt.
 - No migration or delivery retry produces duplicate agent execution.
@@ -1413,6 +1494,8 @@ Read-only pilot execution requires enforced denial of every side-effect-capable 
 - Every active run has an inspectable revision, identity, grant, and adapter reference.
 - Every unknown effect blocks unsafe automatic retry.
 - Every migrated schedule has deterministic lifecycle, schedule-state, activity, and attention fields, including paused plus review-required for ambiguous rows and exhausted schedule states for completed, missed, or failed one-time rows.
+- No M2 activation occurs before durable run/Result/Attention APIs and a supported migration-ready operator workflow are available; WebUI parity is additionally required for bundled enterprise deployments, not as a dependency of the API product itself.
+- Retention never purges unresolved safety/recovery state or required replay/dedupe evidence, and deletion status never overstates adapter or backup scope.
 - Results, approvals, runs, and adapter records have stable permission-checked deep links.
 - Results/Home review and action state derive from canonical resources.
 - Watchlists and standalone Agent Tasks preserve existing functionality and ownership.
@@ -1471,13 +1554,12 @@ These are deferrals, not unresolved product decisions for the first Phase 4D pla
 
 ## Open Implementation Questions
 
-No blocking product or safety decision remains open. The implementation plan must resolve these deployment choices without weakening the contract:
+No blocking contract decision remains open. Execution feasibility remains an explicit 4D.0F go/no-go gate rather than an assumed implementation detail. The implementation plan must resolve these deployment choices without weakening the contract:
 
 - whether secure payload/transcript storage is co-located with Scheduled Tasks or uses the provisional saga and outbox path;
 - which existing or new shared store owns migration leases, scheduler generation, and the cutover journal in each deployment mode;
-- which isolation backend can satisfy and attest the deny-by-default scheduled-execution profile on supported platforms;
 - whether live run updates use an event stream, bounded polling, or both behind one capability contract;
-- default retention and authorization-expiry durations for single-user and multi-user deployments;
+- deployment-specific retention and authorization-expiry durations within the normative safety and evidence floors;
 - exact OpenAPI version names and deprecation dates for legacy ACP schedule projections.
 
 ## Review Record
@@ -1490,19 +1572,22 @@ Three independent review tracks completed with no unresolved findings:
 
 Blocking and high-severity findings from each track were incorporated before approval. This is a design review result, not evidence that the described dependencies are implemented.
 
+A subsequent cross-section review identified and addressed seven additional issues: migration preceding result/recovery surfaces, contradictory `every_run` Result semantics, incomplete retention rules, conflated destructive/export permissions, missing execution feasibility proof, incomplete extension result/attention behavior, and non-canonical OpenAPI path parameter names.
+
 ## Recommended Implementation Plan Shape
 
 The follow-up implementation plan should split reviewable work into:
 
 1. TASK-13113 pre-run missing-definition fix and contract characterization.
-2. Immutable-revision schema backfill, normative RBAC, actor/delegation rules, and compatibility mappings.
-3. Secure payload plus scheduled-mode transcript stores, target registry, attested isolation, and preview changes.
-4. Typed definition/authorization transactions, grants, material diffs, reveal/copy/forget, and live revocation.
-5. Transactional dispatch/result/delivery outboxes, run identity, Jobs attempt contract, dispatch tokens, and reconciliation.
-6. ACP isolated no-side-effect adapter, then mediated tools, approvals, checkpoints, effects, retry, and cancellation.
-7. Versioned Agent Results, canonical attention, additive Inbox, Home, notifications, and review mutations.
-8. Legacy fence-preparation release, journaled dry run, drain/reconcile, and canonical scheduler cutover.
-9. WebUI Agent automation creation, inventory, Authority, run, Results, and Attention surfaces.
-10. Extension draft capture, canonical deep links, accessibility, migration operations, observability, broad regression, and release gates.
+2. 4D.0F isolation, scheduled-transcript, adapter-idempotency, cancellation-evidence, and deployment feasibility proof plus ADR.
+3. 4D.0E immutable-revision/schema backfill, normative granular RBAC, actor/delegation rules, retention fields, and compatibility mappings.
+4. 4D.M1 legacy generation/idempotency fields, handler fencing, inventory, and dry run without ownership transfer.
+5. Secure payload and scheduled-mode transcript stores, target registry, certified isolation integration, and preview changes.
+6. Typed definition/authorization transactions, grants, material diffs, reveal/copy/clone/delete, and live revocation.
+7. Transactional dispatch/result/delivery outboxes, run identity, Jobs attempt contract, dispatch and execution fences, and reconciliation.
+8. ACP isolated no-side-effect adapter plus durable runs, versioned Agent Results/run summaries, canonical attention, additive Inbox/Home, retention/deletion state, notifications, and review mutations.
+9. End-to-end result/recovery proof plus the migration-ready API operator workflow, minimum WebUI parity for bundled enterprise deployments or equivalent headless runbook evidence, then M2 drain/reconcile and canonical scheduler cutover.
+10. Bounded tools, pre-action mediation, durable approvals, checkpoints, effects, safe retry, and cancellation.
+11. Complete creation/Authority/power-user WebUI, extension draft capture and Automation updates, accessibility, advanced migration operations, observability, broad regression, and release gates.
 
 Each implementation slice must use capability gates and test-driven development. Write-capable execution must remain disabled until its complete safety slice is present and verified.

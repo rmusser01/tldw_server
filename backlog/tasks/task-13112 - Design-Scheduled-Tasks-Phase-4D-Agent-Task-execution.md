@@ -19,7 +19,7 @@ references:
 - Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md
 dependencies:
 - TASK-13113
-updated_date: 2026-08-24 16:42
+updated_date: 2026-08-24 17:04
 documentation:
 - Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md
 modified_files:
@@ -52,7 +52,9 @@ Approved brainstorming decisions consolidated into the written Phase 4D design: 
 
 Final structured review completed across three independent tracks: API/security, product UX/HCI/accessibility, and migration/reliability. All blocking findings were incorporated and each track approved the current spec. Key remediation includes route-complete RBAC, attested authority precedence, secure prompt/output handling, typed authorize-and-run and uncertainty recovery, independent lifecycle/schedule/activity/multi-attention state, Results-versus-Attention IA, one-time outcome mapping, surfacing compatibility, all-path migration activation fencing, restartable rollback, per-attempt execution fences, archive-safe Jobs idempotency, and monotonic cancellation-race ordering.
 
-Documentation verification: referenced files exist; Markdown table pipe counts are consistent; no TODO/TBD/FIXME, prohibited punctuation, or trailing-whitespace findings; `git diff --no-index --check` passed for the untracked spec. Bandit skipped because this design slice changes Markdown/Backlog records only and no Python scope. The spec is ready for the required user review; implementation planning remains gated on acceptance criterion #6.
+A later cross-section review found seven additional issues. The spec now gates M2 on certified execution plus durable run/Result/Attention and operator-recovery workflows; defines non-duplicating `noteworthy_only`, `every_run`, and `history_only` Result semantics; adds normative cross-resource retention/deletion/evidence rules; separates prompt reveal, plaintext copy, encrypted clone, and destructive deletion permissions; makes isolation feasibility a deployment-class go/no-go ADR; defines extension result/attention behavior; and uses stable resource-specific OpenAPI path parameter names. A final consistency pass preserved the API-first boundary by requiring WebUI parity only for bundled enterprise deployments while allowing equivalent supported API/CLI evidence for headless deployments, and aligned the extension summary with its compact updates role.
+
+Fresh documentation verification passed: `git diff --check`, Markdown table pipe consistency, duplicate-heading scan, and targeted scans for generic `{id}` parameters, retired permission names, TODO/TBD/FIXME markers, and prohibited punctuation. Referenced files were previously verified. Bandit remains not applicable because this design slice changes Markdown/Backlog records only. Acceptance criterion #6 remains pending explicit user approval of the revised written design.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
