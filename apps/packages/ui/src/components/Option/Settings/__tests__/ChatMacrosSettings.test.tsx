@@ -225,6 +225,8 @@ describe("ChatMacrosSettings", () => {
     expect((await screen.findByLabelText("Macro YAML") as HTMLTextAreaElement).value).toContain("name: wrapup")
     expect(screen.getByRole("switch", { name: "Toggle /wrapup" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Clone macro" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Clone macro" }))
+    expect(screen.getByLabelText("Clone macro name")).toHaveClass("bg-surface")
     expect(screen.queryByRole("button", { name: "Save macro" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Delete macro" })).not.toBeInTheDocument()
   })
