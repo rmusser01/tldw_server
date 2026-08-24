@@ -89,6 +89,7 @@ class ChatMacrosService:
     ) -> ChatMacroCatalogItem:
         """Create a validated user macro and synchronize the catalog."""
         definition = self.validate_macro(raw)
+        self._require_matching_name(name, definition)
         self._reject_macro_collision(definition, exclude_name=name)
         stored = self.storage.create(name, raw, supporting_files)
         item = self._user_item(stored)
@@ -105,6 +106,7 @@ class ChatMacrosService:
         if self._builtin_item(name) is not None:
             raise MacroStorageError("built-in macros are immutable")
         definition = self.validate_macro(raw)
+        self._require_matching_name(name, definition)
         self._reject_macro_collision(definition, exclude_name=name)
         stored = self.storage.update(name, raw, supporting_files)
         item = self._user_item(stored)
@@ -277,6 +279,13 @@ class ChatMacrosService:
     def _reject_core_collision(self, definition: MacroDefinition) -> None:
         if definition.command.lower() in self.core_commands:
             raise MacroValidationError("macro command conflicts with core command")
+
+    @staticmethod
+    def _require_matching_name(resource_name: str, definition: MacroDefinition) -> None:
+        if definition.name != resource_name:
+            raise MacroValidationError(
+                f"macro definition name '{definition.name}' must match resource name '{resource_name}'"
+            )
 
     def _reject_macro_collision(self, definition: MacroDefinition, *, exclude_name: str) -> None:
         for item in self._catalog_items():
