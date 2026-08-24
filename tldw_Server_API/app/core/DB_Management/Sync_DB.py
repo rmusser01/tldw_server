@@ -35,7 +35,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_ORGANIZATION_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
-    SYNC_V2_SUPPORTED_OPERATIONS,
+    SYNC_V2_INTERNAL_OPERATIONS,
     WORKSPACE_SYNC_DOMAINS,
     ConflictStatus,
     SyncApplyStatus,
@@ -2352,6 +2352,8 @@ class SyncDatabase:
     def materialization_transaction(
         self,
         keys: Sequence[tuple[str, SyncDomain, str]],
+        *,
+        trusted_notes_task_bootstrap_id: str | None = None,
     ) -> Iterator[Any]:
         """Serialize product projection and Sync bookkeeping by dataset."""
 
@@ -2374,7 +2376,20 @@ class SyncDatabase:
                         )
                     enrolled = _dataset_domains_from_row(row)
                     for domain in sorted(domains):
-                        if domain not in enrolled:
+                        trusted_task = (
+                            domain == "notes.task"
+                            and trusted_notes_task_bootstrap_id is not None
+                        )
+                        if trusted_task:
+                            metadata = decode_json(row.get("metadata_json"), default={})
+                            readiness = metadata.get("notes_task_v1")
+                            if (
+                                not isinstance(readiness, Mapping)
+                                or readiness.get("state") != "bootstrapping"
+                                or metadata.get("task_activity_capture_enabled") is not True
+                            ):
+                                raise SyncStoreError("notes_task_sync_not_ready")
+                        elif domain not in enrolled:
                             raise SyncInvalidDomainError(
                                 "Sync domain is not enrolled for dataset "
                                 f"{dataset_id}: {domain}"
@@ -3113,6 +3128,27 @@ class SyncDatabase:
             return
         raise SyncStoreError("notes_organization_sync_not_ready")
 
+    @staticmethod
+    def _require_notes_task_bootstrap_write_ready(
+        row: Mapping[str, Any],
+        *,
+        envelope: SyncEnvelope | SyncEnvelopeCreate,
+        bootstrap_id: str,
+    ) -> None:
+        """Authorize only the private source-verified dormant task bootstrap."""
+
+        metadata = decode_json(row.get("metadata_json"), default={})
+        readiness = metadata.get("notes_task_v1")
+        routing = envelope.routing_metadata
+        if (
+            not isinstance(readiness, Mapping)
+            or readiness.get("state") != "bootstrapping"
+            or metadata.get("task_activity_capture_enabled") is not True
+            or routing.get("bootstrap_capture") is not True
+            or routing.get("bootstrap_id") != bootstrap_id
+        ):
+            raise SyncStoreError("notes_task_sync_not_ready")
+
     def _get_device_row(
         self,
         user_id: str,
@@ -3199,9 +3235,9 @@ class SyncDatabase:
                 raise SyncStoreError("notes_organization_sync_not_ready")
 
     def _validate_envelope_contract(self, envelope: SyncEnvelopeCreate) -> None:
-        if envelope.domain not in SYNC_V2_SUPPORTED_OPERATIONS:
+        if envelope.domain not in SYNC_V2_INTERNAL_OPERATIONS:
             raise SyncInvalidDomainError(f"Sync v2 M1 domain is not supported: {envelope.domain}")
-        if envelope.operation not in SYNC_V2_SUPPORTED_OPERATIONS[envelope.domain]:
+        if envelope.operation not in SYNC_V2_INTERNAL_OPERATIONS[envelope.domain]:
             raise SyncStoreError(
                 f"Sync v2 M1 operation {envelope.operation} is not supported for {envelope.domain}"
             )
@@ -6297,6 +6333,7 @@ class SyncDatabase:
         envelopes: Sequence[SyncEnvelopeCreate],
         *,
         trusted_notes_organization_bootstrap_id: str | None = None,
+        trusted_notes_task_bootstrap_id: str | None = None,
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
@@ -6317,11 +6354,29 @@ class SyncDatabase:
         try:
             with self.backend.transaction() as conn:
                 for envelope in plan:
-                    dataset_row = self._require_dataset_domain_for_update(
-                        envelope.dataset_id,
-                        envelope.domain,
-                        connection=conn,
-                    )
+                    if (
+                        envelope.domain == "notes.task"
+                        and trusted_notes_task_bootstrap_id is not None
+                    ):
+                        dataset_row = self._get_dataset_row_for_update(
+                            envelope.dataset_id,
+                            connection=conn,
+                        )
+                        if dataset_row is None:
+                            raise SyncDatasetNotFoundError(
+                                f"Sync dataset not found: {envelope.dataset_id}"
+                            )
+                        self._require_notes_task_bootstrap_write_ready(
+                            dataset_row,
+                            envelope=envelope,
+                            bootstrap_id=trusted_notes_task_bootstrap_id,
+                        )
+                    else:
+                        dataset_row = self._require_dataset_domain_for_update(
+                            envelope.dataset_id,
+                            envelope.domain,
+                            connection=conn,
+                        )
                     self._require_notes_organization_write_ready(
                         dataset_row,
                         envelope.domain,
@@ -6824,10 +6879,27 @@ class SyncDatabase:
         state: SyncObjectState,
         *,
         connection: Any | None = None,
+        trusted_notes_task_bootstrap_id: str | None = None,
     ) -> SyncObjectState:
         now = utcnow_iso()
         with self.backend.transaction(connection) as conn:
-            self._require_dataset_domain(state.dataset_id, state.domain, connection=conn)
+            if (
+                state.domain == "notes.task"
+                and trusted_notes_task_bootstrap_id is not None
+            ):
+                row = self._require_dataset(state.dataset_id, connection=conn)
+                metadata = decode_json(row.get("metadata_json"), default={})
+                readiness = metadata.get("notes_task_v1")
+                if (
+                    not isinstance(readiness, Mapping)
+                    or readiness.get("state") != "bootstrapping"
+                    or metadata.get("task_activity_capture_enabled") is not True
+                ):
+                    raise SyncStoreError("notes_task_sync_not_ready")
+            else:
+                self._require_dataset_domain(
+                    state.dataset_id, state.domain, connection=conn
+                )
             self.execute(
                 """
                 INSERT INTO sync_object_state (
@@ -6935,6 +7007,7 @@ class SyncDatabase:
         server_cursor: int,
         *,
         bootstrap_id: str,
+        notes_task_bootstrap: bool = False,
         connection: Any | None = None,
     ) -> SyncEnvelope:
         """Atomically record a source-verified bootstrap step without product replay."""
@@ -6957,6 +7030,7 @@ class SyncDatabase:
                 return self.mark_bootstrap_envelope_verified(
                     server_cursor,
                     bootstrap_id=bootstrap_id,
+                    notes_task_bootstrap=notes_task_bootstrap,
                     connection=guarded_connection,
                 )
 
@@ -6970,9 +7044,19 @@ class SyncDatabase:
             )
             if row is None:
                 raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
-            dataset_row = self._require_dataset_domain(
-                str(row["dataset_id"]), row["domain"], connection=conn
-            )
+            if row["domain"] == "notes.task" and notes_task_bootstrap:
+                dataset_row = self._require_dataset(
+                    str(row["dataset_id"]), connection=conn
+                )
+                self._require_notes_task_bootstrap_write_ready(
+                    dataset_row,
+                    envelope=_envelope_from_row(row),
+                    bootstrap_id=bootstrap_id,
+                )
+            else:
+                dataset_row = self._require_dataset_domain(
+                    str(row["dataset_id"]), row["domain"], connection=conn
+                )
             self._require_notes_organization_write_ready(
                 dataset_row,
                 row["domain"],
@@ -6990,6 +7074,9 @@ class SyncDatabase:
                     deleted=row.get("operation") == "tombstone",
                 ),
                 connection=conn,
+                trusted_notes_task_bootstrap_id=(
+                    bootstrap_id if notes_task_bootstrap else None
+                ),
             )
             self.execute(
                 "UPDATE sync_envelopes SET apply_status = 'applied', apply_error_code = NULL, "

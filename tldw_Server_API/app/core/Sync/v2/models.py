@@ -165,6 +165,11 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
     **NOTES_LINK_SYNC_OPERATIONS,
 }
+SYNC_V2_INTERNAL_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    **SYNC_V2_SUPPORTED_OPERATIONS,
+    "notes.task": ["upsert", "tombstone"],
+    "notes.task_activity": ["upsert", "tombstone"],
+}
 SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS = 100
 SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN = 8
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"

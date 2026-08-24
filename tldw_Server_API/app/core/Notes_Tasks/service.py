@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
 from tldw_Server_API.app.core.Notes.organization_capture import (
@@ -15,6 +17,8 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
 from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
 from tldw_Server_API.app.core.Notes_Tasks.models import ParsedChecklistItem, ReconciliationResult, TaskActor
 from tldw_Server_API.app.core.Notes_Tasks.reconciler import NotesTaskReconciler
+from tldw_Server_API.app.core.Sync.v2.models import SyncOperation
+from tldw_Server_API.app.core.Sync.v2.server_origin_batch import ServerOriginMutationStep
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskConnection
@@ -173,6 +177,133 @@ class TaskStoreScope:
     dataset_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class NotesTaskCaptureMutation:
+    """Canonical dormant capture input for one committed product task mutation."""
+
+    owner_user_id: str
+    dataset_id: str
+    actor: TaskActor
+    operation: SyncOperation
+    before: dict[str, Any] | None
+    after: dict[str, Any]
+    base_revision: int | None
+    base_hash: str | None
+    restore_intent: bool
+    idempotency_key: str
+    step: ServerOriginMutationStep
+
+
+class NotesTaskCaptureCallback(Protocol):
+    """Receive one canonical mutation while its product transaction is open."""
+
+    def __call__(
+        self,
+        mutation: NotesTaskCaptureMutation,
+        *,
+        conn: TaskConnection | None,
+    ) -> None: ...
+
+
+def build_task_capture_mutation(
+    *,
+    db: CharactersRAGDB,
+    owner_user_id: str,
+    dataset_id: str,
+    actor: TaskActor,
+    before: dict[str, Any] | None,
+    after: dict[str, Any],
+) -> NotesTaskCaptureMutation:
+    """Build one exact, stable task capture input from canonical product rows."""
+
+    owner = str(owner_user_id)
+    dataset = str(dataset_id)
+    after_row = db.task_store._sync_bootstrap_task_row(after, owner)
+    before_row = (
+        db.task_store._sync_bootstrap_task_row(before, owner)
+        if before is not None
+        else None
+    )
+    if (
+        after_row.get("owner_user_id") != owner
+        or after_row.get("dataset_id") != dataset
+    ):
+        raise ConflictError(
+            "Task capture scope is invalid.",
+            entity="tasks",
+            entity_id=str(after_row.get("id") or ""),
+        )
+    task_id = str(after_row["id"])
+    note_id = str(after_row["note_id"])
+    revision = int(after_row["canonical_revision"])
+    object_hash = str(after_row["canonical_hash"])
+    base_revision = None
+    base_hash = None
+    if before_row is None:
+        if revision != 1:
+            raise ConflictError(
+                "Task capture create revision is invalid.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+    else:
+        if (
+            before_row.get("owner_user_id") != owner
+            or before_row.get("dataset_id") != dataset
+            or str(before_row.get("id")) != task_id
+            or str(before_row.get("note_id")) != note_id
+        ):
+            raise ConflictError(
+                "Task capture identity is invalid.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        base_revision = int(before_row["canonical_revision"])
+        base_hash = str(before_row["canonical_hash"])
+        if revision != base_revision + 1:
+            raise ConflictError(
+                "Task capture revision is invalid.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+    deleted = bool(after_row.get("deleted"))
+    restore_intent = bool(
+        before_row is not None
+        and before_row.get("deleted")
+        and not deleted
+    )
+    operation: SyncOperation = "tombstone" if deleted else "upsert"
+    identity_hash = hashlib.sha256(
+        json.dumps(
+            [owner, dataset, task_id, revision, object_hash, operation, restore_intent],
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    step = ServerOriginMutationStep(
+        domain="notes.task",
+        operation=operation,
+        object_id=task_id,
+        parent_id=note_id,
+        payload=dict(after_row["sync_payload"]),
+        routing_metadata={"restore_intent": True} if restore_intent else {},
+        client_envelope_id=f"notes-task-server-{identity_hash[:32]}",
+        object_revision=revision,
+    )
+    return NotesTaskCaptureMutation(
+        owner_user_id=owner,
+        dataset_id=dataset,
+        actor=actor,
+        operation=operation,
+        before=dict(before_row) if before_row is not None else None,
+        after=dict(after_row),
+        base_revision=base_revision,
+        base_hash=base_hash,
+        restore_intent=restore_intent,
+        idempotency_key=f"notes-task-capture-{identity_hash}",
+        step=step,
+    )
+
+
 def resolve_task_compatibility_scope(
     db: CharactersRAGDB,
     *,
@@ -191,8 +322,38 @@ def resolve_task_compatibility_scope(
 class NotesTaskService:
     """Coordinate task-backed checklist reconciliation for saved notes."""
 
-    def __init__(self, reconciler: NotesTaskReconciler | None = None) -> None:
+    def __init__(
+        self,
+        reconciler: NotesTaskReconciler | None = None,
+        *,
+        task_capture_callback: NotesTaskCaptureCallback | None = None,
+    ) -> None:
         self._reconciler = reconciler or NotesTaskReconciler()
+        self._task_capture_callback = task_capture_callback
+
+    def _capture_task_mutation(
+        self,
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        actor: TaskActor,
+        before: dict[str, Any] | None,
+        after: dict[str, Any],
+        conn: TaskConnection | None,
+    ) -> None:
+        if self._task_capture_callback is None:
+            return
+        self._task_capture_callback(
+            build_task_capture_mutation(
+                db=db,
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                actor=actor,
+                before=before,
+                after=after,
+            ),
+            conn=conn,
+        )
 
     @staticmethod
     def _internal_reconciliation_actor(actor: TaskActor) -> TaskActor:
@@ -345,7 +506,7 @@ class NotesTaskService:
 
         coordinator = active_coordinator(db, user_id=actor.actor_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
-        with transaction:
+        with transaction as conn:
             note = self._require_note_version(db, note_id=note_id, expected_note_version=expected_note_version)
             self.reconcile_note(
                 db=db,
@@ -362,6 +523,7 @@ class NotesTaskService:
                 note=note,
                 content=new_content,
                 expected_version=expected_note_version,
+                conn=conn,
             )
             updated_note = self._require_note(db, note_id)
             result = self.reconcile_note(
@@ -381,6 +543,14 @@ class NotesTaskService:
             )
             if task is None:
                 raise ConflictError("Created task was not found.", entity="tasks", entity_id=note_id)
+            self._capture_task_mutation(
+                db=db,
+                scope=scope,
+                actor=actor,
+                before=None,
+                after=task,
+                conn=conn,
+            )
             return task
 
     def update_task(
@@ -435,7 +605,7 @@ class NotesTaskService:
                     )
                 if metadata is None:
                     return task
-                return self._update_record_only_metadata(
+                updated = self._update_record_only_metadata(
                     db=db,
                     conn=conn,
                     task=task,
@@ -444,6 +614,15 @@ class NotesTaskService:
                     actor=actor,
                     scope=scope,
                 )
+                self._capture_task_mutation(
+                    db=db,
+                    scope=scope,
+                    actor=actor,
+                    before=task,
+                    after=updated,
+                    conn=conn,
+                )
+                return updated
             if projection_status != "live":
                 raise ConflictError(
                     f"Task projection is {projection_status} for task '{task_id}'.",
@@ -551,6 +730,14 @@ class NotesTaskService:
                 actor=self._internal_reconciliation_actor(actor),
                 owner_user_id=scope.owner_user_id,
             )
+            self._capture_task_mutation(
+                db=db,
+                scope=scope,
+                actor=actor,
+                before=task,
+                after=updated_task,
+                conn=conn,
+            )
             return updated_task
 
     def delete_task(
@@ -593,7 +780,7 @@ class NotesTaskService:
                         entity="tasks",
                         entity_id=task_id,
                     )
-                return db.soft_delete_task(
+                deleted = db.soft_delete_task(
                     owner_user_id=scope.owner_user_id,
                     dataset_id=scope.dataset_id,
                     task_id=task_id,
@@ -607,6 +794,15 @@ class NotesTaskService:
                     idempotency_key=actor.idempotency_key,
                     conn=conn,
                 )
+                self._capture_task_mutation(
+                    db=db,
+                    scope=scope,
+                    actor=actor,
+                    before=task,
+                    after=deleted,
+                    conn=conn,
+                )
+                return deleted
             if projection_status != "live":
                 raise ConflictError(
                     f"Task projection is {projection_status} for task '{task_id}'.",
@@ -674,6 +870,14 @@ class NotesTaskService:
                 content=new_content,
                 actor=self._internal_reconciliation_actor(actor),
                 owner_user_id=scope.owner_user_id,
+            )
+            self._capture_task_mutation(
+                db=db,
+                scope=scope,
+                actor=actor,
+                before=task,
+                after=deleted,
+                conn=conn,
             )
             return deleted
 

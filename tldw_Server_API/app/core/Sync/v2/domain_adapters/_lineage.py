@@ -64,6 +64,22 @@ def incoming_references_head(
     return any(_dependency_references_head(dependency, head) for dependency in envelope.dependencies)
 
 
+def incoming_references_exact_head(
+    envelope: SyncEnvelopeCreate,
+    head: SyncHead,
+) -> bool:
+    """Return whether every canonical base token matches the current head."""
+
+    return bool(
+        _same_optional_token(envelope.base_server_cursor, head.server_cursor)
+        and _same_optional_token(
+            envelope.base_object_revision,
+            head.object_revision,
+        )
+        and _same_optional_token(envelope.base_object_hash, head.payload_hash)
+    )
+
+
 def delete_update_conflict(
     envelope: SyncEnvelopeCreate,
     prior: list[SyncHead],
@@ -115,9 +131,16 @@ def _same_token(left: object, right: object) -> bool:
     return str(left) == str(right)
 
 
+def _same_optional_token(left: object, right: object) -> bool:
+    if left is None or right is None:
+        return left is right
+    return str(left) == str(right)
+
+
 __all__ = [
     "current_head",
     "delete_update_conflict",
     "incoming_references_head",
+    "incoming_references_exact_head",
     "prior_envelopes",
 ]

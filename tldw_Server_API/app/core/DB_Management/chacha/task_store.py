@@ -16,6 +16,12 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     logger,
 )
+from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
+from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
+    NotesTaskV1Payload,
+    notes_task_object_hash,
+    parse_notes_task_v1,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -171,6 +177,7 @@ class TaskStore:
         source = dict(task)
         if isinstance(source.get("metadata_json"), dict):
             source["metadata_json"] = self._json_dumps(source["metadata_json"], "metadata")
+        source["completed_at"] = normalize_sync_timestamp(source.get("completed_at"))
         object_hash, code, diagnostic_hash = self._db._canonicalize_legacy_task_v60(
             source,
             owner_user_id=str(source["owner_user_id"]),
@@ -343,23 +350,37 @@ class TaskStore:
         owner_user_id: str,
         dataset_id: str,
         include_deleted: bool,
+        for_update: bool = False,
         conn: TaskConnection | None = None,
     ) -> dict[str, Any] | None:
+        lock_clause = (
+            " FOR UPDATE"
+            if for_update and self._db.backend_type == BackendType.POSTGRESQL
+            else ""
+        )
         if include_deleted:
             cursor = self._read(
-                "SELECT * FROM note_tasks WHERE owner_user_id = ? AND dataset_id = ? AND id = ?",
+                "SELECT * FROM note_tasks "
+                "WHERE owner_user_id = ? AND dataset_id = ? AND id = ?"
+                + lock_clause,  # nosec B608
                 (owner_user_id, dataset_id, task_id),
                 conn=conn,
             )
             return self._decode_task_row(cursor.fetchone())
-        cursor = self._read(
+        if lock_clause:
+            lock_clause = " FOR UPDATE OF t"
+        query = (
             """
             SELECT t.*
               FROM note_tasks t
               JOIN notes n ON n.id = t.note_id
              WHERE t.owner_user_id = ? AND t.dataset_id = ? AND t.id = ?
                AND n.client_id = t.owner_user_id AND t.deleted = ? AND n.deleted = ?
-            """,
+            """
+            + lock_clause  # nosec B608
+        )
+        cursor = self._read(
+            query,
             (owner_user_id, dataset_id, task_id, self._deleted_value(False), self._deleted_value(False)),
             conn=conn,
         )
@@ -590,6 +611,385 @@ class TaskStore:
             )  # noqa: TRY003
         return task_status, projection
 
+    @staticmethod
+    def _sync_task_materialization_checkpoint(_stage: str) -> None:
+        """No-op seam used to prove product transaction rollback."""
+
+    @staticmethod
+    def _sync_task_metadata(payload: NotesTaskV1Payload) -> dict[str, Any]:
+        recurrence = (
+            payload.recurrence.model_dump(mode="json")
+            if payload.recurrence is not None
+            else None
+        )
+        return {
+            "description": payload.description,
+            "priority": payload.priority,
+            "due_date": payload.due_date,
+            "estimate": payload.estimate,
+            "recurrence": recurrence,
+            "assignee_id": payload.assignee_id,
+            "tags": list(payload.tags),
+            "custom": dict(payload.custom),
+        }
+
+    def verify_sync_task_postcondition(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        payload: NotesTaskV1Payload,
+        canonical_revision: int,
+        canonical_hash: str,
+        deleted: bool,
+        expected_projection_status: str | None = None,
+        conn: TaskConnection | None = None,
+    ) -> bool:
+        """Return whether the exact canonical task product state is durable."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+
+        def _verify(read_conn: TaskConnection | None) -> bool:
+            row = self._fetch_task(
+                payload.task_id,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                include_deleted=True,
+                conn=read_conn,
+            )
+            if row is None:
+                return False
+            projection_status = str(row["projection_status"])
+            if expected_projection_status is not None:
+                projection_matches = projection_status == expected_projection_status
+            else:
+                projection_matches = projection_status in {
+                    "live",
+                    "unlinked",
+                    "ambiguous",
+                }
+            return bool(
+                row["owner_user_id"] == owner
+                and row["dataset_id"] == dataset
+                and row["id"] == payload.task_id
+                and row["note_id"] == payload.note_id
+                and row["text"] == payload.title
+                and row["status"] == payload.status
+                and row["metadata_json"] == self._sync_task_metadata(payload)
+                and normalize_sync_timestamp(row.get("completed_at"))
+                == payload.completed_at
+                and int(row["canonical_revision"]) == canonical_revision
+                and row["canonical_hash"] == canonical_hash
+                and bool(row["deleted"]) is deleted
+                and projection_matches
+                and row.get("source_diagnostic_code") is None
+                and row.get("source_diagnostic_hash") is None
+            )
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=conn,
+            fn=_verify,
+        )
+
+    def apply_sync_task_create(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        payload: NotesTaskV1Payload,
+        canonical_revision: int,
+        canonical_hash: str,
+        conn: TaskConnection,
+    ) -> dict[str, Any]:
+        """Create one canonical unlinked task without recording activity."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        if canonical_revision != 1:
+            raise ConflictError(
+                "Sync task create revision is invalid.",
+                entity="tasks",
+                entity_id=payload.task_id,
+            )  # noqa: TRY003
+        self._require_authorized_write_scope(
+            conn,
+            owner_user_id=owner,
+            dataset_id=dataset,
+        )
+        if self._fetch_task(
+            payload.task_id,
+            owner_user_id=owner,
+            dataset_id=dataset,
+            include_deleted=True,
+            conn=conn,
+        ) is not None:
+            raise ConflictError(
+                "Sync task identity already exists.",
+                entity="tasks",
+                entity_id=payload.task_id,
+            )  # noqa: TRY003
+        self._require_active_note(
+            payload.note_id,
+            payload.task_id,
+            owner_user_id=owner,
+            conn=conn,
+        )
+        now = self._db._get_current_utc_timestamp_iso()
+        self._execute(
+            conn,
+            """
+            INSERT INTO note_tasks (
+                owner_user_id, dataset_id, id, note_id, text, status,
+                metadata_json, projection_status, deleted, created_at, updated_at,
+                completed_at, client_id, version, canonical_revision, canonical_hash,
+                source_diagnostic_code, source_diagnostic_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+            """,
+            (
+                owner,
+                dataset,
+                payload.task_id,
+                payload.note_id,
+                payload.title,
+                payload.status,
+                self._json_dumps(self._sync_task_metadata(payload), "metadata"),
+                "unlinked",
+                self._deleted_value(False),
+                now,
+                now,
+                payload.completed_at,
+                self._db.client_id,
+                1,
+                canonical_revision,
+                canonical_hash,
+            ),
+        )
+        self._sync_task_materialization_checkpoint("create")
+        if not self.verify_sync_task_postcondition(
+            owner_user_id=owner,
+            dataset_id=dataset,
+            payload=payload,
+            canonical_revision=canonical_revision,
+            canonical_hash=canonical_hash,
+            deleted=False,
+            expected_projection_status="unlinked",
+            conn=conn,
+        ):
+            raise CharactersRAGDBError("Sync task create postcondition failed.")  # noqa: TRY003
+        created = self._fetch_task(
+            payload.task_id,
+            owner_user_id=owner,
+            dataset_id=dataset,
+            include_deleted=True,
+            conn=conn,
+        )
+        if created is None:
+            raise CharactersRAGDBError("Sync task create readback failed.")  # noqa: TRY003
+        return created
+
+    def apply_sync_task_upsert(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        payload: NotesTaskV1Payload,
+        base_revision: int,
+        base_hash: str,
+        canonical_revision: int,
+        canonical_hash: str,
+        conn: TaskConnection,
+    ) -> dict[str, Any]:
+        """Update one live canonical task without recording activity."""
+
+        return self._apply_sync_task_transition(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            payload=payload,
+            base_revision=base_revision,
+            base_hash=base_hash,
+            canonical_revision=canonical_revision,
+            canonical_hash=canonical_hash,
+            deleted=False,
+            restore=False,
+            conn=conn,
+        )
+
+    def apply_sync_task_tombstone(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        payload: NotesTaskV1Payload,
+        base_revision: int,
+        base_hash: str,
+        canonical_revision: int,
+        canonical_hash: str,
+        conn: TaskConnection,
+    ) -> dict[str, Any]:
+        """Soft-delete one live canonical task without recording activity."""
+
+        return self._apply_sync_task_transition(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            payload=payload,
+            base_revision=base_revision,
+            base_hash=base_hash,
+            canonical_revision=canonical_revision,
+            canonical_hash=canonical_hash,
+            deleted=True,
+            restore=False,
+            conn=conn,
+        )
+
+    def apply_sync_task_restore(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        payload: NotesTaskV1Payload,
+        base_revision: int,
+        base_hash: str,
+        canonical_revision: int,
+        canonical_hash: str,
+        conn: TaskConnection,
+    ) -> dict[str, Any]:
+        """Restore one exact task tombstone as an unlinked live task."""
+
+        return self._apply_sync_task_transition(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            payload=payload,
+            base_revision=base_revision,
+            base_hash=base_hash,
+            canonical_revision=canonical_revision,
+            canonical_hash=canonical_hash,
+            deleted=False,
+            restore=True,
+            conn=conn,
+        )
+
+    def _apply_sync_task_transition(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        payload: NotesTaskV1Payload,
+        base_revision: int,
+        base_hash: str,
+        canonical_revision: int,
+        canonical_hash: str,
+        deleted: bool,
+        restore: bool,
+        conn: TaskConnection,
+    ) -> dict[str, Any]:
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        if canonical_revision != base_revision + 1:
+            raise ConflictError(
+                "Sync task canonical revision is stale.",
+                entity="tasks",
+                entity_id=payload.task_id,
+            )  # noqa: TRY003
+        self._require_authorized_write_scope(
+            conn,
+            owner_user_id=owner,
+            dataset_id=dataset,
+        )
+        current = self._fetch_task(
+            payload.task_id,
+            owner_user_id=owner,
+            dataset_id=dataset,
+            include_deleted=True,
+            for_update=True,
+            conn=conn,
+        )
+        if (
+            current is None
+            or current["note_id"] != payload.note_id
+            or int(current["canonical_revision"]) != base_revision
+            or current["canonical_hash"] != base_hash
+            or bool(current["deleted"]) is not restore
+        ):
+            raise ConflictError(
+                "Sync task product state does not match its canonical base.",
+                entity="tasks",
+                entity_id=payload.task_id,
+            )  # noqa: TRY003
+        self._require_active_note(
+            payload.note_id,
+            payload.task_id,
+            owner_user_id=owner,
+            conn=conn,
+        )
+        now = self._db._get_current_utc_timestamp_iso()
+        projection_status = "deleted" if deleted else "unlinked" if restore else None
+        projection_sql = (
+            ", projection_status = ?" if projection_status is not None else ""
+        )
+        params: tuple[Any, ...] = (
+            payload.title,
+            payload.status,
+            self._json_dumps(self._sync_task_metadata(payload), "metadata"),
+            now,
+            payload.completed_at,
+            self._deleted_value(deleted),
+            canonical_revision,
+            canonical_hash,
+        )
+        if projection_status is not None:
+            params += (projection_status,)
+        params += (
+            owner,
+            dataset,
+            payload.task_id,
+            base_revision,
+            base_hash,
+            self._deleted_value(restore),
+        )
+        cursor = self._execute(
+            conn,
+            "UPDATE note_tasks SET text = ?, status = ?, metadata_json = ?, "  # nosec B608
+            "updated_at = ?, completed_at = ?, deleted = ?, version = version + 1, "
+            "canonical_revision = ?, canonical_hash = ?, source_diagnostic_code = NULL, "
+            "source_diagnostic_hash = NULL"
+            + projection_sql
+            + " WHERE owner_user_id = ? AND dataset_id = ? AND id = ? "
+            "AND canonical_revision = ? AND canonical_hash = ? AND deleted = ?",  # nosec B608
+            params,
+        )
+        if getattr(cursor, "rowcount", None) == 0:
+            raise ConflictError(
+                "Sync task product state changed concurrently.",
+                entity="tasks",
+                entity_id=payload.task_id,
+            )  # noqa: TRY003
+        self._sync_task_materialization_checkpoint(
+            "restore" if restore else "tombstone" if deleted else "upsert"
+        )
+        expected_projection = (
+            "deleted" if deleted else "unlinked" if restore else None
+        )
+        if not self.verify_sync_task_postcondition(
+            owner_user_id=owner,
+            dataset_id=dataset,
+            payload=payload,
+            canonical_revision=canonical_revision,
+            canonical_hash=canonical_hash,
+            deleted=deleted,
+            expected_projection_status=expected_projection,
+            conn=conn,
+        ):
+            raise CharactersRAGDBError("Sync task transition postcondition failed.")  # noqa: TRY003
+        updated = self._fetch_task(
+            payload.task_id,
+            owner_user_id=owner,
+            dataset_id=dataset,
+            include_deleted=True,
+            conn=conn,
+        )
+        if updated is None:
+            raise CharactersRAGDBError("Sync task transition readback failed.")  # noqa: TRY003
+        return updated
+
     def create_task(
         self,
         *,
@@ -796,6 +1196,92 @@ class TaskStore:
             conn=None,
             fn=_read_tasks,
         )
+
+    def page_tasks_for_sync_bootstrap(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        after_task_id: str | None = None,
+        limit: int = 500,
+        conn: TaskConnection | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return one canonical task keyset page for private Sync bootstrap."""
+
+        if isinstance(limit, bool) or not 1 <= limit <= 500:
+            raise ValueError("Notes task bootstrap page limit must be 1..500")
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        cursor = str(after_task_id or "")
+
+        def _page(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            rows = self._read(
+                "SELECT * FROM note_tasks WHERE owner_user_id = ? AND dataset_id = ? "
+                "AND id > ? ORDER BY id ASC LIMIT ?",
+                (owner, dataset, cursor, limit),
+                conn=read_conn,
+            ).fetchall()
+            return [self._sync_bootstrap_task_row(row, owner) for row in rows]
+
+        return self._with_scoped_read(dataset_id=dataset, conn=conn, fn=_page)
+
+    @staticmethod
+    def _sync_bootstrap_task_row(row: Mapping[str, Any], owner: str) -> dict[str, Any]:
+        decoded = dict(row)
+        raw_metadata = decoded.get("metadata_json")
+        if isinstance(raw_metadata, str):
+            try:
+                metadata = json.loads(raw_metadata)
+            except (TypeError, ValueError) as exc:
+                raise CharactersRAGDBError("notes_task_source_invalid") from exc
+        else:
+            metadata = raw_metadata
+        if not isinstance(metadata, dict) or decoded.get("source_diagnostic_code") is not None:
+            raise CharactersRAGDBError("notes_task_source_invalid")
+        metadata_keys = set(metadata)
+        legacy_keys = {"due_date", "priority", "estimate"}
+        canonical_keys = {
+            "description",
+            "priority",
+            "due_date",
+            "estimate",
+            "recurrence",
+            "assignee_id",
+            "tags",
+            "custom",
+        }
+        legacy = metadata_keys.issubset(legacy_keys)
+        if not legacy and metadata_keys != canonical_keys:
+            raise CharactersRAGDBError("notes_task_source_invalid")
+        raw_payload: dict[str, Any] = {
+            "task_id": decoded.get("id"),
+            "note_id": decoded.get("note_id"),
+            "title": decoded.get("text"),
+            "description": None if legacy else metadata.get("description"),
+            "status": decoded.get("status"),
+            "completed_at": normalize_sync_timestamp(decoded.get("completed_at")),
+            "priority": metadata.get("priority"),
+            "due_date": metadata.get("due_date"),
+            "estimate": metadata.get("estimate"),
+            "recurrence": None if legacy else metadata.get("recurrence"),
+            "assignee_id": None if legacy else metadata.get("assignee_id"),
+            "tags": [] if legacy else metadata.get("tags"),
+            "custom": {} if legacy else metadata.get("custom"),
+        }
+        try:
+            payload = parse_notes_task_v1(raw_payload, owner_user_id=owner)
+            revision = int(decoded.get("canonical_revision") or 0)
+            expected_hash = notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=bool(decoded.get("deleted")),
+            )
+        except (TypeError, ValueError) as exc:
+            raise CharactersRAGDBError("notes_task_source_invalid") from exc
+        if decoded.get("canonical_hash") != expected_hash:
+            raise CharactersRAGDBError("notes_task_source_invalid")
+        decoded["metadata_json"] = metadata
+        decoded["sync_payload"] = payload.model_dump(mode="json")
+        return decoded
 
     def update_unlinked_task_metadata_record_only(
         self,
