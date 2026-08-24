@@ -124,6 +124,12 @@ const definitions: Record<KnownServicePromptId, ServicePromptCatalogItem> = {
       required_variables: ["current_date_time", "search_results"]
     }
   ]),
+  "chat.title.generation": definition("chat.title.generation", [{
+    key: "user_template",
+    label: "User template",
+    mode: "template",
+    required_variables: ["query"]
+  }]),
   "media.text.translation": definition("media.text.translation", [
     {
       key: "system",
@@ -141,11 +147,12 @@ const definitions: Record<KnownServicePromptId, ServicePromptCatalogItem> = {
 }
 
 describe("Service Prompt validation and rendering", () => {
-  it("keeps the three old-server Chat defaults byte-equivalent to the shared fixture", () => {
+  it("keeps old-server Chat defaults byte-equivalent to the shared fixture", () => {
     expect(LEGACY_SERVICE_PROMPT_DEFAULTS).toEqual({
       "chat.rag.answer": fixture.defaults["chat.rag.answer"],
       "chat.rag.question_rewrite": fixture.defaults["chat.rag.question_rewrite"],
-      "chat.web_search.answer": fixture.defaults["chat.web_search.answer"]
+      "chat.web_search.answer": fixture.defaults["chat.web_search.answer"],
+      "chat.title.generation": fixture.defaults["chat.title.generation"]
     })
   })
 
@@ -673,6 +680,129 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(mocks.promptForRag).not.toHaveBeenCalled()
   })
 
+  it("uses the packaged title template on old servers without reading legacy storage", async () => {
+    mocks.listServicePrompts.mockRejectedValue(
+      new ServicePromptApiError("Not found", { status: 404 })
+    )
+
+    const snapshot = await loadServicePromptSnapshot([
+      "chat.title.generation"
+    ])
+
+    expect(snapshot).toMatchObject({
+      capability: "legacy-404",
+      definitions: {
+        "chat.title.generation": {
+          definition: renderDefinitionFor("chat.title.generation"),
+          parts: {
+            user_template: fixture.defaults["chat.title.generation"].user_template
+          },
+          source: "packaged",
+          revision: null
+        }
+      }
+    })
+    expect(mocks.promptForRag).not.toHaveBeenCalled()
+    expect(mocks.getWebSearchPrompt).not.toHaveBeenCalled()
+    expect(mocks.localGet).not.toHaveBeenCalled()
+    expect(mocks.syncGet).not.toHaveBeenCalled()
+    snapshot.release()
+  })
+
+  it("rejects a mismatched authenticated user after resolving the matching multi-user target", async () => {
+    const multiUserConfig = {
+      ...config,
+      authMode: "multi-user" as const,
+      accessToken: jwtForUser(42)
+    }
+    mocks.ensureConfig.mockResolvedValue(multiUserConfig)
+    mocks.getCurrentUser.mockResolvedValue({ id: 42, username: "resolved" })
+
+    await expect(loadServicePromptSnapshot(
+      ["chat.title.generation"],
+      {
+        requestScope: {
+          config: targetConfig(multiUserConfig),
+          userId: 999
+        }
+      }
+    )).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+    expect(mocks.listServicePrompts).not.toHaveBeenCalled()
+    expect(mocks.getServicePrompt).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      name: "server",
+      requestScope: {
+        config: { ...config, serverUrl: "https://other-server.example" },
+        userId: null
+      }
+    },
+    {
+      name: "single-user API-key scope",
+      requestScope: {
+        config: {
+          ...config,
+          expectedSingleUserApiKeyScope: "other-api-key-scope"
+        },
+        userId: null
+      }
+    }
+  ])("rejects a mismatched expected request scope before catalog reads: $name", async ({ requestScope }) => {
+    await expect(loadServicePromptSnapshot(
+      ["chat.title.generation"],
+      { requestScope }
+    )).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
+    expect(mocks.listServicePrompts).not.toHaveBeenCalled()
+    expect(mocks.getServicePrompt).not.toHaveBeenCalled()
+  })
+
+  it("loads catalog and detail when expected server, account, and API-key scope match", async () => {
+    const matchingRequestScope = {
+      config: {
+        ...targetConfig(config),
+        expectedSingleUserApiKeyScope: singleUserApiKeyScopeFor(config)
+      },
+      userId: null
+    }
+
+    const snapshot = await loadServicePromptSnapshot(
+      ["chat.title.generation"],
+      { requestScope: matchingRequestScope }
+    )
+
+    expect(snapshot.definitions["chat.title.generation"]?.parts).toEqual(
+      fixture.defaults["chat.title.generation"]
+    )
+    expect(mocks.listServicePrompts).toHaveBeenCalledOnce()
+    expect(mocks.getServicePrompt).toHaveBeenCalledOnce()
+    expect(mocks.listServicePrompts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestScope: expect.objectContaining({
+          config: matchingRequestScope.config,
+          userId: null
+        })
+      })
+    )
+    expect(mocks.getServicePrompt).toHaveBeenCalledWith(
+      "chat.title.generation",
+      expect.objectContaining({
+        requestScope: expect.objectContaining({
+          config: matchingRequestScope.config,
+          userId: null
+        })
+      })
+    )
+    snapshot.release()
+  })
+
   it.each([401, 403, 500, 0])(
     "does not fall back on catalog status %i",
     async (status) => {
@@ -793,7 +923,7 @@ describe("Service Prompt migration and runtime snapshots", () => {
     snapshot.release()
   })
 
-  it("propagates invocation aborts", async () => {
+  it("keeps a parent caller abort as AbortError", async () => {
     let detailSignal: AbortSignal | undefined
     mocks.getServicePrompt.mockImplementation(
       async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
@@ -816,7 +946,7 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(detailSignal?.aborted).toBe(true)
   })
 
-  it("aborts when hosted credentials change during principal resolution", async () => {
+  it("normalizes hosted credential invalidation during principal resolution", async () => {
     let resolveUser!: (user: { id: number; username: string }) => void
     mocks.isHosted.mockReturnValue(true)
     mocks.getCurrentUser.mockImplementation(() =>
@@ -830,11 +960,14 @@ describe("Service Prompt migration and runtime snapshots", () => {
     window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
     resolveUser({ id: 99, username: "changed" })
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
     expect(mocks.listServicePrompts).not.toHaveBeenCalled()
   })
 
-  it("aborts during an unabortable catalog-404 compatibility getter", async () => {
+  it("normalizes invalidation during an unabortable catalog-404 compatibility getter", async () => {
     let resolvePrompts!: (value: {
       ragPrompt: string
       ragQuestionPrompt: string
@@ -861,10 +994,13 @@ describe("Service Prompt migration and runtime snapshots", () => {
       ragQuestionPrompt: "legacy {chat_history} {question}"
     })
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
   })
 
-  it("aborts during the supported raw migration probe", async () => {
+  it("normalizes invalidation during the supported raw migration probe", async () => {
     let resolveRaw!: (value: undefined) => void
     mocks.localGet.mockImplementationOnce(() =>
       new Promise((resolve) => {
@@ -877,11 +1013,14 @@ describe("Service Prompt migration and runtime snapshots", () => {
     window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
     resolveRaw(undefined)
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
     expect(mocks.getServicePrompt).not.toHaveBeenCalled()
   })
 
-  it("aborts an active read when the cross-context config watcher fires", async () => {
+  it("normalizes cross-context scope invalidation during an active read", async () => {
     let detailSignal: AbortSignal | undefined
     mocks.getServicePrompt.mockImplementation(
       async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
@@ -908,12 +1047,15 @@ describe("Service Prompt migration and runtime snapshots", () => {
       external.abort()
     }
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
     expect(watched?.tldwConfig).toBeTypeOf("function")
     expect(mocks.localUnwatch).toHaveBeenCalledWith(watched)
   })
 
-  it("aborts a single-user lease when the API-key account changes", async () => {
+  it("normalizes a single-user lease invalidation when the API-key account changes", async () => {
     let detailSignal: AbortSignal | undefined
     mocks.getServicePrompt.mockImplementation(
       async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
@@ -934,7 +1076,10 @@ describe("Service Prompt migration and runtime snapshots", () => {
       newValue: { ...config, apiKey: "different-account-key" }
     })
 
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
     expect(watched?.tldwConfig).toBeTypeOf("function")
   })
 

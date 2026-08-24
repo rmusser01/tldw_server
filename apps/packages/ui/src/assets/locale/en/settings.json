@@ -35,6 +35,10 @@
         "label": "Web-search answer",
         "description": "Controls how normalized web-search results are presented for the final answer."
       },
+      "chatTitleGeneration": {
+        "label": "Conversation title",
+        "description": "Controls the instruction used to generate automatic conversation titles."
+      },
       "mediaTextTranslation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation."
@@ -47,7 +51,12 @@
       "sidepanelRag": "Sidepanel RAG",
       "mainChatWebSearch": "Main chat web search",
       "compareWebSearch": "Compare web search",
+      "automaticConversationTitles": "Automatic conversation titles",
       "textTranslation": "Text translation"
+    },
+    "titleGeneration": {
+      "note": "Automatic title generation is enabled or disabled in Chat settings.",
+      "openChatSettings": "Open Chat settings"
     },
     "parts": {
       "template": "Template",

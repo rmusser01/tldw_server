@@ -506,7 +506,31 @@ export const LEGACY_SERVICE_PROMPT_DEFAULTS = Object.freeze({
   "chat.rag.question_rewrite": Object.freeze({
     template: DEFAULT_RAG_QUESTION_PROMPT
   }),
-  "chat.web_search.answer": Object.freeze({ template: DEFAULT_WEBSEARCH_PROMPT })
+  "chat.web_search.answer": Object.freeze({ template: DEFAULT_WEBSEARCH_PROMPT }),
+  "chat.title.generation": Object.freeze({
+    user_template: `Here is the query:
+
+--------------
+
+{query}
+
+--------------
+
+Create a concise, 3-5 word phrase as a title for the previous query. Avoid quotation marks or special formatting. RESPOND ONLY WITH THE TITLE TEXT. ANSWER USING THE SAME LANGUAGE AS THE QUERY.
+
+
+Examples of titles:
+
+Stellar Achievement Celebration
+Family Bonding Activities
+🇫🇷 Voyage à Paris
+🍜 Receta de Ramen Casero
+Shakespeare Analyse Literarische
+日本の春祭り体験
+Древнегреческая Философия Обзор
+
+Response:`
+  })
 })
 
 const DEFAULT_WEBSEARCH_FOLLOWUP_PROMPT = `You will rephrase follow-up questions into concise, standalone search queries optimized for internet search engines. Transform conversational questions into keyword-focused search terms by removing unnecessary words, question formats, and context dependencies while preserving the core information need.

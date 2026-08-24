@@ -126,6 +126,12 @@ const KNOWN_DEFINITIONS = {
     description:
       "Controls how normalized web-search results are presented for the final answer."
   },
+  "chat.title.generation": {
+    key: "chatTitleGeneration",
+    label: "Conversation title",
+    description:
+      "Controls the instruction used to generate automatic conversation titles."
+  },
   "media.text.translation": {
     key: "mediaTextTranslation",
     label: "Text translation",
@@ -149,6 +155,10 @@ const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "chat.compare.web_search": {
     key: "compareWebSearch",
     label: "Compare web search"
+  },
+  "chat.title.generation": {
+    key: "automaticConversationTitles",
+    label: "Automatic conversation titles"
   },
   "media.text.translation": {
     key: "textTranslation",
@@ -1792,6 +1802,22 @@ export const ServicePromptsSettings = () => {
                     <p className="mt-1 max-w-[70ch] text-sm text-text-muted">
                       {getDefinitionText(selectedDefinition, "description", t)}
                     </p>
+                    {selectedDefinition.id === "chat.title.generation" ? (
+                      <p className="mt-2 text-sm text-text-muted">
+                        {t("servicePrompts.titleGeneration.note", {
+                          defaultValue:
+                            "Automatic title generation is enabled or disabled in Chat settings."
+                        })}{" "}
+                        <Link
+                          className="font-medium text-primary hover:underline"
+                          to="/settings/chat"
+                        >
+                          {t("servicePrompts.titleGeneration.openChatSettings", {
+                            defaultValue: "Open Chat settings"
+                          })}
+                        </Link>
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Badge

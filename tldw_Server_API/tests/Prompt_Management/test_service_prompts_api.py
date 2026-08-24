@@ -32,6 +32,9 @@ CUSTOM_PARTS = {
     "system": "Translate faithfully.",
     "user_template": "Translate {text} into {target_language}.",
 }
+TITLE_ID = "chat.title.generation"
+TITLE_PATH = f"/api/v1/service-prompts/{TITLE_ID}"
+TITLE_CUSTOM_PARTS = {"user_template": "Name this request: {query}"}
 
 
 def _principal(*, api_key_id: int | None = None) -> AuthPrincipal:
@@ -141,6 +144,24 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
             ],
         },
         {
+            "id": "chat.title.generation",
+            "label": "Conversation title",
+            "description": (
+                "Controls the instruction used to generate automatic conversation titles."
+            ),
+            "parts": [
+                {
+                    "key": "user_template",
+                    "label": "User template",
+                    "mode": "template",
+                    "required_variables": ["query"],
+                }
+            ],
+            "affected_workflows": [
+                {"id": "chat.title.generation", "label": "Automatic conversation titles"}
+            ],
+        },
+        {
             "id": "media.text.translation",
             "label": "Text translation",
             "description": (
@@ -179,6 +200,23 @@ def test_service_prompt_detail_returns_packaged_state_without_caching(api_contex
     assert body["saved_parts"] is None
     assert body["effective_parts"] == body["default_parts"]
     assert set(body["default_parts"]) == {"system", "user_template"}
+
+
+def test_title_prompt_can_be_saved_and_reset_through_generic_api(api_context) -> None:
+    saved = api_context.client.put(
+        TITLE_PATH,
+        json={"parts": TITLE_CUSTOM_PARTS, "expected_revision": None},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["effective_parts"] == TITLE_CUSTOM_PARTS
+
+    reset = api_context.client.delete(
+        TITLE_PATH,
+        params={"expected_revision": saved.json()["revision"]},
+    )
+    assert reset.status_code == 200
+    assert reset.json()["source"] == "packaged"
+    assert reset.json()["effective_parts"] == reset.json()["default_parts"]
 
 
 def test_service_prompt_put_activates_immediately_and_identical_retry_keeps_revision(

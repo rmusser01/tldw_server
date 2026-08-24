@@ -6289,5 +6289,23 @@
   },
   "servicePrompts_corrupt_rebound": {
     "message": "The saved customization changed. The latest revision was loaded. Retry reset."
+  },
+  "servicePrompts_definitions_chatTitleGeneration_label": {
+    "message": "Conversation title"
+  },
+  "servicePrompts_definitions_chatTitleGeneration_description": {
+    "message": "Controls the instruction used to generate automatic conversation titles."
+  },
+  "servicePrompts_workflows_automaticConversationTitles": {
+    "message": "Automatic conversation titles"
+  },
+  "servicePrompts_titleGeneration_note": {
+    "message": "Automatic title generation is enabled or disabled in Chat settings."
+  },
+  "servicePrompts_titleGeneration_openChatSettings": {
+    "message": "Open Chat settings"
+  },
+  "chatMacrosNav": {
+    "message": "Chat Macros"
   }
 }
