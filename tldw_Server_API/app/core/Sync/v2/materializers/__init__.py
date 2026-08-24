@@ -10,6 +10,7 @@ from .notes import NotesMaterializer
 from .notes_link import NotesLinkMaterializer
 from .notes_organization import NotesOrganizationMaterializer
 from .notes_task import NotesTaskMaterializer
+from .notes_task_activity import NotesTaskActivityMaterializer
 from .source_cache import SourceCacheMaterializer
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "NotesLinkMaterializer",
     "NotesOrganizationMaterializer",
     "NotesTaskMaterializer",
+    "NotesTaskActivityMaterializer",
     "SourceCacheMaterializer",
     "SyncMaterializer",
 ]

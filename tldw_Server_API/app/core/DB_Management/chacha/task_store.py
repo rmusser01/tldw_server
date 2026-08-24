@@ -18,7 +18,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
 from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
+    NotesTaskActivityTombstoneV1,
+    NotesTaskActivityV1,
     NotesTaskV1Payload,
+    notes_task_activity_object_hash,
     notes_task_object_hash,
     parse_notes_task_v1,
 )
@@ -614,6 +617,10 @@ class TaskStore:
     @staticmethod
     def _sync_task_materialization_checkpoint(_stage: str) -> None:
         """No-op seam used to prove product transaction rollback."""
+
+    @staticmethod
+    def _sync_task_activity_materialization_checkpoint(_stage: str) -> None:
+        """No-op seam used to prove activity transaction rollback."""
 
     @staticmethod
     def _sync_task_metadata(payload: NotesTaskV1Payload) -> dict[str, Any]:
@@ -1897,6 +1904,447 @@ class TaskStore:
             return updated
 
         return self._with_transaction(_execute_delete, conn)
+
+    @staticmethod
+    def _sync_activity_legacy_context(
+        payload: NotesTaskActivityV1,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Map verified legacy context into the existing audit columns."""
+
+        context = payload.metadata.get("legacy_context")
+        if not isinstance(context, Mapping):
+            return None, None, None
+        return tuple(
+            value if isinstance((value := context.get(field)), str) else None
+            for field in ("tool_name", "policy_mode", "approval_id")
+        )
+
+    def _require_sync_activity_parents(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        payload: NotesTaskActivityV1,
+        conn: TaskConnection,
+    ) -> None:
+        """Require exact owner/dataset/note/task and correction scope."""
+
+        note = self._read(
+            "SELECT id FROM notes WHERE client_id = ? AND id = ?",
+            (owner_user_id, payload.note_id),
+            conn=conn,
+        ).fetchone()
+        if note is None:
+            raise ConflictError(
+                "Sync task activity note not found.",
+                entity="task_activity",
+                entity_id=payload.activity_id,
+            )  # noqa: TRY003
+        if payload.task_id is not None:
+            task = self._fetch_task(
+                payload.task_id,
+                owner_user_id=owner_user_id,
+                dataset_id=dataset_id,
+                include_deleted=True,
+                conn=conn,
+            )
+            if task is None or task["note_id"] != payload.note_id:
+                raise ConflictError(
+                    "Sync task activity task scope does not match its note.",
+                    entity="task_activity",
+                    entity_id=payload.activity_id,
+                )  # noqa: TRY003
+        if payload.corrects_activity_id is not None:
+            corrected = self.get_sync_task_activity(
+                owner_user_id=owner_user_id,
+                dataset_id=dataset_id,
+                activity_id=payload.corrects_activity_id,
+                conn=conn,
+            )
+            if (
+                corrected is None
+                or corrected["note_id"] != payload.note_id
+                or corrected["task_id"] != payload.task_id
+            ):
+                raise ConflictError(
+                    "Sync task activity correction scope does not match its target.",
+                    entity="task_activity",
+                    entity_id=payload.activity_id,
+                )  # noqa: TRY003
+
+    @staticmethod
+    def _sync_activity_create_row_matches(
+        row: Mapping[str, Any],
+        payload: NotesTaskActivityV1,
+    ) -> bool:
+        """Return whether immutable product columns equal a canonical create."""
+
+        tool_name, policy_mode, approval_id = TaskStore._sync_activity_legacy_context(payload)
+        return bool(
+            row["id"] == payload.activity_id
+            and row["note_id"] == payload.note_id
+            and row["task_id"] == payload.task_id
+            and row["event_type"] == payload.event_type
+            and row["actor_type"] == payload.actor_type
+            and row["actor_id"] == payload.actor_id
+            and row["tool_name"] == tool_name
+            and row["policy_mode"] == policy_mode
+            and row["approval_id"] == approval_id
+            and row["old_value_json"] == payload.old_value
+            and row["new_value_json"] == payload.new_value
+            and row["source_device_id"] == payload.source_device_id
+            and normalize_sync_timestamp(row["client_occurred_at"])
+            == payload.client_occurred_at
+            and row["source_kind"] == payload.source_kind
+            and row["corrects_activity_id"] == payload.corrects_activity_id
+            and row.get("source_diagnostic_code") is None
+            and row.get("source_diagnostic_hash") is None
+        )
+
+    def verify_sync_task_activity_postcondition(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        payload: NotesTaskActivityV1 | NotesTaskActivityTombstoneV1,
+        sync_revision: int,
+        sync_object_hash: str,
+        sync_server_cursor: int,
+        original_payload: NotesTaskActivityV1 | None = None,
+        conn: TaskConnection | None = None,
+    ) -> bool:
+        """Return whether the exact immutable activity state is durable."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        activity_id = (
+            payload.activity_id
+            if isinstance(payload, NotesTaskActivityV1)
+            else (original_payload.activity_id if original_payload is not None else "")
+        )
+
+        def _verify(read_conn: TaskConnection | None) -> bool:
+            row = self.get_sync_task_activity(
+                owner_user_id=owner,
+                dataset_id=dataset,
+                activity_id=activity_id,
+                conn=read_conn,
+            )
+            if row is None:
+                return False
+            create_payload = payload if isinstance(payload, NotesTaskActivityV1) else original_payload
+            if create_payload is None or not self._sync_activity_create_row_matches(row, create_payload):
+                return False
+            lifecycle_matches = (
+                not bool(row["deleted"])
+                and row["deleted_at"] is None
+                and row["delete_reason"] is None
+                if sync_revision == 1
+                else bool(row["deleted"])
+                and isinstance(payload, NotesTaskActivityTombstoneV1)
+                and normalize_sync_timestamp(row["deleted_at"]) == payload.deleted_at
+                and row["delete_reason"] == payload.delete_reason
+            )
+            return bool(
+                row["owner_user_id"] == owner
+                and row["dataset_id"] == dataset
+                and int(row["sync_revision"]) == sync_revision
+                and row["sync_object_hash"] == sync_object_hash
+                and int(row["sync_server_cursor"]) == sync_server_cursor
+                and lifecycle_matches
+            )
+
+        return self._with_scoped_read(dataset_id=dataset, conn=conn, fn=_verify)
+
+    def create_sync_task_activity(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        payload: NotesTaskActivityV1,
+        sync_object_hash: str,
+        sync_server_cursor: int,
+        conn: TaskConnection,
+    ) -> dict[str, Any]:
+        """Insert one canonical revision-1 activity exactly once."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        expected_hash = notes_task_activity_object_hash(payload, revision=1, deleted=False)
+        if sync_object_hash != expected_hash or isinstance(sync_server_cursor, bool) or sync_server_cursor < 1:
+            raise ConflictError(
+                "Sync task activity create lineage is invalid.",
+                entity="task_activity",
+                entity_id=payload.activity_id,
+            )  # noqa: TRY003
+        self._require_authorized_write_scope(conn, owner_user_id=owner, dataset_id=dataset)
+        if self.get_sync_task_activity(
+            owner_user_id=owner,
+            dataset_id=dataset,
+            activity_id=payload.activity_id,
+            conn=conn,
+        ) is not None:
+            raise ConflictError(
+                "Sync task activity identity already exists.",
+                entity="task_activity",
+                entity_id=payload.activity_id,
+            )  # noqa: TRY003
+        self._require_sync_activity_parents(
+            owner_user_id=owner,
+            dataset_id=dataset,
+            payload=payload,
+            conn=conn,
+        )
+        tool_name, policy_mode, approval_id = self._sync_activity_legacy_context(payload)
+        now = self._db._get_current_utc_timestamp_iso()
+        self._execute(
+            conn,
+            """
+            INSERT INTO task_events (
+                owner_user_id, dataset_id, id, task_id, note_id, event_type, actor_type,
+                actor_id, tool_name, policy_mode, approval_id, old_value_json, new_value_json,
+                created_at, client_id, sync_revision, sync_object_hash, sync_server_cursor,
+                source_device_id, client_occurred_at, source_kind, corrects_activity_id,
+                deleted, deleted_at, delete_reason, source_diagnostic_code,
+                source_diagnostic_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
+            """,
+            (
+                owner,
+                dataset,
+                payload.activity_id,
+                payload.task_id,
+                payload.note_id,
+                payload.event_type,
+                payload.actor_type,
+                payload.actor_id,
+                tool_name,
+                policy_mode,
+                approval_id,
+                json.dumps(payload.old_value, sort_keys=True) if payload.old_value is not None else None,
+                json.dumps(payload.new_value, sort_keys=True) if payload.new_value is not None else None,
+                now,
+                self._db.client_id,
+                sync_object_hash,
+                sync_server_cursor,
+                payload.source_device_id,
+                payload.client_occurred_at,
+                payload.source_kind,
+                payload.corrects_activity_id,
+                self._deleted_value(False),
+            ),
+        )
+        self._sync_task_activity_materialization_checkpoint("create")
+        if not self.verify_sync_task_activity_postcondition(
+            owner_user_id=owner,
+            dataset_id=dataset,
+            payload=payload,
+            sync_revision=1,
+            sync_object_hash=sync_object_hash,
+            sync_server_cursor=sync_server_cursor,
+            conn=conn,
+        ):
+            raise CharactersRAGDBError("Sync task activity create postcondition failed.")  # noqa: TRY003
+        created = self.get_sync_task_activity(
+            owner_user_id=owner,
+            dataset_id=dataset,
+            activity_id=payload.activity_id,
+            conn=conn,
+        )
+        if created is None:
+            raise CharactersRAGDBError("Sync task activity create readback failed.")  # noqa: TRY003
+        return created
+
+    def tombstone_sync_task_activity(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        activity_id: str,
+        payload: NotesTaskActivityTombstoneV1,
+        original_payload: NotesTaskActivityV1,
+        base_server_cursor: int,
+        base_hash: str,
+        sync_object_hash: str,
+        sync_server_cursor: int,
+        conn: TaskConnection,
+    ) -> dict[str, Any]:
+        """Apply the exact one-way revision-2 activity tombstone CAS."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        expected_hash = notes_task_activity_object_hash(
+            payload,
+            revision=2,
+            deleted=True,
+            activity_id=activity_id,
+            original_create_hash=base_hash,
+        )
+        if (
+            activity_id != original_payload.activity_id
+            or sync_object_hash != expected_hash
+            or isinstance(sync_server_cursor, bool)
+            or sync_server_cursor < 1
+        ):
+            raise ConflictError(
+                "Sync task activity tombstone lineage is invalid.",
+                entity="task_activity",
+                entity_id=activity_id,
+            )  # noqa: TRY003
+        self._require_authorized_write_scope(conn, owner_user_id=owner, dataset_id=dataset)
+        current = self.get_sync_task_activity(
+            owner_user_id=owner,
+            dataset_id=dataset,
+            activity_id=activity_id,
+            conn=conn,
+        )
+        if (
+            current is None
+            or bool(current["deleted"])
+            or int(current["sync_revision"]) != 1
+            or current["sync_server_cursor"] != base_server_cursor
+            or current["sync_object_hash"] != base_hash
+            or not self._sync_activity_create_row_matches(current, original_payload)
+        ):
+            raise ConflictError(
+                "Sync task activity base state does not match.",
+                entity="task_activity",
+                entity_id=activity_id,
+            )  # noqa: TRY003
+        cursor = self._execute(
+            conn,
+            """
+            UPDATE task_events
+               SET sync_revision = 2, sync_object_hash = ?, sync_server_cursor = ?,
+                   deleted = ?, deleted_at = ?, delete_reason = ?,
+                   source_diagnostic_code = NULL, source_diagnostic_hash = NULL
+             WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+               AND sync_revision = 1 AND sync_object_hash = ? AND deleted = ?
+            """,
+            (
+                sync_object_hash,
+                sync_server_cursor,
+                self._deleted_value(True),
+                payload.deleted_at,
+                payload.delete_reason,
+                owner,
+                dataset,
+                activity_id,
+                base_hash,
+                self._deleted_value(False),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ConflictError(
+                "Sync task activity tombstone compare-and-swap failed.",
+                entity="task_activity",
+                entity_id=activity_id,
+            )  # noqa: TRY003
+        self._sync_task_activity_materialization_checkpoint("tombstone")
+        if not self.verify_sync_task_activity_postcondition(
+            owner_user_id=owner,
+            dataset_id=dataset,
+            payload=payload,
+            original_payload=original_payload,
+            sync_revision=2,
+            sync_object_hash=sync_object_hash,
+            sync_server_cursor=sync_server_cursor,
+            conn=conn,
+        ):
+            raise CharactersRAGDBError("Sync task activity tombstone postcondition failed.")  # noqa: TRY003
+        tombstoned = self.get_sync_task_activity(
+            owner_user_id=owner,
+            dataset_id=dataset,
+            activity_id=activity_id,
+            conn=conn,
+        )
+        if tombstoned is None:
+            raise CharactersRAGDBError("Sync task activity tombstone readback failed.")  # noqa: TRY003
+        return tombstoned
+
+    def get_sync_task_activity(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        activity_id: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any] | None:
+        """Read one activity through its exact canonical scope."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+
+        def _get(read_conn: TaskConnection | None) -> dict[str, Any] | None:
+            row = self._read(
+                """
+                SELECT e.* FROM task_events e
+                JOIN notes n ON n.client_id = e.owner_user_id AND n.id = e.note_id
+                LEFT JOIN note_tasks t
+                  ON t.owner_user_id = e.owner_user_id AND t.dataset_id = e.dataset_id
+                 AND t.id = e.task_id AND t.note_id = e.note_id
+                WHERE e.owner_user_id = ? AND e.dataset_id = ? AND e.id = ?
+                  AND (e.task_id IS NULL OR t.id IS NOT NULL)
+                """,
+                (owner, dataset, activity_id),
+                conn=read_conn,
+            ).fetchone()
+            return self._decode_event_row(row)
+
+        return self._with_scoped_read(dataset_id=dataset, conn=conn, fn=_get)
+
+    def page_sync_task_activity(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        after_server_cursor: int | None = None,
+        after_activity_id: str | None = None,
+        limit: int = 100,
+        conn: TaskConnection | None = None,
+    ) -> list[dict[str, Any]]:
+        """Keyset-page canonical activity by server cursor and activity ID."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        if (after_server_cursor is None) != (after_activity_id is None):
+            raise InputError("Activity keyset cursor fields must be provided together.")  # noqa: TRY003
+        if after_server_cursor is not None and (
+            isinstance(after_server_cursor, bool)
+            or not isinstance(after_server_cursor, int)
+            or after_server_cursor < 1
+            or not isinstance(after_activity_id, str)
+            or not after_activity_id
+        ):
+            raise InputError("Activity keyset cursor is invalid.")  # noqa: TRY003
+        try:
+            bounded_limit = min(max(int(limit), 1), 1_000)
+        except (TypeError, ValueError) as exc:
+            raise InputError("limit must be an integer.") from exc  # noqa: TRY003
+        clauses = [
+            "e.owner_user_id = ?",
+            "e.dataset_id = ?",
+            "e.sync_server_cursor IS NOT NULL",
+            "(e.task_id IS NULL OR t.id IS NOT NULL)",
+        ]
+        params: list[Any] = [owner, dataset]
+        if after_server_cursor is not None:
+            clauses.append(
+                "(e.sync_server_cursor > ? OR "
+                "(e.sync_server_cursor = ? AND e.id > ?))"
+            )
+            params.extend((after_server_cursor, after_server_cursor, after_activity_id))
+        params.append(bounded_limit)
+        query = (
+            "SELECT e.* FROM task_events e "
+            "JOIN notes n ON n.client_id = e.owner_user_id AND n.id = e.note_id "
+            "LEFT JOIN note_tasks t ON t.owner_user_id = e.owner_user_id "
+            "AND t.dataset_id = e.dataset_id AND t.id = e.task_id AND t.note_id = e.note_id "
+            "WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY e.sync_server_cursor ASC, e.id ASC LIMIT ?"
+        )
+
+        def _page(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            rows = self._read(query, tuple(params), conn=read_conn).fetchall()
+            return [self._decode_event_row(row) for row in rows]
+
+        return self._with_scoped_read(dataset_id=dataset, conn=conn, fn=_page)
 
     def record_task_event(
         self,
