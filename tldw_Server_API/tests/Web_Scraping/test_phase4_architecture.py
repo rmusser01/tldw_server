@@ -335,6 +335,7 @@ def test_article_selector_responsibilities_import_the_canonical_facade() -> None
 def test_phase4b_moved_consumers_import_canonical_content_and_extraction_facades() -> None:
     content_module = "tldw_Server_API.app.core.Web_Scraping.content"
     extraction_module = "tldw_Server_API.app.core.Web_Scraping.extraction"
+    orchestration_module = "tldw_Server_API.app.core.Web_Scraping.orchestration"
     legacy_module = "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib"
 
     assert _imported_names_at_any_scope(HANDLERS_PATH, content_module) == {"convert_html_to_markdown"}
@@ -364,11 +365,11 @@ def test_phase4b_moved_consumers_import_canonical_content_and_extraction_facades
         if isinstance(node, ast.ImportFrom) and node.module in {content_module, extraction_module}
     }
     enhanced_tree = _tree(ENHANCED_SCRAPER_PATH)
+    assert _imported_names_at_any_scope(ENHANCED_SCRAPER_PATH, orchestration_module) == {"scrape_article"}
     legacy_imports = [
         node for node in ast.walk(enhanced_tree) if isinstance(node, ast.ImportFrom) and node.module == legacy_module
     ]
-    assert len(legacy_imports) == 1
-    assert [alias.name for alias in legacy_imports[0].names] == ["scrape_article"]
+    assert legacy_imports == []
     manager = next(
         node for node in enhanced_tree.body if isinstance(node, ast.ClassDef) and node.name == "ScrapingJobQueue"
     )
@@ -385,7 +386,9 @@ def test_phase4b_moved_consumers_import_canonical_content_and_extraction_facades
         and node.test.attr == "parent_scraper"
     )
     fallback_imports = [node for node in parent_scraper_branch.orelse if isinstance(node, ast.ImportFrom)]
-    assert fallback_imports == legacy_imports
+    assert len(fallback_imports) == 1
+    assert fallback_imports[0].module == orchestration_module
+    assert [alias.name for alias in fallback_imports[0].names] == ["scrape_article"]
     fallback_calls = [
         statement.value
         for statement in parent_scraper_branch.orelse
@@ -425,8 +428,8 @@ def test_phase4b_moved_consumers_import_canonical_content_and_extraction_facades
             assert keyword.value.args[1].value is expected_default
 
 
-def test_phase4b_enhanced_no_parent_fallback_forwards_legacy_job_arguments(monkeypatch) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
+def test_phase4b_enhanced_no_parent_fallback_forwards_canonical_job_arguments(monkeypatch) -> None:
+    from tldw_Server_API.app.core.Web_Scraping import orchestration
     from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import ScrapingJob, ScrapingJobQueue
 
     calls: list[tuple[str, dict[str, Any]]] = []
@@ -435,7 +438,7 @@ def test_phase4b_enhanced_no_parent_fallback_forwards_legacy_job_arguments(monke
         calls.append((url, kwargs))
         return {"url": url, "extraction_successful": True}
 
-    monkeypatch.setattr(article, "scrape_article", fallback)
+    monkeypatch.setattr(orchestration, "scrape_article", fallback)
     job = ScrapingJob(
         job_id="fallback-job",
         url="https://example.com/fallback",
@@ -637,6 +640,14 @@ def test_phase4b_llm_provider_labels_have_one_frozen_contract() -> None:
         contract["llm_tokens_used_total"]["provider"] = frozenset({"other"})  # type: ignore[index]
 
 
+def test_extraction_executor_lifecycle_metric_has_bounded_outcomes() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.extraction import metrics
+
+    assert metrics.METRIC_LABEL_CONTRACT["extraction_executor_total"] == {
+        "outcome": frozenset({"queued", "running", "saturated", "cancelled", "discarded"})
+    }
+
+
 def test_phase4b_only_the_canonical_metric_boundary_owns_metric_sinks() -> None:
     assert METRICS_PATH.is_file()
     assert _metric_boundary_bypasses(sorted(EXTRACTION_ROOT.rglob("*.py"))) == []
@@ -753,6 +764,13 @@ def test_phase4b_metric_contract_covers_every_production_emission_and_allowed_va
             provider=input_provider,
             model="unbounded-model-payload",
             dependencies=dependencies,
+        )
+
+    for outcome in contract["extraction_executor_total"]["outcome"]:
+        metrics.emit_callback_counter(
+            record,
+            "extraction_executor_total",
+            labels={"outcome": outcome},
         )
 
     assert {name for name, _value, _labels in events} == set(contract)

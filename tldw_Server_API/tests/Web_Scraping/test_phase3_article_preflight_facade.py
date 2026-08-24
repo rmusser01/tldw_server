@@ -4,7 +4,7 @@ import asyncio
 import inspect
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any, get_type_hints
 from unittest.mock import AsyncMock, Mock
 
@@ -16,6 +16,11 @@ from tldw_Server_API.app.core.Web_Scraping.contracts import (
     PreflightResult,
     RuntimeFailure,
     WebScrapingStatus,
+)
+from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+    ArticleLimits,
+    ArticlePlan,
+    DirectBrowserProfile,
 )
 from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
@@ -60,47 +65,23 @@ class FakeFetchClient:
         return response
 
 
-class FakePage:
-    async def goto(self, *_args: Any, **_kwargs: Any) -> None:
-        return None
+class FakeCanonicalBrowser:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, DirectBrowserProfile, ArticleLimits]] = []
 
-    async def wait_for_load_state(self, *_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    async def content(self) -> str:
+    async def acquire(
+        self,
+        url: str,
+        profile: DirectBrowserProfile,
+        limits: ArticleLimits,
+    ) -> str:
+        self.calls.append((url, profile, limits))
         return "<html><body>rendered</body></html>"
 
 
-class FakeBrowserContext:
-    async def add_cookies(self, _cookies: list[dict[str, Any]]) -> None:
-        return None
-
-    async def new_page(self) -> FakePage:
-        return FakePage()
-
-
-class FakeBrowser:
-    async def new_context(self, **_kwargs: Any) -> FakeBrowserContext:
-        return FakeBrowserContext()
-
-    async def close(self) -> None:
-        return None
-
-
-class FakeChromium:
-    async def launch(self, **_kwargs: Any) -> FakeBrowser:
-        return FakeBrowser()
-
-
-class FakePlaywright:
-    def __init__(self) -> None:
-        self.chromium = FakeChromium()
-
-    async def __aenter__(self) -> FakePlaywright:
-        return self
-
-    async def __aexit__(self, *_args: Any) -> None:
-        return None
+class FakeExecutor:
+    async def run(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
 
 
 def allowed_decision() -> PolicyDecision:
@@ -161,6 +142,7 @@ def failed_article(url: str) -> dict[str, Any]:
 @dataclass
 class ArticleHarness:
     article: ModuleType
+    dependencies: Any
     policy_checker: FakePolicyChecker
     fetch_client: FakeFetchClient
     evaluate_target: AsyncMock
@@ -169,6 +151,7 @@ class ArticleHarness:
     apply_advice: Mock
     public_payload: Mock
     extractor: Mock
+    logs: list[dict[str, str]]
 
 
 def install_article_defaults(
@@ -183,6 +166,7 @@ def install_article_defaults(
     extraction_results: Sequence[dict[str, Any]] | None = None,
 ) -> ArticleHarness:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
 
     selected_decision = decision or allowed_decision()
     selected_result = preflight_result or successful_preflight()
@@ -196,35 +180,6 @@ def install_article_defaults(
         "web_scraper_retry_timeout": 1,
         "web_scraper_stealth_playwright": False,
     }
-    plan = SimpleNamespace(
-        backend=backend,
-        handler="",
-        ua_profile="test-profile",
-        extra_headers={},
-        cookies={},
-        respect_robots=True,
-        impersonate=None,
-        proxies=None,
-        strategy_order=None,
-        schema_rules=None,
-        llm_settings=None,
-        regex_settings=None,
-        cluster_settings=None,
-    )
-
-    class FakeRouter:
-        @staticmethod
-        def load_rules_from_yaml(_path: str) -> dict[str, Any]:
-            return {}
-
-        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-            return None
-
-        def resolve(self, _url: str) -> SimpleNamespace:
-            return plan
-
-    # The legacy direct policy path is denied so the pre-migration RED run cannot
-    # reach its real analyzer/network path. The facade mock remains authoritative.
     policy_checker = FakePolicyChecker(denied_decision())
     fetch_client = FakeFetchClient(
         fetch_responses
@@ -250,31 +205,55 @@ def install_article_defaults(
     apply_advice = Mock(wraps=real_apply)
     public_payload = Mock(wraps=real_payload)
 
-    monkeypatch.setattr(article, "preflight_facade", preflight_facade, raising=False)
-    monkeypatch.setattr(preflight_facade, "evaluate_target", evaluate)
-    monkeypatch.setattr(preflight_facade, "build_execution_context", build_context)
-    monkeypatch.setattr(preflight_facade, "run_preflight", run)
-    monkeypatch.setattr(preflight_facade, "apply_preflight_advice", apply_advice)
-    monkeypatch.setattr(preflight_facade, "public_preflight_payload", public_payload)
-    monkeypatch.setattr(article, "ScraperRouter", FakeRouter)
-    monkeypatch.setattr(article, "load_and_log_configs", lambda: {"web_scraper": config})
-    monkeypatch.setattr(
-        article,
-        "build_browser_headers",
-        lambda *_args, **_kwargs: {"User-Agent": "article-test-agent"},
+    browser = FakeCanonicalBrowser()
+    logs: list[dict[str, str]] = []
+
+    def resolve_plan(_url: str, _loaded_config: Mapping[str, Any]) -> ArticlePlan:
+        headers = {"User-Agent": "article-test-agent"}
+        return ArticlePlan(
+            url=URL,
+            domain="example.com",
+            browser=DirectBrowserProfile(
+                user_agent=headers["User-Agent"],
+                custom_cookies=(),
+                retries=1,
+                timeout_ms=1_000,
+                stealth_enabled=False,
+                stealth_wait_ms=0,
+            ),
+            backend=backend,
+            handler="",
+            headers=headers,
+            respect_robots=True,
+            limits=ArticleLimits(max_article_bytes=4_096, max_browser_transfer_bytes=8_192),
+        )
+
+    dependencies = canonical.ArticleDependencies(
+        load_config=lambda: {"web_scraper": config},
+        resolve_plan=resolve_plan,
+        evaluate_target=evaluate,
+        run_preflight=run,
+        apply_preflight_advice=apply_advice,
+        fetch_client=fetch_client,
+        browser=browser,
+        executor=FakeExecutor(),
+        extract=extractor,
+        build_preflight_context=build_context,
+        preflight_options=preflight_facade.PreflightOptions.from_mapping,
+        public_preflight_payload=public_payload,
+        resolve_handler=lambda _path: None,
+        js_required=lambda *_args, **_kwargs: False,
+        convert_content=lambda content: content,
+        increment_counter=lambda *_args, **_kwargs: None,
+        observe_histogram=lambda *_args, **_kwargs: None,
+        clock=lambda: 0.0,
+        log=lambda _message, **fields: logs.append(fields),
+        policy_checker=policy_checker,
     )
-    monkeypatch.setattr(article, "resolve_handler", lambda _path: None)
-    monkeypatch.setattr(article, "convert_html_to_markdown", lambda content: content)
-    monkeypatch.setattr(article, "extract_article_with_pipeline", extractor)
-    monkeypatch.setattr(article, "_js_required", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(article, "_ARTICLE_POLICY_CHECKER", policy_checker)
-    monkeypatch.setattr(article, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(article, "async_playwright", FakePlaywright)
-    monkeypatch.setattr(article, "observe_histogram", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(article, "increment_counter", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(article, "log_counter", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(canonical, "_build_default_dependencies", lambda _cookies: dependencies)
     return ArticleHarness(
         article=article,
+        dependencies=dependencies,
         policy_checker=policy_checker,
         fetch_client=fetch_client,
         evaluate_target=evaluate,
@@ -283,6 +262,7 @@ def install_article_defaults(
         apply_advice=apply_advice,
         public_payload=public_payload,
         extractor=extractor,
+        logs=logs,
     )
 
 
@@ -323,10 +303,6 @@ async def test_article_policy_failure_is_structural_and_logs_no_sensitive_detail
     error = RuntimeError(f"credential leaked for {sensitive_url}")
     harness.evaluate_target.side_effect = error
     harness.policy_checker.error = error
-    messages: list[str] = []
-    monkeypatch.setattr(harness.article.logging, "info", lambda message: messages.append(str(message)))
-    monkeypatch.setattr(harness.article.logging, "error", lambda message: messages.append(str(message)))
-
     result = await harness.article.scrape_article(sensitive_url)
 
     assert result == {
@@ -336,16 +312,16 @@ async def test_article_policy_failure_is_structural_and_logs_no_sensitive_detail
         "date": "N/A",
         "content": "",
         "extraction_successful": False,
-        "error": "Outbound policy evaluation failed. Please contact system administrator.",
+        "error": "policy_error",
     }
-    combined_logs = " ".join(messages)
-    assert "secret-value" not in combined_logs
-    assert "password" not in combined_logs
-    assert "credential leaked" not in combined_logs
-    assert "?token=" not in combined_logs
-    assert "source=article_extract" in combined_logs
-    assert "stage=pre_fetch" in combined_logs
-    assert "exception_type=RuntimeError" in combined_logs
+    assert harness.logs == [
+        {
+            "exception_type": "RuntimeError",
+            "code": "policy_error",
+            "stage": "pre_fetch",
+            "host": "example.com",
+        }
+    ]
     harness.build_context.assert_not_called()
     harness.run_preflight.assert_not_awaited()
     assert harness.fetch_client.requests == []
@@ -616,7 +592,7 @@ def test_article_public_signature_is_unchanged() -> None:
 
 
 def test_article_consumer_has_one_package_facade_and_no_private_policy_helper() -> None:
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article
 
     source = inspect.getsource(article)
     assert not hasattr(article, "_decide_article_pre_fetch_policy")

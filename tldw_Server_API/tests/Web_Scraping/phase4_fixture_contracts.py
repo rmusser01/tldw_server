@@ -68,6 +68,26 @@ def _validate_change_10_unknown_strategy_metric_profile(actual: object, expected
     ), "Change 10 permits only the index-zero skipped mystery strategy metric to become unknown"
 
 
+def _validate_change_10_robots_counter_profile(actual: object, expected: object) -> None:
+    assert isinstance(expected, dict) and isinstance(actual, dict), "Change 10 requires object profiles"
+    expected_metrics = expected.get("metrics")
+    assert isinstance(expected_metrics, list) and len(expected_metrics) == 1, "Expected one robots counter"
+    expected_event = expected_metrics[0]
+    assert isinstance(expected_event, dict), "Expected a robots counter object"
+    assert expected_event.get("name") == "scrape_blocked_by_robots_total", "Expected robots counter"
+    assert expected_event.get("labels") == {"domain": "example.com"}, "Expected predecessor host label"
+
+    allowed_current = deepcopy(expected)
+    allowed_metrics = allowed_current["metrics"]
+    assert isinstance(allowed_metrics, list)
+    allowed_event = allowed_metrics[0]
+    assert isinstance(allowed_event, dict)
+    allowed_event["labels"] = {}
+    assert not collect_differences(
+        actual, allowed_current
+    ), "Change 10 permits only removal of the robots counter host label"
+
+
 _CHANGE_4_PREDECESSOR_PROFILE = {"outcome": "regex_error", "value": None}
 _CHANGE_4_CURRENT_PROFILE = {
     "outcome": "returned",
@@ -159,6 +179,19 @@ DIFFERENCE_CONTRACTS = {
             ),
         ),
         profile_validator=_validate_change_10_unknown_strategy_metric_profile,
+    ),
+    "change_10_robots_counter_labels": DifferenceContract(
+        behavior_change=10,
+        rules=(
+            DifferenceRule(
+                identifier="robots_counter_host_label",
+                path=("metrics", 0, "labels", "domain"),
+                description="robots counter omits the predecessor host label",
+                validator=lambda _difference: True,
+                minimum_count=1,
+            ),
+        ),
+        profile_validator=_validate_change_10_robots_counter_profile,
     ),
     "change_11_response_too_large": DifferenceContract(
         behavior_change=11,

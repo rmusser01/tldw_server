@@ -366,7 +366,7 @@ class ReadingService:
             return raw, None
         try:
             from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
-            from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import convert_html_to_markdown
+            from tldw_Server_API.app.core.Web_Scraping.content import convert_html_to_markdown
         except _READING_SERVICE_NONCRITICAL_EXCEPTIONS:
             return raw, None
         try:
@@ -833,10 +833,8 @@ class ReadingService:
             return non_html
 
         try:
-            from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-                ContentMetadataHandler,
-                scrape_article,
-            )
+            from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
+            from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
         except _READING_SERVICE_NONCRITICAL_EXCEPTIONS as exc:
             return {
                 "url": url,

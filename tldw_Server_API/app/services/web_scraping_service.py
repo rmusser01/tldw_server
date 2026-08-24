@@ -32,15 +32,15 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import r
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
-# Keep fallback imports for compatibility mode
+# Keep deferred crawl/sitemap fallback imports for compatibility mode.
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-    ContentMetadataHandler,
     recursive_scrape,
     scrape_and_summarize_multiple,
-    scrape_article,
     scrape_by_url_level,
     scrape_from_sitemap,
 )
+from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
+from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
 
 # Import the enhanced service
 from tldw_Server_API.app.services.enhanced_web_scraping_service import (
@@ -407,7 +407,7 @@ async def process_web_scraping_task(
                     api_key=api_key,
                     keywords=keywords,
                     custom_article_titles=custom_titles,
-                    system_prompt=system_prompt,
+                    system_message=system_prompt,
                     summarize_checkbox=summarize_checkbox,
                     custom_cookies=custom_cookies,
                     temperature=temperature,

@@ -811,7 +811,7 @@ class ScrapingJobQueue:
         else:
             # Fallback to importing the standalone scraping function
             logger.warning(f"No parent scraper available for job {job.job_id}, using fallback scraping")
-            from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
+            from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
             return await scrape_article(
                 job.url,
                 custom_cookies=job.metadata.get('custom_cookies'),

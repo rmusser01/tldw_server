@@ -326,10 +326,8 @@ def fetch_site_article(url: str) -> dict[str, Any] | None:
     Playwright runtime. Returns None on failure.
     """
     try:
-        from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-            ContentMetadataHandler,  # type: ignore
-            scrape_article_blocking,
-        )
+        from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
+        from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article_blocking
     except _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Article extractor import failed: {e}")
         return None

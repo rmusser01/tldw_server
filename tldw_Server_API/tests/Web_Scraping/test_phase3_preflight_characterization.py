@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 from collections.abc import Awaitable
 from importlib.util import find_spec
@@ -167,14 +168,65 @@ def _article_response() -> FetchResponse:
     )
 
 
-def _configure_article_consumer(
+def _install_article_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    include_results: bool | None,
-    backend: str = "auto",
+    config: dict[str, Any],
+    backend: str,
+    policy_checker: FakePolicyChecker,
+    fetch_client: FakeFetchClient,
+    extract: Any,
+    run_preflight: Any,
+    build_context: Any = None,
+    browser_acquire: Any = None,
 ) -> Any:
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article_extractor
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+        ArticleLimits,
+        ArticlePlan,
+        DirectBrowserProfile,
+    )
 
+    async def evaluate_target(url: str, **_kwargs: Any) -> PreflightTarget:
+        decision = await policy_checker.decide()
+        return PreflightTarget(
+            url=url,
+            decision=decision,
+            request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+        )
+
+    async def unavailable_browser(*_args: Any, **_kwargs: Any) -> str:
+        raise AssertionError("browser should not run")
+
+    default_dependencies = canonical._build_default_dependencies
+
+    def build_dependencies(cookies: Any) -> Any:
+        plan = ArticlePlan(
+            url="https://example.com/article",
+            domain="example.com",
+            backend=backend,
+            browser=DirectBrowserProfile("test", tuple(cookies), 1, 1_000, False, 0),
+            limits=ArticleLimits(),
+        )
+        dependencies = default_dependencies(cookies)
+        return dataclasses.replace(
+            dependencies,
+            load_config=lambda: config,
+            resolve_plan=lambda _url, _config: plan,
+            evaluate_target=evaluate_target,
+            run_preflight=run_preflight,
+            build_preflight_context=build_context or dependencies.build_preflight_context,
+            fetch_client=fetch_client,
+            browser=SimpleNamespace(acquire=browser_acquire or unavailable_browser),
+            extract=extract,
+            js_required=lambda *_args, **_kwargs: False,
+        )
+
+    monkeypatch.setattr(canonical, "_build_default_dependencies", build_dependencies)
+    return canonical
+
+
+def _article_config(*, include_results: bool | None) -> dict[str, Any]:
     web_scraper_config: dict[str, Any] = {
         "web_scraper_preflight_analyzers": True,
         "web_scraper_preflight_timeout_s": 0,
@@ -182,29 +234,7 @@ def _configure_article_consumer(
     }
     if include_results is not None:
         web_scraper_config["web_scraper_preflight_include_results"] = include_results
-
-    monkeypatch.setattr(
-        article_extractor,
-        "load_and_log_configs",
-        lambda: {"web_scraper": web_scraper_config},
-    )
-    monkeypatch.setattr(article_extractor, "_js_required", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(
-        article_extractor.ScraperRouter,
-        "load_rules_from_yaml",
-        lambda _path: {
-            "domains": {
-                "example.com": {
-                    "backend": backend,
-                    "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
-                }
-            }
-        },
-    )
-    monkeypatch.setattr(article_extractor, "resolve_handler", lambda _path: lambda *_args: {})
-    monkeypatch.setattr(article_extractor, "observe_histogram", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(article_extractor, "increment_counter", lambda *_args, **_kwargs: None)
-    return article_extractor
+    return {"web_scraper": web_scraper_config}
 
 
 def _enhanced_plan(*, backend: str) -> SimpleNamespace:
@@ -569,8 +599,6 @@ async def test_gather_analysis_isolates_middle_analyzer_failure_and_runs_remaini
 async def test_scoring_recommendations_and_article_payload_are_current(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article_extractor
-
     score = calculate_difficulty_score(ANALYSIS_RESULTS)
     recommendations = generate_recommendations(ANALYSIS_RESULTS)
 
@@ -595,84 +623,22 @@ async def test_scoring_recommendations_and_article_payload_are_current(
         },
     }
 
-    monkeypatch.setattr(
-        article_extractor,
-        "load_and_log_configs",
-        lambda: {
-            "web_scraper": {
-                "web_scraper_preflight_analyzers": True,
-                "web_scraper_preflight_include_results": True,
-                "web_scraper_preflight_timeout_s": 0,
-                "web_scraper_default_backend": "auto",
-                "web_scraper_respect_robots": True,
-            }
-        },
-    )
-    monkeypatch.setattr(article_extractor, "_ARTICLE_POLICY_CHECKER", FakePolicyChecker())
-    monkeypatch.setattr(article_extractor, "_js_required", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(
-        article_extractor.ScraperRouter,
-        "load_rules_from_yaml",
-        lambda _path: {
-            "domains": {
-                "example.com": {
-                    "backend": "auto",
-                    "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
-                }
-            }
-        },
-    )
     run_preflight = AsyncMock(return_value=preflight_result)
-    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
-    monkeypatch.setattr(
-        article_extractor,
-        "extract_article_with_pipeline",
-        lambda *_args, **_kwargs: {"extraction_successful": True, "content": "article"},
+
+    async def acquire(*_args: Any, **_kwargs: Any) -> str:
+        return "<html><body><article>article</article></body></html>"
+
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config=_article_config(include_results=True),
+        backend="auto",
+        policy_checker=FakePolicyChecker(),
+        fetch_client=FakeFetchClient([]),
+        extract=lambda *_args, **_kwargs: {"extraction_successful": True, "content": "article"},
+        run_preflight=run_preflight,
+        browser_acquire=acquire,
     )
-
-    class FakePage:
-        async def goto(self, *_args: Any, **_kwargs: Any) -> None:
-            return None
-
-        async def wait_for_load_state(self, *_args: Any, **_kwargs: Any) -> None:
-            return None
-
-        async def content(self) -> str:
-            return "<html><body><article>article</article></body></html>"
-
-    class FakeContext:
-        async def add_cookies(self, *_args: Any, **_kwargs: Any) -> None:
-            return None
-
-        async def new_page(self) -> FakePage:
-            return FakePage()
-
-        async def close(self) -> None:
-            return None
-
-    class FakeBrowser:
-        async def new_context(self, *_args: Any, **_kwargs: Any) -> FakeContext:
-            return FakeContext()
-
-        async def close(self) -> None:
-            return None
-
-    class FakeChromium:
-        async def launch(self, *_args: Any, **_kwargs: Any) -> FakeBrowser:
-            return FakeBrowser()
-
-    class FakePlaywright:
-        chromium = FakeChromium()
-
-    class FakePlaywrightContext:
-        async def __aenter__(self) -> FakePlaywright:
-            return FakePlaywright()
-
-        async def __aexit__(self, *_args: Any) -> bool:
-            return False
-
-    monkeypatch.setattr(article_extractor, "async_playwright", FakePlaywrightContext)
-    article_result = await article_extractor.scrape_article("https://example.com/article")
+    article_result = await canonical.scrape_article("https://example.com/article")
 
     assert article_result["preflight_analysis"] == expected_payload  # nosec B101
     run_preflight.assert_awaited_once()
@@ -769,20 +735,23 @@ async def test_enhanced_consumer_payload_is_current(monkeypatch: pytest.MonkeyPa
 async def test_article_policy_denial_prevents_preflight_and_extraction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    article_extractor = _configure_article_consumer(monkeypatch, include_results=True)
     policy_checker = FakePolicyChecker(_policy_decision(allowed=False))
     build_context = Mock(side_effect=AssertionError("preflight context created"))
     run_preflight = AsyncMock(side_effect=AssertionError("preflight ran"))
     fetch_client = FakeFetchClient([])
     extract = Mock(side_effect=AssertionError("extraction ran"))
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config=_article_config(include_results=True),
+        backend="auto",
+        policy_checker=policy_checker,
+        fetch_client=fetch_client,
+        extract=extract,
+        run_preflight=run_preflight,
+        build_context=build_context,
+    )
 
-    monkeypatch.setattr(article_extractor, "_ARTICLE_POLICY_CHECKER", policy_checker)
-    monkeypatch.setattr(article_extractor.preflight_facade, "build_execution_context", build_context)
-    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
-    monkeypatch.setattr(article_extractor, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(article_extractor, "extract_article_with_pipeline", extract)
-
-    result = await article_extractor.scrape_article("https://example.com/article")
+    result = await canonical.scrape_article("https://example.com/article")
 
     assert policy_checker.calls == 1  # nosec B101
     assert result["extraction_successful"] is False  # nosec B101
@@ -798,11 +767,6 @@ async def test_article_policy_denial_prevents_preflight_and_extraction(
 async def test_article_preflight_failure_is_advisory_and_preserves_http_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    article_extractor = _configure_article_consumer(
-        monkeypatch,
-        include_results=True,
-        backend="httpx",
-    )
     fetch_client = FakeFetchClient([_article_response()])
     extraction_calls: list[object] = []
 
@@ -811,12 +775,17 @@ async def test_article_preflight_failure_is_advisory_and_preserves_http_path(
         return {"extraction_successful": True, "content": "article"}
 
     run_preflight = AsyncMock(side_effect=RuntimeError("preflight failed"))
-    monkeypatch.setattr(article_extractor, "_ARTICLE_POLICY_CHECKER", FakePolicyChecker())
-    monkeypatch.setattr(article_extractor, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
-    monkeypatch.setattr(article_extractor, "extract_article_with_pipeline", extract)
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config=_article_config(include_results=True),
+        backend="httpx",
+        policy_checker=FakePolicyChecker(),
+        fetch_client=fetch_client,
+        extract=extract,
+        run_preflight=run_preflight,
+    )
 
-    result = await article_extractor.scrape_article("https://example.com/article")
+    result = await canonical.scrape_article("https://example.com/article")
 
     assert result["extraction_successful"] is True  # nosec B101
     assert fetch_client.requests[0].backend == "httpx"  # nosec B101
@@ -829,7 +798,6 @@ async def test_article_preflight_failure_is_advisory_and_preserves_http_path(
 async def test_article_preflight_cancellation_propagates_before_extraction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    article_extractor = _configure_article_consumer(monkeypatch, include_results=True)
     fetch_client = FakeFetchClient([_article_response()])
     extraction_calls: list[object] = []
 
@@ -838,13 +806,18 @@ async def test_article_preflight_cancellation_propagates_before_extraction(
         return {"extraction_successful": True, "content": "article"}
 
     run_preflight = AsyncMock(side_effect=asyncio.CancelledError)
-    monkeypatch.setattr(article_extractor, "_ARTICLE_POLICY_CHECKER", FakePolicyChecker())
-    monkeypatch.setattr(article_extractor, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
-    monkeypatch.setattr(article_extractor, "extract_article_with_pipeline", extract)
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config=_article_config(include_results=True),
+        backend="auto",
+        policy_checker=FakePolicyChecker(),
+        fetch_client=fetch_client,
+        extract=extract,
+        run_preflight=run_preflight,
+    )
 
     with pytest.raises(asyncio.CancelledError):
-        await article_extractor.scrape_article("https://example.com/article")
+        await canonical.scrape_article("https://example.com/article")
 
     run_preflight.assert_awaited_once()
     assert fetch_client.requests == []  # nosec B101
@@ -857,22 +830,19 @@ async def test_article_successful_advice_omits_payload_when_results_are_disabled
     monkeypatch: pytest.MonkeyPatch,
     include_results: bool | None,
 ) -> None:
-    article_extractor = _configure_article_consumer(
-        monkeypatch,
-        include_results=include_results,
-    )
     fetch_client = FakeFetchClient([_article_response()])
     run_preflight = AsyncMock(return_value=PreflightResult(analysis={"results": {"tls": {"status": "active"}}}))
-    monkeypatch.setattr(article_extractor, "_ARTICLE_POLICY_CHECKER", FakePolicyChecker())
-    monkeypatch.setattr(article_extractor, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
-    monkeypatch.setattr(
-        article_extractor,
-        "extract_article_with_pipeline",
-        lambda *_args, **_kwargs: {"extraction_successful": True, "content": "article"},
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config=_article_config(include_results=include_results),
+        backend="auto",
+        policy_checker=FakePolicyChecker(),
+        fetch_client=fetch_client,
+        extract=lambda *_args, **_kwargs: {"extraction_successful": True, "content": "article"},
+        run_preflight=run_preflight,
     )
 
-    result = await article_extractor.scrape_article("https://example.com/article")
+    result = await canonical.scrape_article("https://example.com/article")
 
     assert result["extraction_successful"] is True  # nosec B101
     assert fetch_client.requests[0].backend == "curl"  # nosec B101

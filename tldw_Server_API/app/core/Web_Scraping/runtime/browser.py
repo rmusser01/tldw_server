@@ -6,7 +6,7 @@ import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 
 def _normalize_viewport_dimension(value: Any, *, field_name: str) -> int:
@@ -73,6 +73,25 @@ class RuntimeWebSocketRoute(Protocol):
         raise NotImplementedError
 
 
+class RuntimeBrowserCDPSession(Protocol):
+    async def send(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def on(
+        self,
+        event: str,
+        handler: Callable[[dict[str, Any]], None],
+    ) -> None:
+        raise NotImplementedError
+
+    async def detach(self) -> None:
+        raise NotImplementedError
+
+
 class RuntimeBrowserLocator(Protocol):
     def nth(self, index: int) -> RuntimeBrowserLocator:
         raise NotImplementedError
@@ -125,6 +144,13 @@ class RuntimeBrowserContext(Protocol):
     ) -> None:
         raise NotImplementedError
 
+    async def unroute_all(
+        self,
+        *,
+        behavior: Literal["default", "ignoreErrors", "wait"] | None = None,
+    ) -> None:
+        raise NotImplementedError
+
     async def add_init_script(self, *, script: str) -> None:
         raise NotImplementedError
 
@@ -136,6 +162,12 @@ class RuntimeBrowserContext(Protocol):
         raise NotImplementedError
 
     async def new_page(self) -> RuntimeBrowserPage:
+        raise NotImplementedError
+
+    async def new_cdp_session(
+        self,
+        page: RuntimeBrowserPage,
+    ) -> RuntimeBrowserCDPSession:
         raise NotImplementedError
 
     async def close(self) -> None:

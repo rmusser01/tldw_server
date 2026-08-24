@@ -7,13 +7,18 @@ import shutil
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from Helper_Scripts import web_scraping_phase4_fixtures as fixture_generator
 
 from tldw_Server_API.app.core.Watchlists import fetchers
-from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
+from tldw_Server_API.app.core.Web_Scraping import extraction as article_extraction
+from tldw_Server_API.app.core.Web_Scraping.content import (
+    ContentMetadataHandler,
+    convert_html_to_markdown,
+)
 from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline as extraction_pipeline
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
     build_default_dependencies,
@@ -21,6 +26,9 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import (
 from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import (
     cluster as cluster_strategy,
 )
+from tldw_Server_API.app.core.Web_Scraping.orchestration import article as article_orchestration
+from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import ArticlePlan
+from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightResult, PreflightTarget
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchRequest,
     FetchResponse,
@@ -96,6 +104,7 @@ def _load_fixture_set(
 _FIXTURE_MANIFEST, _FIXTURE_CASES, _FIXTURE_RAW_FILES = _load_fixture_set()
 
 _CURRENT_FIXTURE_DIFFERENCE_CONTRACTS = {
+    "policy_denial_short_circuits_fetch": (10, "change_10_robots_counter_labels"),
     "unknown_strategy_is_traced": (10, "change_10_unknown_strategy_metric"),
 }
 
@@ -175,10 +184,6 @@ class _MetricRecorder:
 
 def _install_metric_recorder(monkeypatch: pytest.MonkeyPatch) -> _MetricRecorder:
     recorder = _MetricRecorder()
-    monkeypatch.setattr(article, "increment_counter", recorder.counter("increment_counter"))
-    monkeypatch.setattr(article, "log_counter", recorder.counter("log_counter"))
-    monkeypatch.setattr(article, "observe_histogram", recorder.histogram("observe_histogram"))
-    monkeypatch.setattr(article, "log_histogram", recorder.histogram("log_histogram"))
     pipeline_dependencies = replace(
         build_default_dependencies(),
         increment_counter=recorder.counter("increment_counter"),
@@ -279,8 +284,8 @@ def _policy_decision(case: Mapping[str, Any]) -> PolicyDecision | None:
 async def _run_article_case(case: Mapping[str, Any], monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     recorder = _install_metric_recorder(monkeypatch)
     _set_environment(monkeypatch, _FIXED_EXTRACTION_ENV)
-    monkeypatch.setattr(article.random, "uniform", lambda *_args, **_kwargs: 0.0)
-    article.clear_extraction_caches()
+    monkeypatch.setattr(extraction_pipeline.random, "uniform", lambda *_args, **_kwargs: 0.0)
+    article_extraction.clear_extraction_caches()
 
     web_scraper_config = {
         "web_scraper_preflight_analyzers": case.get("preflight_enabled", False),
@@ -289,28 +294,11 @@ async def _run_article_case(case: Mapping[str, Any], monkeypatch: pytest.MonkeyP
     if "preflight_include_results" in case:
         web_scraper_config["web_scraper_preflight_include_results"] = case["preflight_include_results"]
     config = {"web_scraper": web_scraper_config}
-    rules = {
-        "domains": {
-            "example.com": {
-                "backend": case.get("backend", "httpx"),
-                "cookies": {"mode": "fixture", "session": "plan"},
-                "extra_headers": {"X-Fixture": "phase4"},
-                "handler": "fixture:handler",
-                "respect_robots": True,
-                "ua_profile": "chrome_120_win",
-            }
-        }
-    }
-    monkeypatch.setattr(article, "load_and_log_configs", lambda: config)
-    monkeypatch.setattr(article.ScraperRouter, "load_rules_from_yaml", lambda _path: rules)
-    monkeypatch.setattr(article, "_js_required", lambda *_args, **_kwargs: False)
 
     handler_result = dict(case.get("handler_result", {}))
 
     def _handler(_html: str, url: str) -> dict[str, Any]:
         return {"url": url, **handler_result}
-
-    monkeypatch.setattr(article, "resolve_handler", lambda _path: _handler)
 
     preflight_calls = {
         "build_execution_context": 0,
@@ -323,16 +311,9 @@ async def _run_article_case(case: Mapping[str, Any], monkeypatch: pytest.MonkeyP
 
     async def _run_preflight(*_args: Any, **_kwargs: Any) -> Any:
         preflight_calls["run_preflight"] += 1
-        return article.preflight_facade.PreflightResult(
+        return PreflightResult(
             analysis=case.get("preflight_analysis", {}),
         )
-
-    monkeypatch.setattr(
-        article.preflight_facade,
-        "build_execution_context",
-        _build_execution_context,
-    )
-    monkeypatch.setattr(article.preflight_facade, "run_preflight", _run_preflight)
 
     decision = _policy_decision(case)
     policy_checker = _FakePolicyChecker(decision, error=case["scenario"] == "policy_error")
@@ -350,16 +331,70 @@ async def _run_article_case(case: Mapping[str, Any], monkeypatch: pytest.MonkeyP
             )
         )
     fetch_client = _FakeFetchClient(responses)
-    monkeypatch.setattr(article, "_ARTICLE_POLICY_CHECKER", policy_checker)
-    monkeypatch.setattr(article, "_ARTICLE_FETCH_CLIENT", fetch_client)
 
-    result = await article.scrape_article(
+    async def evaluate_target(
+        url: str,
+        *,
+        respect_robots: bool,
+        user_agent: str | None,
+        request_context: RuntimeRequestContext,
+        config: Mapping[str, Any],
+        **_kwargs: Any,
+    ) -> Any:
+        decision = await policy_checker.decide(
+            url,
+            respect_robots=respect_robots,
+            user_agent=user_agent,
+            context=request_context,
+            config=config,
+        )
+        return PreflightTarget(url, decision, request_context)
+
+    default_dependencies = article_orchestration._build_default_dependencies
+
+    def build_dependencies(cookies: Any) -> Any:
+        route = SimpleNamespace(
+            url=case["url"],
+            domain="example.com",
+            backend=case.get("backend", "httpx"),
+            cookies={"mode": "fixture", "session": "plan"},
+            extra_headers={"X-Fixture": "phase4"},
+            handler="fixture:handler",
+            respect_robots=True,
+            ua_profile="chrome_120_win",
+            impersonate=None,
+            proxies={},
+            strategy_order=None,
+            schema_rules=None,
+            llm_settings=None,
+            regex_settings=None,
+            cluster_settings=None,
+        )
+        plan = ArticlePlan.from_routing_plan(route, config, cookies)
+        dependencies = default_dependencies(cookies)
+        return replace(
+            dependencies,
+            load_config=lambda: config,
+            resolve_plan=lambda _url, _config: plan,
+            evaluate_target=evaluate_target,
+            run_preflight=_run_preflight,
+            build_preflight_context=_build_execution_context,
+            fetch_client=fetch_client,
+            extract=article_extraction.extract_article_with_pipeline,
+            resolve_handler=lambda _path: _handler,
+            js_required=lambda *_args, **_kwargs: False,
+            increment_counter=recorder.counter("increment_counter"),
+            observe_histogram=recorder.histogram("observe_histogram"),
+        )
+
+    monkeypatch.setattr(article_orchestration, "_build_default_dependencies", build_dependencies)
+    result = await article_orchestration.scrape_article(
         case["url"],
         custom_cookies=case.get("custom_cookies"),
         allow_llm_extraction=False,
     )
-    cache_stats = article.get_extraction_cache_stats()
-    article.clear_extraction_caches()
+    cache_stats = article_extraction.get_extraction_cache_stats()
+    article_extraction.clear_extraction_caches()
     actual: dict[str, Any] = {
         "cache_stats": cache_stats,
         "fetch_requests": [_serialize_request(request) for request in fetch_client.requests],
@@ -470,6 +505,10 @@ def test_tagged_fixture_cases_select_explicit_difference_contracts() -> None:
         ),
     }
     assert _CURRENT_FIXTURE_DIFFERENCE_CONTRACTS == {
+        "policy_denial_short_circuits_fetch": (
+            10,
+            "change_10_robots_counter_labels",
+        ),
         "unknown_strategy_is_traced": (10, "change_10_unknown_strategy_metric"),
     }
 
@@ -477,12 +516,12 @@ def test_tagged_fixture_cases_select_explicit_difference_contracts() -> None:
 def test_content_formatting_matches_predecessor() -> None:
     for case in _load_cases("content"):
         assert case["operation"] == "convert_html_to_markdown"
-        actual = article.convert_html_to_markdown(case["html"])
+        actual = convert_html_to_markdown(case["html"])
         _assert_case(case, actual)
 
 
 def test_metadata_envelopes_hashing_and_guards_match_predecessor() -> None:
-    handler = article.ContentMetadataHandler
+    handler = ContentMetadataHandler
     for case in _load_cases("metadata"):
         operation = case["operation"]
         if operation == "format":
@@ -600,20 +639,20 @@ def test_extraction_replay_overrides_and_restores_regex_pii_mask(
     with monkeypatch.context() as environment:
         recorder = _install_metric_recorder(environment)
         _set_environment(environment, _FIXED_EXTRACTION_ENV)
-        environment.setattr(article.random, "uniform", lambda *_args, **_kwargs: 0.0)
-        article.clear_extraction_caches()
-        result = article.extract_article_with_pipeline(
+        environment.setattr(extraction_pipeline.random, "uniform", lambda *_args, **_kwargs: 0.0)
+        article_extraction.clear_extraction_caches()
+        result = article_extraction.extract_article_with_pipeline(
             case["html"],
             case["url"],
             strategy_order=case.get("strategy_order"),
             allow_llm_extraction=case.get("allow_llm_extraction", False),
         )
         actual = {
-            "cache_stats": article.get_extraction_cache_stats(),
+            "cache_stats": article_extraction.get_extraction_cache_stats(),
             "metrics": recorder.events,
             "result": result,
         }
-        article.clear_extraction_caches()
+        article_extraction.clear_extraction_caches()
 
     assert os.environ["REGEX_PII_MASK"] == "true"
     _assert_case(case, actual)
@@ -623,19 +662,19 @@ def test_extraction_behavior_matches_predecessor(monkeypatch: pytest.MonkeyPatch
     for case in _load_cases("extraction"):
         recorder = _install_metric_recorder(monkeypatch)
         _set_environment(monkeypatch, _FIXED_EXTRACTION_ENV)
-        monkeypatch.setattr(article.random, "uniform", lambda *_args, **_kwargs: 0.0)
-        article.clear_extraction_caches()
+        monkeypatch.setattr(extraction_pipeline.random, "uniform", lambda *_args, **_kwargs: 0.0)
+        article_extraction.clear_extraction_caches()
         operation = case["operation"]
         if operation == "regex":
-            result = article.extract_regex_entities(
+            result = article_extraction.extract_regex_entities(
                 case["html"],
                 case["url"],
                 mask_pii=case["mask_pii"],
             )
         elif operation == "jsonld":
-            result = article.extract_jsonld_entities(case["html"], case["url"])
+            result = article_extraction.extract_jsonld_entities(case["html"], case["url"])
         elif operation == "cluster":
-            result = article.extract_cluster_entities(
+            result = article_extraction.extract_cluster_entities(
                 case["html"],
                 case["url"],
                 cluster_settings=case["cluster_settings"],
@@ -650,7 +689,7 @@ def test_extraction_behavior_matches_predecessor(monkeypatch: pytest.MonkeyPatch
             ) -> dict[str, Any]:
                 return {"url": url, **dict(_fallback_result or {})}
 
-            result = article.extract_article_with_pipeline(
+            result = article_extraction.extract_article_with_pipeline(
                 case["html"],
                 case["url"],
                 strategy_order=case.get("strategy_order"),
@@ -660,11 +699,11 @@ def test_extraction_behavior_matches_predecessor(monkeypatch: pytest.MonkeyPatch
         else:
             raise AssertionError(f"Unknown extraction fixture operation: {operation}")
         actual = {
-            "cache_stats": article.get_extraction_cache_stats(),
+            "cache_stats": article_extraction.get_extraction_cache_stats(),
             "metrics": recorder.events,
             "result": result,
         }
-        article.clear_extraction_caches()
+        article_extraction.clear_extraction_caches()
         _assert_case(case, actual)
 
 

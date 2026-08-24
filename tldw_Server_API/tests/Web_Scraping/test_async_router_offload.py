@@ -1,10 +1,12 @@
 import asyncio
+import dataclasses
 import threading
 from types import MethodType, SimpleNamespace
 from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical_article
 from tldw_Server_API.tests.Web_Scraping.test_phase3_article_preflight_facade import (
     URL,
     install_article_defaults,
@@ -36,10 +38,11 @@ def _scrape_plan() -> SimpleNamespace:
 async def test_article_router_resolution_runs_off_loop_before_preflight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    default_builder = canonical_article._build_default_dependencies
     harness = install_article_defaults(monkeypatch)
     loop_thread = threading.get_ident()
     events: list[tuple[str, int]] = []
-    config = harness.article.load_and_log_configs()
+    config = harness.dependencies.load_config()
     target = harness.evaluate_target.return_value
     plan = _scrape_plan()
 
@@ -64,8 +67,15 @@ async def test_article_router_resolution_runs_off_loop_before_preflight(
         events.append(("preflight", threading.get_ident()))
         return target
 
-    monkeypatch.setattr(harness.article, "load_and_log_configs", load_config)
-    monkeypatch.setattr(harness.article, "ScraperRouter", RecordingRouter)
+    default_dependencies = default_builder(None)
+    dependencies = dataclasses.replace(
+        harness.dependencies,
+        load_config=load_config,
+        resolve_plan=default_dependencies.resolve_plan,
+        backend_setting=default_dependencies.backend_setting,
+    )
+    monkeypatch.setattr(canonical_article, "ScraperRouter", RecordingRouter)
+    monkeypatch.setattr(canonical_article, "_build_default_dependencies", lambda _cookies: dependencies)
     harness.evaluate_target.side_effect = evaluate_target
 
     result = await harness.article.scrape_article(URL)
@@ -138,6 +148,7 @@ async def test_enhanced_router_resolution_runs_off_loop_before_preflight(
 async def test_article_cancellation_discards_late_router_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    default_builder = canonical_article._build_default_dependencies
     harness = install_article_defaults(monkeypatch)
     started = threading.Event()
     finished = threading.Event()
@@ -158,7 +169,14 @@ async def test_article_cancellation_discards_late_router_result(
             finished.set()
             return plan
 
-    monkeypatch.setattr(harness.article, "ScraperRouter", SlowRouter)
+    default_dependencies = default_builder(None)
+    dependencies = dataclasses.replace(
+        harness.dependencies,
+        resolve_plan=default_dependencies.resolve_plan,
+        backend_setting=default_dependencies.backend_setting,
+    )
+    monkeypatch.setattr(canonical_article, "ScraperRouter", SlowRouter)
+    monkeypatch.setattr(canonical_article, "_build_default_dependencies", lambda _cookies: dependencies)
     task = asyncio.create_task(harness.article.scrape_article(URL))
     cancel_handle = asyncio.get_running_loop().call_later(0.02, task.cancel)
 

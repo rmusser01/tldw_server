@@ -1492,7 +1492,7 @@ git commit -m "refactor(web-scraping): migrate canonical article consumers"
 
 **Files:** Phase 4C files and its Backlog child task.
 
-- [ ] **Step 1: Run orchestration and security gates**
+- [x] **Step 1: Run orchestration and security gates**
 
 ```bash
 python -m pytest -q \
@@ -1528,6 +1528,11 @@ Require independent spec/security and quality reviews. Confirm preflight remains
 optional and in the standard flow; every browser destination is freshly guarded;
 both sync guards precede side effects; and no moved observability contains a
 full URL/raw error. Finalize and merge 4C before 4D.
+
+Implementation and independent reviews are complete. The content-equivalent
+rebased code candidate is `3a7cd35063` on `origin/dev` `8f94369e51`. Merge
+remains unchecked until the required human-written Change summary is supplied
+and the delivery-unit PR is marked ready and merged.
 
 ## Phase 4D: Final Integration And Gates
 

@@ -565,11 +565,11 @@ def _create_discussion_search_action(
 
 
 def _create_scrape_url_action() -> ResearchAction:
-    """Create action that wraps Article_Extractor_Lib.scrape_article()."""
+    """Create action that wraps canonical article orchestration."""
 
     async def _execute(params: dict[str, Any]) -> ActionOutput:
         try:
-            from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
+            from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
 
             url = params.get("url", "")
             if not url:
