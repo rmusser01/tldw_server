@@ -8,7 +8,7 @@ import type {
 import {
   createPersonaCompanionDiagnostic,
   type PersonaCompanionDiagnosticEvent
-} from "./personaVisualDiagnostics"
+} from "./personaCompanionDiagnostics"
 import { resolveEffectiveAmbientMode } from "./personaCompanionPolicy"
 
 export type { PersonaCompanionDiagnosticEvent }
@@ -52,6 +52,7 @@ export type PersonaCompanionInput = {
 export type PersonaCompanionSnapshot = {
   generation: number
   phase: "idle" | "action"
+  actionToken: number | null
   requestedState: PersonaVisualStateId
   facing: "left" | "right"
   transientOffsetX: number
@@ -84,7 +85,7 @@ export interface PersonaCompanionEngine {
     state: PersonaVisualStateId,
     ttlMs: number
   ): PersonaVisualStateLease
-  completeAction(succeeded: boolean): void
+  completeAction(actionToken: number, succeeded: boolean): void
   getSnapshot(): PersonaCompanionSnapshot
   subscribe(listener: () => void): () => void
   dispose(): void
@@ -128,6 +129,7 @@ type PreparedMove = {
 }
 
 type ActiveAction = {
+  token: number
   entry: NormalizedEntry
   trigger: "ambient" | "click" | "drag"
   pendingMove?: PreparedMove
@@ -138,6 +140,7 @@ const AMBIENT_MAX_MS = 90_000
 const ACTION_MIN_MS = 150
 const ACTION_MAX_MS = 8_000
 const COOLDOWN_MAX_MS = 86_400_000
+const WEIGHT_MAX = 1_000_000
 const LEASE_MIN_MS = 150
 const LEASE_MAX_MS = 86_400_000
 const DEFAULT_ACTION_MS = 1_000
@@ -158,6 +161,39 @@ const randomUnit = (random: () => number): number => {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.min(1 - Number.EPSILON, Math.max(0, value))
     : 0
+}
+
+const normalizeEntry = (
+  entry: PersonaCompanionBehaviorEntry
+): NormalizedEntry | null => {
+  const weight = entry.suggested_weight
+  const cooldown = entry.suggested_cooldown_ms
+  const movement = entry.movement
+  if (
+    (weight !== undefined &&
+      (typeof weight !== "number" || !Number.isFinite(weight) || weight < 0)) ||
+    (cooldown !== undefined &&
+      (typeof cooldown !== "number" ||
+        !Number.isFinite(cooldown) ||
+        cooldown < 0)) ||
+    (movement &&
+      (!Number.isFinite(movement.motion_start_ratio) ||
+        !Number.isFinite(movement.motion_end_ratio) ||
+        movement.motion_start_ratio < 0 ||
+        movement.motion_start_ratio > 1 ||
+        movement.motion_end_ratio < 0 ||
+        movement.motion_end_ratio > 1 ||
+        movement.motion_start_ratio > movement.motion_end_ratio))
+  ) {
+    return null
+  }
+  return {
+    ...entry,
+    suggested_weight:
+      weight === undefined ? 1 : Math.min(WEIGHT_MAX, weight),
+    suggested_cooldown_ms:
+      cooldown === undefined ? 0 : Math.min(COOLDOWN_MAX_MS, cooldown)
+  }
 }
 
 const normalizeInput = (input: PersonaCompanionInput): NormalizedInput => {
@@ -204,43 +240,9 @@ const normalizeInput = (input: PersonaCompanionInput): NormalizedInput => {
       Math.min(DEFAULT_MOVEMENT_PX, movementLimit)
     )
   }
-  const entries = (input.behavior?.entries ?? []).map((entry) => ({
-    ...entry,
-    suggested_weight: clampNumber(entry.suggested_weight, 0, 1_000_000, 1),
-    suggested_cooldown_ms: clampNumber(
-      entry.suggested_cooldown_ms,
-      0,
-      COOLDOWN_MAX_MS,
-      0
-    ),
-    ...(entry.movement
-      ? {
-          movement: {
-            direction: "horizontal" as const,
-            motion_start_ratio: clampNumber(
-              entry.movement.motion_start_ratio,
-              0,
-              1,
-              0
-            ),
-            motion_end_ratio: clampNumber(
-              entry.movement.motion_end_ratio,
-              0,
-              1,
-              1
-            )
-          }
-        }
-      : {})
-  }))
-  for (const entry of entries) {
-    if (entry.movement) {
-      entry.movement.motion_end_ratio = Math.max(
-        entry.movement.motion_start_ratio,
-        entry.movement.motion_end_ratio
-      )
-    }
-  }
+  const entries = (input.behavior?.entries ?? [])
+    .map(normalizeEntry)
+    .filter((entry): entry is NormalizedEntry => entry !== null)
   const availableStates = new Set(
     input.availableStates ?? entries.map((entry) => entry.state)
   )
@@ -306,6 +308,7 @@ export const createPersonaCompanionEngine = (
   let disposed = false
   let generation = 0
   let leaseToken = 0
+  let nextActionToken = 0
   let scheduledTimer: PersonaCompanionTimer | null = null
   let ambientDueAt: number | null = null
   let actionDueAt: number | null = null
@@ -319,6 +322,7 @@ export const createPersonaCompanionEngine = (
   let snapshot: PersonaCompanionSnapshot = {
     generation,
     phase: "idle",
+    actionToken: null,
     requestedState: "idle",
     facing,
     transientOffsetX,
@@ -346,17 +350,19 @@ export const createPersonaCompanionEngine = (
   }
 
   const notifySnapshot = (
-    next: Omit<PersonaCompanionSnapshot, "generation">
+    next: Omit<PersonaCompanionSnapshot, "generation" | "actionToken">
   ) => {
+    const actionToken = currentAction?.token ?? null
     const changed =
       snapshot.generation !== generation ||
       snapshot.phase !== next.phase ||
+      snapshot.actionToken !== actionToken ||
       snapshot.requestedState !== next.requestedState ||
       snapshot.facing !== next.facing ||
       snapshot.transientOffsetX !== next.transientOffsetX ||
       snapshot.suspension !== next.suspension
     if (!changed) return
-    snapshot = { generation, ...next }
+    snapshot = { generation, actionToken, ...next }
     listeners.forEach((listener) => listener())
   }
 
@@ -439,7 +445,7 @@ export const createPersonaCompanionEngine = (
       facing = prepared.desiredFacing
     }
     transientOffsetX = prepared.targetOffsetX
-    currentAction = { entry: prepared.entry, trigger }
+    currentAction = { token: ++nextActionToken, entry: prepared.entry, trigger }
     actionDueAt = runtime.now() + input.timing.actionDurationMs
     advanceGeneration()
   }
@@ -449,7 +455,7 @@ export const createPersonaCompanionEngine = (
     trigger: "ambient" | "click" | "drag"
   ) => {
     if (entry.category !== "move") {
-      currentAction = { entry, trigger }
+      currentAction = { token: ++nextActionToken, entry, trigger }
       actionDueAt = runtime.now() + input.timing.actionDurationMs
       advanceGeneration()
       return
@@ -475,7 +481,12 @@ export const createPersonaCompanionEngine = (
     const prepared = { entry, desiredFacing, targetOffsetX }
     const turn = desiredFacing !== facing ? findTurnEntry(desiredFacing) : null
     if (turn) {
-      currentAction = { entry: turn, trigger, pendingMove: prepared }
+      currentAction = {
+        token: ++nextActionToken,
+        entry: turn,
+        trigger,
+        pendingMove: prepared
+      }
       actionDueAt = runtime.now() + input.timing.actionDurationMs
       advanceGeneration()
       return
@@ -525,8 +536,11 @@ export const createPersonaCompanionEngine = (
     startEntry(selected, "ambient")
   }
 
-  const finishAction = (succeeded: boolean) => {
-    if (!currentAction) return
+  const finishAction = (actionToken: number, succeeded: boolean) => {
+    if (!currentAction || currentAction.token !== actionToken) {
+      diagnose({ event: "stale_generation", failureClass: "stale_action" })
+      return false
+    }
     const completed = currentAction
     currentAction = null
     actionDueAt = null
@@ -539,9 +553,10 @@ export const createPersonaCompanionEngine = (
         facing = completed.pendingMove.desiredFacing
       }
       startPreparedMove(completed.pendingMove, completed.trigger)
-      return
+      return true
     }
     ambientDueAt = null
+    return true
   }
 
   const scheduleNext = () => {
@@ -555,6 +570,7 @@ export const createPersonaCompanionEngine = (
     if (dueTimes.length === 0) return
     const due = Math.min(...dueTimes)
     const scheduledGeneration = generation
+    const scheduledActionToken = currentAction?.token ?? null
     scheduledTimer = runtime.setTimer(() => {
       scheduledTimer = null
       if (disposed || scheduledGeneration !== generation) {
@@ -567,7 +583,11 @@ export const createPersonaCompanionEngine = (
       const now = runtime.now()
       if (expireLeases()) advanceGeneration()
       if (actionDueAt !== null && actionDueAt <= now) {
-        finishAction(!currentAction?.pendingMove)
+        if (scheduledActionToken === null) {
+          diagnose({ event: "stale_generation", failureClass: "stale_timer" })
+        } else {
+          finishAction(scheduledActionToken, !currentAction?.pendingMove)
+        }
       }
       if (ambientDueAt !== null && ambientDueAt <= now && !currentAction) {
         ambientDueAt = null
@@ -704,10 +724,12 @@ export const createPersonaCompanionEngine = (
         }
       }
     },
-    completeAction(succeeded) {
-      if (disposed || !currentAction) return
-      finishAction(succeeded)
-      settle()
+    completeAction(actionToken, succeeded) {
+      if (disposed) {
+        diagnose({ event: "stale_generation", failureClass: "stale_action" })
+        return
+      }
+      if (finishAction(actionToken, succeeded)) settle()
     },
     getSnapshot: () => snapshot,
     subscribe(listener) {

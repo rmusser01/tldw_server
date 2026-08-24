@@ -1,16 +1,11 @@
 import { act, renderHook } from "@testing-library/react"
+import { createElement, StrictMode, type PropsWithChildren } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-
-vi.mock("@/services/tldw/TldwApiClient", () => {
-  throw new Error("companion engine imported the API client")
-})
-vi.mock("@/store/model", () => {
-  throw new Error("companion engine imported the model store")
-})
 
 import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
 import type {
   PersonaCompanionDiagnosticEvent,
+  PersonaCompanionEngine,
   PersonaCompanionRuntime,
   PersonaCompanionTimer
 } from "../personaCompanionEngine"
@@ -79,6 +74,14 @@ const wave = asPersonaVisualCustomStateId("ambient.wave")
 const walk = asPersonaVisualCustomStateId("ambient.walk")
 const turnLeft = asPersonaVisualCustomStateId("ambient.turn.left")
 const click = asPersonaVisualCustomStateId("reaction.click")
+const badWeight = asPersonaVisualCustomStateId("ambient.bad_weight")
+const badCooldown = asPersonaVisualCustomStateId("ambient.bad_cooldown")
+const badNegative = asPersonaVisualCustomStateId("ambient.bad_negative")
+const badNegativeCooldown = asPersonaVisualCustomStateId(
+  "ambient.bad_negative_cooldown"
+)
+const badMovement = asPersonaVisualCustomStateId("ambient.bad_movement")
+const badOrder = asPersonaVisualCustomStateId("ambient.bad_order")
 
 const entries = (...states: Array<typeof look | typeof wave>) =>
   states.map((state) => ({
@@ -116,8 +119,43 @@ const idleInput = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
+const StrictModeWrapper = ({ children }: PropsWithChildren) =>
+  createElement(StrictMode, null, children)
+
+const PROHIBITED_ENGINE_IMPORTS = [
+  "@/services/tldw",
+  "@/services/tldw/TldwApiClient",
+  "@/services/persona-visual-assets",
+  "@/services/persona-visuals",
+  "@/store/model",
+  "../personaVisualAssets",
+  "../personaVisualDiagnostics",
+  "../personaVisualRenderers",
+  "../SpriteFrameRenderer"
+] as const
+
+const getActionToken = (engine: PersonaCompanionEngine): number => {
+  const token = engine.getSnapshot().actionToken
+  if (typeof token !== "number") throw new Error("expected active action token")
+  return token
+}
+
+const completeActionToken = (
+  engine: PersonaCompanionEngine,
+  token: number,
+  succeeded: boolean
+) =>
+  engine.completeAction(token, succeeded)
+
+const completeCurrentAction = (
+  engine: PersonaCompanionEngine,
+  succeeded = true
+) => engine.completeAction(getActionToken(engine), succeeded)
+
 afterEach(() => {
   vi.unstubAllGlobals()
+  for (const moduleId of PROHIBITED_ENGINE_IMPORTS) vi.doUnmock(moduleId)
+  vi.resetModules()
 })
 
 describe("createPersonaCompanionEngine", () => {
@@ -148,7 +186,7 @@ describe("createPersonaCompanionEngine", () => {
 
     fake.advanceBy(30_000)
     expect(engine.getSnapshot().requestedState).toBe("ambient.wave")
-    engine.completeAction(true)
+    completeCurrentAction(engine)
     fake.advanceBy(30_000)
     expect(engine.getSnapshot().requestedState).toBe("ambient.look")
   })
@@ -163,13 +201,23 @@ describe("createPersonaCompanionEngine", () => {
     expect(fake.diagnostics.at(-1)?.failureClass).toBe("empty_set")
   })
 
-  it("runs ambient and reaction paths without network or service clients", () => {
+  it("fresh-imports and runs behind renderer-neutral dependency guards", async () => {
+    vi.resetModules()
     const fetch = vi.fn(() => {
       throw new Error("network access is forbidden")
     })
     vi.stubGlobal("fetch", fetch)
+    for (const moduleId of PROHIBITED_ENGINE_IMPORTS) {
+      vi.doMock(moduleId, () => {
+        throw new Error(`companion engine imported ${moduleId}`)
+      })
+    }
+
+    const { createPersonaCompanionEngine: createGuardedEngine } = await import(
+      "../personaCompanionEngine"
+    )
     const fake = createFakeCompanionRuntime([0, 0, 0])
-    const engine = createPersonaCompanionEngine(fake.runtime)
+    const engine = createGuardedEngine(fake.runtime)
     engine.update(
       idleInput({
         behavior: {
@@ -182,15 +230,15 @@ describe("createPersonaCompanionEngine", () => {
         availableStates: [look, click]
       })
     )
-
     fake.advanceBy(30_000)
-    engine.completeAction(true)
+    completeCurrentAction(engine)
     expect(engine.react("click")).toBe(true)
-    engine.completeAction(true)
+    completeCurrentAction(engine)
+
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it("clamps cadence, action duration, cooldown, and movement distance", () => {
+  it("clamps engine timing and movement distance with omitted metadata defaults", () => {
     const fake = createFakeCompanionRuntime([0, 0, 0])
     const engine = createPersonaCompanionEngine(fake.runtime)
     engine.update(
@@ -203,13 +251,6 @@ describe("createPersonaCompanionEngine", () => {
               state: walk,
               trigger: "ambient",
               category: "move",
-              suggested_weight: Number.POSITIVE_INFINITY,
-              suggested_cooldown_ms: -100,
-              movement: {
-                direction: "horizontal",
-                motion_start_ratio: Number.NaN,
-                motion_end_ratio: Number.POSITIVE_INFINITY
-              }
             }
           ]
         },
@@ -237,6 +278,114 @@ describe("createPersonaCompanionEngine", () => {
     expect(Object.values(engine.getSnapshot()).every((value) => {
       return typeof value !== "number" || Number.isFinite(value)
     })).toBe(true)
+  })
+
+  it("fails closed when every declared entry has invalid present metadata", () => {
+    const fake = createFakeCompanionRuntime([0, 0])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(
+      idleInput({
+        mode: "roaming",
+        behavior: {
+          schema_version: 1,
+          entries: [
+            {
+              state: badWeight,
+              trigger: "ambient",
+              category: "idle_variant",
+              suggested_weight: Number.POSITIVE_INFINITY
+            },
+            {
+              state: badCooldown,
+              trigger: "ambient",
+              category: "idle_variant",
+              suggested_cooldown_ms: Number.NaN
+            },
+            {
+              state: badNegative,
+              trigger: "ambient",
+              category: "idle_variant",
+              suggested_weight: -1
+            },
+            {
+              state: badNegativeCooldown,
+              trigger: "ambient",
+              category: "idle_variant",
+              suggested_cooldown_ms: -1
+            },
+            {
+              state: badMovement,
+              trigger: "ambient",
+              category: "move",
+              movement: {
+                direction: "horizontal",
+                motion_start_ratio: Number.NaN,
+                motion_end_ratio: 0.9
+              }
+            },
+            {
+              state: badOrder,
+              trigger: "ambient",
+              category: "move",
+              movement: {
+                direction: "horizontal",
+                motion_start_ratio: 0.9,
+                motion_end_ratio: 0.1
+              }
+            }
+          ]
+        },
+        availableStates: [
+          badWeight,
+          badCooldown,
+          badNegative,
+          badNegativeCooldown,
+          badMovement,
+          badOrder
+        ]
+      })
+    )
+    fake.advanceBy(30_000)
+
+    expect(engine.getSnapshot()).toEqual(
+      expect.objectContaining({
+        phase: "idle",
+        actionToken: null,
+        requestedState: "idle",
+        transientOffsetX: 0
+      })
+    )
+    expect(fake.diagnostics.at(-1)).toEqual(
+      expect.objectContaining({
+        event: "ambient_skipped",
+        failureClass: "empty_set"
+      })
+    )
+  })
+
+  it("keeps deterministic valid selection when invalid entries are mixed in", () => {
+    const fake = createFakeCompanionRuntime([0, 0.9])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(
+      idleInput({
+        behavior: {
+          schema_version: 1,
+          entries: [
+            ...entries(look),
+            {
+              state: wave,
+              trigger: "ambient",
+              category: "idle_variant",
+              suggested_weight: Number.POSITIVE_INFINITY
+            }
+          ]
+        },
+        availableStates: [look, wave]
+      })
+    )
+    fake.advanceBy(30_000)
+
+    expect(engine.getSnapshot().requestedState).toBe("ambient.look")
   })
 
   it("clamps cadence and duration at their upper bounds", () => {
@@ -279,7 +428,7 @@ describe("createPersonaCompanionEngine", () => {
       })
     )
     fake.advanceBy(30_000)
-    engine.completeAction(true)
+    completeCurrentAction(engine)
     fake.advanceBy(86_399_999)
     expect(engine.getSnapshot().requestedState).toBe("idle")
     fake.advanceBy(1)
@@ -339,7 +488,89 @@ describe("createPersonaCompanionEngine", () => {
 
     expect(engine.getSnapshot()).toBe(preempted)
     expect(fake.diagnostics.at(-1)).toEqual(
-      expect.objectContaining({ event: "stale_generation" })
+      expect.objectContaining({
+        event: "stale_generation",
+        failureClass: "stale_timer"
+      })
+    )
+  })
+
+  it("ignores stale public completions through preemption and turn-to-move rotation", () => {
+    const fake = createFakeCompanionRuntime([0, 0, 0, 0])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(idleInput())
+    fake.advanceBy(30_000)
+    const actionAToken = getActionToken(engine)
+
+    engine.update(idleInput({ focusWithin: true }))
+    const preempted = engine.getSnapshot()
+    completeActionToken(engine, actionAToken, true)
+    expect(engine.getSnapshot()).toBe(preempted)
+
+    const movement = {
+      mode: "roaming" as const,
+      packRevision: 2,
+      behavior: {
+        schema_version: 1 as const,
+        entries: [
+          { state: walk, trigger: "ambient" as const, category: "move" as const },
+          {
+            state: turnLeft,
+            trigger: "ambient" as const,
+            category: "idle_variant" as const
+          }
+        ]
+      },
+      availableStates: [walk, turnLeft]
+    }
+    engine.update(idleInput(movement))
+    fake.advanceBy(30_000)
+    const turnToken = getActionToken(engine)
+    const turnSnapshot = engine.getSnapshot()
+    completeActionToken(engine, actionAToken, true)
+    expect(engine.getSnapshot()).toBe(turnSnapshot)
+
+    completeActionToken(engine, turnToken, true)
+    const moveToken = getActionToken(engine)
+    const moveSnapshot = engine.getSnapshot()
+    expect(moveToken).not.toBe(turnToken)
+    expect(moveSnapshot).toEqual(
+      expect.objectContaining({
+        requestedState: "ambient.walk",
+        facing: "left",
+        transientOffsetX: -48
+      })
+    )
+
+    completeActionToken(engine, turnToken, false)
+    completeActionToken(engine, turnToken, true)
+    expect(engine.getSnapshot()).toBe(moveSnapshot)
+    expect(engine.getSnapshot().generation).toBe(moveSnapshot.generation)
+    expect(fake.diagnostics.at(-1)).toEqual(
+      expect.objectContaining({
+        event: "stale_generation",
+        failureClass: "stale_action"
+      })
+    )
+  })
+
+  it("ignores public completion after disposal", () => {
+    const fake = createFakeCompanionRuntime([0, 0])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(idleInput())
+    fake.advanceBy(30_000)
+    const token = getActionToken(engine)
+    const disposedSnapshot = engine.getSnapshot()
+    engine.dispose()
+    completeActionToken(engine, token, true)
+
+    expect(engine.getSnapshot()).toBe(disposedSnapshot)
+    expect(engine.getSnapshot().generation).toBe(disposedSnapshot.generation)
+    expect(fake.diagnostics.at(-1)).toEqual(
+      expect.objectContaining({
+        event: "stale_generation",
+        failureClass: "stale_action"
+      })
     )
   })
 
@@ -484,7 +715,7 @@ describe("createPersonaCompanionEngine", () => {
     fake.advanceBy(120_000)
     expect(engine.getSnapshot().requestedState).toBe("idle")
     expect(engine.react("click")).toBe(true)
-    engine.completeAction(true)
+    completeCurrentAction(engine)
     expect(engine.react("space")).toBe(true)
     expect(engine.getSnapshot().requestedState).toBe("reaction.click")
   })
@@ -538,7 +769,7 @@ describe("createPersonaCompanionEngine", () => {
     expect(engine.getSnapshot()).toEqual(
       expect.objectContaining({ requestedState: "ambient.turn.left", facing: "right" })
     )
-    engine.completeAction(true)
+    completeCurrentAction(engine)
     expect(engine.getSnapshot()).toEqual(
       expect.objectContaining({ requestedState: "ambient.walk", facing: "left" })
     )
@@ -586,14 +817,14 @@ describe("createPersonaCompanionEngine", () => {
     const unsafe = createPersonaCompanionEngine(unsafeFake.runtime)
     unsafe.update(idleInput(movement))
     unsafeFake.advanceBy(30_000)
-    unsafe.completeAction(false)
+    completeCurrentAction(unsafe, false)
     expect(unsafe.getSnapshot().facing).toBe("right")
 
     const safeFake = createFakeCompanionRuntime([0, 0])
     const safe = createPersonaCompanionEngine(safeFake.runtime)
     safe.update(idleInput({ ...movement, mirrorSafeStates: [walk] }))
     safeFake.advanceBy(30_000)
-    safe.completeAction(false)
+    completeCurrentAction(safe, false)
     expect(safe.getSnapshot().facing).toBe("left")
   })
 
@@ -607,16 +838,21 @@ describe("createPersonaCompanionEngine", () => {
     expect(engine.getSnapshot()).toBe(snapshot)
   })
 
-  it("owns one timer chain and disposes it when the hook unmounts", () => {
+  it("survives StrictMode replay with one live timer chain and final cleanup", () => {
     const fake = createFakeCompanionRuntime()
     const initialProps = idleInput()
-    const { rerender, unmount } = renderHook(
+    const { result, rerender, unmount } = renderHook(
       (input) => usePersonaCompanion({ ...input, runtime: fake.runtime }),
-      { initialProps }
+      { initialProps, wrapper: StrictModeWrapper }
     )
     expect(fake.activeTimerCount()).toBe(1)
+    act(() => fake.advanceBy(30_000))
+    expect(result.current.requestedState).toBe("ambient.look")
     rerender({ ...initialProps, packRevision: 2 })
     expect(fake.activeTimerCount()).toBe(1)
+    const updated = result.current
+    rerender({ ...initialProps, packRevision: 2 })
+    expect(result.current).toBe(updated)
     act(() => unmount())
     expect(fake.activeTimerCount()).toBe(0)
   })
