@@ -896,6 +896,7 @@ class SyncV2Service:
         notes_link_bootstrapper: object | None = None,
         notes_attachment_bootstrapper: object | None = None,
         notes_task_bootstrapper: object | None = None,
+        notes_task_activity_bootstrapper: object | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -909,6 +910,7 @@ class SyncV2Service:
         self.notes_link_bootstrapper = notes_link_bootstrapper
         self.notes_attachment_bootstrapper = notes_attachment_bootstrapper
         self.notes_task_bootstrapper = notes_task_bootstrapper
+        self.notes_task_activity_bootstrapper = notes_task_activity_bootstrapper
 
     def capabilities(
         self,

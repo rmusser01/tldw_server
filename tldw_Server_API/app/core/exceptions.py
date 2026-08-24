@@ -112,6 +112,14 @@ class NotesTaskBootstrapInterrupted(RuntimeError):
     """Testable interruption that leaves durable task bootstrap progress resumable."""
 
 
+class NotesTaskActivitySourceInvalid(RuntimeError):
+    """Malformed legacy task activity encountered during trusted bootstrap."""
+
+
+class NotesTaskActivitySourceChanged(RuntimeError):
+    """Previously observed task activity changed during trusted bootstrap."""
+
+
 class NotesAttachmentMutationError(RuntimeError):
     """Stable failure for a coordinated Notes attachment mutation."""
 

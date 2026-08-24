@@ -8,6 +8,7 @@ from .notes import NotesDomainAdapter
 from .notes_link import NotesLinkDomainAdapter
 from .notes_organization import NotesOrganizationDomainAdapter
 from .notes_task import NotesTaskDomainAdapter
+from .notes_task_activity import NotesTaskActivityDomainAdapter
 from .source_cache import SourceCacheAdapter
 from .workspaces import WorkspacesDomainAdapter
 
@@ -18,6 +19,7 @@ __all__ = [
     "NotesDomainAdapter",
     "NotesLinkDomainAdapter",
     "NotesTaskDomainAdapter",
+    "NotesTaskActivityDomainAdapter",
     "NotesOrganizationDomainAdapter",
     "SourceCacheAdapter",
     "WorkspacesDomainAdapter",

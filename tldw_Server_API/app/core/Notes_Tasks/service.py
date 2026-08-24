@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
+from uuid import UUID
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
 from tldw_Server_API.app.core.Notes.organization_capture import (
@@ -17,7 +18,12 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
 from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
 from tldw_Server_API.app.core.Notes_Tasks.models import ParsedChecklistItem, ReconciliationResult, TaskActor
 from tldw_Server_API.app.core.Notes_Tasks.reconciler import NotesTaskReconciler
-from tldw_Server_API.app.core.Sync.v2.models import SyncOperation
+from tldw_Server_API.app.core.Sync.v2.models import SyncOperation, normalize_sync_timestamp
+from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
+    NotesTaskActivityV1,
+    TaskActivitySource,
+    parse_notes_task_activity_v1,
+)
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import ServerOriginMutationStep
 
 if TYPE_CHECKING:
@@ -178,6 +184,14 @@ class TaskStoreScope:
 
 
 @dataclass(frozen=True, slots=True)
+class NotesTaskActivityCapture:
+    """One deterministic dormant activity derived from a task transition."""
+
+    payload: NotesTaskActivityV1
+    step: ServerOriginMutationStep
+
+
+@dataclass(frozen=True, slots=True)
 class NotesTaskCaptureMutation:
     """Canonical dormant capture input for one committed product task mutation."""
 
@@ -192,6 +206,13 @@ class NotesTaskCaptureMutation:
     restore_intent: bool
     idempotency_key: str
     step: ServerOriginMutationStep
+    activity: NotesTaskActivityCapture
+
+    @property
+    def steps(self) -> tuple[ServerOriginMutationStep, ServerOriginMutationStep]:
+        """Return the future atomic task/activity plan in dependency order."""
+
+        return self.step, self.activity.step
 
 
 class NotesTaskCaptureCallback(Protocol):
@@ -203,6 +224,198 @@ class NotesTaskCaptureCallback(Protocol):
         *,
         conn: TaskConnection | None,
     ) -> None: ...
+
+
+def _task_activity_metadata(row: dict[str, Any]) -> dict[str, object]:
+    """Return the portable metadata subset used by task activity events."""
+
+    payload = row["sync_payload"]
+    return {
+        key: payload[key]
+        for key in (
+            "description",
+            "priority",
+            "due_date",
+            "estimate",
+            "recurrence",
+            "assignee_id",
+            "tags",
+            "custom",
+        )
+    }
+
+
+def _task_activity_values(
+    before: dict[str, Any] | None,
+    after: dict[str, Any],
+) -> tuple[str, dict[str, object] | None, dict[str, object]]:
+    """Derive the sole canonical activity shape for one accepted transition."""
+
+    after_payload = after["sync_payload"]
+    if before is None:
+        return (
+            "created",
+            None,
+            {
+                "title": after_payload["title"],
+                "status": after_payload["status"],
+                "completed_at": after_payload["completed_at"],
+                "metadata": _task_activity_metadata(after),
+            },
+        )
+    before_payload = before["sync_payload"]
+    if not bool(before.get("deleted")) and bool(after.get("deleted")):
+        return (
+            "deleted",
+            {
+                "deleted": False,
+                "projection_status": str(before["projection_status"]),
+            },
+            {"deleted": True, "projection_status": "deleted"},
+        )
+    if bool(before.get("deleted")) and not bool(after.get("deleted")):
+        return (
+            "restored",
+            {"deleted": True, "projection_status": "deleted"},
+            {
+                "deleted": False,
+                "projection_status": str(after["projection_status"]),
+            },
+        )
+    before_status = str(before_payload["status"])
+    after_status = str(after_payload["status"])
+    if (before_status, after_status) == ("open", "done"):
+        return "completed", {"status": "open"}, {"status": "done"}
+    if (before_status, after_status) == ("done", "open"):
+        return "reopened", {"status": "done"}, {"status": "open"}
+    before_projection = str(before["projection_status"])
+    after_projection = str(after["projection_status"])
+    if before_projection == "live" and after_projection == "unlinked":
+        return (
+            "projection_unlinked",
+            {"projection_status": "live"},
+            {"projection_status": "unlinked"},
+        )
+    if before_projection in {"unlinked", "ambiguous"} and after_projection == "live":
+        return (
+            "projection_linked",
+            {"projection_status": before_projection},
+            {"projection_status": "live"},
+        )
+    before_metadata = _task_activity_metadata(before)
+    after_metadata = _task_activity_metadata(after)
+    if before_payload["title"] != after_payload["title"]:
+        return (
+            "updated",
+            {"title": before_payload["title"], "metadata": before_metadata},
+            {"title": after_payload["title"], "metadata": after_metadata},
+        )
+    if before_metadata != after_metadata:
+        return "updated", {"metadata": before_metadata}, {"metadata": after_metadata}
+    raise ConflictError(
+        "Task transition has no portable activity.",
+        entity="tasks",
+        entity_id=str(after.get("id") or ""),
+    )
+
+
+def build_task_activity_capture(
+    *,
+    db: CharactersRAGDB,
+    owner_user_id: str,
+    dataset_id: str,
+    actor: TaskActor,
+    before: dict[str, Any] | None,
+    after: dict[str, Any],
+    source_kind: TaskActivitySource = "rest",
+) -> NotesTaskActivityCapture:
+    """Build one strict, stable activity from canonical product task rows."""
+
+    owner = str(owner_user_id)
+    dataset = str(dataset_id)
+    after_row = db.task_store._sync_bootstrap_task_row(after, owner)
+    before_row = (
+        db.task_store._sync_bootstrap_task_row(before, owner)
+        if before is not None
+        else None
+    )
+    if (
+        after_row.get("owner_user_id") != owner
+        or after_row.get("dataset_id") != dataset
+        or (
+            before_row is not None
+            and (
+                before_row.get("owner_user_id") != owner
+                or before_row.get("dataset_id") != dataset
+                or before_row.get("id") != after_row.get("id")
+                or before_row.get("note_id") != after_row.get("note_id")
+            )
+        )
+    ):
+        raise ConflictError(
+            "Task activity capture scope is invalid.",
+            entity="tasks",
+            entity_id=str(after_row.get("id") or ""),
+        )
+    event_type, old_value, new_value = _task_activity_values(before_row, after_row)
+    occurred_at = normalize_sync_timestamp(after_row.get("updated_at"))
+    if occurred_at is None:
+        raise ConflictError(
+            "Task activity capture timestamp is invalid.",
+            entity="tasks",
+            entity_id=str(after_row.get("id") or ""),
+        )
+    identity_hash = hashlib.sha256(
+        json.dumps(
+            [
+                owner,
+                dataset,
+                after_row["id"],
+                int(after_row.get("version") or 0),
+                int(after_row["canonical_revision"]),
+                after_row["canonical_hash"],
+                event_type,
+                old_value,
+                new_value,
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    activity_id = str(UUID(bytes=bytes.fromhex(identity_hash[:32]), version=4))
+    payload = parse_notes_task_activity_v1(
+        {
+            "activity_id": activity_id,
+            "note_id": str(after_row["note_id"]),
+            "task_id": str(after_row["id"]),
+            "event_type": event_type,
+            "actor_type": actor.actor_type,
+            "actor_id": actor.actor_id,
+            "source_device_id": None,
+            "client_occurred_at": occurred_at,
+            "source_kind": source_kind,
+            "corrects_activity_id": None,
+            "old_value": old_value,
+            "new_value": new_value,
+            "metadata": {},
+        },
+        owner_user_id=owner,
+        bound_actor_type=actor.actor_type,
+        bound_actor_id=actor.actor_id,
+        authenticated_device_id=None,
+        trusted_server_origin=True,
+    )
+    step = ServerOriginMutationStep(
+        domain="notes.task_activity",
+        operation="upsert",
+        object_id=activity_id,
+        parent_id=str(after_row["note_id"]),
+        payload=payload.model_dump(mode="json"),
+        created_at_client=occurred_at,
+        client_envelope_id=f"notes-task-activity-server-{identity_hash[:32]}",
+        object_revision=1,
+    )
+    return NotesTaskActivityCapture(payload=payload, step=step)
 
 
 def build_task_capture_mutation(
@@ -289,6 +502,14 @@ def build_task_capture_mutation(
         client_envelope_id=f"notes-task-server-{identity_hash[:32]}",
         object_revision=revision,
     )
+    activity = build_task_activity_capture(
+        db=db,
+        owner_user_id=owner,
+        dataset_id=dataset,
+        actor=actor,
+        before=before,
+        after=after,
+    )
     return NotesTaskCaptureMutation(
         owner_user_id=owner,
         dataset_id=dataset,
@@ -301,6 +522,7 @@ def build_task_capture_mutation(
         restore_intent=restore_intent,
         idempotency_key=f"notes-task-capture-{identity_hash}",
         step=step,
+        activity=activity,
     )
 
 

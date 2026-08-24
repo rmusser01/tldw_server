@@ -2377,12 +2377,17 @@ class SyncDatabase:
                     enrolled = _dataset_domains_from_row(row)
                     for domain in sorted(domains):
                         trusted_task = (
-                            domain == "notes.task"
+                            domain in {"notes.task", "notes.task_activity"}
                             and trusted_notes_task_bootstrap_id is not None
                         )
                         if trusted_task:
                             metadata = decode_json(row.get("metadata_json"), default={})
-                            readiness = metadata.get("notes_task_v1")
+                            readiness_key = (
+                                "notes_task_v1"
+                                if domain == "notes.task"
+                                else "notes_task_activity_v1"
+                            )
+                            readiness = metadata.get(readiness_key)
                             if (
                                 not isinstance(readiness, Mapping)
                                 or readiness.get("state") != "bootstrapping"
@@ -3138,7 +3143,15 @@ class SyncDatabase:
         """Authorize only the private source-verified dormant task bootstrap."""
 
         metadata = decode_json(row.get("metadata_json"), default={})
-        readiness = metadata.get("notes_task_v1")
+        readiness_key = {
+            "notes.task": "notes_task_v1",
+            "notes.task_activity": "notes_task_activity_v1",
+        }.get(envelope.domain)
+        expected_source = {
+            "notes.task": "notes-task-bootstrap",
+            "notes.task_activity": "notes-task-activity-bootstrap",
+        }.get(envelope.domain)
+        readiness = metadata.get(readiness_key) if readiness_key is not None else None
         routing = envelope.routing_metadata
         if (
             not isinstance(readiness, Mapping)
@@ -3146,6 +3159,7 @@ class SyncDatabase:
             or metadata.get("task_activity_capture_enabled") is not True
             or routing.get("bootstrap_capture") is not True
             or routing.get("bootstrap_id") != bootstrap_id
+            or routing.get("source") != expected_source
         ):
             raise SyncStoreError("notes_task_sync_not_ready")
 
@@ -6355,7 +6369,7 @@ class SyncDatabase:
             with self.backend.transaction() as conn:
                 for envelope in plan:
                     if (
-                        envelope.domain == "notes.task"
+                        envelope.domain in {"notes.task", "notes.task_activity"}
                         and trusted_notes_task_bootstrap_id is not None
                     ):
                         dataset_row = self._get_dataset_row_for_update(
@@ -6884,12 +6898,16 @@ class SyncDatabase:
         now = utcnow_iso()
         with self.backend.transaction(connection) as conn:
             if (
-                state.domain == "notes.task"
+                state.domain in {"notes.task", "notes.task_activity"}
                 and trusted_notes_task_bootstrap_id is not None
             ):
                 row = self._require_dataset(state.dataset_id, connection=conn)
                 metadata = decode_json(row.get("metadata_json"), default={})
-                readiness = metadata.get("notes_task_v1")
+                readiness = metadata.get(
+                    "notes_task_v1"
+                    if state.domain == "notes.task"
+                    else "notes_task_activity_v1"
+                )
                 if (
                     not isinstance(readiness, Mapping)
                     or readiness.get("state") != "bootstrapping"
