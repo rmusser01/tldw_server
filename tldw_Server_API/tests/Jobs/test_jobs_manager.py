@@ -58,6 +58,96 @@ def _capture_sqlite_archive_query_plan(
     return rows, plan
 
 
+def test_jobs_models_owns_terminal_status_classification():
+    from tldw_Server_API.app.core.Jobs import models
+
+    assert frozenset({"completed", "failed", "cancelled", "quarantined"}) == (
+        models.TERMINAL_JOB_STATUSES
+    )
+    assert all(models.is_terminal_job_status(status) for status in models.TERMINAL_JOB_STATUSES)
+    assert models.is_terminal_job_status("processing") is False
+    assert models.is_terminal_job_status(None) is False
+
+
+def test_pg_ensure_ignores_optional_index_psycopg_error_after_required_indexes(
+    monkeypatch,
+):
+    import psycopg
+
+    from tldw_Server_API.app.core.Jobs import pg_migrations
+
+    connections = []
+    maintenance_calls = []
+
+    class _Cursor:
+        def __init__(self, phase):
+            self.phase = phase
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            del params
+            if self.phase == 3 and "idx_jobs_status_available_at" in str(query):
+                raise psycopg.OperationalError("optional index unavailable")
+
+    class _Connection:
+        def __init__(self, phase):
+            self.cursor_instance = _Cursor(phase)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def commit(self):
+            return None
+
+    def _connect(_dsn, *, autocommit=False):
+        del autocommit
+        connection = _Connection(len(connections) + 1)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(psycopg, "connect", _connect)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Jobs.pg_util.negotiate_pg_dsn",
+        lambda dsn: dsn,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_ensure_pg_archive_locators",
+        lambda _dsn: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_ensure_pg_archive_batch_read_indexes",
+        lambda _cursor: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "ensure_job_events_pg",
+        lambda _dsn: maintenance_calls.append("events"),
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "ensure_job_counters_pg",
+        lambda _dsn: maintenance_calls.append("counters"),
+    )
+    monkeypatch.delenv("JOBS_PG_RLS_ENABLE", raising=False)
+
+    pg_migrations.ensure_jobs_tables_pg("postgresql://jobs.test/jobs")
+
+    assert maintenance_calls == ["events", "counters"]
+
+
 def test_create_and_acquire_and_complete(jobs_db):
 
 
@@ -787,6 +877,130 @@ def test_jobs_archive_has_migration_scan_index(jobs_db):
         conn.close()
 
     assert "idx_jobs_archive_migration" in indexes
+
+
+_SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS = {
+    "idx_jobs_archive_lookup_id": [
+        ("id", False),
+        ("archive_id", True),
+    ],
+    "idx_jobs_archive_batch_group_scope": [
+        ("batch_group", False),
+        ("domain", False),
+        ("owner_user_id", False),
+        ("job_type", False),
+        ("archive_id", True),
+    ],
+}
+
+
+def _read_sqlite_archive_batch_index_columns(db_path, index_name):
+    conn = sqlite3.connect(db_path)
+    try:
+        return [
+            (str(row[2]), bool(row[3]))
+            for row in conn.execute(
+                f"PRAGMA index_xinfo({index_name})"
+            ).fetchall()
+            if bool(row[5])
+        ]
+    finally:
+        conn.close()
+
+
+def test_jobs_archive_batch_read_indexes_are_created_and_recreated(jobs_db):
+    def _read_index_columns():
+        return {
+            index_name: _read_sqlite_archive_batch_index_columns(
+                jobs_db, index_name
+            )
+            for index_name in _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS
+        }
+
+    assert _read_index_columns() == _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS
+
+    conn = sqlite3.connect(jobs_db)
+    try:
+        for index_name in _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS:
+            conn.execute(f"DROP INDEX {index_name}")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ensure_jobs_tables(jobs_db)
+
+    assert _read_index_columns() == _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS
+
+
+@pytest.mark.parametrize(
+    ("index_name", "misdefined_ddl"),
+    (
+        (
+            "idx_jobs_archive_lookup_id",
+            "CREATE INDEX idx_jobs_archive_lookup_id "
+            "ON jobs_archive(id, archive_id)",
+        ),
+        (
+            "idx_jobs_archive_batch_group_scope",
+            "CREATE INDEX idx_jobs_archive_batch_group_scope "
+            "ON jobs_archive(domain, batch_group, owner_user_id, job_type, "
+            "archive_id)",
+        ),
+    ),
+)
+def test_sqlite_archive_batch_read_index_migration_repairs_misdefined_index(
+    jobs_db,
+    index_name,
+    misdefined_ddl,
+):
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.execute(f"DROP INDEX {index_name}")
+        conn.execute(misdefined_ddl)
+        conn.commit()
+    finally:
+        conn.close()
+
+    ensure_jobs_tables(jobs_db)
+
+    assert _read_sqlite_archive_batch_index_columns(
+        jobs_db, index_name
+    ) == _SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS[index_name]
+
+
+@pytest.mark.parametrize(
+    "index_name",
+    tuple(_SQLITE_ARCHIVE_BATCH_READ_INDEX_COLUMNS),
+)
+def test_sqlite_archive_batch_read_index_migration_rejects_name_collision(
+    jobs_db,
+    index_name,
+):
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.execute(f"DROP INDEX {index_name}")
+        conn.execute("CREATE TABLE archive_index_name_owner (id INTEGER)")
+        conn.execute(
+            f"CREATE INDEX {index_name} ON archive_index_name_owner(id)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(RuntimeError, match=f"{index_name} belongs to another table"):
+        ensure_jobs_tables(jobs_db)
+
+    conn = sqlite3.connect(jobs_db)
+    try:
+        owner = conn.execute(
+            "SELECT tbl_name FROM sqlite_master "
+            "WHERE type = 'index' AND name = ?",
+            (index_name,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert owner == "archive_index_name_owner"
 
 
 def test_sqlite_archive_cursor_index_handles_invalid_legacy_timestamps(

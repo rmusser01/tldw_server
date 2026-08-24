@@ -8,6 +8,14 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
     OffsetPaginationMeta,
     validate_offset_pagination_aliases,
 )
+from tldw_Server_API.app.core.claims_analytics_export_contract import (
+    CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS,
+    CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS,
+)
 
 
 def _default_offset_pagination_aliases(response):
@@ -411,13 +419,34 @@ class ClaimsAnalyticsExportFilters(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    workspace_id: str | None = Field(default=None)
-    event_type: str | None = Field(default=None)
-    severity: str | None = Field(default=None)
-    provider: str | None = Field(default=None)
-    model: str | None = Field(default=None)
-    start_time: str | None = Field(default=None)
-    end_time: str | None = Field(default=None)
+    workspace_id: str | None = Field(
+        default=None,
+        max_length=CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS,
+    )
+    event_type: str | None = Field(
+        default=None,
+        max_length=CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS,
+    )
+    severity: str | None = Field(
+        default=None,
+        max_length=CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS,
+    )
+    provider: str | None = Field(
+        default=None,
+        max_length=CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS,
+    )
+    model: str | None = Field(
+        default=None,
+        max_length=CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS,
+    )
+    start_time: str | None = Field(
+        default=None,
+        max_length=CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS,
+    )
+    end_time: str | None = Field(
+        default=None,
+        max_length=CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS,
+    )
 
 
 class ClaimsAnalyticsExportPagination(BaseModel):
@@ -449,6 +478,10 @@ class ClaimsAnalyticsExportResponse(BaseModel):
     status: str
     download_url: str | None = None
     created_at: str | None = None
+    job_id: int | None = None
+    job_status: str | None = None
+    error_code: str | None = None
+    snapshot_at: str | None = None
 
 
 class ClaimsAnalyticsExportPaginationMeta(BaseModel):
@@ -475,6 +508,10 @@ class ClaimsAnalyticsExportListItem(BaseModel):
     filters: ClaimsAnalyticsExportFilters | None = None
     pagination: ClaimsAnalyticsExportPaginationMeta | None = None
     error_message: str | None = None
+    job_id: int | None = None
+    job_status: str | None = None
+    error_code: str | None = None
+    snapshot_at: str | None = None
 
 
 class ClaimsAnalyticsExportListResponse(BaseModel):

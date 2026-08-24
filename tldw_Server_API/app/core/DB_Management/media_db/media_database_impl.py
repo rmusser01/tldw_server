@@ -57,11 +57,16 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_ops import (
     update_chunking_template,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_analytics_export_ops import (
+    attach_claims_analytics_export_job,
     cleanup_claims_analytics_exports,
     count_claims_analytics_exports,
     create_claims_analytics_export,
+    delete_claims_analytics_exports,
     get_claims_analytics_export,
     list_claims_analytics_exports,
+    list_claims_analytics_exports_for_maintenance,
+    mark_claims_analytics_export_ready,
+    transition_claims_analytics_export_status,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_aggregate_ops import (
     get_claim_cluster_member_counts,
@@ -109,10 +114,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_c
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     get_claims_monitoring_event,
+    get_claims_monitoring_event_export_data_bounded,
+    get_claims_monitoring_event_high_water,
+    get_claims_monitoring_event_payload_bounded,
     get_latest_claims_monitoring_event_delivery,
     has_successful_claims_monitoring_event_delivery,
     insert_claims_monitoring_event,
     list_claims_monitoring_events,
+    list_claims_monitoring_events_page,
     list_undelivered_claims_monitoring_events,
     mark_claims_monitoring_events_delivered,
 )
@@ -421,6 +430,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.pos
     run_postgres_migrate_to_v10,
     run_postgres_migrate_to_v17,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims_analytics_export_jobs import (
+    run_postgres_migrate_to_v24,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_collections import (
     run_postgres_migrate_to_v12,
     run_postgres_migrate_to_v13,
@@ -510,7 +522,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate
 class MediaDatabase:
     """Canonical package-native Media DB runtime class."""
 
-    _CURRENT_SCHEMA_VERSION = 23  # Transcript run-history schema/bootstrap scaffolding
+    _CURRENT_SCHEMA_VERSION = 24  # Claims analytics export Jobs linkage and snapshot metadata
 
     # <<< Schema Definition (Version 1) >>>
 
@@ -1087,6 +1099,8 @@ class MediaDatabase:
         delivered_at DATETIME
     );
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user ON claims_monitoring_events(user_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_created_id ON claims_monitoring_events(user_id, created_at, id);
+    CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_user_id ON claims_monitoring_events(user_id, id);
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_type ON claims_monitoring_events(event_type);
     CREATE INDEX IF NOT EXISTS idx_claims_monitoring_events_delivered ON claims_monitoring_events(delivered_at);
 
@@ -1158,10 +1172,19 @@ class MediaDatabase:
         filters_json TEXT,
         pagination_json TEXT,
         error_message TEXT,
+        job_id INTEGER,
+        error_code TEXT,
+        snapshot_at TEXT,
+        snapshot_event_id INTEGER,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user ON claims_analytics_exports(user_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_job_id ON claims_analytics_exports(job_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user_status_export_id
+        ON claims_analytics_exports(user_id, status, export_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_analytics_exports_user_status_updated_export_id
+        ON claims_analytics_exports(user_id, status, updated_at, export_id);
 
     CREATE TABLE IF NOT EXISTS claims_notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1902,6 +1925,7 @@ MediaDatabase._postgres_migrate_to_v20 = run_postgres_migrate_to_v20
 MediaDatabase._postgres_migrate_to_v21 = run_postgres_migrate_to_v21
 MediaDatabase._postgres_migrate_to_v22 = run_postgres_migrate_to_v22
 MediaDatabase._postgres_migrate_to_v23 = run_postgres_migrate_to_v23
+MediaDatabase._postgres_migrate_to_v24 = run_postgres_migrate_to_v24
 MediaDatabase._get_db_version = get_db_version
 MediaDatabase._update_schema_version_postgres = update_schema_version_postgres
 MediaDatabase._sync_postgres_sequences = sync_postgres_sequences
@@ -2000,9 +2024,18 @@ MediaDatabase._resolve_email_tenant_id = _resolve_email_tenant_id
 MediaDatabase.upsert_email_message_graph = upsert_email_message_graph
 MediaDatabase.create_claims_analytics_export = create_claims_analytics_export
 MediaDatabase.get_claims_analytics_export = get_claims_analytics_export
+MediaDatabase.attach_claims_analytics_export_job = attach_claims_analytics_export_job
+MediaDatabase.transition_claims_analytics_export_status = (
+    transition_claims_analytics_export_status
+)
+MediaDatabase.mark_claims_analytics_export_ready = mark_claims_analytics_export_ready
 MediaDatabase.list_claims_analytics_exports = list_claims_analytics_exports
+MediaDatabase.list_claims_analytics_exports_for_maintenance = (
+    list_claims_analytics_exports_for_maintenance
+)
 MediaDatabase.count_claims_analytics_exports = count_claims_analytics_exports
 MediaDatabase.cleanup_claims_analytics_exports = cleanup_claims_analytics_exports
+MediaDatabase.delete_claims_analytics_exports = delete_claims_analytics_exports
 MediaDatabase.insert_claim_notification = insert_claim_notification
 MediaDatabase.get_claim_notification = get_claim_notification
 MediaDatabase.get_latest_claim_notification = get_latest_claim_notification
@@ -2081,7 +2114,15 @@ MediaDatabase.get_claims_monitoring_health = get_claims_monitoring_health
 MediaDatabase.upsert_claims_monitoring_health = upsert_claims_monitoring_health
 MediaDatabase.insert_claims_monitoring_event = insert_claims_monitoring_event
 MediaDatabase.get_claims_monitoring_event = get_claims_monitoring_event
+MediaDatabase.get_claims_monitoring_event_high_water = get_claims_monitoring_event_high_water
+MediaDatabase.get_claims_monitoring_event_export_data_bounded = (
+    get_claims_monitoring_event_export_data_bounded
+)
+MediaDatabase.get_claims_monitoring_event_payload_bounded = (
+    get_claims_monitoring_event_payload_bounded
+)
 MediaDatabase.list_claims_monitoring_events = list_claims_monitoring_events
+MediaDatabase.list_claims_monitoring_events_page = list_claims_monitoring_events_page
 MediaDatabase.list_undelivered_claims_monitoring_events = (
     list_undelivered_claims_monitoring_events
 )

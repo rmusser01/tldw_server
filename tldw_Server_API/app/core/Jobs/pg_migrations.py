@@ -40,6 +40,39 @@ POSTGRES_ARCHIVE_CURSOR_INDEX_SQL = (
     f"{POSTGRES_ARCHIVE_CURSOR_TIME_SQL}, "
     "id, COALESCE(uuid, ''), archive_id)"
 )
+POSTGRES_ARCHIVE_LOOKUP_ID_INDEX_SQL = (
+    "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_archive_lookup_id "
+    "ON jobs_archive(id, archive_id DESC)"
+)
+POSTGRES_ARCHIVE_BATCH_GROUP_SCOPE_INDEX_SQL = (
+    "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+    "idx_jobs_archive_batch_group_scope "
+    "ON jobs_archive(batch_group, domain, owner_user_id, job_type, "
+    "archive_id DESC)"
+)
+_POSTGRES_ARCHIVE_BATCH_READ_INDEX_LOCK = (
+    "tldw.jobs_archive.batch_read_indexes.v1"
+)
+_POSTGRES_ARCHIVE_BATCH_READ_INDEX_SPECS = (
+    (
+        "idx_jobs_archive_lookup_id",
+        POSTGRES_ARCHIVE_LOOKUP_ID_INDEX_SQL,
+        "DROP INDEX CONCURRENTLY idx_jobs_archive_lookup_id",
+        ("id", "archive_id DESC"),
+    ),
+    (
+        "idx_jobs_archive_batch_group_scope",
+        POSTGRES_ARCHIVE_BATCH_GROUP_SCOPE_INDEX_SQL,
+        "DROP INDEX CONCURRENTLY idx_jobs_archive_batch_group_scope",
+        (
+            "batch_group",
+            "domain",
+            "owner_user_id",
+            "job_type",
+            "archive_id DESC",
+        ),
+    ),
+)
 _POSTGRES_ARCHIVE_SEQUENCE = "jobs_archive_archive_id_seq"
 _POSTGRES_ARCHIVE_MIGRATION_LOCK = "tldw.jobs_archive.archive_id.v1"
 
@@ -237,6 +270,93 @@ def _pg_archive_locator_index_ready(archive_index: tuple[Any, ...] | None) -> bo
         and int(archive_index[3]) == 1
         and str(archive_index[4]).strip() == "archive_id"
     )
+
+
+def _pg_archive_batch_read_index_state(
+    cur: Any,
+    index_name: str,
+) -> tuple[Any, ...] | None:
+    """Return catalog metadata for one archive batch-read index."""
+
+    cur.execute(
+        "SELECT i.indrelid = 'jobs_archive'::regclass, i.indisvalid, "
+        "i.indisready, i.indisunique, i.indpred IS NULL, "
+        "i.indexprs IS NULL, am.amname, i.indnkeyatts, "
+        "ARRAY(SELECT pg_get_indexdef(i.indexrelid, key_position, true) "
+        "FROM generate_series(1, i.indnkeyatts) AS key_position "
+        "ORDER BY key_position), con.conname "
+        "FROM pg_class idx "
+        "JOIN pg_namespace ns ON ns.oid = idx.relnamespace "
+        "JOIN pg_index i ON i.indexrelid = idx.oid "
+        "JOIN pg_am am ON am.oid = idx.relam "
+        "LEFT JOIN pg_constraint con ON con.conindid = idx.oid "
+        "WHERE ns.nspname = current_schema() AND idx.relname = %s",
+        (index_name,),
+    )
+    return cur.fetchone()
+
+
+def _pg_archive_batch_read_index_ready(
+    state: tuple[Any, ...] | None,
+    expected_columns: tuple[str, ...],
+) -> bool:
+    """Return whether one PostgreSQL archive lookup index is canonical."""
+
+    return bool(
+        state is not None
+        and state[0]
+        and state[1]
+        and state[2]
+        and not state[3]
+        and state[4]
+        and state[5]
+        and str(state[6]) == "btree"
+        and int(state[7]) == len(expected_columns)
+        and tuple(state[8]) == expected_columns
+        and state[9] is None
+    )
+
+
+def _ensure_pg_archive_batch_read_indexes(cur: Any) -> None:
+    """Create or repair archive lookup indexes once under an advisory lock."""
+
+    lock_acquired = False
+    cur.execute(
+        "SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+        (_POSTGRES_ARCHIVE_BATCH_READ_INDEX_LOCK,),
+    )
+    lock_acquired = True
+    try:
+        for index_name, create_sql, drop_sql, expected_columns in (
+            _POSTGRES_ARCHIVE_BATCH_READ_INDEX_SPECS
+        ):
+            state = _pg_archive_batch_read_index_state(cur, index_name)
+            if state is not None and not state[0]:
+                raise RuntimeError(f"{index_name} belongs to another table")
+            if state is not None and state[9] is not None:
+                raise RuntimeError(
+                    f"{index_name} is a misdefined constraint-backed index"
+                )
+            if not _pg_archive_batch_read_index_ready(
+                state, expected_columns
+            ):
+                if state is not None:
+                    cur.execute(drop_sql)
+                cur.execute(create_sql)
+            if not _pg_archive_batch_read_index_ready(
+                _pg_archive_batch_read_index_state(cur, index_name),
+                expected_columns,
+            ):
+                raise RuntimeError(f"{index_name} verification failed")
+    finally:
+        if lock_acquired:
+            with contextlib.suppress(
+                _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS
+            ):
+                cur.execute(
+                    "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                    (_POSTGRES_ARCHIVE_BATCH_READ_INDEX_LOCK,),
+                )
 
 
 def _pg_archive_column_default_uses_locator_sequence(cur: Any) -> bool:
@@ -614,6 +734,7 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS payload_compressed BYTEA")
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS result_compressed BYTEA")
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS batch_group TEXT")
+                    f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS owner_user_id TEXT")
                 except required_migration_exceptions:
                     pass
             except required_migration_exceptions:
@@ -621,10 +742,13 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 pass
         _ensure_pg_archive_locators(_dsn)
         # Create hot-path indexes concurrently (outside transaction) when possible
+        archive_batch_read_indexes_verified = False
         try:
             with psycopg.connect(_dsn, autocommit=True) as c2:
                 with c2.cursor() as k:
                     _configure_pg_archive_migration_session(k, local=False)
+                    _ensure_pg_archive_batch_read_indexes(k)
+                    archive_batch_read_indexes_verified = True
                     # Ready vs scheduled scans
                     k.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_status_available_at ON jobs(status, available_at)")
                     # Composite unique for idempotency (NULLs are allowed and do not conflict)
@@ -644,7 +768,16 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                         # Older PG versions or permission issues: non-fatal
                         pass
-        except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+        except (
+            psycopg.Error,
+            *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
+        ) as exc:
+            if not archive_batch_read_indexes_verified:
+                if isinstance(exc, RuntimeError):
+                    raise
+                raise RuntimeError(
+                    "PostgreSQL Jobs archive batch-read index migration failed"
+                ) from exc
             # Best-effort; not fatal
             pass
         # Ensure job_events exists (idempotent helper) for deployments created before inlined DDL

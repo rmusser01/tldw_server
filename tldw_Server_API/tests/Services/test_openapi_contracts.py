@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 import re
+from collections.abc import Iterator
 from typing import Any
 
-from fastapi import FastAPI
 import pytest
-
+from fastapi import FastAPI
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
 PATH_PARAMETER_PATTERN = re.compile(r"{([^}/]+)}")
@@ -72,6 +71,7 @@ MESSAGES_COMPLETION_PATHS = ("/api/v1/messages", "/v1/messages")
 PROMETHEUS_TEXT_RESPONSE_PATHS = ("/api/v1/metrics/text", "/api/v1/mcp/metrics/prometheus")
 MCP_REQUEST_PATH = "/api/v1/mcp/request"
 CLAIMS_ANALYTICS_EXPORT_DOWNLOAD_PATH = "/api/v1/claims/analytics/export/{export_id}"
+CLAIMS_ANALYTICS_EXPORT_CREATE_PATH = "/api/v1/claims/analytics/export"
 PRIVILEGE_SNAPSHOT_CSV_EXPORT_PATH = "/api/v1/privileges/snapshots/{snapshot_id}/export.csv"
 EVALUATIONS_ABTEST_EVENTS_PATH = "/api/v1/evaluations/embeddings/abtest/{test_id}/events"
 EVALUATIONS_ABTEST_EXPORT_PATH = "/api/v1/evaluations/embeddings/abtest/{test_id}/export"
@@ -736,6 +736,32 @@ def test_claims_analytics_export_openapi_documents_csv_response(openapi_spec: di
     assert "application/json" in content
     assert "text/csv" in content
     assert not _contains_ref_fragment(operation, "ResponseEnvelope")
+
+
+@pytest.mark.integration
+def test_claims_analytics_export_download_documents_lifecycle_conflict(
+    openapi_spec: dict[str, Any],
+) -> None:
+    operation = openapi_spec["paths"][CLAIMS_ANALYTICS_EXPORT_DOWNLOAD_PATH]["get"]
+
+    assert "409" in operation["responses"]
+
+
+@pytest.mark.integration
+def test_claims_analytics_export_create_documents_sync_and_async_responses(
+    openapi_spec: dict[str, Any],
+) -> None:
+    operation = openapi_spec["paths"][CLAIMS_ANALYTICS_EXPORT_CREATE_PATH]["post"]
+    for response_code in ("200", "202"):
+        schema = operation["responses"][response_code]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("/ClaimsAnalyticsExportResponse")
+
+    component = openapi_spec["components"]["schemas"]["ClaimsAnalyticsExportResponse"]
+    required = set(component.get("required", []))
+    for field in ("job_id", "job_status", "error_code", "snapshot_at"):
+        assert field in component["properties"]
+        assert field not in required
+        assert {item.get("type") for item in component["properties"][field]["anyOf"]} >= {"null"}
 
 
 @pytest.mark.integration

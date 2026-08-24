@@ -2,12 +2,12 @@ import uuid
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 
 def _column_exists(backend, conn, table: str, column: str) -> bool:
@@ -26,6 +26,25 @@ def _column_exists(backend, conn, table: str, column: str) -> bool:
         connection=conn,
     )
     return bool(result.rows)
+
+
+def _column_definition(backend, conn, table: str, column: str) -> dict[str, object]:
+    """Return the PostgreSQL type and nullability for a table column."""
+
+    result = backend.execute(
+        """
+        SELECT data_type, is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+          AND column_name = %s
+        """,
+        (table, column),
+        connection=conn,
+    )
+    if not result.rows:
+        raise AssertionError(f"Column not found: {table}.{column}")
+    return dict(result.rows[0])
 
 
 def _serial_sequence_name(backend, conn, table: str, column: str) -> str:
@@ -742,5 +761,199 @@ def test_media_postgres_migration_reaches_v23_and_backfills_transcript_run_histo
                 )
 
         assert int(version) == db._CURRENT_SCHEMA_VERSION
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exports(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="pg-migration-v24", backend=backend)
+
+    try:
+        with backend.transaction() as conn:
+            backend.execute(
+                """
+                INSERT INTO claims_analytics_exports (
+                    export_id, user_id, format, status, payload_json, filters_json,
+                    created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    "export-existing",
+                    "user-1",
+                    "json",
+                    "ready",
+                    '{"claim_count": 1}',
+                    '{"status": "verified"}',
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-01T00:00:00Z",
+                ),
+                connection=conn,
+            )
+            backend.execute(
+                "DROP INDEX IF EXISTS idx_claims_analytics_exports_job_id",
+                connection=conn,
+            )
+            backend.execute(
+                "DROP INDEX IF EXISTS idx_claims_monitoring_events_user_created_id",
+                connection=conn,
+            )
+            backend.execute(
+                "DROP INDEX IF EXISTS idx_claims_monitoring_events_user_id",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS job_id",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS error_code",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS snapshot_at",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS snapshot_event_id",
+                connection=conn,
+            )
+            backend.execute(
+                "UPDATE schema_version SET version = %s",
+                (23,),
+                connection=conn,
+            )
+
+        db._initialize_schema()
+
+        with backend.transaction() as conn:
+            version = backend.execute(
+                "SELECT version FROM schema_version LIMIT 1",
+                connection=conn,
+            ).scalar
+            export_rows = backend.execute(
+                """
+                SELECT export_id, user_id, format, status, payload_json, filters_json,
+                       job_id, error_code, snapshot_at, snapshot_event_id
+                FROM claims_analytics_exports
+                WHERE export_id = %s
+                """,
+                ("export-existing",),
+                connection=conn,
+            ).rows
+
+            assert int(version) == 24
+            assert _column_definition(
+                backend, conn, "claims_analytics_exports", "job_id"
+            ) == {"data_type": "bigint", "is_nullable": "YES"}
+            assert _column_definition(
+                backend, conn, "claims_analytics_exports", "error_code"
+            ) == {"data_type": "text", "is_nullable": "YES"}
+            assert _column_definition(
+                backend, conn, "claims_analytics_exports", "snapshot_at"
+            ) == {"data_type": "timestamp with time zone", "is_nullable": "YES"}
+            assert _column_definition(
+                backend, conn, "claims_analytics_exports", "snapshot_event_id"
+            ) == {"data_type": "bigint", "is_nullable": "YES"}
+            assert not _column_exists(
+                backend, conn, "claims_analytics_exports", "job_status"
+            )
+            assert _index_exists(
+                backend, conn, "idx_claims_analytics_exports_job_id"
+            )
+            assert _index_exists(
+                backend, conn, "idx_claims_monitoring_events_user_created_id"
+            )
+            assert _index_exists(
+                backend, conn, "idx_claims_monitoring_events_user_id"
+            )
+            helper_functions = backend.execute(
+                "SELECT proname FROM pg_proc WHERE proname IN (%s, %s)",
+                ("tldw_claims_safe_json", "tldw_claims_compact_json"),
+                connection=conn,
+            ).fetchall()
+            assert {row["proname"] for row in helper_functions} == {
+                "tldw_claims_safe_json",
+                "tldw_claims_compact_json",
+            }
+            assert [dict(row) for row in export_rows] == [
+                {
+                    "export_id": "export-existing",
+                    "user_id": "user-1",
+                    "format": "json",
+                    "status": "ready",
+                    "payload_json": '{"claim_count": 1}',
+                    "filters_json": '{"status": "verified"}',
+                    "job_id": None,
+                    "error_code": None,
+                    "snapshot_at": None,
+                    "snapshot_event_id": None,
+                }
+            ]
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_media_postgres_migration_v24_repairs_missing_monitoring_event_extension(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(
+        db_path=":memory:",
+        client_id="pg-migration-v24-missing-claims-events",
+        backend=backend,
+    )
+
+    try:
+        with backend.transaction() as conn:
+            backend.execute(
+                "DROP TABLE IF EXISTS claims_monitoring_events CASCADE",
+                connection=conn,
+            )
+            backend.execute(
+                "DROP INDEX IF EXISTS idx_claims_analytics_exports_job_id",
+                connection=conn,
+            )
+            for column_name in (
+                "job_id",
+                "error_code",
+                "snapshot_at",
+                "snapshot_event_id",
+            ):
+                backend.execute(
+                    f'ALTER TABLE claims_analytics_exports DROP COLUMN IF EXISTS "{column_name}"',
+                    connection=conn,
+                )
+            backend.execute(
+                "UPDATE schema_version SET version = %s",
+                (23,),
+                connection=conn,
+            )
+
+        db._initialize_schema()
+
+        with backend.transaction() as conn:
+            version = backend.execute(
+                "SELECT version FROM schema_version LIMIT 1",
+                connection=conn,
+            ).scalar
+
+            assert int(version) == 24
+            assert backend.table_exists("claims_monitoring_events", connection=conn)
+            assert _index_exists(
+                backend,
+                conn,
+                "idx_claims_monitoring_events_user_created_id",
+            )
+            assert _index_exists(
+                backend,
+                conn,
+                "idx_claims_monitoring_events_user_id",
+            )
     finally:
         db.close_connection()

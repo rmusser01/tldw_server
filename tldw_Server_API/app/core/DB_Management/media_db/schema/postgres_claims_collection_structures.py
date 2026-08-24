@@ -8,6 +8,9 @@ from typing import Any, Protocol
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_claims_json_helpers import (
+    POSTGRES_CLAIMS_JSON_HELPER_DDL,
+)
 
 try:
     from loguru import logger
@@ -414,9 +417,21 @@ def ensure_postgres_claims_extensions(
             f"ADD COLUMN IF NOT EXISTS {ident('delivered_at')} TIMESTAMPTZ",
             connection=conn,
         )
+        for statement in POSTGRES_CLAIMS_JSON_HELPER_DDL:
+            backend.execute(statement, connection=conn)
         backend.execute(
             f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_user')} "
             f"ON {ident('claims_monitoring_events')} ({ident('user_id')})",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_user_created_id')} "
+            f"ON {ident('claims_monitoring_events')} ({ident('user_id')}, {ident('created_at')}, {ident('id')})",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_monitoring_events_user_id')} "
+            f"ON {ident('claims_monitoring_events')} ({ident('user_id')}, {ident('id')})",
             connection=conn,
         )
         backend.execute(
@@ -463,14 +478,58 @@ def ensure_postgres_claims_extensions(
                 "filters_json TEXT, "
                 "pagination_json TEXT, "
                 "error_message TEXT, "
+                "job_id BIGINT, "
+                "error_code TEXT, "
+                "snapshot_at TIMESTAMPTZ, "
+                "snapshot_event_id BIGINT, "
                 "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, "
                 "updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)"
             ),
             connection=conn,
         )
         backend.execute(
+            f"ALTER TABLE {ident('claims_analytics_exports')} "
+            f"ADD COLUMN IF NOT EXISTS {ident('job_id')} BIGINT",
+            connection=conn,
+        )
+        backend.execute(
+            f"ALTER TABLE {ident('claims_analytics_exports')} "
+            f"ADD COLUMN IF NOT EXISTS {ident('error_code')} TEXT",
+            connection=conn,
+        )
+        backend.execute(
+            f"ALTER TABLE {ident('claims_analytics_exports')} "
+            f"ADD COLUMN IF NOT EXISTS {ident('snapshot_at')} TIMESTAMPTZ",
+            connection=conn,
+        )
+        backend.execute(
+            f"ALTER TABLE {ident('claims_analytics_exports')} "
+            f"ADD COLUMN IF NOT EXISTS {ident('snapshot_event_id')} BIGINT",
+            connection=conn,
+        )
+        backend.execute(
             f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_analytics_exports_user')} "
             f"ON {ident('claims_analytics_exports')} ({ident('user_id')})",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_claims_analytics_exports_job_id')} "
+            f"ON {ident('claims_analytics_exports')} ({ident('job_id')})",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS "
+            f"{ident('idx_claims_analytics_exports_user_status_export_id')} "
+            f"ON {ident('claims_analytics_exports')} "
+            f"({ident('user_id')}, {ident('status')}, {ident('export_id')})",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS "
+            f"{ident('idx_claims_analytics_exports_user_status_updated_export_id')} "
+            f"ON {ident('claims_analytics_exports')} "
+            f"({ident('user_id')}, {ident('status')}, "
+            f"{ident('updated_at')}, {ident('export_id')})",
             connection=conn,
         )
 

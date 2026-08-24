@@ -3,7 +3,36 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
+
+from tldw_Server_API.app.core import (
+    claims_analytics_export_contract as _analytics_export_contract,
+)
+from tldw_Server_API.app.core.claims_analytics_export_contract import (
+    CLAIMS_MAX_OWNER_USER_ID,
+    is_routable_claims_owner_id_text,
+)
+
+# Compatibility aliases for callers that imported these limits from this module.
+CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_EVENT_TYPE_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_SEVERITY_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_PROVIDER_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_MODEL_MAX_CHARS
+)
+CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS = (
+    _analytics_export_contract.CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS
+)
 
 CLAIMS_JOBS_DOMAIN = "claims"
 CLAIMS_JOBS_DEFAULT_QUEUE = "default"
@@ -11,6 +40,7 @@ CLAIMS_JOBS_DEFAULT_QUEUE = "default"
 CLAIMS_REBUILD_MEDIA_JOB_TYPE = "claims_rebuild_media"
 CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE = "claims_deliver_review_notification"
 CLAIMS_DELIVER_ALERT_JOB_TYPE = "claims_deliver_alert"
+CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE = "claims_generate_analytics_export"
 
 CLAIMS_JOB_PAYLOAD_VERSION = 1
 CLAIMS_ALERT_JOB_CHANNELS = {"slack", "webhook"}
@@ -28,6 +58,16 @@ SENSITIVE_PAYLOAD_KEYS = {
     "api_key",
     "secret",
     "token",
+    "filters",
+    "pagination",
+    "events",
+    "payload_json",
+    "payload_csv",
+    "content",
+    "workspace_id",
+    "database_path",
+    "file_path",
+    "credentials",
 }
 CLAIMS_REBUILD_MEDIA_PAYLOAD_KEYS = {"version", "owner_user_id", "media_id"}
 CLAIMS_REVIEW_NOTIFICATION_PAYLOAD_KEYS = {
@@ -42,6 +82,8 @@ CLAIMS_ALERT_DELIVERY_PAYLOAD_KEYS = {
     "alert_id",
     "channel",
 }
+CLAIMS_ANALYTICS_EXPORT_PAYLOAD_KEYS = {"version", "owner_user_id", "export_id"}
+CLAIMS_ANALYTICS_EXPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 class ClaimsJobError(RuntimeError):
@@ -117,17 +159,10 @@ def _owner_user_id(value: Any) -> str:
             failure_code="claims_missing_owner",
         )
     if isinstance(value, int):
-        owner = str(value)
+        owner = str(value) if 1 <= value <= CLAIMS_MAX_OWNER_USER_ID else ""
     else:
         owner = value
-    if (
-        not owner
-        or owner != owner.strip()
-        or not owner.isascii()
-        or not owner.isdigit()
-        or owner == "0"
-        or (len(owner) > 1 and owner.startswith("0"))
-    ):
+    if not is_routable_claims_owner_id_text(owner):
         raise ClaimsJobError(
             "claims job payload owner_user_id must be a canonical positive integer",
             retryable=False,
@@ -244,6 +279,38 @@ def validate_alert_delivery_payload(value: Any) -> dict[str, Any]:
         "event_id": _positive_int(payload.get("event_id"), "event_id"),
         "alert_id": _positive_int(payload.get("alert_id"), "alert_id"),
         "channel": channel,
+    }
+
+
+def validate_analytics_export_payload(value: Any) -> dict[str, Any]:
+    """Validate a Claims analytics export job's strict ID-only payload."""
+    payload = _normalize_dict(value)
+    version = _version(payload)
+    raw_owner_user_id = payload.get("owner_user_id")
+    if not isinstance(raw_owner_user_id, str):
+        raise ClaimsJobError(
+            "claims job payload missing real owner_user_id",
+            retryable=False,
+            failure_code="claims_missing_owner",
+        )
+    owner_user_id = _owner_user_id(raw_owner_user_id)
+    if set(payload).difference(CLAIMS_ANALYTICS_EXPORT_PAYLOAD_KEYS):
+        raise ClaimsJobError(
+            "claims analytics export payload contains disallowed fields",
+            retryable=False,
+            failure_code="claims_export_invalid_payload",
+        )
+    export_id = payload.get("export_id")
+    if not isinstance(export_id, str) or CLAIMS_ANALYTICS_EXPORT_ID_RE.fullmatch(export_id) is None:
+        raise ClaimsJobError(
+            "claims analytics export payload has invalid export_id",
+            retryable=False,
+            failure_code="claims_export_invalid_payload",
+        )
+    return {
+        "version": version,
+        "owner_user_id": owner_user_id,
+        "export_id": export_id,
     }
 
 

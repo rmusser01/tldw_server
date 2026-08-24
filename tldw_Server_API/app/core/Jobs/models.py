@@ -4,6 +4,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+TERMINAL_JOB_STATUSES: frozenset[str] = frozenset(
+    {"completed", "failed", "cancelled", "quarantined"}
+)
+
+
+def is_terminal_job_status(value: Any) -> bool:
+    """Return whether a value is a canonical terminal Jobs status."""
+    return isinstance(value, str) and value in TERMINAL_JOB_STATUSES
+
 
 @dataclass
 class JobRecord:

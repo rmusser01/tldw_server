@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import (
     MediaDatabase,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime import (
+    claims_monitoring_event_ops,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     get_claims_monitoring_event as helper_get_claims_monitoring_event,
@@ -95,6 +101,32 @@ def test_insert_claims_monitoring_event_returns_inserted_row_and_gets_by_id(
         db.close_connection()
 
 
+def test_claims_monitoring_event_high_water_is_owner_scoped(tmp_path: Path) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-high-water.db")
+    try:
+        assert db.get_claims_monitoring_event_high_water(user_id="1") == 0
+        first = db.insert_claims_monitoring_event(user_id="1", event_type="first")
+        second = db.insert_claims_monitoring_event(user_id="2", event_type="other")
+        third = db.insert_claims_monitoring_event(user_id="1", event_type="last")
+
+        assert db.get_claims_monitoring_event_high_water(user_id="1") == third["id"]
+        assert db.get_claims_monitoring_event_high_water(user_id="2") == second["id"]
+        assert first["id"] < third["id"]
+
+        plan_rows = db.get_connection().execute(
+            "EXPLAIN QUERY PLAN SELECT COALESCE(MAX(id), 0) "
+            "FROM claims_monitoring_events "
+            "INDEXED BY idx_claims_monitoring_events_user_id WHERE user_id = ?",
+            ("1",),
+        ).fetchall()
+        assert any(
+            "idx_claims_monitoring_events_user_id" in str(row["detail"])
+            for row in plan_rows
+        )
+    finally:
+        db.close_connection()
+
+
 def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_row() -> None:
     loaded_row = {
         "id": 17,
@@ -105,7 +137,9 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
         "created_at": "2026-03-22T00:00:01Z",
         "delivered_at": None,
     }
-    execute_calls: list[tuple[str, tuple[object, ...], bool]] = []
+    execute_calls: list[tuple[str, tuple[object, ...], bool, object | None]] = []
+    transaction_events: list[str] = []
+    transaction_connection = object()
 
     class _Cursor:
         def __init__(self, row: dict[str, object]) -> None:
@@ -117,6 +151,12 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
     class _FakePostgresDB:
         backend_type = BackendType.POSTGRESQL
 
+        @contextmanager
+        def transaction(self):
+            transaction_events.append("enter")
+            yield transaction_connection
+            transaction_events.append("exit")
+
         def _get_current_utc_timestamp_str(self) -> str:
             return "2026-03-22T00:00:01Z"
 
@@ -126,8 +166,9 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
             params: tuple[object, ...] | None = None,
             *,
             commit: bool = False,
+            connection: object | None = None,
         ) -> _Cursor:
-            execute_calls.append((sql, tuple(params or ()), commit))
+            execute_calls.append((sql, tuple(params or ()), commit, connection))
             if sql.startswith("INSERT INTO claims_monitoring_events"):
                 return _Cursor({"id": 17})
             return _Cursor(loaded_row)
@@ -141,8 +182,12 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
     )
 
     assert created == loaded_row
-    assert execute_calls[0][0].endswith(" RETURNING id")
-    assert execute_calls[0][1] == (
+    assert transaction_events == ["enter", "exit"]
+    assert "pg_advisory_xact_lock_shared" in execute_calls[0][0]
+    assert execute_calls[0][1] == ("claims_monitoring_events:1",)
+    assert execute_calls[0][2:] == (False, transaction_connection)
+    assert execute_calls[1][0].endswith(" RETURNING id")
+    assert execute_calls[1][1] == (
         "1",
         "unsupported_ratio",
         "warning",
@@ -150,12 +195,119 @@ def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_r
         "2026-03-22T00:00:01Z",
         None,
     )
-    assert execute_calls[0][2] is True
-    assert execute_calls[1][0].startswith(
+    assert execute_calls[1][2:] == (False, transaction_connection)
+    assert execute_calls[2][0].startswith(
         "SELECT id, user_id, event_type, severity, payload_json, created_at, delivered_at "
     )
-    assert execute_calls[1][1] == (17,)
-    assert execute_calls[1][2] is False
+    assert execute_calls[2][1] == (17,)
+    assert execute_calls[2][2:] == (False, None)
+
+
+def test_postgres_high_water_takes_exclusive_owner_lock_before_max_query() -> None:
+    calls: list[tuple[str, tuple[object, ...], bool, object | None]] = []
+    transaction_connection = object()
+
+    class _Cursor:
+        def __init__(self, row=None) -> None:
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
+    class _FakePostgresDB:
+        backend_type = BackendType.POSTGRESQL
+
+        @contextmanager
+        def transaction(self):
+            yield transaction_connection
+
+        def execute_query(
+            self,
+            sql: str,
+            params: tuple[object, ...] | None = None,
+            *,
+            commit: bool = False,
+            connection: object | None = None,
+        ) -> _Cursor:
+            calls.append((sql, tuple(params or ()), commit, connection))
+            return _Cursor({"event_id": 23} if "MAX(id)" in sql else None)
+
+    assert claims_monitoring_event_ops.get_claims_monitoring_event_high_water(
+        _FakePostgresDB(), user_id="owner-7"
+    ) == 23
+    assert "pg_advisory_xact_lock(" in calls[0][0]
+    assert "pg_advisory_xact_lock_shared" not in calls[0][0]
+    assert calls[0][1] == ("claims_monitoring_events:owner-7",)
+    assert calls[0][2:] == (False, transaction_connection)
+    assert "MAX(id)" in calls[1][0]
+    assert calls[1][1] == ("owner-7",)
+    assert calls[1][2:] == (False, transaction_connection)
+
+
+@pytest.mark.integration
+def test_postgres_high_water_waits_for_admitted_insert_commit(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(
+        db_path=":memory:",
+        client_id="claims-monitoring-event-fence",
+        backend=backend,
+    )
+    insert_executed = threading.Event()
+    release_insert = threading.Event()
+    snapshot_started = threading.Event()
+    snapshot_finished = threading.Event()
+    inserted: dict[str, int] = {}
+    captured: dict[str, int] = {}
+    original_execute = backend.execute
+
+    def delayed_execute(query, params=None, connection=None):
+        result = original_execute(query, params, connection=connection)
+        if (
+            threading.current_thread().name == "claims-insert"
+            and query.lstrip().startswith("INSERT INTO claims_monitoring_events")
+        ):
+            insert_executed.set()
+            assert release_insert.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(backend, "execute", delayed_execute)
+
+    def insert_event() -> None:
+        inserted["id"] = int(
+            db.insert_claims_monitoring_event(
+                user_id="owner-lock",
+                event_type="unsupported_ratio",
+            )["id"]
+        )
+
+    def capture_high_water() -> None:
+        snapshot_started.set()
+        captured["id"] = db.get_claims_monitoring_event_high_water(user_id="owner-lock")
+        snapshot_finished.set()
+
+    insert_thread = threading.Thread(target=insert_event, name="claims-insert")
+    snapshot_thread = threading.Thread(target=capture_high_water, name="claims-snapshot")
+    try:
+        insert_thread.start()
+        assert insert_executed.wait(timeout=5)
+        snapshot_thread.start()
+        assert snapshot_started.wait(timeout=5)
+        assert snapshot_finished.wait(timeout=0.2) is False
+        release_insert.set()
+        insert_thread.join(timeout=5)
+        snapshot_thread.join(timeout=5)
+
+        assert not insert_thread.is_alive()
+        assert not snapshot_thread.is_alive()
+        assert captured["id"] == inserted["id"]
+    finally:
+        release_insert.set()
+        insert_thread.join(timeout=5)
+        snapshot_thread.join(timeout=5)
+        db.close_connection()
 
 
 def test_list_claims_monitoring_events_filters_and_preserves_created_at_order(
@@ -378,5 +530,393 @@ def test_has_successful_claims_monitoring_event_delivery_checks_bounded_recent_e
             alert_id=3,
             channel="slack",
         ) is False
+    finally:
+        db.close_connection()
+
+
+def test_list_claims_monitoring_events_page_uses_paired_keyset_without_gaps(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-page.db")
+    timestamp = "2026-08-08T12:00:00.000Z"
+    db._get_current_utc_timestamp_str = lambda: timestamp  # type: ignore[method-assign]
+    try:
+        wanted_ids = []
+        for payload in ('{"index":1}', '{"index":2}', '{"index":3}', '{"index":4}'):
+            row = db.insert_claims_monitoring_event(
+                user_id="1",
+                event_type="unsupported_ratio",
+                severity="warning",
+                payload_json=payload,
+            )
+            wanted_ids.append(int(row["id"]))
+        db.insert_claims_monitoring_event(
+            user_id="2",
+            event_type="unsupported_ratio",
+            severity="warning",
+            payload_json='{"owner":2}',
+        )
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="webhook_delivery",
+            severity="info",
+            payload_json='{"filtered":true}',
+        )
+
+        assert (
+            db.list_claims_monitoring_events_page.__func__
+            is claims_monitoring_event_ops.list_claims_monitoring_events_page
+        )
+        first = db.list_claims_monitoring_events_page(
+            user_id="1",
+            event_type="unsupported_ratio",
+            severity="warning",
+            start_time=timestamp,
+            end_time=timestamp,
+            limit=2,
+        )
+        second = db.list_claims_monitoring_events_page(
+            user_id="1",
+            event_type="unsupported_ratio",
+            severity="warning",
+            start_time=timestamp,
+            end_time=timestamp,
+            after_created_at=first[-1]["created_at"],
+            after_id=int(first[-1]["id"]),
+            limit=2,
+        )
+
+        rows = first + second
+        assert [int(row["id"]) for row in rows] == wanted_ids
+        assert [int(row["id"]) for row in rows] == sorted(int(row["id"]) for row in rows)
+        assert all(row["user_id"] == "1" for row in rows)
+        assert all(set(row) == {"id", "user_id", "created_at"} for row in rows)
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_payload_scan_and_fetch_are_byte_bounded_and_owner_scoped(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-payload-bound.db")
+    payload = '{"text":"東京"}'
+    payload_size = len(payload.encode("utf-8"))
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            severity="warning",
+            payload_json=payload,
+        )
+
+        metadata = db.list_claims_monitoring_events_page(user_id="1", limit=1)
+
+        assert len(metadata) == 1
+        assert set(metadata[0]) == {"id", "user_id", "created_at"}
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="2",
+            event_id=int(event["id"]),
+            max_bytes=payload_size,
+        ) == {}
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=payload_size - 1,
+        ) == {
+            "payload_json": None,
+            "payload_size_bytes": payload_size,
+        }
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=payload_size,
+        ) == {
+            "payload_json": payload,
+            "payload_size_bytes": payload_size,
+        }
+        assert db.list_claims_monitoring_events_page(
+            user_id="1",
+            provider="missing",
+            limit=1,
+        ) == []
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_export_page_omits_unbounded_text_metadata(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-fixed-export-page.db")
+    try:
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="e" * 70_000,
+            severity="s" * 70_000,
+            payload_json="{}",
+        )
+
+        rows = db.list_claims_monitoring_events_page(user_id="1", limit=1)
+
+        assert len(rows) == 1
+        assert set(rows[0]) == {"id", "user_id", "created_at"}
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_filter_flags_payload_above_source_budget(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-filter-source-bound.db")
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            payload_json=" " * 80_000 + '{"provider":"local"}',
+        )
+
+        rows = db.list_claims_monitoring_events_page(
+            user_id="1",
+            provider="local",
+            max_filter_source_bytes=1024,
+            limit=1,
+        )
+
+        assert rows == [
+            {
+                "id": event["id"],
+                "user_id": "1",
+                "created_at": event["created_at"],
+                "filter_payload_oversized": 1,
+            }
+        ]
+    finally:
+        db.close_connection()
+
+
+def test_postgres_claims_monitoring_event_filter_checks_size_before_json_parse() -> None:
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class _Cursor:
+        def fetchall(self) -> list[dict[str, object]]:
+            return []
+
+    class _FakePostgresDB:
+        backend_type = BackendType.POSTGRESQL
+
+        def execute_query(
+            self,
+            sql: str,
+            params: tuple[object, ...],
+        ) -> _Cursor:
+            calls.append((sql, params))
+            return _Cursor()
+
+    assert claims_monitoring_event_ops.list_claims_monitoring_events_page(
+        _FakePostgresDB(),
+        user_id="1",
+        provider="local",
+        model="model-a",
+        max_filter_source_bytes=4096,
+        limit=10,
+    ) == []
+
+    sql, params = calls[0]
+    assert (
+        "CASE WHEN octet_length(COALESCE(payload_json, '')) > ? THEN 1 "
+        "ELSE CASE WHEN CASE WHEN json_typeof"
+    ) in sql
+    assert params == (4096, "1", 4096, "local", "model-a", 10)
+
+
+def test_claims_monitoring_event_export_data_bounds_metadata_with_payload(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-export-data-bound.db")
+    event_type = "e" * 70_000
+    severity = "warning"
+    payload = "{}"
+    source_size = len((event_type + severity + payload).encode("utf-8"))
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type=event_type,
+            severity=severity,
+            payload_json=payload,
+        )
+
+        assert db.get_claims_monitoring_event_export_data_bounded(
+            user_id="2",
+            event_id=int(event["id"]),
+            max_bytes=16,
+        ) == {}
+        assert db.get_claims_monitoring_event_export_data_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=16,
+        ) == {
+            "event_type": None,
+            "severity": None,
+            "payload_json": None,
+            "export_data_size_bytes": source_size,
+        }
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_payload_bound_uses_canonical_unicode_bytes(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-escaped-unicode.db")
+    escaped_payload = '{"text":"\\u6771\\u4eac"}'
+    canonical_payload = '{"text":"東京"}'
+    canonical_size = len(canonical_payload.encode("utf-8"))
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unicode",
+            payload_json=escaped_payload,
+        )
+
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=canonical_size - 1,
+        ) == {
+            "payload_json": None,
+            "payload_size_bytes": canonical_size,
+        }
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=canonical_size,
+        ) == {
+            "payload_json": canonical_payload,
+            "payload_size_bytes": canonical_size,
+        }
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_payload_bound_rejects_oversized_raw_source_before_normalizing(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-raw-source-bound.db")
+    raw_payload = (" " * 70_000) + "{}"
+    try:
+        event = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="oversized-raw-source",
+            payload_json=raw_payload,
+        )
+
+        assert db.get_claims_monitoring_event_payload_bounded(
+            user_id="1",
+            event_id=int(event["id"]),
+            max_bytes=16,
+        ) == {
+            "payload_json": None,
+            "payload_size_bytes": len(raw_payload.encode("utf-8")),
+        }
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.parametrize("filter_name", ["event_type", "severity", "provider", "model"])
+def test_claims_monitoring_event_page_applies_empty_scalar_filters(
+    tmp_path: Path,
+    filter_name: str,
+) -> None:
+    db = _make_db(tmp_path, f"claims-monitoring-event-empty-{filter_name}.db")
+    try:
+        empty = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="",
+            severity="",
+            payload_json='{"provider":"","model":""}',
+        )
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="nonempty",
+            severity="nonempty",
+            payload_json='{"provider":"nonempty","model":"nonempty"}',
+        )
+
+        rows = db.list_claims_monitoring_events_page(
+            user_id="1",
+            **{filter_name: ""},
+        )
+
+        assert [row["id"] for row in rows] == [empty["id"]]
+    finally:
+        db.close_connection()
+
+
+def test_claims_monitoring_event_page_filters_only_string_provider_and_model_values(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-string-filters.db")
+    try:
+        non_string = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            payload_json='{"provider":true,"model":7}',
+        )
+        wanted = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            payload_json='{"provider":"1","model":"7"}',
+        )
+
+        rows = db.list_claims_monitoring_events_page(
+            user_id="1",
+            provider="1",
+            model="7",
+            limit=10,
+        )
+
+        assert [row["id"] for row in rows] == [wanted["id"]]
+        assert non_string["id"] != wanted["id"]
+    finally:
+        db.close_connection()
+
+
+def test_list_claims_monitoring_events_page_requires_both_cursor_parts(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-page-cursor.db")
+    try:
+        with pytest.raises(ValueError, match="after_created_at and after_id"):
+            db.list_claims_monitoring_events_page(
+                user_id="1",
+                after_created_at="2026-08-08T12:00:00.000Z",
+            )
+        with pytest.raises(ValueError, match="after_created_at and after_id"):
+            db.list_claims_monitoring_events_page(user_id="1", after_id=1)
+    finally:
+        db.close_connection()
+
+
+def test_list_claims_monitoring_events_page_clamps_limit_to_one_through_one_thousand(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-page-limit.db")
+    calls: list[tuple[object, ...]] = []
+
+    class _Cursor:
+        def fetchall(self) -> list[object]:
+            return []
+
+    def _capture_query(_sql: str, params: tuple[object, ...]) -> _Cursor:
+        calls.append(params)
+        return _Cursor()
+
+    try:
+        monkeypatch.setattr(db, "execute_query", _capture_query)
+
+        assert db.list_claims_monitoring_events_page(user_id="1", limit=0) == []
+        assert calls[-1][-1] == 1
+        assert db.list_claims_monitoring_events_page(user_id="1", limit=1001) == []
+        assert calls[-1][-1] == 1000
     finally:
         db.close_connection()

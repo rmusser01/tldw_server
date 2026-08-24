@@ -9,16 +9,18 @@ from typing import Any
 
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int, jobs_manager_from_env
+from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 
 from .claims_job_contracts import (
     CLAIMS_DELIVER_ALERT_JOB_TYPE,
     CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
+    CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
     CLAIMS_JOB_PAYLOAD_VERSION,
     CLAIMS_JOBS_DEFAULT_QUEUE,
     CLAIMS_JOBS_DOMAIN,
     CLAIMS_REBUILD_MEDIA_JOB_TYPE,
     validate_alert_delivery_payload,
+    validate_analytics_export_payload,
     validate_rebuild_media_payload,
     validate_review_notification_payload,
 )
@@ -53,6 +55,15 @@ def claims_jobs_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
     return _truthy(_setting_value("CLAIMS_JOBS_ENABLED", False, settings_obj))
 
 
+def claims_analytics_export_jobs_enabled(
+    settings_obj: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether Claims analytics exports should enqueue through Jobs."""
+    return claims_jobs_enabled(settings_obj) and _truthy(
+        _setting_value("CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED", False, settings_obj)
+    )
+
+
 def claims_jobs_worker_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
     """Return whether the Claims Jobs worker should start during app lifecycle."""
     return _truthy(_setting_value("CLAIMS_JOBS_WORKER_ENABLED", False, settings_obj))
@@ -69,9 +80,20 @@ def _max_retries(
     default: int = 3,
     settings_obj: Mapping[str, Any] | None = None,
 ) -> int:
-    """Resolve a non-negative max retry count for a Claims job type."""
-    retries = coerce_int(_setting_value(key, None, settings_obj), default)
-    return int(default) if retries < 0 else retries
+    """Resolve a retry count within the Jobs schema's inclusive 0..100 range."""
+    value = _setting_value(key, None, settings_obj)
+    if isinstance(value, bool):
+        return int(default)
+    if isinstance(value, int):
+        retries = value
+    elif isinstance(value, str):
+        normalized = value.strip()
+        if not normalized or not normalized.isascii() or not normalized.isdigit():
+            return int(default)
+        retries = int(normalized, 10)
+    else:
+        return int(default)
+    return retries if 0 <= retries <= 100 else int(default)
 
 
 def _manager(job_manager: JobManager | None = None) -> JobManager:
@@ -123,6 +145,42 @@ def enqueue_claims_rebuild_media(
         idempotency_key=idempotency_key,
     )
     return _refresh(manager, created)
+
+
+def enqueue_claims_analytics_export(
+    *,
+    owner_user_id: str,
+    export_id: str,
+    job_manager: JobManager | None = None,
+    settings_obj: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create one analytics export Job and return its acceptance result directly."""
+    payload = validate_analytics_export_payload(
+        {
+            "version": CLAIMS_JOB_PAYLOAD_VERSION,
+            "owner_user_id": owner_user_id,
+            "export_id": export_id,
+        }
+    )
+    manager = _manager(job_manager)
+    return manager.create_job(
+        domain=CLAIMS_JOBS_DOMAIN,
+        queue=claims_jobs_queue(settings_obj),
+        job_type=CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
+        payload=payload,
+        owner_user_id=payload["owner_user_id"],
+        priority=5,
+        max_retries=_max_retries(
+            "CLAIMS_JOBS_MAX_RETRIES_ANALYTICS_EXPORT",
+            3,
+            settings_obj,
+        ),
+        batch_group=f"claims-analytics-export:{payload['export_id']}",
+        idempotency_key=(
+            f"claims:analytics_export:{payload['owner_user_id']}:"
+            f"{payload['export_id']}"
+        ),
+    )
 
 
 def enqueue_claims_review_notification(
