@@ -1,3 +1,5 @@
+import asyncio
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +9,8 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.Writing import note_title as note_title_module
+
+pytestmark = pytest.mark.integration
 
 
 class _CountingPromptsDatabase(PromptsDatabase):
@@ -159,6 +163,48 @@ def test_create_note_uses_one_owner_scoped_title_prompt(
     assert response.json()["title"] == "Saved prompt title"
     assert prompts_db.read_definition_ids == ["notes.title.generate"]
     assert adapter.payloads[0]["system_message"] == "Write titles in the saved account style."
+
+
+def test_title_prompt_resolution_runs_off_loop_and_closes_worker_connection(
+    client_user_only: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts_db = _save_title_override(client_user_only)
+    _enable_llm(monkeypatch, titles=["Nonblocking title"])
+
+    from tldw_Server_API.app.api.v1.endpoints import notes as notes_module
+
+    real_resolve = notes_module.resolve_service_prompt
+    real_close = prompts_db.close_connection
+    resolution_threads: list[int] = []
+    closed_threads: list[int] = []
+
+    def resolve_off_event_loop(db, definition_id):
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        resolution_threads.append(threading.get_ident())
+        return real_resolve(db, definition_id)
+
+    def record_close() -> None:
+        closed_threads.append(threading.get_ident())
+        real_close()
+
+    monkeypatch.setattr(notes_module, "resolve_service_prompt", resolve_off_event_loop)
+    monkeypatch.setattr(prompts_db, "close_connection", record_close)
+
+    response = client_user_only.post(
+        "/api/v1/notes/",
+        json={
+            "content": "Content resolved without blocking the request loop",
+            "auto_title": True,
+            "title_strategy": "llm",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["title"] == "Nonblocking title"
+    assert len(resolution_threads) == 1
+    assert resolution_threads[0] in closed_threads
 
 
 def test_suggest_title_uses_one_owner_scoped_title_prompt(

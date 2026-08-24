@@ -270,7 +270,14 @@ async def _resolve_note_title_service_prompt(
     if options.strategy not in ("llm", "llm_fallback"):
         return None
     db = await get_prompts_db_for_user(request, current_user)
-    return resolve_service_prompt(db, _NOTES_TITLE_SERVICE_PROMPT_ID)
+
+    def resolve_and_close() -> ResolvedServicePrompt:
+        try:
+            return resolve_service_prompt(db, _NOTES_TITLE_SERVICE_PROMPT_ID)
+        finally:
+            db.close_connection()
+
+    return await asyncio.to_thread(resolve_and_close)
 
 
 def _generate_note_title_with_service_prompt(

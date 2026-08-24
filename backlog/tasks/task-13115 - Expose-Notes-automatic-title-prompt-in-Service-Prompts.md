@@ -4,7 +4,7 @@ title: Expose Notes automatic-title prompt in Service Prompts
 status: Done
 assignee: []
 created_date: '2026-08-24 04:47'
-updated_date: '2026-08-24 05:48'
+updated_date: '2026-08-24 06:07'
 labels:
   - service-prompts
   - notes
@@ -44,6 +44,8 @@ Implement test-first in three bounded stages: register the definition and metada
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented test-first. Verification: backend Service Prompt/title matrix 86/86; complete Notes title integration 12/12; legacy Notes title regressions 3/3; shared UI Settings/domain 143/143; extension TypeScript compile; i18n duplicate/coverage/sync dry-run; focused Ruff and ESLint; Bandit zero findings; git diff --check clean. Independent final code review found no remaining actionable issues. Repo-wide tldw-frontend typecheck remains outside this task's gate because origin/dev has unrelated settings navigation and skills-certification baseline errors; the extension compile covers the touched shared UI.
+
+Post-rebase Qodo review: moved the synchronous title Service Prompt lookup off the async request loop and retired the same worker thread's SQLite connection; categorized the Notes integration module with the accepted integration marker. Added a red/green regression covering both nonblocking dispatch and worker cleanup. Verification: 100/100 focused backend Service Prompt, Notes title, and legacy compatibility tests; focused Ruff; Bandit zero findings; git diff --check clean.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
