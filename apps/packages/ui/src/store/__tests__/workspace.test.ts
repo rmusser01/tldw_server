@@ -1456,9 +1456,11 @@ describe("workspace store snapshot persistence", () => {
       )
     }
 
-    const setItemSpy = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw quotaError
-    })
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw quotaError
+      })
     window.addEventListener(
       WORKSPACE_STORAGE_QUOTA_EVENT,
       onQuotaExceeded as EventListener
