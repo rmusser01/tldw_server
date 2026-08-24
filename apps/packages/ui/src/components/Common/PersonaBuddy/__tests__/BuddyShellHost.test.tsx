@@ -1697,6 +1697,123 @@ describe("BuddyShellHost", () => {
     expect(within(personaModes).getByRole("radio", { name: "Off" })).toBeChecked()
   })
 
+  it("lets the only layered Persona read settle after a global save completes", async () => {
+    const initialGlobalRead = deferred<{
+      ambient_mode: "expressive"
+      version: number
+      stored: boolean
+    }>()
+    const initialPersonaRead = deferred<{
+      ambient_mode: null
+      version: number
+      stored: boolean
+    }>()
+    preferenceMocks.getBuddyPreferences.mockReturnValue(initialGlobalRead.promise)
+    preferenceMocks.getPersonaBuddyPreferences.mockReturnValue(initialPersonaRead.promise)
+    preferenceMocks.updateBuddyPreferences.mockResolvedValue({
+      ambient_mode: "roaming",
+      version: 2,
+      stored: true
+    })
+
+    renderSwitchableHost(personaContext("persona-1"), "web")
+    fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Buddy behavior" }))
+        .getByRole("radio", { name: "Roaming" })
+    )
+    await waitFor(() => {
+      expect(preferenceMocks.updateBuddyPreferences).toHaveBeenCalledWith({
+        ambient_mode: "roaming",
+        expected_version: null
+      })
+    })
+
+    await act(async () => {
+      initialGlobalRead.resolve({ ambient_mode: "expressive", version: 1, stored: true })
+      initialPersonaRead.resolve({ ambient_mode: null, version: 1, stored: false })
+      await Promise.all([initialGlobalRead.promise, initialPersonaRead.promise])
+    })
+
+    expect(screen.getByTestId("persona-buddy-effective-mode")).toHaveTextContent(
+      "Effective: Roaming"
+    )
+    expect(
+      within(screen.getByRole("group", { name: "For this Persona" }))
+        .getByRole("radio", { name: "Use global" })
+    ).toBeChecked()
+  })
+
+  it("keeps a completed global save across a Persona switch and a stale layered global read", async () => {
+    const globalUpdate = deferred<{
+      ambient_mode: "roaming"
+      version: number
+      stored: boolean
+    }>()
+    const personaBGlobalRead = deferred<{
+      ambient_mode: "expressive"
+      version: number
+      stored: boolean
+    }>()
+    const personaBRead = deferred<{
+      ambient_mode: null
+      version: number
+      stored: boolean
+    }>()
+    preferenceMocks.getBuddyPreferences
+      .mockResolvedValueOnce({ ambient_mode: "expressive", version: 1, stored: true })
+      .mockReturnValueOnce(personaBGlobalRead.promise)
+    preferenceMocks.getPersonaBuddyPreferences.mockImplementation(
+      (personaId: string) => personaId === "persona-1"
+        ? Promise.resolve({ ambient_mode: null, version: 1, stored: false })
+        : personaBRead.promise
+    )
+    preferenceMocks.updateBuddyPreferences.mockReturnValue(globalUpdate.promise)
+
+    const view = renderSwitchableHost(personaContext("persona-1"), "web")
+    fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole("group", { name: "For this Persona" }))
+          .getByRole("radio", { name: "Use global" })
+      ).toBeChecked()
+    })
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Buddy behavior" }))
+        .getByRole("radio", { name: "Roaming" })
+    )
+    await waitFor(() => {
+      expect(preferenceMocks.updateBuddyPreferences).toHaveBeenCalledTimes(1)
+    })
+
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="web" context={personaContext("persona-2")} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    await waitFor(() => {
+      expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledWith("persona-2")
+    })
+
+    await act(async () => {
+      globalUpdate.resolve({ ambient_mode: "roaming", version: 2, stored: true })
+      await globalUpdate.promise
+      personaBGlobalRead.resolve({ ambient_mode: "expressive", version: 1, stored: true })
+      personaBRead.resolve({ ambient_mode: null, version: 1, stored: false })
+      await Promise.all([personaBGlobalRead.promise, personaBRead.promise])
+    })
+
+    expect(screen.getByTestId("persona-buddy-effective-mode")).toHaveTextContent(
+      "Effective: Roaming"
+    )
+    expect(
+      within(screen.getByRole("group", { name: "For this Persona" }))
+        .getByRole("radio", { name: "Use global" })
+    ).toBeChecked()
+  })
+
   it("ignores a delayed Persona preference read after focus moves to another Persona", async () => {
     const personaA = deferred<{
       ambient_mode: "roaming"

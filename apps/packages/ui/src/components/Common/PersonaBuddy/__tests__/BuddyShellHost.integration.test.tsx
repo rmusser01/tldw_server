@@ -9,13 +9,54 @@ import {
 } from "@/store/persona-buddy-shell"
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
-import { BuddyShellRenderContextProvider } from "../BuddyShellRenderContext"
+import {
+  BuddyShellRenderContextProvider,
+  useSetBuddyShellRenderContext
+} from "../BuddyShellRenderContext"
 import { BuddyShellHost } from "../BuddyShellHost"
 
 const mocks = vi.hoisted(() => ({
   reducedMotion: false,
-  visualPack: null as Record<string, unknown> | null
+  visualPack: null as Record<string, unknown> | null,
+  acquireAsset: vi.fn(),
+  engineReactions: [] as Array<{
+    trigger: string
+    personaId: string | null
+    packId: string | null
+    generation: number
+  }>
 }))
+
+vi.mock("../personaCompanionEngine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../personaCompanionEngine")>()
+  return {
+    ...actual,
+    createPersonaCompanionEngine: (...args: Parameters<typeof actual.createPersonaCompanionEngine>) => {
+      const engine = actual.createPersonaCompanionEngine(...args)
+      const update = engine.update.bind(engine)
+      const react = engine.react.bind(engine)
+      let personaId: string | null = null
+      let packId: string | null = null
+      return {
+        ...engine,
+        update(input: Parameters<typeof engine.update>[0]) {
+          personaId = input.personaId
+          packId = input.packId
+          update(input)
+        },
+        react(trigger: Parameters<typeof engine.react>[0]) {
+          mocks.engineReactions.push({
+            trigger,
+            personaId,
+            packId,
+            generation: engine.getSnapshot().generation
+          })
+          return react(trigger)
+        }
+      }
+    }
+  }
+})
 
 vi.mock("@/hooks/useMediaQuery", () => ({
   useDesktop: () => true,
@@ -46,11 +87,7 @@ vi.mock("@/services/persona-buddy", () => ({
 }))
 
 vi.mock("@/services/persona-visual-assets", () => ({
-  acquirePersonaVisualAsset: vi.fn(async (asset: { id: string; mime_type: string }) => ({
-    url: `blob:${asset.id}`,
-    mimeType: asset.mime_type,
-    release: vi.fn()
-  }))
+  acquirePersonaVisualAsset: mocks.acquireAsset
 }))
 
 vi.mock("@/services/persona-visuals", () => ({
@@ -194,6 +231,27 @@ const renderRealHost = () =>
     </MemoryRouter>
   )
 
+const ControlledRealHost: React.FC<{
+  captureSetContext: (
+    setContext: ReturnType<typeof useSetBuddyShellRenderContext>
+  ) => void
+}> = ({ captureSetContext }) => {
+  captureSetContext(useSetBuddyShellRenderContext())
+  return <BuddyShellHost root="web" />
+}
+
+const renderControllableRealHost = () => {
+  let setContext!: ReturnType<typeof useSetBuddyShellRenderContext>
+  const view = render(
+    <MemoryRouter>
+      <BuddyShellRenderContextProvider initialContext={context}>
+        <ControlledRealHost captureSetContext={(next) => { setContext = next }} />
+      </BuddyShellRenderContextProvider>
+    </MemoryRouter>
+  )
+  return { ...view, setContext: (next: typeof context) => setContext(next) }
+}
+
 describe("BuddyShellHost real companion integration", () => {
   let rectSpy: ReturnType<typeof vi.spyOn>
   let originalWidth: number
@@ -203,6 +261,14 @@ describe("BuddyShellHost real companion integration", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 300 })
     mocks.reducedMotion = false
     mocks.visualPack = buildPack()
+    mocks.engineReactions = []
+    mocks.acquireAsset.mockReset().mockImplementation(
+      async (asset: { id: string; mime_type: string }) => ({
+        url: `blob:${asset.id}`,
+        mimeType: asset.mime_type,
+        release: vi.fn()
+      })
+    )
     document.body.innerHTML = '<div id="tldw-portal-root"></div>'
     usePersonaBuddyShellStore.setState({
       isOpen: false,
@@ -300,6 +366,61 @@ describe("BuddyShellHost real companion integration", () => {
         "reaction.drag"
       )
     })
+  })
+
+  it("drops a completed drag when the real controller is replaced by another Persona", async () => {
+    const view = renderControllableRealHost()
+    const buddy = await screen.findByRole("button", { name: "Toggle buddy for Persona One" })
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "idle"
+      )
+    })
+    fireEvent.pointerDown(buddy, {
+      button: 0,
+      pointerId: 34,
+      clientX: 20,
+      clientY: 100
+    })
+    fireEvent.pointerMove(window, {
+      pointerId: 34,
+      clientX: 40,
+      clientY: 100
+    })
+    await act(async () => {})
+
+    const pointerUp = new Event("pointerup")
+    Object.defineProperty(pointerUp, "pointerId", { value: 34 })
+    act(() => {
+      window.dispatchEvent(pointerUp)
+      mocks.visualPack = {
+        ...buildPack(),
+        id: "pack-persona-2",
+        persona_id: "persona-2"
+      }
+      view.setContext({
+        ...context,
+        active_persona_id: "persona-2",
+        buddy_summary: {
+          ...context.buddy_summary,
+          persona_name: "Persona Two"
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", {
+        name: "Toggle buddy for Persona Two"
+      })).toBeInTheDocument()
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "idle"
+      )
+    })
+    expect(mocks.engineReactions).not.toContainEqual(
+      expect.objectContaining({ trigger: "drag", personaId: "persona-2" })
+    )
   })
 
   it("reactively re-clamps transient movement on resize without persisting it", async () => {

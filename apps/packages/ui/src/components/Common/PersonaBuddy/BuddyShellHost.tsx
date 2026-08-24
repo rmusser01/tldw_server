@@ -67,6 +67,11 @@ type DragState = {
   target: HTMLButtonElement
 }
 
+type PendingDragReaction = {
+  interactionIdentity: string
+  generation: number
+}
+
 type ResolvedPersonaShellState = {
   hasTargetPersona: boolean
   activePersonaId: string | null
@@ -205,7 +210,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 }) => {
   const dockRef = React.useRef<HTMLDivElement | null>(null)
   const dragStateRef = React.useRef<DragState | null>(null)
-  const pendingDragReactionRef = React.useRef(false)
+  const pendingDragReactionRef = React.useRef<PendingDragReaction | null>(null)
   const clickTimerRef = React.useRef<number | null>(null)
   const nudgeTimerRef = React.useRef<number | null>(null)
   const [dragPosition, setDragPosition] = React.useState<PersonaBuddyShellPosition | null>(null)
@@ -321,7 +326,10 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   const [preferenceReadFailed, setPreferenceReadFailed] = React.useState(true)
   const [ambientPreferenceMessage, setAmbientPreferenceMessage] =
     React.useState<string | null>(null)
-  const preferenceRequestGenerationRef = React.useRef(0)
+  const preferenceReadGenerationRef = React.useRef(0)
+  const globalPreferenceMutationGenerationRef = React.useRef(0)
+  const pendingGlobalPreferenceMutationRef = React.useRef<number | null>(null)
+  const personaPreferenceMutationGenerationRef = React.useRef(0)
   const activePreferencePersonaId = String(
     resolvedPersona.activePersonaId ?? ""
   ).trim()
@@ -331,17 +339,25 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     personaPreferenceResult?.personaId === activePreferencePersonaId
       ? personaPreferenceResult.preferences
       : null
-  const isCurrentPreferenceRequest = React.useCallback(
+  const isCurrentPreferenceRead = React.useCallback(
     (personaId: string, generation: number) =>
       activePreferencePersonaIdRef.current === personaId &&
-      preferenceRequestGenerationRef.current === generation,
+      preferenceReadGenerationRef.current === generation,
+    []
+  )
+  const isCurrentPersonaPreferenceMutation = React.useCallback(
+    (personaId: string, generation: number) =>
+      activePreferencePersonaIdRef.current === personaId &&
+      personaPreferenceMutationGenerationRef.current === generation,
     []
   )
 
   const refreshAmbientPreferences = React.useCallback(async (
     personaId = activePreferencePersonaId
   ) => {
-    const generation = ++preferenceRequestGenerationRef.current
+    const generation = ++preferenceReadGenerationRef.current
+    const globalMutationGeneration = globalPreferenceMutationGenerationRef.current
+    const globalMutationWasPending = pendingGlobalPreferenceMutationRef.current !== null
     if (!personaId) {
       setPersonaPreferenceResult(null)
       setPreferenceReadFailed(true)
@@ -352,18 +368,23 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
         getBuddyPreferences(),
         getPersonaBuddyPreferences(personaId)
       ])
-      if (!isCurrentPreferenceRequest(personaId, generation)) return false
-      setGlobalPreferences(globalResult)
+      if (!isCurrentPreferenceRead(personaId, generation)) return false
+      if (
+        !globalMutationWasPending &&
+        globalPreferenceMutationGenerationRef.current === globalMutationGeneration
+      ) {
+        setGlobalPreferences(globalResult)
+      }
       setPersonaPreferenceResult({ personaId, preferences: personaResult })
       setPreferenceReadFailed(false)
       return true
     } catch {
-      if (isCurrentPreferenceRequest(personaId, generation)) {
+      if (isCurrentPreferenceRead(personaId, generation)) {
         setPreferenceReadFailed(true)
       }
       return false
     }
-  }, [activePreferencePersonaId, isCurrentPreferenceRequest])
+  }, [activePreferencePersonaId, isCurrentPreferenceRead])
 
   React.useEffect(() => {
     setPersonaPreferenceResult(null)
@@ -381,9 +402,9 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 
   const handleGlobalAmbientModeChange = React.useCallback(
     async (mode: PersonaAmbientMode) => {
-      const personaId = activePreferencePersonaId
-      if (!personaId) return
-      const generation = ++preferenceRequestGenerationRef.current
+      if (!activePreferencePersonaId) return
+      const generation = ++globalPreferenceMutationGenerationRef.current
+      pendingGlobalPreferenceMutationRef.current = generation
       const previous = globalPreferences
       setGlobalPreferences({
         ambient_mode: mode,
@@ -396,25 +417,31 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
           ambient_mode: mode,
           expected_version: previous.version
         })
-        if (isCurrentPreferenceRequest(personaId, generation)) {
+        if (globalPreferenceMutationGenerationRef.current === generation) {
           setGlobalPreferences(updated)
         }
       } catch (error) {
-        if (!isCurrentPreferenceRequest(personaId, generation)) return
+        if (globalPreferenceMutationGenerationRef.current !== generation) return
         if ((error as { status?: number })?.status === 409) {
-          if (await refreshAmbientPreferences(personaId)) {
+          if (pendingGlobalPreferenceMutationRef.current === generation) {
+            pendingGlobalPreferenceMutationRef.current = null
+          }
+          if (await refreshAmbientPreferences(activePreferencePersonaIdRef.current)) {
             setAmbientPreferenceMessage("Settings changed elsewhere. Latest values were loaded.")
           }
         } else {
           setGlobalPreferences(previous)
           setAmbientPreferenceMessage("Buddy settings could not be saved.")
         }
+      } finally {
+        if (pendingGlobalPreferenceMutationRef.current === generation) {
+          pendingGlobalPreferenceMutationRef.current = null
+        }
       }
     },
     [
       activePreferencePersonaId,
       globalPreferences,
-      isCurrentPreferenceRequest,
       refreshAmbientPreferences
     ]
   )
@@ -424,7 +451,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       const personaId = activePreferencePersonaId
       const previous = personaPreferences
       if (!personaId || !previous) return
-      const generation = ++preferenceRequestGenerationRef.current
+      const generation = ++personaPreferenceMutationGenerationRef.current
       setPersonaPreferenceResult({
         personaId,
         preferences: {
@@ -439,11 +466,11 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
           ambient_mode: mode,
           expected_version: previous.version
         })
-        if (isCurrentPreferenceRequest(personaId, generation)) {
+        if (isCurrentPersonaPreferenceMutation(personaId, generation)) {
           setPersonaPreferenceResult({ personaId, preferences: updated })
         }
       } catch (error) {
-        if (!isCurrentPreferenceRequest(personaId, generation)) return
+        if (!isCurrentPersonaPreferenceMutation(personaId, generation)) return
         if ((error as { status?: number })?.status === 409) {
           if (await refreshAmbientPreferences(personaId)) {
             setAmbientPreferenceMessage("Settings changed elsewhere. Latest values were loaded.")
@@ -456,7 +483,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     },
     [
       activePreferencePersonaId,
-      isCurrentPreferenceRequest,
+      isCurrentPersonaPreferenceMutation,
       personaPreferences,
       refreshAmbientPreferences
     ]
@@ -622,11 +649,16 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     react: companionReact,
     completeAction: completeCompanionAction
   } = companion
-  const interactionIdentity = `${activePreferencePersonaId}:${visualPack?.id ?? ""}:${
+  const dragInteractionIdentity = `${activePreferencePersonaId}:${visualPack?.id ?? ""}:${
     visualPack?.revision_number ?? visualPack?.version ?? ""
-  }:${companionSnapshot.generation}:${visualState}:${visibility}:${reducedMotion ? 1 : 0}`
+  }:${visualState}:${visibility}:${reducedMotion ? 1 : 0}`
+  const interactionIdentity = `${dragInteractionIdentity}:${companionSnapshot.generation}`
   const interactionIdentityRef = React.useRef(interactionIdentity)
   interactionIdentityRef.current = interactionIdentity
+  const dragInteractionIdentityRef = React.useRef(dragInteractionIdentity)
+  dragInteractionIdentityRef.current = dragInteractionIdentity
+  const companionGenerationRef = React.useRef(companionSnapshot.generation)
+  companionGenerationRef.current = companionSnapshot.generation
 
   const clearDeferredInteractions = React.useCallback(() => {
     if (clickTimerRef.current !== null) {
@@ -643,6 +675,15 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   React.useEffect(() => {
     clearDeferredInteractions()
   }, [clearDeferredInteractions, interactionIdentity])
+
+  React.useEffect(() => {
+    if (
+      pendingDragReactionRef.current &&
+      pendingDragReactionRef.current.interactionIdentity !== dragInteractionIdentity
+    ) {
+      pendingDragReactionRef.current = null
+    }
+  }, [dragInteractionIdentity])
 
   const acknowledgeWithoutState = React.useCallback(() => {
     if (reducedMotion || visualState !== "idle") {
@@ -684,6 +725,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   const handleBuddyPointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       if (event.button !== 0) return
+      pendingDragReactionRef.current = null
       const startPosition = {
         x: position.x + companionSnapshot.transientOffsetX,
         y: position.y
@@ -739,14 +781,18 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       const drag = dragStateRef.current
       if (!drag || drag.pointerId !== event.pointerId) return
       drag.target.releasePointerCapture?.(drag.pointerId)
+      if (cancelled) {
+        pendingDragReactionRef.current = null
+      }
       if (drag.dragging) {
         setDragPosition(null)
         setIsDragging(false)
-        if (cancelled) {
-          pendingDragReactionRef.current = false
-        } else {
+        if (!cancelled) {
           setPosition(positionBucket, drag.currentPosition)
-          pendingDragReactionRef.current = true
+          pendingDragReactionRef.current = {
+            interactionIdentity: dragInteractionIdentityRef.current,
+            generation: companionGenerationRef.current
+          }
         }
       } else if (!cancelled) {
         scheduleBuddyClick()
@@ -766,19 +812,27 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   }, [positionBucket, scheduleBuddyClick, setPosition])
 
   React.useEffect(() => {
+    const pending = pendingDragReactionRef.current
+    if (!pending || isDragging || companionSnapshot.suspension === "drag") return
+    pendingDragReactionRef.current = null
     if (
-      pendingDragReactionRef.current &&
-      !isDragging &&
-      companionSnapshot.suspension !== "drag"
-    ) {
-      pendingDragReactionRef.current = false
-      reactToBuddy("drag")
-    }
-  }, [companionSnapshot.suspension, isDragging, reactToBuddy])
+      pending.interactionIdentity !== dragInteractionIdentity ||
+      companionSnapshot.generation < pending.generation ||
+      companionSnapshot.generation > pending.generation + 1
+    ) return
+    reactToBuddy("drag")
+  }, [
+    companionSnapshot.generation,
+    companionSnapshot.suspension,
+    dragInteractionIdentity,
+    isDragging,
+    reactToBuddy
+  ])
 
   React.useEffect(() => () => {
     if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current)
     if (nudgeTimerRef.current !== null) window.clearTimeout(nudgeTimerRef.current)
+    pendingDragReactionRef.current = null
   }, [])
 
   const handleBuddyKeyDown = React.useCallback(
