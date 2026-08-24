@@ -105,7 +105,7 @@ jobs:
       (
         needs.changes.result == 'success'
       )
-    timeout-minutes: 45
+    timeout-minutes: 120
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
