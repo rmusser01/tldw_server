@@ -2687,6 +2687,61 @@ class PersonaStateStore:
             "created_at": now,
         }
 
+    def get_persona_visual_pack_current_review(
+        self,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the owner-scoped review that authorizes the pack's current payload."""
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        row = self.execute_query(
+            """
+            SELECT r.*
+              FROM persona_visual_pack_reviews r
+              JOIN persona_visual_packs p
+                ON p.id = r.pack_id AND p.user_id = r.user_id
+             WHERE p.id = ? AND p.persona_id = ? AND p.user_id = ? AND p.deleted = ?
+               AND r.pack_version = CASE WHEN p.status = 'active' THEN p.version - 1 ELSE p.version END
+             ORDER BY r.reviewed_at DESC, r.id DESC
+             LIMIT 1
+            """,
+            (pack_id, persona_id, user_id, bool_cast(False)),
+        ).fetchone()
+        if not row:
+            return None
+        review = dict(row)
+        review["pack_version"] = int(review["pack_version"])
+        return review
+
+    def list_persona_visual_pack_current_reviews(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Return current authorizing reviews keyed by pack ID for one owned Persona."""
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        rows = self.execute_query(
+            """
+            SELECT r.*
+              FROM persona_visual_pack_reviews r
+              JOIN persona_visual_packs p
+                ON p.id = r.pack_id AND p.user_id = r.user_id
+             WHERE p.persona_id = ? AND p.user_id = ? AND p.deleted = ?
+               AND r.pack_version = CASE WHEN p.status = 'active' THEN p.version - 1 ELSE p.version END
+             ORDER BY r.pack_id ASC, r.reviewed_at DESC, r.id DESC
+            """,
+            (persona_id, user_id, bool_cast(False)),
+        ).fetchall()
+        reviews: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            review = dict(row)
+            review["pack_version"] = int(review["pack_version"])
+            reviews.setdefault(str(review["pack_id"]), review)
+        return reviews
+
     def update_persona_visual_pack_payload(
         self,
         *,

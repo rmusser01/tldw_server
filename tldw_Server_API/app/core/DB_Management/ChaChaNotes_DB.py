@@ -37762,6 +37762,8 @@ for _persona_state_store_method in (
     "list_persona_visual_packs",
     "get_active_persona_visual_pack",
     "create_persona_visual_pack_review",
+    "get_persona_visual_pack_current_review",
+    "list_persona_visual_pack_current_reviews",
     "update_persona_visual_pack_payload",
     "activate_persona_visual_pack",
     "deactivate_persona_visual_pack",

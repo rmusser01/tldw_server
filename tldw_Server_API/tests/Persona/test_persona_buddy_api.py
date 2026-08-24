@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -33,6 +35,81 @@ def persona_db(tmp_path):
     db = CharactersRAGDB(str(tmp_path / "persona_buddy_api.db"), client_id="persona-buddy-api-tests")
     yield db
     db.close_connection()
+
+
+async def _prepare_real_authnz_users(tmp_path, monkeypatch):
+    """Create isolated multi-user AuthNZ credentials for a real dependency-path test."""
+    db_path = tmp_path / "users.db"
+    original_env = {
+        name: os.environ.get(name)
+        for name in ("AUTH_MODE", "DATABASE_URL", "JWT_SECRET_KEY")
+    }
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("JWT_SECRET_KEY", "persona-buddy-auth-test-secret-0123456789")
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service, reset_jwt_service
+    from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
+
+    reset_settings()
+    reset_jwt_service()
+    await reset_db_pool()
+    await reset_users_db()
+    pool = await get_db_pool()
+    ensure_authnz_tables(db_path)
+    users_db = UsersDB(pool)
+    await users_db.initialize()
+    owner = await users_db.create_user(
+        username="persona-auth-owner",
+        email="persona-auth-owner@example.com",
+        password_hash="not-used-by-this-test",
+        is_verified=True,
+    )
+    other = await users_db.create_user(
+        username="persona-auth-other",
+        email="persona-auth-other@example.com",
+        password_hash="not-used-by-this-test",
+        is_verified=True,
+    )
+    key_manager = APIKeyManager(pool)
+    owner_key = (await key_manager.create_api_key(user_id=int(owner["id"]), name="persona-owner"))["key"]
+    other_key = (await key_manager.create_api_key(user_id=int(other["id"]), name="persona-other"))["key"]
+    jwt_service = get_jwt_service()
+    return {
+        "owner": owner,
+        "other": other,
+        "owner_key": owner_key,
+        "other_key": other_key,
+        "owner_token": jwt_service.create_access_token(
+            user_id=int(owner["id"]), username=str(owner["username"]), role=str(owner["role"])
+        ),
+        "other_token": jwt_service.create_access_token(
+            user_id=int(other["id"]), username=str(other["username"]), role=str(other["role"])
+        ),
+        "original_env": original_env,
+    }
+
+
+async def _restore_real_authnz_environment(state, monkeypatch) -> None:
+    """Close the isolated auth pool and invalidate setting caches after the test."""
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
+
+    await reset_db_pool()
+    await reset_users_db()
+    for name, value in state["original_env"].items():
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    reset_settings()
+    reset_jwt_service()
 
 
 def test_get_buddy_lazily_creates_for_preexisting_persona_without_row(persona_db: CharactersRAGDB):
@@ -449,3 +526,65 @@ def test_stale_persona_override_patch_returns_conflict_for_bearer_owner(
         )
 
     assert stale.status_code == 409, stale.text
+
+
+@pytest.mark.parametrize("invalid_version", [True, 1.0, "1"])
+def test_preference_expected_versions_reject_non_integer_json_values(
+    persona_db: CharactersRAGDB,
+    invalid_version: object,
+):
+    """Version fields must not coerce booleans, floats, or strings at the route boundary."""
+    with _client_for_user(1, persona_db) as client:
+        response = client.patch(
+            "/api/v1/persona/buddy/preferences",
+            json={"ambient_mode": "roaming", "expected_version": invalid_version},
+        )
+        assert response.status_code == 422, response.text
+
+        created = client.post("/api/v1/persona/profiles", json={"name": "Strict Override Persona"})
+        assert created.status_code == 201, created.text
+        override = client.patch(
+            f"/api/v1/persona/profiles/{created.json()['id']}/buddy/preferences",
+            json={"ambient_mode": "roaming", "expected_version": invalid_version},
+        )
+
+    assert override.status_code == 422, override.text
+
+
+@pytest.mark.asyncio
+async def test_real_api_key_and_bearer_authenticate_owner_and_hide_foreign_persona(
+    persona_db: CharactersRAGDB,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Exercise the real AuthNZ dependency for both supported credential headers."""
+    state = await _prepare_real_authnz_users(tmp_path, monkeypatch)
+    owner_id = str(state["owner"]["id"])
+    persona_id = persona_db.create_persona_profile({"user_id": owner_id, "name": "Real Auth Persona"})
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: persona_db
+    try:
+        with TestClient(fastapi_app) as client:
+            api_key_owner = client.get(
+                f"/api/v1/persona/profiles/{persona_id}/buddy",
+                headers={"X-API-KEY": state["owner_key"]},
+            )
+            api_key_other = client.get(
+                f"/api/v1/persona/profiles/{persona_id}/buddy",
+                headers={"X-API-KEY": state["other_key"]},
+            )
+            bearer_owner = client.get(
+                f"/api/v1/persona/profiles/{persona_id}/buddy",
+                headers={"Authorization": f"Bearer {state['owner_token']}"},
+            )
+            bearer_other = client.get(
+                f"/api/v1/persona/profiles/{persona_id}/buddy",
+                headers={"Authorization": f"Bearer {state['other_token']}"},
+            )
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        await _restore_real_authnz_environment(state, monkeypatch)
+
+    assert api_key_owner.status_code == 200, api_key_owner.text
+    assert api_key_other.status_code == 404, api_key_other.text
+    assert bearer_owner.status_code == 200, bearer_owner.text
+    assert bearer_other.status_code == 404, bearer_other.text

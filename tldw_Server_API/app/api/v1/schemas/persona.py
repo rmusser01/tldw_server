@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictInt, ValidationInfo, field_validator, model_validator
 
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     PersonaVisualRendererSetupStatus,
@@ -46,6 +46,7 @@ PersonaVisualStarterRecipeItems = Annotated[
     Field(min_length=1, max_length=12),
 ]
 PersonaVisualPortabilityOperation = Literal["export", "import_preview", "import_commit"]
+PersonaStrictVersion = Annotated[StrictInt, Field(ge=1)]
 PersonaSetupEventType = Literal[
     "setup_started",
     "step_viewed",
@@ -96,12 +97,12 @@ class PersonaVisualPackCreate(BaseModel):
 
 class PersonaBuddyPreferencesUpdate(BaseModel):
     ambient_mode: PersonaAmbientMode
-    expected_version: int | None = Field(default=None, ge=1)
+    expected_version: PersonaStrictVersion | None = None
 
 
 class PersonaBuddyPreferencesOverrideUpdate(BaseModel):
     ambient_mode: PersonaAmbientMode
-    expected_version: int = Field(ge=1)
+    expected_version: PersonaStrictVersion
 
 
 class PersonaBuddyPreferencesResponse(BaseModel):
@@ -111,11 +112,11 @@ class PersonaBuddyPreferencesResponse(BaseModel):
 
 
 class PersonaVisualPackReviewRequest(BaseModel):
-    expected_version: int = Field(ge=1)
+    expected_version: PersonaStrictVersion
 
 
 class PersonaVisualPackActivateRequest(BaseModel):
-    expected_version: int = Field(ge=1)
+    expected_version: PersonaStrictVersion
     reviewed_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

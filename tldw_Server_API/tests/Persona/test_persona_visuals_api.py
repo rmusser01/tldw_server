@@ -2409,3 +2409,108 @@ def test_visual_pack_activation_rejects_stale_review_conflict(persona_db: Charac
         )
 
     assert activated.status_code == 409, activated.text
+
+
+def test_review_path_persona_mismatch_returns_404_without_creating_review(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """A nested review route must never mutate a same-user pack from another Persona."""
+    with _client_for_user(1, persona_db) as client:
+        path_persona_id = _create_persona(client, name="Review Path Persona")
+        pack_persona_id = _create_persona(client, name="Review Pack Persona")
+        pack = _create_visual_pack(client, pack_persona_id)
+        asset = _upload_png(client, pack_persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{pack_persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{path_persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": updated.json()["version"]},
+        )
+
+    assert response.status_code == 404, response.text
+    review_count = persona_db.execute_query(
+        "SELECT COUNT(*) FROM persona_visual_pack_reviews WHERE pack_id = ?",
+        (pack["id"],),
+    ).fetchone()[0]
+    assert review_count == 0
+
+
+def test_review_hydrates_get_list_and_activation_responses_but_not_revised_payload(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Responses expose only the review that authorizes their current persisted payload."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Hydrated Review Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+        review = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": updated.json()["version"]},
+        )
+        assert review.status_code == 200, review.text
+        fingerprint = review.json()["review"]["fingerprint"]
+
+        fetched = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+        listed = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs")
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={"expected_version": updated.json()["version"], "reviewed_fingerprint": fingerprint},
+        )
+        active_fetched = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+        active_listed = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs")
+
+        assert fetched.status_code == 200, fetched.text
+        assert fetched.json()["review"]["fingerprint"] == fingerprint
+        assert listed.status_code == 200, listed.text
+        assert listed.json()[0]["review"]["fingerprint"] == fingerprint
+        assert activated.status_code == 200, activated.text
+        assert activated.json()["review"]["fingerprint"] == fingerprint
+        assert active_fetched.status_code == 200, active_fetched.text
+        assert active_fetched.json()["review"]["fingerprint"] == fingerprint
+        assert active_listed.status_code == 200, active_listed.text
+        assert active_listed.json()[0]["review"]["fingerprint"] == fingerprint
+
+        deactivated = client.post(f"/api/v1/persona/profiles/{persona_id}/visual-packs/deactivate")
+        assert deactivated.status_code == 200, deactivated.text
+        editable = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+        assert editable.status_code == 200, editable.text
+        revised = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": editable.json()["version"]},
+        )
+        assert revised.status_code == 200, revised.text
+        after_revision = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+
+    assert after_revision.status_code == 200, after_revision.text
+    assert after_revision.json()["review"] is None
+
+
+@pytest.mark.parametrize("invalid_version", [True, 1.0, "1"])
+def test_visual_expected_versions_reject_non_integer_json_values(
+    persona_db: CharactersRAGDB,
+    invalid_version: object,
+) -> None:
+    """Review and activation version fields keep a strict JSON-integer boundary."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Strict Visual Version Persona")
+        pack = _create_visual_pack(client, persona_id)
+        review = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": invalid_version},
+        )
+        activation = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={"expected_version": invalid_version, "reviewed_fingerprint": "a" * 64},
+        )
+
+    assert review.status_code == 422, review.text
+    assert activation.status_code == 422, activation.text

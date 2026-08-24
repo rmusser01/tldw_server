@@ -4534,6 +4534,11 @@ async def list_persona_visual_packs(
             persona_id=persona_id,
             user_id=user_id,
         )
+        reviews = await _run_persona_db_call(
+            db.list_persona_visual_pack_current_reviews,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
         responses: list[PersonaVisualPackResponse] = []
         for pack in packs:
             pack_id = str(pack.get("id") or "")
@@ -4543,6 +4548,7 @@ async def list_persona_visual_packs(
                 persona_id=persona_id,
                 user_id=user_id,
             )
+            pack["review"] = reviews.get(pack_id)
             responses.append(_persona_visual_pack_to_response(pack, assets=assets))
         return responses
     except HTTPException:
@@ -4662,6 +4668,12 @@ async def get_persona_visual_pack(
             raise HTTPException(status_code=404, detail="Persona visual pack not found")
         assets = await _run_persona_db_call(
             db.list_persona_visual_assets,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        pack["review"] = await _run_persona_db_call(
+            db.get_persona_visual_pack_current_review,
             pack_id=pack_id,
             persona_id=persona_id,
             user_id=user_id,
@@ -4894,6 +4906,14 @@ async def review_persona_visual_pack(
             user_id=user_id,
             include_deleted=False,
         )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
         review = await _run_persona_db_call(
             visual_service.review_pack,
             pack_id=pack_id,
@@ -4960,6 +4980,12 @@ async def activate_persona_visual_pack(
             reviewed_fingerprint=payload.reviewed_fingerprint,
         )
         assets = list(active.get("assets") or [])
+        active["review"] = await _run_persona_db_call(
+            db.get_persona_visual_pack_current_review,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
         return _persona_visual_pack_to_response(active, assets=assets)
     except HTTPException:
         raise
