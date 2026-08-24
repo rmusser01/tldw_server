@@ -453,6 +453,12 @@ Independent re-review of `837b209884` reported no findings and separately
 verified the focused test on Node 20, 22, and 24, forced child-error diagnostics,
 shell-free invocation portability, and temporary-directory cleanup.
 
+The refreshed Qodo review is bound to pushed head `8b00250005` and reports
+`0` bugs and `0` rule violations. GitHub GraphQL reports no unresolved review
+threads. Because the PR is merge-conflicted against the advanced `dev` branch,
+normal `pull_request` workflows are not available at this head; the complete
+hosted CI gate remains assigned to the final post-PR-2808 rebase.
+
 ```text
 behavioral mutation RED:                   1 failed, 3 passed
 behavioral guard GREEN:                     4 passed

@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-24 20:40'
+updated_date: '2026-08-24 20:47'
 labels:
   - admin
   - webhooks
@@ -148,6 +148,8 @@ Qodo incremental review at commit 618080c00a resolved five findings and marked t
 2026-08-24 immutable async child-process remediation commit: 837b209884. This commit replaces spawnSync with promisified execFile while preserving rejected-promise propagation and guaranteed temporary-directory cleanup. Evidence is being refreshed against this commit; independent re-review is in progress before push.
 
 2026-08-24 independent re-review of 837b209884 found no issues. Reviewer separately verified 4/4 on Node 20, 22, and 24, nonzero child exits reject with diagnostics, shell-free invocation portability, and no leftover temporary directories. Local review gate is closed for this Qodo remediation; evidence commit, push, and refreshed Qodo confirmation remain.
+
+2026-08-24 refreshed Qodo review is confirmed against pushed head 8b00250005: 0 bugs, 0 rule violations, and no unresolved GitHub review threads. The PR remains merge-conflicted against advanced dev, so normal pull_request CI cannot run at this head; complete hosted CI remains assigned to the final post-PR-2808 rebase. This closure record will be held locally and included with that rebase to avoid another documentation-only CI restart.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
