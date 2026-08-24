@@ -61,7 +61,7 @@
 - Consumes: `ChatMacrosService.create_macro(name, raw, supporting_files)` and `update_macro(name, raw, supporting_files)` from v1.
 - Produces: `MacroOutputProfile.section_titles: dict[str, str]`, accepted settings key `section_titles`, and a stable `MacroValidationError` when route/storage identity differs from YAML identity.
 
-- [ ] **Step 1: Write failing identity and heading tests**
+- [x] **Step 1: Write failing identity and heading tests**
 
 Add focused cases equivalent to:
 
@@ -101,7 +101,7 @@ def test_output_profile_rejects_titles_for_unknown_sections() -> None:
 
 Add API cases asserting create/update mismatches return `400`, no user directory is created or renamed, and `GET/PUT /settings` round-trips `section_titles`.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run:
 
@@ -114,7 +114,7 @@ Run:
 
 Expected: the identity tests fail because mismatched names are accepted, and heading tests fail because `section_titles` is currently an unknown key.
 
-- [ ] **Step 3: Implement the minimal backend contract**
+- [x] **Step 3: Implement the minimal backend contract**
 
 Extend the normalized profile without changing existing keys:
 
@@ -152,7 +152,7 @@ def _require_matching_name(self, resource_name: str, definition: MacroDefinition
 
 Call it from both `create_macro()` and `update_macro()` immediately after `validate_macro(raw)`.
 
-- [ ] **Step 4: Run focused and full Chat Macros tests**
+- [x] **Step 4: Run focused and full Chat Macros tests**
 
 Run:
 
@@ -168,7 +168,7 @@ Run:
 
 Expected: all focused tests and all Chat Macros tests pass.
 
-- [ ] **Step 5: Run Bandit on the changed backend scope**
+- [x] **Step 5: Run Bandit on the changed backend scope**
 
 Run:
 
@@ -181,7 +181,7 @@ Run:
 
 Expected: no new findings in changed production code.
 
-- [ ] **Step 6: Commit the backend contract**
+- [x] **Step 6: Commit the backend contract**
 
 ```bash
 git add \
@@ -206,7 +206,7 @@ git commit -m "feat(chat-macros): harden authoring contracts (TASK-13114)"
 - Consumes: existing v1 `ChatMacroDetail.raw`, CRUD service calls, and `ChatMacroSettingsResponse.settings`.
 - Produces: `ChatMacroDefinition`, `ChatMacroSettings`, `ChatMacroOutputProfile`, `GuidedMacroDraft`, `parseMacroSource(raw)`, `serializeGuidedMacro(draft)`, `createBlankMacroDraft()`, `readMacroImport(file)`, and `outputProfilesToSettings(settings, profiles)`.
 
-- [ ] **Step 1: Write failing service and pure-helper tests**
+- [x] **Step 1: Write failing service and pure-helper tests**
 
 Cover all CRUD methods used by the UI:
 
@@ -235,7 +235,7 @@ Add pure-helper cases for:
 - import rejecting files over 500,000 bytes before `file.text()` is called;
 - output-profile edits preserving `disabled_builtins`, `user_macro_enabled`, and unknown future top-level keys.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run:
 
@@ -247,7 +247,7 @@ bunx vitest run \
 
 Expected: missing types/helpers and assertions for CRUD methods not imported by the existing service test.
 
-- [ ] **Step 3: Add additive API types**
+- [x] **Step 3: Add additive API types**
 
 Define explicit contracts while keeping request functions unchanged:
 
@@ -292,7 +292,7 @@ export interface ChatMacroSettings extends Record<string, unknown> {
 
 Use these types in `ChatMacroDetail` and `ChatMacroSettingsResponse` without narrowing server compatibility at runtime.
 
-- [ ] **Step 4: Implement pure authoring helpers**
+- [x] **Step 4: Implement pure authoring helpers**
 
 Use `load` and `dump` from the existing `js-yaml` dependency. Define a guided draft that represents the supported common topology:
 
@@ -325,7 +325,7 @@ export interface GuidedMacroDraft {
 
 `outputProfilesToSettings()` must shallow-copy the original settings and replace only `output_profiles`.
 
-- [ ] **Step 5: Run helper and service tests**
+- [x] **Step 5: Run helper and service tests**
 
 Run:
 
@@ -337,7 +337,7 @@ bunx vitest run \
 
 Expected: all tests pass with no new warnings beyond the repository baseline.
 
-- [ ] **Step 6: Commit the typed helper layer**
+- [x] **Step 6: Commit the typed helper layer**
 
 ```bash
 git add \
@@ -361,7 +361,7 @@ git commit -m "feat(chat-macros): add authoring helpers (TASK-13114)"
 - Consumes: Task 2 helpers plus `createChatMacro`, `getChatMacro`, `updateChatMacro`, `deleteChatMacro`, `validateChatMacro`, and `useConfirmDanger`.
 - Produces: `ChatMacroEditor({ selected, outputProfileNames, onSaved, onDeleted, onCloneRequested })`.
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Test user-visible behavior, not internal state:
 
@@ -389,7 +389,7 @@ Also cover:
 - built-ins are read-only and offer clone instead of edit/delete;
 - stale detail requests cannot replace a newer selection.
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -399,7 +399,7 @@ bunx vitest run src/components/Option/Settings/__tests__/ChatMacroEditor.test.ts
 
 Expected: import failure because `ChatMacroEditor.tsx` does not exist.
 
-- [ ] **Step 3: Implement the editor state and save sequence**
+- [x] **Step 3: Implement the editor state and save sequence**
 
 Use a request-generation ref or `AbortController`-equivalent stale-response guard for detail loads. The save path must be:
 
@@ -417,7 +417,7 @@ const response = isCreate
 
 Never infer success from client parsing alone. Disable repeated submissions while a request is active and retain the draft after any failure.
 
-- [ ] **Step 4: Implement the work-focused authoring UI**
+- [x] **Step 4: Implement the work-focused authoring UI**
 
 Use a stable two-column editor on wide screens and a single column on mobile:
 
@@ -432,7 +432,7 @@ Use a stable two-column editor on wide screens and a single column on mobile:
 
 The hidden import input must use `accept=".yaml,.yml,text/yaml,text/plain"`. Export must call the existing `downloadBlob()` utility with the exact raw source and `${name}.yaml`.
 
-- [ ] **Step 5: Run component and accessibility checks**
+- [x] **Step 5: Run component and accessibility checks**
 
 Run:
 
@@ -442,7 +442,7 @@ bunx vitest run src/components/Option/Settings/__tests__/ChatMacroEditor.test.ts
 
 Expected: all editor tests pass; all controls have accessible names and destructive actions remain cancellable.
 
-- [ ] **Step 6: Commit the macro editor**
+- [x] **Step 6: Commit the macro editor**
 
 ```bash
 git add \
@@ -465,7 +465,7 @@ git commit -m "feat(chat-macros): add macro authoring editor (TASK-13114)"
 - Consumes: `ChatMacroSettings`, `ChatMacroOutputProfile`, `outputProfilesToSettings()`, and `updateChatMacroSettings()`.
 - Produces: `OutputProfileEditor({ settings, onSaved })` that preserves unrelated settings keys.
 
-- [ ] **Step 1: Write failing profile-editor tests**
+- [x] **Step 1: Write failing profile-editor tests**
 
 Cover the contract with behavior assertions:
 
@@ -499,7 +499,7 @@ Also cover:
 - server save failure retaining edits;
 - a settings-load failure rendering retry rather than editable defaults.
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -509,7 +509,7 @@ bunx vitest run src/components/Option/Settings/__tests__/OutputProfileEditor.tes
 
 Expected: import failure because `OutputProfileEditor.tsx` does not exist.
 
-- [ ] **Step 3: Implement profile draft validation**
+- [x] **Step 3: Implement profile draft validation**
 
 Before persistence, require:
 
@@ -525,7 +525,7 @@ if (sections.some((section) => !SECTION_KEY.test(section))) {
 
 Require profile names to use the same lowercase command-safe pattern and custom headings to be at most 128 characters. Keep empty headings out of `section_titles` so server-generated titles remain the default.
 
-- [ ] **Step 4: Implement profile controls**
+- [x] **Step 4: Implement profile controls**
 
 Use:
 
@@ -538,7 +538,7 @@ Use:
 
 When saving, call `outputProfilesToSettings(originalSettings, drafts)` and send the full preserved settings object. Replace local state with the normalized server response after success.
 
-- [ ] **Step 5: Run profile tests**
+- [x] **Step 5: Run profile tests**
 
 Run:
 
@@ -548,7 +548,7 @@ bunx vitest run src/components/Option/Settings/__tests__/OutputProfileEditor.tes
 
 Expected: all profile tests pass.
 
-- [ ] **Step 6: Commit the output-profile editor**
+- [x] **Step 6: Commit the output-profile editor**
 
 ```bash
 git add \
@@ -572,7 +572,7 @@ git commit -m "feat(chat-macros): add output profile editor (TASK-13114)"
 - Consumes: `ChatMacroEditor`, `OutputProfileEditor`, existing macro list/toggle/clone calls, and settings list route.
 - Produces: the final `/settings/chat-macros` manager with `Macros` and `Output profiles` tabs and unchanged chat/run behavior.
 
-- [ ] **Step 1: Rewrite manager tests around the final workflow**
+- [x] **Step 1: Rewrite manager tests around the final workflow**
 
 Retain existing toggle and clone regressions, then add:
 
@@ -585,7 +585,7 @@ Retain existing toggle and clone regressions, then add:
 - narrow viewport markup does not hide primary actions;
 - no state update occurs after unmount or stale refresh completion.
 
-- [ ] **Step 2: Run the integration test and verify RED**
+- [x] **Step 2: Run the integration test and verify RED**
 
 Run:
 
@@ -595,7 +595,7 @@ bunx vitest run src/components/Option/Settings/__tests__/ChatMacrosSettings.test
 
 Expected: assertions fail against the v1 table, standalone clone panel, YAML validator, and raw settings textarea.
 
-- [ ] **Step 3: Integrate the manager shell**
+- [x] **Step 3: Integrate the manager shell**
 
 Replace the v1 page composition with:
 
@@ -608,7 +608,7 @@ Replace the v1 page composition with:
 
 Keep list and editor dimensions stable with explicit grid tracks such as `minmax(220px, 300px) minmax(0, 1fr)`, collapsing to one column below the existing large breakpoint.
 
-- [ ] **Step 4: Update module documentation**
+- [x] **Step 4: Update module documentation**
 
 Document in `README.md`:
 
@@ -620,7 +620,7 @@ Document in `README.md`:
 - server-side validation, permissions rejection, path safety, and user ownership;
 - explicitly deferred supporting-file bundles, ACP fork retention UI, foreground execution, and extra presets.
 
-- [ ] **Step 5: Run focused frontend and backend verification**
+- [x] **Step 5: Run focused frontend and backend verification**
 
 Run:
 
@@ -643,7 +643,7 @@ bunx vitest run \
 
 Expected: all focused frontend and backend tests pass.
 
-- [ ] **Step 6: Run static and security checks**
+- [x] **Step 6: Run static and security checks**
 
 Run:
 
@@ -659,7 +659,7 @@ git diff --check
 
 Expected: no type errors, whitespace errors, or new Bandit findings.
 
-- [ ] **Step 7: Run desktop and mobile visual verification**
+- [x] **Step 7: Run desktop and mobile visual verification**
 
 Start the existing frontend dev server on an unused port and use Playwright against `/settings/chat-macros` at:
 
@@ -677,7 +677,7 @@ Verify:
 
 Store screenshots under `/tmp/chat-macros-v1-1-visual-qa/`; do not commit them.
 
-- [ ] **Step 8: Update Backlog and commit integration**
+- [x] **Step 8: Update Backlog and commit integration**
 
 Record touched files, exact verification results, known skips, and final summary in `TASK-13114`. Check acceptance criteria and Definition of Done only after evidence exists.
 
@@ -694,15 +694,15 @@ git commit -m "feat(chat-macros): complete v1.1 authoring workflow (TASK-13114)"
 
 ## Final Review Checklist
 
-- [ ] Every production behavior was preceded by a failing test that failed for the intended missing behavior.
-- [ ] Resource name, YAML name, storage directory, and catalog identity cannot diverge.
-- [ ] Existing v1 macros and output profiles remain valid without migration.
-- [ ] Advanced YAML remains exact until the user edits it; guided mode never silently discards unsupported fields.
-- [ ] Import does not persist automatically, and export uses the exact canonical source.
-- [ ] Delete is user-scoped, unavailable for built-ins, and requires accessible confirmation.
-- [ ] Output-profile saves preserve unrelated settings and server normalization replaces local state.
-- [ ] Existing run, cancel, retry, status-card, and `/wrapup` tests remain green.
-- [ ] Frontend tests, backend tests, typecheck, `git diff --check`, Bandit, and responsive visual QA are recorded in Backlog.
+- [x] Every production behavior was preceded by a failing test that failed for the intended missing behavior.
+- [x] Resource name, YAML name, storage directory, and catalog identity cannot diverge.
+- [x] Existing v1 macros and output profiles remain valid without migration.
+- [x] Advanced YAML remains exact until the user edits it; guided mode never silently discards unsupported fields.
+- [x] Import does not persist automatically, and export uses the exact canonical source.
+- [x] Delete is user-scoped, unavailable for built-ins, and requires accessible confirmation.
+- [x] Output-profile saves preserve unrelated settings and server normalization replaces local state.
+- [x] Existing run, cancel, retry, status-card, and `/wrapup` tests remain green.
+- [x] Frontend tests, backend tests, typecheck, `git diff --check`, Bandit, and responsive visual QA are recorded in Backlog.
 
 ## Baseline Recorded Before Implementation
 
