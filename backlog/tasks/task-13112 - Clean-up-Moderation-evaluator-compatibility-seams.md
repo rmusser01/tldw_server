@@ -24,7 +24,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 - backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
-updated_date: 2026-08-24 05:40
+updated_date: 2026-08-24 05:53
 ---
 
 ## Description
@@ -57,6 +57,7 @@ Repository compatibility inventory and the exact eight-method removal set are do
 
 Pre-change verification passed: 318 unit Moderation tests, 89 Guardian tests, 16 Chat tests, 12 selected Workflow tests, and 1 targeted Audio test.
 The revised design is user-approved. The implementation plan was written and self-reviewed against the spec: exact retained pytest nodes collect successfully, compilation precedes test cleanup in both implementation stages, placeholder and whitespace scans are clean, and all eight deletions map to retained direct-evaluator coverage.
+Task 1 removed the five class/static direct PolicyEvaluator shims. The new ModerationService.__dict__ absence test failed before deletion and passed after deletion. Direct evaluator and service delegation suites passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
