@@ -414,6 +414,51 @@ do not alter repository, migration, or PostgreSQL behavior, so the prior
 required-provider proof remains `24 passed, 0 skipped`. Post-push Qodo
 confirmation and GitHub-hosted CI remain pending.
 
+## Eager-Import Qodo Follow-Up
+
+Qodo's refreshed review at PR head `90907cd2de` identified one reliability
+bug: `next.config.mjs` statically imported the development-only
+`@next/bundle-analyzer` package, so a production-only dependency install could
+fail while loading the config even when `ANALYZE` was disabled. The current
+Docker builder installs all dependencies, but that does not make the config
+safe for other supported build environments.
+
+Source commit `7c104a7500` replaces the static import with a guarded dynamic
+import that is evaluated only when `ANALYZE=true`. A focused regression rejects
+eager analyzer imports while the existing config tests continue to exercise the
+disabled path and security settings.
+
+Independent review found no implementation or ESM/Next.js compatibility defect,
+but correctly identified that the original source-regex regression could miss an
+unconditional dynamic import or a multiline static import. Follow-up test commit
+`1263677011` replaces that check with an isolated Node loader: analyzer
+resolution is forced to fail while disabled, while the enabled path receives a
+stub analyzer and must apply its wrapper. Mutating the config back to the buggy
+static import produced the expected RED result; restoring the guarded import
+returned the suite to GREEN.
+
+Independent re-review of `1263677011` reported no remaining findings. The
+reviewer separately reproduced the `4/4` focused pass on Node 20, 22, and 24,
+plus targeted ESLint and `git diff --check` passes.
+
+```text
+behavioral mutation RED:                   1 failed, 3 passed
+behavioral guard GREEN:                     4 passed
+Node 20 ANALYZE=false config load:          PASS
+Node 20 ANALYZE=true config load:           PASS
+targeted ESLint:                            PASS
+admin package lint:                         PASS, 0 errors, 41 baseline warnings
+admin typecheck:                            PASS
+admin production build:                    PASS, 49 pages
+git diff --check:                           PASS
+```
+
+The first production-build attempt failed only because the restricted sandbox
+forbids Turbopack's internal local port bind. The identical Node 20 command
+passed with normal process permissions. No dependency, runtime image, webhook,
+database, migration, or PostgreSQL behavior changed; the prior required-
+PostgreSQL proof remains applicable.
+
 ## Upstream Admin UI Baselines
 
 `bun run test` is not green on the exact PR base. An isolated detached worktree
@@ -474,7 +519,7 @@ and webhook browser journey establish the scoped PR behavior.
 
 ## Final Safety Checks
 
-- `git diff --cached --check`: PASS for tested source commit `ebbe6d30da`.
+- `git diff --check`: PASS at tested source/test head `1263677011`.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,

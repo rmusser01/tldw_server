@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-24 20:15'
+updated_date: '2026-08-24 20:30'
 labels:
   - admin
   - webhooks
@@ -134,6 +134,12 @@ Qodo incremental review at commit 618080c00a resolved five findings and marked t
 2026-08-24: Refreshed Qodo review identified one unresolved reliability finding at PR head 90907cd2de: admin-ui/next.config.mjs statically imports the dev-only @next/bundle-analyzer package. Verified the current Docker builder installs all dependencies, but production-only build environments can fail while loading the config even when ANALYZE is disabled. Remediation will add a focused regression prohibiting eager loading and change the analyzer to a guarded dynamic import; then rerun focused tests, lint, typecheck, config branch loads, and production build before push.
 
 2026-08-24 Qodo eager-import remediation verified locally. TDD RED: the focused security-header suite failed 1/4 because next.config.mjs statically imported @next/bundle-analyzer. GREEN after guarded dynamic import: 4/4 passed. Node 20 config loads passed with ANALYZE=false and ANALYZE=true; package lint passed with 0 errors and the existing 41-warning baseline; typecheck passed; targeted ESLint passed; Node 20 production build generated all 49 pages. The first build attempt failed only because the restricted sandbox blocked Turbopack's local worker port; the identical command passed with normal process permissions. git diff --check passed. Awaiting immutable source commit, independent review, push, and refreshed Qodo/CI confirmation.
+
+2026-08-24 immutable eager-import remediation source commit: 7c104a7500ef214f3154ae6bb4cbd639bc85ad52. Docs/Evidence/Admin_Webhooks_PR1_Verification.md now binds the RED/GREEN, Node 20 config-load, lint, typecheck, build, and sandbox disposition evidence to that source. PR #2808 remains open and clean; PR #2806 remote head remains 90907cd2de, so final rebase is still deferred to avoid rebasing twice. Independent review, documentation commit, push, Qodo refresh, and CI remain pending.
+
+2026-08-24 independent review of 7c104a7500 found no implementation or ESM/Next.js compatibility defect and one P2 test-quality gap: the source regex could miss unconditional dynamic or multiline static imports. Accepted and remediated in test commit 1263677011 with an isolated Node loader that blocks analyzer resolution while disabled and supplies a marker wrapper while enabled. Mutation proof reintroduced the prior static import and failed 1/4 for the expected eager-resolution error; restoring the guarded import passed 4/4. Targeted ESLint, typecheck, and git diff --check passed after the test change. No reviewer findings remain locally.
+
+2026-08-24 independent re-review at test head 1263677011 found no remaining issues. Reviewer independently reproduced the 4/4 focused pass on Node 20, 22, and 24, plus targeted ESLint and git diff --check. Local review gate is closed; push, Qodo thread resolution, hosted CI, and final post-#2808 rebase remain.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
