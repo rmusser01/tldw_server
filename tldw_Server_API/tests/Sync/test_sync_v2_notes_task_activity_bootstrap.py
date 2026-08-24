@@ -201,6 +201,43 @@ def test_activity_bootstrap_captures_pages_adopts_rows_and_ignores_read_state(
     assert len(envelopes) == 3
 
 
+def test_activity_bootstrap_nonfinal_resume_scans_only_one_page(
+    bootstrap_stack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep each non-final resume proportional to its configured page."""
+
+    note_db, _sync_store, service, dataset = bootstrap_stack
+    _record_events(note_db, dataset.dataset_id)
+    page_limits: list[int] = []
+    original_page = note_db.task_store.page_legacy_events_for_sync_bootstrap
+
+    def tracked_page(**kwargs):
+        """Record source-page limits without changing storage behavior."""
+
+        page_limits.append(kwargs["limit"])
+        return original_page(**kwargs)
+
+    monkeypatch.setattr(
+        note_db.task_store,
+        "page_legacy_events_for_sync_bootstrap",
+        tracked_page,
+    )
+    bootstrapper = _bootstrap_module().NotesTaskActivityBootstrapper(
+        note_db,
+        page_limit=1,
+    )
+
+    first = bootstrapper.bootstrap(service=service, dataset=dataset)
+    assert first.metadata["notes_task_activity_v1"]["state"] == "bootstrapping"
+    assert page_limits == [1]
+
+    page_limits.clear()
+    second = bootstrapper.bootstrap(service=service, dataset=first)
+    assert second.metadata["notes_task_activity_v1"]["state"] == "bootstrapping"
+    assert page_limits == [1]
+
+
 def test_activity_bootstrap_resumes_after_append_before_progress_split(
     bootstrap_stack,
 ) -> None:

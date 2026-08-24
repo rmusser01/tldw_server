@@ -227,6 +227,8 @@ class NotesTaskCaptureCallback(Protocol):
 
 
 def _task_activity_metadata(row: dict[str, Any]) -> dict[str, object]:
+    """Return the portable metadata subset used by task activity events."""
+
     payload = row["sync_payload"]
     return {
         key: payload[key]

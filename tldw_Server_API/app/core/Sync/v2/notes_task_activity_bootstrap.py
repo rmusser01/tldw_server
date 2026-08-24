@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import (
+    NotesTaskActivitySourceChanged,
+    NotesTaskActivitySourceInvalid,
     NotesTaskBootstrapInterrupted,
     NotesTaskContractError,
 )
@@ -29,14 +31,6 @@ from .service import SyncV2Service
 
 _SOURCE = "notes-task-activity-bootstrap"
 _EMPTY_FINGERPRINT = hashlib.sha256(b"notes.task_activity.bootstrap.v1").hexdigest()
-
-
-class _SourceInvalid(RuntimeError):
-    """Internal marker for malformed legacy activity source data."""
-
-
-class _SourceChanged(RuntimeError):
-    """Internal marker for changed verified source history."""
 
 
 class NotesTaskActivityBootstrapper:
@@ -89,13 +83,13 @@ class NotesTaskActivityBootstrapper:
 
         bootstrap_id = _bootstrap_id(owner, current.dataset_id)
         try:
-            source = self._source_summary(
+            self._verify_resume_boundary(
                 service=service,
                 owner=owner,
                 dataset_id=current.dataset_id,
                 bootstrap_id=bootstrap_id,
+                state=state,
             )
-            _verify_stored_progress(state, source)
             after_created_at, after_activity_id = _split_cursor(
                 _optional_string(state.get("source_cursor"))
             )
@@ -144,27 +138,33 @@ class NotesTaskActivityBootstrapper:
                     source_count=running_count,
                     source_fingerprint=running_fingerprint,
                 )
-            if running_count < source.count:
+            if len(page) == self._page_limit and not all(
+                row.get("sync_server_cursor") is not None for row in page
+            ):
                 return current
-            verified = self._source_summary(
+            source = self._source_summary(
                 service=service,
                 owner=owner,
                 dataset_id=current.dataset_id,
                 bootstrap_id=bootstrap_id,
             )
-            if verified != source:
-                raise _SourceChanged
+            if running_count < source.count:
+                return current
             if (
                 running_count != source.count
                 or running_fingerprint != source.fingerprint
+                or _optional_string(
+                    _readiness(current).get("source_cursor")
+                ) != source.cursor
                 or not _sync_bootstrap_matches_source(
                     service,
                     current.dataset_id,
+                    owner=owner,
                     bootstrap_id=bootstrap_id,
                     source=source,
                 )
             ):
-                raise _SourceChanged
+                raise NotesTaskActivitySourceChanged
             current = service.store.transition_notes_task_activity_readiness(
                 current.dataset_id,
                 owner_user_id=owner,
@@ -187,7 +187,7 @@ class NotesTaskActivityBootstrapper:
             )
         except NotesTaskBootstrapInterrupted:
             raise
-        except _SourceChanged:
+        except NotesTaskActivitySourceChanged:
             return _block(service, current, reason="notes_task_activity_source_changed")
         except Exception as exc:  # noqa: BLE001 - details become bounded readiness.
             if isinstance(exc, SyncStoreError) and str(exc) not in {
@@ -235,6 +235,49 @@ class NotesTaskActivityBootstrapper:
             source_fingerprint=_EMPTY_FINGERPRINT,
         )
 
+    def _verify_resume_boundary(
+        self,
+        *,
+        service: SyncV2Service,
+        owner: str,
+        dataset_id: str,
+        bootstrap_id: str,
+        state: Mapping[str, object],
+    ) -> None:
+        """Verify the durable progress boundary without rescanning its prefix."""
+
+        count = int(state["source_count"])
+        cursor = _optional_string(state.get("source_cursor"))
+        fingerprint = str(state.get("source_fingerprint") or _EMPTY_FINGERPRINT)
+        if count == 0:
+            if cursor is not None or fingerprint != _EMPTY_FINGERPRINT:
+                raise NotesTaskActivitySourceChanged
+            return
+        if cursor is None or fingerprint == _EMPTY_FINGERPRINT:
+            raise NotesTaskActivitySourceChanged
+        _created_at, activity_id = _split_cursor(cursor)
+        if activity_id is None:
+            raise NotesTaskActivitySourceChanged
+        row = self._tasks.get_sync_task_activity(
+            owner_user_id=owner,
+            dataset_id=dataset_id,
+            activity_id=activity_id,
+        )
+        if row is None or _row_cursor(row) != cursor:
+            raise NotesTaskActivitySourceChanged
+        try:
+            boundary = self._source_row(
+                service=service,
+                owner=owner,
+                dataset_id=dataset_id,
+                bootstrap_id=bootstrap_id,
+                row=row,
+            )
+        except NotesTaskActivitySourceInvalid as exc:
+            raise NotesTaskActivitySourceChanged from exc
+        if boundary.cursor != cursor:
+            raise NotesTaskActivitySourceChanged
+
     def _source_summary(
         self,
         *,
@@ -243,11 +286,12 @@ class NotesTaskActivityBootstrapper:
         dataset_id: str,
         bootstrap_id: str,
     ) -> _SourceSummary:
-        """Read and validate the complete ordered legacy/adopted source identity."""
+        """Stream the complete source identity with page-bounded memory."""
 
-        rows: list[_SourceRow] = []
         after_created_at: str | None = None
         after_activity_id: str | None = None
+        cursor: str | None = None
+        count = 0
         fingerprint = _EMPTY_FINGERPRINT
         while True:
             try:
@@ -266,21 +310,21 @@ class NotesTaskActivityBootstrapper:
                         bootstrap_id=bootstrap_id,
                         row=row,
                     )
-                    rows.append(item)
+                    count += 1
+                    cursor = item.cursor
                     fingerprint = _activity_bootstrap_fingerprint(
                         fingerprint,
                         item.cursor,
                         item.canonical_hash,
                     )
                     after_created_at, after_activity_id = _split_cursor(item.cursor)
-            except _SourceChanged:
+            except NotesTaskActivitySourceChanged:
                 raise
             except Exception as exc:  # noqa: BLE001 - source details remain private.
-                raise _SourceInvalid from exc
+                raise NotesTaskActivitySourceInvalid from exc
             if len(page) < self.PAGE_LIMIT:
                 break
-        cursor = rows[-1].cursor if rows else None
-        return _SourceSummary(tuple(rows), cursor, len(rows), fingerprint)
+        return _SourceSummary(cursor, count, fingerprint)
 
     def _source_row(
         self,
@@ -316,7 +360,7 @@ class NotesTaskActivityBootstrapper:
                 or envelope.routing_metadata.get("bootstrap_id") != bootstrap_id
                 or envelope.apply_status != "applied"
             ):
-                raise _SourceChanged
+                raise NotesTaskActivitySourceChanged
             payload = _parse_bootstrap_payload(envelope, owner)
             canonical_hash = notes_task_activity_object_hash(
                 payload,
@@ -336,7 +380,7 @@ class NotesTaskActivityBootstrapper:
                     sync_server_cursor=int(row["sync_server_cursor"]),
                 )
             ):
-                raise _SourceChanged
+                raise NotesTaskActivitySourceChanged
         return _SourceRow(
             activity_id=payload.activity_id,
             note_id=payload.note_id,
@@ -423,6 +467,8 @@ class NotesTaskActivityBootstrapper:
 
 @dataclass(frozen=True, slots=True)
 class _SourceRow:
+    """One canonical legacy/adopted activity source row."""
+
     activity_id: str
     note_id: str
     cursor: str
@@ -432,7 +478,8 @@ class _SourceRow:
 
 @dataclass(frozen=True, slots=True)
 class _SourceSummary:
-    rows: tuple[_SourceRow, ...]
+    """Constant-memory identity summary of the complete ordered source."""
+
     cursor: str | None
     count: int
     fingerprint: str
@@ -490,40 +537,20 @@ def _parse_bootstrap_payload(envelope: SyncEnvelope, owner: str) -> NotesTaskAct
     )
 
 
-def _verify_stored_progress(state: Mapping[str, object], source: _SourceSummary) -> None:
-    """Reject readiness progress that is not an exact source prefix."""
-
-    count = int(state["source_count"])
-    cursor = _optional_string(state.get("source_cursor"))
-    fingerprint = str(state.get("source_fingerprint") or _EMPTY_FINGERPRINT)
-    if count == 0:
-        if cursor is not None or fingerprint != _EMPTY_FINGERPRINT:
-            raise _SourceChanged
-        return
-    if count > len(source.rows) or source.rows[count - 1].cursor != cursor:
-        raise _SourceChanged
-    expected = _EMPTY_FINGERPRINT
-    for row in source.rows[:count]:
-        expected = _activity_bootstrap_fingerprint(
-            expected,
-            row.cursor,
-            row.canonical_hash,
-        )
-    if expected != fingerprint:
-        raise _SourceChanged
-
-
 def _sync_bootstrap_matches_source(
     service: SyncV2Service,
     dataset_id: str,
     *,
+    owner: str,
     bootstrap_id: str,
     source: _SourceSummary,
 ) -> bool:
-    """Return whether applied bootstrap envelopes exactly cover the source."""
+    """Stream-verify exact ordered envelope identity against the source summary."""
 
-    found: dict[str, tuple[str, str | None, str | None, str | None]] = {}
     cursor = 0
+    found_count = 0
+    found_cursor: str | None = None
+    found_fingerprint = _EMPTY_FINGERPRINT
     while True:
         page = service.store.list_envelopes_after(
             dataset_id,
@@ -541,32 +568,44 @@ def _sync_bootstrap_matches_source(
                 or envelope.apply_status != "applied"
                 or envelope.operation != "upsert"
                 or envelope.object_revision != 1
-                or envelope.object_id in found
+                or envelope.deleted
             ):
                 return False
-            found[envelope.object_id] = (
-                envelope.payload_hash or "",
-                envelope.parent_id,
-                envelope.created_at_client,
-                envelope.client_envelope_id,
+            try:
+                payload = _parse_bootstrap_payload(envelope, owner)
+                canonical_hash = notes_task_activity_object_hash(
+                    payload,
+                    revision=1,
+                    deleted=False,
+                )
+            except Exception:  # noqa: BLE001 - verification is total and fail-closed.
+                return False
+            found_cursor = f"{payload.client_occurred_at}|{payload.activity_id}"
+            if (
+                envelope.object_id != payload.activity_id
+                or envelope.parent_id != payload.note_id
+                or envelope.created_at_client != payload.client_occurred_at
+                or envelope.payload_hash != canonical_hash
+                or envelope.client_envelope_id
+                != _activity_bootstrap_envelope_id(
+                    bootstrap_id,
+                    payload.activity_id,
+                    canonical_hash,
+                )
+            ):
+                return False
+            found_count += 1
+            found_fingerprint = _activity_bootstrap_fingerprint(
+                found_fingerprint,
+                found_cursor,
+                canonical_hash,
             )
         if len(page) < 500:
             break
-    if len(found) != source.count:
-        return False
-    return all(
-        found.get(row.activity_id)
-        == (
-            row.canonical_hash,
-            row.note_id,
-            row.payload.client_occurred_at,
-            _activity_bootstrap_envelope_id(
-                bootstrap_id,
-                row.activity_id,
-                row.canonical_hash,
-            ),
-        )
-        for row in source.rows
+    return (
+        found_count == source.count
+        and found_cursor == source.cursor
+        and found_fingerprint == source.fingerprint
     )
 
 
@@ -597,6 +636,8 @@ def _block(
 
 
 def _readiness(dataset: SyncDataset) -> Mapping[str, object]:
+    """Return the strict internal activity readiness mapping."""
+
     state = dataset.metadata.get("notes_task_activity_v1")
     if not isinstance(state, Mapping):
         raise SyncStoreError("notes_task_activity_readiness_state_invalid")
@@ -604,28 +645,36 @@ def _readiness(dataset: SyncDataset) -> Mapping[str, object]:
 
 
 def _row_cursor(row: Mapping[str, object]) -> str:
+    """Return the canonical created-at/activity-id keyset cursor."""
+
     created_at = row.get("created_at")
     activity_id = row.get("id")
     if not isinstance(created_at, str) or not isinstance(activity_id, str):
-        raise _SourceInvalid
+        raise NotesTaskActivitySourceInvalid
     return f"{created_at}|{activity_id}"
 
 
 def _split_cursor(value: str | None) -> tuple[str | None, str | None]:
+    """Split one canonical activity cursor into its keyset components."""
+
     if value is None:
         return None, None
     try:
         created_at, activity_id = value.rsplit("|", 1)
     except ValueError as exc:
-        raise _SourceChanged from exc
+        raise NotesTaskActivitySourceChanged from exc
     return created_at, activity_id
 
 
 def _optional_string(value: object) -> str | None:
+    """Return a string value or None without coercion."""
+
     return value if isinstance(value, str) else None
 
 
 def _bootstrap_id(owner_user_id: str, dataset_id: str) -> str:
+    """Return the deterministic trusted-bootstrap identifier for a dataset."""
+
     digest = hashlib.sha256(
         f"notes.task_activity.bootstrap.v1:{owner_user_id}:{dataset_id}".encode()
     ).hexdigest()
@@ -637,6 +686,8 @@ def _activity_bootstrap_envelope_id(
     activity_id: str,
     canonical_hash: str,
 ) -> str:
+    """Return the deterministic envelope identity for one source activity."""
+
     digest = hashlib.sha256(
         json.dumps(
             [bootstrap_id, activity_id, canonical_hash],
@@ -647,6 +698,8 @@ def _activity_bootstrap_envelope_id(
 
 
 def _activity_bootstrap_routing(bootstrap_id: str) -> dict[str, object]:
+    """Return trusted routing metadata for one activity bootstrap."""
+
     return {"bootstrap_capture": True, "bootstrap_id": bootstrap_id}
 
 
@@ -655,6 +708,8 @@ def _activity_bootstrap_fingerprint(
     source_cursor: str,
     canonical_hash: str,
 ) -> str:
+    """Extend the ordered activity source fingerprint by one row."""
+
     seed = previous_fingerprint or _EMPTY_FINGERPRINT
     return hashlib.sha256(
         json.dumps(
