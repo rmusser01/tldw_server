@@ -22,6 +22,7 @@ import type {
   PersonaVisualLibraryUpdateRequest,
   PersonaVisualLibraryUseRequest,
   PersonaVisualManifestUpdate,
+  PersonaVisualPackActivateRequest,
   PersonaVisualPack,
   PersonaVisualPackCreate,
   PersonaVisualPackDuplicateRequest,
@@ -447,12 +448,14 @@ export async function uploadPersonaVisualAsset(
 
 export async function activatePersonaVisualPack(
   personaId: string,
-  packId: string
+  packId: string,
+  payload: PersonaVisualPackActivateRequest
 ): Promise<PersonaVisualPack> {
   return fetchPersonaVisualJson<PersonaVisualPack>(
     packPath(personaId, packId, "/activate"),
     {
-      method: "POST"
+      method: "POST",
+      body: payload
     }
   )
 }

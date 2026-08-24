@@ -1,7 +1,26 @@
 import type {
+  PersonaAmbientMode,
   PersonaVisualPack,
   PersonaVisualStateId
 } from "@/types/persona-visuals"
+
+export type { PersonaAmbientMode } from "@/types/persona-visuals"
+
+export interface PersonaBuddyPreferences {
+  ambient_mode: PersonaAmbientMode
+  version: number | null
+  stored: boolean
+}
+
+export interface PersonaBuddyPreferencesUpdate {
+  ambient_mode: PersonaAmbientMode
+  expected_version?: number | null
+}
+
+export interface PersonaBuddyPreferencesOverrideUpdate {
+  ambient_mode: PersonaAmbientMode
+  expected_version: number
+}
 
 export type PersonaBuddyPositionBucket =
   | "web-desktop"

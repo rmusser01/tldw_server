@@ -97,6 +97,8 @@ export type PersonaVisualRendererType =
   | "static_image"
   | "live2d"
 
+export type PersonaAmbientMode = "off" | "expressive" | "roaming"
+
 export type PersonaVisualRendererSetupStatus =
   | "supported"
   | "unsupported_renderer"
@@ -223,49 +225,70 @@ export interface PersonaVisualManifest {
   authored_triggers?: PersonaVisualAuthoredTrigger[]
 }
 
+export type PersonaCompanionBehaviorEntry = {
+  state: PersonaVisualStateId
+  trigger: "ambient" | "click" | "drag"
+  category: "idle_variant" | "move" | "reaction"
+  suggested_weight?: number
+  suggested_cooldown_ms?: number
+  movement?: {
+    direction: "horizontal"
+    motion_start_ratio: number
+    motion_end_ratio: number
+  }
+}
+
+export type PersonaCompanionBehavior = {
+  schema_version: 1
+  entries: PersonaCompanionBehaviorEntry[]
+}
+
 export interface PersonaVisualAsset {
   id: string
-  pack_id?: string
-  persona_id?: string
-  asset_role: PersonaVisualAssetRole | string
-  storage_key?: string
+  pack_id: string
+  persona_id: string
+  asset_role: PersonaVisualAssetRole
+  storage_key: string
   url: string
-  original_filename?: string | null
+  original_filename: string | null
   mime_type: string
-  byte_size?: number
-  checksum_sha256?: string
-  width?: number | null
-  height?: number | null
-  duration_ms?: number | null
-  provenance?: string
-  created_at?: string
-  last_modified?: string
-  version?: number
+  byte_size: number
+  checksum_sha256: string
+  width: number | null
+  height: number | null
+  duration_ms: number | null
+  provenance: string
+  created_at: string
+  last_modified: string
+  version: number
 }
 
 export interface PersonaVisualPack {
   id: string
   persona_id: string
-  user_id?: string
+  user_id: string
   title: string
   renderer_type: PersonaVisualRendererType
   status: PersonaVisualPackStatus
-  manifest_version?: number
+  manifest_version: number
   manifest: PersonaVisualManifest
-  parent_pack_id?: string | null
-  revision_number?: number
-  provenance?: string
-  active_at?: string | null
-  assets?: PersonaVisualAsset[]
+  companion_behavior: PersonaCompanionBehavior | null
+  review: PersonaVisualPackReviewResponse | null
+  parent_pack_id: string | null
+  revision_number: number
+  provenance: string
+  active_at: string | null
+  assets: PersonaVisualAsset[]
   assets_by_id?: Record<string, PersonaVisualAsset>
-  created_at?: string
-  last_modified?: string
-  version?: number
+  created_at: string
+  last_modified: string
+  version: number
 }
 
 export interface PersonaVisualPackCreate {
   title: string
   manifest?: Partial<PersonaVisualManifest> | Record<string, unknown>
+  companion_behavior?: PersonaCompanionBehavior | null
 }
 
 export interface PersonaVisualPackDuplicateRequest {
@@ -374,7 +397,28 @@ export interface PersonaVisualLibraryDeleteResponse {
 
 export interface PersonaVisualManifestUpdate {
   manifest: PersonaVisualManifest | Record<string, unknown>
-  expected_version?: number | null
+  companion_behavior?: PersonaCompanionBehavior | null
+  expected_version: number
+}
+
+export interface PersonaVisualPackReviewRequest {
+  expected_version: number
+}
+
+export interface PersonaVisualPackActivateRequest {
+  expected_version: number
+  reviewed_fingerprint: string
+}
+
+export interface PersonaVisualPackReviewResponse {
+  id: string
+  pack_id: string
+  user_id: string
+  reviewer_user_id: string
+  fingerprint: string
+  pack_version: number
+  reviewed_at: string
+  created_at: string
 }
 
 export interface PersonaVisualPackListResponse {
