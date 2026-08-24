@@ -1,12 +1,15 @@
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 
 import { describe, it, expect } from 'vitest';
 
 import nextConfig from '../../next.config.mjs';
+
+const execFileAsync = promisify(execFile);
 
 describe('next.config.mjs security', () => {
   it('loads the optional bundle analyzer only when analysis is enabled', async () => {
@@ -36,12 +39,11 @@ export async function resolve(specifier, context, nextResolve) {
       );
 
       const runConfig = (analyze: string, mode: string, script: string) =>
-        spawnSync(
+        execFileAsync(
           process.execPath,
           ['--experimental-loader', loaderUrl, '--input-type=module', '--eval', script],
           {
             cwd: process.cwd(),
-            encoding: 'utf8',
             env: {
               ...process.env,
               ANALYZE: analyze,
@@ -51,16 +53,14 @@ export async function resolve(specifier, context, nextResolve) {
           }
         );
 
-      const disabled = runConfig('false', 'block', `await import(${JSON.stringify(configUrl)});`);
-      expect(disabled.status, disabled.stderr).toBe(0);
+      await runConfig('false', 'block', `await import(${JSON.stringify(configUrl)});`);
 
-      const enabled = runConfig(
+      await runConfig(
         'true',
         'stub',
         `const config = (await import(${JSON.stringify(configUrl)})).default;
 if (config.testAnalyzerEnabled !== true) throw new Error('analyzer wrapper was not applied');`
       );
-      expect(enabled.status, enabled.stderr).toBe(0);
     } finally {
       await rm(tempDirectory, { recursive: true, force: true });
     }

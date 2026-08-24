@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-24 20:30'
+updated_date: '2026-08-24 20:38'
 labels:
   - admin
   - webhooks
@@ -140,6 +140,10 @@ Qodo incremental review at commit 618080c00a resolved five findings and marked t
 2026-08-24 independent review of 7c104a7500 found no implementation or ESM/Next.js compatibility defect and one P2 test-quality gap: the source regex could miss unconditional dynamic or multiline static imports. Accepted and remediated in test commit 1263677011 with an isolated Node loader that blocks analyzer resolution while disabled and supplies a marker wrapper while enabled. Mutation proof reintroduced the prior static import and failed 1/4 for the expected eager-resolution error; restoring the guarded import passed 4/4. Targeted ESLint, typecheck, and git diff --check passed after the test change. No reviewer findings remain locally.
 
 2026-08-24 independent re-review at test head 1263677011 found no remaining issues. Reviewer independently reproduced the 4/4 focused pass on Node 20, 22, and 24, plus targeted ESLint and git diff --check. Local review gate is closed; push, Qodo thread resolution, hosted CI, and final post-#2808 rebase remain.
+
+2026-08-24 refreshed Qodo review at pushed head a1e4557489 reported one rule violation: spawnSync blocks the event loop inside the new async config regression. Finding validated. Remediation will preserve the same isolated loader behavior while replacing synchronous child execution with promisified execFile, then rerun mutation/focused test proof, targeted ESLint, typecheck, diff checks, independent re-review, and Qodo refresh.
+
+2026-08-24 async child-process remediation verified before commit. Replacing spawnSync with promisified execFile preserves the loader guard without blocking the event loop. Mutation RED reintroduced the static analyzer import and failed 1/4 with the expected eager-resolution error; restored GREEN passed 4/4 under current Node and separately under Node 20. Targeted ESLint, typecheck, synchronous-child scan, and git diff --check passed. Awaiting source commit, independent re-review, evidence refresh, push, and Qodo confirmation.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
