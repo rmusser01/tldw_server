@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -17,7 +17,10 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization
-from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile
+from tldw_Server_API.app.core.Persona.buddy import (
+    normalize_persona_buddy_overlay_preferences,
+    resolve_persona_buddy_profile,
+)
 from tldw_Server_API.app.core.Persona.visual_candidate_provenance import (
     normalize_persona_visual_candidate_provenance,
 )
@@ -927,6 +930,11 @@ class PersonaStateStore:
             field_name="manifest_json",
             context_label=f"persona visual pack {pack_label}",
         )
+        item["companion_behavior"] = self._decode_persona_json_object(
+            item.get("companion_behavior_json"),
+            field_name="companion_behavior_json",
+            context_label=f"persona visual pack {pack_label}",
+        ) if item.get("companion_behavior_json") is not None else None
         item["deleted"] = self._as_bool(item.get("deleted"))
         return item
 
@@ -2188,6 +2196,130 @@ class PersonaStateStore:
 
             return _load_persisted_item(conn)
 
+    def get_persona_buddy_preferences(self, *, user_id: str) -> dict[str, Any] | None:
+        """Return the stored global companion preference for a user, if any."""
+        row = self.execute_query(
+            "SELECT * FROM persona_buddy_preferences WHERE user_id = ? LIMIT 1",
+            (str(user_id or "").strip(),),
+        ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["version"] = int(item["version"])
+        return item
+
+    def upsert_persona_buddy_preferences(
+        self,
+        *,
+        user_id: str,
+        ambient_mode: str,
+        expected_version: int | None,
+    ) -> dict[str, Any]:
+        """Create or version-check update a user's global companion preference."""
+        user_id_value = str(user_id or "").strip()
+        mode_value = str(ambient_mode or "").strip().lower()
+        if not user_id_value:
+            raise InputError("user_id is required for persona buddy preferences.")  # noqa: TRY003
+        if mode_value not in {"off", "expressive", "roaming"}:
+            raise InputError("ambient_mode must be off, expressive, or roaming.")  # noqa: TRY003
+        expected = None if expected_version is None else self._parse_version_input(expected_version)
+        now = self._get_current_utc_timestamp_iso()
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM persona_buddy_preferences WHERE user_id = ? LIMIT 1",
+                (user_id_value,),
+            ).fetchone()
+            if not row:
+                if expected is not None:
+                    raise ConflictError(
+                        "Persona buddy preferences version mismatch.",
+                        entity="persona_buddy_preferences",
+                        entity_id=user_id_value,
+                    )
+                query = (
+                    "INSERT INTO persona_buddy_preferences(user_id, ambient_mode, version, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)"
+                )
+                params = (user_id_value, mode_value, 1, now, now)
+                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+                conn.execute(prepared_query, prepared_params or ())
+            else:
+                current = dict(row)
+                if expected is None or int(current["version"]) != expected:
+                    raise ConflictError(
+                        "Persona buddy preferences version mismatch.",
+                        entity="persona_buddy_preferences",
+                        entity_id=user_id_value,
+                    )
+                query = (
+                    "UPDATE persona_buddy_preferences "
+                    "SET ambient_mode = ?, updated_at = ?, version = version + 1 "
+                    "WHERE user_id = ? AND version = ?"
+                )
+                params = (mode_value, now, user_id_value, expected)
+                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+                if conn.execute(prepared_query, prepared_params or ()).rowcount == 0:
+                    raise ConflictError(
+                        "Persona buddy preferences version mismatch.",
+                        entity="persona_buddy_preferences",
+                        entity_id=user_id_value,
+                    )
+
+        preferences = self.get_persona_buddy_preferences(user_id=user_id_value)
+        if not preferences:
+            raise CharactersRAGDBError("Failed to load persona buddy preferences after upsert.")  # noqa: TRY003
+        return preferences
+
+    def patch_persona_buddy_overlay_preferences(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+        patch: Mapping[str, Any],
+        expected_version: int,
+    ) -> dict[str, Any]:
+        """Apply a versioned overlay patch without discarding unknown preference keys."""
+        if not isinstance(patch, Mapping):
+            raise InputError("persona buddy overlay patch must be an object.")  # noqa: TRY003
+        expected = self._parse_version_input(expected_version)
+        now = self._get_current_utc_timestamp_iso()
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            row = conn.execute(
+                "SELECT * FROM persona_buddies WHERE persona_id = ? AND user_id = ? LIMIT 1",
+                (persona_id, user_id),
+            ).fetchone()
+            buddy = self._persona_buddy_row_to_dict(row)
+            if not buddy:
+                raise ConflictError(
+                    "Persona buddy not found for user.",
+                    entity="persona_buddies",
+                    entity_id=persona_id,
+                )
+            overlay_preferences = dict(buddy["overlay_preferences"])
+            overlay_preferences.update(dict(patch))
+            try:
+                normalized = normalize_persona_buddy_overlay_preferences(overlay_preferences)
+            except ValueError as exc:
+                raise InputError(str(exc)) from exc  # noqa: TRY003
+            query = (
+                "UPDATE persona_buddies SET overlay_preferences_json = ?, last_modified = ?, version = version + 1 "
+                "WHERE persona_id = ? AND user_id = ? AND version = ?"
+            )
+            params = (self._ensure_json_string(normalized) or "{}", now, persona_id, user_id, expected)
+            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            if conn.execute(prepared_query, prepared_params or ()).rowcount == 0:
+                raise ConflictError(
+                    "Persona buddy version mismatch.",
+                    entity="persona_buddies",
+                    entity_id=persona_id,
+                )
+
+        updated = self.get_persona_buddy(persona_id=persona_id, user_id=user_id)
+        if not updated:
+            raise CharactersRAGDBError("Failed to load persona buddy after overlay patch.")  # noqa: TRY003
+        return updated
+
     def create_persona_visual_pack(
         self,
         *,
@@ -2195,6 +2327,7 @@ class PersonaStateStore:
         user_id: str,
         title: str,
         manifest: dict[str, Any] | None = None,
+        companion_behavior: dict[str, Any] | None = None,
         renderer_type: str = "sprite_frames",
         status: str = "draft",
         parent_pack_id: str | None = None,
@@ -2238,6 +2371,8 @@ class PersonaStateStore:
             field_name="status",
             default="draft",
         )
+        if status_value == "active":
+            raise InputError("Use activate_persona_visual_pack for active status transitions.")  # noqa: TRY003
         provenance_value = self._normalize_persona_visual_enum(
             provenance,
             allowed=self._ALLOWED_PERSONA_VISUAL_PROVENANCE_TYPES,
@@ -2279,8 +2414,8 @@ class PersonaStateStore:
             insert_query = (
                 "INSERT INTO persona_visual_packs("
                 "id, persona_id, user_id, title, renderer_type, status, manifest_version, manifest_json, "
-                "parent_pack_id, revision_number, provenance, active_at, created_at, last_modified, deleted, version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                "companion_behavior_json, parent_pack_id, revision_number, provenance, active_at, created_at, last_modified, deleted, version"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
             insert_params = (
                 pack_id_value,
@@ -2291,6 +2426,7 @@ class PersonaStateStore:
                 status_value,
                 manifest_version_value,
                 self._ensure_json_string(manifest_value) or "{}",
+                self._ensure_json_string(companion_behavior) if companion_behavior is not None else None,
                 str(parent_pack_id) if parent_pack_id else None,
                 revision_number_value,
                 provenance_value,
@@ -2432,23 +2568,176 @@ class PersonaStateStore:
         pack["assets_by_id"] = {str(asset["id"]): asset for asset in assets}
         return pack
 
+    def create_persona_visual_pack_review(
+        self,
+        *,
+        pack_id: str,
+        user_id: str,
+        reviewer_user_id: str,
+        fingerprint: str,
+        expected_pack_version: int,
+    ) -> dict[str, Any]:
+        """Record a review tied to the exact inactive pack version supplied by the caller."""
+        fingerprint_value = str(fingerprint or "").strip()
+        if len(fingerprint_value) != 64:
+            raise InputError("persona visual pack fingerprint must be 64 characters.")  # noqa: TRY003
+        expected = self._parse_version_input(expected_pack_version)
+        review_id = self._generate_uuid()
+        now = self._get_current_utc_timestamp_iso()
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM persona_visual_packs WHERE id = ? AND user_id = ? AND deleted = ? LIMIT 1",
+                (pack_id, user_id, False if self.backend_type == BackendType.POSTGRESQL else 0),
+            ).fetchone()
+            if not row:
+                raise ConflictError(
+                    "Persona visual pack not found for review.",
+                    entity="persona_visual_packs",
+                    entity_id=pack_id,
+                )
+            pack = dict(row)
+            if int(pack["version"]) != expected:
+                raise ConflictError(
+                    "Persona visual pack version mismatch.",
+                    entity="persona_visual_packs",
+                    entity_id=pack_id,
+                )
+            query = (
+                "INSERT INTO persona_visual_pack_reviews("
+                "id, pack_id, user_id, reviewer_user_id, fingerprint, pack_version, reviewed_at, created_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+            params = (review_id, pack_id, user_id, str(reviewer_user_id or "").strip(), fingerprint_value, expected, now, now)
+            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            try:
+                conn.execute(prepared_query, prepared_params or ())
+            except sqlite3.IntegrityError as exc:
+                raise ConflictError(
+                    "Persona visual pack review already exists for this fingerprint.",
+                    entity="persona_visual_pack_reviews",
+                    entity_id=pack_id,
+                ) from exc
+            except BackendDatabaseError as exc:
+                if self._is_unique_violation(exc):
+                    raise ConflictError(
+                        "Persona visual pack review already exists for this fingerprint.",
+                        entity="persona_visual_pack_reviews",
+                        entity_id=pack_id,
+                    ) from exc
+                raise
+        return {
+            "id": review_id,
+            "pack_id": pack_id,
+            "user_id": user_id,
+            "reviewer_user_id": str(reviewer_user_id or "").strip(),
+            "fingerprint": fingerprint_value,
+            "pack_version": expected,
+            "reviewed_at": now,
+            "created_at": now,
+        }
+
+    def update_persona_visual_pack_payload(
+        self,
+        *,
+        pack_id: str,
+        user_id: str,
+        manifest: Mapping[str, Any],
+        companion_behavior: Mapping[str, Any] | None,
+        expected_version: int,
+    ) -> dict[str, Any]:
+        """Update an inactive pack's declarative payload using optimistic locking."""
+        if not isinstance(manifest, Mapping):
+            raise InputError("persona visual manifest must be an object.")  # noqa: TRY003
+        expected = self._parse_version_input(expected_version)
+        manifest_value = dict(manifest)
+        behavior_value = None if companion_behavior is None else dict(companion_behavior)
+        now = self._get_current_utc_timestamp_iso()
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM persona_visual_packs WHERE id = ? AND user_id = ? AND deleted = ? LIMIT 1",
+                (pack_id, user_id, False if self.backend_type == BackendType.POSTGRESQL else 0),
+            ).fetchone()
+            if not row:
+                raise ConflictError(
+                    "Persona visual pack not found for user.",
+                    entity="persona_visual_packs",
+                    entity_id=pack_id,
+                )
+            pack = dict(row)
+            if str(pack["status"]) == "active":
+                raise InputError("active visual pack payload is immutable")  # noqa: TRY003
+            if int(pack["version"]) != expected:
+                raise ConflictError(
+                    "Persona visual pack version mismatch.",
+                    entity="persona_visual_packs",
+                    entity_id=pack_id,
+                )
+            query = (
+                "UPDATE persona_visual_packs SET manifest_json = ?, manifest_version = ?, companion_behavior_json = ?, "
+                "last_modified = ?, version = version + 1 WHERE id = ? AND user_id = ? AND version = ?"
+            )
+            params = (
+                self._ensure_json_string(manifest_value) or "{}",
+                int(manifest_value.get("manifest_version", 1) or 1),
+                self._ensure_json_string(behavior_value) if behavior_value is not None else None,
+                now,
+                pack_id,
+                user_id,
+                expected,
+            )
+            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            if conn.execute(prepared_query, prepared_params or ()).rowcount == 0:
+                raise ConflictError(
+                    "Persona visual pack version mismatch.",
+                    entity="persona_visual_packs",
+                    entity_id=pack_id,
+                )
+            persona_id = str(pack["persona_id"])
+        updated = self.get_persona_visual_pack(pack_id=pack_id, persona_id=persona_id, user_id=user_id)
+        if not updated:
+            raise CharactersRAGDBError("Failed to load persona visual pack after payload update.")  # noqa: TRY003
+        return updated
+
     def activate_persona_visual_pack(
         self,
         *,
         persona_id: str,
         user_id: str,
         pack_id: str,
+        expected_version: int,
+        reviewed_fingerprint: str,
     ) -> dict[str, Any]:
         now = self._get_current_utc_timestamp_iso()
         bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        expected = self._parse_version_input(expected_version)
+        fingerprint_value = str(reviewed_fingerprint or "").strip()
+        if len(fingerprint_value) != 64:
+            raise InputError("reviewed_fingerprint must be a 64-character fingerprint.")  # noqa: TRY003
         with self.transaction() as conn:
             self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            self._require_persona_visual_pack_owner(
+            pack = self._require_persona_visual_pack_owner(
                 conn,
                 pack_id=pack_id,
                 persona_id=persona_id,
                 user_id=user_id,
             )
+            if int(pack["version"]) != expected:
+                raise ConflictError(
+                    "Persona visual pack version mismatch.",
+                    entity="persona_visual_packs",
+                    entity_id=pack_id,
+                )
+            review = conn.execute(
+                "SELECT 1 FROM persona_visual_pack_reviews "
+                "WHERE pack_id = ? AND user_id = ? AND fingerprint = ? AND pack_version = ? LIMIT 1",
+                (pack_id, user_id, fingerprint_value, expected),
+            ).fetchone()
+            if not review:
+                raise ConflictError(
+                    "Persona visual pack activation requires a current matching review.",
+                    entity="persona_visual_pack_reviews",
+                    entity_id=pack_id,
+                )
             archive_query = (
                 "UPDATE persona_visual_packs "
                 "SET status = 'archived', active_at = NULL, last_modified = ?, version = version + 1 "
@@ -2470,7 +2759,7 @@ class PersonaStateStore:
             activate_query = (
                 "UPDATE persona_visual_packs "
                 "SET status = 'active', active_at = ?, last_modified = ?, version = version + 1 "
-                "WHERE id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
+                "WHERE id = ? AND user_id = ? AND persona_id = ? AND deleted = ? AND version = ?"
             )
             activate_params = (
                 now,
@@ -2479,6 +2768,7 @@ class PersonaStateStore:
                 user_id,
                 persona_id,
                 bool_cast(False),
+                expected,
             )
             prepared_activate, prepared_activate_params = self._prepare_backend_statement(
                 activate_query,
@@ -2531,43 +2821,16 @@ class PersonaStateStore:
         manifest: dict[str, Any],
         expected_version: int | None = None,
     ) -> dict[str, Any] | None:
-        manifest_value = manifest if isinstance(manifest, dict) else {}
-        now = self._get_current_utc_timestamp_iso()
-        params: list[Any] = [
-            self._ensure_json_string(manifest_value) or "{}",
-            int(manifest_value.get("manifest_version", 1) or 1),
-            now,
-            pack_id,
-            user_id,
-            persona_id,
-            False if self.backend_type == BackendType.POSTGRESQL else 0,
-        ]
-        where_sql = "id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
-        if expected_version is not None:
-            where_sql += " AND version = ?"
-            params.append(int(expected_version))
-        query = (
-            "UPDATE persona_visual_packs "
-            "SET manifest_json = ?, manifest_version = ?, last_modified = ?, version = version + 1 "
-            f"WHERE {where_sql}"  # nosec B608
+        current = self.get_persona_visual_pack(pack_id=pack_id, persona_id=persona_id, user_id=user_id)
+        if not current:
+            return None
+        return self.update_persona_visual_pack_payload(
+            pack_id=pack_id,
+            user_id=user_id,
+            manifest=manifest,
+            companion_behavior=current.get("companion_behavior"),
+            expected_version=int(current["version"]) if expected_version is None else expected_version,
         )
-        with self.transaction() as conn:
-            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            self._require_persona_visual_pack_owner(
-                conn,
-                pack_id=pack_id,
-                persona_id=persona_id,
-                user_id=user_id,
-            )
-            prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
-            cursor = conn.execute(prepared_query, prepared_params or ())
-            if cursor.rowcount == 0 and expected_version is not None:
-                raise ConflictError(  # noqa: TRY003
-                    "Persona visual pack version mismatch.",
-                    entity="persona_visual_packs",
-                    entity_id=pack_id,
-                )
-        return self.get_persona_visual_pack(pack_id=pack_id, persona_id=persona_id, user_id=user_id)
 
     def update_persona_visual_pack_status(
         self,
@@ -2607,12 +2870,14 @@ class PersonaStateStore:
         )
         with self.transaction() as conn:
             self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            self._require_persona_visual_pack_owner(
+            pack = self._require_persona_visual_pack_owner(
                 conn,
                 pack_id=pack_id,
                 persona_id=persona_id,
                 user_id=user_id,
             )
+            if str(pack["status"]) == "active":
+                raise InputError("active visual pack is immutable")  # noqa: TRY003
             prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
             cursor = conn.execute(prepared_query, prepared_params or ())
             if cursor.rowcount == 0 and expected_version is not None:
@@ -2652,12 +2917,14 @@ class PersonaStateStore:
 
         with self.transaction() as conn:
             self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            self._require_persona_visual_pack_owner(
+            pack = self._require_persona_visual_pack_owner(
                 conn,
                 pack_id=pack_id,
                 persona_id=persona_id,
                 user_id=user_id,
             )
+            if str(pack["status"]) == "active":
+                raise InputError("active visual pack is immutable")  # noqa: TRY003
             pack_where_sql = "id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
             pack_params: list[Any] = [
                 deleted_true,
@@ -3206,12 +3473,14 @@ class PersonaStateStore:
         )
         with self.transaction() as conn:
             self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            self._require_persona_visual_pack_owner(
+            pack = self._require_persona_visual_pack_owner(
                 conn,
                 pack_id=pack_id,
                 persona_id=persona_id,
                 user_id=user_id,
             )
+            if str(pack["status"]) == "active":
+                raise InputError("active visual pack assets are immutable")  # noqa: TRY003
             prepared_query, prepared_params = self._prepare_backend_statement(query, params)
             conn.execute(prepared_query, prepared_params or ())
 

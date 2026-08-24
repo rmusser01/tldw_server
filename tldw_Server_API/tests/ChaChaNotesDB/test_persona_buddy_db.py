@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
+    InputError,
 )
 from tldw_Server_API.app.core.Persona.buddy import ensure_persona_buddy_for_profile
 
@@ -195,6 +196,68 @@ def test_ensure_persona_buddy_preserves_overlay_preferences_on_rederive(
 
     assert repaired["source_fingerprint"] != original["source_fingerprint"]
     assert repaired["overlay_preferences"] == overlay_preferences
+
+
+def test_overlay_patch_preserves_unknown_preferences_and_rejects_stale_versions(
+    db_instance: CharactersRAGDB,
+) -> None:
+    """A targeted ambient patch cannot discard unrelated overlay preferences."""
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Overlay Patch Persona"})
+    profile = db_instance.get_persona_profile(persona_id, user_id="user-1")
+    assert profile is not None
+    buddy = ensure_persona_buddy_for_profile(db_instance, profile)
+    seeded = db_instance.upsert_persona_buddy(
+        persona_id=persona_id,
+        user_id="user-1",
+        derivation_version=int(buddy["derivation_version"]),
+        source_fingerprint=str(buddy["source_fingerprint"]),
+        derived_core=buddy["derived_core"],
+        overlay_preferences={"accessory_id": "scarf", "eye_style": "round", "future_key": {"keep": True}},
+    )
+
+    updated = db_instance.patch_persona_buddy_overlay_preferences(
+        persona_id=persona_id,
+        user_id="user-1",
+        patch={"ambient_mode": "roaming"},
+        expected_version=int(seeded["version"]),
+    )
+
+    assert updated["overlay_preferences"] == {
+        "accessory_id": "scarf",
+        "eye_style": "round",
+        "future_key": {"keep": True},
+        "ambient_mode": "roaming",
+    }
+    with pytest.raises(ConflictError, match="version mismatch"):
+        db_instance.patch_persona_buddy_overlay_preferences(
+            persona_id=persona_id,
+            user_id="user-1",
+            patch={"ambient_mode": "off"},
+            expected_version=int(seeded["version"]),
+        )
+
+
+def test_global_ambient_preference_rejects_stale_version(db_instance: CharactersRAGDB) -> None:
+    """Global companion preferences use optimistic locking."""
+    created = db_instance.upsert_persona_buddy_preferences(
+        user_id="user-1",
+        ambient_mode="expressive",
+        expected_version=None,
+    )
+
+    assert db_instance.get_persona_buddy_preferences(user_id="user-1") == created
+    with pytest.raises(ConflictError, match="version mismatch"):
+        db_instance.upsert_persona_buddy_preferences(
+            user_id="user-1",
+            ambient_mode="off",
+            expected_version=int(created["version"]) + 1,
+        )
+    with pytest.raises(InputError, match="ambient_mode"):
+        db_instance.upsert_persona_buddy_preferences(
+            user_id="user-1",
+            ambient_mode="chaotic",
+            expected_version=int(created["version"]),
+        )
 
 
 def test_get_persona_buddy_surfaces_resolver_failures(
