@@ -31,9 +31,20 @@ _OBSOLETE_POLICY_HELPER_DELEGATES = (
     "_apply_rule_redactions",
 )
 
+_OBSOLETE_SCAN_HELPER_DELEGATES = (
+    "_iter_scan_chunks",
+    "_find_match_span",
+    "_collect_rule_matches",
+)
+
 
 def test_obsolete_policy_helper_delegates_are_not_class_local():
     for name in _OBSOLETE_POLICY_HELPER_DELEGATES:
+        assert name not in ModerationService.__dict__
+
+
+def test_obsolete_scan_helper_delegates_are_not_class_local():
+    for name in _OBSOLETE_SCAN_HELPER_DELEGATES:
         assert name not in ModerationService.__dict__
 
 
@@ -290,69 +301,6 @@ def test_redact_text_with_count_delegates_exactly_once_with_one_snapshot():
     )
 
 
-def test_iter_scan_chunks_delegates_exactly_once_with_one_snapshot():
-    evaluator = Mock()
-    evaluator.iter_scan_chunks.return_value = iter(
-        (sentinel.first_chunk, sentinel.second_chunk),
-    )
-    service = _service()
-    service._policy_evaluator = evaluator
-    service._evaluation_limits = Mock(return_value=sentinel.chunk_limits)
-
-    result = list(service._iter_scan_chunks(sentinel.chunk_text))
-
-    assert len(result) == 2
-    assert result[0] is sentinel.first_chunk
-    assert result[1] is sentinel.second_chunk
-    service._evaluation_limits.assert_called_once_with()
-    evaluator.iter_scan_chunks.assert_called_once_with(
-        sentinel.chunk_text,
-        sentinel.chunk_limits,
-    )
-
-
-def test_find_match_span_delegates_exactly_once_with_one_snapshot():
-    evaluator = Mock()
-    evaluator.find_match_span.return_value = sentinel.found_span
-    service = _service()
-    service._policy_evaluator = evaluator
-    service._evaluation_limits = Mock(return_value=sentinel.find_limits)
-
-    result = service._find_match_span(
-        sentinel.find_pattern,
-        sentinel.find_text,
-    )
-
-    assert result is sentinel.found_span
-    service._evaluation_limits.assert_called_once_with()
-    evaluator.find_match_span.assert_called_once_with(
-        sentinel.find_pattern,
-        sentinel.find_text,
-        sentinel.find_limits,
-    )
-
-
-def test_collect_rule_matches_delegates_exactly_once_with_one_snapshot():
-    evaluator = Mock()
-    evaluator.collect_rule_matches.return_value = sentinel.collected_matches
-    service = _service()
-    service._policy_evaluator = evaluator
-    service._evaluation_limits = Mock(return_value=sentinel.collect_limits)
-
-    result = service._collect_rule_matches(
-        sentinel.collect_text,
-        sentinel.collect_pattern,
-    )
-
-    assert result is sentinel.collected_matches
-    service._evaluation_limits.assert_called_once_with()
-    evaluator.collect_rule_matches.assert_called_once_with(
-        sentinel.collect_text,
-        sentinel.collect_pattern,
-        sentinel.collect_limits,
-    )
-
-
 def test_decision_only_evaluation_delegates_exactly_once_with_one_snapshot():
     evaluator = Mock()
     evaluator.evaluate_text.return_value = sentinel.decision_only_result
@@ -494,9 +442,6 @@ def test_service_method_parameter_names_and_kinds_are_preserved():
         "_evaluate_action_internal": ("self", "text", "policy", "phase"),
         "evaluate_action": ("self", "text", "policy", "phase"),
         "evaluate_action_with_match": ("self", "text", "policy", "phase"),
-        "_iter_scan_chunks": ("self", "text"),
-        "_find_match_span": ("self", "pat", "text"),
-        "_collect_rule_matches": ("self", "text", "pat"),
     }
 
     for name, parameter_names in expected.items():
