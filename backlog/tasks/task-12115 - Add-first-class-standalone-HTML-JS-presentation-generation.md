@@ -1,10 +1,10 @@
 ---
 id: TASK-12115
 title: Add first-class standalone HTML-JS presentation generation
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-08-21 22:59
+updated_date: 2026-08-24 17:50
 labels:
 - slides
 - presentation-studio
@@ -99,6 +99,10 @@ modified_files:
 - tldw_Server_API/tests/Services/test_startup_worker_groups.py
 - tldw_Server_API/tests/Slides/test_standalone_html_reconciler.py
 - tldw_Server_API/tests/Slides/test_standalone_html_reconciler_db.py
+references:
+- https://github.com/rmusser01/tldw_server/pull/2809
+- merge:2c6553c4ed7192f024802ddf2735babc950cea69
+- TASK-13116
 ---
 
 ## Description
@@ -107,29 +111,31 @@ modified_files:
 Design and implement a hardened standalone HTML+JavaScript presentation mode shared across existing Slides source types, with a form-first Presentation Studio flow, strict content-kind invariants, bounded LLM output, explicit-save editing, a text-only safe outline, attachment-only file handoff, compatibility guards, tests, documentation, and a firm no-execution boundary across every tldw surface.
 <!-- SECTION:DESCRIPTION:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
+## Final Summary
 
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered and merged first-class standalone HTML/JavaScript presentations behind a default-off, fail-closed capability gate. The implementation provides owner-scoped storage and generation, bounded validation/provider transport, Jobs-backed resumable generation, guarded MCP access, explicit strong-ETag editing, inert safe-outline/download/recovery flows, source-free extension handoff, compatibility protection for structured slides, and complete operator/API/user documentation. PR #2809 merged to dev as 2c6553c4ed7192f024802ddf2735babc950cea69 after required policy and review gates. Verification and inherited/environment limitations are recorded in Implementation Notes. Duplicate Backlog identity normalization is intentionally deferred to TASK-13116.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An approved design spec and implementation plan document the architecture, no-execution security boundary, compatibility behavior, and deferred scope.
-- [ ] #2 The Slides backend supports structured_slides and standalone_html as explicit, validated content kinds without permitting split-brain records.
-- [ ] #3 Standalone HTML generation uses one shared mode-aware service across supported source kinds, submission-time immutable source snapshots, and one administrator-configured concrete allowlisted provider/model/adapter/endpoint target.
-- [ ] #4 Presentation Studio exposes a form-first HTML+JavaScript generation flow and a dedicated code, text-only safe-outline, save, conflict, recovery, and attachment-download experience.
-- [ ] #5 Generated HTML/JavaScript is never rendered or executed by a tldw server, WebUI, extension, worker, MCP path, or renderer; source is never served as text/html.
-- [ ] #6 Legacy presentations and clients remain structured by default, schema-v2 and version migrations are covered, and capabilities fail closed without blocking existing HTML read/edit/export.
-- [ ] #7 Focused backend, frontend, security, integration, and E2E tests pass, and Bandit reports no new findings in touched Python.
+- [x] #1 An approved design spec and implementation plan document the architecture, no-execution security boundary, compatibility behavior, and deferred scope.
+- [x] #2 The Slides backend supports structured_slides and standalone_html as explicit, validated content kinds without permitting split-brain records.
+- [x] #3 Standalone HTML generation uses one shared mode-aware service across supported source kinds, submission-time immutable source snapshots, and one administrator-configured concrete allowlisted provider/model/adapter/endpoint target.
+- [x] #4 Presentation Studio exposes a form-first HTML+JavaScript generation flow and a dedicated code, text-only safe-outline, save, conflict, recovery, and attachment-download experience.
+- [x] #5 Generated HTML/JavaScript is never rendered or executed by a tldw server, WebUI, extension, worker, MCP path, or renderer; source is never served as text/html.
+- [x] #6 Legacy presentations and clients remain structured by default, schema-v2 and version migrations are covered, and capabilities fail closed without blocking existing HTML read/edit/export.
+- [x] #7 Focused backend, frontend, security, integration, and E2E tests pass, and Bandit reports no new findings in touched Python.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -271,4 +277,13 @@ Fresh verification: standalone generation 113/113 passed. The affected Task 7/Ta
 2026-08-21 Task 11 implementation evidence: exposed exact capabilities and receipt-backed generation/status transports, source-free lost-save reconciliation, strong-ETag save/version responses, and fixed-name inert draft/saved attachments without HTML execution; final focused/domain/structured suites passed 104/104, 44/44, and 97/97, while Black, Ruff, py_compile, diff checks, and production Bandit (0 findings) were clean. TASK-12115 remains In Progress for Task 12+.
 2026-08-21 Task 11 review-fix evidence: added the locked source-free metadata route, lifecycle-owned fenced transport reuse, lazy selected-source acquisition, independent closed capability reasons, complete status/capability matrices, and parsed fail-closed CSS URL checks; amended focused/domain/structured/startup suites passed 141/141, 44/44, 102/102, and 56/56 before final static/security gates. TASK-12115 remains In Progress for Task 12+.
 2026-08-21 Task 11 fix-round-2 evidence: added lifecycle-backed HTTP coverage proving a real stale-revision generation request consumes the lifecycle-owned exact-epoch transport once and shutdown closes/removes it; API/focused/domain/structured/startup suites passed 107/107, 142/142, 44/44, 102/102, and 56/56, with Black, Ruff, py_compile, and diff checks clean. TASK-12115 remains In Progress for Task 12+.
+2026-08-24 Tasks 12–17 and rollout closeout: completed guarded MCP transport behavior, the discriminated standalone client contract, source-free index and form-first generation UX, resumable generation authority, the inert Monaco editor with trusted text-only outline, strong-ETag save/conflict handling, exact scoped recovery, audited octet-stream download, source-free extension handoff, and the final API/deployment/design/user documentation and browser security matrix. Runtime hardening also closed reviewed lifecycle races around pagehide/bfcache, principal changes, pending editor/form recovery, worker identity/watchdogs, and same-scope storage-failure quarantine; no standalone source is rendered or executed by tldw.
+
+Merged PR #2809 into dev as merge commit 2c6553c4ed7192f024802ddf2735babc950cea69 (head b7ebd315bc6550177b45fe7dd7d9283c95e5b891). The requester supplied the required human-authored Change summary explaining both the feature and the safety/compatibility rationale. Required license policy passed on the exact head, all five review threads were resolved, and no failed required checks remained at merge.
+
+Final verification evidence: standalone backend integration 1/1; impacted frontend matrix 631/631; Chromium workflow 4/4; Chromium security 13/13; extension TypeScript compile green; OpenAPI generation green; git diff checks clean. Production functionality remains default-off and existing structured slides remain compatible.
+
+Known limitations and inherited/environment dispositions: Firefox and WebKit security projects selected the intended 13 cases each with retries disabled but could not launch because the pinned local browser binaries were absent, so they are not reported as passed. The broad backend run was 1,573 passed, 25 repository-managed PostgreSQL fixture skips, and two deterministic inherited CAS failures in unchanged generation-jobs code: test_lost_terminal_cas_reloads_completed_winner and test_lost_retry_reset_cas_reloads_completed_or_terminal_winner[completed]. Bandit reported 72 LOW, 0 MEDIUM, 0 HIGH, and 0 errors across 95,436 LOC; the LOW findings were existing test assertions/sentinels, with no production implementation finding. The Task 16 extension CI/headless pure-audit path exposed an inherited chrome-fallback fixture limitation; the plan-exact non-CI run passed the pure audit with three no-target skips, and extension compilation passed. Optional GitHub Actions runner cancellations were infrastructure churn rather than code failures. Direct-eval monkeypatch observability was deliberately omitted because wrapping direct eval changes JavaScript semantics; execution-sentinel and other source-sink instrumentation remained active.
+
+Backlog identity note: a separate housekeeping task, TASK-13116, tracks the pre-existing duplicate TASK-12115 identifier without renumbering or deleting historical records in this closeout.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
