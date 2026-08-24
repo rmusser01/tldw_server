@@ -499,7 +499,6 @@ def _extract_article_with_pipeline_with_dependencies(
         if strategy == "regex":
             with _strategy_throttle(strategy, dependencies):
                 result = _copy_result(extract_regex_entities(html, url, mask_pii=regex_mask_override(regex_settings)))
-            last_result = result
             if result.get("extraction_successful"):
                 regex_result = result
                 if default_regex_enrichment:
@@ -511,6 +510,7 @@ def _extract_article_with_pipeline_with_dependencies(
                 trace.append(_trace_entry(dependencies, strategy, "success", "regex_extracted"))
                 _record_strategy_metrics(dependencies, strategy, "success", dependencies.perf_counter() - start, result)
                 return finalize(result, strategy=strategy)
+            last_result = result
             trace.append(_trace_entry(dependencies, strategy, "failed", "regex_no_matches"))
             _record_strategy_metrics(dependencies, strategy, "failed", dependencies.perf_counter() - start, result)
             continue
@@ -578,8 +578,6 @@ def _extract_article_with_pipeline_with_dependencies(
         trace.append(_trace_entry(dependencies, strategy, "failed", "no_content"))
         _record_strategy_metrics(dependencies, strategy, "failed", dependencies.perf_counter() - start, result)
 
-    if regex_result is not None and regex_result.get("extraction_successful"):
-        return finalize(regex_result, strategy="regex")
     if last_result is None:
         last_result = {
             "title": "N/A",
