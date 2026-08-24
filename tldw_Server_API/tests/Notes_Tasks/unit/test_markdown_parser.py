@@ -10,6 +10,7 @@ import pytest
 
 from tldw_Server_API.app.core.Notes_Tasks import markdown_parser, models
 from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
+from tldw_Server_API.app.core.Notes_Tasks.projection_markers import TaskMarker
 
 pytestmark = pytest.mark.unit
 
@@ -32,6 +33,34 @@ def test_parse_basic_checklist_lines_with_locators() -> None:
     assert result.items[0].locator.end_offset == len("Intro\n- [ ] Review source @due(2026-06-10)")
     assert result.items[0].locator.normalized_text_hash == _expected_hash("Review source")
     assert result.items[0].metadata["due_date"] == "2026-06-10"
+
+
+def test_parse_managed_checklist_exposes_marker_without_polluting_text() -> None:
+    markdown = (
+        "- [ ] Review source "
+        "<!-- tldw-task:v1:11111111-1111-4111-8111-111111111111:7:"
+        f"sha256:{'a' * 64} -->\n"
+    )
+
+    result = parse_note_checklists(note_id="note-1", note_version=7, content=markdown)
+
+    assert result.items[0].text == "Review source"
+    assert result.items[0].marker == TaskMarker(
+        task_id="11111111-1111-4111-8111-111111111111",
+        revision=7,
+        object_hash="sha256:" + "a" * 64,
+    )
+    assert result.items[0].marker_reason_code is None
+
+
+def test_parse_malformed_managed_marker_is_reviewable_without_identity() -> None:
+    markdown = "- [ ] Review source <!-- tldw-task:v1:not-a-task:7:not-a-hash -->\n"
+
+    result = parse_note_checklists(note_id="note-1", note_version=7, content=markdown)
+
+    assert result.items[0].text == "Review source"
+    assert result.items[0].marker is None
+    assert result.items[0].marker_reason_code == "malformed_marker"
 
 
 def test_parse_nested_checklist_lines_as_tasks() -> None:

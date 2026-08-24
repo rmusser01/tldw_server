@@ -6765,6 +6765,111 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params), connection=connection)
         return [_envelope_from_row(row) for row in result.rows]
 
+    def get_historical_task_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+        object_revision: int,
+        object_hash: str,
+        envelope_id: str | None = None,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Resolve one applied immutable task envelope from every anchor claim."""
+
+        def _lookup(conn: Any) -> SyncEnvelope | None:
+            dataset = self._require_dataset_domain(
+                dataset_id,
+                "notes.task",
+                connection=conn,
+            )
+            if dataset.get("owner_user_id") != owner_user_id:
+                return None
+            if envelope_id is None:
+                rows = self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND domain = 'notes.task'
+                       AND entity_id = ? AND object_revision = ? AND payload_hash = ?
+                       AND operation = 'upsert' AND status = 'accepted'
+                       AND apply_status = 'applied'
+                     ORDER BY server_sequence DESC
+                     LIMIT 2
+                    """,
+                    (dataset_id, task_id, object_revision, object_hash),
+                    connection=conn,
+                ).rows
+                return _envelope_from_row(rows[0]) if len(rows) == 1 else None
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND client_envelope_id = ?
+                       AND domain = 'notes.task' AND entity_id = ?
+                       AND object_revision = ? AND payload_hash = ?
+                       AND operation = 'upsert' AND status = 'accepted'
+                       AND apply_status = 'applied'
+                     LIMIT 1
+                    """,
+                    (
+                        dataset_id,
+                        envelope_id,
+                        task_id,
+                        object_revision,
+                        object_hash,
+                    ),
+                    connection=conn,
+                )
+            )
+            return _envelope_from_row(row) if row is not None else None
+
+        if connection is not None:
+            return _lookup(connection)
+        with self.backend.transaction() as transaction_conn:
+            return _lookup(transaction_conn)
+
+    def get_projection_note_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        envelope_id: str,
+        object_hash: str,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Resolve the exact applied note envelope named by a projection anchor."""
+
+        def _lookup(conn: Any) -> SyncEnvelope | None:
+            dataset = self._require_dataset_domain(
+                dataset_id,
+                "notes.note",
+                connection=conn,
+            )
+            if dataset.get("owner_user_id") != owner_user_id:
+                return None
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND client_envelope_id = ?
+                       AND domain = 'notes.note' AND entity_id = ?
+                       AND payload_hash = ? AND operation = 'upsert'
+                       AND status = 'accepted' AND apply_status = 'applied'
+                     LIMIT 1
+                    """,
+                    (dataset_id, envelope_id, note_id, object_hash),
+                    connection=conn,
+                )
+            )
+            return _envelope_from_row(row) if row is not None else None
+
+        if connection is not None:
+            return _lookup(connection)
+        with self.backend.transaction() as transaction_conn:
+            return _lookup(transaction_conn)
+
     def get_envelope_for_entity_at_or_before(
         self,
         dataset_id: str,

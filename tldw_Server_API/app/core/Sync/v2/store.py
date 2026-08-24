@@ -707,6 +707,46 @@ class SyncV2Store:
             connection=self._connection,
         )
 
+    def get_historical_task_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+        object_revision: int,
+        object_hash: str,
+        envelope_id: str | None = None,
+    ) -> SyncEnvelope | None:
+        """Resolve one exact applied historical Notes task envelope."""
+        return self.db.get_historical_task_envelope(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            task_id=task_id,
+            envelope_id=envelope_id,
+            object_revision=object_revision,
+            object_hash=object_hash,
+            connection=self._connection,
+        )
+
+    def get_projection_note_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        envelope_id: str,
+        object_hash: str,
+    ) -> SyncEnvelope | None:
+        """Resolve one exact applied note envelope for projection proof."""
+        return self.db.get_projection_note_envelope(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            note_id=note_id,
+            envelope_id=envelope_id,
+            object_hash=object_hash,
+            connection=self._connection,
+        )
+
     def get_envelope_for_entity_at_or_before(
         self,
         dataset_id: str,

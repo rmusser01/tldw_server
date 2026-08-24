@@ -44,6 +44,17 @@ class TaskStore:
     _CHECKLIST_DISCOVERY_BULLET_PATTERNS = ("%-%", "%*%", "%+%")
     _TASK_STATUSES = {"open", "done"}
     _PROJECTION_STATUSES = {"live", "unlinked", "deleted", "ambiguous"}
+    _PROJECTION_DRIFT_REASONS = {
+        "missing_marker_base",
+        "malformed_marker",
+        "duplicate_marker",
+        "marker_scope_mismatch",
+        "base_unavailable",
+        "both_changed",
+        "ambiguous_legacy_match",
+        "unsupported_markdown",
+    }
+    _PROJECTION_DRIFT_STATUSES = {"open", "resolved", "dismissed"}
     _MIN_LIMIT = 1
     _MAX_LIMIT = 500
     _LOCAL_UNBOUND = "local-unbound"
@@ -281,6 +292,46 @@ class TaskStore:
 
     def _decode_event_row(self, row: Any) -> dict[str, Any] | None:
         return self._decode_row(row, self._EVENT_JSON_FIELDS)
+
+    @staticmethod
+    def _require_nonempty_identity(value: str, field_name: str) -> str:
+        """Return one non-empty opaque identity without rewriting it."""
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise InputError(f"{field_name} must be a non-empty canonical string.")
+        return value
+
+    @staticmethod
+    def _validate_projection_hash(value: str, field_name: str) -> str:
+        """Return a lowercase SHA-256 value used in projection claims."""
+        if (
+            not isinstance(value, str)
+            or len(value) != 71
+            or not value.startswith("sha256:")
+            or any(character not in "0123456789abcdef" for character in value[7:])
+        ):
+            raise InputError(f"{field_name} must be a canonical SHA-256 hash.")
+        return value
+
+    @classmethod
+    def _validate_projection_head_claim(
+        cls,
+        cursor: int | None,
+        object_hash: str | None,
+        field_name: str,
+    ) -> tuple[int | None, str | None]:
+        """Validate one optional cursor/hash pair used by drift CAS."""
+        if cursor is None and object_hash is None:
+            return None, None
+        if (
+            isinstance(cursor, bool)
+            or not isinstance(cursor, int)
+            or cursor < 1
+            or object_hash is None
+        ):
+            raise InputError(
+                f"{field_name} cursor and hash must be supplied together."
+            )
+        return cursor, cls._validate_projection_hash(object_hash, f"{field_name}_hash")
 
     @staticmethod
     def _require_live_projection_row(task_id: str, projection: dict[str, Any] | None) -> dict[str, Any]:
@@ -3078,6 +3129,384 @@ class TaskStore:
         )
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def _fetch_task_projection_drift(
+        self,
+        drift_id: str,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str | None = None,
+        task_id: str | None = None,
+        for_update: bool = False,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch one authorized drift row, optionally locking it for CAS."""
+        lock_clause = (
+            " FOR UPDATE"
+            if for_update and self._db.backend_type == BackendType.POSTGRESQL
+            else ""
+        )
+        query = (
+            "SELECT * FROM task_projection_drifts "
+            "WHERE owner_user_id = ? AND dataset_id = ? AND id = ? "
+            "AND (? IS NULL OR note_id = ?) AND (? IS NULL OR task_id = ?)"
+            + lock_clause
+        )  # nosec B608 - fixed SQL plus a backend-controlled row-lock suffix
+        cursor = self._read(
+            query,
+            (
+                owner_user_id,
+                dataset_id,
+                drift_id,
+                note_id,
+                note_id,
+                task_id,
+                task_id,
+            ),
+            conn=conn,
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def _projection_drift_claims(row: Mapping[str, Any]) -> tuple[Any, ...]:
+        """Return the immutable privacy-safe claims of one drift row."""
+        return (
+            row["note_id"],
+            row["task_id"],
+            int(row["marker_base_revision"]),
+            row["marker_base_hash"],
+            row.get("note_head_cursor"),
+            row.get("note_head_hash"),
+            row.get("task_head_cursor"),
+            row.get("task_head_hash"),
+            row["reason_code"],
+        )
+
+    def create_task_projection_drift(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        drift_id: str,
+        note_id: str,
+        task_id: str,
+        marker_base_revision: int,
+        marker_base_hash: str,
+        note_head_cursor: int | None,
+        note_head_hash: str | None,
+        task_head_cursor: int | None,
+        task_head_hash: str | None,
+        reason_code: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any]:
+        """Create one privacy-safe drift row or return its exact replay."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        drift = self._require_nonempty_identity(drift_id, "drift_id")
+        note = self._require_nonempty_identity(note_id, "note_id")
+        task = self._require_nonempty_identity(task_id, "task_id")
+        if (
+            isinstance(marker_base_revision, bool)
+            or not isinstance(marker_base_revision, int)
+            or marker_base_revision < 1
+        ):
+            raise InputError("marker_base_revision must be a positive integer.")
+        base_hash = self._validate_projection_hash(
+            marker_base_hash, "marker_base_hash"
+        )
+        note_cursor, note_hash = self._validate_projection_head_claim(
+            note_head_cursor, note_head_hash, "note_head"
+        )
+        task_cursor, task_hash = self._validate_projection_head_claim(
+            task_head_cursor, task_head_hash, "task_head"
+        )
+        if reason_code not in self._PROJECTION_DRIFT_REASONS:
+            raise InputError("reason_code is not a supported projection drift reason.")
+        expected_claims = (
+            note,
+            task,
+            marker_base_revision,
+            base_hash,
+            note_cursor,
+            note_hash,
+            task_cursor,
+            task_hash,
+            reason_code,
+        )
+        now = self._db._get_current_utc_timestamp_iso()
+
+        def _execute_create(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
+            existing = self._fetch_task_projection_drift(
+                drift,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                for_update=True,
+                conn=transaction_conn,
+            )
+            if existing is not None:
+                if self._projection_drift_claims(existing) != expected_claims:
+                    raise ConflictError(
+                        "Projection drift ID has changed claims.",
+                        entity="tasks",
+                        entity_id=drift,
+                    )  # noqa: TRY003
+                return existing
+            task_row = self._fetch_task(
+                task,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                include_deleted=True,
+                conn=transaction_conn,
+            )
+            if task_row is None or task_row["note_id"] != note:
+                raise ConflictError(
+                    "Projection drift task reference not found.",
+                    entity="tasks",
+                    entity_id=drift,
+                )  # noqa: TRY003
+            self._execute(
+                transaction_conn,
+                """
+                INSERT INTO task_projection_drifts (
+                    owner_user_id, dataset_id, id, note_id, task_id,
+                    marker_base_revision, marker_base_hash, note_head_cursor,
+                    note_head_hash, task_head_cursor, task_head_hash, reason_code,
+                    status, created_at, updated_at, resolved_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner,
+                    dataset,
+                    drift,
+                    note,
+                    task,
+                    marker_base_revision,
+                    base_hash,
+                    note_cursor,
+                    note_hash,
+                    task_cursor,
+                    task_hash,
+                    reason_code,
+                    "open",
+                    now,
+                    now,
+                    None,
+                ),
+            )
+            created = self._fetch_task_projection_drift(
+                drift,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                note_id=note,
+                task_id=task,
+                conn=transaction_conn,
+            )
+            if created is None:
+                raise CharactersRAGDBError(
+                    "Failed to read created projection drift."
+                )
+            return created
+
+        try:
+            return self._with_transaction(_execute_create, conn)
+        except sqlite3.IntegrityError as exc:
+            self._raise_write_integrity_error(
+                exc,
+                operation="Projection drift",
+                entity_id=drift,
+                reference="task",
+            )
+        except BackendDatabaseError as exc:
+            self._raise_write_backend_error(
+                exc,
+                operation="Projection drift",
+                entity_id=drift,
+                reference="task",
+            )
+
+    def get_task_projection_drift(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        task_id: str,
+        drift_id: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any] | None:
+        """Return one drift only through its complete authorized scope."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=conn,
+            fn=lambda read_conn: self._fetch_task_projection_drift(
+                drift_id,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                note_id=note_id,
+                task_id=task_id,
+                conn=read_conn,
+            ),
+        )
+
+    def list_task_projection_drifts(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        task_id: str | None = None,
+        status: str = "open",
+        limit: int = 100,
+        offset: int = 0,
+        conn: TaskConnection | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return one bounded owner/dataset/note drift page."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        if status not in self._PROJECTION_DRIFT_STATUSES:
+            raise InputError("status is not a supported projection drift status.")
+        page_limit = self._clamp_limit(limit)
+        page_offset = self._normalize_offset(offset)
+
+        def _read_page(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            if task_id is None:
+                cursor = self._read(
+                    """
+                    SELECT * FROM task_projection_drifts
+                     WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?
+                       AND status = ?
+                     ORDER BY updated_at DESC, id DESC
+                     LIMIT ? OFFSET ?
+                    """,
+                    (owner, dataset, note_id, status, page_limit, page_offset),
+                    conn=read_conn,
+                )
+            else:
+                cursor = self._read(
+                    """
+                    SELECT * FROM task_projection_drifts
+                     WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?
+                       AND task_id = ? AND status = ?
+                     ORDER BY updated_at DESC, id DESC
+                     LIMIT ? OFFSET ?
+                    """,
+                    (
+                        owner,
+                        dataset,
+                        note_id,
+                        task_id,
+                        status,
+                        page_limit,
+                        page_offset,
+                    ),
+                    conn=read_conn,
+                )
+            return [dict(row) for row in cursor.fetchall()]
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=conn,
+            fn=_read_page,
+        )
+
+    def compare_and_set_task_projection_drift(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        task_id: str,
+        drift_id: str,
+        expected_note_head_cursor: int | None,
+        expected_note_head_hash: str | None,
+        expected_task_head_cursor: int | None,
+        expected_task_head_hash: str | None,
+        status: str,
+        conn: TaskConnection | None = None,
+    ) -> dict[str, Any]:
+        """Resolve or dismiss an open drift only for exact current claims."""
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        if status not in {"resolved", "dismissed"}:
+            raise InputError("status must be 'resolved' or 'dismissed'.")
+        expected_note = self._validate_projection_head_claim(
+            expected_note_head_cursor, expected_note_head_hash, "note_head"
+        )
+        expected_task = self._validate_projection_head_claim(
+            expected_task_head_cursor, expected_task_head_hash, "task_head"
+        )
+        now = self._db._get_current_utc_timestamp_iso()
+
+        def _execute_cas(transaction_conn: TaskConnection) -> dict[str, Any]:
+            self._require_authorized_write_scope(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
+            current = self._fetch_task_projection_drift(
+                drift_id,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                note_id=note_id,
+                task_id=task_id,
+                for_update=True,
+                conn=transaction_conn,
+            )
+            if (
+                current is None
+                or current["status"] != "open"
+                or (current["note_head_cursor"], current["note_head_hash"])
+                != expected_note
+                or (current["task_head_cursor"], current["task_head_hash"])
+                != expected_task
+            ):
+                raise ConflictError(
+                    "Projection drift changed concurrently.",
+                    entity="tasks",
+                    entity_id=drift_id,
+                )  # noqa: TRY003
+            updated = self._execute(
+                transaction_conn,
+                """
+                UPDATE task_projection_drifts
+                   SET status = ?, updated_at = ?, resolved_at = ?
+                 WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?
+                   AND task_id = ? AND id = ? AND status = 'open'
+                """,
+                (
+                    status,
+                    now,
+                    now,
+                    owner,
+                    dataset,
+                    note_id,
+                    task_id,
+                    drift_id,
+                ),
+            )
+            if getattr(updated, "rowcount", None) != 1:
+                raise ConflictError(
+                    "Projection drift changed concurrently.",
+                    entity="tasks",
+                    entity_id=drift_id,
+                )  # noqa: TRY003
+            result = self._fetch_task_projection_drift(
+                drift_id,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                note_id=note_id,
+                task_id=task_id,
+                conn=transaction_conn,
+            )
+            if result is None:
+                raise CharactersRAGDBError(
+                    "Failed to read updated projection drift."
+                )
+            return result
+
+        return self._with_transaction(_execute_cas, conn)
 
     def candidate_notes_for_task_discovery(
         self,
