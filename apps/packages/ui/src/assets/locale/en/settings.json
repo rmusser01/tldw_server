@@ -358,6 +358,7 @@
     "deleteTitle": "Delete macro?",
     "deleteContent": "This macro will be permanently removed.",
     "validationPassed": "Server validation passed.",
+    "validatedNameMismatch": "Validated macro name must match the selected macro.",
     "copied": "YAML copied.",
     "copyError": "Unable to copy YAML.",
     "importError": "Unable to import YAML.",
