@@ -335,6 +335,12 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   ).trim()
   const activePreferencePersonaIdRef = React.useRef(activePreferencePersonaId)
   activePreferencePersonaIdRef.current = activePreferencePersonaId
+  const personaPreferenceFocusEpoch = React.useMemo(
+    () => Symbol("persona-preference-focus"),
+    [activePreferencePersonaId]
+  )
+  const personaPreferenceFocusEpochRef = React.useRef(personaPreferenceFocusEpoch)
+  personaPreferenceFocusEpochRef.current = personaPreferenceFocusEpoch
   const personaPreferences =
     personaPreferenceResult?.personaId === activePreferencePersonaId
       ? personaPreferenceResult.preferences
@@ -346,8 +352,9 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     []
   )
   const isCurrentPersonaPreferenceMutation = React.useCallback(
-    (personaId: string, generation: number) =>
+    (personaId: string, focusEpoch: symbol, generation: number) =>
       activePreferencePersonaIdRef.current === personaId &&
+      personaPreferenceFocusEpochRef.current === focusEpoch &&
       personaPreferenceMutationGenerationRef.current === generation,
     []
   )
@@ -451,6 +458,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       const personaId = activePreferencePersonaId
       const previous = personaPreferences
       if (!personaId || !previous) return
+      const focusEpoch = personaPreferenceFocusEpoch
       const generation = ++personaPreferenceMutationGenerationRef.current
       setPersonaPreferenceResult({
         personaId,
@@ -466,13 +474,16 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
           ambient_mode: mode,
           expected_version: previous.version
         })
-        if (isCurrentPersonaPreferenceMutation(personaId, generation)) {
+        if (isCurrentPersonaPreferenceMutation(personaId, focusEpoch, generation)) {
           setPersonaPreferenceResult({ personaId, preferences: updated })
         }
       } catch (error) {
-        if (!isCurrentPersonaPreferenceMutation(personaId, generation)) return
+        if (!isCurrentPersonaPreferenceMutation(personaId, focusEpoch, generation)) return
         if ((error as { status?: number })?.status === 409) {
-          if (await refreshAmbientPreferences(personaId)) {
+          if (
+            await refreshAmbientPreferences(personaId) &&
+            isCurrentPersonaPreferenceMutation(personaId, focusEpoch, generation)
+          ) {
             setAmbientPreferenceMessage("Settings changed elsewhere. Latest values were loaded.")
           }
         } else {
@@ -485,6 +496,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       activePreferencePersonaId,
       isCurrentPersonaPreferenceMutation,
       personaPreferences,
+      personaPreferenceFocusEpoch,
       refreshAmbientPreferences
     ]
   )

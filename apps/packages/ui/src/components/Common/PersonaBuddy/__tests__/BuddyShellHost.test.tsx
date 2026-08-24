@@ -1939,6 +1939,99 @@ describe("BuddyShellHost", () => {
     }
   )
 
+  it.each(["error", "success"] as const)(
+    "ignores a delayed Persona A preference write %s after an A to B to A focus cycle",
+    async (outcome) => {
+      preferenceMocks.getPersonaBuddyPreferences
+        .mockResolvedValueOnce({ ambient_mode: null, version: 1, stored: false })
+        .mockResolvedValueOnce({ ambient_mode: "off", version: 4, stored: true })
+        .mockResolvedValueOnce({ ambient_mode: "off", version: 9, stored: true })
+      const staleUpdate = deferred<{
+        ambient_mode: "roaming"
+        version: number
+        stored: boolean
+      }>()
+      preferenceMocks.updatePersonaBuddyPreferences
+        .mockReturnValueOnce(staleUpdate.promise)
+        .mockResolvedValue({ ambient_mode: "expressive", version: 10, stored: true })
+
+      const view = renderSwitchableHost(personaContext("persona-1"))
+      fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+      const personaModes = screen.getByRole("group", { name: "For this Persona" })
+      await waitFor(() => {
+        expect(
+          within(personaModes).getByRole("radio", { name: "Use global" })
+        ).toBeChecked()
+      })
+      fireEvent.click(within(personaModes).getByRole("radio", { name: "Roaming" }))
+      await waitFor(() => {
+        expect(preferenceMocks.updatePersonaBuddyPreferences).toHaveBeenCalledWith(
+          "persona-1",
+          { ambient_mode: "roaming", expected_version: 1 }
+        )
+      })
+
+      view.rerender(
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider>
+            <ContextDrivenHost root="sidepanel" context={personaContext("persona-2")} />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      )
+      await waitFor(() => {
+        expect(
+          within(screen.getByRole("group", { name: "For this Persona" }))
+            .getByRole("radio", { name: "Off" })
+        ).toBeChecked()
+      })
+
+      view.rerender(
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider>
+            <ContextDrivenHost root="sidepanel" context={personaContext("persona-1")} />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      )
+      await waitFor(() => {
+        expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledTimes(3)
+        expect(
+          within(screen.getByRole("group", { name: "For this Persona" }))
+            .getByRole("radio", { name: "Off" })
+        ).toBeChecked()
+      })
+
+      await act(async () => {
+        if (outcome === "success") {
+          staleUpdate.resolve({ ambient_mode: "roaming", version: 2, stored: true })
+        } else {
+          staleUpdate.reject(Object.assign(new Error("offline"), { status: 500 }))
+        }
+        try {
+          await staleUpdate.promise
+        } catch {
+          // The component owns the rejection; the test only releases it.
+        }
+      })
+
+      const currentPersonaModes = screen.getByRole("group", { name: "For this Persona" })
+      expect(within(currentPersonaModes).getByRole("radio", { name: "Off" })).toBeChecked()
+      expect(screen.queryByText("Buddy settings could not be saved.")).not.toBeInTheDocument()
+      expect(
+        screen.queryByText("Settings changed elsewhere. Latest values were loaded.")
+      ).not.toBeInTheDocument()
+
+      fireEvent.click(
+        within(currentPersonaModes).getByRole("radio", { name: "Expressive" })
+      )
+      await waitFor(() => {
+        expect(preferenceMocks.updatePersonaBuddyPreferences).toHaveBeenLastCalledWith(
+          "persona-1",
+          { ambient_mode: "expressive", expected_version: 9 }
+        )
+      })
+    }
+  )
+
   it("renders grounded transient movement without persisting it as an anchor", async () => {
     companionMocks.snapshot = {
       ...companionMocks.snapshot,
