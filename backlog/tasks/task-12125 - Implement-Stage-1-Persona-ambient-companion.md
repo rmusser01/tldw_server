@@ -1,10 +1,10 @@
 ---
 id: TASK-12125
 title: Implement Stage 1 Persona ambient companion
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-08-24 05:42
-updated_date: 2026-08-24 14:19
+updated_date: 2026-08-24 16:20
 labels:
 - persona
 - persona-visuals
@@ -54,11 +54,11 @@ Execute the approved Stage 1 implementation plan end to end using subagent-drive
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Schema migrations, stores, behavior validation, immutable review fingerprints, and atomic activation satisfy Stage 1 plan Tasks 1-3 in SQLite and PostgreSQL-supported paths.
-- [ ] #2 Frontend authenticated raster loading, deterministic companion engine, adaptive controls, reduced motion, transient grounded roaming, and focused Persona behavior satisfy Stage 1 plan Tasks 4-6.
-- [ ] #3 Every implementation task records red-green TDD evidence, focused tests, an implementation commit, and independent specification/code-quality review.
-- [ ] #4 Focused backend, frontend, E2E, lint/typecheck, Bandit, and diff verification required by Task 7 pass or any environment skip/blocker is explicitly documented.
-- [ ] #5 Documentation is updated, the final whole-branch review is resolved, and the branch is ready for the repository integration workflow.
+- [x] #1 Schema migrations, stores, behavior validation, immutable review fingerprints, and atomic activation satisfy Stage 1 plan Tasks 1-3 in SQLite and PostgreSQL-supported paths.
+- [x] #2 Frontend authenticated raster loading, deterministic companion engine, adaptive controls, reduced motion, transient grounded roaming, and focused Persona behavior satisfy Stage 1 plan Tasks 4-6.
+- [x] #3 Every implementation task records red-green TDD evidence, focused tests, an implementation commit, and independent specification/code-quality review.
+- [x] #4 Focused backend, frontend, E2E, lint/typecheck, Bandit, and diff verification required by Task 7 pass or any environment skip/blocker is explicitly documented.
+- [x] #5 Documentation is updated, the final whole-branch review is resolved, and the branch is ready for the repository integration workflow.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -80,18 +80,19 @@ Task 7 release-proof work started from reviewed Task 6 HEAD e29141f5483c93a59080
 
 Task 7 release proof implemented. Added 12 deterministic isolated Chromium scenarios across quiet 64px chrome, Off/direct reactions, keyboard/touch/double-click, semantic and hidden fresh intervals, reduced motion, preference failure, focused Persona switch, protected Blob retention, and ephemeral bounded roaming with explicit-drag persistence. Added executable owner/path API and engine no-model/no-network boundaries plus runtime/author docs. Task 7 discovered a real identity-reset defect: the engine canceled the old handle but retained ambientDueAt; direct RED observed ambient at old due +1, and the minimal GREEN resets ambientDueAt in the existing identityChanged path. Verification: backend 353/353; frontend 248/248 across 12 files; isolated Playwright 12/12 in 58.7s; ESLint 0 errors (9 existing broad-scope warnings); TypeScript 5.9.3 has 0 Task 7 diagnostics and 16 unrelated current-environment diagnostics; Bandit 0 findings/0 errors; git diff --check clean. Full ignored report: .superpowers/sdd/2026-08-23-persona-ambient-companion-stage-1-implementation-plan/task-7-report.md.
 Stage 1 final whole-branch review fix round 1 started from 4feb15b13f460a0ce68b49562ed62df69a20b890. Scope is exactly Important findings I1-I5: durable ever-activated revision sealing and lifecycle review binding; presence-aware movement validation; accessible controls close/Escape with fresh ambient resume; deterministic movement-ratio interpolation; and transient-offset rebase for explicit drag. Minor findings M1-M3 and the Ponytail unused-policy deletion remain explicitly deferred. Use two incremental commits when clean: backend I1/I2, then frontend I3/I4/I5.
+Stage 1 final whole-branch review fix round completed. Backend commit 1021f78fe601b73b118796b73c86305c142dcaf8 resolves I1/I2; frontend commit ccb7aad5a0 resolves I3/I4/I5. Fresh final gates: backend 358/358 (5 baseline warnings), frontend 255/255, isolated Chromium 13/13, UI/E2E ESLint 0 errors, TypeScript 5.9.3 0 touched-path diagnostics (47 unrelated baseline), Bandit 0 findings/0 errors, range diff check clean. Independent focused rereview PASS: 0 Critical, 0 Important. Deferred optional items remain M1 abort-listener cleanup, M2 authenticated candidate thumbnails, M3 controls-open fallback nudge, and unused precedence helper deletion.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented Persona Ambient Companion Stage 1 across persistence, APIs, authenticated raster rendering, deterministic idle-only behavior, adaptive interactions, reduced motion, grounded roaming, review/activation workflow, E2E release proof, and documentation. Final whole-branch review findings were resolved in 1021f78fe6 and ccb7aad5a0: active/archived revisions are sealed with safe reviewed reactivation/forking; movement metadata parity is strict; controls close accessibly with fresh scheduling; movement ratios interpolate deterministically; and explicit drag rebases transient roaming. Final verification: backend 358/358, frontend 255/255, isolated Chromium 13/13, ESLint 0 errors, touched TypeScript diagnostics 0, Bandit 0 findings/errors, diff check clean. Final rereview: 0 Critical, 0 Important.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
