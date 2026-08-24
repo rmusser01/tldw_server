@@ -4,7 +4,7 @@ title: Implement Chat Macros v1.1 authoring and output profiles
 status: Done
 assignee: []
 created_date: '2026-08-24 04:15'
-updated_date: '2026-08-24 08:13'
+updated_date: '2026-08-24 08:17'
 labels:
   - chat-macros
   - frontend
@@ -61,6 +61,8 @@ Final review closeout: the independent whole-branch review identified four block
 Final evidence: frontend 97 passed (63 authoring/profile/service, 33 workspace run/cancel/retry, 1 WebUI route); backend Chat_Macros plus Jobs startup 146 passed with 2 existing warnings; Bandit 0 findings/0 errors across 3,564 LOC; git diff --check clean; branch current with origin/dev; desktop and mobile document widths equal viewports. Package TypeScript remains exit 2 on the unchanged 304-line repository baseline, with no diagnostics naming touched Chat Macros files. Final screenshots: /tmp/chat-macros-v1-1-visual-qa/desktop-macros-final.png and mobile-macros-final.png.
 
 Remaining non-blocking follow-ups: add roving Arrow/Home/End behavior to the tabs (tabpanel relationships are now present); strengthen deferred validation-order and delete failure/cancel cases; replace the existing global fixed N control behavior that overlaps lower mobile content in the wider settings shell. None is introduced as a functional blocker by this branch.
+
+Latest-dev closeout: rebased conflict-free onto origin/dev 21aed4cc0d after it advanced 66 commits. Rewritten review-fix commits are 330b940346 (final-review findings) and f45a82165a (preserve drafts across tabs); earlier SHA references in the chronological notes are their pre-rebase identities. Post-rebase verification repeated successfully: 96 UI-package tests plus 1 WebUI route test, 146 backend/Jobs tests with 2 existing warnings, Bandit 0 findings across 3,564 LOC, clean diff check, TypeScript baseline still 304 lines with no Chat Macros diagnostics, and branch 0 behind origin/dev.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
