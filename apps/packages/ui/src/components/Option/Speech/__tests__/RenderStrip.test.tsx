@@ -191,6 +191,35 @@ describe("RenderStrip", () => {
     expect(onToggleDisabled).toHaveBeenCalledWith("r1", true)
   })
 
+  it("shows requested and actual gateway provenance compactly", () => {
+    render(
+      <RenderStrip
+        id="r1"
+        state="ready"
+        config={{
+          ...baseConfig,
+          backend: "gateway:primary",
+          allowFallback: true
+        }}
+        audioUrl="blob:test"
+        metadata={{
+          createdAt: "2026-03-06T14:05:09.000Z",
+          inputTextLength: 4,
+          inputTextPreview: "Test",
+          inputTextPreviewTruncated: false,
+          inputTextHash: "local-12345678",
+          requestedBackend: "gateway:primary",
+          actualBackend: "gateway:backup",
+          fallbackUsed: true
+        }}
+      />
+    )
+
+    expect(screen.getByText("Requested gateway:primary")).toBeInTheDocument()
+    expect(screen.getByText("Actual gateway:backup")).toBeInTheDocument()
+    expect(screen.getByText("Fallback used")).toBeInTheDocument()
+  })
+
   it("has correct aria-label", () => {
     render(<RenderStrip id="r1" state="idle" config={baseConfig} />)
     expect(

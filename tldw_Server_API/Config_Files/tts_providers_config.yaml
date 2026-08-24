@@ -34,6 +34,80 @@ providers:
     # startup does not depend on external network availability.
     verify_api_key_on_init: false
 
+  # OpenRouter TTS gateway (disabled until an operator selects a model/voice).
+  # The URL and paths are server-controlled. Users may supply only an API key
+  # when allow_user_api_key is true; they cannot override endpoint authority.
+  openrouter:
+    enabled: false
+    display_name: "OpenRouter"
+    base_url: "https://openrouter.ai/api/v1/"
+    speech_path: "audio/speech"
+    api_key: ${OPENROUTER_API_KEY}
+    allow_user_api_key: true
+    speech_timeout_seconds: 30
+    default_model: "openai/gpt-4o-mini-tts-2025-12-15"
+    default_voice: "nova"
+
+    # Discovery is advisory. The exact-cased allowed_models and overlays below
+    # remain authoritative even when OpenRouter advertises additional models.
+    discovery:
+      enabled: true
+      models_path: "models"
+      query:
+        output_modalities: "speech"
+      ttl_seconds: 600
+      stale_ttl_seconds: 3600
+      timeout_seconds: 5
+    allowed_models:
+      - "openai/gpt-4o-mini-tts-2025-12-15"
+    model_overrides:
+      "openai/gpt-4o-mini-tts-2025-12-15":
+        default_voice: "nova"
+        voices: ["alloy", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]
+        formats: ["mp3", "pcm"]
+        supports_speed: true
+
+    capability_defaults:
+      formats: ["mp3", "pcm"]
+      supports_speed: false
+      supports_language: false
+      supports_target_sample_rate: false
+      allow_octet_stream: false
+      max_input_characters: 12000
+      max_response_bytes: 26214400
+      pcm:
+        sample_rate: 24000
+        channels: 1
+        sample_width_bits: 16
+
+    # Only these exact extra_params leaves may reach OpenRouter's provider
+    # object. Add options deliberately; URL/auth/header fields are forbidden.
+    allowed_request_options:
+      - "/provider/order"
+      - "/provider/allow_fallbacks"
+
+    # This is tldw cross-backend fallback, distinct from OpenRouter's own
+    # provider routing. Each synthesis target can incur a separate charge.
+    # Enable/configure company-proxy too, or clear this policy before enabling
+    # OpenRouter by itself.
+    fallback:
+      "on": ["timeout", "network_error", "upstream_5xx", "rate_limited"]
+      max_attempts: 2
+      targets:
+        - backend: "gateway:company-proxy"
+          model: "Vendor/Expressive-TTS"
+          voice: "narrator"
+
+    # Conversion is opt-in and always full-buffer. Native mp3/pcm remain usable
+    # without ffmpeg; enable conversion only after setting bounded target formats.
+    conversion:
+      enabled: false
+      source_format: "mp3"
+      target_formats: ["wav"]
+      max_input_bytes: 26214400
+      max_output_bytes: 52428800
+      timeout_seconds: 30
+
   # Kokoro TTS Configuration
   kokoro:
     enabled: true
@@ -341,6 +415,64 @@ providers:
       default_chunk_length: 200
       default_normalize: true
       default_use_memory_cache: "off"
+
+# Administrator-defined OpenAI-compatible speech gateways. The mapping key is
+# normalized to the public backend ID gateway:<slug> (company-proxy below becomes
+# gateway:company-proxy). Multiple disabled examples may coexist safely.
+gateways:
+  company-proxy:
+    enabled: false
+    display_name: "Company Speech Proxy"
+    # Example-only reserved domain. Replace it with an operator-controlled URL.
+    base_url: "https://speech-gateway.example.invalid/v1/"
+    speech_path: "audio/speech"
+    api_key: ${COMPANY_TTS_API_KEY}
+    allow_user_api_key: true
+    speech_timeout_seconds: 30
+    default_model: "Vendor/Expressive-TTS"
+    default_voice: "narrator"
+
+    discovery:
+      enabled: true
+      models_path: "models"
+      query: {}
+      ttl_seconds: 600
+      stale_ttl_seconds: 3600
+      timeout_seconds: 5
+    allowed_models:
+      - "Vendor/Expressive-TTS"
+    model_overrides:
+      "Vendor/Expressive-TTS":
+        default_voice: "narrator"
+        voices: ["narrator", "guide"]
+        formats: ["mp3", "pcm"]
+
+    capability_defaults:
+      formats: ["mp3", "pcm"]
+      supports_speed: true
+      supports_language: false
+      supports_target_sample_rate: false
+      allow_octet_stream: false
+      max_input_characters: 12000
+      max_response_bytes: 26214400
+      pcm:
+        sample_rate: 24000
+        channels: 1
+        sample_width_bits: 16
+
+    allowed_request_options:
+      - "/provider/options/vendor/style"
+    fallback:
+      "on": []
+      max_attempts: 1
+      targets: []
+    conversion:
+      enabled: false
+      source_format: "mp3"
+      target_formats: ["wav"]
+      max_input_bytes: 26214400
+      max_output_bytes: 52428800
+      timeout_seconds: 30
 
 # Voice mappings for cross-provider compatibility
 # NOTE: Providers like index_tts rely on uploaded reference audio; the

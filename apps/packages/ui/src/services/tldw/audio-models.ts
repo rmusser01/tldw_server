@@ -147,9 +147,22 @@ const extractModelsFromProviders = (
   return output
 }
 
-export const fetchTldwTtsModels = async (): Promise<TldwTtsModel[]> => {
+export const fetchTldwTtsModels = async (
+  backend?: string
+): Promise<TldwTtsModel[]> => {
   const seen = new Set<string>()
   const models: string[] = []
+
+  if (backend) {
+    try {
+      const providersInfo = await fetchTtsProviders()
+      const provider = providersInfo?.providers?.[backend]
+      collectModelIds(provider?.models, seen, models)
+    } catch {
+      return []
+    }
+    return models.map((id) => ({ id, label: id }))
+  }
 
   try {
     const providersInfo = await fetchTtsProviders()

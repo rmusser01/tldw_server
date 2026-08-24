@@ -32,6 +32,7 @@ from .adapter_registry import (
     TTSAdapterFactory,
     TTSAdapterRegistry,
     TTSProvider,
+    canonicalize_tts_backend,
     close_tts_factory,
     get_tts_factory,
 )
@@ -241,7 +242,16 @@ class TTSServiceV2:
     Provides intelligent provider selection and fallback capabilities.
     """
 
-    def __init__(self, factory: Optional[TTSAdapterFactory] = None, circuit_manager: Optional[CircuitBreakerManager] = None):
+    def __init__(
+        self,
+        factory: Optional[TTSAdapterFactory] = None,
+        circuit_manager: Optional[CircuitBreakerManager] = None,
+        *,
+        gateway_executor: Any | None = None,
+        gateway_catalog: Any | None = None,
+        gateway_config_manager: Any | None = None,
+        gateway_credential_resolver: Any | None = None,
+    ):
         """
         Initialize the TTS service.
 
@@ -270,6 +280,10 @@ class TTSServiceV2:
             # Safe to ignore - tests may override `_factory` directly
             pass
         self.circuit_manager = circuit_manager
+        self.gateway_executor = gateway_executor
+        self.gateway_catalog = gateway_catalog
+        self.gateway_config_manager = gateway_config_manager
+        self.gateway_credential_resolver = gateway_credential_resolver
         # Limit concurrent generations; honor config if available
         max_concurrent = 4
         # Default to structured HTTP errors instead of embedding error bytes in audio
@@ -459,7 +473,7 @@ class TTSServiceV2:
         self,
         request: TTSRequest,
         *,
-        user_id: int,
+        user_id: int | None,
         voice_manager: Any,
         metadata: Optional[Any],
     ) -> None:
@@ -1504,6 +1518,164 @@ class TTSServiceV2:
                 voices_by_provider[provider] = voices
         return voices_by_provider
 
+    async def get_gateway_provider_catalog(
+        self,
+        *,
+        user_id: int | None,
+        backend: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Return safe credential-scoped catalog overlays for enabled gateways."""
+        manager = self.gateway_config_manager
+        resolver = self.gateway_credential_resolver
+        if manager is None or resolver is None:
+            return {}
+        specs = manager.get_gateway_specs()
+        if backend is not None:
+            spec = specs.get(backend)
+            if spec is None or not spec.enabled:
+                return {}
+            specs = {backend: spec}
+        providers: dict[str, dict[str, Any]] = {}
+        for backend_id, spec in specs.items():
+            if not spec.enabled:
+                continue
+            result = None
+            try:
+                credential = await resolver(
+                    backend_id,
+                    user_id=user_id,
+                    gateway_spec=spec,
+                )
+                api_key = getattr(credential, "api_key", None)
+                scope_token = getattr(credential, "credential_scope_token", None)
+                if self.gateway_catalog is not None and api_key and scope_token:
+                    result = await self.gateway_catalog.get(
+                        spec,
+                        credential_scope_token=scope_token,
+                        api_key=api_key,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except _TTS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(
+                    "Gateway catalog unavailable for {}: {}",
+                    backend_id,
+                    type(exc).__name__,
+                )
+            providers[backend_id] = self._serialize_gateway_provider(spec, result)
+        return providers
+
+    @staticmethod
+    def _static_gateway_models(spec: Any) -> list[str]:
+        """Return exact configured model IDs without discovery."""
+        candidates: list[str] = []
+        if spec.default_model:
+            candidates.append(spec.default_model)
+        candidates.extend(spec.model_overrides)
+        if spec.allowed_models_configured:
+            candidates.extend(sorted(spec.allowed_models))
+        return list(dict.fromkeys(model for model in candidates if spec.allows_model(model)))
+
+    @classmethod
+    def _serialize_gateway_provider(cls, spec: Any, result: Any | None) -> dict[str, Any]:
+        """Serialize configured gateway capabilities without authority or secrets."""
+        models = list(result.models) if result is not None else cls._static_gateway_models(spec)
+        model_capabilities: dict[str, dict[str, Any]] = {}
+        public_formats = {audio_format.value for audio_format in AudioFormat}
+        for model in models:
+            capabilities = spec.capabilities_for_model(model)
+            overlay = spec.model_overrides.get(model)
+            voices = list(getattr(overlay, "voices", ()) or ())
+            default_voice = spec.default_voice_for_model(model)
+            if default_voice and default_voice not in voices:
+                voices.insert(0, default_voice)
+            native_formats = [
+                fmt for fmt in capabilities.formats if fmt in public_formats
+            ]
+            conversion = spec.conversion
+            executable = spec.ffmpeg_path
+            conversion_available = (
+                conversion.enabled
+                and conversion.source_format in native_formats
+                and bool(executable)
+                and Path(executable).is_file()
+                and os.access(executable, os.X_OK)
+            )
+            converted_formats = (
+                [
+                    fmt
+                    for fmt in conversion.target_formats
+                    if fmt in public_formats and fmt not in native_formats
+                ]
+                if conversion_available
+                else []
+            )
+            model_capabilities[model] = {
+                "formats": [*native_formats, *converted_formats],
+                "native_formats": native_formats,
+                "converted_formats": converted_formats,
+                "supports_speed": capabilities.supports_speed,
+                "supports_language": capabilities.supports_language,
+                "supports_target_sample_rate": capabilities.supports_target_sample_rate,
+                "allow_octet_stream": capabilities.allow_octet_stream,
+                "max_input_characters": capabilities.max_input_characters,
+                "max_response_bytes": capabilities.max_response_bytes,
+                "pcm": capabilities.pcm.model_dump(mode="json"),
+                "default_voice": default_voice,
+                "voices": voices,
+                "requires_freeform_voice": not bool(voices or default_voice),
+            }
+        fallback_targets = list(dict.fromkeys(target.backend for target in spec.fallback.targets))
+        return {
+            "display_name": spec.display_name,
+            "models": models,
+            "default_model": spec.default_model,
+            "model_capabilities": model_capabilities,
+            "voice_catalog_available": any(
+                bool(model_info["voices"]) for model_info in model_capabilities.values()
+            ),
+            "discovery": {
+                "status": getattr(result, "discovery_status", "unavailable"),
+                "source": getattr(result, "source", "static"),
+                "stale": bool(getattr(result, "stale", False)),
+                "fetched_at": getattr(result, "fetched_at", None),
+                "fresh_until": getattr(result, "fresh_until", None),
+                "stale_until": getattr(result, "stale_until", None),
+                "discovered_model_count": getattr(result, "discovered_model_count", None),
+            },
+            "fallback": {
+                "available": bool(fallback_targets and spec.fallback.max_attempts > 1),
+                "targets": fallback_targets,
+            },
+        }
+
+    async def list_gateway_voices(
+        self,
+        *,
+        user_id: int,
+        backend: str,
+        model: str | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """Return configured voices for one canonical gateway and exact model."""
+        providers = await self.get_gateway_provider_catalog(
+            user_id=user_id,
+            backend=backend,
+        )
+        provider = providers.get(backend)
+        if provider is None:
+            return None
+        selected_models = [model] if model is not None else provider["models"]
+        voices: list[dict[str, Any]] = []
+        for model_id in selected_models:
+            model_info = provider["model_capabilities"].get(model_id)
+            if model_info is None:
+                continue
+            voices.extend(
+                {"id": voice, "name": voice, "model": model_id}
+                for voice in model_info["voices"]
+            )
+        return voices
+
     async def open_realtime_session(
         self,
         *,
@@ -1846,6 +2018,31 @@ class TTSServiceV2:
         """
         # Convert OpenAI request to unified TTSRequest
         tts_request = self._convert_request(request)
+        if tts_request.backend is not None:
+            if self.gateway_executor is None:
+                raise TTSProviderNotConfiguredError(
+                    "Explicit TTS gateway execution is unavailable",
+                    provider=tts_request.backend,
+                )
+            response = await self.gateway_executor.execute(tts_request, user_id=user_id)
+            metadata = response.metadata if isinstance(response.metadata, dict) else {}
+            request._tts_metadata = metadata
+            try:
+                if metadata_only:
+                    return
+                if response.audio_stream is not None:
+                    async for chunk in response.audio_stream:
+                        yield chunk
+                elif response.audio_data:
+                    yield response.audio_data
+                else:
+                    raise TTSGenerationError(
+                        "Explicit TTS gateway returned no audio",
+                        provider=tts_request.backend,
+                    )
+            finally:
+                await self._close_response_audio_stream(response)
+            return
         request_id_ctx, correlation_id_ctx = self._resolve_observability_context(
             request,
             explicit_request_id=request_id,
@@ -2568,13 +2765,37 @@ class TTSServiceV2:
         }
 
         model_id = str(getattr(request, "model", "") or "").strip().lower()
+        raw_explicit_fields = getattr(request, "model_fields_set", None)
+        if raw_explicit_fields is None:
+            raw_explicit_fields = getattr(request, "__pydantic_fields_set__", None)
+        if raw_explicit_fields is None:
+            raw_explicit_fields = getattr(request, "__fields_set__", set())
+        explicit_fields = set(raw_explicit_fields or ())
+        supplied_common_fields = {
+            "format" if name == "response_format" else name
+            for name in explicit_fields
+            if name
+            in {
+                "voice",
+                "speed",
+                "language",
+                "lang_code",
+                "target_sample_rate",
+                "response_format",
+                "extra_params",
+            }
+        }
+        raw_backend = getattr(request, "backend", None)
+        backend = None
+        if raw_backend is not None:
+            try:
+                backend = canonicalize_tts_backend(raw_backend)
+            except ValueError as exc:
+                raise TTSValidationError("Invalid TTS backend identity") from exc
         response_format = request.response_format
         output_format = getattr(request, "output_format", None)
         if output_format:
             try:
-                explicit_fields = getattr(request, "model_fields_set", None)
-                if explicit_fields is None:
-                    explicit_fields = getattr(request, "__fields_set__", set())
                 if model_id.startswith("chatterbox") and "response_format" not in explicit_fields:
                     response_format = output_format
                     request.response_format = response_format
@@ -2586,9 +2807,21 @@ class TTSServiceV2:
             AudioFormat.MP3
         )
         # Optional language code mapping (lang_code primary; Chatterbox language alias next; extra_params.language override)
-        language = self._normalize_language_code(getattr(request, 'lang_code', None))
-        if language is None and model_id.startswith("chatterbox"):
-            language = self._normalize_language_code(getattr(request, "language", None))
+        raw_lang_code = getattr(request, "lang_code", None)
+        raw_language = getattr(request, "language", None)
+        if backend is not None:
+            lang_code_supplied = "lang_code" in explicit_fields
+            language_supplied = "language" in explicit_fields
+            if lang_code_supplied and language_supplied and raw_lang_code != raw_language:
+                raise TTSValidationError("Gateway lang_code and language values conflict")
+            source_lang_code = raw_lang_code if lang_code_supplied else None
+            language = source_lang_code if lang_code_supplied else raw_language if language_supplied else None
+        else:
+            source_lang_code = self._normalize_language_code(raw_lang_code)
+            source_language = self._normalize_language_code(raw_language)
+            language = source_lang_code
+            if language is None and model_id.startswith("chatterbox"):
+                language = source_language
         # Optional voice reference decoding (base64)
         voice_ref_bytes = None
         if getattr(request, 'voice_reference', None):
@@ -2600,7 +2833,10 @@ class TTSServiceV2:
                     details={"error": str(exc)}
                 ) from exc
         # Provider-specific extras passthrough
-        extras = getattr(request, 'extra_params', None) or {}
+        raw_extra_params = getattr(request, 'extra_params', None)
+        supplied_extra_params = copy.deepcopy(raw_extra_params)
+        extras = copy.deepcopy(raw_extra_params) if backend is not None else raw_extra_params
+        extras = extras or {}
         target_sample_rate: Optional[int] = None
         seed: Optional[int] = None
         try:
@@ -2626,25 +2862,26 @@ class TTSServiceV2:
                     except _TTS_NONCRITICAL_EXCEPTIONS:
                         continue
 
-            extra_language = extras.get("language")
-            if isinstance(extra_language, str):
-                normalized_extra_language = self._normalize_language_code(extra_language)
-                if normalized_extra_language:
-                    language = normalized_extra_language
-                    extras["language"] = normalized_extra_language
-            elif extra_language is not None:
-                try:
-                    coerced_language = str(extra_language)
-                except _TTS_NONCRITICAL_EXCEPTIONS:
-                    coerced_language = None
-                if coerced_language:
-                    normalized_extra_language = self._normalize_language_code(coerced_language)
+            if backend is None:
+                extra_language = extras.get("language")
+                if isinstance(extra_language, str):
+                    normalized_extra_language = self._normalize_language_code(extra_language)
                     if normalized_extra_language:
                         language = normalized_extra_language
                         extras["language"] = normalized_extra_language
+                elif extra_language is not None:
+                    try:
+                        coerced_language = str(extra_language)
+                    except _TTS_NONCRITICAL_EXCEPTIONS:
+                        coerced_language = None
+                    if coerced_language:
+                        normalized_extra_language = self._normalize_language_code(coerced_language)
+                        if normalized_extra_language:
+                            language = normalized_extra_language
+                            extras["language"] = normalized_extra_language
             if getattr(request, "reference_duration_min", None) is not None:
                 extras["reference_duration_min"] = request.reference_duration_min
-            if target_sample_rate is not None:
+            if target_sample_rate is not None and backend is None:
                 extras["target_sample_rate"] = target_sample_rate
                 # Alias for providers that currently look up `sample_rate` in extra params.
                 extras["sample_rate"] = target_sample_rate
@@ -2659,6 +2896,20 @@ class TTSServiceV2:
                 except _TTS_NONCRITICAL_EXCEPTIONS:
                     seed = None
 
+        supplied_common_values = {
+            name: value
+            for name, value in {
+                "speed": request.speed,
+                "language": raw_language,
+                "lang_code": raw_lang_code,
+                "voice": request.voice,
+                "target_sample_rate": getattr(request, "target_sample_rate", None),
+                "format": response_format,
+                "extra_params": supplied_extra_params,
+            }.items()
+            if name in supplied_common_fields
+        }
+
         tts_request = TTSRequest(
             text=request.input,
             voice=request.voice,
@@ -2667,6 +2918,11 @@ class TTSServiceV2:
             speed=request.speed,
             stream=request.stream if hasattr(request, 'stream') else True,
             language=language,
+            lang_code=source_lang_code,
+            supplied_fields=frozenset(supplied_common_fields),
+            supplied_field_values=supplied_common_values,
+            backend=backend,
+            allow_fallback=bool(getattr(request, "allow_fallback", True)),
             voice_reference=voice_ref_bytes,
             seed=seed,
             # Additional parameters can be added via extra_params
@@ -3445,7 +3701,7 @@ class TTSServiceV2:
             if registry and hasattr(registry, "_adapter_specs"):
                 specs = registry._adapter_specs
                 try:
-                    if provider not in specs:
+                    if provider.value not in specs and provider not in specs:
                         continue
                 except TypeError:
                     # If specs is not dict-like, fall back to attempting fetch
@@ -3949,19 +4205,57 @@ async def get_tts_service_v2(config: Optional[dict[str, Any]] = None) -> TTSServ
         async with _service_lock:
             if _service_instance is None:
                 # Load configuration if not provided
+                circuit_config = config
                 if config is None:
                     from tldw_Server_API.app.core.config import load_comprehensive_config_with_tts
                     config_obj = load_comprehensive_config_with_tts()
-                    config = config_obj.get_tts_config()
+                    circuit_config = config_obj.get_tts_config()
 
                 # Get factory
                 factory = await get_tts_factory(config)
 
                 # Get circuit breaker manager
-                circuit_manager = await get_circuit_manager(config)
+                circuit_manager = await get_circuit_manager(circuit_config)
+
+                from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+                    resolve_gateway_byok_credentials,
+                )
+
+                from .adapters.openai_compatible_speech_adapter import (
+                    OpenAICompatibleSpeechAdapter,
+                )
+                from .audio_utils import AudioProcessor
+                from .gateway_catalog import GatewayCatalog
+                from .gateway_execution import GatewaySpeechExecutor
+
+                config_manager = getattr(factory.registry, "config_manager", None)
+                if config_manager is None:
+                    config_manager = factory.registry
+                for backend_id, spec in config_manager.get_gateway_specs().items():
+                    if spec.enabled and factory.registry.resolve_provider_key(backend_id) is None:
+                        factory.registry.register_adapter(
+                            backend_id,
+                            OpenAICompatibleSpeechAdapter,
+                        )
+                gateway_catalog = GatewayCatalog()
+                gateway_executor = GatewaySpeechExecutor(
+                    registry=factory.registry,
+                    spec_provider=config_manager,
+                    circuit_manager=circuit_manager,
+                    audio_processor=AudioProcessor(),
+                    credential_resolver=resolve_gateway_byok_credentials,
+                    catalog=gateway_catalog,
+                )
 
                 # Create service
-                _service_instance = TTSServiceV2(factory, circuit_manager)
+                _service_instance = TTSServiceV2(
+                    factory,
+                    circuit_manager,
+                    gateway_executor=gateway_executor,
+                    gateway_catalog=gateway_catalog,
+                    gateway_config_manager=config_manager,
+                    gateway_credential_resolver=resolve_gateway_byok_credentials,
+                )
                 logger.info("Enhanced TTS Service (V2) initialized")
 
     return _service_instance

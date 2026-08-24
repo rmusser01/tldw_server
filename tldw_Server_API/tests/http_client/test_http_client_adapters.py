@@ -180,6 +180,35 @@ async def test_httpx_adapter_stream_bytes_closes_delegate_on_early_close(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_httpx_adapter_stream_response_callback_passes_through(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    calls = {}
+
+    async def fake_stream_bytes_httpx(**kwargs):
+        calls["kwargs"] = kwargs
+        yield b"one"
+
+    def on_response(_status, _headers):
+        return None
+
+    monkeypatch.setattr(hc, "_astream_bytes_httpx", fake_stream_bytes_httpx)
+
+    chunks = [
+        chunk
+        async for chunk in hc.HttpxAdapter().stream_bytes(
+            method="GET",
+            url="http://example.com",
+            client=object(),
+            on_response=on_response,
+        )
+    ]
+
+    assert chunks == [b"one"]
+    assert calls["kwargs"]["on_response"] is on_response
+
+
+@pytest.mark.asyncio
 async def test_httpx_adapter_stream_sse_passes_through(monkeypatch):
     from tldw_Server_API.app.core import http_client as hc
 
@@ -356,6 +385,65 @@ async def test_aiohttp_adapter_stream_bytes_closes_delegate_on_early_close(monke
 
     assert finalized == ["closed"]
     assert hc._SENSITIVE_HTTP_LOG_CONTEXT.get() is False
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_adapter_stream_response_callback_passes_through(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    calls = {}
+
+    async def fake_stream_bytes_aiohttp(**kwargs):
+        calls["kwargs"] = kwargs
+        yield b"alpha"
+
+    async def on_response(_status, _headers):
+        return None
+
+    monkeypatch.setattr(hc, "_astream_bytes_aiohttp", fake_stream_bytes_aiohttp)
+
+    chunks = [
+        chunk
+        async for chunk in hc.AiohttpAdapter().stream_bytes(
+            method="GET",
+            url="http://example.com",
+            client=object(),
+            on_response=on_response,
+        )
+    ]
+
+    assert chunks == [b"alpha"]
+    assert calls["kwargs"]["on_response"] is on_response
+
+
+@pytest.mark.asyncio
+async def test_public_stream_response_callback_passes_to_transport_adapter(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    calls = {}
+
+    class Adapter:
+        async def stream_bytes(self, **kwargs):
+            calls["kwargs"] = kwargs
+            yield b"audio"
+
+    def on_response(_status, _headers):
+        return None
+
+    monkeypatch.setattr(hc, "_get_transport_adapter", lambda _name: Adapter())
+
+    chunks = [
+        chunk
+        async for chunk in hc.astream_bytes(
+            method="GET",
+            url="http://example.com",
+            client=object(),
+            on_response=on_response,
+        )
+    ]
+
+    assert chunks == [b"audio"]
+    assert calls["kwargs"]["on_response"] is on_response
 
 
 @pytest.mark.asyncio

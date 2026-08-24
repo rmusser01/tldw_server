@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import hashlib
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -94,6 +95,39 @@ def test_extract_payload_detaches_secret_bearing_decrypt_failure(monkeypatch):
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
     assert secret not in repr(exc_info.value)
+
+
+def _assert_opaque_scope_token(token: str | None) -> None:
+    assert token is not None
+    assert len(token) == 64
+    assert token == token.lower()
+    int(token, 16)
+
+
+def _gateway_spec(
+    backend_id: str = "gateway:voice-lab",
+    *,
+    enabled: bool = True,
+    allow_user_api_key: bool = True,
+    api_key: str | None = "admin-secret",
+    config_generation: str = "generation-one",
+):
+    return SimpleNamespace(
+        backend_id=backend_id,
+        enabled=enabled,
+        allow_user_api_key=allow_user_api_key,
+        api_key=api_key,
+        config_generation=config_generation,
+    )
+
+
+@pytest.fixture
+def gateway_byok_encryption(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    monkeypatch.setenv("BYOK_ENABLED", "1")
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"g"))
+    reset_settings()
 
 
 @pytest.mark.asyncio
@@ -1288,6 +1322,404 @@ async def test_revoked_user_credential_blocks_shared_and_server_fallback(monkeyp
     assert exc_info.value.code == "invalid_provider_credentials"
     assert exc_info.value.provider == "openai"
     assert fallback_calls == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_resolution_uses_only_user_key_and_opaque_scope(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    row = _encrypted_row(
+        build_secret_payload(
+            "user-secret",
+            credential_fields={
+                "base_url": "https://attacker.example/v1",
+                "headers": {"X-Attacker": "yes"},
+            },
+        )
+    )
+    row.update(
+        {
+            "id": 17,
+            "user_id": 404,
+            "provider": "gateway:voice-lab",
+            "metadata": {"base_url": "https://attacker.example/v1"},
+            "updated_at": "2026-07-16T12:00:00+00:00",
+        }
+    )
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, user_id: int, provider: str):
+            assert user_id == 404
+            assert provider == "gateway:voice-lab"
+            return row
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    resolved = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=404,
+        gateway_spec=_gateway_spec(),
+    )
+
+    assert resolved.source == "user"
+    assert resolved.api_key == "user-secret"
+    assert resolved.credential_fields == {}
+    assert resolved.app_config is None
+    assert resolved.credential_scope_token
+    assert "user-secret" not in resolved.credential_scope_token
+    _assert_opaque_scope_token(resolved.credential_scope_token)
+    assert "voice-lab" not in resolved.credential_scope_token
+    assert resolved.credential_scope_token not in repr(resolved)
+
+
+@pytest.mark.asyncio
+async def test_gateway_user_record_is_authoritative_and_never_falls_through_to_admin(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    row = _encrypted_row({"credential_fields": {"base_url": "https://legacy.invalid"}})
+    row.update({"id": 18, "updated_at": "2026-07-16T12:00:00+00:00"})
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, _user_id: int, _provider: str):
+            return row
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    resolved = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=5,
+        gateway_spec=_gateway_spec(api_key="admin-must-not-be-used"),
+    )
+
+    assert resolved.source == "user"
+    assert resolved.api_key is None
+    assert resolved.credential_scope_token is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_admin_scope_tracks_config_and_key_rotation(
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    first = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=None,
+        gateway_spec=_gateway_spec(
+            api_key="admin-secret-one",
+            config_generation="generation-one",
+        ),
+    )
+    same = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=None,
+        gateway_spec=_gateway_spec(
+            api_key="admin-secret-one",
+            config_generation="generation-one",
+        ),
+    )
+    rotated_key = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=None,
+        gateway_spec=_gateway_spec(
+            api_key="admin-secret-two",
+            config_generation="generation-one",
+        ),
+    )
+    changed_config = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=None,
+        gateway_spec=_gateway_spec(
+            api_key="admin-secret-one",
+            config_generation="generation-two",
+        ),
+    )
+
+    assert first.source == "server_default"
+    assert first.api_key == "admin-secret-one"
+    assert first.credential_scope_token
+    assert first.credential_scope_token == same.credential_scope_token
+    assert first.credential_scope_token != rotated_key.credential_scope_token
+    assert first.credential_scope_token != changed_config.credential_scope_token
+    key_fingerprint = hashlib.sha256(
+        b"admin-secret-one",
+        usedforsecurity=True,
+    ).hexdigest()
+    assert key_fingerprint not in first.credential_scope_token
+    assert "admin-secret-one" not in first.credential_scope_token
+    assert "voice-lab" not in first.credential_scope_token
+    assert first.credential_scope_token not in repr(first)
+
+
+@pytest.mark.asyncio
+async def test_gateway_repository_driver_error_fails_closed_without_admin_fallback(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    import aiosqlite
+
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    log_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class _Logger:
+        def debug(self, message: str, *args: object) -> None:
+            log_calls.append((message, args))
+
+    class _FailingRepo:
+        async def fetch_secret_for_user(self, _user_id: int, _provider: str):
+            raise aiosqlite.Error("sensitive database detail")
+
+    async def _fake_get_user_repo():
+        return _FailingRepo()
+
+    monkeypatch.setattr(byok_runtime, "logger", _Logger())
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+
+    resolved = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=9,
+        gateway_spec=_gateway_spec(api_key="admin-must-not-be-used"),
+    )
+
+    assert resolved.source == "none"
+    assert resolved.api_key is None
+    assert resolved.credential_scope_token is None
+    assert log_calls
+    assert log_calls[-1][1] == ("gateway:voice-lab", "Error")
+    assert "sensitive database detail" not in repr(log_calls)
+
+
+@pytest.mark.asyncio
+async def test_gateway_repository_cancellation_propagates(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    class _CancelledRepo:
+        async def fetch_secret_for_user(self, _user_id: int, _provider: str):
+            raise asyncio.CancelledError
+
+    async def _fake_get_user_repo():
+        return _CancelledRepo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+
+    with pytest.raises(asyncio.CancelledError):
+        await byok_runtime.resolve_gateway_byok_credentials(
+            "gateway:voice-lab",
+            user_id=9,
+            gateway_spec=_gateway_spec(api_key="admin-must-not-be-used"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_gateway_scope_changes_on_rotation_and_is_distinct_between_records(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    rows = {
+        1: {
+            **_encrypted_row(build_secret_payload("same-key")),
+            "id": 101,
+            "updated_at": "2026-07-16T12:00:00+00:00",
+        },
+        2: {
+            **_encrypted_row(build_secret_payload("same-key")),
+            "id": 202,
+            "updated_at": "2026-07-16T12:00:00+00:00",
+        },
+    }
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, user_id: int, _provider: str):
+            return rows[user_id]
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    first = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=1,
+        gateway_spec=_gateway_spec(),
+    )
+    other_user = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=2,
+        gateway_spec=_gateway_spec(),
+    )
+    rows[1]["encrypted_blob"] = _encrypted_row(
+        build_secret_payload("rotated-key")
+    )["encrypted_blob"]
+    rows[1]["updated_at"] = "2026-07-16T12:01:00+00:00"
+    rotated = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=1,
+        gateway_spec=_gateway_spec(),
+    )
+
+    assert first.credential_scope_token != other_user.credential_scope_token
+    assert first.credential_scope_token != rotated.credential_scope_token
+    _assert_opaque_scope_token(first.credential_scope_token)
+    _assert_opaque_scope_token(other_user.credential_scope_token)
+
+
+@pytest.mark.asyncio
+async def test_gateway_scope_ignores_usage_timestamps_but_changes_with_ciphertext(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    row = {
+        **_encrypted_row(build_secret_payload("first-key")),
+        "id": 707,
+        "updated_at": "2026-07-16T12:00:00+00:00",
+        "last_used_at": None,
+    }
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, _user_id: int, _provider: str):
+            return row
+
+        async def touch_last_used(self, _user_id: int, _provider: str, used_at):
+            row["last_used_at"] = used_at.isoformat()
+            row["updated_at"] = used_at.isoformat()
+
+    repo = _FakeUserRepo()
+
+    async def _fake_get_user_repo():
+        return repo
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    first = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=44,
+        gateway_spec=_gateway_spec(),
+    )
+    await repo.touch_last_used(
+        44,
+        "gateway:voice-lab",
+        datetime.now(timezone.utc),
+    )
+    after_touch = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=44,
+        gateway_spec=_gateway_spec(),
+    )
+
+    row["encrypted_blob"] = _encrypted_row(build_secret_payload("rotated-key"))[
+        "encrypted_blob"
+    ]
+    row["updated_at"] = "2026-07-16T12:05:00+00:00"
+    after_rotation = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=44,
+        gateway_spec=_gateway_spec(),
+    )
+
+    assert first.credential_scope_token == after_touch.credential_scope_token
+    assert first.credential_scope_token != after_rotation.credential_scope_token
+    assert "first-key" not in first.credential_scope_token
+    assert "rotated-key" not in after_rotation.credential_scope_token
+    _assert_opaque_scope_token(first.credential_scope_token)
+
+
+@pytest.mark.asyncio
+async def test_disabled_or_removed_gateway_cannot_resolve_stored_or_admin_key(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    class _FailingRepo:
+        async def fetch_secret_for_user(self, _user_id: int, _provider: str):
+            raise AssertionError("disabled gateway must not read stored credentials")
+
+    async def _fake_get_user_repo():
+        return _FailingRepo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    disabled = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=1,
+        gateway_spec=_gateway_spec(enabled=False),
+    )
+    monkeypatch.setattr(
+        byok_runtime,
+        "get_byok_gateway_spec",
+        lambda _backend: None,
+        raising=False,
+    )
+    removed = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:removed",
+        user_id=1,
+    )
+
+    for resolved in (disabled, removed):
+        assert resolved.source == "none"
+        assert resolved.api_key is None
+        assert resolved.credential_scope_token is None
+
+
+@pytest.mark.asyncio
+async def test_each_gateway_target_resolves_its_own_fresh_credential(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    calls: list[str] = []
+    rows = {
+        "gateway:first": {
+            **_encrypted_row(build_secret_payload("first-key")),
+            "id": 301,
+            "updated_at": "2026-07-16T12:00:00+00:00",
+        },
+        "gateway:second": {
+            **_encrypted_row(build_secret_payload("second-key")),
+            "id": 302,
+            "updated_at": "2026-07-16T12:00:00+00:00",
+        },
+    }
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, _user_id: int, provider: str):
+            calls.append(provider)
+            return rows[provider]
+
+    async def _fake_get_user_repo():
+        return _FakeUserRepo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    first = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:first",
+        user_id=7,
+        gateway_spec=_gateway_spec("gateway:first"),
+    )
+    second = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:second",
+        user_id=7,
+        gateway_spec=_gateway_spec("gateway:second"),
+    )
+
+    assert calls == ["gateway:first", "gateway:second"]
+    assert first.api_key == "first-key"
+    assert second.api_key == "second-key"
 
 
 @pytest.mark.asyncio

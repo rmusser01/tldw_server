@@ -11,7 +11,7 @@ import secrets
 import sqlite3
 import threading
 from collections.abc import AsyncIterator, Awaitable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_config import (
     runtime_base_url_override_provenance,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    get_byok_gateway_spec,
     is_byok_enabled,
     is_provider_allowlisted,
     is_trusted_base_url_request,
@@ -610,6 +611,11 @@ class ResolvedByokCredentials:
     allowlisted: bool
     status: ByokResolutionStatus = ByokResolutionStatus.RESOLVED
     auth_source: str | None = None
+    credential_scope_token: str | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     _touch_cb: Callable[[], Awaitable[None]] | None = None
     _credential_generation: str | None = None
 
@@ -848,6 +854,57 @@ def _fallback_result(
         allowlisted=allowlisted,
         status=(ByokResolutionStatus.RESOLVED if is_resolved else ByokResolutionStatus.ABSENT),
         auth_source=auth_source,
+        _touch_cb=None,
+    )
+
+
+def _gateway_scope_token(*parts: Any) -> str | None:
+    """Derive an opaque cache scope from secret-free identity and revision data."""
+    if any(part is None or str(part).strip() == "" for part in parts):
+        return None
+    material = "\x1f".join(("tts-gateway-scope-v1", *(str(part) for part in parts)))
+    return hashlib.sha256(material.encode("utf-8"), usedforsecurity=True).hexdigest()
+
+
+def _gateway_user_credential_revision(row: dict[str, Any]) -> str | None:
+    """Return a usage-stable, secret-safe revision for one encrypted credential.
+
+    Explicit credential revisions take precedence. Otherwise the stored
+    ciphertext is immediately reduced to a one-way fingerprint; neither the
+    ciphertext nor its fingerprint is logged or emitted.
+    """
+    for field_name in ("revision", "version"):
+        value = row.get(field_name)
+        if value is not None and str(value).strip():
+            return f"{field_name}:{value}"
+
+    ciphertext = row.get("encrypted_blob")
+    if not isinstance(ciphertext, str) or not ciphertext:
+        return None
+    return hashlib.sha256(
+        ciphertext.encode("utf-8"),
+        usedforsecurity=True,
+    ).hexdigest()
+
+
+def _gateway_admin_credential_revision(api_key: str) -> str:
+    """Return a one-way revision for an admin-configured gateway key."""
+    return hashlib.sha256(
+        api_key.encode("utf-8"),
+        usedforsecurity=True,
+    ).hexdigest()
+
+
+def _unavailable_gateway_result(provider: str, *, allowlisted: bool) -> ResolvedByokCredentials:
+    return ResolvedByokCredentials(
+        provider=provider,
+        api_key=None,
+        app_config=None,
+        credential_fields={},
+        source="none",
+        allowlisted=allowlisted,
+        auth_source=None,
+        credential_scope_token=None,
         _touch_cb=None,
     )
 
@@ -2268,6 +2325,101 @@ def _build_touch_cb(
             await repo.touch_last_used(scope_type, int(scope_id), provider, now)
 
     return _touch
+
+
+async def resolve_gateway_byok_credentials(
+    backend: str,
+    *,
+    user_id: int | None,
+    gateway_spec: Any | None = None,
+) -> ResolvedByokCredentials:
+    """Resolve one gateway attempt without accepting user-controlled authority.
+
+    A present user record is authoritative, including when its payload is
+    malformed or missing key material. Callers resolve each fallback backend by
+    invoking this function again with that backend's current spec.
+    """
+    provider_norm = canonical_provider_name(backend)
+    spec = gateway_spec if gateway_spec is not None else get_byok_gateway_spec(provider_norm)
+    if (
+        spec is None
+        or not bool(getattr(spec, "enabled", False))
+        or getattr(spec, "backend_id", None) != provider_norm
+    ):
+        return _unavailable_gateway_result(provider_norm, allowlisted=False)
+
+    allow_user_key = bool(getattr(spec, "allow_user_api_key", False))
+    if allow_user_key and user_id is not None and is_byok_enabled():
+        try:
+            user_repo = await _get_user_repo()
+            user_row = await user_repo.fetch_secret_for_user(int(user_id), provider_norm)
+            payload = None
+            if user_row is not None:
+                encrypted_blob = user_row.get("encrypted_blob")
+                if encrypted_blob:
+                    payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
+        except Exception as exc:  # noqa: BLE001 - fail closed on repository/crypto drivers
+            logger.debug(
+                "Gateway BYOK user lookup failed for provider={}: {}",
+                provider_norm,
+                type(exc).__name__,
+            )
+            return _unavailable_gateway_result(provider_norm, allowlisted=True)
+
+        if user_row is not None:
+            api_key = None
+            if payload is not None:
+                api_key = _legacy_payload_api_key(payload) or _v2_payload_api_key(payload)
+            scope_token = None
+            if api_key:
+                revision = _gateway_user_credential_revision(user_row)
+                scope_token = _gateway_scope_token(
+                    provider_norm,
+                    user_row.get("id"),
+                    revision,
+                )
+            return ResolvedByokCredentials(
+                provider=provider_norm,
+                api_key=api_key,
+                app_config=None,
+                credential_fields={},
+                source="user",
+                allowlisted=True,
+                auth_source="api_key" if api_key else None,
+                credential_scope_token=scope_token,
+                _touch_cb=(
+                    _build_touch_cb(
+                        provider=provider_norm,
+                        last_used_at=_parse_last_used(user_row.get("last_used_at")),
+                        repo=user_repo,
+                        user_id=int(user_id),
+                    )
+                    if api_key
+                    else None
+                ),
+            )
+
+    admin_key = _coerce_nonempty_string(getattr(spec, "api_key", None))
+    if not admin_key:
+        return _unavailable_gateway_result(
+            provider_norm,
+            allowlisted=allow_user_key,
+        )
+    return ResolvedByokCredentials(
+        provider=provider_norm,
+        api_key=admin_key,
+        app_config=None,
+        credential_fields={},
+        source="server_default",
+        allowlisted=allow_user_key,
+        auth_source="api_key",
+        credential_scope_token=_gateway_scope_token(
+            provider_norm,
+            getattr(spec, "config_generation", None),
+            _gateway_admin_credential_revision(admin_key),
+        ),
+        _touch_cb=None,
+    )
 
 
 async def resolve_byok_credentials(

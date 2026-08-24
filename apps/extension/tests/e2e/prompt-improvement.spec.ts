@@ -327,10 +327,7 @@ const ensureChatInput = async (page: Page) => {
   ) {
     await startButton.first().click()
   }
-  let input = page.getByTestId("chat-input")
-  if ((await input.count()) === 0) {
-    input = page.getByPlaceholder(/Type a message/i)
-  }
+  const input = page.getByTestId("chat-input")
   await expect(input).toBeVisible({ timeout: 20_000 })
   await expect(input).toBeEditable()
   return input
@@ -950,7 +947,9 @@ test.describe("Packaged extension prompt improvement parity", () => {
       await expect(selectModel).toBeVisible()
       await selectModel.click()
       await expect(
-        page.getByRole("dialog", { name: /Current Chat Model Settings/i })
+        page.getByRole("dialog", {
+          name: /Current Chat Model Settings|currentChatModelSettings/i
+        })
       ).toBeVisible({ timeout: 20_000 })
       expect(mock.improveRequests()).toHaveLength(0)
     } finally {
@@ -998,9 +997,15 @@ test.describe("Packaged extension prompt improvement parity", () => {
         target: "user_message",
         text: draft
       })
+      await expect(
+        page.getByRole("heading", { name: "Review improved prompt" })
+      ).toBeVisible()
+      await page.getByRole("button", { name: "Apply to draft" }).click()
       await expect(input).toHaveValue("Improved user request for {{topic}}.")
       await expect(
-        page.getByRole("button", { name: "Undo improvement" })
+        page
+          .locator("#tldw-portal-root")
+          .getByRole("button", { name: "Undo improvement" })
       ).toBeVisible()
     } finally {
       await context?.close()

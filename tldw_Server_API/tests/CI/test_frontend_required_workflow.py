@@ -4,6 +4,31 @@ import pytest
 import yaml
 
 
+@pytest.mark.unit
+def test_frontend_required_budget_covers_broad_changed_suite() -> None:
+    workflow_path = Path(".github/workflows/frontend-required.yml")
+    data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+
+    assert data["jobs"]["frontend-required"]["timeout-minutes"] >= 120
+
+
+@pytest.mark.unit
+def test_frontend_required_bounds_pathological_impact_expansion() -> None:
+    workflow_path = Path(".github/workflows/frontend-required.yml")
+    data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    steps = data["jobs"]["frontend-required"]["steps"]
+    unit_step = next(
+        step for step in steps if step.get("name") == "Run frontend unit tests"
+    )
+    script = unit_step["run"]
+
+    assert 'IMPACTED_TEST_LIMIT="500"' in script
+    assert 'bunx vitest list --changed="${BASE_SHA}" --filesOnly' in script
+    assert 'git diff --name-only --diff-filter=ACMR "${BASE_SHA}"...HEAD' in script
+    assert 'bunx vitest run "${DIRECT_TEST_FILES[@]}"' in script
+    assert "No directly changed frontend tests were found" in script
+
+
 def test_frontend_required_runs_family_guardrails_e2e_for_targeted_changes() -> None:
     workflow_path = Path(".github/workflows/frontend-required.yml")
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
@@ -28,7 +53,7 @@ def test_frontend_required_does_not_publish_or_enforce_license_policy() -> None:
     workflow_text = workflow_path.read_text(encoding="utf-8")
 
     assert checkout["if"] == "needs.changes.outputs.frontend_changed == 'true'"
-    assert "fetch-depth" not in checkout.get("with", {})
+    assert checkout["with"]["fetch-depth"] == 0
     assert "Enforce temporary frontend licensing contribution freeze" not in step_names
     assert "check_frontend_license_gate.py" not in workflow_text
     assert "frontend-license-policy/trusted/" not in workflow_text

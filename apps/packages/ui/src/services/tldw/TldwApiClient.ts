@@ -1720,20 +1720,29 @@ export class TldwApiClientBase {
   }
 
   async requestWithCurrentConfig<T = any>(
-    init: any,
+    init: any | ((config: TldwConfig) => any),
     requireAuth = true
   ): Promise<T> {
+    const usesConfigFactory = typeof init === "function"
+    const staticInit = usesConfigFactory ? null : init
     const useDirectWebRequest = getCurrentBrowserSurface() === "webui-page"
     if (useDirectWebRequest) await this.initialize()
-    const cfg = await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
+    const cfg = await this.ensureConfigForRequest(
+      requireAuth && !staticInit?.noAuth
+    )
+    const resolvedInit = typeof init === "function" ? init(cfg) : init
     if (!useDirectWebRequest) {
-      return await bgRequest<T>(init)
+      return await bgRequest<T>(
+        usesConfigFactory
+          ? { ...resolvedInit, configSnapshot: cfg }
+          : resolvedInit
+      )
     }
 
-    const response = await tldwRequest(init, {
+    const response = await tldwRequest(resolvedInit, {
       getConfig: async () => cfg
     })
-    if (!response?.ok) {
+    if (!response?.ok && !resolvedInit?.returnResponse) {
       const message =
         typeof response?.error === "string" && response.error.trim()
           ? response.error
@@ -1746,7 +1755,7 @@ export class TldwApiClientBase {
       error.details = response?.data
       throw error
     }
-    return response.data as T
+    return (resolvedInit?.returnResponse ? response : response.data) as T
   }
 
   async fetchWithAuth(
@@ -6868,196 +6877,6 @@ export class TldwApiClientBase {
     return await this.upload<any>({ path: '/api/v1/audio/transcriptions', method: 'POST', fields, file: { name, type, data } })
   }
 
-  async synthesizeSpeech(
-    text: string,
-    options?: {
-      voice?: string
-      model?: string
-      responseFormat?: string
-      speed?: number
-      language?: string
-      normalizationOptions?: Record<string, any>
-      extraParams?: Record<string, any>
-      stream?: boolean
-      signal?: AbortSignal
-      timeoutMs?: number
-    }
-  ): Promise<ArrayBuffer> {
-    const cfg = await this.ensureConfigForRequest(true)
-    const body: Record<string, any> = { input: text, text }
-    if (options?.voice) body.voice = options.voice
-    if (options?.model) body.model = options.model
-    if (options?.responseFormat) body.response_format = options.responseFormat
-    if (options?.speed != null) body.speed = options.speed
-    if (options?.language) body.lang_code = options.language
-    if (options?.normalizationOptions) {
-      body.normalization_options = options.normalizationOptions
-    }
-    if (options?.extraParams) body.extra_params = options.extraParams
-    if (options?.stream != null) body.stream = options.stream
-    const accept = (() => {
-      switch ((options?.responseFormat || "").trim().toLowerCase()) {
-        case "wav":
-          return "audio/wav"
-        case "opus":
-          return "audio/opus"
-        case "aac":
-          return "audio/aac"
-        case "flac":
-          return "audio/flac"
-        case "ogg":
-          return "audio/ogg"
-        case "webm":
-          return "audio/webm"
-        case "ulaw":
-          return "audio/basic"
-        case "pcm":
-          return "audio/L16; rate=24000; channels=1"
-        case "mp3":
-        default:
-          return "audio/mpeg"
-      }
-    })()
-    const cfgTtsTimeout = Number((cfg as any)?.ttsRequestTimeoutMs)
-    const timeoutMs =
-      options?.timeoutMs ??
-      (Number.isFinite(cfgTtsTimeout) && cfgTtsTimeout > 0
-        ? cfgTtsTimeout
-        : TTS_REQUEST_TIMEOUT_MS)
-    const data = await this.request<any>({
-      path: "/api/v1/audio/speech",
-      method: "POST",
-      headers: { Accept: accept },
-      body,
-      responseType: "arrayBuffer",
-      timeoutMs,
-      abortSignal: options?.signal
-    })
-
-    const normalizeArrayBuffer = async (value: unknown): Promise<ArrayBuffer | null> => {
-      if (!value) return null
-      if (value instanceof ArrayBuffer) return value
-      if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer) {
-        return new Uint8Array(value).slice(0).buffer
-      }
-      if (ArrayBuffer.isView(value)) {
-        const view = value as ArrayBufferView
-        if (
-          typeof SharedArrayBuffer !== "undefined" &&
-          view.buffer instanceof SharedArrayBuffer
-        ) {
-          const copy = new Uint8Array(view.byteLength)
-          copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength))
-          return copy.buffer
-        }
-        if (view.buffer instanceof ArrayBuffer) {
-          return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
-        }
-      }
-      if (typeof Blob !== "undefined" && value instanceof Blob) {
-        return await value.arrayBuffer()
-      }
-      const tag = Object.prototype.toString.call(value)
-      if (tag === "[object ArrayBuffer]" && typeof (value as any).slice === "function") {
-        return (value as any).slice(0)
-      }
-      if (Array.isArray(value) && value.every((entry) => typeof entry === "number")) {
-        return new Uint8Array(value).buffer
-      }
-      if (typeof value === "object") {
-        const record = value as Record<string, any>
-        if (
-          typeof record.type === "string" &&
-          record.type.toLowerCase() === "buffer" &&
-          Array.isArray(record.data)
-        ) {
-          return new Uint8Array(record.data).buffer
-        }
-        if (
-          typeof record.ok === "boolean" &&
-          Object.prototype.hasOwnProperty.call(record, "data")
-        ) {
-          const nested = await normalizeArrayBuffer(record.data)
-          if (nested) return nested
-        }
-        if (
-          typeof record.byteLength === "number" &&
-          typeof record.slice === "function"
-        ) {
-          try {
-            const sliced = record.slice(0)
-            if (
-              typeof SharedArrayBuffer !== "undefined" &&
-              sliced instanceof SharedArrayBuffer
-            ) {
-              return new Uint8Array(sliced).slice(0).buffer
-            }
-            return sliced
-          } catch {
-            // ignore and continue
-          }
-        }
-        if (typeof record.arrayBuffer === "function") {
-          return await record.arrayBuffer()
-        }
-        if (record.data !== undefined) {
-          const nested = await normalizeArrayBuffer(record.data)
-          if (nested) return nested
-        }
-        if (record.buffer !== undefined) {
-          const nested = await normalizeArrayBuffer(record.buffer)
-          if (nested) return nested
-        }
-        if (typeof record.length === "number") {
-          const maybeArray = Array.from(record as ArrayLike<unknown>)
-          if (maybeArray.length > 0 && maybeArray.every((entry) => typeof entry === "number")) {
-            return new Uint8Array(maybeArray).buffer
-          }
-        }
-      }
-      return null
-    }
-
-    const normalized = await normalizeArrayBuffer(data)
-    if (!normalized) {
-      // eslint-disable-next-line no-console
-      try {
-        // eslint-disable-next-line no-console
-        console.error("[tldw][tts] Invalid audio buffer from /api/v1/audio/speech", {
-          type: typeof data,
-          tag: Object.prototype.toString.call(data),
-          constructor:
-            typeof data === "object" && data ? (data as any).constructor?.name : undefined,
-          keys:
-            typeof data === "object" && data
-              ? Object.keys(data as object).slice(0, 10)
-              : [],
-          dataType: typeof (data as any)?.data,
-          dataTag:
-            typeof (data as any)?.data !== "undefined"
-              ? Object.prototype.toString.call((data as any).data)
-              : undefined,
-          dataKeys:
-            (data as any)?.data && typeof (data as any).data === "object"
-              ? Object.keys((data as any).data).slice(0, 10)
-              : undefined
-        })
-        if (typeof data === "object" && data) {
-          // eslint-disable-next-line no-console
-          console.error(
-            "[tldw][tts] Invalid audio buffer payload sample",
-            JSON.stringify(data, null, 2).slice(0, 2000)
-          )
-        }
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error("[tldw][tts] Failed to log invalid audio buffer payload", e)
-      }
-      throw new Error("TTS returned an invalid audio buffer.")
-    }
-    return normalized
-  }
-
   async createTtsJob(payload: {
     input: string
     model?: string
@@ -7067,6 +6886,8 @@ export class TldwApiClientBase {
     lang_code?: string
     normalization_options?: Record<string, any>
     extra_params?: Record<string, any>
+    backend?: string
+    allow_fallback?: boolean
   }): Promise<{ job_id: number; status: string }> {
     return await bgRequest<{ job_id: number; status: string }>({
       path: "/api/v1/audio/speech/jobs",
@@ -8362,6 +8183,11 @@ import {
   type ServicePromptRequestScope
 } from "./domains/service-prompts"
 
+export type {
+  TldwSpeechDetailedResult,
+  TldwSpeechOptions
+} from "./domains/models-audio"
+
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class TldwApiClient extends TldwApiClientBase {}
 
@@ -8408,17 +8234,11 @@ Object.assign(
   servicePromptMethods
 )
 
-// createChatCompletion and synthesizeSpeech are implemented on
-// TldwApiClientBase and are intentionally excluded from the domain interface
-// via TldwDomainMethodOverride, so the base-class versions are the canonical
-// (type-visible) ones. The legacy duplicates in the chat-rag / models-audio
-// mixins were overwriting them at runtime, which (a) re-introduced the
-// non-streaming sanitizer that corrupts successful assistant replies and
-// (b) dropped the generous TTS timeout. Re-apply the base implementations so
-// runtime matches the declared types and the fixes take effect.
+// createChatCompletion remains canonical on TldwApiClientBase. TTS synthesis is
+// canonical in modelsAudioMethods so explicit-backend negotiation and response
+// provenance stay available while preserving the configured request timeout.
 Object.assign(TldwApiClient.prototype, {
-  createChatCompletion: TldwApiClientBase.prototype.createChatCompletion,
-  synthesizeSpeech: TldwApiClientBase.prototype.synthesizeSpeech
+  createChatCompletion: TldwApiClientBase.prototype.createChatCompletion
 })
 
 // Also expose core helpers that domain files reference via `this`

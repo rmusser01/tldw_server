@@ -5,7 +5,7 @@ import math
 import os
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from tldw_Server_API.app.core.AuthNZ.byok_config import build_app_config_overrides
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
@@ -39,7 +39,11 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.core.http_client import sensitive_http_observability_context
+from tldw_Server_API.app.core.http_client import (
+    RetryPolicy,
+    afetch_json,
+    sensitive_http_observability_context,
+)
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
     ChatProviderRegistry,
     get_registry,
@@ -57,6 +61,11 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     provider_requires_api_key,
 )
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.TTS.gateway_catalog import (
+    MAX_DISCOVERY_BYTES,
+    _parse_discovered_models,
+)
+from tldw_Server_API.app.core.TTS.gateway_config import build_gateway_url
 
 _INVALID_TEST_KEY_PREFIXES = ("invalid-", "test-invalid-", "bad-key-", "dummy-invalid-")
 PROVIDER_CREDENTIAL_VALIDATION_TIMEOUT_SECONDS = 10.0
@@ -113,6 +122,17 @@ def _provider_health_admission(provider: str) -> threading.BoundedSemaphore:
             )
             _PROVIDER_HEALTH_ADMISSIONS_BY_PROVIDER[provider_key] = admission
         return admission
+
+
+GatewayVerificationStatus = Literal["verified", "stored-unverified", "rejected"]
+
+
+class _GatewayCredentialRejected(Exception):
+    pass
+
+
+class _GatewayProbeUnavailable(Exception):
+    pass
 
 
 def _is_test_mode() -> bool:
@@ -474,7 +494,7 @@ def provider_validation_public_error(value: Any) -> SanitizedProviderStreamError
             message=PROVIDER_STREAM_ERROR_MESSAGES[value.error_code],
             status_code=500,
         )
-    if isinstance(value, ChatProviderError):
+    if isinstance(value, ChatAPIError):
         status_code = value.status_code if value.status_code in {500, 502, 503, 504} else 502
         return SanitizedProviderStreamError(
             code="provider_unavailable",
@@ -482,6 +502,48 @@ def provider_validation_public_error(value: Any) -> SanitizedProviderStreamError
             status_code=status_code,
         )
     return sanitized_provider_stream_exception(value)
+
+
+async def probe_gateway_credentials(
+    *,
+    spec: Any,
+    api_key: str,
+) -> GatewayVerificationStatus:
+    """Probe configured model discovery without issuing a synthesis request."""
+    if (
+        not bool(getattr(spec, "enabled", False))
+        or not bool(getattr(getattr(spec, "discovery", None), "enabled", False))
+        or not getattr(spec, "models_path", None)
+    ):
+        return "stored-unverified"
+
+    async def _classify_status(status: int, _headers: Any) -> None:
+        if status in {401, 403}:
+            raise _GatewayCredentialRejected
+        if status < 200 or status >= 300:
+            raise _GatewayProbeUnavailable
+
+    headers = dict(getattr(spec, "headers", ()) or ())
+    headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        payload = await afetch_json(
+            method="GET",
+            url=str(build_gateway_url(spec.base_url, spec.models_path)),
+            params=dict(getattr(spec, "discovery_query", ()) or ()),
+            headers=headers,
+            timeout=spec.discovery.timeout_seconds,
+            retry=RetryPolicy(attempts=1),
+            require_json_ct=True,
+            max_bytes=MAX_DISCOVERY_BYTES,
+            allow_redirects=False,
+            on_response=_classify_status,
+        )
+        _parse_discovered_models(payload)
+    except _GatewayCredentialRejected:
+        return "rejected"
+    except Exception:
+        return "stored-unverified"
+    return "verified"
 
 
 async def test_provider_credentials(

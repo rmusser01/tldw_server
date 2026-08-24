@@ -1,5 +1,6 @@
 # audio_tts.py
 # Description: Audio TTS endpoints and helpers.
+import asyncio
 import base64
 import contextlib
 import inspect
@@ -18,6 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     check_rate_limit,
+    get_auth_principal,
     get_request_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
@@ -31,6 +33,7 @@ from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error, _sa
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -39,6 +42,13 @@ from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_his
 from tldw_Server_API.app.core.Storage.generated_file_helpers import (
     save_and_register_tts_audio,
 )
+from tldw_Server_API.app.core.TTS.adapter_registry import canonicalize_tts_backend
+from tldw_Server_API.app.core.TTS.gateway_preflight import (
+    gateway_route_provenance,
+    preflight_gateway_speech,
+    reject_gateway_persistence_authority,
+)
+from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSAuthenticationError,
     TTSError,
@@ -113,6 +123,39 @@ def _audio_shim_attr(name: str):
     raise NameError(name)
 
 
+def _resolve_tts_backend_mirror(
+    request_data: OpenAISpeechRequest,
+    request: Request,
+) -> Optional[str]:
+    """Resolve the body/header backend mirror before provider or credential lookup."""
+    body_backend = getattr(request_data, "backend", None)
+    header_backend = request.headers.get("X-TLDW-TTS-Backend")
+    if body_backend is None and header_backend is None:
+        return None
+    try:
+        canonical_body = canonicalize_tts_backend(body_backend) if body_backend is not None else None
+        canonical_header = canonicalize_tts_backend(header_backend) if header_backend is not None else None
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "invalid_tts_backend",
+                "message": "TTS backend identity is malformed.",
+            },
+        ) from exc
+    if canonical_body is not None and canonical_header is not None and canonical_body != canonical_header:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "invalid_tts_backend",
+                "message": "TTS backend body and header values conflict.",
+            },
+        )
+    backend = canonical_body or canonical_header
+    request_data.backend = backend
+    return backend
+
+
 def _tts_history_config() -> dict[str, Any]:
     return {
         "enabled": parse_bool(getattr(settings, "TTS_HISTORY_ENABLED", False), default=False),
@@ -125,6 +168,76 @@ def _tts_history_config() -> dict[str, Any]:
 def _extract_tts_metadata(request_data: OpenAISpeechRequest) -> dict[str, Any]:
     metadata = getattr(request_data, "_tts_metadata", None)
     return metadata if isinstance(metadata, dict) else {}
+
+
+async def _close_speech_iterator(speech_iter: Any) -> None:
+    """Close the endpoint-owned iterator when consumption stops for any reason."""
+    close = getattr(speech_iter, "aclose", None)
+    if callable(close):
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:
+            logger.bind(error_type=type(exc).__name__).warning(
+                "Failed to close TTS speech iterator"
+            )
+
+
+def _append_gateway_response_headers(
+    request_data: OpenAISpeechRequest,
+    headers: dict[str, str],
+) -> None:
+    """Expose only resolved canonical route provenance for explicit gateways."""
+    if getattr(request_data, "backend", None) is None:
+        return
+    metadata = _extract_tts_metadata(request_data)
+    actual_backend = (
+        metadata.get("actual_backend")
+        or metadata.get("actual_provider")
+        or metadata.get("provider")
+    )
+    if isinstance(actual_backend, str) and actual_backend:
+        headers["X-TLDW-TTS-Backend"] = actual_backend
+        headers["X-TLDW-TTS-Fallback-Used"] = (
+            "true" if bool(metadata.get("fallback_used", False)) else "false"
+        )
+
+
+def _request_user_id(current_user: User) -> int:
+    """Return the authenticated integer user identity used by TTS runtime."""
+    try:
+        return int(current_user.id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user identity is invalid",
+        ) from exc
+
+
+async def _get_optional_tts_catalog_principal(
+    request: Request,
+) -> AuthPrincipal | None:
+    """Return authenticated catalog identity while preserving public reads."""
+    try:
+        return await get_auth_principal(request)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            return None
+        raise
+
+
+def _tts_catalog_user_id(principal: AuthPrincipal | None) -> int | None:
+    """Return optional user identity for credential-scoped gateway discovery."""
+    if principal is None or principal.user_id is None:
+        return None
+    try:
+        return int(principal.user_id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user identity is invalid",
+        ) from exc
 
 
 _AUDIO_CONTENT_TYPE_MAP = {
@@ -491,8 +604,9 @@ async def create_speech_job(
 ):
     """Submit a long-form TTS job and return job id."""
     request_id = ensure_request_id(request)
+    explicit_backend = _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
-    speech_request_payload = model_dump_compat(request_data)
+    speech_request_payload = model_dump_compat(request_data, exclude_unset=True)
     if contains_tts_credential_fields(speech_request_payload):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -505,25 +619,57 @@ async def create_speech_job(
         request,
         current_user,
     )
-
-    resolved_user_id, _, resolution = await _audio_shim_attr("_resolve_tts_byok")(
-        provider_hint=provider_hint,
-        model=request_data.model,
-        current_user=current_user,
-        request=request,
-    )
-    credential_scope = _finalize_tts_job_credential_scope(
-        credential_scope,
-        trusted_base_url_capable=trusted_base_url_capable,
-        resolved_user_id=resolved_user_id,
-        resolution=resolution,
-    )
-
-    payload = {
-        "speech_request": speech_request_payload,
-        "provider_hint": provider_hint,
-        "credential_scope": credential_scope,
-    }
+    if explicit_backend is not None:
+        supplied_fields = frozenset(getattr(request_data, "model_fields_set", set()) or ())
+        try:
+            resolved = preflight_gateway_speech(
+                backend=explicit_backend,
+                model=request_data.model,
+                voice=request_data.voice,
+                voice_supplied="voice" in supplied_fields,
+                response_format=request_data.response_format,
+                allow_fallback=request_data.allow_fallback,
+                supplied_fields=supplied_fields,
+                gateway_specs=get_tts_config_manager().get_gateway_specs(),
+                speed=request_data.speed,
+                lang_code=request_data.lang_code,
+                language=request_data.language,
+                target_sample_rate=request_data.target_sample_rate,
+                extra_params=request_data.extra_params,
+                text_length=len(request_data.input),
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        speech_request_payload.update(
+            backend=resolved.backend,
+            model=resolved.model,
+            voice=resolved.voice,
+            allow_fallback=resolved.allow_fallback,
+        )
+        payload = {
+            "speech_request": speech_request_payload,
+        }
+    else:
+        resolved_user_id, _, resolution = await _audio_shim_attr("_resolve_tts_byok")(
+            provider_hint=provider_hint,
+            model=request_data.model,
+            current_user=current_user,
+            request=request,
+        )
+        credential_scope = _finalize_tts_job_credential_scope(
+            credential_scope,
+            trusted_base_url_capable=trusted_base_url_capable,
+            resolved_user_id=resolved_user_id,
+            resolution=resolution,
+        )
+        payload = {
+            "speech_request": speech_request_payload,
+            "provider_hint": provider_hint,
+            "credential_scope": credential_scope,
+        }
     # Force non-streaming in jobs worker.
     payload["speech_request"]["stream"] = False
 
@@ -645,19 +791,33 @@ async def create_speech(
     """
     request_id = ensure_request_id(request)
 
+    explicit_backend = _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
+    if explicit_backend is not None:
+        try:
+            reject_gateway_persistence_authority(request_data.extra_params or {})
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
     history_cfg = _tts_history_config()
     history_enabled = bool(media_db) and history_cfg.get("enabled", False)
     history_written = False
     start_ts = time.monotonic()
 
     tts_provider_hint = provider_hint
-    user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
-        provider_hint=tts_provider_hint,
-        model=request_data.model,
-        current_user=current_user,
-        request=request,
-    )
+    if explicit_backend is not None:
+        user_id_int = _request_user_id(current_user)
+        tts_overrides = None
+        byok_tts_resolution = None
+    else:
+        user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
+            provider_hint=tts_provider_hint,
+            model=request_data.model,
+            current_user=current_user,
+            request=request,
+        )
     oauth_retry_attempted = False
     credential_usage_marked = False
 
@@ -771,7 +931,12 @@ async def create_speech(
         text_length = tts_history_text_length(request_data.input)
         text_value = request_data.input if history_cfg.get("store_text", True) else None
         metadata = _extract_tts_metadata(request_data)
-        provider = metadata.get("provider") or tts_provider_hint
+        provider = (
+            metadata.get("actual_backend")
+            or metadata.get("actual_provider")
+            or metadata.get("provider")
+            or tts_provider_hint
+        )
         model = metadata.get("model") or request_data.model
         voice_name = metadata.get("voice") or request_data.voice
         voice_id = metadata.get("voice_id")
@@ -802,6 +967,16 @@ async def create_speech(
         if request_data.normalization_options is not None:
             with contextlib.suppress(_AUDIO_TTS_NONCRITICAL_EXCEPTIONS):
                 params_json["normalization_options"] = model_dump_compat(request_data.normalization_options)
+        route = gateway_route_provenance(
+            requested_backend=request_data.backend,
+            requested_model=request_data.model,
+            metadata=metadata,
+        )
+        if route:
+            if route["requested_backend"] != route["actual_backend"]:
+                params_json["requested_backend"] = route["requested_backend"]
+            params_json["fallback_used"] = route["fallback_used"]
+            params_json["conversion_used"] = route["conversion_used"]
 
         voice_info: dict[str, Any] | None = {}
         meta_voice_info = metadata.get("voice_info")
@@ -867,8 +1042,8 @@ async def create_speech(
     def _build_speech_iter():
         return tts_service.generate_speech(
             request_data,
-            provider=tts_provider_hint,
-            fallback=True,
+            provider=None if explicit_backend is not None else tts_provider_hint,
+            fallback=explicit_backend is None,
             provider_overrides=tts_overrides,
             voice_to_voice_start=voice_to_voice_start,
             voice_to_voice_route="audio.speech",
@@ -899,6 +1074,7 @@ async def create_speech(
         if not isinstance(api_key, str) or not api_key.strip():
             raise TTSAuthenticationError("OpenAI OAuth refresh returned no access token")
 
+        await _close_speech_iterator(speech_iter)
         speech_iter = _build_speech_iter()
 
     try:
@@ -981,6 +1157,7 @@ async def create_speech(
             stream_failed = _tts_history_error_message(exc)
             _raise_for_tts_error(exc, request_id)
         finally:
+            await _close_speech_iterator(speech_iter)
             status = "success"
             error_message = None
             if stream_failed:
@@ -996,13 +1173,19 @@ async def create_speech(
     if request_data.stream:
         try:
             first_chunk = await _pull_first_chunk()
+        except asyncio.CancelledError:
+            await _close_speech_iterator(speech_iter)
+            raise
         except HTTPException as exc:
+            await _close_speech_iterator(speech_iter)
             _record_tts_history("failed", error_message=_tts_history_error_message(exc))
             raise
         except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
+            await _close_speech_iterator(speech_iter)
             _record_tts_history("failed", error_message=_tts_history_error_message(exc))
             raise
         if not first_chunk:
+            await _close_speech_iterator(speech_iter)
             logger.error("Streaming generation resulted in empty audio data.")
             _record_tts_history("failed", error_message="empty_audio")
             raise HTTPException(
@@ -1018,6 +1201,7 @@ async def create_speech(
             "X-Request-Id": request_id,
         }
         _append_pcm_response_headers(request_data, stream_headers)
+        _append_gateway_response_headers(request_data, stream_headers)
         return StreamingResponse(
             _stream_chunks(first_chunk),
             media_type=response_content_type,
@@ -1026,19 +1210,24 @@ async def create_speech(
     # Non-streaming mode: accumulate chunks and return a single response
     try:
         first_chunk = await _pull_first_chunk()
+    except asyncio.CancelledError:
+        await _close_speech_iterator(speech_iter)
+        raise
     except HTTPException as exc:
+        await _close_speech_iterator(speech_iter)
         _record_tts_history("failed", error_message=_tts_history_error_message(exc))
         raise
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
+        await _close_speech_iterator(speech_iter)
         _record_tts_history("failed", error_message=_tts_history_error_message(exc))
         raise
-    all_audio_bytes = b""
+    all_audio_bytes = bytearray()
     if first_chunk:
-        all_audio_bytes += first_chunk
+        all_audio_bytes.extend(first_chunk)
         await _mark_credential_usage()
     try:
         async for chunk in speech_iter:
-            all_audio_bytes += chunk
+            all_audio_bytes.extend(chunk)
             if chunk:
                 await _mark_credential_usage()
     except HTTPException as exc:
@@ -1047,11 +1236,13 @@ async def create_speech(
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
         _record_tts_history("failed", error_message=_tts_history_error_message(exc))
         _raise_for_tts_error(exc, request_id)
+    finally:
+        await _close_speech_iterator(speech_iter)
 
     # Drop any internal boundary markers if present
-    all_audio_bytes = all_audio_bytes.replace(b"--final_boundary_for_non_streamed--", b"")
+    audio_bytes = bytes(all_audio_bytes).replace(b"--final_boundary_for_non_streamed--", b"")
 
-    if not all_audio_bytes:
+    if not audio_bytes:
         logger.error("Non-streaming generation resulted in empty audio data.")
         _record_tts_history("failed", error_message="empty_audio")
         raise HTTPException(
@@ -1064,6 +1255,7 @@ async def create_speech(
         "X-Request-Id": request_id,
     }
     _append_pcm_response_headers(request_data, headers)
+    _append_gateway_response_headers(request_data, headers)
     try:
         metadata = getattr(request_data, "_tts_metadata", None)
         alignment_payload = metadata.get("alignment") if isinstance(metadata, dict) else None
@@ -1084,7 +1276,7 @@ async def create_speech(
         try:
             file_record = await _audio_shim_attr("save_and_register_tts_audio")(
                 user_id=user_id_int,
-                audio_bytes=all_audio_bytes,
+                audio_bytes=audio_bytes,
                 audio_format=request_data.response_format,
                 original_text=request_data.input,
                 voice_name=request_data.voice,
@@ -1115,7 +1307,7 @@ async def create_speech(
     _record_tts_history("success", artifact_ids=artifact_ids, output_id=output_id)
 
     return Response(
-        content=all_audio_bytes,
+        content=audio_bytes,
         media_type=_resolve_response_content_type(request_data),
         headers=headers,
     )
@@ -1156,6 +1348,7 @@ async def create_speech_metadata(
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
 ):
     request_id = ensure_request_id(request)
+    _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
     tts_provider_hint = provider_hint
     user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
@@ -1328,8 +1521,15 @@ async def create_speech_metadata(
     return JSONResponse(content={"alignment": alignment_payload}, headers={"X-Request-Id": request_id})
 
 
-@router.get("/providers")
-async def list_tts_providers(request: Request, tts_service: TTSServiceV2 = Depends(get_tts_service)):
+@router.get(
+    "/providers",
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_tts_providers(
+    request: Request,
+    tts_service: TTSServiceV2 = Depends(get_tts_service),
+    principal: AuthPrincipal | None = Depends(_get_optional_tts_catalog_principal),
+):
     """
     List all available TTS providers and their capabilities.
     """
@@ -1338,8 +1538,18 @@ async def list_tts_providers(request: Request, tts_service: TTSServiceV2 = Depen
     try:
         capabilities = await tts_service.get_capabilities()
         voices = await tts_service.list_voices()
+        gateway_catalog = getattr(tts_service, "get_gateway_provider_catalog", None)
+        if callable(gateway_catalog):
+            dynamic = await gateway_catalog(user_id=_tts_catalog_user_id(principal))
+            if isinstance(dynamic, dict):
+                capabilities = {**capabilities, **dynamic}
 
-        return {"providers": capabilities, "voices": voices, "timestamp": datetime.utcnow().isoformat()}
+        return {
+            "providers": capabilities,
+            "voices": voices,
+            "timestamp": datetime.utcnow().isoformat(),
+            "supports_explicit_backend": True,
+        }
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Error listing TTS providers")
         request_id = ensure_request_id(request)
@@ -1352,16 +1562,40 @@ async def list_tts_providers(request: Request, tts_service: TTSServiceV2 = Depen
 @router.get(
     "/tts/providers/{provider}/model-info",
     summary="Get focused TTS provider model information",
+    dependencies=[Depends(check_rate_limit)],
 )
 async def get_tts_provider_model_info(
     provider: str,
     request: Request,
     tts_service: TTSServiceV2 = Depends(get_tts_service),
+    principal: AuthPrincipal | None = Depends(_get_optional_tts_catalog_principal),
 ):
     """Return focused status and capability metadata for one TTS provider."""
     request_id = ensure_request_id(request)
     provider_key = (provider or "").strip().lower()
     try:
+        gateway_catalog = getattr(tts_service, "get_gateway_provider_catalog", None)
+        if callable(gateway_catalog):
+            dynamic = await gateway_catalog(
+                user_id=_tts_catalog_user_id(principal),
+                backend=provider,
+            )
+            gateway_info = dynamic.get(provider_key) if isinstance(dynamic, dict) else None
+            if isinstance(gateway_info, dict):
+                return {
+                    "provider": provider_key,
+                    "status": "available",
+                    "initialized": False,
+                    "loaded": False,
+                    "failed": False,
+                    "model_ids": list(gateway_info.get("models", [])),
+                    "capabilities": gateway_info,
+                    "voice_catalog_available": bool(
+                        gateway_info.get("voice_catalog_available", False)
+                    ),
+                    "discovery": gateway_info.get("discovery", {}),
+                    "fallback": gateway_info.get("fallback", {}),
+                }
         status_data = tts_service.get_status()
         capabilities = await tts_service.get_capabilities()
         status_providers = status_data.get("providers", {}) if isinstance(status_data, dict) else {}
@@ -1434,12 +1668,18 @@ async def unload_tts_provider(
         ) from e
 
 
-@router.get("/voices/catalog", summary="List available TTS voices across providers")
+@router.get(
+    "/voices/catalog",
+    summary="List available TTS voices across providers",
+    dependencies=[Depends(check_rate_limit)],
+)
 async def list_tts_voices(
     request: Request,
     provider: Optional[str] = None,
+    model: Optional[str] = None,
     catalog_format: Optional[str] = Query(default=None, alias="format"),
     tts_service: TTSServiceV2 = Depends(get_tts_service),
+    principal: AuthPrincipal | None = Depends(_get_optional_tts_catalog_principal),
 ):
     """
     List available voices from TTS providers.
@@ -1449,6 +1689,36 @@ async def list_tts_voices(
     - If `format=openai`, returns a flattened OpenAI-style list object.
     """
     try:
+        provider_key = provider.strip().lower() if provider else None
+        if provider_key is not None:
+            gateway_catalog = getattr(tts_service, "get_gateway_provider_catalog", None)
+            if callable(gateway_catalog):
+                dynamic = await gateway_catalog(
+                    user_id=_tts_catalog_user_id(principal),
+                    backend=provider,
+                )
+                gateway_info = dynamic.get(provider_key) if isinstance(dynamic, dict) else None
+                if isinstance(gateway_info, dict):
+                    selected_models = [model] if model is not None else gateway_info.get("models", [])
+                    gateway_voices: list[dict[str, Any]] = []
+                    model_capabilities = gateway_info.get("model_capabilities", {})
+                    for model_id in selected_models:
+                        model_info = (
+                            model_capabilities.get(model_id)
+                            if isinstance(model_capabilities, dict)
+                            else None
+                        )
+                        if not isinstance(model_info, dict):
+                            continue
+                        gateway_voices.extend(
+                            {"id": voice, "name": voice, "model": model_id}
+                            for voice in model_info.get("voices", [])
+                            if isinstance(voice, str) and voice
+                        )
+                    result = {provider_key: gateway_voices}
+                    if (catalog_format or "").strip().lower() == "openai":
+                        return _build_openai_voice_catalog(result)
+                    return result
         all_voices = await tts_service.list_voices()
         if provider:
             key = provider.lower()

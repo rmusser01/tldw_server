@@ -3,7 +3,12 @@ export { mediaMethods, type MediaMethods } from "./media"
 export { characterMethods, type CharacterMethods } from "./characters"
 export { chatRagMethods, type ChatRagMethods } from "./chat-rag"
 export { collectionsMethods, type CollectionsMethods } from "./collections"
-export { modelsAudioMethods, type ModelsAudioMethods } from "./models-audio"
+export {
+  modelsAudioMethods,
+  type ModelsAudioMethods,
+  type TldwSpeechDetailedResult,
+  type TldwSpeechOptions
+} from "./models-audio"
 export { presentationsMethods, type PresentationsMethods } from "./presentations"
 export {
   prototypeWorkspaceMethods,

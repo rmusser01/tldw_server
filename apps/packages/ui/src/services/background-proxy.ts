@@ -229,7 +229,7 @@ const isSensitiveKey = (key: string): boolean => {
 }
 
 // Redact known sensitive fields (stack/trace/sql/query/secret/headers/etc.) recursively.
-const sanitizeResponseData = (
+export const sanitizeResponseData = (
   value: unknown,
   seen: WeakSet<object> = new WeakSet()
 ): unknown => {
@@ -462,6 +462,7 @@ export interface BgRequestInit<
   expectedStatuses?: number[]
   sanitizeRagProviderError?: boolean
   servicePromptConfig?: ServicePromptTargetConfig
+  configSnapshot?: unknown
 }
 
 const resolveCurrentServicePromptConfig = async (
@@ -774,7 +775,8 @@ const refreshAuthDirect = async (
 // extension worker), and single-flights it across concurrent callers.
 const createDirectRuntime = (
   storage: DirectRuntimeStorage,
-  servicePromptConfig?: ServicePromptTargetConfig
+  servicePromptConfig?: ServicePromptTargetConfig,
+  configSnapshot?: unknown
 ) => {
   let originalConfig: TldwConfig | undefined
   return {
@@ -788,7 +790,9 @@ const createDirectRuntime = (
           originalConfig ??= current
           return current
         }
-      : () => resolveDirectConfig(storage),
+      : configSnapshot !== undefined
+        ? () => Promise.resolve(configSnapshot)
+        : () => resolveDirectConfig(storage),
     refreshAuth: async () => {
       await refreshAuthDirect(
         storage,
@@ -814,7 +818,8 @@ export async function bgRequest<
     !init.suppressBackendUnavailableEvent &&
     !init.sanitizeRagProviderError &&
     !init.servicePromptConfig &&
-    !init.expectedStatuses?.length
+    !init.expectedStatuses?.length &&
+    init.configSnapshot === undefined
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
   }
@@ -907,7 +912,8 @@ async function bgRequestImpl<
     suppressBackendUnavailableEvent = false,
     expectedStatuses,
     sanitizeRagProviderError = false,
-    servicePromptConfig
+    servicePromptConfig,
+    configSnapshot
   } = init
   if (servicePromptConfig) {
     if (!isServicePromptRequestPath(rawPath, method)) {
@@ -1124,7 +1130,7 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      createDirectRuntime(storage, servicePromptConfig)
+      createDirectRuntime(storage, servicePromptConfig, configSnapshot)
     )
   }
   const resolveArrayBufferResponse = async (
@@ -1177,7 +1183,7 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      createDirectRuntime(storage, servicePromptConfig)
+      createDirectRuntime(storage, servicePromptConfig, configSnapshot)
     )
     if (!resp?.ok) {
       const failure = await handleFailedResponse(resp, "direct")
@@ -1331,7 +1337,7 @@ async function bgRequestImpl<
       abortSignal,
       responseType
     },
-    createDirectRuntime(storage, servicePromptConfig)
+    createDirectRuntime(storage, servicePromptConfig, configSnapshot)
   )
   if (!resp?.ok) {
     const failure = await handleFailedResponse(resp, "direct")

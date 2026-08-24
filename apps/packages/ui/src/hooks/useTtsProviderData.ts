@@ -44,12 +44,16 @@ type ElevenLabsData = {
 
 type UseTtsProviderDataArgs = {
   provider?: string
+  backend?: string
+  model?: string
   elevenLabsApiKey?: string | null
   inferredProviderKey?: string | null
 }
 
 export const useTtsProviderData = ({
   provider,
+  backend,
+  model,
   elevenLabsApiKey,
   inferredProviderKey
 }: UseTtsProviderDataArgs) => {
@@ -66,18 +70,31 @@ export const useTtsProviderData = ({
     enabled: hasAudio
   })
 
+  const explicitBackend =
+    providersInfo?.supports_explicit_backend === true && backend
+      ? backend
+      : undefined
+
   const { data: tldwTtsModels } = useQuery<TldwTtsModel[]>({
-    queryKey: ["tldw-tts-models"],
-    queryFn: fetchTldwTtsModels,
+    queryKey: ["tldw-tts-models", explicitBackend],
+    queryFn: () => fetchTldwTtsModels(explicitBackend),
     enabled: hasAudio
   })
 
+  const catalogProvider = explicitBackend
+    ? explicitBackend
+    : inferredProviderKey
+      ? toServerTtsProviderKey(inferredProviderKey)
+      : null
+  const catalogModel = explicitBackend ? model : undefined
+
   const { data: tldwVoiceCatalog } = useQuery<TldwTtsVoiceInfo[]>({
-    queryKey: ["tldw-voice-catalog", inferredProviderKey],
+    queryKey: ["tldw-voice-catalog", catalogProvider, catalogModel],
     queryFn: async () => {
-      if (!inferredProviderKey) return []
+      if (!catalogProvider) return []
       const voices = await fetchTldwVoiceCatalog(
-        toServerTtsProviderKey(inferredProviderKey)
+        catalogProvider,
+        catalogModel ? { model: catalogModel } : undefined
       )
       return voices.map((v) => ({
         id: v.voice_id || v.id || v.name,
@@ -88,7 +105,7 @@ export const useTtsProviderData = ({
         preview_url: (v as any)?.preview_url
       })) as TldwTtsVoiceInfo[]
     },
-    enabled: hasAudio && provider === "tldw" && Boolean(inferredProviderKey)
+    enabled: hasAudio && provider === "tldw" && Boolean(catalogProvider)
   })
 
   const {
