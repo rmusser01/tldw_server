@@ -465,6 +465,32 @@ async def test_request_runtime_reuses_lifecycle_owned_fenced_transport(
 
 
 @pytest.mark.asyncio
+async def test_request_runtime_never_reuses_another_owner_database(tmp_path):
+    first_db = SlidesDatabase(db_path=tmp_path / "owner-1.db", client_id="1")
+    second_db = SlidesDatabase(db_path=tmp_path / "owner-2.db", client_id="2")
+    app = FastAPI()
+
+    try:
+        first_runtime = await slides_standalone_html._build_runtime(
+            SimpleNamespace(app=app),
+            first_db,
+        )
+        app.state.standalone_html_api_runtime = first_runtime
+
+        second_runtime = await slides_standalone_html._build_runtime(
+            SimpleNamespace(app=app),
+            second_db,
+        )
+
+        assert second_runtime is not first_runtime
+        assert second_runtime.slides_db is second_db
+        assert second_runtime.generation_service.slides_db is second_db
+    finally:
+        first_db.close_connection()
+        second_db.close_connection()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("local_only", [None, True], ids=["absent", "local-only"])
 async def test_request_runtime_without_full_lifecycle_context_fails_closed_without_resources(
     tmp_path,
@@ -589,7 +615,8 @@ class _FakeGenerationService:
 
 
 class _FakeStandaloneRuntime:
-    def __init__(self) -> None:
+    def __init__(self, slides_db: SlidesDatabase) -> None:
+        self.slides_db = slides_db
         self.config = _runtime_config()
         self.validator_available = True
         self.generation_service = _FakeGenerationService()
@@ -759,9 +786,12 @@ def html_client(tmp_path):
     html = _create_html(db)
     app = FastAPI()
     validation_pool = _InlineValidationPool(db)
-    standalone_runtime = _FakeStandaloneRuntime()
+    standalone_runtime = _FakeStandaloneRuntime(db)
     app.state.standalone_html_validation_pool = validation_pool
     app.state.standalone_html_api_runtime = standalone_runtime
+    app.state.standalone_html_api_runtime_factory = (
+        lambda *, request, slides_db: standalone_runtime
+    )
     app.include_router(slides_router, prefix="/api/v1", tags=["slides"])
 
     @app.exception_handler(RequestValidationError)
@@ -2065,6 +2095,7 @@ def test_generation_status_malformed_and_unknown_are_equivalent_404(html_client,
 def test_generation_status_unknown_remains_404_without_lifecycle_context(html_client):
     client, _db, _structured, _html = html_client
     del client.app.state.standalone_html_api_runtime
+    del client.app.state.standalone_html_api_runtime_factory
 
     response = client.get("/api/v1/slides/generations/018f2f4a-6f79-7a27-a1aa-7bb60777d900")
 

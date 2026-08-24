@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_config import (
     load_standalone_html_config,
 )
 from tldw_Server_API.app.core.Slides.standalone_html_reconciler import (
+    OwnerReconciliationResult,
     reconcile_owner_generation_receipts,
 )
 from tldw_Server_API.app.core.Slides.standalone_html_service import (
@@ -59,7 +60,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_sources import (
 
 router = APIRouter()
 
-_RUNTIME_STATE_ATTR = "standalone_html_api_runtime"
+_RUNTIME_FACTORY_STATE_ATTR = "standalone_html_api_runtime_factory"
 _TRANSPORT_CONTEXT_STATE_ATTR = "standalone_html_transport_context"
 _SAFE_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 _MAX_PROGRESS_TEXT = 256
@@ -67,6 +68,7 @@ _MAX_ERROR_MESSAGE = 256
 
 
 def _bounded_public_text(value: object, *, maximum: int) -> str | None:
+    """Return one bounded printable public string, or ``None`` when unsafe."""
     if not isinstance(value, str):
         return None
     text = value.strip()
@@ -87,7 +89,7 @@ class StandaloneHtmlApiRuntime:
     config_loader: Any
     validator_available: bool
 
-    def reconcile_owner(self, owner_user_id: str):
+    def reconcile_owner(self, owner_user_id: str) -> OwnerReconciliationResult:
         if self.job_manager is None:
             raise StandaloneHtmlGenerationError(
                 "generation_receipt_unresolved",
@@ -193,9 +195,14 @@ async def _closed_digest_snapshot_loader():
 
 
 async def _build_runtime(request: Request, slides_db: SlidesDatabase) -> StandaloneHtmlApiRuntime:
-    existing = getattr(request.app.state, _RUNTIME_STATE_ATTR, None)
-    if existing is not None:
-        return existing
+    runtime_factory = getattr(request.app.state, _RUNTIME_FACTORY_STATE_ATTR, None)
+    if runtime_factory is not None:
+        runtime = runtime_factory(request=request, slides_db=slides_db)
+        if inspect.isawaitable(runtime):
+            runtime = await runtime
+        if getattr(runtime, "slides_db", None) is not slides_db:
+            raise RuntimeError("standalone HTML runtime factory returned the wrong owner database")
+        return runtime
 
     validator_available = bool(
         standalone_html_validator.html5lib is not None and standalone_html_validator.tinycss2 is not None

@@ -202,7 +202,7 @@ export const useNavigate = () => {
   }
 }
 
-export const unstable_usePrompt = ({ when, message }: PromptOptions): void => {
+const useUnstablePrompt = ({ when, message }: PromptOptions): void => {
   const router = useRouter()
   const whenRef = React.useRef(when)
   const messageRef = React.useRef(message)
@@ -238,6 +238,8 @@ export const unstable_usePrompt = ({ when, message }: PromptOptions): void => {
     }
   }, [router])
 }
+
+export { useUnstablePrompt as unstable_usePrompt }
 
 export const useLocation = () => {
   const router = useRouter()

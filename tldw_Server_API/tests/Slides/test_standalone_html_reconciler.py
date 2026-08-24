@@ -182,7 +182,7 @@ def test_discovery_is_numeric_one_level_deterministic_and_cursor_bounded(tmp_pat
     assert all(item.path == base_dir / item.owner_user_id / "Slides.db" for item in (*first, *second))
 
 
-@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks are unavailable")
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="TASK-12115: symlinks are unavailable")
 def test_discovery_fails_closed_for_canonical_symlinked_database(tmp_path: Path) -> None:
     base_dir = tmp_path / "user_databases"
     target = _create_slides_db(base_dir, "2")
@@ -296,7 +296,7 @@ def test_discovery_fails_closed_when_selected_database_disappears(
         )
 
 
-@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks are unavailable")
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="TASK-12115: symlinks are unavailable")
 def test_discovery_fails_closed_for_symlinked_registry_root(tmp_path: Path) -> None:
     real_base_dir = tmp_path / "real_user_databases"
     _create_slides_db(real_base_dir, "2")
@@ -1450,7 +1450,7 @@ def test_fenced_open_does_not_recreate_a_database_removed_after_final_revalidati
     assert not db_path.exists()
 
 
-@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks are unavailable")
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="TASK-12115: symlinks are unavailable")
 def test_fenced_open_rejects_a_symlink_inserted_after_final_revalidation_without_migration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1488,7 +1488,7 @@ def test_fenced_open_rejects_a_symlink_inserted_after_final_revalidation_without
     assert outside_target.stat().st_size == 0
 
 
-@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks are unavailable")
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="TASK-12115: symlinks are unavailable")
 def test_fenced_open_rejects_an_owner_directory_symlink_inserted_after_final_revalidation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

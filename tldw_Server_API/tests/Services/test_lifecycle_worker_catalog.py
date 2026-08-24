@@ -106,7 +106,9 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "privilege_snapshot_task",
     "audio_jobs_task",
     "audiobook_jobs_task",
+    "chat_macros_jobs_task",
     "presentation_render_jobs_task",
+    "scheduled_tasks_recurring_question_jobs_task",
     "standalone_html_generation_jobs_task",
     "research_workspace_output_jobs_task",
     "media_ingest_jobs_task",
@@ -172,6 +174,7 @@ TASK7_SERVICE_TAIL_SPEC_NAMES = {
     "admin_backup_sched_task",
     "companion_reflection_sched_task",
     "reminders_sched_task",
+    "scheduled_tasks_recurring_question_sched_task",
     "connectors_sync_sched_task",
 }
 

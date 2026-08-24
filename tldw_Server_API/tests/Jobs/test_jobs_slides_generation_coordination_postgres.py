@@ -309,7 +309,8 @@ def test_postgres_audit_locks_before_scans_and_normalizes_compressed_rows():
 
     assert source.index("FOR UPDATE") < source.index("SELECT COALESCE(SUM(candidate_count), 0)")
     assert "normalize_slides_archive_projection" in source
-    assert forward_block.count("except psycopg.Error") == 1
+    assert "psycopg.Error" in forward_block
+    assert forward_block.count("except required_migration_exceptions") == 3
     assert "except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS" in audit_block
     assert audit_block.index("_mark_slides_audit_failure_pg(audit_cur)") < audit_block.index(
         "_audit_slides_generation_pg(audit_cur)"
@@ -639,7 +640,8 @@ def test_postgres_reconciliation_lock_order_and_registry_grant_are_narrow():
     assert "_SLIDES_GENERATION_CORRELATION_LOCK_PARTS" in prune_source
 
     rls_source = inspect.getsource(ensure_jobs_rls_policies_pg)
-    assert "GRANT INSERT ON {}.slides_standalone_key_registry TO {}" in rls_source
+    assert "GRANT INSERT ON TABLE " in rls_source
+    assert "{}.slides_standalone_key_registry TO {}" in rls_source
     assert "GRANT INSERT ON {}.job_events TO {}" in rls_source
     assert "GRANT USAGE, SELECT ON SEQUENCE {}.job_events_id_seq TO {}" in rls_source
     assert "GRANT INSERT ON ALL TABLES" not in rls_source
@@ -652,7 +654,7 @@ def test_postgres_prune_uses_one_locked_candidate_set_for_every_mutation():
     candidate_lock = prune_source.index('f"SELECT id FROM jobs{where_clause} "')
     batch_dispatch = prune_source.index("_prune_postgres_batch")
     collision_check = batch_source.index("_idempotent_slides_archive_collisions")
-    archive_copy = batch_source.index("SELECT {archive_projection} FROM locked_jobs")
+    archive_copy = batch_source.index("SELECT {archive_select_projection} FROM locked_jobs")
     delete = batch_source.index("DELETE FROM jobs{candidate_where_clause}")
 
     assert candidate_lock < batch_dispatch

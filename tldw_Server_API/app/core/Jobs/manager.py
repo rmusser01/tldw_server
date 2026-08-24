@@ -18,6 +18,7 @@ from typing import Any, ClassVar
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
+    fetch_slides_archive_collision_rows,
     job_event_filter_fragment,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
@@ -1661,35 +1662,17 @@ class JobManager:
         cursor: Any | None = None,
     ) -> set[str]:
         """Validate matching UUID collisions and return exact re-archive UUIDs."""
-        scoped_suffix = " AND domain='slides' AND queue='default' " "AND job_type='presentation.generate'"
-        query = f"SELECT * FROM jobs{where_clause}{scoped_suffix}"  # nosec B608
-        if self.backend == "postgres":
-            if cursor is None:
-                raise RuntimeError("PostgreSQL archive validation requires a cursor")
-            cursor.execute(query, params)
-            active_rows = list(cursor.fetchall() or [])
-        else:
-            active_rows = list(conn.execute(query, params).fetchall())
-
         exact_collisions: set[str] = set()
-        for active_row in active_rows:
+        collision_rows = fetch_slides_archive_collision_rows(
+            conn,
+            backend=self.backend,
+            where_clause=where_clause,
+            params=params,
+            cursor=cursor,
+        )
+        for active_row, archived_rows in collision_rows:
             active = normalize_slides_archive_projection(active_row)
             job_uuid = str(active.get("uuid") or "").strip()
-            if not job_uuid:
-                continue
-            if self.backend == "postgres":
-                cursor.execute(
-                    "SELECT * FROM jobs_archive WHERE uuid=%s LIMIT 2",
-                    (job_uuid,),
-                )
-                archived_rows = list(cursor.fetchall() or [])
-            else:
-                archived_rows = list(
-                    conn.execute(
-                        "SELECT * FROM jobs_archive WHERE uuid=? LIMIT 2",
-                        (job_uuid,),
-                    ).fetchall()
-                )
             if not archived_rows:
                 continue
             if len(archived_rows) != 1:
@@ -8676,6 +8659,15 @@ class JobManager:
         )
         if archive_enabled:
             archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+            archive_select_projection = ", ".join(
+                (
+                    "CASE WHEN status IN ('completed','failed','cancelled','quarantined') "
+                    f"THEN NULL ELSE {column} END AS {column}"
+                    if column in {"leased_until", "lease_id", "worker_id"}
+                    else column
+                )
+                for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS)
+            )
             exact_collisions = self._idempotent_slides_archive_collisions(
                 None,
                 where_clause=candidate_where_clause,
@@ -8724,7 +8716,7 @@ class JobManager:
             archive_insert_sql = (
                 f"WITH locked_jobs AS (SELECT * FROM jobs{archive_where_clause} FOR UPDATE) "  # nosec B608
                 f"INSERT INTO jobs_archive ({archive_projection}) "
-                f"SELECT {archive_projection} FROM locked_jobs"
+                f"SELECT {archive_select_projection} FROM locked_jobs"
                 + archive_returning
             )
             cur.execute(archive_insert_sql, archive_params)
@@ -8856,6 +8848,15 @@ class JobManager:
             and job_type in (None, _SLIDES_GENERATION_JOB_TYPE)
         )
         archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+        archive_select_projection = ", ".join(
+            (
+                "CASE WHEN status IN ('completed','failed','cancelled','quarantined') "
+                f"THEN NULL ELSE {column} END AS {column}"
+                if column in {"leased_until", "lease_id", "worker_id"}
+                else column
+            )
+            for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS)
+        )
         conn = self._connect()
         slides_diagnostic_persisted = False
         _test_mode = _is_test_mode()
@@ -9064,16 +9065,11 @@ class JobManager:
                                         "optimization",
                                     ),
                                 )
-                        try:
-                            exact_collisions = self._idempotent_slides_archive_collisions(
-                                conn,
-                                where_clause=where_clause,
-                                params=tuple(params),
-                            )
-                        except SlidesGenerationJobsUnavailableError:
-                            # The surrounding transaction rolls back before the
-                            # outer handler persists the bounded diagnostic.
-                            raise
+                        exact_collisions = self._idempotent_slides_archive_collisions(
+                            conn,
+                            where_clause=where_clause,
+                            params=tuple(params),
+                        )
                         archive_where_clause = where_clause
                         archive_params = list(params)
                         if exact_collisions:
@@ -9096,7 +9092,7 @@ class JobManager:
                         )
                         archive_insert_sql = (
                             f"INSERT INTO jobs_archive ({archive_projection}) "  # nosec B608
-                            f"SELECT {archive_projection} FROM jobs{archive_where_clause}"  # nosec B608
+                            f"SELECT {archive_select_projection} FROM jobs{archive_where_clause}"  # nosec B608
                             + archive_returning
                         )
                         archive_insert_cursor = conn.execute(
@@ -9125,12 +9121,11 @@ class JobManager:
                                     rs,
                                 ) in inserted_archive_rows:
                                     try:
-                                        if not job_uuid:
-                                            if _is_slides_generation_scope(
-                                                row_domain,
-                                                row_queue,
-                                                row_type,
-                                            ):
+                                        if not job_uuid and _is_slides_generation_scope(
+                                            row_domain,
+                                            row_queue,
+                                            row_type,
+                                        ):
                                                 conn.execute(
                                                     """
                                                     UPDATE slides_standalone_reconciliation
@@ -9149,7 +9144,7 @@ class JobManager:
                                                     WHERE singleton_id=1
                                                     """
                                                 )
-                                            continue
+                                                continue
                                         p64 = None
                                         r64 = None
                                         if isinstance(pl, str) and pl:

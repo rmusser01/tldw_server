@@ -174,6 +174,7 @@ def test_sqlite_forward_migration_adds_archive_terminal_projection_before_audit(
         "error_code",
     )
     with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX IF EXISTS idx_jobs_archive_batch_group_scope")
         for column in removed_columns:
             conn.execute(f"ALTER TABLE jobs_archive DROP COLUMN {column}")
 
@@ -186,6 +187,10 @@ def test_sqlite_forward_migration_adds_archive_terminal_projection_before_audit(
             "SELECT diagnostic_code FROM slides_standalone_reconciliation WHERE singleton_id=1"
         ).fetchone()[0]
         assert diagnostic is None
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='index' AND name='idx_jobs_archive_batch_group_scope'"
+        ).fetchone() == (1,)
 
 
 def test_sqlite_incomplete_archive_projection_fails_generation_readiness(tmp_path):

@@ -49,15 +49,15 @@ from tldw_Server_API.app.core.Slides.standalone_html_registry import (
 from tldw_Server_API.app.core.Slides.standalone_html_service import (
     StandaloneHtmlGenerationService,
 )
-from tldw_Server_API.app.core.Slides.standalone_html_validator import (
-    validate_standalone_html,
-)
 from tldw_Server_API.app.core.Slides.standalone_html_sources import (
     StandaloneHtmlSourceProvenance,
     StandaloneHtmlSourceSnapshot,
 )
 from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
     StandaloneHtmlValidationPool,
+)
+from tldw_Server_API.app.core.Slides.standalone_html_validator import (
+    validate_standalone_html,
 )
 from tldw_Server_API.app.services.standalone_html_generation_jobs_worker import (
     process_standalone_html_generation_job,
@@ -225,28 +225,30 @@ async def test_owner_generation_jobs_and_presentation_http_contract(
     def load_config() -> SlidesStandaloneHtmlConfig:
         return _config(enabled=enabled["value"])
 
-    generation_service = StandaloneHtmlGenerationService(
-        slides_db=db_holder[0],
-        job_manager=jobs,
-        keyring=keyring,
-        digest_snapshot_loader=load_digest_snapshot,
-        now=lambda: _NOW,
-        receipt_id_factory=lambda: str(uuid.uuid4()),
-    )
-    runtime = slides_standalone_html.StandaloneHtmlApiRuntime(
-        slides_db=db_holder[0],
-        job_manager=jobs,
-        generation_service=generation_service,
-        config_loader=load_config,
-        validator_available=True,
-    )
+    def runtime_factory(*, request: Request, slides_db: SlidesDatabase):
+        del request
+        generation_service = StandaloneHtmlGenerationService(
+            slides_db=slides_db,
+            job_manager=jobs,
+            keyring=keyring,
+            digest_snapshot_loader=load_digest_snapshot,
+            now=lambda: _NOW,
+            receipt_id_factory=lambda: str(uuid.uuid4()),
+        )
+        return slides_standalone_html.StandaloneHtmlApiRuntime(
+            slides_db=slides_db,
+            job_manager=jobs,
+            generation_service=generation_service,
+            config_loader=load_config,
+            validator_available=True,
+        )
     validation_pool = StandaloneHtmlValidationPool(
         max_workers=1,
         watchdog_seconds=10,
         mp_start_method="spawn",
     )
     app = FastAPI()
-    app.state.standalone_html_api_runtime = runtime
+    app.state.standalone_html_api_runtime_factory = runtime_factory
     app.state.standalone_html_validation_pool = validation_pool
     app.include_router(slides_router, prefix="/api/v1", tags=["slides"])
 
@@ -409,7 +411,7 @@ async def test_owner_generation_jobs_and_presentation_http_contract(
                     current_config_loader=load_config,
                     provider_api_key_loader=lambda _target: None,
                     provider_generate=provider_generate,
-                    now=lambda: _NOW + timedelta(minutes=index),
+                    now=lambda index=index: _NOW + timedelta(minutes=index),
                 )
                 assert isinstance(result, dict)
                 assert result["content_kind"] == "standalone_html"
@@ -611,8 +613,6 @@ async def test_owner_generation_jobs_and_presentation_http_contract(
             db_holder[0].close_connection()
             reopened = SlidesDatabase(slides_path, client_id="1")
             db_holder[0] = reopened
-            runtime.slides_db = reopened
-            generation_service.slides_db = reopened
             reopened_detail = await client.get(
                 f"/api/v1/slides/presentations/{presentation_id}", headers=_BOTH
             )
