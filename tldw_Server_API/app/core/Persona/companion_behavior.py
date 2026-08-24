@@ -118,13 +118,12 @@ def _normalize_entries(
                 )
             item["suggested_cooldown_ms"] = cooldown
 
-        movement = entry.get("movement")
-        if movement is not None:
+        if "movement" in entry:
             if category != "move":
                 raise CompanionBehaviorValidationError(
                     f"entries[{index}].movement requires category move"
                 )
-            item["movement"] = _normalize_movement(movement, index=index)
+            item["movement"] = _normalize_movement(entry["movement"], index=index)
         elif category == "move":
             raise CompanionBehaviorValidationError(
                 f"entries[{index}].movement is required for category move"

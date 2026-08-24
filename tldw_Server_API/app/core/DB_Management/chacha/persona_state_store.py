@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
 
 _UNSET = object()
+_SEALED_VISUAL_PACK_STATUSES = frozenset({"active", "archived"})
 
 
 class PersonaStateStore:
@@ -2707,8 +2708,8 @@ class PersonaStateStore:
               JOIN persona_visual_packs p
                 ON p.id = r.pack_id AND p.user_id = r.user_id
              WHERE p.id = ? AND p.persona_id = ? AND p.user_id = ? AND p.deleted = ?
-               AND r.pack_version = CASE WHEN p.status = 'active' THEN p.version - 1 ELSE p.version END
-             ORDER BY r.reviewed_at DESC, r.id DESC
+               AND (p.status IN ('active', 'archived') OR r.pack_version = p.version)
+             ORDER BY r.pack_version DESC, r.reviewed_at DESC, r.id DESC
              LIMIT 1
             """,
             (pack_id, persona_id, user_id, bool_cast(False)),
@@ -2734,8 +2735,8 @@ class PersonaStateStore:
               JOIN persona_visual_packs p
                 ON p.id = r.pack_id AND p.user_id = r.user_id
              WHERE p.persona_id = ? AND p.user_id = ? AND p.deleted = ?
-               AND r.pack_version = CASE WHEN p.status = 'active' THEN p.version - 1 ELSE p.version END
-             ORDER BY r.pack_id ASC, r.reviewed_at DESC, r.id DESC
+               AND (p.status IN ('active', 'archived') OR r.pack_version = p.version)
+             ORDER BY r.pack_id ASC, r.pack_version DESC, r.reviewed_at DESC, r.id DESC
             """,
             (persona_id, user_id, bool_cast(False)),
         ).fetchall()
@@ -2774,8 +2775,9 @@ class PersonaStateStore:
                     entity_id=pack_id,
                 )
             pack = dict(row)
-            if str(pack["status"]) == "active":
-                raise InputError("active visual pack payload is immutable")  # noqa: TRY003
+            pack_status = str(pack["status"])
+            if pack_status in _SEALED_VISUAL_PACK_STATUSES:
+                raise InputError(f"{pack_status} visual pack payload is immutable")  # noqa: TRY003
             if int(pack["version"]) != expected:
                 raise ConflictError(
                     "Persona visual pack version mismatch.",
@@ -2837,11 +2839,15 @@ class PersonaStateStore:
                     entity="persona_visual_packs",
                     entity_id=pack_id,
                 )
-            review = conn.execute(
+            review_query = (
                 "SELECT 1 FROM persona_visual_pack_reviews "
-                "WHERE pack_id = ? AND user_id = ? AND fingerprint = ? AND pack_version = ? LIMIT 1",
-                (pack_id, user_id, fingerprint_value, expected),
-            ).fetchone()
+                "WHERE pack_id = ? AND user_id = ? AND fingerprint = ?"
+            )
+            review_params: tuple[Any, ...] = (pack_id, user_id, fingerprint_value)
+            if str(pack["status"]) not in _SEALED_VISUAL_PACK_STATUSES:
+                review_query += " AND pack_version = ?"
+                review_params = (*review_params, expected)
+            review = conn.execute(review_query + " LIMIT 1", review_params).fetchone()
             if not review:
                 raise ConflictError(
                     "Persona visual pack activation requires a current matching review.",
@@ -2986,8 +2992,9 @@ class PersonaStateStore:
                 persona_id=persona_id,
                 user_id=user_id,
             )
-            if str(pack["status"]) == "active":
-                raise InputError("active visual pack is immutable")  # noqa: TRY003
+            pack_status = str(pack["status"])
+            if pack_status in _SEALED_VISUAL_PACK_STATUSES:
+                raise InputError(f"{pack_status} visual pack is immutable")  # noqa: TRY003
             prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
             cursor = conn.execute(prepared_query, prepared_params or ())
             if cursor.rowcount == 0 and expected_version is not None:
@@ -3033,8 +3040,9 @@ class PersonaStateStore:
                 persona_id=persona_id,
                 user_id=user_id,
             )
-            if str(pack["status"]) == "active":
-                raise InputError("active visual pack is immutable")  # noqa: TRY003
+            pack_status = str(pack["status"])
+            if pack_status in _SEALED_VISUAL_PACK_STATUSES:
+                raise InputError(f"{pack_status} visual pack is immutable")  # noqa: TRY003
             pack_where_sql = "id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
             pack_params: list[Any] = [
                 deleted_true,
@@ -3589,8 +3597,9 @@ class PersonaStateStore:
                 persona_id=persona_id,
                 user_id=user_id,
             )
-            if str(pack["status"]) == "active":
-                raise InputError("active visual pack assets are immutable")  # noqa: TRY003
+            pack_status = str(pack["status"])
+            if pack_status in _SEALED_VISUAL_PACK_STATUSES:
+                raise InputError(f"{pack_status} visual pack assets are immutable")  # noqa: TRY003
             prepared_query, prepared_params = self._prepare_backend_statement(query, params)
             conn.execute(prepared_query, prepared_params or ())
 

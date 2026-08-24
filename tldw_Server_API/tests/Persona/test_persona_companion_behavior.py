@@ -150,6 +150,29 @@ def test_behavior_accepts_limits_and_canonical_movement() -> None:
     }
 
 
+@pytest.mark.parametrize("category", ["idle_variant", "move"])
+def test_behavior_rejects_explicit_null_movement(category: str) -> None:
+    """Movement is presence-sensitive: explicit null is never an omitted field."""
+    with pytest.raises(CompanionBehaviorValidationError):
+        normalize_companion_behavior(
+            {
+                "schema_version": 1,
+                "entries": [_entry(category=category, movement=None)],
+            },
+            resolvable_state_ids={"ambient.look"},
+        )
+
+
+def test_behavior_allows_absent_movement_only_for_non_move_entries() -> None:
+    normalized = normalize_companion_behavior(
+        {"schema_version": 1, "entries": [_entry()]},
+        resolvable_state_ids={"ambient.look"},
+    )
+
+    assert normalized is not None
+    assert "movement" not in normalized["entries"][0]
+
+
 @pytest.mark.parametrize(
     "movement",
     [

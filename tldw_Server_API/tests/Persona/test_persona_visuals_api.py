@@ -2420,7 +2420,7 @@ def test_visual_pack_review_then_activation_requires_current_fingerprint(
 def test_visual_pack_fork_creates_an_inactive_same_persona_revision(
     persona_db: CharactersRAGDB,
 ) -> None:
-    """The nested fork route copies an immutable active source into a new draft."""
+    """The nested fork route copies an immutable archived source into a new draft."""
     behavior = {"schema_version": 1, "entries": []}
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Fork Route Persona")
@@ -2433,7 +2433,11 @@ def test_visual_pack_fork_creates_an_inactive_same_persona_revision(
         assert updated.status_code == 200, updated.text
         activated = _review_and_activate(client, persona_id, updated.json())
         assert activated.status_code == 200, activated.text
-        source = activated.json()
+        deactivated = client.post(f"/api/v1/persona/profiles/{persona_id}/visual-packs/deactivate")
+        assert deactivated.status_code == 200, deactivated.text
+        source = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+        ).json()
 
         forked = client.post(
             f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/fork",
@@ -2453,7 +2457,7 @@ def test_visual_pack_fork_creates_an_inactive_same_persona_revision(
     assert len(payload["assets"]) == 1
 
 
-@pytest.mark.parametrize("source_status", ["draft", "review", "archived"])
+@pytest.mark.parametrize("source_status", ["draft", "review"])
 def test_visual_pack_fork_rejects_editable_source_before_service_access(
     persona_db: CharactersRAGDB,
     source_status: str,
@@ -2639,17 +2643,112 @@ def test_review_hydrates_get_list_and_activation_responses_but_not_revised_paylo
 
         deactivated = client.post(f"/api/v1/persona/profiles/{persona_id}/visual-packs/deactivate")
         assert deactivated.status_code == 200, deactivated.text
-        editable = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
-        assert editable.status_code == 200, editable.text
+        sealed = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+        assert sealed.status_code == 200, sealed.text
+        assert sealed.json()["review"]["fingerprint"] == fingerprint
         revised = client.patch(
             f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
-            json={"manifest": _valid_manifest(asset["id"]), "expected_version": editable.json()["version"]},
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": sealed.json()["version"]},
         )
-        assert revised.status_code == 200, revised.text
-        after_revision = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
 
-    assert after_revision.status_code == 200, after_revision.text
-    assert after_revision.json()["review"] is None
+    assert revised.status_code == 400, revised.text
+    assert revised.json()["detail"] == "archived visual pack payload is immutable"
+
+
+def test_review_and_activation_reject_explicit_null_movement_without_rewriting_raw_payload(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Review and activation share the presence-aware behavior boundary."""
+    behavior = {
+        "schema_version": 1,
+        "entries": [{
+            "state": "idle",
+            "trigger": "ambient",
+            "category": "idle_variant",
+            "movement": None,
+        }],
+    }
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Null Movement Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={
+                "manifest": _valid_manifest(asset["id"]),
+                "companion_behavior": behavior,
+                "expected_version": pack["version"],
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        review = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": updated.json()["version"]},
+        )
+        activation = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={
+                "expected_version": updated.json()["version"],
+                "reviewed_fingerprint": "a" * 64,
+            },
+        )
+        persisted = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+        )
+
+    assert review.status_code == 400, review.text
+    assert activation.status_code == 400, activation.text
+    assert review.json()["detail"]["code"] == "invalid_companion_behavior"
+    assert activation.json()["detail"]["code"] == "invalid_companion_behavior"
+    assert persisted.json()["companion_behavior"] == behavior
+
+
+def test_valid_move_behavior_round_trips_through_review_fingerprint_and_activation(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Stored movement and the reviewed fingerprint describe the same valid behavior."""
+    behavior = {
+        "schema_version": 1,
+        "entries": [{
+            "state": "idle",
+            "trigger": "ambient",
+            "category": "move",
+            "movement": {
+                "direction": "horizontal",
+                "motion_start_ratio": 0.25,
+                "motion_end_ratio": 0.75,
+            },
+        }],
+    }
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Valid Movement Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={
+                "manifest": _valid_manifest(asset["id"]),
+                "companion_behavior": behavior,
+                "expected_version": pack["version"],
+            },
+        )
+        review = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": updated.json()["version"]},
+        )
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={
+                "expected_version": updated.json()["version"],
+                "reviewed_fingerprint": review.json()["review"]["fingerprint"],
+            },
+        )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["companion_behavior"] == behavior
+    assert review.status_code == 200, review.text
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["companion_behavior"] == behavior
 
 
 @pytest.mark.parametrize("invalid_version", [True, 1.0, "1"])

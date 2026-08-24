@@ -5020,10 +5020,10 @@ async def fork_persona_visual_pack_revision(
         )
         if pack is None:
             raise HTTPException(status_code=404, detail="Persona visual pack not found")
-        if str(pack.get("status") or "") != "active":
+        if str(pack.get("status") or "") not in {"active", "archived"}:
             raise PersonaVisualServiceError(
                 "fork_conflict",
-                "Only the immutable active visual pack can be forked.",
+                "Only a sealed visual pack can be forked.",
                 details={"pack_id": pack_id, "status": pack.get("status")},
             )
         forked = await _run_persona_db_call(

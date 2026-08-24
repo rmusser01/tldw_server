@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 from PIL import Image
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_service import (
     MAX_VISUAL_UPLOAD_BYTES,
@@ -877,6 +877,104 @@ def test_service_deactivate_reverts_to_derived_buddy(
     )
     assert archived is not None
     assert archived["status"] == "archived"
+
+
+def test_deactivated_revision_remains_sealed_and_reactivates_unchanged(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An activated revision stays immutable after archive but remains reusable."""
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id, pack = _create_pack(db_instance)
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=str(pack["id"]),
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="still.png",
+    )
+    pack = db_instance.update_persona_visual_pack_payload(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        manifest=_valid_manifest(str(asset["id"])),
+        companion_behavior={"schema_version": 1, "entries": []},
+        expected_version=int(pack["version"]),
+    )
+    review = service.review_pack(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        expected_version=int(pack["version"]),
+    )
+    service.activate_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=str(pack["id"]),
+        expected_version=int(pack["version"]),
+        reviewed_fingerprint=str(review["fingerprint"]),
+    )
+    service.deactivate_pack(persona_id=persona_id, user_id="user-1")
+    archived = db_instance.get_persona_visual_pack(
+        pack_id=str(pack["id"]), persona_id=persona_id, user_id="user-1"
+    )
+    assert archived is not None
+
+    with pytest.raises(InputError, match="immutable"):
+        db_instance.update_persona_visual_pack_payload(
+            pack_id=str(pack["id"]),
+            user_id="user-1",
+            manifest=archived["manifest"],
+            companion_behavior=None,
+            expected_version=int(archived["version"]),
+        )
+    with pytest.raises(InputError, match="immutable"):
+        service.create_asset_from_upload(
+            persona_id=persona_id,
+            user_id="user-1",
+            pack_id=str(pack["id"]),
+            content=_png_bytes(),
+            mime_type="image/png",
+            original_filename="new.png",
+        )
+    with pytest.raises(InputError, match="immutable"):
+        db_instance.update_persona_visual_pack_status(
+            pack_id=str(pack["id"]),
+            persona_id=persona_id,
+            user_id="user-1",
+            status="draft",
+            expected_version=int(archived["version"]),
+        )
+    with pytest.raises(InputError, match="immutable"):
+        db_instance.soft_delete_persona_visual_pack_with_assets(
+            pack_id=str(pack["id"]),
+            persona_id=persona_id,
+            user_id="user-1",
+            expected_version=int(archived["version"]),
+        )
+
+    with pytest.raises(PersonaVisualServiceError) as stale_error:
+        service.activate_pack(
+            persona_id=persona_id,
+            user_id="user-1",
+            pack_id=str(pack["id"]),
+            expected_version=int(archived["version"]) - 1,
+            reviewed_fingerprint=str(review["fingerprint"]),
+        )
+    reactivated = service.activate_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=str(pack["id"]),
+        expected_version=int(archived["version"]),
+        reviewed_fingerprint=str(review["fingerprint"]),
+    )
+
+    assert stale_error.value.code == "activation_conflict"
+    assert reactivated["status"] == "active"
+    assert reactivated["manifest"] == archived["manifest"]
+    assert reactivated["companion_behavior"] == archived["companion_behavior"]
 
 
 def test_review_validates_without_mutating_payload_and_activation_writes_no_normalized_payload(
