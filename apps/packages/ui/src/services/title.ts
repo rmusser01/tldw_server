@@ -39,6 +39,14 @@ type TitleGenerationOptions = {
     requestScope?: ServicePromptRequestScope
 }
 
+type TitleGenerationStage =
+    | "settings"
+    | "snapshot"
+    | "render"
+    | "model"
+    | "invoke"
+    | "response"
+
 const throwIfAborted = (signal?: AbortSignal): void => {
     if (!signal?.aborted) return
     const error = new Error("Request scope changed")
@@ -63,15 +71,19 @@ export const generateTitle = async (
     options: TitleGenerationOptions = {}
 ) => {
     let snapshot: Awaited<ReturnType<typeof loadServicePromptSnapshot>> | null = null
+    let stage: TitleGenerationStage = "settings"
     try {
+        throwIfAborted(options.signal)
         const isEnabled = await isTitleGenEnabled()
         throwIfAborted(options.signal)
         if (!isEnabled) return fallBackTitle
 
+        stage = "snapshot"
         snapshot = await loadServicePromptSnapshot(
             ["chat.title.generation"],
             { signal: options.signal, requestScope: options.requestScope }
         )
+        stage = "render"
         const promptConfig = snapshot.definitions["chat.title.generation"]
         if (!promptConfig) {
             throw new Error("Conversation title prompt is unavailable.")
@@ -82,6 +94,7 @@ export const generateTitle = async (
             promptConfig.parts.user_template,
             { query }
         )
+        stage = "model"
         const titleModel = await pageAssistModel({
             model,
             toolChoice: "none",
@@ -89,12 +102,14 @@ export const generateTitle = async (
             requestScope: snapshot.requestScope
         })
         throwIfTitleRequestInvalidated(snapshot, options.signal)
+        stage = "invoke"
         const title = await titleModel.invoke(
             [new HumanMessage({ content: prompt })],
             { signal: snapshot.scopeSignal }
         )
         throwIfTitleRequestInvalidated(snapshot, options.signal)
 
+        stage = "response"
         return removeReasoning(title.content.toString())
     } catch (error) {
         if (snapshot?.scopeInvalidatedSignal.aborted) {
@@ -106,7 +121,7 @@ export const generateTitle = async (
         ) {
             throw error
         }
-        console.error("Error generating title")
+        console.error("Error generating title", { stage })
         return fallBackTitle
     } finally {
         snapshot?.release()

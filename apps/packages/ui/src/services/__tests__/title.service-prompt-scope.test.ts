@@ -192,7 +192,22 @@ Response:`
     expect(mocks.pageAssistModel).not.toHaveBeenCalled()
   })
 
+  it("rejects a pre-aborted caller without reading title settings", async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(generateTitle(
+      "model-1",
+      "question",
+      "fallback",
+      { signal: controller.signal, requestScope }
+    )).rejects.toMatchObject({ name: "AbortError" })
+
+    expect(mocks.getSetting).not.toHaveBeenCalled()
+  })
+
   it("returns the fallback when reading the setting fails", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined)
     mocks.getSetting.mockRejectedValueOnce(new Error("secret setting error"))
 
     await expect(generateTitle("model-1", "question", "fallback", { requestScope }))
@@ -200,17 +215,24 @@ Response:`
 
     expect(mocks.loadServicePromptSnapshot).not.toHaveBeenCalled()
     expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+    expect(log).toHaveBeenCalledWith("Error generating title", { stage: "settings" })
+    log.mockRestore()
   })
 
   it.each([
     ["snapshot", () => mocks.loadServicePromptSnapshot.mockRejectedValueOnce(new Error("secret snapshot error"))],
     ["render", () => mocks.loadServicePromptSnapshot.mockResolvedValueOnce(snapshotFor("{not_query}").snapshot)],
-    ["model", () => mocks.pageAssistModel.mockRejectedValueOnce(new Error("secret model error"))]
-  ])("returns the fallback on an ordinary $name failure", async (_name, arrange) => {
+    ["model", () => mocks.pageAssistModel.mockRejectedValueOnce(new Error("secret model error"))],
+    ["invoke", () => mocks.invoke.mockRejectedValueOnce(new Error("secret invoke error"))]
+  ])("returns the fallback and logs safe context on an ordinary $name failure", async (stage, arrange) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined)
     arrange()
 
     await expect(generateTitle("model-1", "question", "fallback", { requestScope }))
       .resolves.toBe("fallback")
+
+    expect(log).toHaveBeenCalledWith("Error generating title", { stage })
+    log.mockRestore()
   })
 
   it("logs a generic fallback error without authored prompt or error text", async () => {
@@ -223,7 +245,7 @@ Response:`
     await expect(generateTitle("model-1", "question", "fallback", { requestScope }))
       .resolves.toBe("fallback")
 
-    expect(log).toHaveBeenCalledWith("Error generating title")
+    expect(log).toHaveBeenCalledWith("Error generating title", { stage: "model" })
     expect(log.mock.calls.flat().join(" ")).not.toContain(secretPrompt)
     expect(log.mock.calls.flat().join(" ")).not.toContain(secretError)
     log.mockRestore()
