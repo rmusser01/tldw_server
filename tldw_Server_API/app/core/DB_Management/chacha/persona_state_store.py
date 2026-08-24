@@ -2498,6 +2498,28 @@ class PersonaStateStore:
         cursor = self.execute_query(query, params)
         return self._persona_visual_pack_row_to_dict(cursor.fetchone())
 
+    def get_persona_visual_pack_for_user(
+        self,
+        *,
+        pack_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        """Return one active-owner pack when only its immutable id is available."""
+        query = """
+            SELECT p.*
+              FROM persona_visual_packs p
+              JOIN persona_profiles pp
+                ON pp.id = p.persona_id
+               AND pp.user_id = p.user_id
+             WHERE p.id = ?
+               AND p.user_id = ?
+               AND p.deleted = 0
+               AND pp.deleted = 0
+             LIMIT 1
+        """
+        cursor = self.execute_query(query, (pack_id, user_id))
+        return self._persona_visual_pack_row_to_dict(cursor.fetchone())
+
     def list_persona_visual_packs(
         self,
         *,

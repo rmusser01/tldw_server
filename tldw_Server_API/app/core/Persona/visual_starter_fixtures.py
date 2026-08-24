@@ -136,6 +136,9 @@ class PersonaVisualStarterPack:
     renderer_type: str
     manifest: dict[str, Any]
     assets: tuple[PersonaVisualStarterAsset, ...]
+    companion_behavior: dict[str, Any] = field(
+        default_factory=lambda: {"schema_version": 1, "entries": []}
+    )
     tags: tuple[str, ...] = field(default_factory=tuple)
     license_label: str = "bundled"
     complexity_tier: str = "basic"

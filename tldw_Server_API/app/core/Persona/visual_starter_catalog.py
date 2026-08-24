@@ -152,6 +152,7 @@ class PersonaVisualStarterCatalogService:
             renderer_type=starter.renderer_type,
             status="failed",
             provenance="imported",
+            companion_behavior=deepcopy(starter.companion_behavior),
             manifest={
                 "manifest_version": 1,
                 "renderer_type": starter.renderer_type,

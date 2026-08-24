@@ -37757,6 +37757,7 @@ for _persona_state_store_method in (
     "upsert_persona_buddy_preferences",
     "patch_persona_buddy_overlay_preferences",
     "create_persona_visual_pack",
+    "get_persona_visual_pack_for_user",
     "get_persona_visual_pack",
     "list_persona_visual_packs",
     "get_active_persona_visual_pack",

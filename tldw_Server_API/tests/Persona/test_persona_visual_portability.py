@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
     PersonaVisualPackExporter,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.fingerprints import (
+    build_persona_visual_pack_fingerprint,
     sha256_bytes,
     sha256_file,
 )
@@ -95,10 +96,14 @@ def _valid_manifest(asset_id: str) -> dict[str, object]:
         "renderer_type": "sprite_frames",
         "states": {
             "idle": {"animation_id": "idle"},
+            "wake_armed": {"animation_id": "idle"},
             "listening": {"animation_id": "idle"},
             "thinking": {"animation_id": "idle"},
             "speaking": {"animation_id": "idle"},
+            "tool_running": {"animation_id": "idle"},
+            "approval_needed": {"animation_id": "idle"},
             "error": {"animation_id": "idle"},
+            "offline": {"animation_id": "idle"},
         },
         "animations": {
             "idle": {
@@ -463,6 +468,15 @@ def _create_pack_with_asset(
         persona_id=persona_id,
         user_id=user_id,
         title="Portable Visuals",
+        companion_behavior={
+            "schema_version": 1,
+            "entries": [{
+                "state": "idle",
+                "trigger": "ambient",
+                "category": "idle_variant",
+                "suggested_weight": 1,
+            }],
+        },
         manifest={
             "manifest_version": 1,
             "renderer_type": "sprite_frames",
@@ -522,6 +536,43 @@ def test_validate_archive_members_allows_zip_directory_entries(tmp_path: Path) -
     assert "metadata/" not in members  # nosec B101
 
 
+def test_complete_pack_fingerprint_covers_payload_assets_and_provenance_but_not_lifecycle() -> None:
+    pack = {
+        "renderer_type": "sprite_frames",
+        "manifest_version": 1,
+        "manifest": _valid_manifest("asset-1"),
+        "companion_behavior": {"schema_version": 1, "entries": []},
+        "provenance": "uploaded",
+        "provenance_version": "converter-v1",
+        "status": "draft",
+        "created_at": "2026-01-01T00:00:00Z",
+        "last_modified": "2026-01-01T00:00:00Z",
+    }
+    assets = [{
+        "id": "asset-1",
+        "asset_role": "frame",
+        "mime_type": "image/png",
+        "byte_size": 10,
+        "checksum_sha256": "a" * 64,
+        "width": 1,
+        "height": 1,
+        "provenance": "uploaded",
+    }]
+    baseline = build_persona_visual_pack_fingerprint(pack, assets)
+
+    lifecycle_only = {**pack, "status": "review", "created_at": "later", "last_modified": "later"}
+    assert build_persona_visual_pack_fingerprint(lifecycle_only, assets) == baseline
+
+    mutations = [
+        ({**pack, "manifest": {**pack["manifest"], "fallbacks": {"offline": ["idle"]}}}, assets),
+        ({**pack, "companion_behavior": {"schema_version": 1, "entries": [{"state": "idle"}]}}, assets),
+        ({**pack, "provenance_version": "converter-v2"}, assets),
+        (pack, [{**assets[0], "checksum_sha256": "b" * 64}]),
+        (pack, [{**assets[0], "width": 2}]),
+    ]
+    assert all(build_persona_visual_pack_fingerprint(changed_pack, changed_assets) != baseline for changed_pack, changed_assets in mutations)
+
+
 def test_export_pack_writes_manifest_metadata_checksums_and_asset_bytes(
     db_instance: CharactersRAGDB,
     tmp_path: Path,
@@ -563,6 +614,7 @@ def test_export_pack_writes_manifest_metadata_checksums_and_asset_bytes(
 
         pack_payload = json.loads(archive.read("metadata/pack.json"))["pack"]
         assert pack_payload["title"] == "Portable Visuals"  # nosec B101
+        assert pack_payload["companion_behavior"]["entries"][0]["state"] == "idle"  # nosec B101
         assert (
             pack_payload["visual_manifest"]["animations"]["idle"]["frames"][0]["asset_id"] == asset["id"]
         )  # nosec B101
@@ -698,9 +750,10 @@ def test_import_preview_reports_target_pack_conflicts_and_choices(
         persona_id=target_persona_id,
         user_id="user-1",
         title="Portable Visuals",
-        status="active",
+        status="draft",
         manifest={"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
     )
+    active_pack = {**active_pack, "status": "active"}
     draft_pack = db_instance.create_persona_visual_pack(
         persona_id=target_persona_id,
         user_id="user-1",
@@ -723,10 +776,7 @@ def test_import_preview_reports_target_pack_conflicts_and_choices(
         archive_path=result.archive_path,
         owner_user_id="user-1",
         target_persona_id=target_persona_id,
-        target_packs=db_instance.list_persona_visual_packs(
-            persona_id=target_persona_id,
-            user_id="user-1",
-        ),
+        target_packs=[active_pack, draft_pack],
     )
 
     conflict_ids = {conflict["conflict_id"] for conflict in preview["conflicts"]}
@@ -1057,6 +1107,77 @@ def test_import_commit_codex_pet_cleans_up_failed_manifest_update(
     assert deleted_packs[0]["deleted"] is True  # nosec B101
     assert len(asset_rows) == 1  # nosec B101
     assert bool(asset_rows[0]["deleted"]) is True  # nosec B101
+
+
+def test_native_export_import_preserves_companion_behavior(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.importer import (
+        PersonaVisualPackImporter,
+    )
+
+    source_persona_id, source_pack, _asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    export_result = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    ).export_pack(
+        persona_id=source_persona_id,
+        pack_id=str(source_pack["id"]),
+        options=PersonaVisualPackExportOptions(),
+    )
+    target_persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Native Import Target"}
+    )
+    preview_result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=export_result.archive_path,
+        owner_user_id="user-1",
+        target_persona_id=target_persona_id,
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-native-behavior",
+        status="completed",
+        stage="completed",
+        archive_path=str(export_result.archive_path),
+        archive_sha256=preview_result["archive_sha256"],
+        canonical_payload_fingerprint=preview_result["canonical_payload_fingerprint"],
+        schema_version=preview_result["schema_version"],
+        target_persona_id=target_persona_id,
+        bundle_summary=preview_result["bundle_summary"],
+        proposed_plan=preview_result["proposed_plan"],
+        required_choices=preview_result["required_choices"],
+    )
+
+    imported = PersonaVisualPackImporter(
+        db=db_instance,
+        repo=repo,
+        user_id="user-1",
+    ).import_preview(
+        preview_id=str(preview["id"]),
+        target_persona_id=target_persona_id,
+        trust_mode="untrusted_import",
+    )
+
+    assert imported["pack"]["companion_behavior"] == {
+        "schema_version": 1,
+        "entries": [{
+            "state": "idle",
+            "trigger": "ambient",
+            "category": "idle_variant",
+            "suggested_weight": 1,
+        }],
+    }
 
 
 def test_import_commit_native_archive_cleans_up_failed_manifest_update(

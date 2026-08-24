@@ -279,6 +279,7 @@ class PersonaVisualPackExporter:
             "status": row["status"],
             "manifest_version": row["manifest_version"],
             "visual_manifest": row.get("manifest") if isinstance(row.get("manifest"), dict) else {},
+            "companion_behavior": row.get("companion_behavior"),
             "parent_pack_id": row.get("parent_pack_id"),
             "revision_number": row.get("revision_number"),
             "provenance": row.get("provenance"),
@@ -380,6 +381,7 @@ def _canonical_pack_for_fingerprint(row: Mapping[str, Any]) -> dict[str, Any]:
         "renderer_type": row.get("renderer_type"),
         "manifest_version": row.get("manifest_version"),
         "visual_manifest": row.get("visual_manifest"),
+        "companion_behavior": row.get("companion_behavior"),
         "revision_number": row.get("revision_number"),
         "provenance": row.get("provenance"),
     }

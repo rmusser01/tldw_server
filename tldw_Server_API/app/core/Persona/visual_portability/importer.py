@@ -145,6 +145,11 @@ class PersonaVisualPackImporter:
                         "animations": {},
                     },
                     provenance="imported",
+                    companion_behavior=(
+                        dict(pack["companion_behavior"])
+                        if isinstance(pack.get("companion_behavior"), Mapping)
+                        else None
+                    ),
                 )
 
                 if pack.get("source_pack_id") not in (None, ""):
