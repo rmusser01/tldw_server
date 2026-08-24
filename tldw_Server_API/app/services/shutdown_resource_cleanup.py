@@ -92,7 +92,13 @@ async def _shutdown_mcp_server(
         mcp_server = getattr(heavy_startup_handles, "mcp_server", None)
         if mcp_server is not None:
             await mcp_server.shutdown()
-            logger.info("App Shutdown: MCP Unified server shutdown")
+            completed = await mcp_server.wait_for_shutdown_completion()
+            if completed:
+                logger.info("App Shutdown: MCP Unified server shutdown")
+            else:
+                logger.warning(
+                    "App Shutdown: MCP Unified deferred module shutdown incomplete"
+                )
     except guard_exceptions as exc:
         logger.exception(f"App Shutdown: Error shutting down MCP Unified server: {exc}")
 

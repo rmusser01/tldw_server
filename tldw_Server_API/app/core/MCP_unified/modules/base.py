@@ -17,9 +17,62 @@ from typing import Any, Optional, TypeVar
 from loguru import logger
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
 
+from ..execution_outcomes import (
+    BreakerAction,
+    ExpectedToolFailure,
+    get_expected_tool_failure_reason,
+)
 from ..tool_observability import ensure_tool_definition_eval_metadata
 
 T = TypeVar("T")
+
+
+class AdmittedModuleOperation:
+    """Run a final admission check before entering module breaker accounting."""
+
+    __slots__ = ("_admission_check", "_operation")
+
+    def __init__(
+        self,
+        admission_check: Callable[[], Awaitable[None]],
+        operation: Callable[..., Awaitable[Any]],
+    ) -> None:
+        """Store the final admission check and admitted operation."""
+        self._admission_check = admission_check
+        self._operation = operation
+
+    async def admit(self) -> None:
+        """Run the final admission check without entering breaker accounting."""
+        await self._admission_check()
+
+    async def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        """Invoke the operation after admission has already succeeded."""
+        return await self._operation(*args, **kwargs)
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Admit and invoke the operation in the required order."""
+        await self.admit()
+        return await self.invoke(*args, **kwargs)
+
+
+def _safe_exception_family(exc: BaseException) -> str:
+    """Return a bounded real exception type for structured module logs."""
+
+    try:
+        name = type(exc).__name__
+        if (
+            type(name) is str
+            and 1 <= len(name) <= 64
+            and name.isascii()
+            and (name[0].isalpha() or name[0] == "_")
+            and all(character.isalnum() or character == "_" for character in name)
+        ):
+            return name
+    except asyncio.CancelledError:
+        raise
+    except BaseException:  # noqa: BLE001 - logging must not inspect hostile descriptors.
+        return "Exception"
+    return "Exception"
 
 
 class HealthStatus(str, Enum):
@@ -111,6 +164,27 @@ class ModuleCircuitBreakerConfig:
     success_threshold: int = 1
     category: str = "mcp"
     service: str = ""
+    expected_exception: type | tuple[type[BaseException], ...] = Exception
+
+
+class _IgnoredModuleOutcome(Exception):
+    """Private breaker-neutral wrapper that never renders its original error."""
+
+    __slots__ = ("original",)
+
+    def __init__(self, original: Exception) -> None:
+        self.original = original
+        super().__init__("ignored_module_outcome")
+
+
+class _CountedModuleOutcome(Exception):
+    """Private breaker-counted wrapper that never renders its original error."""
+
+    __slots__ = ("original",)
+
+    def __init__(self, original: Exception) -> None:
+        self.original = original
+        super().__init__("counted_module_outcome")
 
 
 def _build_module_circuit_breaker_config(config: ModuleConfig) -> ModuleCircuitBreakerConfig:
@@ -123,6 +197,7 @@ def _build_module_circuit_breaker_config(config: ModuleConfig) -> ModuleCircuitB
         success_threshold=1,
         category="mcp",
         service=config.name,
+        expected_exception=_CountedModuleOutcome,
     )
 
 
@@ -208,8 +283,9 @@ class _DefaultModuleCircuitBreaker:
             self._half_open_in_flight += 1
         try:
             result = await operation()
-        except Exception:
-            self.record_failure()
+        except BaseException as exc:
+            if isinstance(exc, self.config.expected_exception):
+                self.record_failure()
             raise
         finally:
             if half_open_probe:
@@ -329,7 +405,11 @@ class BaseModule(ABC):
                 logger.info(f"Module initialized successfully: {self.name}")
 
             except Exception as e:
-                logger.error(f"Module initialization failed: {self.name} - {str(e)}")
+                logger.bind(
+                    module_id=self.name,
+                    reason_code="module_initialization_failed",
+                    error_type=_safe_exception_family(e),
+                ).error("MCP module initialization failed")
                 self._health = ModuleHealth(
                     status=HealthStatus.UNHEALTHY,
                     message="Initialization failed"
@@ -367,7 +447,11 @@ class BaseModule(ABC):
                 logger.info(f"Module shut down successfully: {self.name}")
 
             except Exception as e:
-                logger.error(f"Module shutdown failed: {self.name} - {str(e)}")
+                logger.bind(
+                    module_id=self.name,
+                    reason_code="module_shutdown_failed",
+                    error_type=_safe_exception_family(e),
+                ).error("MCP module shutdown failed")
                 # Continue shutdown even if there's an error
 
     def invalidate_capability_caches(self) -> None:
@@ -414,7 +498,11 @@ class BaseModule(ABC):
             )
 
         except Exception as e:
-            logger.error(f"Health check failed for {self.name}: {str(e)}")
+            logger.bind(
+                module_id=self.name,
+                reason_code="module_health_check_failed",
+                error_type=_safe_exception_family(e),
+            ).error("MCP module health check failed")
             self._health = ModuleHealth(
                 status=HealthStatus.UNHEALTHY,
                 message="Health check error",
@@ -440,42 +528,80 @@ class BaseModule(ABC):
 
         Delegates to the unified breaker's ``call_async`` for correct
         half-open probe slot management and exception-type filtering.
-        The semaphore concurrency guard and timeout wrapping are applied
-        as an inner wrapper around the operation.
+        The breaker rejects open circuits before bounded semaphore admission.
+        A runtime admission check, when present, runs after slot acquisition and
+        immediately before dispatch without entering breaker failure accounting.
         """
         start_time = time.time()
 
-        async def _guarded_operation():
+        async def _breaker_operation():
             acquired = False
             try:
-                if self._semaphore is not None:
-                    await self._semaphore.acquire()
-                    acquired = True
-                return await asyncio.wait_for(
-                    operation(*args, **kwargs),
-                    timeout=self.config.timeout_seconds,
-                )
+                async with asyncio.timeout(self.config.timeout_seconds):
+                    if self._semaphore is not None:
+                        await self._semaphore.acquire()
+                        acquired = True
+                    if type(operation) is AdmittedModuleOperation:
+                        try:
+                            await operation.admit()
+                        except Exception as exc:
+                            raise _IgnoredModuleOutcome(exc) from None
+                    try:
+                        if type(operation) is AdmittedModuleOperation:
+                            return await operation.invoke(*args, **kwargs)
+                        return await operation(*args, **kwargs)
+                    except ExpectedToolFailure as exc:
+                        reason = get_expected_tool_failure_reason(exc)
+                        if reason is not None and reason.breaker_action is BreakerAction.IGNORE:
+                            raise _IgnoredModuleOutcome(exc) from None
+                        raise _CountedModuleOutcome(exc) from None
+                    except Exception as exc:
+                        raise _CountedModuleOutcome(exc) from None
             except asyncio.TimeoutError:
                 logger.error(f"Operation timeout in module {self.name}")
-                raise Exception(f"Operation timeout after {self.config.timeout_seconds}s") from None
+                timeout_error = Exception(
+                    f"Operation timeout after {self.config.timeout_seconds}s"
+                )
+                raise _CountedModuleOutcome(timeout_error) from None
             finally:
                 if acquired:
                     with contextlib.suppress(Exception):
                         self._semaphore.release()
 
+        original_to_raise: Exception | None = None
+        original_traceback = None
         try:
-            result = await self._circuit_breaker.call_async(_guarded_operation)
+            result = await self._circuit_breaker.call_async(_breaker_operation)
             latency_ms = (time.time() - start_time) * 1000
             self._metrics.record_request(True, latency_ms)
             return result
 
+        except (_IgnoredModuleOutcome, _CountedModuleOutcome) as wrapped:
+            latency_ms = max(0.0, (time.time() - start_time) * 1000.0)
+            self._metrics.record_request(False, latency_ms)
+            original_to_raise = wrapped.original
+            original_traceback = original_to_raise.__traceback__
+            expected_reason = get_expected_tool_failure_reason(original_to_raise)
+            reason_code = expected_reason.reason_code if expected_reason is not None else "module_operation_failed"
+            logger.bind(
+                module_id=self.name,
+                reason_code=reason_code,
+                error_type=_safe_exception_family(original_to_raise),
+            ).error("MCP module operation failed")
         except Exception as e:
             if _is_circuit_breaker_open_error(e):
                 raise
-            latency_ms = (time.time() - start_time) * 1000
+            latency_ms = max(0.0, (time.time() - start_time) * 1000.0)
             self._metrics.record_request(False, latency_ms)
-            logger.error(f"Operation failed in module {self.name}: {str(e)}")
+            logger.bind(
+                module_id=self.name,
+                reason_code="module_operation_failed",
+                error_type=_safe_exception_family(e),
+            ).error("MCP module operation failed")
             raise
+
+        if original_to_raise is not None:
+            raise original_to_raise.with_traceback(original_traceback)
 
     async def get_tool_def(self, tool_name: str) -> Optional[dict[str, Any]]:
         """Return a single tool definition, using cached tool list if available."""
@@ -490,7 +616,12 @@ class BaseModule(ABC):
                 if isinstance(tool, dict) and tool.get("name") == tool_name:
                     return tool
         except Exception as tool_lookup_error:
-            logger.debug("MCP module tool cache lookup failed", exc_info=tool_lookup_error)
+            logger.bind(
+                module_id=self.name,
+                tool_id=tool_name,
+                reason_code="module_tool_cache_lookup_failed",
+                error_type=_safe_exception_family(tool_lookup_error),
+            ).debug("MCP module tool cache lookup failed")
         return None
 
     def get_metrics(self) -> ModuleMetrics:

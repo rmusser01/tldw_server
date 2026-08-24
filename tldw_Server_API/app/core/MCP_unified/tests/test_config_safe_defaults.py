@@ -2,11 +2,11 @@
 
 import pytest
 
-from tldw_Server_API.app.core.MCP_unified.config import _is_local_only_safe_profile
-from tldw_Server_API.app.core.MCP_unified.config import get_config
-from tldw_Server_API.app.core.MCP_unified.config import validate_config
 from tldw_Server_API.app.core.MCP_unified import config as config_module
+from tldw_Server_API.app.core.MCP_unified.config import _is_local_only_safe_profile, get_config, validate_config
 from tldw_Server_API.app.core.MCP_unified.tests.support import SAFE_DEFAULT_ENV_VARS
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
@@ -96,3 +96,35 @@ def test_invalid_tool_category_map_records_sanitized_warning(monkeypatch):
         }
     ]
     assert '{"media.search":' not in repr(warnings)
+
+
+def test_idempotency_policy_config_uses_bounded_safe_defaults() -> None:
+    cfg = get_config()
+
+    assert cfg.idempotency_ttl_seconds == 300
+    assert cfg.idempotency_cache_size == 512
+    assert cfg.idempotency_wait_seconds == 5
+    assert cfg.idempotency_finalize_seconds == 5
+    assert cfg.idempotency_result_max_bytes == 256_000
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "invalid_value"),
+    [
+        ("MCP_IDEMPOTENCY_TTL_SECONDS", "604801"),
+        ("MCP_IDEMPOTENCY_CACHE_SIZE", "100001"),
+        ("MCP_IDEMPOTENCY_WAIT_SECONDS", "31"),
+        ("MCP_IDEMPOTENCY_FINALIZE_SECONDS", "16"),
+        ("MCP_IDEMPOTENCY_RESULT_MAX_BYTES", "1000001"),
+    ],
+)
+def test_idempotency_policy_config_rejects_values_above_hard_limits(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
+    invalid_value: str,
+) -> None:
+    monkeypatch.setenv(environment_name, invalid_value)
+    get_config.cache_clear()  # type: ignore[attr-defined]
+
+    with pytest.raises(ValueError):
+        get_config()

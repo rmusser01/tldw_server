@@ -1,7 +1,7 @@
 ---
 id: TASK-2295
 title: Add tool availability and deferred tool-search parity
-status: In Progress
+status: Done
 labels:
 - mcp
 - tool-discovery
@@ -13,6 +13,7 @@ references:
 documentation:
 - Docs/superpowers/specs/2026-06-09-mcp-tool-availability-deferred-search-design.md
 - Docs/superpowers/plans/2026-06-09-mcp-tool-availability-deferred-search-implementation-plan.md
+updated_date: 2026-07-24 00:11
 ---
 
 ## Description
@@ -60,6 +61,7 @@ Review validation:
 - `source ../../.venv/bin/activate && python -m py_compile mcp_unified/gateway/tool_discovery.py mcp_unified/gateway/profile_runtime.py` -> passed.
 - `source ../../.venv/bin/activate && python -m bandit -r mcp_unified/gateway/tool_discovery.py mcp_unified/gateway/profile_runtime.py -f json -o /tmp/bandit_mcp_tool_availability_search_review.json` -> 0 findings.
 - `git diff --check` -> passed.
+Backlog reconciliation on 2026-07-23: all acceptance criteria and Definition of Done items were already checked, final summary and verification evidence were present, and the task was moved from stale In Progress status to Done. No code or behavior changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

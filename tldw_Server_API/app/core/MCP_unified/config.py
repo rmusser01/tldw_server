@@ -210,8 +210,36 @@ class MCPConfig(BaseSettings):
     validate_input_schema: bool = Field(default=True, validation_alias="MCP_VALIDATE_INPUT_SCHEMA")
     disable_write_tools: bool = Field(default=False, validation_alias="MCP_DISABLE_WRITE_TOOLS")
     # Idempotency (protocol-level) for write tools
-    idempotency_ttl_seconds: int = Field(default=300, validation_alias="MCP_IDEMPOTENCY_TTL_SECONDS")
-    idempotency_cache_size: int = Field(default=512, validation_alias="MCP_IDEMPOTENCY_CACHE_SIZE")
+    idempotency_ttl_seconds: int = Field(
+        default=300,
+        ge=1,
+        le=604_800,
+        validation_alias="MCP_IDEMPOTENCY_TTL_SECONDS",
+    )
+    idempotency_cache_size: int = Field(
+        default=512,
+        ge=1,
+        le=100_000,
+        validation_alias="MCP_IDEMPOTENCY_CACHE_SIZE",
+    )
+    idempotency_wait_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=30,
+        validation_alias="MCP_IDEMPOTENCY_WAIT_SECONDS",
+    )
+    idempotency_finalize_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=15,
+        validation_alias="MCP_IDEMPOTENCY_FINALIZE_SECONDS",
+    )
+    idempotency_result_max_bytes: int = Field(
+        default=256_000,
+        ge=1,
+        le=1_000_000,
+        validation_alias="MCP_IDEMPOTENCY_RESULT_MAX_BYTES",
+    )
 
     # API Key Configuration
     api_key_salt: Optional[SecretStr] = Field(default=None, validation_alias="MCP_API_KEY_SALT")
