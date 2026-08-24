@@ -114,7 +114,6 @@ SAFE_METADATA_NONNEGATIVE_INTEGER_FIELDS = frozenset(
         "fallback_attempt_count",
         "item_count",
         "prompt_tokens",
-        "response_header_count",
         "token_count",
         "total_tokens",
         "vector_count",

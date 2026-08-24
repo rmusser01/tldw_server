@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
-    EmbeddingExecutionResult,
+    EmbeddingExecutionOutcome,
     EmbeddingRequestContext,
+    PreparedEmbeddingRequest,
 )
 from tldw_Server_API.app.core.Embeddings.workflow_types import (
     EmbeddingNoopWorkflowTraceCollector,
@@ -21,21 +22,26 @@ from tldw_Server_API.app.core.Embeddings.workflow_types import (
     SafeWorkflowMetadataValue,
 )
 
-if TYPE_CHECKING:
-    from tldw_Server_API.app.core.Embeddings.orchestrator import PreparedEmbeddingRequest
+PreExecuteHook = Callable[[PreparedEmbeddingRequest], Awaitable[None]]
 
 
-PreExecuteHook = Callable[["PreparedEmbeddingRequest"], Awaitable[None]]
+class PreparationPipeline(Protocol):
+    """Preparation contract consumed directly by the inline workflow runner."""
 
-
-class PrepareExecuteOrchestrator(Protocol):
-    """Minimal orchestrator contract needed by the inline workflow runner."""
-
-    def prepare(self, raw_input: Any, context: EmbeddingRequestContext) -> PreparedEmbeddingRequest:
+    def prepare(
+        self,
+        raw_input: Any,
+        context: EmbeddingRequestContext,
+        phase_sink: Callable[[EmbeddingWorkflowPhase], None] | None = None,
+    ) -> PreparedEmbeddingRequest:
         """Normalize and plan one raw embedding request."""
         raise NotImplementedError
 
-    async def execute(self, prepared: PreparedEmbeddingRequest) -> EmbeddingExecutionResult:
+
+class ExecutionCoordinator(Protocol):
+    """Canonical execution contract consumed directly by the inline workflow runner."""
+
+    async def execute(self, prepared: PreparedEmbeddingRequest) -> EmbeddingExecutionOutcome:
         """Execute one prepared embedding request."""
         raise NotImplementedError
 
@@ -45,18 +51,20 @@ class EmbeddingInlineWorkflowRunner:
 
     def __init__(
         self,
-        orchestrator: PrepareExecuteOrchestrator,
+        preparation_pipeline: PreparationPipeline,
+        execution_coordinator: ExecutionCoordinator,
         *,
         trace_collector: EmbeddingWorkflowTraceCollector | None = None,
         pre_execute: PreExecuteHook | None = None,
     ) -> None:
-        """Configure the orchestrator, optional collector, and boundary hook."""
-        self._orchestrator = orchestrator
+        """Configure concrete workflow components and optional boundary hooks."""
+        self._preparation_pipeline = preparation_pipeline
+        self._execution_coordinator = execution_coordinator
         self.trace_collector = trace_collector or EmbeddingNoopWorkflowTraceCollector()
         self._pre_execute = pre_execute
 
-    async def run(self, raw_input: Any, context: EmbeddingRequestContext) -> EmbeddingExecutionResult:
-        """Run prepare and execute inline while emitting safe lifecycle events."""
+    async def run(self, raw_input: Any, context: EmbeddingRequestContext) -> EmbeddingExecutionOutcome:
+        """Run preparation and execution inline while emitting safe lifecycle events."""
         workflow_context = EmbeddingWorkflowContext.create(
             endpoint_path=context.endpoint_path,
             runner_mode="inline",
@@ -73,12 +81,17 @@ class EmbeddingInlineWorkflowRunner:
             },
         )
 
+        def enter_phase(next_phase: EmbeddingWorkflowPhase) -> None:
+            nonlocal phase
+            phase = next_phase
+            self._record(workflow_context, "phase_changed", phase=phase, status="running")
+
         try:
-            phase = "normalizing"
-            self._record(workflow_context, "phase_changed", phase=phase, status="running")
-            prepared = self._orchestrator.prepare(raw_input, context)
-            phase = "planning"
-            self._record(workflow_context, "phase_changed", phase=phase, status="running")
+            prepared = self._preparation_pipeline.prepare(
+                raw_input,
+                context,
+                phase_sink=enter_phase,
+            )
             self._record(
                 workflow_context,
                 "prepare_completed",
@@ -90,18 +103,18 @@ class EmbeddingInlineWorkflowRunner:
             if self._pre_execute is not None:
                 await self._pre_execute(prepared)
 
-            phase = "executing"
-            self._record(workflow_context, "phase_changed", phase=phase, status="running")
-            result = await self._orchestrator.execute(prepared)
+            enter_phase("executing")
+            outcome = await self._execution_coordinator.execute(prepared)
             self._record(
                 workflow_context,
                 "execute_completed",
                 phase=phase,
                 status="running",
-                metadata=_execute_metadata(result),
+                metadata=_execute_metadata(outcome),
             )
-            self._record(workflow_context, "workflow_completed", phase="finalizing", status="completed")
-            return result
+            enter_phase("finalizing")
+            self._record(workflow_context, "workflow_completed", phase=phase, status="completed")
+            return outcome
         except EmbeddingDomainError as exc:
             self._record_failure(
                 workflow_context,
@@ -186,14 +199,15 @@ def _prepare_metadata(
     }
 
 
-def _execute_metadata(result: EmbeddingExecutionResult) -> dict[str, SafeWorkflowMetadataValue]:
-    """Derive aggregate allowlisted metadata from an execution result."""
+def _execute_metadata(outcome: EmbeddingExecutionOutcome) -> dict[str, SafeWorkflowMetadataValue]:
+    """Derive aggregate allowlisted metadata from a canonical execution outcome."""
     return {
-        "vector_count": len(result.vectors),
-        "cache_hits": result.cache_hits,
-        "cache_misses": result.cache_misses,
-        "adapter_used": result.embeddings_from_adapter,
-        "response_header_count": len(result.response_headers),
+        "attempt_count": outcome.attempt_count,
+        "fallback_attempt_count": outcome.fallback_attempt_count,
+        "vector_count": len(outcome.vectors),
+        "cache_hits": outcome.cache_hits,
+        "cache_misses": outcome.cache_misses,
+        "adapter_used": outcome.embeddings_from_adapter,
     }
 
 
@@ -211,6 +225,7 @@ def _domain_error_metadata(
 
 __all__ = [
     "EmbeddingInlineWorkflowRunner",
+    "ExecutionCoordinator",
     "PreExecuteHook",
-    "PrepareExecuteOrchestrator",
+    "PreparationPipeline",
 ]

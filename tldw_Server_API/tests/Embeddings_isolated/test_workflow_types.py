@@ -155,20 +155,23 @@ def test_safe_workflow_metadata_allows_token_count_fields():
     }
 
 
-def test_safe_workflow_metadata_allows_attempt_counters_and_legacy_header_count():
+def test_safe_workflow_metadata_allows_attempt_counters():
     metadata = safe_workflow_metadata(
         {
             "attempt_count": 2,
             "fallback_attempt_count": 1,
-            "response_header_count": 3,
         }
     )
 
     assert metadata == {
         "attempt_count": 2,
         "fallback_attempt_count": 1,
-        "response_header_count": 3,
     }
+
+
+def test_safe_workflow_metadata_rejects_removed_response_header_count():
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        safe_workflow_metadata({"response_header_count": 3})
 
 
 def test_safe_workflow_metadata_rejects_unknown_fields_and_unapproved_enum_values():

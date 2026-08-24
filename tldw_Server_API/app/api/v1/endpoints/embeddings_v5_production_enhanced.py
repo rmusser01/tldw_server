@@ -23,7 +23,7 @@ import threading
 import time
 import uuid
 from asyncio import Lock
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -132,7 +132,7 @@ from tldw_Server_API.app.core.Embeddings.request_batching import (
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
     EmbeddingExecutionError,
-    EmbeddingExecutionResult,
+    EmbeddingExecutionOutcome,
     EmbeddingInputError,
     EmbeddingPolicyDecision,
     EmbeddingPolicyError,
@@ -140,6 +140,9 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingRateLimitError,
     EmbeddingRequestContext,
     ProviderModelIntent,
+)
+from tldw_Server_API.app.core.Embeddings.result_mapping import (
+    map_embedding_response_headers,
 )
 from tldw_Server_API.app.core.Embeddings.vector_validation import (
     validated_embedding_vectors,
@@ -3627,18 +3630,18 @@ def _record_orchestrator_dimension_adjustment(provider: str, model: str, method:
     ).inc()
 
 
-def _record_orchestrator_cache_hits(result: EmbeddingExecutionResult) -> None:
+def _record_orchestrator_cache_hits(outcome: EmbeddingExecutionOutcome) -> None:
     """Record cache hits from the orchestrator path on the legacy metric."""
     try:
-        cache_hits = int(result.cache_hits or 0)
+        cache_hits = int(outcome.cache_hits or 0)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         cache_hits = 0
     if cache_hits <= 0:
         return
     try:
         embedding_cache_hits.labels(
-            provider=result.provider,
-            model=result.model,
+            provider=outcome.provider,
+            model=outcome.model,
         ).inc(cache_hits)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         pass
@@ -3695,7 +3698,11 @@ def _build_embedding_request_orchestrator(
         dimension_policy=_dimension_policy(),
         guess_provider=guess_provider_for_model,
         backend_identity_resolver=endpoint_executor.backend_identity,
-        record_dimension_adjustment=_record_orchestrator_dimension_adjustment,
+        record_dimension_adjustment=(
+            None
+            if context.encoding_format == "base64"
+            else _record_orchestrator_dimension_adjustment
+        ),
         provider_preflight=endpoint_executor.preflight_provider,
         execution_path="adapter" if context.adapters_enabled else "legacy",
     )
@@ -3707,7 +3714,11 @@ def _build_embedding_inline_workflow_runner(
     pre_execute: PreExecuteHook | None = None,
 ) -> EmbeddingInlineWorkflowRunner:
     """Build the inline workflow runner for the feature-flagged embeddings path."""
-    return EmbeddingInlineWorkflowRunner(orchestrator, pre_execute=pre_execute)
+    return EmbeddingInlineWorkflowRunner(
+        orchestrator.preparation_pipeline,
+        orchestrator.execution_coordinator,
+        pre_execute=pre_execute,
+    )
 
 
 def _orchestrator_backend_identity(
@@ -3919,7 +3930,7 @@ def _prepared_total_tokens(prepared: Any) -> int:
 
 
 def _format_embedding_result_data(
-    vectors: list[list[float]],
+    vectors: Sequence[Sequence[float]],
     encoding_format: str | None,
     *,
     embeddings_from_adapter: bool = False,
@@ -3927,15 +3938,16 @@ def _format_embedding_result_data(
     output_data: list[EmbeddingData] = []
     fmt = encoding_format or "float"
     for index, embedding in enumerate(vectors):
+        embedding_values = list(embedding)
         arr, did_l2 = decide_and_apply_l2(
-            embedding,
+            embedding_values,
             fmt,
             embeddings_from_adapter=embeddings_from_adapter,
         )
         if fmt == "base64":
             processed_value = base64.b64encode(arr.tobytes()).decode("utf-8")
         else:
-            processed_value = arr.tolist() if did_l2 else embedding
+            processed_value = arr.tolist() if did_l2 else embedding_values
         output_data.append(EmbeddingData(embedding=processed_value, index=index))
     return output_data
 
@@ -3995,7 +4007,7 @@ async def _create_embedding_with_orchestrator(
     x_provider: str | None,
     response: Response | None,
 ) -> CreateEmbeddingResponse | JSONResponse:
-    """Create embeddings through the pure request orchestrator."""
+    """Create embeddings through the feature-flagged inline workflow."""
     _ = background_tasks
     if not EMBEDDINGS_AVAILABLE:
         raise HTTPException(
@@ -4052,7 +4064,7 @@ async def _create_embedding_with_orchestrator(
                 orchestrator,
                 pre_execute=_reserve_before_execute,
             )
-            result = await workflow_runner.run(embedding_request.input, context)
+            outcome = await workflow_runner.run(embedding_request.input, context)
         except EmbeddingDomainError as domain_exc:
             mapped = _embedding_domain_error_to_http(domain_exc)
             if isinstance(mapped, JSONResponse):
@@ -4061,27 +4073,27 @@ async def _create_embedding_with_orchestrator(
         if mapped_domain_error is not None:
             raise mapped_domain_error
 
-        await endpoint_executor.touch_resolved_credentials(result.provider, result.model)
-        _record_orchestrator_cache_hits(result)
-        rg_actual_units = int(result.total_tokens or result.prompt_tokens or 0)
-        for header_name, header_value in result.response_headers.items():
+        await endpoint_executor.touch_resolved_credentials(outcome.provider, outcome.model)
+        _record_orchestrator_cache_hits(outcome)
+        rg_actual_units = int(outcome.total_tokens or outcome.prompt_tokens or rg_reserved_units)
+        for header_name, header_value in map_embedding_response_headers(outcome).items():
             if response is not None:
                 response.headers[str(header_name)] = str(header_value)
 
         output_data = _format_embedding_result_data(
-            result.vectors,
+            outcome.vectors,
             embedding_request.encoding_format,
-            embeddings_from_adapter=result.embeddings_from_adapter,
+            embeddings_from_adapter=outcome.embeddings_from_adapter,
         )
 
         duration = time.time() - start_time
         embedding_request_duration.labels(
-            provider=result.provider,
-            model=result.model,
+            provider=outcome.provider,
+            model=outcome.model,
         ).observe(duration)
         embedding_requests_total.labels(
-            provider=result.provider,
-            model=result.model,
+            provider=outcome.provider,
+            model=outcome.model,
             status="success",
         ).inc()
 
@@ -4089,10 +4101,10 @@ async def _create_embedding_with_orchestrator(
             f"Created {len(output_data)} embeddings",
             extra={
                 "user_id": current_user.id,
-                "provider": result.provider,
-                "model": result.model,
+                "provider": outcome.provider,
+                "model": outcome.model,
                 "duration": duration,
-                "fallback_from": result.fallback_from,
+                "fallback_from": outcome.fallback_from,
             },
         )
 
@@ -4110,13 +4122,13 @@ async def _create_embedding_with_orchestrator(
                 request=request,
                 endpoint=f"{request.method}:{request.url.path}",
                 operation="embeddings",
-                provider=result.provider,
-                model=result.model,
+                provider=outcome.provider,
+                model=outcome.model,
                 status=200,
                 latency_ms=int(duration * 1000),
-                prompt_tokens=int(result.prompt_tokens or 0),
+                prompt_tokens=int(outcome.prompt_tokens or 0),
                 completion_tokens=0,
-                total_tokens=int(result.total_tokens or 0),
+                total_tokens=int(outcome.total_tokens or 0),
                 request_id=(
                     getattr(getattr(request, "state", None), "request_id", None)
                     or request.headers.get("X-Request-ID")
@@ -4135,10 +4147,14 @@ async def _create_embedding_with_orchestrator(
 
         return CreateEmbeddingResponse(
             data=output_data,
-            model=f"{result.provider}:{result.model}" if result.provider != "openai" else result.model,
+            model=(
+                f"{outcome.provider}:{outcome.model}"
+                if outcome.provider != "openai"
+                else outcome.model
+            ),
             usage=EmbeddingUsage(
-                prompt_tokens=int(result.prompt_tokens or 0),
-                total_tokens=int(result.total_tokens or 0),
+                prompt_tokens=int(outcome.prompt_tokens or 0),
+                total_tokens=int(outcome.total_tokens or 0),
             ),
         )
     finally:

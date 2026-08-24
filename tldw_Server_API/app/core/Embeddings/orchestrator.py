@@ -1,14 +1,10 @@
-"""Pure prepare and execute orchestration for embedding requests."""
+"""Dependency wiring and compatibility facade for embedding requests."""
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from tldw_Server_API.app.core.Embeddings.embedding_policy import (
-    map_model_for_provider,
-)
 from tldw_Server_API.app.core.Embeddings.execution_coordinator import (
     EmbeddingAdapterAttempt,
     EmbeddingExecutionCoordinator,
@@ -26,11 +22,8 @@ from tldw_Server_API.app.core.Embeddings.provider_attempt import (
 )
 from tldw_Server_API.app.core.Embeddings.provider_resolution import ProviderGuesser
 from tldw_Server_API.app.core.Embeddings.request_types import (
-    EmbeddingDomainError,
-    EmbeddingExecutionError,
     EmbeddingExecutionResult,
     EmbeddingExecutorOutput,
-    EmbeddingProviderError,
     EmbeddingRequestContext,
     PreparedEmbeddingRequest,
 )
@@ -79,23 +72,8 @@ CacheKeyFn = Callable[[str, str, str, int | None, str | None], str]
 ProviderPreflight = Callable[[str, str], Awaitable[None]]
 
 
-# Stage 2D compatibility only: these private execution members are unreachable
-# from execute(). Stage 2E removes them after runner and header migration.
-@dataclass(frozen=True, slots=True)
-class _ProviderExecution:
-    vectors: list[list[float]]
-    provider: str
-    model: str
-    fallback_from: str | None
-    cache_vectors: list[list[float]] | None = None
-    cache_hits: int = 0
-    cache_misses: int = 0
-    complete_response: bool = False
-    embeddings_from_adapter: bool = False
-
-
 class EmbeddingRequestOrchestrator:
-    """Prepare and execute embedding requests without endpoint dependencies."""
+    """Wire concrete components and preserve the temporary legacy result API."""
 
     def __init__(
         self,
@@ -124,24 +102,22 @@ class EmbeddingRequestOrchestrator:
         batch_size: int | None = None,
         execution_path: Literal["legacy", "adapter"] = "legacy",
     ) -> None:
-        self._cache_key_fn = cache_key_fn
-        self._cache = cache
-        self._executor = executor
-        self._settings_fallback_model_map = settings_fallback_model_map
-        self._backend_identity_resolver = backend_identity_resolver or _no_backend_identity
-        self._provider_preflight = provider_preflight or _no_provider_preflight
-        self._vector_processor = EmbeddingVectorProcessor(record_dimension_adjustment=record_dimension_adjustment)
-        readiness = EmbeddingProviderReadinessCheck(self._provider_preflight)
+        resolved_backend_identity = backend_identity_resolver or _no_backend_identity
+        resolved_provider_preflight = provider_preflight or _no_provider_preflight
+        vector_processor = EmbeddingVectorProcessor(
+            record_dimension_adjustment=record_dimension_adjustment,
+        )
+        readiness = EmbeddingProviderReadinessCheck(resolved_provider_preflight)
         provider_attempt = EmbeddingProviderAttempt(
             cache_key_fn=cache_key_fn,
             cache=cache,
             executor=executor,
-            backend_identity_resolver=self._backend_identity_resolver,
-            vector_processor=self._vector_processor,
+            backend_identity_resolver=resolved_backend_identity,
+            vector_processor=vector_processor,
         )
         adapter_attempt = EmbeddingAdapterAttempt(
             executor=executor,
-            vector_processor=self._vector_processor,
+            vector_processor=vector_processor,
         )
         fallback_coordinator = EmbeddingFallbackCoordinator(
             readiness=readiness,
@@ -169,263 +145,30 @@ class EmbeddingRequestOrchestrator:
             dimension_policy=dimension_policy,
             require_model=require_model,
             guess_provider=guess_provider,
-            backend_identity_resolver=self._backend_identity_resolver,
+            backend_identity_resolver=resolved_backend_identity,
             cache_namespace=cache_namespace,
             batch_size=batch_size,
             execution_path=execution_path,
         )
 
+    @property
+    def preparation_pipeline(self) -> EmbeddingPreparationPipeline:
+        """Return the concrete preparation component for the workflow runner."""
+        return self._preparation_pipeline
+
+    @property
+    def execution_coordinator(self) -> EmbeddingExecutionCoordinator:
+        """Return the canonical execution component for the workflow runner."""
+        return self._execution_coordinator
+
     def prepare(self, raw_input: Any, context: EmbeddingRequestContext) -> PreparedEmbeddingRequest:
-        """Normalize, resolve, validate, and plan an embedding request."""
+        """Delegate preparation for compatibility callers."""
         return self._preparation_pipeline.prepare(raw_input, context)
 
     async def execute(self, prepared: PreparedEmbeddingRequest) -> EmbeddingExecutionResult:
-        """Execute a prepared request through the Stage 2 coordinator boundary."""
+        """Delegate execution and map its canonical outcome for compatibility callers."""
         outcome = await self._execution_coordinator.execute(prepared)
         return map_outcome_to_legacy_execution_result(outcome)
-
-    async def _execute_misses(
-        self,
-        prepared: PreparedEmbeddingRequest,
-        miss_texts: list[str],
-    ) -> _ProviderExecution:
-        plan = prepared.execution_plan
-        chain = plan.fallback_chain or [plan.provider]
-        errors: list[EmbeddingDomainError] = []
-
-        for provider in chain:
-            model = map_model_for_provider(
-                plan.provider,
-                provider,
-                plan.model,
-                settings_fallback_model_map=self._settings_fallback_model_map,
-            )
-            if provider != plan.provider:
-                try:
-                    return await self._execute_coherent_fallback(prepared, provider, model)
-                except EmbeddingDomainError as exc:
-                    if exc.code == "missing_provider_credentials":
-                        continue
-                    errors.append(exc)
-                    if not _is_fallback_eligible(exc):
-                        raise
-                    continue
-
-            try:
-                output = await self._executor.create(
-                    miss_texts,
-                    provider=provider,
-                    model=model,
-                    dimensions=plan.dimensions,
-                )
-                vectors, embeddings_from_adapter = _coerce_executor_output(output)
-            except EmbeddingDomainError as exc:
-                errors.append(exc)
-                if not prepared.policy_decision.fallback_allowed or not _is_fallback_eligible(exc):
-                    raise
-                continue
-
-            vectors = self._vector_processor.validate_vector_count(
-                vectors,
-                expected=len(miss_texts),
-                provider=provider,
-                model=model,
-            )
-            cache_vectors = vectors
-            canonical_vectors = self._vector_processor.process_vectors(
-                cache_vectors,
-                provider=provider,
-                model=model,
-                dimensions=plan.dimensions,
-                dimension_policy=prepared.effective_dimension_policy,
-            )
-            return _ProviderExecution(
-                vectors=canonical_vectors,
-                provider=provider,
-                model=model,
-                fallback_from=plan.provider if provider != plan.provider else None,
-                cache_vectors=cache_vectors,
-                embeddings_from_adapter=embeddings_from_adapter,
-            )
-
-        selected_error = _select_exhausted_error(errors)
-        if selected_error is not None:
-            raise selected_error
-        raise EmbeddingExecutionError(
-            "fallback_exhausted",
-            "Embedding providers unavailable",
-            retryable=True,
-            provider=plan.provider,
-            model=plan.model,
-        )
-
-    async def _execute_coherent_fallback(
-        self,
-        prepared: PreparedEmbeddingRequest,
-        provider: str,
-        model: str,
-    ) -> _ProviderExecution:
-        plan = prepared.execution_plan
-        results: list[list[float] | None] = []
-        miss_indices: list[int] = []
-        miss_texts: list[str] = []
-
-        await self._provider_preflight(provider, model)
-        backend_identity = self._backend_identity_resolver(provider, model)
-        for index, text in enumerate(prepared.normalized_input.texts):
-            key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
-            cached = await self._cache.get(key)
-            cached_vector = self._vector_processor.validate_cached_vector(cached)
-            if cached_vector is not None:
-                results.append(
-                    self._vector_processor.process_cached_vector(
-                        cached_vector,
-                        provider=provider,
-                        model=model,
-                        dimensions=plan.dimensions,
-                        dimension_policy=prepared.effective_dimension_policy,
-                    )
-                )
-                continue
-            results.append(None)
-            miss_indices.append(index)
-            miss_texts.append(text)
-
-        embeddings_from_adapter = False
-        pending_cache_writes: list[tuple[str, list[float]]] = []
-        if miss_texts:
-            output = await self._executor.create(
-                miss_texts,
-                provider=provider,
-                model=model,
-                dimensions=plan.dimensions,
-            )
-            vectors, embeddings_from_adapter = _coerce_executor_output(output)
-            vectors = self._vector_processor.validate_vector_count(
-                vectors,
-                expected=len(miss_texts),
-                provider=provider,
-                model=model,
-            )
-            cache_vectors = vectors
-            canonical_vectors = self._vector_processor.process_vectors(
-                cache_vectors,
-                provider=provider,
-                model=model,
-                dimensions=plan.dimensions,
-                dimension_policy=prepared.effective_dimension_policy,
-            )
-            write_backend_identity = self._backend_identity_resolver(provider, model)
-            for index, text, vector, cache_vector in zip(
-                miss_indices,
-                miss_texts,
-                canonical_vectors,
-                cache_vectors,
-            ):
-                results[index] = vector
-                if not embeddings_from_adapter:
-                    key = self._cache_key(
-                        text,
-                        provider,
-                        model,
-                        plan.dimensions,
-                        write_backend_identity,
-                    )
-                    pending_cache_writes.append((key, cache_vector))
-
-        vectors = self._vector_processor.validate_vector_count(
-            results,
-            expected=len(prepared.normalized_input.texts),
-            provider=provider,
-            model=model,
-        )
-        for key, cache_vector in pending_cache_writes:
-            await self._cache.set(key, cache_vector)
-
-        return _ProviderExecution(
-            vectors=vectors,
-            provider=provider,
-            model=model,
-            fallback_from=plan.provider,
-            cache_hits=len(results) - len(miss_indices),
-            cache_misses=len(miss_indices),
-            complete_response=True,
-            embeddings_from_adapter=embeddings_from_adapter,
-        )
-
-    async def _execute_adapter(self, prepared: PreparedEmbeddingRequest) -> _ProviderExecution | None:
-        plan = prepared.execution_plan
-        if plan.execution_path != "adapter":
-            return None
-        create_adapter = getattr(self._executor, "create_adapter", None)
-        if not callable(create_adapter):
-            return None
-
-        output = await create_adapter(
-            prepared.normalized_input.texts,
-            provider=plan.provider,
-            model=plan.model,
-            dimensions=plan.dimensions,
-        )
-        if output is None:
-            return None
-        vectors, embeddings_from_adapter = _coerce_executor_output(output)
-        if not embeddings_from_adapter:
-            return None
-        vectors = self._vector_processor.validate_vector_count(
-            vectors,
-            expected=len(prepared.normalized_input.texts),
-            provider=plan.provider,
-            model=plan.model,
-        )
-        canonical_vectors = self._vector_processor.process_vectors(
-            vectors,
-            provider=plan.provider,
-            model=plan.model,
-            dimensions=plan.dimensions,
-            dimension_policy=prepared.effective_dimension_policy,
-        )
-        return _ProviderExecution(
-            vectors=canonical_vectors,
-            provider=plan.provider,
-            model=plan.model,
-            fallback_from=None,
-            complete_response=True,
-            embeddings_from_adapter=True,
-        )
-
-    def _cache_key(
-        self,
-        text: str,
-        provider: str,
-        model: str,
-        dimensions: int | None,
-        backend_identity: str | None,
-    ) -> str:
-        return self._cache_key_fn(text, provider, model, dimensions, backend_identity)
-
-    def _response_headers(
-        self,
-        *,
-        actual_provider: str,
-        fallback_from: str | None,
-        dimensions: int | None,
-        dimension_policy: str,
-    ) -> dict[str, str]:
-        headers: dict[str, str] = {"X-Embeddings-Provider": actual_provider}
-        if fallback_from and fallback_from != actual_provider:
-            headers["X-Embeddings-Fallback-From"] = fallback_from
-        if dimensions is not None:
-            headers["X-Embeddings-Dimensions-Policy"] = dimension_policy
-        return headers
-
-
-def _coerce_executor_output(
-    output: list[list[float]] | EmbeddingExecutorOutput,
-) -> tuple[list[list[float]], bool]:
-    if isinstance(output, EmbeddingExecutorOutput):
-        return output.vectors, output.embeddings_from_adapter
-    return output, False
 
 
 def _no_backend_identity(provider: str, model: str) -> str | None:
@@ -435,40 +178,6 @@ def _no_backend_identity(provider: str, model: str) -> str | None:
 
 async def _no_provider_preflight(provider: str, model: str) -> None:
     del provider, model
-
-
-_NON_FALLBACKABLE_ERROR_CODES = frozenset(
-    {
-        "empty_input",
-        "invalid_input_type",
-        "too_many_inputs",
-        "input_too_long",
-        "invalid_token_array",
-        "unknown_provider",
-        "provider_model_mismatch",
-        "invalid_dimensions",
-        "provider_denied",
-        "model_denied",
-        "model_required",
-        "provider_unsupported",
-        "missing_provider_credentials",
-        "provider_malformed_response",
-    }
-)
-
-
-def _is_fallback_eligible(error: EmbeddingDomainError) -> bool:
-    return bool(error.retryable) and error.code not in _NON_FALLBACKABLE_ERROR_CODES
-
-
-def _select_exhausted_error(errors: list[EmbeddingDomainError]) -> EmbeddingDomainError | None:
-    for error in errors:
-        if isinstance(error, EmbeddingProviderError) and not error.retryable:
-            return error
-    for error in errors:
-        if error.code == "provider_rate_limited":
-            return error
-    return errors[-1] if errors else None
 
 
 __all__ = [
