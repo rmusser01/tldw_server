@@ -4,7 +4,7 @@ title: Expose Notes automatic-title prompt in Service Prompts
 status: Done
 assignee: []
 created_date: '2026-08-24 04:47'
-updated_date: '2026-08-24 05:45'
+updated_date: '2026-08-24 05:48'
 labels:
   - service-prompts
   - notes
@@ -14,6 +14,7 @@ references:
   - Docs/Design/service-prompt-inventory.md
   - >-
     Docs/superpowers/specs/2026-07-12-user-customizable-service-prompts-design.md
+  - 'https://github.com/rmusser01/tldw_server/pull/2812'
 priority: medium
 ---
 
