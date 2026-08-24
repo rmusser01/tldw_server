@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_scope import (
     normalize_recurring_question_scope,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_all_searchable_library_resolves_capability_reported_sources():
@@ -61,5 +65,20 @@ def test_unsupported_scope_fields_return_field_errors():
             "field": "config.scope.provider",
             "code": "unsupported",
             "message": "Unsupported scope field: provider",
+        }
+    ]
+
+
+def test_unsupported_scope_mode_returns_field_error():
+    _scope, errors, _warnings = normalize_recurring_question_scope(
+        {"mode": "github_issues", "sources": ["media_db"]},
+        available_sources=["media_db"],
+    )
+
+    assert errors == [  # nosec B101
+        {
+            "field": "config.scope.mode",
+            "code": "unsupported",
+            "message": "Unsupported scope mode: github_issues",
         }
     ]

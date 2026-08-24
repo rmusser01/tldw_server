@@ -983,7 +983,7 @@ class ScheduledTasksTransaction:
             FROM scheduled_task_runs AS runs
             WHERE runs.owner_id = ?
                 AND runs.definition_id = ?
-                AND runs.outcome = 'no_match'
+                AND runs.outcome IN ('no_match', 'degraded', 'none', 'partial')
                 AND runs.created_at < ?
                 AND NOT EXISTS (
                     SELECT 1
@@ -1042,6 +1042,8 @@ class ScheduledTasksTransaction:
         current = self.get_definition(owner_id=owner_id, definition_id=definition_id)
         if current is None:
             raise KeyError(f"definition not found: {definition_id}")
+        if current.family != "recurring_question":
+            raise ValueError("definition_family_mismatch")
         resolved_at = _utcnow_iso()
         with self._connect() as conn:
             begin_immediate_if_needed(conn)
@@ -1098,6 +1100,8 @@ class ScheduledTasksTransaction:
         current = self.get_definition(owner_id=owner_id, definition_id=definition_id)
         if current is None:
             raise KeyError(f"definition not found: {definition_id}")
+        if current.family != "recurring_question":
+            raise ValueError("definition_family_mismatch")
         reopened_at = _utcnow_iso()
         with self._connect() as conn:
             cursor = conn.execute(
@@ -1876,6 +1880,30 @@ class ScheduledTasksDatabase:
             _ensure_definition_extension_columns(conn)
             _ensure_run_table_schema(conn)
             _ensure_run_indexes(conn)
+
+    def get_schema_overview(self) -> dict[str, set[str]]:
+        """Return Scheduled Tasks table, index, and definition-column names for schema contract tests."""
+        with self._connect() as conn:
+            table_rows = conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table' AND name LIKE 'scheduled_task_%'
+                """
+            ).fetchall()
+            index_rows = conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'index' AND name LIKE 'idx_scheduled_task_%'
+                """
+            ).fetchall()
+            definition_columns = conn.execute("PRAGMA table_info(scheduled_task_definitions)").fetchall()
+        return {
+            "tables": {str(row["name"]) for row in table_rows},
+            "indexes": {str(row["name"]) for row in index_rows},
+            "definition_columns": {str(row["name"]) for row in definition_columns},
+        }
 
     def write_transaction(self, operation: Callable[[ScheduledTasksTransaction], Any]) -> Any:
         """Run ``operation`` inside one immediate write transaction."""

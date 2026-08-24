@@ -82,14 +82,21 @@ def _create_definition(
     service: ScheduledTaskAutomationService,
     *,
     owner_id: int = OWNER_ID,
+    family: str = "recurring_question",
     name: str = "Daily research check",
     initial_lifecycle: str = "configured",
     config_payload: dict[str, Any] | None = None,
+    input_payload: dict[str, Any] | None = None,
 ):
     preview = service.create_preview(
         owner_id=owner_id,
         actor=ACTOR,
-        payload=_payload(name=name, config_payload=config_payload),
+        payload=_payload(
+            family=family,
+            name=name,
+            config_payload=config_payload,
+            input_payload=input_payload,
+        ),
     )
     return service.create_definition(
         owner_id=owner_id,
@@ -551,6 +558,35 @@ def test_mark_solved_and_reopen_reject_archived_and_disabled_definitions(tmp_pat
         service.reopen_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=disabled.id)
 
 
+def test_mark_solved_and_reopen_reject_non_recurring_question_families(tmp_path):
+    service, _repo = _service(tmp_path)
+    definition = _create_definition(
+        service,
+        family="agent_task",
+        name="Agent dispatch",
+        input_payload={"agent_ref": "agent:triage", "message": "Summarize this."},
+    )
+
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_family_mismatch"):
+        service.mark_solved(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_family_mismatch"):
+        service.reopen_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+
+
+def test_mark_solved_maps_invalid_result_id_to_service_error(tmp_path):
+    service, _repo = _service(tmp_path)
+    definition = _create_definition(service, initial_lifecycle="configured")
+
+    with pytest.raises(ScheduledTaskAutomationError, match="result_not_found"):
+        service.mark_solved(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=definition.id,
+            resolved_result_id="missing-result",
+        )
+
+
 def test_manual_run_creates_run_and_jobs_payload(tmp_path, monkeypatch):
     service, repo = _recurring_question_service(tmp_path)
     definition = _create_definition(service, initial_lifecycle="paused")
@@ -580,6 +616,7 @@ def test_manual_run_creates_run_and_jobs_payload(tmp_path, monkeypatch):
     assert run.job_id == "123"  # nosec B101
     assert replay.id == run.id  # nosec B101
     assert len(created_jobs) == 1  # nosec B101
+    assert created_jobs[0]["idempotency_key"] == "run-1"  # nosec B101
     assert created_jobs[0]["payload"]["run_id"] == run.id  # nosec B101
     assert created_jobs[0]["payload"]["definition_id"] == definition.id  # nosec B101
     assert repo.get_run(owner_id=OWNER_ID, run_id=run.id).job_id == "123"  # nosec B101

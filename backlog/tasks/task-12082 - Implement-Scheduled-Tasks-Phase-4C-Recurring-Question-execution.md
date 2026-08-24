@@ -104,3 +104,57 @@ Stage 7 verification is recorded in Implementation Notes. Final PR summary pendi
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Run History
+<!-- SECTION:RUN_HISTORY:BEGIN -->
+<!-- RUN_HISTORY_ENTRY:BEGIN -->
+```yaml
+event_id: run-61afc7cd420a49db804b93b0fc30509b
+type: record_run
+actor: codex
+timestamp: '2026-08-24T05:21:24.769008Z'
+result: succeeded
+task_id: TASK-12082
+files:
+- apps/packages/ui/src/components/Option/CompanionHome/__tests__/CompanionHomePage.test.tsx
+- apps/packages/ui/src/components/Option/CompanionHome/hooks.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskAutomationDefinitionEditor.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskAutomationDefinitionEditor.test.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-results.test.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-results.ts
+- tldw_Server_API/app/api/v1/endpoints/scheduled_tasks_control_plane.py
+- tldw_Server_API/app/core/DB_Management/Scheduled_Tasks_DB.py
+- tldw_Server_API/app/core/Scheduled_Tasks/recurring_question_jobs.py
+- tldw_Server_API/app/core/Scheduled_Tasks/recurring_question_rag_adapter.py
+- tldw_Server_API/app/core/Scheduled_Tasks/recurring_question_scope.py
+- tldw_Server_API/app/core/exceptions.py
+- tldw_Server_API/app/services/scheduled_task_automation_service.py
+- tldw_Server_API/app/services/scheduled_task_recurring_question_scheduler.py
+- tldw_Server_API/app/services/scheduled_task_recurring_question_service.py
+- tldw_Server_API/app/services/scheduled_task_recurring_question_worker.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_jobs_worker.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_rag_adapter.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_scheduler.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_scope.py
+verification:
+- git diff --check
+- python -m pytest -q tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_rag_adapter.py
+  tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_scope.py
+  tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py
+  tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_scheduler.py
+  tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_jobs_worker.py
+  --maxfail=20 (115 passed, 3 warnings)
+- bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTaskAutomationDefinitionEditor.test.tsx
+  src/components/Option/ScheduledTasks/__tests__/scheduled-task-results.test.ts src/components/Option/CompanionHome/__tests__/CompanionHomePage.test.tsx
+  src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx --maxWorkers=1
+  --no-file-parallelism (4 files, 94 tests passed)
+- python -m bandit -r touched backend production scope -f json -o /tmp/bandit_scheduled_tasks_phase4c_review.json
+  (0 findings)
+```
+Rebased PR #2566 onto latest origin/dev and addressed review feedback: RAG snapshot key redaction, run pruning, scheduler resilience/schedule parsing/job preservation, worker cancellation/retry state, mark-solved family/error handling, manual-run idempotency, frontend scope precedence/result redaction/Home partial errors/latest-result selection, and Qodo compliance items.
+<!-- RUN_HISTORY_ENTRY:END -->
+<!-- SECTION:RUN_HISTORY:END -->

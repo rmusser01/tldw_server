@@ -141,6 +141,21 @@ const getAutomationDefinitionIdForTask = (task: ScheduledTask): string => {
   return task.id
 }
 
+export const findLatestScheduledTaskResultForTask = (
+  results: ScheduledTaskResultItem[],
+  taskId: string
+): ScheduledTaskResultItem | null =>
+  results.reduce<ScheduledTaskResultItem | null>((latest, result) => {
+    if (result.taskId !== taskId) return latest
+    if (!latest) return result
+
+    const latestTimestamp = Date.parse(latest.occurredAt ?? "")
+    const resultTimestamp = Date.parse(result.occurredAt ?? "")
+    if (!Number.isFinite(resultTimestamp)) return latest
+    if (!Number.isFinite(latestTimestamp)) return result
+    return resultTimestamp > latestTimestamp ? result : latest
+  }, null)
+
 const buildAutomationEditorInitialValues = (
   definition: ScheduledTaskDefinitionResponse
 ): ScheduledTaskAutomationDefinitionEditorValues => {
@@ -368,7 +383,7 @@ export const ScheduledTasksPage: React.FC = () => {
   const selectedTaskLatestResult = React.useMemo(
     () =>
       selectedTask
-        ? displayedResults.find((result) => result.taskId === selectedTask.id) ?? null
+        ? findLatestScheduledTaskResultForTask(displayedResults, selectedTask.id)
         : null,
     [displayedResults, selectedTask]
   )

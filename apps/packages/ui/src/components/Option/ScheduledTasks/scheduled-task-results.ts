@@ -179,6 +179,20 @@ const MATCHED_RULE_LABEL_KEYS = [
 const PRIVATE_VALUE_PATTERN =
   /(authorization\s*:|bearer\s+|api[_-]?key\s*=|access[_-]?token\s*=|token\s*=|client[_-]?secret\s*=|secret\s*=|password\s*=)/i
 
+const PRIVATE_KEY_PARTS = [
+  "api_key",
+  "apikey",
+  "access_token",
+  "token",
+  "secret",
+  "password",
+  "raw_text",
+  "rawtext",
+  "full_text",
+  "document_text",
+  "content"
+] as const
+
 const RESULT_STATUS_TOKENS = [
   "found",
   "match",
@@ -305,6 +319,42 @@ const sanitizeProvenanceText = (value: unknown): string | null => {
   }
 
   return trimmed
+}
+
+const isPrivateKey = (key: string): boolean => {
+  const normalized = Array.from(key.toLowerCase())
+    .filter((character) => /[a-z0-9_]/.test(character))
+    .join("")
+  const compact = normalized.replace(/_/g, "")
+
+  return PRIVATE_KEY_PARTS.some((part) => {
+    const compactPart = part.replace(/_/g, "")
+    if (part === "content") {
+      return normalized === part || compact === compactPart
+    }
+    return normalized.includes(part) || compact.includes(compactPart)
+  })
+}
+
+const redactStructuredValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactStructuredValue(item))
+  }
+
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        isPrivateKey(key) ? "[redacted]" : redactStructuredValue(item)
+      ])
+    )
+  }
+
+  if (typeof value === "string" && PRIVATE_VALUE_PATTERN.test(value)) {
+    return "[redacted]"
+  }
+
+  return value
 }
 
 const firstSanitizedText = (
@@ -485,7 +535,7 @@ const answerToDisplayText = (value: unknown): string | null => {
   }
 
   try {
-    return JSON.stringify(value)
+    return JSON.stringify(redactStructuredValue(value))
   } catch {
     return null
   }

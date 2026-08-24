@@ -546,6 +546,7 @@ def create_scheduled_task_recurring_question_run(
     principal=Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
     service: ScheduledTaskRecurringQuestionService = Depends(get_scheduled_task_recurring_question_service),
 ) -> ScheduledTaskRunResponse:
+    """Queue one manual Recurring Question run for an existing scheduled task definition."""
     try:
         return service.create_manual_run(
             owner_id=int(current_user.id),

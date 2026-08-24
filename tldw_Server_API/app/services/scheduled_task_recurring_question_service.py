@@ -47,7 +47,7 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
         job_manager: JobManager | None = None,
     ) -> None:
         super().__init__(repository=repository)
-        self._job_manager = job_manager
+        self._job_manager = job_manager or JobManager()
 
     def create_manual_run(
         self,
@@ -354,6 +354,7 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
             owner_user_id=str(owner_id),
             payload=job_payload,
             request_id=request_id,
+            idempotency_key=idempotency_key,
         )
         job_id = str(job["id"]) if job.get("id") is not None else None
         if job_id is not None:
@@ -467,8 +468,7 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
         priority: int = 5,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        manager = self._job_manager or JobManager()
-        return manager.create_job(
+        return self._job_manager.create_job(
             domain=SCHEDULED_TASKS_DOMAIN,
             queue=RECURRING_QUESTION_QUEUE,
             job_type=RECURRING_QUESTION_JOB_TYPE,
@@ -543,7 +543,7 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
         job_status: str | None = None
         if row.job_id:
             try:
-                job = (self._job_manager or JobManager()).get_job(int(row.job_id))
+                job = self._job_manager.get_job(int(row.job_id))
             except (TypeError, ValueError):
                 job = None
             if isinstance(job, dict):

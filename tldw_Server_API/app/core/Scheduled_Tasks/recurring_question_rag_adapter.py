@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGRequest, UnifiedRAGResponse
+from tldw_Server_API.app.core.exceptions import RecurringQuestionRAGError
 
 _PRIVATE_KEY_PARTS = (
     "api_key",
@@ -21,16 +22,6 @@ _PRIVATE_KEY_PARTS = (
     "document_text",
     "content",
 )
-
-
-class RecurringQuestionRAGError(Exception):
-    """Expected Recurring Question RAG execution failure."""
-
-    def __init__(self, code: str, *, retryable: bool = False, details: dict[str, Any] | None = None) -> None:
-        super().__init__(code)
-        self.code = code
-        self.retryable = retryable
-        self.details = details or {}
 
 
 @dataclass(frozen=True)
@@ -294,7 +285,15 @@ def _sanitize_snapshot(value: Any) -> Any:
 def _is_private_key(key: str) -> bool:
     normalized = "".join(ch for ch in key.lower() if ch.isalnum() or ch == "_")
     compact = normalized.replace("_", "")
-    return any(part in normalized or part.replace("_", "") in compact for part in _PRIVATE_KEY_PARTS)
+    for part in _PRIVATE_KEY_PARTS:
+        compact_part = part.replace("_", "")
+        if part == "content":
+            if normalized == part or compact == compact_part:
+                return True
+            continue
+        if part in normalized or compact_part in compact:
+            return True
+    return False
 
 
 def _short_text(value: str, *, limit: int) -> str:

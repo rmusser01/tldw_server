@@ -560,6 +560,85 @@ describe("ScheduledTasksPage", () => {
     })
   })
 
+  it("marks an automation definition solved with the latest normalized result", async () => {
+    const user = userEvent.setup()
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        paths: {
+          "/api/v1/scheduled-tasks": { get: {} },
+          "/api/v1/scheduled-tasks/results": { get: {} },
+          "/api/v1/scheduled-tasks/results/{result_id}/review": { post: {} }
+        }
+      })
+    })
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [automationTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.getScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({ resolution_state: "open" })
+    )
+    mocks.listScheduledTaskResults.mockResolvedValue({
+      items: [
+        {
+          id: "result_old",
+          definition_id: "definition_1",
+          run_id: "run_old",
+          kind: "finding",
+          title: "Older answer",
+          summary: "Older evidence.",
+          answer: "Old answer",
+          answer_mode: "synthesized",
+          confidence: { label: "medium" },
+          source_refs: [],
+          dedupe_key: "rq:old",
+          visibility_destination: { home: true, results: true },
+          review_state: "unread",
+          created_at: "2030-01-01T09:00:00Z",
+          updated_at: "2030-01-01T09:00:00Z"
+        },
+        {
+          id: "result_new",
+          definition_id: "definition_1",
+          run_id: "run_new",
+          kind: "finding",
+          title: "Latest answer",
+          summary: "Newer evidence.",
+          answer: "New answer",
+          answer_mode: "synthesized",
+          confidence: { label: "high" },
+          source_refs: [],
+          dedupe_key: "rq:new",
+          visibility_destination: { home: true, results: true },
+          review_state: "unread",
+          created_at: "2030-01-02T09:00:00Z",
+          updated_at: "2030-01-02T09:00:00Z"
+        }
+      ],
+      total: 2,
+      limit: 100,
+      offset: 0,
+      has_more: false
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Inspect Track answer" }))
+    expect(await screen.findByRole("dialog", { name: /Track answer/i })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Mark solved" }))
+
+    await waitFor(() => {
+      expect(mocks.markScheduledTaskDefinitionSolved).toHaveBeenCalledWith(
+        "definition_1",
+        { resolved_result_id: "result_new" }
+      )
+    })
+  })
+
   it("opens the Results tab from the alias path and opens the result drawer", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [

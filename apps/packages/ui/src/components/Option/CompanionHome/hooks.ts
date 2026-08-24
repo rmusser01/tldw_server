@@ -250,6 +250,7 @@ export const useScheduledTaskHomeSignals = ({
       const nextPartial =
         tasksResult.status === "rejected" ||
         notificationsResult.status === "rejected" ||
+        resultsResult.status === "rejected" ||
         (tasksResult.status === "fulfilled" && Boolean(tasksResult.value?.partial))
 
       let nextError: string | null = null
@@ -260,6 +261,8 @@ export const useScheduledTaskHomeSignals = ({
             : "Automation signals unavailable"
       } else if (notificationsResult.status === "rejected") {
         nextError = "Recent automation notifications could not be loaded."
+      } else if (resultsResult.status === "rejected") {
+        nextError = "Scheduled-task results could not be loaded."
       } else if (tasksResult.value?.partial) {
         nextError = "Some scheduled-task sources are temporarily unavailable."
       }

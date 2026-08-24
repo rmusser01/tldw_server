@@ -7,7 +7,6 @@ import json
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import RunRow
-from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 SCHEDULED_TASKS_DOMAIN = "scheduled_tasks"
 RECURRING_QUESTION_JOB_TYPE = "recurring_question_run"
@@ -53,24 +52,3 @@ def build_recurring_question_run_job_payload(
         "trigger_reason": run.trigger_reason,
         "schedule_slot": run.schedule_slot,
     }
-
-
-def enqueue_recurring_question_run_job(
-    job_manager: JobManager,
-    *,
-    run: RunRow,
-    owner_user_id: str,
-    priority: int = 5,
-    request_id: str | None = None,
-) -> dict[str, Any]:
-    """Enqueue a Recurring Question run into the core Jobs backend."""
-    return job_manager.create_job(
-        domain=SCHEDULED_TASKS_DOMAIN,
-        queue=RECURRING_QUESTION_QUEUE,
-        job_type=RECURRING_QUESTION_JOB_TYPE,
-        payload=build_recurring_question_run_job_payload(run=run, owner_user_id=owner_user_id),
-        owner_user_id=owner_user_id,
-        priority=priority,
-        idempotency_key=f"scheduled-task-rq-run:{run.id}",
-        request_id=request_id,
-    )

@@ -65,6 +65,27 @@ def test_safe_rag_request_snapshot_strips_private_and_raw_fields():
     assert "RAW FULL SOURCE TEXT" not in str(snapshot)  # nosec B101
 
 
+def test_safe_rag_request_snapshot_preserves_nonsecret_content_metadata():
+    request = build_rag_request_from_definition(
+        _definition(),
+        scope_snapshot={"mode": "sources", "sources": ["media_db"]},
+        finding_policy={"preset": "balanced_findings"},
+    )
+
+    snapshot = safe_rag_request_snapshot(
+        request,
+        extra={
+            "content_type": "text/html",
+            "content_length": 4096,
+            "content": "RAW DOCUMENT BODY",
+        },
+    )
+
+    assert snapshot["extra"]["content_type"] == "text/html"  # nosec B101
+    assert snapshot["extra"]["content_length"] == 4096  # nosec B101
+    assert "RAW DOCUMENT BODY" not in str(snapshot)  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_execute_recurring_question_rag_classifies_synthesized_and_evidence_only_findings():
     request = build_rag_request_from_definition(

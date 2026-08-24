@@ -542,6 +542,28 @@ describe("CompanionHomePage", () => {
     expect(screen.getByText("Automation signals unavailable")).toBeInTheDocument()
   })
 
+  it("surfaces partial automation state when normalized result loading fails", async () => {
+    mocks.listScheduledTasks.mockResolvedValueOnce({
+      items: [buildScheduledTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.listScheduledTaskResults.mockRejectedValueOnce(
+      new Error("scheduled task results unavailable")
+    )
+
+    renderPage()
+
+    expect(await screen.findByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Release monitor/i })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks?tab=results&result_id=202"
+    )
+    expect(screen.getByText("Partial automation data")).toBeInTheDocument()
+    expect(screen.getByText("Scheduled-task results could not be loaded.")).toBeInTheDocument()
+  })
+
   it("dedupes notification-derived automation signals against projected task results", async () => {
     mocks.listScheduledTasks.mockResolvedValueOnce({
       items: [buildScheduledTask()],

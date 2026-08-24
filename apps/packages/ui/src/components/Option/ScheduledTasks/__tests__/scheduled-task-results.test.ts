@@ -108,6 +108,28 @@ describe("scheduled task result helpers", () => {
     expect(result?.runHref).toBe("/scheduled-tasks?tab=results&run_id=run_1")
   })
 
+  it("redacts private keys when rendering structured API result answers", () => {
+    const [result] = mapScheduledTaskApiResults([
+      buildApiResult({
+        answer: {
+          text: "The answer is now present.",
+          api_key: "sk-live-secret",
+          citations: [
+            {
+              title: "Research note",
+              access_token: "token-secret"
+            }
+          ]
+        }
+      })
+    ])
+
+    expect(result.answer).toContain("The answer is now present.")
+    expect(result.answer).toContain("[redacted]")
+    expect(result.answer).not.toContain("sk-live-secret")
+    expect(result.answer).not.toContain("token-secret")
+  })
+
   it("keeps dismissed normalized findings out of Home while preserving them in results", () => {
     const [result] = mapScheduledTaskApiResults([
       buildApiResult({

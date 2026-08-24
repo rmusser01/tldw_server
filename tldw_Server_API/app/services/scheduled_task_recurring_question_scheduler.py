@@ -132,8 +132,17 @@ class _RecurringQuestionScheduler:
             return
         desired: set[str] = set()
         for owner_id in sorted(self._enumerate_user_ids()):
-            repo = self._get_repo(owner_id)
-            for definition in _iter_recurring_question_definitions(repo, owner_id=owner_id):
+            try:
+                repo = self._get_repo(owner_id)
+                definitions = _iter_recurring_question_definitions(repo, owner_id=owner_id)
+            except _NONCRITICAL_EXCEPTIONS as exc:
+                logger.warning(
+                    "Recurring Question scheduler skipped owner_id={} during rescan: {}",
+                    owner_id,
+                    exc,
+                )
+                continue
+            for definition in definitions:
                 job_id = self._job_id(owner_id, definition.id)
                 if self._should_register(definition):
                     desired.add(job_id)
@@ -151,12 +160,20 @@ class _RecurringQuestionScheduler:
             minimum=60,
         )
         for owner_id in sorted(self._enumerate_user_ids()):
-            service = self._get_service(owner_id)
-            repaired_ids = service.reconcile_stale_runs(
-                owner_id=owner_id,
-                actor=_SCHEDULER_ACTOR,
-                stale_after=timedelta(seconds=stale_after_seconds),
-            )
+            try:
+                service = self._get_service(owner_id)
+                repaired_ids = service.reconcile_stale_runs(
+                    owner_id=owner_id,
+                    actor=_SCHEDULER_ACTOR,
+                    stale_after=timedelta(seconds=stale_after_seconds),
+                )
+            except _NONCRITICAL_EXCEPTIONS as exc:
+                logger.warning(
+                    "Recurring Question scheduler skipped owner_id={} during stale-run reconcile: {}",
+                    owner_id,
+                    exc,
+                )
+                continue
             if repaired_ids:
                 repaired[owner_id] = repaired_ids
         return repaired
@@ -204,6 +221,12 @@ class _RecurringQuestionScheduler:
         if not self._aps:
             return
         job_id = self._job_id(definition.owner_id, definition.id)
+        job_args = [definition.owner_id, definition.id, definition.version]
+        existing_job = _get_existing_job(self._aps, job_id)
+        if existing_job is not None:
+            existing_args = getattr(existing_job, "args", None)
+            if existing_args is None or list(existing_args) == job_args:
+                return
         try:
             trigger = _build_trigger(definition.schedule)
         except _NONCRITICAL_EXCEPTIONS as exc:
@@ -226,7 +249,7 @@ class _RecurringQuestionScheduler:
             self._run_definition_schedule,
             trigger=trigger,
             id=job_id,
-            args=[definition.owner_id, definition.id, definition.version],
+            args=job_args,
             max_instances=1,
             coalesce=True,
             misfire_grace_time=_env_int(
@@ -341,18 +364,23 @@ def _build_trigger(schedule: dict[str, Any]) -> Any | None:
 def _parse_time_fields(schedule: dict[str, Any]) -> tuple[int, int, int]:
     raw_time = str(schedule.get("time") or "00:00:00").strip()
     parts = raw_time.split(":")
+    if not 1 <= len(parts) <= 3:
+        raise ValueError("invalid schedule time")
     try:
         hour = int(parts[0])
         minute = int(parts[1]) if len(parts) > 1 else 0
         second = int(parts[2]) if len(parts) > 2 else 0
     except (TypeError, ValueError, IndexError):
-        return 0, 0, 0
+        raise ValueError("invalid schedule time") from None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+        raise ValueError("invalid schedule time")
     return hour, minute, second
 
 
 def _normalize_day_of_week(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
-        return value.strip()
+        normalized = [part.strip().lower()[:3] for part in value.split(",") if part.strip()]
+        return ",".join(normalized) if normalized else None
     if not isinstance(value, list):
         return None
     normalized: list[str] = []
@@ -381,6 +409,17 @@ def _interval_seconds(schedule: dict[str, Any]) -> int | None:
         except (TypeError, ValueError):
             return None
         return seconds if seconds > 0 else None
+    return None
+
+
+def _get_existing_job(scheduler: Any, job_id: str) -> Any | None:
+    get_job = getattr(scheduler, "get_job", None)
+    if callable(get_job):
+        with contextlib.suppress(_NONCRITICAL_EXCEPTIONS):
+            return get_job(job_id)
+    for job in getattr(scheduler, "get_jobs", lambda: [])() or []:
+        if getattr(job, "id", None) == job_id:
+            return job
     return None
 
 

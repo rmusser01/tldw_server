@@ -242,8 +242,8 @@ const buildRecurringQuestionScope = (
       : { mode: "all_searchable_library" }
 
   return {
-    ...baseScope,
-    ...parsedScope.value
+    ...parsedScope.value,
+    ...baseScope
   }
 }
 

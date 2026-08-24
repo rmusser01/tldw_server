@@ -24,7 +24,9 @@ from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_jobs import (
 from tldw_Server_API.app.services.scheduled_task_automation_service import ScheduledTaskAutomationError
 from tldw_Server_API.app.services.scheduled_task_recurring_question_scheduler import (
     _RecurringQuestionScheduler,
+    _normalize_day_of_week,
     _normalize_slot_to_utc_iso,
+    _parse_time_fields,
 )
 from tldw_Server_API.app.services.scheduled_task_recurring_question_service import (
     ScheduledTaskRecurringQuestionService,
@@ -177,6 +179,50 @@ async def test_rescan_registers_only_open_configured_recurring_questions(
 
 
 @pytest.mark.asyncio
+async def test_rescan_preserves_existing_registered_jobs(
+    recurring_question_scheduler_env,
+) -> None:
+    service, _repo = _service_for_user(OWNER_ID)
+    configured = _create_definition(service, name="Already registered")
+    scheduler = _RecurringQuestionScheduler()
+    job_id = scheduler._job_id(OWNER_ID, configured.id)
+    fake_aps = _FakeAPS(existing=[job_id])
+    scheduler._aps = fake_aps
+    scheduler._started = True
+
+    await scheduler.rescan()
+
+    assert fake_aps.removed == []  # nosec B101
+    assert fake_aps.added == {}  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rescan_isolates_per_user_repository_errors(
+    recurring_question_scheduler_env,
+) -> None:
+    service, repo = _service_for_user(OWNER_ID)
+    configured = _create_definition(service, name="Healthy user")
+
+    class BrokenUserScheduler(_RecurringQuestionScheduler):
+        def _enumerate_user_ids(self) -> set[int]:
+            return {123, OWNER_ID}
+
+        def _get_repo(self, owner_id: int) -> ScheduledTasksDatabase:
+            if owner_id == 123:
+                raise RuntimeError("locked user database")
+            return repo
+
+    scheduler = BrokenUserScheduler()
+    fake_aps = _FakeAPS()
+    scheduler._aps = fake_aps
+    scheduler._started = True
+
+    await scheduler.rescan()
+
+    assert set(fake_aps.added) == {scheduler._job_id(OWNER_ID, configured.id)}  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_rescan_skips_invalid_schedule_without_blocking_valid_definitions(
     recurring_question_scheduler_env,
 ) -> None:
@@ -196,6 +242,47 @@ async def test_rescan_skips_invalid_schedule_without_blocking_valid_definitions(
 
     assert set(fake_aps.added) == {scheduler._job_id(OWNER_ID, valid.id)}  # nosec B101
     assert scheduler._job_id(OWNER_ID, invalid.id) in fake_aps.removed  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_reconcile_all_stale_runs_isolates_per_user_errors(
+    recurring_question_scheduler_env,
+) -> None:
+    service, repo = _service_for_user(OWNER_ID)
+    definition = _create_definition(service, name="Healthy reconcile user")
+    run = repo.create_run(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        definition_version=definition.version,
+        trigger_reason="scheduled",
+        status="queued",
+        outcome="none",
+        scope_snapshot={"mode": "all_searchable_library", "resolved_sources": ["media_db"]},
+        finding_policy_snapshot={"preset": "balanced_findings"},
+        rag_request_snapshot={"query": "What changed?"},
+        run_summary={"message": "Queued before crash."},
+        schedule_slot="2026-07-01T16:00:00+00:00",
+    )
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.execute(
+            "UPDATE scheduled_task_runs SET updated_at = ? WHERE owner_id = ? AND id = ?",
+            ["2026-07-01T16:00:00+00:00", OWNER_ID, run.id],
+        )
+
+    class BrokenUserScheduler(_RecurringQuestionScheduler):
+        def _enumerate_user_ids(self) -> set[int]:
+            return {123, OWNER_ID}
+
+        def _get_service(self, owner_id: int) -> ScheduledTaskRecurringQuestionService:
+            if owner_id == 123:
+                raise RuntimeError("locked user database")
+            return service
+
+    scheduler = BrokenUserScheduler()
+
+    repaired = await scheduler.reconcile_all_stale_runs()
+
+    assert repaired == {OWNER_ID: [run.id]}  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -310,6 +397,15 @@ def test_reconcile_stale_runs_marks_failed_with_repair_reason(
     assert updated.failure_reason["code"] == "scheduler_repair_stale_run"  # nosec B101
     audit_events = repo.list_audit_events(owner_id=OWNER_ID, definition_id=definition.id, limit=20, offset=0)[0]
     assert "run.repaired" in {event.event_type for event in audit_events}  # nosec B101
+
+
+def test_weekly_day_strings_are_trimmed_for_cron_trigger() -> None:
+    assert _normalize_day_of_week("mon, wed, fri") == "mon,wed,fri"  # nosec B101
+
+
+def test_invalid_daily_time_raises_instead_of_defaulting_to_midnight() -> None:
+    with pytest.raises(ValueError, match="invalid schedule time"):
+        _parse_time_fields({"time": "not-a-time"})
 
 
 def test_reconcile_orphaned_completed_job_marks_run_needs_attention(

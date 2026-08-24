@@ -10,7 +10,13 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import ScheduledTasksDatabase
+from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
+    DefinitionRow,
+    RunRow,
+    ScheduledTasksDatabase,
+)
+
+pytestmark = pytest.mark.unit
 
 
 def _repo(tmp_path, monkeypatch, *, user_id: int = 101) -> ScheduledTasksDatabase:
@@ -102,7 +108,13 @@ def _create_definition(
     )
 
 
-def _create_run(repo: ScheduledTasksDatabase, definition, *, owner_id: int = 101, **overrides):
+def _create_run(
+    repo: ScheduledTasksDatabase,
+    definition: DefinitionRow,
+    *,
+    owner_id: int = 101,
+    **overrides: Any,
+) -> RunRow:
     payload = {
         "owner_id": owner_id,
         "definition_id": definition.id,
@@ -748,6 +760,25 @@ def test_result_review_state_and_definition_resolution_roundtrip(tmp_path, monke
     assert reopened.resolved_result_id is None  # nosec B101
 
 
+def test_definition_resolution_rejects_non_recurring_question_families(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo, family="agent_task", name="Dispatch agent")
+
+    with pytest.raises(ValueError, match="definition_family_mismatch"):
+        repo.mark_definition_solved(
+            owner_id=101,
+            definition_id=definition.id,
+            resolved_by="101",
+        )
+
+    with pytest.raises(ValueError, match="definition_family_mismatch"):
+        repo.reopen_definition(
+            owner_id=101,
+            definition_id=definition.id,
+            reopened_by="101",
+        )
+
+
 def test_prune_run_history_removes_old_no_match_runs_before_surfaced_results(
     tmp_path, monkeypatch
 ):
@@ -823,6 +854,31 @@ def test_prune_run_history_removes_old_no_match_runs_before_surfaced_results(
     events, total = repo.list_audit_events(owner_id=101, definition_id=definition.id, limit=10, offset=0)
     assert total == 1  # nosec B101
     assert events[0].id == audit.id  # nosec B101
+
+
+def test_prune_run_history_removes_old_non_finding_runs_without_results(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    old_at = "2026-01-01T00:00:00+00:00"
+    runs = [
+        _create_run(repo, definition, status="completed", outcome="no_match"),
+        _create_run(repo, definition, status="failed", outcome="degraded"),
+        _create_run(repo, definition, status="cancelled", outcome="none"),
+        _create_run(repo, definition, status="completed", outcome="partial"),
+    ]
+    for run in runs:
+        _set_run_created_at(repo, run_id=run.id, created_at=old_at)
+
+    pruned = repo.prune_run_history(
+        owner_id=101,
+        definition_id=definition.id,
+        no_match_before="2026-02-01T00:00:00+00:00",
+        result_before=None,
+    )
+
+    assert pruned == {"runs": 4, "results": 0}  # nosec B101
+    for run in runs:
+        assert repo.get_run(owner_id=101, run_id=run.id) is None  # nosec B101
 
 
 def test_prune_run_history_preserves_solved_result_unless_dismissed(tmp_path, monkeypatch):
@@ -914,27 +970,7 @@ def test_run_and_result_response_schemas_expose_stage_1_contracts():
 
 
 def _scheduled_task_schema_objects(repo: ScheduledTasksDatabase) -> dict[str, set[str]]:
-    with repo._connect() as conn:
-        table_rows = conn.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table' AND name LIKE 'scheduled_task_%'
-            """
-        ).fetchall()
-        index_rows = conn.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'index' AND name LIKE 'idx_scheduled_task_%'
-            """
-        ).fetchall()
-        definition_columns = conn.execute("PRAGMA table_info(scheduled_task_definitions)").fetchall()
-    return {
-        "tables": {row["name"] for row in table_rows},
-        "indexes": {row["name"] for row in index_rows},
-        "definition_columns": {row["name"] for row in definition_columns},
-    }
+    return repo.get_schema_overview()
 
 
 def test_update_preview_consumption_sets_consumed_at(tmp_path, monkeypatch):

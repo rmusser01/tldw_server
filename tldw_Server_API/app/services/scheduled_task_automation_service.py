@@ -1061,12 +1061,19 @@ class ScheduledTaskAutomationService:
             raise ScheduledTaskAutomationError("definition_disabled")
         if current.resolution_state == "solved":
             return self._definition_response(current)
-        updated = tx.mark_definition_solved(
-            owner_id=owner_id,
-            definition_id=definition_id,
-            resolved_by=actor,
-            resolved_result_id=resolved_result_id,
-        )
+        try:
+            updated = tx.mark_definition_solved(
+                owner_id=owner_id,
+                definition_id=definition_id,
+                resolved_by=actor,
+                resolved_result_id=resolved_result_id,
+            )
+        except KeyError as exc:
+            raise ScheduledTaskAutomationError("result_not_found") from exc
+        except ValueError as exc:
+            if str(exc) == "definition_family_mismatch":
+                raise ScheduledTaskAutomationError("definition_family_mismatch") from exc
+            raise
         response = self._definition_response(updated)
         self._create_audit(
             tx=tx,
@@ -1095,6 +1102,8 @@ class ScheduledTaskAutomationService:
         request_id: str | None,
     ) -> ScheduledTaskDefinitionResponse:
         current = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
+        if current.family != "recurring_question":
+            raise ScheduledTaskAutomationError("definition_family_mismatch")
         if current.lifecycle == "archived":
             raise ScheduledTaskAutomationError("definition_archived")
         if current.lifecycle == "disabled":

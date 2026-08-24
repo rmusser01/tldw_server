@@ -18,6 +18,7 @@ from tldw_Server_API.app.services.scheduled_task_recurring_question_service impo
 from tldw_Server_API.app.services.scheduled_task_recurring_question_worker import (
     RecurringQuestionWorkerRetryableError,
     handle_recurring_question_run_job,
+    run_recurring_question_jobs_worker,
 )
 
 OWNER_ID = 5201
@@ -156,7 +157,7 @@ async def test_worker_records_non_retryable_rag_unavailable_failure(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_worker_reraises_retryable_failure_after_marking_run_failed(tmp_path):
+async def test_worker_reraises_retryable_failure_after_recording_retry_state(tmp_path):
     repo, definition, run = _create_definition_and_run(tmp_path)
 
     async def _rag_executor(_request):
@@ -166,5 +167,78 @@ async def test_worker_reraises_retryable_failure_after_marking_run_failed(tmp_pa
         await handle_recurring_question_run_job(_job(definition.id, run.id), repository=repo, rag_executor=_rag_executor)
 
     stored_run = repo.get_run(owner_id=OWNER_ID, run_id=run.id)
-    assert stored_run.status == "failed"  # nosec B101
+    assert stored_run.status == "queued"  # nosec B101
+    assert stored_run.outcome == "none"  # nosec B101
     assert stored_run.failure_reason["code"] == "quota_exceeded"  # nosec B101
+    assert stored_run.run_summary["retrying"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_retryable_failure_does_not_surface_failure_result_and_success_clears_stale_failure(
+    tmp_path,
+):
+    repo, definition, run = _create_definition_and_run(tmp_path)
+
+    async def _retryable_failure(_request):
+        raise RecurringQuestionRAGError("quota_exceeded", retryable=True)
+
+    with pytest.raises(RecurringQuestionWorkerRetryableError, match="quota_exceeded"):
+        await handle_recurring_question_run_job(
+            _job(definition.id, run.id),
+            repository=repo,
+            rag_executor=_retryable_failure,
+        )
+
+    _results, total_after_failure = repo.list_results(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        limit=10,
+        offset=0,
+    )
+    assert total_after_failure == 0  # nosec B101
+
+    async def _successful_retry(request):
+        return UnifiedRAGResponse(
+            query=request.query,
+            documents=[{"id": "doc-1", "title": "Doc", "score": 0.91, "snippet": "short"}],
+            generated_answer="A useful answer.",
+        )
+
+    await handle_recurring_question_run_job(
+        _job(definition.id, run.id),
+        repository=repo,
+        rag_executor=_successful_retry,
+    )
+
+    stored_run = repo.get_run(owner_id=OWNER_ID, run_id=run.id)
+    results, total_after_success = repo.list_results(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        limit=10,
+        offset=0,
+    )
+    assert stored_run.status == "completed"  # nosec B101
+    assert stored_run.failure_reason is None  # nosec B101
+    assert total_after_success == 1  # nosec B101
+    assert results[0].kind == "finding"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_worker_cancel_check_defers_cancelled_jobs_to_handler(monkeypatch):
+    observed: dict[str, bool] = {}
+
+    class FakeWorkerSDK:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def run(self, *, handler, cancel_check, **_kwargs) -> None:
+            observed["cancel_check"] = await cancel_check({"cancel_requested_at": "2026-07-01T00:00:00Z"})
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.scheduled_task_recurring_question_worker.WorkerSDK",
+        FakeWorkerSDK,
+    )
+
+    await run_recurring_question_jobs_worker()
+
+    assert observed == {"cancel_check": False}  # nosec B101

@@ -20,21 +20,20 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
+from tldw_Server_API.app.core.exceptions import (
+    RecurringQuestionRAGError,
+    RecurringQuestionWorkerRetryableError,
+)
 from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_jobs import (
     RECURRING_QUESTION_QUEUE,
     SCHEDULED_TASKS_DOMAIN,
 )
 from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_rag_adapter import (
-    RecurringQuestionRAGError,
     RecurringQuestionRAGResult,
     build_rag_request_from_definition,
     execute_recurring_question_rag,
     safe_rag_request_snapshot,
 )
-
-
-class RecurringQuestionWorkerRetryableError(Exception):
-    """Raised after persisting run failure so WorkerSDK can retry the Jobs job."""
 
 
 async def handle_recurring_question_run_job(
@@ -51,33 +50,17 @@ async def handle_recurring_question_run_job(
     if not definition_id or not run_id:
         raise ValueError("missing recurring question job identifiers")
     repo = repository or ScheduledTasksDatabase.for_user(owner_id)
-    repo.ensure_schema()
-    definition = repo.get_definition(owner_id=owner_id, definition_id=definition_id)
-    run = repo.get_run(owner_id=owner_id, run_id=run_id)
-    if definition is None:
-        raise ValueError(f"definition not found: {definition_id}")
-    if run is None:
-        raise ValueError(f"run not found: {run_id}")
-    if _job_cancelled(job):
-        cancelled = repo.update_run(
-            owner_id=owner_id,
-            run_id=run_id,
-            patch={
-                "status": "cancelled",
-                "outcome": "none",
-                "ended_at": _utcnow_iso(),
-                "run_summary": {"message": "Run cancelled before execution."},
-            },
-        )
-        return {"status": cancelled.status, "run_id": cancelled.id, "outcome": cancelled.outcome}
-
-    running = repo.update_run(
+    prepared = await asyncio.to_thread(
+        _prepare_run_for_execution,
+        repo=repo,
         owner_id=owner_id,
+        definition_id=definition_id,
         run_id=run_id,
-        patch={"status": "running", "started_at": _utcnow_iso(), "run_summary": {"message": "Running RAG query."}},
+        job=job,
     )
-    config = _definition_config(repo=repo, definition=definition)
-    generation_mode = str(config.get("generation_mode") or "optional")
+    if isinstance(prepared, dict):
+        return prepared
+    definition, running, generation_mode = prepared
     try:
         rag_request = build_rag_request_from_definition(
             definition,
@@ -91,7 +74,8 @@ async def handle_recurring_question_run_job(
             generation_mode=generation_mode,
             finding_policy=running.finding_policy_snapshot,
         )
-        return _persist_adapter_result(
+        return await asyncio.to_thread(
+            _persist_adapter_result,
             repo=repo,
             owner_id=owner_id,
             definition=definition,
@@ -100,7 +84,8 @@ async def handle_recurring_question_run_job(
             rag_request_snapshot=safe_rag_request_snapshot(rag_request),
         )
     except RecurringQuestionRAGError as exc:
-        _persist_failure(
+        await asyncio.to_thread(
+            _persist_failure,
             repo=repo,
             owner_id=owner_id,
             definition=definition,
@@ -108,12 +93,14 @@ async def handle_recurring_question_run_job(
             code=exc.code,
             retryable=exc.retryable,
             details=exc.details,
+            surface_result=not exc.retryable,
         )
         if exc.retryable:
             raise RecurringQuestionWorkerRetryableError(exc.code) from exc
         return {"status": "failed", "run_id": running.id, "outcome": "degraded", "failure_reason": {"code": exc.code}}
     except Exception as exc:
-        _persist_failure(
+        await asyncio.to_thread(
+            _persist_failure,
             repo=repo,
             owner_id=owner_id,
             definition=definition,
@@ -121,6 +108,7 @@ async def handle_recurring_question_run_job(
             code="worker_failure",
             retryable=True,
             details={"error_type": type(exc).__name__},
+            surface_result=False,
         )
         raise RecurringQuestionWorkerRetryableError("worker_failure") from exc
 
@@ -159,7 +147,8 @@ async def run_recurring_question_jobs_worker(stop_event: asyncio.Event | None = 
         return await handle_recurring_question_run_job(job)
 
     async def _cancel_check(job: dict[str, Any]) -> bool:
-        return _job_cancelled(job)
+        del job
+        return False
 
     logger.info("Scheduled Tasks Recurring Question Jobs worker starting: worker_id={}", worker_id)
     try:
@@ -188,6 +177,7 @@ def _persist_adapter_result(
                 "status": "completed",
                 "outcome": "no_match",
                 "ended_at": _utcnow_iso(),
+                "failure_reason": None,
                 "rag_request_snapshot": rag_request_snapshot,
                 "evidence_summary": adapter_result.evidence_summary,
                 "run_summary": {"message": adapter_result.summary, "title": adapter_result.title},
@@ -219,6 +209,7 @@ def _persist_adapter_result(
             "status": "completed",
             "outcome": "finding",
             "ended_at": _utcnow_iso(),
+            "failure_reason": None,
             "rag_request_snapshot": rag_request_snapshot,
             "evidence_summary": adapter_result.evidence_summary,
             "run_summary": {"message": adapter_result.summary, "title": adapter_result.title},
@@ -252,24 +243,29 @@ def _persist_failure(
     details: dict[str, Any] | None,
     adapter_result: RecurringQuestionRAGResult | None = None,
     rag_request_snapshot: dict[str, Any] | None = None,
+    surface_result: bool = True,
 ) -> None:
     failure_reason = {"code": code, "retryable": retryable, **(details or {})}
+    should_finalize = surface_result or not retryable
     repo.update_run(
         owner_id=owner_id,
         run_id=run.id,
         patch={
-            "status": "failed",
-            "outcome": "degraded",
-            "ended_at": _utcnow_iso(),
+            "status": "failed" if should_finalize else "queued",
+            "outcome": "degraded" if should_finalize else "none",
+            "ended_at": _utcnow_iso() if should_finalize else None,
             "failure_reason": failure_reason,
             "rag_request_snapshot": rag_request_snapshot or run.rag_request_snapshot,
             "evidence_summary": adapter_result.evidence_summary if adapter_result is not None else run.evidence_summary,
             "run_summary": {
                 "message": adapter_result.summary if adapter_result is not None else "Recurring Question run failed.",
                 "failure_code": code,
+                "retrying": not should_finalize,
             },
         },
     )
+    if not surface_result:
+        return
     repo.create_result(
         owner_id=owner_id,
         definition_id=definition.id,
@@ -284,6 +280,51 @@ def _persist_failure(
         dedupe_key=_dedupe_key(definition_id=definition.id, run_id=run.id, kind=f"failure:{code}"),
         visibility_destination={"home": True, "results": True},
     )
+
+
+def _prepare_run_for_execution(
+    *,
+    repo: ScheduledTasksDatabase,
+    owner_id: int,
+    definition_id: str,
+    run_id: str,
+    job: dict[str, Any],
+) -> tuple[DefinitionRow, RunRow, str] | dict[str, Any]:
+    repo.ensure_schema()
+    definition = repo.get_definition(owner_id=owner_id, definition_id=definition_id)
+    run = repo.get_run(owner_id=owner_id, run_id=run_id)
+    if definition is None:
+        raise ValueError(f"definition not found: {definition_id}")
+    if run is None:
+        raise ValueError(f"run not found: {run_id}")
+    if _job_cancelled(job):
+        cancelled = repo.update_run(
+            owner_id=owner_id,
+            run_id=run_id,
+            patch={
+                "status": "cancelled",
+                "outcome": "none",
+                "ended_at": _utcnow_iso(),
+                "failure_reason": {"code": "job_cancelled", "retryable": False},
+                "run_summary": {"message": "Run cancelled before execution."},
+            },
+        )
+        return {"status": cancelled.status, "run_id": cancelled.id, "outcome": cancelled.outcome}
+    running = repo.update_run(
+        owner_id=owner_id,
+        run_id=run_id,
+        patch={
+            "status": "running",
+            "outcome": "none",
+            "started_at": _utcnow_iso(),
+            "ended_at": None,
+            "failure_reason": None,
+            "run_summary": {"message": "Running RAG query."},
+        },
+    )
+    config = _definition_config(repo=repo, definition=definition)
+    generation_mode = str(config.get("generation_mode") or "optional")
+    return definition, running, generation_mode
 
 
 def _definition_config(*, repo: ScheduledTasksDatabase, definition: DefinitionRow) -> dict[str, Any]:

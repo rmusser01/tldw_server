@@ -9,7 +9,11 @@ import type {
   ScheduledTaskDefinitionResponse,
   ScheduledTaskPreviewResponse
 } from "@/services/scheduled-tasks-control-plane"
-import { ScheduledTaskAutomationDefinitionEditor } from "../ScheduledTaskAutomationDefinitionEditor"
+import {
+  buildAutomationDefinitionPreviewPayload,
+  ScheduledTaskAutomationDefinitionEditor,
+  type ScheduledTaskAutomationDefinitionEditorValues
+} from "../ScheduledTaskAutomationDefinitionEditor"
 
 const validPreview = (
   overrides: Partial<ScheduledTaskPreviewResponse> = {}
@@ -55,6 +59,45 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
     })
     return { promise, resolve }
   }
+
+  it("lets guided scope controls override stale advanced scope JSON", () => {
+    const values: Required<ScheduledTaskAutomationDefinitionEditorValues> = {
+      name: "Track answer",
+      description: "",
+      scheduleKind: "daily",
+      schedule: {},
+      cron: "",
+      timezone: "UTC",
+      visibility: "private",
+      question: "Has the answer appeared?",
+      successCriteria: "",
+      scopeMode: "sources",
+      scopeSources: "notes, media_db",
+      scopeJson: JSON.stringify({
+        mode: "all_searchable_library",
+        sources: ["stale_source"]
+      }),
+      findingPolicyPreset: "balanced_findings",
+      generationMode: "optional",
+      agentRef: "",
+      message: "",
+      allowedToolClasses: "",
+      deniedToolClasses: "",
+      approvalMode: "none",
+      initialLifecycle: "configured"
+    }
+
+    const payload = buildAutomationDefinitionPreviewPayload({
+      family: "recurring_question",
+      mode: "create",
+      values
+    })
+
+    expect(payload.config?.scope).toEqual({
+      mode: "sources",
+      sources: ["notes", "media_db"]
+    })
+  })
 
   it("shows guided recurring question controls and hides raw scope JSON by default", async () => {
     const user = userEvent.setup()

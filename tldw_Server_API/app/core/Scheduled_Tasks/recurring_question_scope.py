@@ -32,6 +32,17 @@ def normalize_recurring_question_scope(
             )
 
     mode = raw_scope.get("mode")
+    if mode is not None and mode not in {"all_searchable_library", "sources"}:
+        return {
+            "mode": str(mode),
+        }, [
+            {
+                "field": "config.scope.mode",
+                "code": "unsupported",
+                "message": f"Unsupported scope mode: {mode}",
+            }
+        ], warnings
+
     if mode == "all_searchable_library" or (mode is None and "sources" not in raw_scope):
         normalized = {
             "mode": "all_searchable_library",
