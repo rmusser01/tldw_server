@@ -2377,6 +2377,405 @@ class NotesTaskService:
             )
             return task
 
+    @staticmethod
+    def _task_projection_line(
+        *,
+        task: dict[str, Any],
+    ) -> str:
+        """Render one canonical top-level line for an explicit link operation."""
+
+        marker = "x" if str(task["status"]) == "done" else " "
+        metadata = dict(task.get("metadata_json") or {})
+        body = NotesTaskService._render_body(
+            text=str(task["text"]),
+            metadata={
+                key: metadata[key]
+                for key in _METADATA_TOKEN_ORDER
+                if metadata.get(key) is not None
+            },
+        )
+        return (
+            f"- [{marker}] {body} "
+            + render_task_marker(
+                str(task["id"]),
+                revision=int(task["canonical_revision"]),
+                object_hash=str(task["canonical_hash"]),
+            )
+        )
+
+    @staticmethod
+    def _cache_materialized_task_projection(
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        task_id: str,
+    ) -> None:
+        """Refresh the disposable locator cache after a linked group applies."""
+
+        task = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if task is None or task["projection_status"] != "live":
+            raise ConflictError(
+                "Linked task product state is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        note = db.get_note_by_id(str(task["note_id"]))
+        if note is None:
+            raise ConflictError(
+                "Linked task note is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        matches = [
+            item
+            for item in parse_note_checklists(
+                note_id=str(note["id"]),
+                note_version=int(note["version"]),
+                content=str(note.get("content") or ""),
+            ).items
+            if item.marker is not None and item.marker.task_id == task_id
+        ]
+        if len(matches) != 1:
+            raise ConflictError(
+                "Linked task marker is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        item = matches[0]
+        db.set_task_projection(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+            note_id=str(note["id"]),
+            note_version=int(note["version"]),
+            line_number=item.locator.line_number,
+            start_offset=item.locator.start_offset,
+            end_offset=item.locator.end_offset,
+            normalized_text_hash=item.locator.normalized_text_hash,
+            occurrence_index=item.locator.occurrence_index,
+            block_fingerprint=item.locator.block_fingerprint,
+            raw_line=item.raw_line,
+            has_child_content=item.has_child_content,
+        )
+
+    def restore_task(
+        self,
+        *,
+        db: CharactersRAGDB,
+        task_id: str,
+        expected_task_version: int,
+        expected_note_version: int,
+        expected_base_server_cursor: int,
+        expected_base_revision: int,
+        expected_base_hash: str,
+        actor: TaskActor,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Restore one exact task tombstone and its verified former projection."""
+
+        scope = resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=owner_user_id or db.client_id,
+        )
+        coordinator = self._active_task_coordinator(scope=scope)
+        if coordinator is None or coordinator.service is None:
+            raise ConflictError(
+                "Task restore requires active synchronized task authority.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        task = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+            include_deleted=True,
+        )
+        if (
+            task is None
+            or not bool(task["deleted"])
+            or int(task["version"]) != expected_task_version
+        ):
+            raise ConflictError(
+                "Task tombstone changed concurrently.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        task_head = coordinator.service.store.get_current_head(
+            scope.dataset_id,
+            "notes.task",
+            task_id,
+        )
+        if (
+            task_head is None
+            or task_head.operation != "tombstone"
+            or task_head.server_cursor != expected_base_server_cursor
+            or task_head.object_revision != expected_base_revision
+            or task_head.payload_hash != expected_base_hash
+            or int(task["canonical_revision"]) != expected_base_revision
+            or str(task["canonical_hash"]) != expected_base_hash
+        ):
+            raise ConflictError(
+                "Task restore requires the exact current tombstone base.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        note = self._require_note_version(
+            db,
+            note_id=str(task["note_id"]),
+            expected_note_version=expected_note_version,
+        )
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        source_row = db.task_store._sync_bootstrap_task_row(
+            task,
+            scope.owner_user_id,
+        )
+        payload = parse_notes_task_v1(
+            source_row["sync_payload"],
+            owner_user_id=scope.owner_user_id,
+        )
+        revision = expected_base_revision + 1
+        from tldw_Server_API.app.core.Sync.v2.notes_task_coordinator import (
+            _projection_anchor_from_envelope,
+        )
+
+        prior_anchor = _projection_anchor_from_envelope(task_head)
+        restore_linked = prior_anchor is not None and prior_anchor.linked
+        after = {
+            **task,
+            "deleted": False,
+            "projection_status": "live" if restore_linked else "unlinked",
+            "updated_at": occurred_at,
+            "version": int(task["version"]) + 1,
+            "canonical_revision": revision,
+            "canonical_hash": notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=False,
+            ),
+            "source_diagnostic_code": None,
+            "source_diagnostic_hash": None,
+        }
+        note_step = None
+        if restore_linked:
+            note_head = coordinator.service.store.get_current_head(
+                scope.dataset_id,
+                "notes.note",
+                str(note["id"]),
+            )
+            if (
+                prior_anchor is None
+                or note_head is None
+                or note_head.client_envelope_id != prior_anchor.note_envelope_id
+                or note_head.payload_hash != prior_anchor.note_hash
+            ):
+                raise ConflictError(
+                    "Task restore note base is unavailable.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )
+            note_content = str(note.get("content") or "")
+            if any(
+                item.marker is not None and item.marker.task_id == task_id
+                for item in parse_note_checklists(
+                    note_id=str(note["id"]),
+                    note_version=int(note["version"]),
+                    content=note_content,
+                ).items
+            ):
+                raise ConflictError(
+                    "Task restore marker already exists.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )
+            note_step = self._note_projection_step(
+                coordinator=coordinator,
+                note=note,
+                content=self._append_checklist_line(
+                    note_content,
+                    self._task_projection_line(task=after),
+                ),
+            )
+        source, source_kind = self._task_source(actor)
+        mutation = build_task_capture_mutation(
+            db=db,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            actor=actor,
+            before=task,
+            after=after,
+            source_kind=source_kind,
+        )
+        result = coordinator.capture(
+            coordinator.plan_task_mutation(mutation, note_step=note_step),
+            source=source,
+        )
+        if not result.fully_applied:
+            raise ConflictError(
+                "Task restore projection is incomplete.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        if restore_linked:
+            self._cache_materialized_task_projection(
+                db=db,
+                scope=scope,
+                task_id=task_id,
+            )
+        restored = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if restored is None:
+            raise ConflictError(
+                "Restored task was not found.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        return restored
+
+    def relink_task(
+        self,
+        *,
+        db: CharactersRAGDB,
+        task_id: str,
+        note_id: str,
+        expected_task_version: int,
+        expected_note_version: int,
+        actor: TaskActor,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Relink one unlinked task to its immutable authorized parent note."""
+
+        scope = resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=owner_user_id or db.client_id,
+        )
+        coordinator = self._active_task_coordinator(scope=scope)
+        if coordinator is None or coordinator.service is None:
+            raise ConflictError(
+                "Task relink requires active synchronized task authority.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        task = self._require_task_version(
+            db,
+            task_id=task_id,
+            expected_task_version=expected_task_version,
+            scope=scope,
+            conn=None,
+        )
+        if task["projection_status"] != "unlinked" or str(task["note_id"]) != note_id:
+            raise ConflictError(
+                "Task relink destination is not its authorized parent note.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        note = self._require_note_version(
+            db,
+            note_id=note_id,
+            expected_note_version=expected_note_version,
+        )
+        content = str(note.get("content") or "")
+        if any(
+            item.marker is not None and item.marker.task_id == task_id
+            for item in parse_note_checklists(
+                note_id=note_id,
+                note_version=int(note["version"]),
+                content=content,
+            ).items
+        ):
+            raise ConflictError(
+                "Task relink marker already exists.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        source_row = db.task_store._sync_bootstrap_task_row(
+            task,
+            scope.owner_user_id,
+        )
+        payload = parse_notes_task_v1(
+            source_row["sync_payload"],
+            owner_user_id=scope.owner_user_id,
+        )
+        revision = int(task["canonical_revision"]) + 1
+        after = {
+            **task,
+            "projection_status": "live",
+            "updated_at": occurred_at,
+            "version": int(task["version"]) + 1,
+            "canonical_revision": revision,
+            "canonical_hash": notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=False,
+            ),
+            "source_diagnostic_code": None,
+            "source_diagnostic_hash": None,
+        }
+        note_step = self._note_projection_step(
+            coordinator=coordinator,
+            note=note,
+            content=self._append_checklist_line(
+                content,
+                self._task_projection_line(task=after),
+            ),
+        )
+        source, source_kind = self._task_source(actor)
+        mutation = build_task_capture_mutation(
+            db=db,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            actor=actor,
+            before=task,
+            after=after,
+            source_kind=source_kind,
+        )
+        result = coordinator.capture(
+            coordinator.plan_task_mutation(mutation, note_step=note_step),
+            source=source,
+        )
+        if not result.fully_applied:
+            raise ConflictError(
+                "Task relink projection is incomplete.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        self._cache_materialized_task_projection(
+            db=db,
+            scope=scope,
+            task_id=task_id,
+        )
+        relinked = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if relinked is None:
+            raise ConflictError(
+                "Relinked task was not found.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        return relinked
+
     def update_task(
         self,
         *,

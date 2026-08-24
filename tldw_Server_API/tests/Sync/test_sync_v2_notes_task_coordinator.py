@@ -623,6 +623,105 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
             "idempotency_conflict"
         ]
 
+        client_live_head = sync_store.get_current_head(
+            dataset.dataset_id,
+            "notes.task",
+            str(task["id"]),
+        )
+        assert client_live_head is not None
+        client_tombstone_revision = int(client_live_head.object_revision or 0) + 1
+        client_tombstone = SyncEnvelopeCreate(
+            dataset_id=dataset.dataset_id,
+            client_envelope_id="client-task-tombstone-1",
+            domain="notes.task",
+            operation="tombstone",
+            object_id=str(task["id"]),
+            parent_id=NOTE_ID,
+            device_id=device_id,
+            base_server_cursor=client_live_head.server_cursor,
+            base_object_revision=client_live_head.object_revision,
+            base_object_hash=client_live_head.payload_hash,
+            object_revision=client_tombstone_revision,
+            entity_version=client_tombstone_revision,
+            payload=dict(client_live_head.payload),
+            payload_hash=notes_task_object_hash(
+                parse_notes_task_v1(
+                    client_live_head.payload,
+                    owner_user_id=OWNER_ID,
+                ),
+                revision=client_tombstone_revision,
+                deleted=True,
+            ),
+            created_at_client="2026-08-24T10:03:00+00:00",
+            encryption_metadata={"policy": "server_trusted_v1"},
+            deleted=True,
+        )
+        client_deleted = service.push(
+            user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            device_id=device_id,
+            envelopes=[client_tombstone],
+        )
+        assert client_deleted.rejected == []
+        assert client_deleted.conflicts == []
+        client_deleted_note = note_db.get_note_by_id(NOTE_ID)
+        assert client_deleted_note is not None
+        assert parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(client_deleted_note["version"]),
+            content=str(client_deleted_note["content"]),
+        ).items == []
+
+        client_deleted_head = sync_store.get_current_head(
+            dataset.dataset_id,
+            "notes.task",
+            str(task["id"]),
+        )
+        assert client_deleted_head is not None
+        client_restore_revision = int(client_deleted_head.object_revision or 0) + 1
+        client_restore = SyncEnvelopeCreate(
+            dataset_id=dataset.dataset_id,
+            client_envelope_id="client-task-restore-1",
+            domain="notes.task",
+            operation="upsert",
+            object_id=str(task["id"]),
+            parent_id=NOTE_ID,
+            device_id=device_id,
+            base_server_cursor=client_deleted_head.server_cursor,
+            base_object_revision=client_deleted_head.object_revision,
+            base_object_hash=client_deleted_head.payload_hash,
+            object_revision=client_restore_revision,
+            entity_version=client_restore_revision,
+            payload=dict(client_deleted_head.payload),
+            payload_hash=notes_task_object_hash(
+                parse_notes_task_v1(
+                    client_deleted_head.payload,
+                    owner_user_id=OWNER_ID,
+                ),
+                revision=client_restore_revision,
+                deleted=False,
+            ),
+            created_at_client="2026-08-24T10:04:00+00:00",
+            encryption_metadata={"policy": "server_trusted_v1"},
+            routing_metadata={"restore_intent": True},
+        )
+        client_restored = service.push(
+            user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            device_id=device_id,
+            envelopes=[client_restore],
+        )
+        assert client_restored.rejected == []
+        client_note = note_db.get_note_by_id(NOTE_ID)
+        assert client_note is not None
+        client_item = parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(client_note["version"]),
+            content=str(client_note["content"]),
+        ).items[0]
+        assert client_item.marker is not None
+        assert client_item.marker.revision == client_restore_revision
+
         note_edit_marker = client_item.marker
         assert note_edit_marker is not None
         note_db.update_note(
@@ -699,6 +798,101 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
             note_version=int(deleted_note["version"]),
             content=str(deleted_note["content"]),
         ).items == []
+
+        restored = task_service.restore_task(
+            db=note_db,
+            task_id=str(task["id"]),
+            expected_task_version=int(deleted["version"]),
+            expected_note_version=int(deleted_note["version"]),
+            expected_base_server_cursor=int(deleted_head.server_cursor or 0),
+            expected_base_revision=int(deleted_head.object_revision or 0),
+            expected_base_hash=str(deleted_head.payload_hash),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        restored_note = note_db.get_note_by_id(NOTE_ID)
+        restored_head = sync_store.get_current_head(
+            dataset.dataset_id,
+            "notes.task",
+            str(task["id"]),
+        )
+        assert restored_note is not None
+        assert restored_head is not None
+        assert restored_head.routing_metadata["restore_intent"] is True
+        assert restored["projection_status"] == "live"
+        assert len(
+            [
+                item
+                for item in parse_note_checklists(
+                    note_id=NOTE_ID,
+                    note_version=int(restored_note["version"]),
+                    content=str(restored_note["content"]),
+                ).items
+                if item.marker is not None and item.marker.task_id == str(task["id"])
+            ]
+        ) == 1
+        with pytest.raises(ConflictError):
+            task_service.restore_task(
+                db=note_db,
+                task_id=str(task["id"]),
+                expected_task_version=int(deleted["version"]),
+                expected_note_version=int(deleted_note["version"]),
+                expected_base_server_cursor=int(deleted_head.server_cursor or 0),
+                expected_base_revision=int(deleted_head.object_revision or 0),
+                expected_base_hash=str(deleted_head.payload_hash),
+                actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+                owner_user_id=OWNER_ID,
+            )
+
+        note_db.update_note(
+            note_id=NOTE_ID,
+            update_data={"content": "\n"},
+            expected_version=int(restored_note["version"]),
+        )
+        restore_removed_note = note_db.get_note_by_id(NOTE_ID)
+        assert restore_removed_note is not None
+        task_service.reconcile_note(
+            db=note_db,
+            note_id=NOTE_ID,
+            note_version=int(restore_removed_note["version"]),
+            content=str(restore_removed_note["content"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        restore_unlinked = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(task["id"]),
+        )
+        relink_note = note_db.get_note_by_id(NOTE_ID)
+        assert restore_unlinked is not None
+        assert relink_note is not None
+        assert restore_unlinked["projection_status"] == "unlinked"
+        relinked = task_service.relink_task(
+            db=note_db,
+            task_id=str(task["id"]),
+            note_id=NOTE_ID,
+            expected_task_version=int(restore_unlinked["version"]),
+            expected_note_version=int(relink_note["version"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        after_relink_note = note_db.get_note_by_id(NOTE_ID)
+        assert relinked["id"] == restored["id"]
+        assert relinked["projection_status"] == "live"
+        assert after_relink_note is not None
+        final_deleted = task_service.delete_task(
+            db=note_db,
+            task_id=str(task["id"]),
+            expected_task_version=int(relinked["version"]),
+            expected_note_version=int(after_relink_note["version"]),
+            record_only=False,
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        deleted_note = note_db.get_note_by_id(NOTE_ID)
+        assert final_deleted["id"] == restored["id"]
+        assert deleted_note is not None
 
         created = task_service.create_task_for_note(
             db=note_db,

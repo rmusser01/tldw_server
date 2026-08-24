@@ -352,6 +352,102 @@ def project_task_payload_into_note(
     marker_end = item.raw_line.find("]", marker_index + 1)
     if marker_index < 0 or marker_end != marker_index + 2:
         raise SyncStoreError("notes_task_projection_base_invalid")
+    new_line = _task_projection_line(
+        prefix=item.raw_line[:marker_index],
+        task_id=task_id,
+        task_revision=task_revision,
+        task_hash=task_hash,
+        payload=payload,
+    )
+    return (
+        content[: item.locator.start_offset]
+        + new_line
+        + content[item.locator.end_offset :]
+    )
+
+
+def remove_task_projection_from_note(
+    *,
+    content: str,
+    note_id: str,
+    note_revision: int,
+    task_id: str,
+    base_revision: int,
+    base_hash: str,
+    **_unused: object,
+) -> str:
+    """Remove the sole line carrying an exact managed task base marker."""
+
+    parsed = parse_note_checklists(
+        note_id=note_id,
+        note_version=note_revision,
+        content=content,
+    )
+    matches = [
+        item
+        for item in parsed.items
+        if item.marker
+        == TaskMarker(
+            task_id=task_id,
+            revision=base_revision,
+            object_hash=base_hash,
+        )
+    ]
+    if len(matches) != 1 or matches[0].has_child_content:
+        raise SyncStoreError("notes_task_projection_base_invalid")
+    item = matches[0]
+    start = item.locator.start_offset
+    end = item.locator.end_offset
+    if end < len(content) and content[end] == "\n":
+        end += 1
+    elif start > 0 and content[start - 1] == "\n":
+        start -= 1
+    remaining = content[:start] + content[end:]
+    return remaining if remaining else "\n"
+
+
+def append_task_projection_to_note(
+    *,
+    content: str,
+    note_id: str,
+    note_revision: int,
+    task_id: str,
+    task_revision: int,
+    task_hash: str,
+    payload: Mapping[str, object],
+) -> str:
+    """Append one restored/relinked marker after proving identity is absent."""
+
+    parsed = parse_note_checklists(
+        note_id=note_id,
+        note_version=note_revision,
+        content=content,
+    )
+    if any(item.marker is not None and item.marker.task_id == task_id for item in parsed.items):
+        raise SyncStoreError("notes_task_projection_base_invalid")
+    line = _task_projection_line(
+        prefix="- ",
+        task_id=task_id,
+        task_revision=task_revision,
+        task_hash=task_hash,
+        payload=payload,
+    )
+    if not content:
+        return line + "\n"
+    separator = "" if content.endswith("\n") else "\n"
+    return content + separator + line + "\n"
+
+
+def _task_projection_line(
+    *,
+    prefix: str,
+    task_id: str,
+    task_revision: int,
+    task_hash: str,
+    payload: Mapping[str, object],
+) -> str:
+    """Render one canonical managed checklist line from a task payload."""
+
     status = payload.get("status")
     title = payload.get("title")
     if status not in {"open", "done"} or not isinstance(title, str) or not title:
@@ -373,12 +469,7 @@ def project_task_payload_into_note(
         )
     )
     checked = "x" if status == "done" else " "
-    new_line = f"{item.raw_line[:marker_index]}[{checked}] {' '.join(body)}"
-    return (
-        content[: item.locator.start_offset]
-        + new_line
-        + content[item.locator.end_offset :]
-    )
+    return f"{prefix}[{checked}] {' '.join(body)}"
 
 
 def _canonical_note_step(

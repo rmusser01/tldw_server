@@ -9946,11 +9946,12 @@ class SyncDatabase:
         through_server_sequence: int,
         state: Mapping[str, Any],
         adapter_version: int = 1,
+        connection: Any | None = None,
     ) -> int:
         """Record a non-destructive compaction checkpoint for a domain."""
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_domain(dataset_id, domain, connection=conn)
             existing = _first(
                 self.execute(

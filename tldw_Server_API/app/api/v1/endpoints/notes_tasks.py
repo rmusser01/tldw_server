@@ -38,7 +38,9 @@ from tldw_Server_API.app.api.v1.schemas.notes_tasks_schemas import (
     TaskProjectionDriftResponse,
     TaskProjectionResponse,
     TaskReconciliationSummaryResponse,
+    TaskRelinkRequest,
     TaskResponse,
+    TaskRestoreRequest,
     TaskStatusBatchRequest,
     TaskStatusBatchResponse,
     TaskStatusValue,
@@ -572,6 +574,80 @@ async def delete_task(
     except Exception as exc:
         _handle_task_error(exc)
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Task delete failed")
+
+
+@router.post("/tasks/{task_id}/restore", response_model=TaskResponse, tags=["notes"])
+async def restore_task(
+    task_id: str,
+    request: TaskRestoreRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+    current_user: User = Depends(get_request_user),
+    task_service: NotesTaskService = Depends(get_notes_task_service),
+    _: None = Depends(rbac_rate_limit("notes.update")),
+) -> TaskResponse:
+    """Restore one task only against its exact current tombstone."""
+
+    await _check_rate_limit(rate_limiter, current_user, "notes.update")
+    try:
+        task = task_service.restore_task(
+            db=db,
+            owner_user_id=str(current_user.id),
+            task_id=task_id,
+            expected_task_version=request.expected_task_version,
+            expected_note_version=request.expected_note_version,
+            expected_base_server_cursor=request.expected_base_server_cursor,
+            expected_base_revision=request.expected_base_revision,
+            expected_base_hash=request.expected_base_hash,
+            actor=_actor(current_user),
+        )
+        scope = resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=str(current_user.id),
+        )
+        return _task_response(db, task, scope=scope)
+    except Exception as exc:
+        _handle_task_error(exc)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Task restore failed",
+    )
+
+
+@router.post("/tasks/{task_id}/relink", response_model=TaskResponse, tags=["notes"])
+async def relink_task(
+    task_id: str,
+    request: TaskRelinkRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+    current_user: User = Depends(get_request_user),
+    task_service: NotesTaskService = Depends(get_notes_task_service),
+    _: None = Depends(rbac_rate_limit("notes.update")),
+) -> TaskResponse:
+    """Relink one unlinked task to its immutable authorized parent note."""
+
+    await _check_rate_limit(rate_limiter, current_user, "notes.update")
+    try:
+        task = task_service.relink_task(
+            db=db,
+            owner_user_id=str(current_user.id),
+            task_id=task_id,
+            note_id=request.note_id,
+            expected_task_version=request.expected_task_version,
+            expected_note_version=request.expected_note_version,
+            actor=_actor(current_user),
+        )
+        scope = resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=str(current_user.id),
+        )
+        return _task_response(db, task, scope=scope)
+    except Exception as exc:
+        _handle_task_error(exc)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Task relink failed",
+    )
 
 
 def _list_note_tasks_response(

@@ -110,6 +110,21 @@ class SyncV2Store:
             yield guarded
 
     @contextmanager
+    def retention_domain_guard(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_ids: Sequence[str],
+    ) -> Iterator[SyncV2Store]:
+        """Hold one dataset fence while revalidating a domain checkpoint."""
+
+        keys = [(dataset_id, domain, object_id) for object_id in object_ids]
+        with self.db.materialization_transaction(keys) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    @contextmanager
     def blob_write_guard(
         self,
         dataset_id: str,
@@ -1498,6 +1513,7 @@ class SyncV2Store:
             domain,
             through_server_sequence=through_server_sequence,
             state=state,
+            connection=self._connection,
         )
 
     def summarize_blob_quota(

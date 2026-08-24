@@ -10,10 +10,16 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Notes_Tasks.projection_markers import (
+    TaskMarker,
+    task_marker_hash,
+)
 from tldw_Server_API.app.core.Sync.v2 import service as service_module
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+from tldw_Server_API.app.core.Sync.v2.materializers import NotesTaskMaterializer
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncBlobObjectCreate,
     SyncDatasetCreate,
@@ -254,6 +260,111 @@ def _v2_retention_service(tmp_path: Path) -> SyncV2Service:
         )
     )
     return service
+
+
+def _notes_task_retention_service(
+    tmp_path: Path,
+) -> tuple[SyncV2Service, CharactersRAGDB, str, str]:
+    owner_id = "task-retention-owner"
+    dataset_id = "task-retention-dataset"
+    note_id = "11111111-1111-4111-8111-111111111111"
+    task_id = "22222222-2222-4222-8222-222222222222"
+    product = CharactersRAGDB(tmp_path / "task-retention-product.db", client_id=owner_id)
+    product.note_store.add_note("Tasks", "body", note_id=note_id)
+    product.bind_local_task_graph_to_dataset(
+        owner_user_id=owner_id,
+        target_dataset_id=dataset_id,
+    )
+    product.task_store.create_task(
+        owner_user_id=owner_id,
+        dataset_id=dataset_id,
+        note_id=note_id,
+        task_id=task_id,
+        text="Retain this task",
+        projection_status="unlinked",
+    )
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "task-retention-sync.db")),
+        adapters=SyncAdapterRegistry(
+            [
+                StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1}),
+                StaticSyncAdapter(domain="notes.task", supported_adapter_versions={1}),
+                StaticSyncAdapter(
+                    domain="notes.task_activity",
+                    supported_adapter_versions={1},
+                ),
+            ]
+        ),
+        materializers={"notes.task": NotesTaskMaterializer(product)},
+        clock=_clock,
+    )
+    service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id=dataset_id,
+            owner_user_id=owner_id,
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=["notes.note"],
+        )
+    )
+    service.store.db.execute(
+        "UPDATE sync_datasets SET domain_set_json = ? WHERE dataset_id = ?",
+        ('["notes.note","notes.task","notes.task_activity"]', dataset_id),
+    )
+    return service, product, note_id, task_id
+
+
+def _insert_task_retention_history(
+    service: SyncV2Service,
+    *,
+    dataset_id: str,
+    note_id: str,
+    task_id: str,
+) -> tuple[Any, Any]:
+    first_hash = "sha256:" + "1" * 64
+    second_hash = "sha256:" + "2" * 64
+    first = service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id="task-retention-v1",
+            domain="notes.task",
+            operation="upsert",
+            object_id=task_id,
+            parent_id=note_id,
+            device_id="server-origin",
+            object_revision=1,
+            entity_version=1,
+            payload={"task_id": task_id, "note_id": note_id, "title": "First"},
+            payload_hash=first_hash,
+            created_at_client="2026-05-20T00:00:00+00:00",
+            status="accepted",
+            apply_status="applied",
+            applied_at="2026-05-20T00:00:00+00:00",
+        )
+    )
+    second = service.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id="task-retention-v2",
+            domain="notes.task",
+            operation="upsert",
+            object_id=task_id,
+            parent_id=note_id,
+            device_id="server-origin",
+            base_server_cursor=first.server_cursor,
+            base_object_revision=1,
+            base_object_hash=first_hash,
+            object_revision=2,
+            entity_version=2,
+            payload={"task_id": task_id, "note_id": note_id, "title": "Second"},
+            payload_hash=second_hash,
+            created_at_client="2026-05-21T00:00:00+00:00",
+            status="accepted",
+            apply_status="applied",
+            applied_at="2026-05-21T00:00:00+00:00",
+        )
+    )
+    return first, second
 
 
 def _namespaced_storage_key(
@@ -1812,3 +1923,196 @@ def test_retention_compact_endpoint_returns_redacted_apply_summary(
     assert body["domain_compactions"][0]["domain"] == "notes.note"
     assert "payload" not in body
     assert "payload_ciphertext" not in body
+
+
+def test_notes_task_open_drift_blocks_exact_envelope_until_resolved(
+    tmp_path: Path,
+) -> None:
+    service, product, note_id, task_id = _notes_task_retention_service(tmp_path)
+    try:
+        first, _second = _insert_task_retention_history(
+            service,
+            dataset_id="task-retention-dataset",
+            note_id=note_id,
+            task_id=task_id,
+        )
+        assert first.server_cursor is not None
+        drift = product.task_store.create_task_projection_drift(
+            owner_user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            drift_id="task-retention-drift",
+            note_id=note_id,
+            task_id=task_id,
+            marker_base_revision=1,
+            marker_base_hash=str(first.payload_hash),
+            note_head_cursor=None,
+            note_head_hash=None,
+            task_head_cursor=first.server_cursor,
+            task_head_hash=str(first.payload_hash),
+            reason_code="both_changed",
+        )
+
+        blocked = service.retention_dry_run(
+            user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            domains=["notes.task"],
+            audit_mode=False,
+        )
+        candidate = next(
+            item for item in blocked.candidates if item.server_sequence == first.server_sequence
+        )
+        assert "retention_task_projection_drift" in candidate.blockers
+
+        product.task_store.compare_and_set_task_projection_drift(
+            owner_user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            note_id=note_id,
+            task_id=task_id,
+            drift_id=str(drift["id"]),
+            expected_note_head_cursor=None,
+            expected_note_head_hash=None,
+            expected_task_head_cursor=first.server_cursor,
+            expected_task_head_hash=str(first.payload_hash),
+            status="resolved",
+        )
+        released = service.retention_dry_run(
+            user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            domains=["notes.task"],
+            audit_mode=False,
+        )
+        candidate = next(
+            item for item in released.candidates if item.server_sequence == first.server_sequence
+        )
+        assert "retention_task_projection_drift" not in candidate.blockers
+    finally:
+        product.close_connection()
+
+
+def test_notes_task_linked_tombstone_retains_immutable_anchor_without_cache(
+    tmp_path: Path,
+) -> None:
+    service, product, note_id, task_id = _notes_task_retention_service(tmp_path)
+    try:
+        _first, second = _insert_task_retention_history(
+            service,
+            dataset_id="task-retention-dataset",
+            note_id=note_id,
+            task_id=task_id,
+        )
+        assert second.server_cursor is not None
+        tombstone_hash = "sha256:" + "3" * 64
+        marker = TaskMarker(task_id=task_id, revision=3, object_hash=tombstone_hash)
+        tombstone = service.store.insert_envelope(
+            SyncEnvelopeCreate(
+                dataset_id="task-retention-dataset",
+                client_envelope_id="task-retention-v3",
+                domain="notes.task",
+                operation="tombstone",
+                object_id=task_id,
+                parent_id=note_id,
+                device_id="server-origin",
+                base_server_cursor=second.server_cursor,
+                base_object_revision=2,
+                base_object_hash=second.payload_hash,
+                object_revision=3,
+                entity_version=3,
+                payload={"task_id": task_id, "note_id": note_id, "title": "Second"},
+                payload_hash=tombstone_hash,
+                created_at_client="2026-05-22T00:00:00+00:00",
+                routing_metadata={
+                    "task_projection": {
+                        "projection_version": 1,
+                        "task_id": task_id,
+                        "task_envelope_id": "task-retention-v3",
+                        "task_revision": 3,
+                        "task_hash": tombstone_hash,
+                        "note_envelope_id": "task-retention-note-v3",
+                        "note_hash": "sha256:" + "4" * 64,
+                        "linked": True,
+                        "marker_hash": task_marker_hash(marker),
+                    }
+                },
+                status="accepted",
+                apply_status="applied",
+                applied_at="2026-05-22T00:00:00+00:00",
+                deleted=True,
+            )
+        )
+        with product.transaction() as conn:
+            product.task_store._execute(
+                conn,
+                "DELETE FROM task_note_projections WHERE owner_user_id = ? AND dataset_id = ?",
+                ("task-retention-owner", "task-retention-dataset"),
+            )
+
+        dry_run = service.retention_dry_run(
+            user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            domains=["notes.task"],
+            audit_mode=False,
+        )
+        candidate = next(
+            item
+            for item in dry_run.candidates
+            if item.server_sequence == tombstone.server_cursor
+        )
+        assert "retention_task_projection_anchor" in candidate.blockers
+    finally:
+        product.close_connection()
+
+
+def test_notes_task_retention_revalidates_new_drift_under_dataset_fence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, product, note_id, task_id = _notes_task_retention_service(tmp_path)
+    try:
+        first, _second = _insert_task_retention_history(
+            service,
+            dataset_id="task-retention-dataset",
+            note_id=note_id,
+            task_id=task_id,
+        )
+        assert first.server_cursor is not None
+        original = service.retention_dry_run
+        inserted = False
+
+        def stale_dry_run(**kwargs: Any):
+            nonlocal inserted
+            result = original(**kwargs)
+            if not inserted:
+                product.task_store.create_task_projection_drift(
+                    owner_user_id="task-retention-owner",
+                    dataset_id="task-retention-dataset",
+                    drift_id="task-retention-stale-drift",
+                    note_id=note_id,
+                    task_id=task_id,
+                    marker_base_revision=1,
+                    marker_base_hash=str(first.payload_hash),
+                    note_head_cursor=None,
+                    note_head_hash=None,
+                    task_head_cursor=first.server_cursor,
+                    task_head_hash=str(first.payload_hash),
+                    reason_code="both_changed",
+                )
+                inserted = True
+            return result
+
+        monkeypatch.setattr(service, "retention_dry_run", stale_dry_run)
+        result = service.retention_compact(
+            user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            domains=["notes.task"],
+            confirm=True,
+            apply_binding_release=False,
+            apply_blob_gc=False,
+        )
+
+        assert result.applied_count == 0
+        assert result.blocker_counts == {"retention_task_projection_drift": 1}
+        assert service.store.get_domain_compaction_sequence(
+            "task-retention-dataset", "notes.task"
+        ) == 0
+    finally:
+        product.close_connection()

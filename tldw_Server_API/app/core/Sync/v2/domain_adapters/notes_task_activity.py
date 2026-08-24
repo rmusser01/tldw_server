@@ -174,7 +174,7 @@ class NotesTaskActivityDomainAdapter:
             note_id=note_id,
             task_id=task_id,
             allow_deleted_task=(
-                trusted_server_mutation
+                (trusted_server_mutation or coordinator_derived)
                 and isinstance(payload, NotesTaskActivityV1)
                 and payload.event_type == "deleted"
             ),

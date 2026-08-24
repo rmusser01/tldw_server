@@ -3474,6 +3474,96 @@ class TaskStore:
             fn=_read_page,
         )
 
+    def has_open_task_projection_drift_for_task_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+        object_revision: int,
+        object_hash: str,
+        server_cursor: int,
+        conn: TaskConnection | None = None,
+    ) -> bool:
+        """Return whether an open drift names one exact immutable task envelope."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        task = self._require_nonempty_identity(task_id, "task_id")
+        if type(object_revision) is not int or object_revision < 1:
+            raise InputError("object_revision must be a positive integer.")
+        canonical_hash = self._validate_projection_hash(object_hash, "object_hash")
+        if type(server_cursor) is not int or server_cursor < 1:
+            raise InputError("server_cursor must be a positive integer.")
+
+        def _read_reference(read_conn: TaskConnection | None) -> bool:
+            row = self._read(
+                """
+                SELECT 1 FROM task_projection_drifts
+                 WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ?
+                   AND status = 'open'
+                   AND (
+                        (marker_base_revision = ? AND marker_base_hash = ?)
+                        OR (task_head_cursor = ? AND task_head_hash = ?)
+                   )
+                 LIMIT 1
+                """,
+                (
+                    owner,
+                    dataset,
+                    task,
+                    object_revision,
+                    canonical_hash,
+                    server_cursor,
+                    canonical_hash,
+                ),
+                conn=read_conn,
+            ).fetchone()
+            return row is not None
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=conn,
+            fn=_read_reference,
+        )
+
+    def has_open_task_projection_drift_for_note_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        object_hash: str,
+        server_cursor: int,
+        conn: TaskConnection | None = None,
+    ) -> bool:
+        """Return whether an open drift names one exact immutable note envelope."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        note = self._require_nonempty_identity(note_id, "note_id")
+        canonical_hash = self._validate_projection_hash(object_hash, "object_hash")
+        if type(server_cursor) is not int or server_cursor < 1:
+            raise InputError("server_cursor must be a positive integer.")
+
+        def _read_reference(read_conn: TaskConnection | None) -> bool:
+            row = self._read(
+                """
+                SELECT 1 FROM task_projection_drifts
+                 WHERE owner_user_id = ? AND dataset_id = ? AND note_id = ?
+                   AND status = 'open'
+                   AND note_head_cursor = ? AND note_head_hash = ?
+                 LIMIT 1
+                """,
+                (owner, dataset, note, server_cursor, canonical_hash),
+                conn=read_conn,
+            ).fetchone()
+            return row is not None
+
+        return self._with_scoped_read(
+            dataset_id=dataset,
+            conn=conn,
+            fn=_read_reference,
+        )
+
     def compare_and_set_task_projection_drift(
         self,
         *,

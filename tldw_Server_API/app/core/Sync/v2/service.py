@@ -237,7 +237,10 @@ def _client_task_activity_values(
         return (
             "restored",
             {"deleted": True, "projection_status": "deleted"},
-            {"deleted": False, "projection_status": "unlinked"},
+            {
+                "deleted": False,
+                "projection_status": _notes_task_projection_status(prior_head),
+            },
         )
     if (before.status, after.status) == ("open", "done"):
         return "completed", {"status": "open"}, {"status": "done"}
@@ -1700,15 +1703,20 @@ class SyncV2Service:
                 blocker_counts=_retention_blocker_counts(blocked),
             )
 
-        domain_compactions = self._apply_retention_domain_compactions(
-            dataset_id=dataset_id,
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        domain_compactions, revalidated_domain_blocked = (
+            self._apply_retention_domain_compactions(
+            dataset=dataset,
             candidates=[
                 candidate
                 for candidate in selected
                 if candidate.candidate_type in {"envelope_compaction", "tombstone_prune"}
             ],
+            minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+            minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+            offline_restore_window_seconds=offline_restore_window_seconds,
+            )
         )
-        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         initially_blocked_bindings = [
             candidate
             for candidate in selected
@@ -1744,7 +1752,8 @@ class SyncV2Service:
             int(item["candidate_count"]) for item in domain_compactions
         ) + len(binding_releases) + len(blob_gc)
         revalidated_blocked = (
-            initially_blocked_bindings
+            revalidated_domain_blocked
+            + initially_blocked_bindings
             + revalidated_binding_blocked
             + revalidated_blob_blocked
         )
@@ -1850,6 +1859,14 @@ class SyncV2Service:
             )
             if unacknowledged:
                 blockers.append("retention_unacknowledged_device")
+            blockers.extend(
+                blocker
+                for blocker in self._notes_task_retention_blockers(
+                    dataset=dataset,
+                    envelope=envelope,
+                )
+                if blocker not in blockers
+            )
             candidates.append(
                 SyncRetentionCandidate(
                     candidate_type=candidate_type,
@@ -2155,7 +2172,9 @@ class SyncV2Service:
                 TASK_PROJECTION_ROUTING_KEY,
                 TaskProjectionGroupMetadata,
                 _projection_anchor_from_envelope,
+                append_task_projection_to_note,
                 project_task_payload_into_note,
+                remove_task_projection_from_note,
             )
             from .server_origin import canonical_payload_hash
 
@@ -2174,17 +2193,31 @@ class SyncV2Service:
                 ):
                     raise SyncStoreError("notes_task_projection_base_invalid")
                 note_wire = dict(note_head.payload)
-                note_wire["content"] = project_task_payload_into_note(
-                    content=str(note_wire.get("content") or ""),
-                    note_id=after.note_id,
-                    note_revision=int(note_head.object_revision),
-                    task_id=after.task_id,
-                    base_revision=int(prior_head.object_revision or 0),
-                    base_hash=str(prior_head.payload_hash or ""),
-                    task_revision=int(envelope.object_revision or 0),
-                    task_hash=str(envelope.payload_hash or ""),
-                    payload=envelope.payload,
-                )
+                projection_kwargs = {
+                    "content": str(note_wire.get("content") or ""),
+                    "note_id": after.note_id,
+                    "note_revision": int(note_head.object_revision),
+                    "task_id": after.task_id,
+                    "task_revision": int(envelope.object_revision or 0),
+                    "task_hash": str(envelope.payload_hash or ""),
+                    "payload": envelope.payload,
+                }
+                if envelope.operation == "tombstone":
+                    note_wire["content"] = remove_task_projection_from_note(
+                        **projection_kwargs,
+                        base_revision=int(prior_head.object_revision or 0),
+                        base_hash=str(prior_head.payload_hash or ""),
+                    )
+                elif restore_intent:
+                    note_wire["content"] = append_task_projection_to_note(
+                        **projection_kwargs,
+                    )
+                else:
+                    note_wire["content"] = project_task_payload_into_note(
+                        **projection_kwargs,
+                        base_revision=int(prior_head.object_revision or 0),
+                        base_hash=str(prior_head.payload_hash or ""),
+                    )
                 note_hash, note_size = canonical_payload_hash(note_wire)
                 note_envelope_id = (
                     f"notes-task-note-client-{activity_id.replace('-', '')}"
@@ -2332,7 +2365,7 @@ class SyncV2Service:
     ) -> None:
         """Rebuild the disposable locator after a linked client group applies."""
 
-        if len(envelopes) != 3:
+        if len(envelopes) != 3 or envelopes[0].operation == "tombstone":
             return
         task_materializer = self.materializers.get("notes.task")
         note_db = getattr(task_materializer, "note_db", None)
@@ -5885,29 +5918,139 @@ class SyncV2Service:
     def _apply_retention_domain_compactions(
         self,
         *,
-        dataset_id: str,
+        dataset: SyncDataset,
         candidates: Sequence[SyncRetentionCandidate],
-    ) -> list[dict[str, object]]:
+        minimum_envelope_age_seconds: int,
+        minimum_tombstone_age_seconds: int,
+        offline_restore_window_seconds: int,
+    ) -> tuple[list[dict[str, object]], list[SyncRetentionCandidate]]:
+        """Revalidate each domain page under its dataset materialization fence."""
+
         grouped: dict[SyncDomain, list[SyncRetentionCandidate]] = {}
         for candidate in candidates:
             if candidate.domain is None or candidate.server_sequence is None:
                 continue
             grouped.setdefault(candidate.domain, []).append(candidate)
         applied: list[dict[str, object]] = []
+        blocked: list[SyncRetentionCandidate] = []
         for domain, domain_candidates in sorted(grouped.items()):
-            through_sequence = max(
-                candidate.server_sequence or 0 for candidate in domain_candidates
+            object_ids = sorted(
+                {
+                    candidate.object_id
+                    for candidate in domain_candidates
+                    if candidate.object_id is not None
+                }
             )
-            stored_sequence = self.store.record_domain_compaction(
-                dataset_id,
+            if not object_ids:
+                continue
+            with self.store.retention_domain_guard(
+                dataset.dataset_id,
                 domain,
-                through_server_sequence=through_sequence,
-                state={
-                    "compacted_at": self.clock(),
-                    "candidate_count": len(domain_candidates),
-                    "through_server_sequence": through_sequence,
-                },
-            )
+                object_ids,
+            ) as guarded:
+                active_devices = self._retention_active_devices(
+                    dataset,
+                    store=guarded,
+                )
+                restore_window_blocked = self._retention_restore_window_active(
+                    active_devices,
+                    offline_restore_window_seconds,
+                )
+                revalidated: list[SyncRetentionCandidate] = []
+                for candidate in domain_candidates:
+                    envelope = (
+                        guarded.get_envelope_by_server_cursor(candidate.server_sequence)
+                        if candidate.server_sequence is not None
+                        else None
+                    )
+                    current_head = (
+                        guarded.get_current_head(
+                            dataset.dataset_id,
+                            domain,
+                            candidate.object_id,
+                        )
+                        if candidate.object_id is not None
+                        else None
+                    )
+                    candidate_type = (
+                        self._retention_envelope_candidate_type(
+                            envelope,
+                            latest_by_object={
+                                (domain, candidate.object_id): current_head
+                            },
+                        )
+                        if envelope is not None
+                        and current_head is not None
+                        and candidate.object_id is not None
+                        else None
+                    )
+                    blockers: list[str] = []
+                    if (
+                        envelope is None
+                        or envelope.dataset_id != dataset.dataset_id
+                        or envelope.domain != domain
+                        or envelope.object_id != candidate.object_id
+                        or candidate_type != candidate.candidate_type
+                    ):
+                        blockers.append("retention_candidate_changed")
+                    else:
+                        window_seconds = (
+                            minimum_tombstone_age_seconds
+                            if candidate.candidate_type == "tombstone_prune"
+                            else minimum_envelope_age_seconds
+                        )
+                        if self._retention_window_active(
+                            envelope.server_timestamp,
+                            window_seconds,
+                        ):
+                            blockers.append(
+                                "retention_tombstone_window_active"
+                                if candidate.candidate_type == "tombstone_prune"
+                                else "retention_envelope_window_active"
+                            )
+                        if restore_window_blocked:
+                            blockers.append("retention_restore_window_active")
+                        if self._retention_workspace_ack_scope_blocked(dataset):
+                            blockers.append("retention_workspace_ack_scope_unknown")
+                        unacknowledged = self._retention_unacknowledged_devices(
+                            dataset_id=dataset.dataset_id,
+                            domain=domain,
+                            adapter_version=envelope.adapter_version,
+                            server_sequence=envelope.server_sequence,
+                            active_devices=active_devices,
+                            store=guarded,
+                        )
+                        if unacknowledged:
+                            blockers.append("retention_unacknowledged_device")
+                        blockers.extend(
+                            blocker
+                            for blocker in self._notes_task_retention_blockers(
+                                dataset=dataset,
+                                envelope=envelope,
+                                store=guarded,
+                            )
+                            if blocker not in blockers
+                        )
+                    if blockers:
+                        revalidated.append(
+                            replace(candidate, blockers=blockers)
+                        )
+                if revalidated:
+                    blocked.extend(revalidated)
+                    continue
+                through_sequence = max(
+                    candidate.server_sequence or 0 for candidate in domain_candidates
+                )
+                stored_sequence = guarded.record_domain_compaction(
+                    dataset.dataset_id,
+                    domain,
+                    through_server_sequence=through_sequence,
+                    state={
+                        "compacted_at": self.clock(),
+                        "candidate_count": len(domain_candidates),
+                        "through_server_sequence": through_sequence,
+                    },
+                )
             applied.append(
                 {
                     "domain": domain,
@@ -5915,7 +6058,93 @@ class SyncV2Service:
                     "candidate_count": len(domain_candidates),
                 }
             )
-        return applied
+        return applied, blocked
+
+    def _notes_task_retention_blockers(
+        self,
+        *,
+        dataset: SyncDataset,
+        envelope: SyncEnvelope,
+        store: SyncV2Store | None = None,
+    ) -> list[str]:
+        """Return exact immutable-anchor and open-drift retention blockers."""
+
+        active_store = store or self.store
+        group = [envelope]
+        if envelope.mutation_group_id is not None:
+            try:
+                group = active_store.list_mutation_group(
+                    dataset.dataset_id,
+                    envelope.mutation_group_id,
+                )
+                validate_stored_mutation_group(
+                    group,
+                    dataset_id=dataset.dataset_id,
+                    mutation_group_id=envelope.mutation_group_id,
+                )
+            except (StoredMutationGroupValidationError, SyncStoreError):
+                return ["retention_task_projection_repair"]
+        task_members = [member for member in group if member.domain == "notes.task"]
+        if not task_members:
+            return []
+        if any(member.apply_status != "applied" for member in group):
+            return ["retention_task_projection_repair"]
+
+        from .notes_task_coordinator import _projection_anchor_from_envelope
+
+        member_ids = {member.client_envelope_id for member in group}
+        blockers: list[str] = []
+        for task_member in task_members:
+            current = active_store.get_current_head(
+                dataset.dataset_id,
+                "notes.task",
+                task_member.object_id,
+            )
+            current_anchor = (
+                _projection_anchor_from_envelope(current)
+                if current is not None
+                else None
+            )
+            if (
+                current_anchor is not None
+                and current_anchor.linked
+                and {
+                    current_anchor.task_envelope_id,
+                    current_anchor.note_envelope_id,
+                }
+                & member_ids
+            ):
+                blockers.append("retention_task_projection_anchor")
+
+        task_materializer = self.materializers.get("notes.task")
+        note_db = getattr(task_materializer, "note_db", None)
+        task_store = getattr(note_db, "task_store", None)
+        if task_store is None:
+            return [*blockers, "retention_task_projection_authority_unavailable"]
+        for member in group:
+            if member.server_cursor is None or member.payload_hash is None:
+                continue
+            if member.domain == "notes.task" and member.object_revision is not None:
+                if task_store.has_open_task_projection_drift_for_task_envelope(
+                    owner_user_id=dataset.owner_user_id,
+                    dataset_id=dataset.dataset_id,
+                    task_id=member.object_id,
+                    object_revision=member.object_revision,
+                    object_hash=member.payload_hash,
+                    server_cursor=member.server_cursor,
+                ):
+                    blockers.append("retention_task_projection_drift")
+                    break
+            if member.domain == "notes.note" and task_store.has_open_task_projection_drift_for_note_envelope(
+                owner_user_id=dataset.owner_user_id,
+                dataset_id=dataset.dataset_id,
+                note_id=member.object_id,
+                object_hash=member.payload_hash,
+                server_cursor=member.server_cursor,
+            ):
+                blockers.append("retention_task_projection_drift")
+                break
+        return list(dict.fromkeys(blockers))
 
     def _apply_retention_binding_releases(
         self,

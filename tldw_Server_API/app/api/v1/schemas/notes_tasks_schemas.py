@@ -155,6 +155,28 @@ class TaskDeleteRequest(BaseModel):
     record_only: bool = False
 
 
+class TaskRestoreRequest(BaseModel):
+    """Exact task and Sync tombstone claims required for restore."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_task_version: int = Field(..., ge=1)
+    expected_note_version: int = Field(..., ge=1)
+    expected_base_server_cursor: int = Field(..., ge=1)
+    expected_base_revision: int = Field(..., ge=1)
+    expected_base_hash: str = Field(..., pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class TaskRelinkRequest(BaseModel):
+    """Authorized immutable parent and product versions required for relink."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note_id: str = Field(..., min_length=1, max_length=128)
+    expected_task_version: int = Field(..., ge=1)
+    expected_note_version: int = Field(..., ge=1)
+
+
 class TaskActivityResponse(BaseModel):
     id: str
     task_id: str | None = None
