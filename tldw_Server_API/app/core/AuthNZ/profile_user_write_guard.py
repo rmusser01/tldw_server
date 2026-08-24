@@ -991,7 +991,7 @@ def _pragma_name(statement: exp.Pragma) -> str | None:
     target = statement.this
     if isinstance(target, exp.EQ):
         target = target.this
-    if isinstance(target, (exp.Column, exp.Identifier, exp.Anonymous)):
+    if isinstance(target, (exp.Column, exp.Identifier, exp.Anonymous, exp.Var)):
         name = target.name
         return name.lower() if name else None
     return None
