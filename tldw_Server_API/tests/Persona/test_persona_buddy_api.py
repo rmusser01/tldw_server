@@ -363,3 +363,89 @@ def test_non_owner_access_to_buddy_and_restore_returns_404(persona_db: Character
             params={"expected_version": 1},
         )
         assert denied_restore.status_code == 404, denied_restore.text
+
+
+def test_missing_global_preference_returns_expressive_default(persona_db: CharactersRAGDB):
+    """A successful no-row read uses the documented calm default."""
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/buddy/preferences")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "ambient_mode": "expressive",
+        "version": None,
+        "stored": False,
+    }
+
+
+def test_global_preference_patch_round_trips_for_authenticated_api_key_owner(
+    persona_db: CharactersRAGDB,
+):
+    """The authenticated owner, rather than request data, owns the preference row."""
+    with _client_for_user(1, persona_db) as api_key_client:
+        created = api_key_client.patch(
+            "/api/v1/persona/buddy/preferences",
+            json={"ambient_mode": "roaming", "expected_version": None},
+        )
+        assert created.status_code == 200, created.text
+        assert created.json() == {"ambient_mode": "roaming", "version": 1, "stored": True}
+
+        loaded = api_key_client.get("/api/v1/persona/buddy/preferences")
+
+    assert loaded.status_code == 200, loaded.text
+    assert loaded.json() == {"ambient_mode": "roaming", "version": 1, "stored": True}
+
+
+def test_global_preference_invalid_mode_returns_validation_error(persona_db: CharactersRAGDB):
+    """Only the lowercase wire-mode enum is accepted at the HTTP boundary."""
+    with _client_for_user(1, persona_db) as client:
+        response = client.patch(
+            "/api/v1/persona/buddy/preferences",
+            json={"ambient_mode": "Expressive", "expected_version": None},
+        )
+
+    assert response.status_code == 422, response.text
+
+
+def test_global_preference_backend_failure_is_not_treated_as_missing_row(
+    persona_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A broken preference read must not silently select Expressive."""
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+    def _raise_read_failure(*_args, **_kwargs):
+        raise CharactersRAGDBError("preference database unavailable")
+
+    monkeypatch.setattr(persona_db, "get_persona_buddy_preferences", _raise_read_failure)
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/buddy/preferences")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] != "expressive"
+
+
+def test_stale_persona_override_patch_returns_conflict_for_bearer_owner(
+    persona_db: CharactersRAGDB,
+):
+    """A versioned persona override hides stale writes and keeps current-user ownership."""
+    with _client_for_user(1, persona_db) as bearer_client:
+        created = bearer_client.post("/api/v1/persona/profiles", json={"name": "Override Persona"})
+        assert created.status_code == 201, created.text
+        persona_id = created.json()["id"]
+        buddy = persona_db.get_persona_buddy(persona_id=persona_id, user_id="1")
+        assert buddy is not None
+
+        updated = bearer_client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/buddy/preferences",
+            json={"ambient_mode": "roaming", "expected_version": buddy["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["ambient_mode"] == "roaming"
+
+        stale = bearer_client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/buddy/preferences",
+            json={"ambient_mode": "off", "expected_version": buddy["version"]},
+        )
+
+    assert stale.status_code == 409, stale.text
