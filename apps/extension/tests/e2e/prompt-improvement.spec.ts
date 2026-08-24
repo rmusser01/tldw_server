@@ -327,16 +327,7 @@ const ensureChatInput = async (page: Page) => {
   ) {
     await startButton.first().click()
   }
-  let input = page.getByTestId("chat-input")
-  if ((await input.count()) === 0) {
-    input = page.getByRole("textbox", { name: /Message input/i })
-  }
-  if ((await input.count()) === 0) {
-    input = page.locator("textarea#textarea-message")
-  }
-  if ((await input.count()) === 0) {
-    input = page.getByPlaceholder(/Type a message/i)
-  }
+  const input = page.getByTestId("chat-input")
   await expect(input).toBeVisible({ timeout: 20_000 })
   await expect(input).toBeEditable()
   return input
