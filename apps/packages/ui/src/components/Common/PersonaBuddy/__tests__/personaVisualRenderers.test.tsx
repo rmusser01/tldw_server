@@ -1,6 +1,6 @@
 import React from "react"
 import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type {
   PersonaVisualAsset,
@@ -12,6 +12,20 @@ import {
   getPersonaVisualRenderer,
   PersonaVisualRendererHost
 } from "../personaVisualRenderers"
+
+const assetLoader = vi.hoisted(() => vi.fn())
+
+vi.mock("@/services/persona-visual-assets", () => ({
+  acquirePersonaVisualAsset: assetLoader
+}))
+
+beforeEach(() => {
+  assetLoader.mockReset().mockImplementation(async (asset: PersonaVisualAsset) => ({
+    url: `blob:${asset.id}`,
+    mimeType: asset.mime_type,
+    release: vi.fn()
+  }))
+})
 
 const buildAsset = (
   id: string,
@@ -177,26 +191,28 @@ describe("persona visual renderer registry", () => {
     ).toBe(true)
   })
 
-  it("renders sprite frame packs through the registered component", () => {
+  it("renders sprite frame packs through the registered component", async () => {
     const onRenderError = vi.fn()
 
     render(
       <PersonaVisualRendererHost
         pack={buildPack()}
-        state="idle"
+        requestedState="idle"
+        generation={1}
+        reducedMotion={false}
         fallbackLabel="Buddy"
         onRenderError={onRenderError}
       />
     )
 
-    expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+    expect(await screen.findByTestId("persona-visual-frame")).toHaveAttribute(
       "src",
-      expect.stringContaining("/assets/idle-1.png")
+      "blob:idle-1"
     )
     expect(onRenderError).toHaveBeenCalledWith(null)
   })
 
-  it("renders sprite atlas regions through the registered sprite frame renderer", () => {
+  it("renders sprite atlas regions through the registered sprite frame renderer", async () => {
     const onRenderError = vi.fn()
 
     render(
@@ -224,14 +240,16 @@ describe("persona visual renderer registry", () => {
             })
           }
         })}
-        state="idle"
+        requestedState="idle"
+        generation={1}
+        reducedMotion={false}
         fallbackLabel="Buddy"
         onRenderError={onRenderError}
       />
     )
 
-    expect(screen.getByTestId("persona-visual-frame")).toHaveStyle({
-      backgroundImage: "url(/assets/sheet.png)",
+    expect(await screen.findByTestId("persona-visual-frame")).toHaveStyle({
+      backgroundImage: "url(blob:sheet-1)",
       backgroundPosition: "-16px -8px",
       backgroundSize: "96px 64px",
       width: "24px",
@@ -250,7 +268,9 @@ describe("persona visual renderer registry", () => {
             "other-asset": buildAsset("other-asset")
           }
         })}
-        state="idle"
+        requestedState="idle"
+        generation={1}
+        reducedMotion={false}
         fallbackLabel="Buddy"
         onRenderError={onRenderError}
       />
@@ -289,7 +309,9 @@ describe("persona visual renderer registry", () => {
             })
           }
         })}
-        state="idle"
+        requestedState="idle"
+        generation={1}
+        reducedMotion={false}
         fallbackLabel="Buddy"
         onRenderError={onRenderError}
       />
@@ -312,7 +334,9 @@ describe("persona visual renderer registry", () => {
     render(
       <PersonaVisualRendererHost
         pack={unsupportedPack}
-        state="idle"
+        requestedState="idle"
+        generation={1}
+        reducedMotion={false}
         fallbackLabel="Buddy"
       />
     )

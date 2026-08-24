@@ -2379,6 +2379,70 @@ def test_visual_pack_review_then_activation_requires_current_fingerprint(
     assert activated.json()["status"] == "active"
 
 
+def test_visual_pack_fork_creates_an_inactive_same_persona_revision(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """The nested fork route copies assets and applies edited payload to a new draft."""
+    behavior = {"schema_version": 1, "entries": []}
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Fork Route Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+        source = updated.json()
+
+        forked = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/fork",
+            json={
+                "expected_version": source["version"],
+                "manifest": source["manifest"],
+                "companion_behavior": behavior,
+            },
+        )
+
+    assert forked.status_code == 200, forked.text
+    payload = forked.json()
+    assert payload["persona_id"] == persona_id
+    assert payload["parent_pack_id"] == pack["id"]
+    assert payload["status"] == "draft"
+    assert payload["companion_behavior"] == behavior
+    assert len(payload["assets"]) == 1
+
+
+def test_visual_pack_fork_rejects_stale_source_without_creating_a_revision(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """The HTTP fork contract reports 409 before a stale source can be copied."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Stale Fork Route Persona")
+        pack = _create_visual_pack(client, persona_id)
+        before_count = persona_db.execute_query(
+            "SELECT COUNT(*) FROM persona_visual_packs WHERE persona_id = ?",
+            (persona_id,),
+        ).fetchone()[0]
+
+        stale = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/fork",
+            json={
+                "expected_version": pack["version"] + 1,
+                "manifest": pack["manifest"],
+                "companion_behavior": None,
+            },
+        )
+
+    after_count = persona_db.execute_query(
+        "SELECT COUNT(*) FROM persona_visual_packs WHERE persona_id = ?",
+        (persona_id,),
+    ).fetchone()[0]
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "fork_conflict"
+    assert after_count == before_count
+
+
 def test_visual_pack_activation_rejects_stale_review_conflict(persona_db: CharactersRAGDB) -> None:
     """A review fingerprint cannot activate a payload revised after that review."""
     with _client_for_user(1, persona_db) as client:

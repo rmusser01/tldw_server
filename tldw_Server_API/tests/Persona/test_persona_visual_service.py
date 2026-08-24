@@ -1,5 +1,6 @@
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from PIL import Image
@@ -959,6 +960,7 @@ def test_behavior_changes_invalidate_review_and_fork_copies_assets(
     fork = service.fork_pack_revision(
         pack_id=pack["id"],
         user_id="user-1",
+        expected_version=pack["version"],
         manifest=pack["manifest"],
         companion_behavior={"schema_version": 1, "entries": []},
     )
@@ -975,6 +977,29 @@ def test_behavior_changes_invalidate_review_and_fork_copies_assets(
     assert fork["companion_behavior"] == {"schema_version": 1, "entries": []}
     assert new_review["fingerprint"] != old_review["fingerprint"]
     assert {asset["checksum_sha256"] for asset in fork["assets"]} == {asset["checksum_sha256"]}
+
+
+def test_fork_rejects_stale_source_before_listing_or_copying_assets(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale revision fork must fail before any source asset work begins."""
+    _persona_id, pack = _create_pack(db_instance)
+    list_assets = Mock(side_effect=AssertionError("assets must not be listed for a stale source"))
+    monkeypatch.setattr(db_instance, "list_persona_visual_assets", list_assets)
+
+    with pytest.raises(PersonaVisualServiceError) as exc_info:
+        service.fork_pack_revision(
+            pack_id=pack["id"],
+            user_id="user-1",
+            expected_version=pack["version"] + 1,
+            manifest=pack["manifest"],
+            companion_behavior=None,
+        )
+
+    assert exc_info.value.code == "fork_conflict"
+    list_assets.assert_not_called()
 
 
 def test_activation_rejects_stale_review_fingerprint(

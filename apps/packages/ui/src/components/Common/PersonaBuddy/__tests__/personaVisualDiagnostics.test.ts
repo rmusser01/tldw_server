@@ -204,6 +204,24 @@ describe("resolvePersonaVisualDiagnostics", () => {
     )
   })
 
+  it.each([
+    ["asset_load_failed", "could not be loaded"],
+    ["static_asset_unsupported", "PNG still"]
+  ] as const)("reports renderer failure %s with recovery text", (renderError, message) => {
+    expect(
+      getPrimaryPersonaVisualDiagnostic({
+        pack: buildPack(),
+        renderError
+      })
+    ).toEqual(
+      expect.objectContaining({
+        code: renderError,
+        severity: "error",
+        message: expect.stringContaining(message)
+      })
+    )
+  })
+
   it("returns no diagnostics for a renderable sprite-frame pack", () => {
     expect(resolvePersonaVisualDiagnostics({ pack: buildPack() })).toEqual([])
   })

@@ -2312,7 +2312,11 @@ class PersonaStateStore:
                     entity_id=persona_id,
                 )
             overlay_preferences = dict(buddy["overlay_preferences"])
-            overlay_preferences.update(dict(patch))
+            for key, value in dict(patch).items():
+                if key == "ambient_mode" and value is None:
+                    overlay_preferences.pop(key, None)
+                else:
+                    overlay_preferences[key] = value
             try:
                 normalized = normalize_persona_buddy_overlay_preferences(overlay_preferences)
             except ValueError as exc:

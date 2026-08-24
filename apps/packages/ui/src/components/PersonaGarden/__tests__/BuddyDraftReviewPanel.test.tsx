@@ -18,8 +18,8 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/components/Common/PersonaBuddy/SpriteFrameRenderer", () => ({
-  SpriteFrameRenderer: ({ state }: { state: string }) => (
-    <div data-testid="sprite-frame-renderer">Sprite preview: {state}</div>
+  SpriteFrameRenderer: ({ requestedState }: { requestedState: string }) => (
+    <div data-testid="sprite-frame-renderer">Sprite preview: {requestedState}</div>
   )
 }))
 

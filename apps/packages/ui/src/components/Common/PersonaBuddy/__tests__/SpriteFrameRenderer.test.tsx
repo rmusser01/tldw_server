@@ -1,12 +1,20 @@
 import React from "react"
-import { act, cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SpriteFrameRenderer } from "../SpriteFrameRenderer"
 import type {
   PersonaVisualAsset,
   PersonaVisualManifest
 } from "@/types/persona-visuals"
+
+const assetLoader = vi.hoisted(() => ({
+  acquire: vi.fn()
+}))
+
+vi.mock("@/services/persona-visual-assets", () => ({
+  acquirePersonaVisualAsset: assetLoader.acquire
+}))
 
 const buildAsset = (
   id: string,
@@ -68,13 +76,23 @@ const baseManifest = (
 
 const currentFrame = () => screen.getByTestId("persona-visual-frame")
 
+beforeEach(() => {
+  assetLoader.acquire.mockReset()
+  assetLoader.acquire.mockImplementation(async (asset: PersonaVisualAsset) => ({
+    url: `blob:${asset.id}`,
+    mimeType: asset.mime_type,
+    release: vi.fn()
+  }))
+})
+
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
 describe("SpriteFrameRenderer", () => {
-  it("renders the first frame for a state", () => {
+  it("renders the first frame for a state through an authenticated Blob handle", async () => {
     render(
       <SpriteFrameRenderer
         manifest={baseManifest()}
@@ -84,11 +102,16 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-1.png"))
+    await act(async () => {})
+    expect(assetLoader.acquire).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "idle-1" }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    expect(currentFrame()).toHaveAttribute("src", "blob:idle-1")
     expect(currentFrame()).toHaveAttribute("data-visual-state", "idle")
   })
 
-  it("uses preview_frame before the animation interval advances", () => {
+  it("uses preview_frame before the animation interval advances", async () => {
     vi.useFakeTimers()
     render(
       <SpriteFrameRenderer
@@ -109,10 +132,11 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-2.png"))
+    await act(async () => {})
+    expect(currentFrame()).toHaveAttribute("src", "blob:idle-2")
   })
 
-  it("respects explicit frame order instead of asset id or upload order", () => {
+  it("respects explicit frame order instead of asset id or upload order", async () => {
     vi.useFakeTimers()
     render(
       <SpriteFrameRenderer
@@ -132,16 +156,17 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-2.png"))
+    await act(async () => {})
+    expect(currentFrame()).toHaveAttribute("src", "blob:idle-2")
 
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(50)
     })
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-1.png"))
+    expect(currentFrame()).toHaveAttribute("src", "blob:idle-1")
   })
 
-  it("renders sprite-sheet region frames as cropped background regions", () => {
+  it("renders sprite-sheet region frames as cropped background regions", async () => {
     render(
       <SpriteFrameRenderer
         manifest={baseManifest({
@@ -163,8 +188,9 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
+    await screen.findByTestId("persona-visual-frame")
     expect(currentFrame()).toHaveStyle({
-      backgroundImage: "url(/assets/sheet.png)",
+      backgroundImage: "url(blob:sheet-1)",
       backgroundPosition: "-8px -12px",
       backgroundSize: "64px 64px",
       width: "16px",
@@ -173,7 +199,7 @@ describe("SpriteFrameRenderer", () => {
     expect(currentFrame()).toHaveAttribute("data-visual-state", "idle")
   })
 
-  it("uses preview_frame for atlas animations that share one asset", () => {
+  it("uses preview_frame for atlas animations that share one asset", async () => {
     render(
       <SpriteFrameRenderer
         manifest={baseManifest({
@@ -201,6 +227,7 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
+    await screen.findByTestId("persona-visual-frame")
     expect(currentFrame()).toHaveStyle({
       backgroundPosition: "-16px 0px",
       width: "16px",
@@ -208,7 +235,7 @@ describe("SpriteFrameRenderer", () => {
     })
   })
 
-  it("falls back to idle when the requested state is missing", () => {
+  it("falls back to idle when the requested state is missing", async () => {
     render(
       <SpriteFrameRenderer
         manifest={baseManifest()}
@@ -218,7 +245,8 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-1.png"))
+    await screen.findByTestId("persona-visual-frame")
+    expect(currentFrame()).toHaveAttribute("src", "blob:idle-1")
     expect(currentFrame()).toHaveAttribute("data-visual-state", "speaking")
   })
 
@@ -257,7 +285,7 @@ describe("SpriteFrameRenderer", () => {
     expect(onRenderError).toHaveBeenCalledWith("missing_asset")
   })
 
-  it("clears onRenderError when a previous render failure becomes renderable", () => {
+  it("clears onRenderError when a previous render failure becomes renderable", async () => {
     const onRenderError = vi.fn()
     const view = render(
       <SpriteFrameRenderer
@@ -281,8 +309,9 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
+    await screen.findByTestId("persona-visual-frame")
     expect(onRenderError).toHaveBeenLastCalledWith(null)
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-1.png"))
+    expect(currentFrame()).toHaveAttribute("src", "blob:idle-1")
   })
 
   it("reports unsupported regions before trying to render them", () => {
@@ -310,5 +339,107 @@ describe("SpriteFrameRenderer", () => {
 
     expect(screen.getByText("Buddy")).toBeInTheDocument()
     expect(onRenderError).toHaveBeenCalledWith("unsupported_region")
+  })
+
+  it("selects a static PNG and allocates no sprite timer under reduced motion", async () => {
+    vi.useFakeTimers()
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout")
+    render(
+      <SpriteFrameRenderer
+        manifest={baseManifest({
+          animations: {
+            idle: {
+              preview_asset_id: "idle-2",
+              frames: [
+                { asset_id: "idle-1", duration_ms: 20 },
+                { asset_id: "idle-2", duration_ms: 20 }
+              ]
+            }
+          }
+        })}
+        assets={assets}
+        requestedState="idle"
+        generation={2}
+        reducedMotion
+        fallbackLabel="Persona Buddy"
+      />
+    )
+
+    await act(async () => {})
+    expect(assetLoader.acquire).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "idle-2", mime_type: "image/png" }),
+      expect.any(Object)
+    )
+    expect(currentFrame()).toHaveAttribute("src", "blob:idle-2")
+    expect(setTimeoutSpy).not.toHaveBeenCalled()
+  })
+
+  it("rejects an animated static fallback under reduced motion", async () => {
+    const onFailure = vi.fn()
+    render(
+      <SpriteFrameRenderer
+        manifest={baseManifest()}
+        assets={{ "idle-1": buildAsset("idle-1", { mime_type: "image/gif" }) }}
+        requestedState="idle"
+        generation={1}
+        reducedMotion
+        fallbackLabel="Buddy"
+        onFailure={onFailure}
+      />
+    )
+
+    expect(onFailure).toHaveBeenCalledWith("static_asset_unsupported")
+    expect(assetLoader.acquire).not.toHaveBeenCalled()
+  })
+
+  it("keeps the old Blob visible until the new generation is ready and releases stale handles", async () => {
+    let resolveSecond: ((handle: { url: string; mimeType: string; release: () => void }) => void) | null = null
+    const firstRelease = vi.fn()
+    const staleRelease = vi.fn()
+    assetLoader.acquire
+      .mockResolvedValueOnce({ url: "blob:first", mimeType: "image/png", release: firstRelease })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve }))
+
+    const view = render(
+      <SpriteFrameRenderer
+        manifest={baseManifest()}
+        assets={assets}
+        requestedState="idle"
+        generation={1}
+        fallbackLabel="Buddy"
+      />
+    )
+    await screen.findByTestId("persona-visual-frame")
+    expect(currentFrame()).toHaveAttribute("src", "blob:first")
+
+    view.rerender(
+      <SpriteFrameRenderer
+        manifest={baseManifest({
+          animations: { idle: { frames: [{ asset_id: "idle-2" }] } }
+        })}
+        assets={assets}
+        requestedState="idle"
+        generation={2}
+        fallbackLabel="Buddy"
+      />
+    )
+    expect(currentFrame()).toHaveAttribute("src", "blob:first")
+    expect(firstRelease).not.toHaveBeenCalled()
+
+    view.rerender(
+      <SpriteFrameRenderer
+        manifest={baseManifest()}
+        assets={assets}
+        requestedState="idle"
+        generation={3}
+        fallbackLabel="Buddy"
+      />
+    )
+    await act(async () => {
+      resolveSecond?.({ url: "blob:stale", mimeType: "image/png", release: staleRelease })
+    })
+    expect(currentFrame()).not.toHaveAttribute("src", "blob:stale")
+    expect(staleRelease).toHaveBeenCalledTimes(1)
+    expect(firstRelease).toHaveBeenCalledTimes(1)
   })
 })

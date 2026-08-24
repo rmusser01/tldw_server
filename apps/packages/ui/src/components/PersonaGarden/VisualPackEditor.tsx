@@ -38,6 +38,8 @@ import {
   listPersonaVisualDuplicateTargets,
   listPersonaVisualPacks,
   PersonaVisualApiError,
+  forkPersonaVisualPackRevision,
+  reviewPersonaVisualPack,
   reviewPersonaVisualCandidate,
   savePersonaVisualPackToLibrary,
   startPersonaVisualImportCommit,
@@ -1230,6 +1232,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [saving, setSaving] = React.useState(false)
   const [uploading, setUploading] = React.useState(false)
   const [activating, setActivating] = React.useState(false)
+  const [reviewingRevision, setReviewingRevision] = React.useState(false)
   const [deactivating, setDeactivating] = React.useState(false)
   const [candidates, setCandidates] = React.useState<PersonaVisualCandidate[]>([])
   const [candidatesLoading, setCandidatesLoading] = React.useState(false)
@@ -1371,6 +1374,30 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const validationErrors = React.useMemo(
     () => validateManifestForActivation(draftManifest),
     [draftManifest]
+  )
+  const sharedStillStates = React.useMemo(() => {
+    const byAsset = new Map<string, PersonaVisualBuiltinStateId[]>()
+    for (const state of REQUIRED_VISUAL_STATES) {
+      const animationId = draftManifest.states?.[state]?.animation_id
+      const animation = animationId ? draftManifest.animations?.[animationId] : null
+      const frames = normalizeFrames(animation)
+      if (!animation || !frames.length) continue
+      const previewIndex = typeof animation.preview_frame === "number"
+        ? animation.preview_frame
+        : -1
+      const previewAssetIndex = animation.preview_asset_id
+        ? frames.findIndex((frame) => frame.asset_id === animation.preview_asset_id)
+        : -1
+      const frame = frames[previewIndex] ?? frames[previewAssetIndex] ?? frames[0]
+      const states = byAsset.get(frame.asset_id) ?? []
+      states.push(state)
+      byAsset.set(frame.asset_id, states)
+    }
+    return Array.from(byAsset.values()).filter((states) => states.length > 1)
+  }, [draftManifest])
+  const hasCurrentReview = Boolean(
+    selectedPack?.review?.fingerprint &&
+    selectedPack.review.pack_version === selectedPack.version
   )
   const packHealthDiagnostic: PersonaVisualDiagnostic | null = React.useMemo(
     () =>
@@ -1767,6 +1794,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     setReviewingCandidateId("")
     setEnqueueingGeneration(false)
     setActivating(false)
+    setReviewingRevision(false)
     setDeactivating(false)
   }, [selectedPersonaId, selectedPack?.id])
 
@@ -2430,14 +2458,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     setSaving(true)
     setError(null)
     try {
-      const saved = await updatePersonaVisualManifest(
-        targetPersonaId,
-        targetPackId,
-        {
+      const payload = {
           manifest: draftManifest,
-          expected_version: selectedPack.version ?? null
+          companion_behavior: selectedPack.companion_behavior ?? null,
+          expected_version: selectedPack.version
         }
-      )
+      const saved = selectedPack.status === "active"
+        ? await forkPersonaVisualPackRevision(targetPersonaId, targetPackId, payload)
+        : await updatePersonaVisualManifest(targetPersonaId, targetPackId, payload)
       if (!isCurrentManifestSaveRequest()) return
       setPacks((current) =>
         mergePack(current, {
@@ -2447,9 +2475,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
       selectPackId(saved.id)
       setStatusMessage(
-        t("sidepanel:personaGarden.visuals.saved", {
-          defaultValue: "Manifest saved."
-        })
+        selectedPack.status === "active"
+          ? "Editable revision created from the active pack."
+          : t("sidepanel:personaGarden.visuals.saved", {
+              defaultValue: "Manifest saved."
+            })
       )
     } catch (saveError) {
       if (isCurrentManifestSaveRequest()) {
@@ -2466,14 +2496,55 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }
 
-  const handleActivate = async () => {
+  const handleReviewRevision = async () => {
     if (!selectedPersonaId || !selectedPack || validationErrors.length) return
+    const targetPersonaId = selectedPersonaId
+    const targetPackId = selectedPack.id
+    setReviewingRevision(true)
+    setError(null)
+    try {
+      const reviewed = await reviewPersonaVisualPack(targetPersonaId, targetPackId, {
+        expected_version: selectedPack.version
+      })
+      if (
+        selectedPersonaIdRef.current !== targetPersonaId ||
+        selectedPackIdRef.current !== targetPackId
+      ) return
+      setPacks((current) => mergePack(current, reviewed))
+      selectPackId(reviewed.id)
+      setStatusMessage("Revision reviewed. It is ready to activate.")
+    } catch (reviewError) {
+      if (
+        selectedPersonaIdRef.current === targetPersonaId &&
+        selectedPackIdRef.current === targetPackId
+      ) {
+        setError(reviewError instanceof Error ? reviewError.message : "Failed to review revision.")
+      }
+    } finally {
+      if (
+        selectedPersonaIdRef.current === targetPersonaId &&
+        selectedPackIdRef.current === targetPackId
+      ) setReviewingRevision(false)
+    }
+  }
+
+  const handleActivate = async () => {
+    if (
+      !selectedPersonaId ||
+      !selectedPack ||
+      validationErrors.length ||
+      !hasCurrentReview ||
+      !selectedPack.review
+    ) return
     const targetPersonaId = selectedPersonaId
     const targetPackId = selectedPack.id
     setActivating(true)
     setError(null)
     try {
-      const active = await activatePersonaVisualPack(targetPersonaId, targetPackId)
+      const active = await activatePersonaVisualPack(targetPersonaId, targetPackId, {
+        expected_version: selectedPack.version,
+        reviewed_fingerprint: selectedPack.review.fingerprint
+      })
       if (
         selectedPersonaIdRef.current !== targetPersonaId ||
         selectedPackIdRef.current !== targetPackId
@@ -4593,6 +4664,16 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                     Required states resolve.
                   </div>
                 )}
+                {sharedStillStates.length ? (
+                  <div
+                    data-testid="persona-visual-shared-still-warning"
+                    className="mt-1 text-xs text-warning"
+                  >
+                    Some built-in states share one still: {sharedStillStates
+                      .map((states) => states.join(", "))
+                      .join("; ")}. This is allowed, but review the result before activation.
+                  </div>
+                ) : null}
               </div>
               <div
                 ref={activationControlsRef}
@@ -4610,10 +4691,28 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   Save manifest
                 </Button>
                 <Button
+                  data-testid="persona-visual-review-button"
+                  size="small"
+                  icon={<FileSearch className="h-3.5 w-3.5" />}
+                  disabled={
+                    validationErrors.length > 0 ||
+                    selectedPack?.status === "active" ||
+                    hasCurrentReview
+                  }
+                  loading={reviewingRevision}
+                  onClick={() => void handleReviewRevision()}
+                >
+                  {hasCurrentReview ? "Reviewed" : "Review revision"}
+                </Button>
+                <Button
                   data-testid="persona-visual-activate-button"
                   size="small"
                   icon={<CheckCircle2 className="h-3.5 w-3.5" />}
-                  disabled={validationErrors.length > 0}
+                  disabled={
+                    validationErrors.length > 0 ||
+                    !hasCurrentReview ||
+                    selectedPack?.status === "active"
+                  }
                   loading={activating}
                   onClick={() => void handleActivate()}
                 >

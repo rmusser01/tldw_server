@@ -2,10 +2,16 @@ import React from "react"
 import { createPortal } from "react-dom"
 
 import { useSetting } from "@/hooks/useSetting"
-import { useDesktop } from "@/hooks/useMediaQuery"
+import { useDesktop, useMediaQuery } from "@/hooks/useMediaQuery"
 import { usePersonaLiveControl } from "@/hooks/usePersonaLiveControl"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import {
+  getBuddyPreferences,
+  getPersonaBuddyPreferences,
+  updateBuddyPreferences,
+  updatePersonaBuddyPreferences
+} from "@/services/persona-buddy"
 import {
   getPersonaVisualPack,
   listPersonaVisualPacks
@@ -14,23 +20,26 @@ import { PERSONA_BUDDY_SHELL_ENABLED_SETTING } from "@/services/settings/ui-sett
 import {
   clampPersonaBuddyShellPosition,
   DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS,
-  usePersonaBuddyShellStore
+  usePersonaBuddyShellStore,
+  type PersonaBuddyShellPosition
 } from "@/store/persona-buddy-shell"
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import type {
   PersonaBuddyPositionBucket,
+  PersonaBuddyPreferences,
+  PersonaBuddyOverridePreferences,
   PersonaBuddyLiveControlView,
   PersonaBuddyRenderContext,
   PersonaBuddySummary
 } from "@/types/persona-buddy"
 import {
-  asPersonaVisualCustomStateId,
   isPersonaVisualCustomStateIdText,
   PERSONA_VISUAL_PACK_ACTIVATED_EVENT
 } from "@/types/persona-visuals"
 import type {
-  PersonaVisualManifest,
-  PersonaVisualPack
+  PersonaAmbientMode,
+  PersonaVisualPack,
+  PersonaVisualStateId
 } from "@/types/persona-visuals"
 
 import { useBuddyShellRenderContext } from "./BuddyShellRenderContext"
@@ -41,24 +50,21 @@ import {
   type PersonaVisualDiagnosticCode
 } from "./personaVisualDiagnostics"
 import { resolvePersonaVisualState } from "./personaVisualState"
+import { resolveEffectiveAmbientMode } from "./personaCompanionPolicy"
+import { usePersonaCompanion } from "./usePersonaCompanion"
 
 type BuddyShellHostProps = {
   root: "web" | "sidepanel"
 }
 
 type DragState = {
-  offsetX: number
-  offsetY: number
-  lastClientX: number
-  accumulatedDeltaX: number
-}
-
-type BuddyMovementState = "moving_left" | "moving_right"
-
-type BuddyMovementContext = {
-  activePersonaId: string | null
-  sessionId: string | null
-  manifest: PersonaVisualManifest | null
+  pointerId: number
+  startClientX: number
+  startClientY: number
+  startPosition: PersonaBuddyShellPosition
+  currentPosition: PersonaBuddyShellPosition
+  dragging: boolean
+  target: HTMLButtonElement
 }
 
 type ResolvedPersonaShellState = {
@@ -68,44 +74,9 @@ type ResolvedPersonaShellState = {
   buddySummary: PersonaBuddySummary | null
 }
 
-const BUDDY_DRAG_MOVEMENT_THRESHOLD_PX = 2
-const BUDDY_DRAG_MOVEMENT_OVERRIDE_MS = 300
-
-const hasVisualMovementState = (
-  manifest: PersonaVisualManifest | null | undefined,
-  state: BuddyMovementState
-): boolean => {
-  const stateId = asPersonaVisualCustomStateId(state)
-  return Boolean(manifest?.states?.[stateId] || manifest?.state_catalog?.[stateId])
-}
-
-const clearBuddyDragOverride = (context: BuddyMovementContext) => {
-  const runtimeStore = usePersonaVisualRuntimeStore.getState()
-  const current = runtimeStore.override
-  if (
-    current?.reason === "buddy_drag" &&
-    (!context.activePersonaId || current.personaId === context.activePersonaId)
-  ) {
-    runtimeStore.clearOverride()
-  }
-}
-
-const setBuddyDragMovementOverride = (
-  context: BuddyMovementContext,
-  state: BuddyMovementState
-) => {
-  if (!context.activePersonaId || !hasVisualMovementState(context.manifest, state)) {
-    return
-  }
-
-  usePersonaVisualRuntimeStore.getState().setOverride({
-    personaId: context.activePersonaId,
-    sessionId: context.sessionId,
-    state: asPersonaVisualCustomStateId(state),
-    reason: "buddy_drag",
-    expiresAt: Date.now() + BUDDY_DRAG_MOVEMENT_OVERRIDE_MS
-  })
-}
+const BUDDY_DRAG_THRESHOLD_PX = 8
+const BUDDY_CLICK_DELAY_MS = 300
+const BUDDY_NUDGE_DURATION_MS = 160
 
 const ensurePortalRoot = () => {
   if (typeof document === "undefined") return null
@@ -234,11 +205,18 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 }) => {
   const dockRef = React.useRef<HTMLDivElement | null>(null)
   const dragStateRef = React.useRef<DragState | null>(null)
-  const movementContextRef = React.useRef<BuddyMovementContext>({
-    activePersonaId: null,
-    sessionId: null,
-    manifest: null
-  })
+  const clickTimerRef = React.useRef<number | null>(null)
+  const nudgeTimerRef = React.useRef<number | null>(null)
+  const [dragPosition, setDragPosition] = React.useState<PersonaBuddyShellPosition | null>(null)
+  const [isDragging, setIsDragging] = React.useState(false)
+  const [focusWithin, setFocusWithin] = React.useState(false)
+  const [nudgeActive, setNudgeActive] = React.useState(false)
+  const [visibility, setVisibility] = React.useState<"visible" | "hidden">(
+    () => typeof document !== "undefined" && document.visibilityState === "hidden"
+      ? "hidden"
+      : "visible"
+  )
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)")
 
   const positionBucket: PersonaBuddyPositionBucket =
     renderContext?.position_bucket ??
@@ -250,6 +228,12 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     (state) => state.resetSessionState
   )
   const setPosition = usePersonaBuddyShellStore((state) => state.setPosition)
+  const firstUseHintDismissed = usePersonaBuddyShellStore(
+    (state) => state.firstUseHintDismissed
+  )
+  const dismissFirstUseHint = usePersonaBuddyShellStore(
+    (state) => state.dismissFirstUseHint
+  )
   const position = usePersonaBuddyShellStore(
     (state) =>
       state.positions[positionBucket] ??
@@ -261,62 +245,12 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   }, [resetSessionState])
 
   React.useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      if (!dragStateRef.current || !dockRef.current) {
-        return
-      }
-
-      const rect = dockRef.current.getBoundingClientRect()
-      const nextPosition = clampPersonaBuddyShellPosition(
-        {
-          x: event.clientX - dragStateRef.current.offsetX,
-          y: event.clientY - dragStateRef.current.offsetY
-        },
-        positionBucket,
-        {
-          viewportWidth: window.innerWidth,
-          viewportHeight: window.innerHeight,
-          shellWidth: rect.width,
-          shellHeight: rect.height,
-          margin: 16
-        }
-      )
-
-      const deltaX = event.clientX - dragStateRef.current.lastClientX
-      dragStateRef.current.lastClientX = event.clientX
-      dragStateRef.current.accumulatedDeltaX += deltaX
-      if (
-        Math.abs(dragStateRef.current.accumulatedDeltaX) >=
-        BUDDY_DRAG_MOVEMENT_THRESHOLD_PX
-      ) {
-        setBuddyDragMovementOverride(
-          movementContextRef.current,
-          dragStateRef.current.accumulatedDeltaX > 0
-            ? "moving_right"
-            : "moving_left"
-        )
-        dragStateRef.current.accumulatedDeltaX = 0
-      }
-
-      setPosition(positionBucket, nextPosition)
-    }
-
-    const handlePointerUp = () => {
-      if (dragStateRef.current) {
-        clearBuddyDragOverride(movementContextRef.current)
-      }
-      dragStateRef.current = null
-    }
-
-    window.addEventListener("pointermove", handlePointerMove)
-    window.addEventListener("pointerup", handlePointerUp)
-    window.addEventListener("pointercancel", handlePointerUp)
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove)
-      window.removeEventListener("pointerup", handlePointerUp)
-      window.removeEventListener("pointercancel", handlePointerUp)
-    }
-  }, [positionBucket, setPosition])
+    const handleVisibility = () => setVisibility(
+      document.visibilityState === "hidden" ? "hidden" : "visible"
+    )
+    document.addEventListener("visibilitychange", handleVisibility)
+    return () => document.removeEventListener("visibilitychange", handleVisibility)
+  }, [])
 
   React.useEffect(() => {
     const clampPersistedPosition = () => {
@@ -352,25 +286,6 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     }
   }, [position, positionBucket, setPosition])
 
-  const handleDragHandlePointerDown = React.useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0 || !dockRef.current) {
-        return
-      }
-
-      const rect = dockRef.current.getBoundingClientRect()
-      dragStateRef.current = {
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-        lastClientX: event.clientX,
-        accumulatedDeltaX: 0
-      }
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-      event.preventDefault()
-    },
-    []
-  )
-
   const resolvedPersona = React.useMemo(
     () =>
       resolveActivePersonaSelection({
@@ -378,6 +293,106 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
         selectedAssistant
       }),
     [renderContext, selectedAssistant]
+  )
+  const [globalPreferences, setGlobalPreferences] =
+    React.useState<PersonaBuddyPreferences>({
+      ambient_mode: "expressive",
+      version: null,
+      stored: false
+    })
+  const [personaPreferences, setPersonaPreferences] =
+    React.useState<PersonaBuddyOverridePreferences | null>(null)
+  const [preferenceReadFailed, setPreferenceReadFailed] = React.useState(true)
+  const [ambientPreferenceMessage, setAmbientPreferenceMessage] =
+    React.useState<string | null>(null)
+
+  const refreshAmbientPreferences = React.useCallback(async () => {
+    const personaId = String(resolvedPersona.activePersonaId ?? "").trim()
+    if (!personaId) {
+      setPersonaPreferences(null)
+      setPreferenceReadFailed(true)
+      return
+    }
+    try {
+      const [globalResult, personaResult] = await Promise.all([
+        getBuddyPreferences(),
+        getPersonaBuddyPreferences(personaId)
+      ])
+      setGlobalPreferences(globalResult)
+      setPersonaPreferences(personaResult)
+      setPreferenceReadFailed(false)
+    } catch {
+      setPreferenceReadFailed(true)
+    }
+  }, [resolvedPersona.activePersonaId])
+
+  React.useEffect(() => {
+    setPreferenceReadFailed(true)
+    setAmbientPreferenceMessage(null)
+    void refreshAmbientPreferences()
+  }, [refreshAmbientPreferences])
+
+  const effectiveAmbientMode = resolveEffectiveAmbientMode({
+    persona: personaPreferences?.ambient_mode,
+    global: globalPreferences.ambient_mode,
+    readFailed: preferenceReadFailed,
+    surface: root
+  })
+
+  const handleGlobalAmbientModeChange = React.useCallback(
+    async (mode: PersonaAmbientMode) => {
+      const previous = globalPreferences
+      setGlobalPreferences({
+        ambient_mode: mode,
+        version: previous.version,
+        stored: true
+      })
+      setAmbientPreferenceMessage(null)
+      try {
+        setGlobalPreferences(await updateBuddyPreferences({
+          ambient_mode: mode,
+          expected_version: previous.version
+        }))
+      } catch (error) {
+        if ((error as { status?: number })?.status === 409) {
+          await refreshAmbientPreferences()
+          setAmbientPreferenceMessage("Settings changed elsewhere. Latest values were loaded.")
+        } else {
+          setGlobalPreferences(previous)
+          setAmbientPreferenceMessage("Buddy settings could not be saved.")
+        }
+      }
+    },
+    [globalPreferences, refreshAmbientPreferences]
+  )
+
+  const handlePersonaAmbientModeChange = React.useCallback(
+    async (mode: PersonaAmbientMode | null) => {
+      const personaId = String(resolvedPersona.activePersonaId ?? "").trim()
+      const previous = personaPreferences
+      if (!personaId || !previous) return
+      setPersonaPreferences({
+        ambient_mode: mode,
+        version: previous.version,
+        stored: mode !== null
+      })
+      setAmbientPreferenceMessage(null)
+      try {
+        setPersonaPreferences(await updatePersonaBuddyPreferences(personaId, {
+          ambient_mode: mode,
+          expected_version: previous.version
+        }))
+      } catch (error) {
+        if ((error as { status?: number })?.status === 409) {
+          await refreshAmbientPreferences()
+          setAmbientPreferenceMessage("Settings changed elsewhere. Latest values were loaded.")
+        } else {
+          setPersonaPreferences(previous)
+          setAmbientPreferenceMessage("Buddy settings could not be saved.")
+        }
+      }
+    },
+    [personaPreferences, refreshAmbientPreferences, resolvedPersona.activePersonaId]
   )
   const { capabilities } = useServerCapabilities()
   const liveControlEnabled = Boolean(capabilities?.hasPersonaLiveControl)
@@ -479,18 +494,6 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     visualPackRefreshNonce
   ])
 
-  React.useEffect(() => {
-    movementContextRef.current = {
-      activePersonaId: resolvedPersona.activePersonaId,
-      sessionId: renderContext.live_session_id ?? null,
-      manifest: visualPack?.manifest ?? null
-    }
-  }, [
-    renderContext.live_session_id,
-    resolvedPersona.activePersonaId,
-    visualPack?.manifest
-  ])
-
   const buddySummary = resolvedPersona.buddySummary
   const isDormant = resolvedPersona.hasTargetPersona && !buddySummary?.has_buddy
   const applicableRuntimeOverride =
@@ -523,6 +526,166 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       authoredTriggers: visualPack?.manifest?.authored_triggers,
       mcpRuntimeReason: applicableRuntimeOverride?.reason
     })
+  const availableStates = React.useMemo(
+    () => Object.keys(visualPack?.manifest?.states ?? {}) as PersonaVisualStateId[],
+    [visualPack?.manifest?.states]
+  )
+  const companion = usePersonaCompanion({
+    personaId: resolvedPersona.activePersonaId,
+    packId: visualPack?.id ?? null,
+    packRevision: visualPack?.revision_number ?? visualPack?.version ?? null,
+    semanticState: visualState,
+    mode: effectiveAmbientMode,
+    surface: root,
+    visibility,
+    controlsOpen: isOpen,
+    focusWithin,
+    dragging: isDragging,
+    reducedMotion,
+    behavior: visualPack?.companion_behavior ?? null,
+    availableStates,
+    mirrorSafeStates: [],
+    horizontalBounds: {
+      min: 16 - position.x,
+      max:
+        typeof window === "undefined"
+          ? 16 - position.x
+          : Math.max(16 - position.x, window.innerWidth - position.x - 80)
+    }
+  })
+  const {
+    snapshot: companionSnapshot,
+    react: companionReact,
+    completeAction: completeCompanionAction
+  } = companion
+
+  const acknowledgeWithoutState = React.useCallback(() => {
+    if (reducedMotion || visualState !== "idle") return
+    if (nudgeTimerRef.current !== null) window.clearTimeout(nudgeTimerRef.current)
+    setNudgeActive(true)
+    nudgeTimerRef.current = window.setTimeout(() => {
+      setNudgeActive(false)
+      nudgeTimerRef.current = null
+    }, BUDDY_NUDGE_DURATION_MS)
+  }, [reducedMotion, visualState])
+
+  const reactToBuddy = React.useCallback(
+    (trigger: "click" | "space" | "drag") => {
+      if (!companionReact(trigger)) acknowledgeWithoutState()
+    },
+    [acknowledgeWithoutState, companionReact]
+  )
+
+  const scheduleBuddyClick = React.useCallback(() => {
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+      setOpen(true)
+      return
+    }
+    clickTimerRef.current = window.setTimeout(() => {
+      clickTimerRef.current = null
+      reactToBuddy("click")
+    }, BUDDY_CLICK_DELAY_MS)
+  }, [reactToBuddy, setOpen])
+
+  const handleBuddyPointerDown = React.useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0) return
+      const startPosition = {
+        x: position.x + companionSnapshot.transientOffsetX,
+        y: position.y
+      }
+      dragStateRef.current = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startPosition,
+        currentPosition: startPosition,
+        dragging: false,
+        target: event.currentTarget
+      }
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      event.preventDefault()
+    },
+    [companionSnapshot.transientOffsetX, position]
+  )
+
+  React.useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = dragStateRef.current
+      if (!drag || drag.pointerId !== event.pointerId || !dockRef.current) return
+      const deltaX = event.clientX - drag.startClientX
+      const deltaY = event.clientY - drag.startClientY
+      if (!drag.dragging && Math.hypot(deltaX, deltaY) < BUDDY_DRAG_THRESHOLD_PX) return
+      if (!drag.dragging) {
+        drag.dragging = true
+        setIsDragging(true)
+        if (clickTimerRef.current !== null) {
+          window.clearTimeout(clickTimerRef.current)
+          clickTimerRef.current = null
+        }
+      }
+      const rect = dockRef.current.getBoundingClientRect()
+      drag.currentPosition = clampPersonaBuddyShellPosition(
+        {
+          x: drag.startPosition.x + deltaX,
+          y: drag.startPosition.y + deltaY
+        },
+        positionBucket,
+        {
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+          shellWidth: rect.width,
+          shellHeight: rect.height,
+          margin: 16
+        }
+      )
+      setDragPosition(drag.currentPosition)
+    }
+    const finishPointer = (event: PointerEvent, cancelled: boolean) => {
+      const drag = dragStateRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      drag.target.releasePointerCapture?.(drag.pointerId)
+      if (drag.dragging) {
+        setPosition(positionBucket, drag.currentPosition)
+        setDragPosition(null)
+        setIsDragging(false)
+        if (!cancelled) reactToBuddy("drag")
+      } else if (!cancelled) {
+        scheduleBuddyClick()
+      }
+      dragStateRef.current = null
+    }
+    const handlePointerUp = (event: PointerEvent) => finishPointer(event, false)
+    const handlePointerCancel = (event: PointerEvent) => finishPointer(event, true)
+    window.addEventListener("pointermove", handlePointerMove)
+    window.addEventListener("pointerup", handlePointerUp)
+    window.addEventListener("pointercancel", handlePointerCancel)
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove)
+      window.removeEventListener("pointerup", handlePointerUp)
+      window.removeEventListener("pointercancel", handlePointerCancel)
+    }
+  }, [positionBucket, reactToBuddy, scheduleBuddyClick, setPosition])
+
+  React.useEffect(() => () => {
+    if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current)
+    if (nudgeTimerRef.current !== null) window.clearTimeout(nudgeTimerRef.current)
+  }, [])
+
+  const handleBuddyKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "Enter") {
+        event.preventDefault()
+        setOpen(true)
+      } else if (event.key === " ") {
+        event.preventDefault()
+        reactToBuddy("space")
+      }
+    },
+    [reactToBuddy, setOpen]
+  )
   const visualRenderKey = `${resolvedPersona.activePersonaId || ""}:${
     visualPack?.id || ""
   }:${visualState}`
@@ -540,6 +703,21 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     },
     [visualRenderKey]
   )
+  const rendererActionToken = companionSnapshot.actionToken
+  const handleVisualFailure = React.useCallback(
+    (error: PersonaVisualDiagnosticCode) => {
+      handleVisualRenderError(error)
+      if (rendererActionToken !== null) {
+        completeCompanionAction(rendererActionToken, false)
+      }
+    },
+    [completeCompanionAction, handleVisualRenderError, rendererActionToken]
+  )
+  const handleVisualComplete = React.useCallback(() => {
+    if (rendererActionToken !== null) {
+      completeCompanionAction(rendererActionToken, true)
+    }
+  }, [completeCompanionAction, rendererActionToken])
   const visualDiagnostic: PersonaVisualDiagnostic | null = React.useMemo(
     () =>
       getPrimaryPersonaVisualDiagnostic({
@@ -620,6 +798,10 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
           role_summary: null,
           visual: null
         }
+  const dockPosition = dragPosition ?? {
+    x: position.x + companionSnapshot.transientOffsetX,
+    y: position.y
+  }
 
   return createPortal(
     <BuddyShellDock
@@ -628,13 +810,30 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       isOpen={isOpen}
       isDormant={isDormant}
       visualPack={visualPack}
-      visualState={visualState}
+      visualState={companionSnapshot.requestedState}
+      visualGeneration={companionSnapshot.generation}
+      reducedMotion={reducedMotion}
+      visualFacing={companionSnapshot.facing}
+      nudgeActive={nudgeActive}
       visualDiagnostic={visualDiagnostic}
       liveControl={liveControlView}
       onVisualRenderError={handleVisualRenderError}
-      position={position}
-      onToggle={() => setOpen(!isOpen)}
-      onDragHandlePointerDown={handleDragHandlePointerDown}
+      onVisualFailure={handleVisualFailure}
+      onVisualComplete={handleVisualComplete}
+      position={dockPosition}
+      onOpenControls={() => setOpen(true)}
+      onBuddyPointerDown={handleBuddyPointerDown}
+      onBuddyKeyDown={handleBuddyKeyDown}
+      onFocusWithinChange={setFocusWithin}
+      showFirstUseHint={!firstUseHintDismissed}
+      onDismissFirstUseHint={dismissFirstUseHint}
+      globalAmbientMode={globalPreferences.ambient_mode}
+      personaAmbientMode={personaPreferences?.ambient_mode ?? null}
+      effectiveAmbientMode={effectiveAmbientMode}
+      ambientSurface={root}
+      ambientPreferenceMessage={ambientPreferenceMessage}
+      onGlobalAmbientModeChange={(mode) => void handleGlobalAmbientModeChange(mode)}
+      onPersonaAmbientModeChange={(mode) => void handlePersonaAmbientModeChange(mode)}
       dockRef={dockRef}
     />,
     portalRoot

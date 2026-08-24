@@ -254,6 +254,7 @@ class PersonaVisualService:
         *,
         pack_id: str,
         user_id: str,
+        expected_version: int,
         manifest: dict[str, Any],
         companion_behavior: dict[str, Any] | None,
     ) -> dict[str, Any]:
@@ -263,6 +264,12 @@ class PersonaVisualService:
             raise PersonaVisualServiceError(
                 "pack_not_found",
                 "Persona visual pack not found for user.",
+                details={"pack_id": pack_id},
+            )
+        if int(source["version"]) != int(expected_version):
+            raise PersonaVisualServiceError(
+                "fork_conflict",
+                "Persona visual pack version changed before the revision fork.",
                 details={"pack_id": pack_id},
             )
         persona_id = str(source["persona_id"])

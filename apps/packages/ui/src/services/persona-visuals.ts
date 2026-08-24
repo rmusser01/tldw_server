@@ -28,7 +28,9 @@ import type {
   PersonaVisualPackDuplicateRequest,
   PersonaVisualPackExportRequest,
   PersonaVisualPackExportResponse,
+  PersonaVisualPackForkRequest,
   PersonaVisualPackListResponse,
+  PersonaVisualPackReviewRequest,
   PersonaVisualPortabilityJobResponse,
   PersonaVisualRendererType,
   PersonaVisualRendererCapabilitiesResponse,
@@ -453,6 +455,34 @@ export async function activatePersonaVisualPack(
 ): Promise<PersonaVisualPack> {
   return fetchPersonaVisualJson<PersonaVisualPack>(
     packPath(personaId, packId, "/activate"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function reviewPersonaVisualPack(
+  personaId: string,
+  packId: string,
+  payload: PersonaVisualPackReviewRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    packPath(personaId, packId, "/reviews"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function forkPersonaVisualPackRevision(
+  personaId: string,
+  packId: string,
+  payload: PersonaVisualPackForkRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    packPath(personaId, packId, "/fork"),
     {
       method: "POST",
       body: payload

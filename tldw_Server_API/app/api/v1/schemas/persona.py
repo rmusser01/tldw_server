@@ -101,7 +101,7 @@ class PersonaBuddyPreferencesUpdate(BaseModel):
 
 
 class PersonaBuddyPreferencesOverrideUpdate(BaseModel):
-    ambient_mode: PersonaAmbientMode
+    ambient_mode: PersonaAmbientMode | None
     expected_version: PersonaStrictVersion
 
 
@@ -111,7 +111,19 @@ class PersonaBuddyPreferencesResponse(BaseModel):
     stored: bool
 
 
+class PersonaBuddyPreferencesOverrideResponse(BaseModel):
+    ambient_mode: PersonaAmbientMode | None
+    version: int
+    stored: bool
+
+
 class PersonaVisualPackReviewRequest(BaseModel):
+    expected_version: PersonaStrictVersion
+
+
+class PersonaVisualPackForkRequest(BaseModel):
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    companion_behavior: dict[str, Any] | None = None
     expected_version: PersonaStrictVersion
 
 

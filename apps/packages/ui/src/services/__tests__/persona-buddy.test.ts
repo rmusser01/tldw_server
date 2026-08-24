@@ -12,6 +12,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 import {
   getBuddyPreferences,
+  getPersonaBuddyPreferences,
   updateBuddyPreferences,
   updatePersonaBuddyPreferences
 } from "../persona-buddy"
@@ -93,6 +94,42 @@ describe("persona buddy preference service", () => {
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({ ambient_mode: "off", expected_version: 7 })
+      })
+    )
+  })
+
+  it("reads and clears a nullable per-Persona override", async () => {
+    mocks.fetchWithAuth
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ambient_mode: null, version: 7, stored: false })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ambient_mode: null, version: 8, stored: false })
+      })
+
+    await expect(
+      getPersonaBuddyPreferences("persona/one")
+    ).resolves.toEqual({ ambient_mode: null, version: 7, stored: false })
+    await updatePersonaBuddyPreferences("persona/one", {
+      ambient_mode: null,
+      expected_version: 7
+    })
+
+    expect(mocks.fetchWithAuth).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/persona/profiles/persona%2Fone/buddy/preferences",
+      expect.objectContaining({ method: "GET" })
+    )
+    expect(mocks.fetchWithAuth).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/persona/profiles/persona%2Fone/buddy/preferences",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ ambient_mode: null, expected_version: 7 })
       })
     )
   })

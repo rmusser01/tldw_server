@@ -91,7 +91,9 @@ export const BuddyDraftReviewPanel: React.FC<BuddyDraftReviewPanelProps> = ({
             <SpriteFrameRenderer
               manifest={manifest}
               assets={assetsById}
-              state="idle"
+              requestedState="idle"
+              generation={0}
+              reducedMotion={false}
               fallbackLabel={t(
                 "sidepanel:personaGarden.visuals.builder.review.previewFallback",
                 { defaultValue: "Buddy preview" }

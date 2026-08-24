@@ -18,8 +18,14 @@ export interface PersonaBuddyPreferencesUpdate {
 }
 
 export interface PersonaBuddyPreferencesOverrideUpdate {
-  ambient_mode: PersonaAmbientMode
+  ambient_mode: PersonaAmbientMode | null
   expected_version: number
+}
+
+export interface PersonaBuddyOverridePreferences {
+  ambient_mode: PersonaAmbientMode | null
+  version: number
+  stored: boolean
 }
 
 export type PersonaBuddyPositionBucket =

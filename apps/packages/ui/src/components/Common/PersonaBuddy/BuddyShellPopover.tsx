@@ -7,6 +7,7 @@ import type {
   PersonaBuddyLiveControlView,
   PersonaBuddySummary
 } from "@/types/persona-buddy"
+import type { PersonaAmbientMode } from "@/types/persona-visuals"
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route"
 
 import {
@@ -19,6 +20,13 @@ type BuddyShellPopoverProps = {
   personaId?: string | null
   visualDiagnostic?: PersonaVisualDiagnostic | null
   liveControl?: PersonaBuddyLiveControlView | null
+  globalAmbientMode?: PersonaAmbientMode
+  personaAmbientMode?: PersonaAmbientMode | null
+  effectiveAmbientMode?: PersonaAmbientMode
+  ambientSurface?: "web" | "sidepanel"
+  ambientPreferenceMessage?: string | null
+  onGlobalAmbientModeChange?: (mode: PersonaAmbientMode) => void
+  onPersonaAmbientModeChange?: (mode: PersonaAmbientMode | null) => void
 }
 
 const generateDraftClientMessageId = () => {
@@ -34,7 +42,14 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   buddySummary,
   personaId = null,
   visualDiagnostic = null,
-  liveControl = null
+  liveControl = null,
+  globalAmbientMode = "expressive",
+  personaAmbientMode = null,
+  effectiveAmbientMode = "off",
+  ambientSurface = "web",
+  ambientPreferenceMessage = null,
+  onGlobalAmbientModeChange,
+  onPersonaAmbientModeChange
 }) => {
   const { t } = useTranslation("common")
   const [draft, setDraft] = React.useState("")
@@ -131,6 +146,56 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
           <div>{visualDiagnostic.message}</div>
         </div>
       ) : null}
+      <div className="mt-3 space-y-3 border-t border-border pt-3 text-xs">
+        <fieldset>
+          <legend className="font-medium text-text">Buddy behavior</legend>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            {(["off", "expressive", "roaming"] as PersonaAmbientMode[]).map((mode) => (
+              <label key={mode} className="inline-flex items-center gap-1 text-text-muted">
+                <input
+                  type="radio"
+                  name="buddy-global-mode"
+                  value={mode}
+                  checked={globalAmbientMode === mode}
+                  onChange={() => onGlobalAmbientModeChange?.(mode)}
+                />
+                {mode[0].toUpperCase() + mode.slice(1)}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend className="font-medium text-text">For this Persona</legend>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            {([
+              [null, "Use global"],
+              ["off", "Off"],
+              ["expressive", "Expressive"],
+              ["roaming", "Roaming"]
+            ] as Array<[PersonaAmbientMode | null, string]>).map(([mode, label]) => (
+              <label key={mode ?? "global"} className="inline-flex items-center gap-1 text-text-muted">
+                <input
+                  type="radio"
+                  name="buddy-persona-mode"
+                  value={mode ?? "global"}
+                  checked={personaAmbientMode === mode}
+                  onChange={() => onPersonaAmbientModeChange?.(mode)}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <div data-testid="persona-buddy-effective-mode" className="text-text-muted">
+          Effective: {effectiveAmbientMode[0].toUpperCase() + effectiveAmbientMode.slice(1)}
+          {ambientSurface === "sidepanel" && (personaAmbientMode ?? globalAmbientMode) === "roaming"
+            ? " · Roaming is limited to Expressive in the sidepanel."
+            : ""}
+        </div>
+        {ambientPreferenceMessage ? (
+          <div role="status" className="text-warning">{ambientPreferenceMessage}</div>
+        ) : null}
+      </div>
       {liveControl ? (
         <div className="mt-3 space-y-2 border-t border-border pt-3">
           {sessionOptions.length > 1 ? (

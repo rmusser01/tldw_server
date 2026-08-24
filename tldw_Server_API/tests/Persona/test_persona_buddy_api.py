@@ -528,6 +528,89 @@ def test_stale_persona_override_patch_returns_conflict_for_bearer_owner(
     assert stale.status_code == 409, stale.text
 
 
+def test_persona_override_get_and_clear_preserve_unknown_overlay_keys(
+    persona_db: CharactersRAGDB,
+):
+    """Use-global reads and clears only ambient_mode on the owned Buddy row."""
+    with _client_for_user(1, persona_db) as client:
+        created = client.post("/api/v1/persona/profiles", json={"name": "Global Override Persona"})
+        assert created.status_code == 201, created.text
+        persona_id = created.json()["id"]
+        buddy = persona_db.get_persona_buddy(persona_id=persona_id, user_id="1")
+        assert buddy is not None
+
+        missing = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/buddy/preferences"
+        )
+        assert missing.status_code == 200, missing.text
+        assert missing.json() == {
+            "ambient_mode": None,
+            "version": buddy["version"],
+            "stored": False,
+        }
+
+        seeded = persona_db.patch_persona_buddy_overlay_preferences(
+            persona_id=persona_id,
+            user_id="1",
+            patch={
+                "ambient_mode": "roaming",
+                "accessory_id": "scarf",
+                "future_overlay": {"kept": True},
+            },
+            expected_version=buddy["version"],
+        )
+        loaded = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/buddy/preferences"
+        )
+        assert loaded.status_code == 200, loaded.text
+        assert loaded.json() == {
+            "ambient_mode": "roaming",
+            "version": seeded["version"],
+            "stored": True,
+        }
+
+        cleared = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/buddy/preferences",
+            json={"ambient_mode": None, "expected_version": seeded["version"]},
+        )
+
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json() == {
+        "ambient_mode": None,
+        "version": seeded["version"] + 1,
+        "stored": False,
+    }
+    persisted = persona_db.get_persona_buddy(persona_id=persona_id, user_id="1")
+    assert persisted is not None
+    assert "ambient_mode" not in persisted["overlay_preferences"]
+    assert persisted["overlay_preferences"]["accessory_id"] == "scarf"
+    assert persisted["overlay_preferences"]["future_overlay"] == {"kept": True}
+
+
+def test_persona_override_clear_rejects_stale_buddy_version(
+    persona_db: CharactersRAGDB,
+):
+    """Clearing to Use global participates in the same optimistic version contract."""
+    with _client_for_user(1, persona_db) as client:
+        created = client.post("/api/v1/persona/profiles", json={"name": "Stale Clear Persona"})
+        assert created.status_code == 201, created.text
+        persona_id = created.json()["id"]
+        buddy = persona_db.get_persona_buddy(persona_id=persona_id, user_id="1")
+        assert buddy is not None
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/buddy/preferences",
+            json={"ambient_mode": "off", "expected_version": buddy["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+
+        stale = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/buddy/preferences",
+            json={"ambient_mode": None, "expected_version": buddy["version"]},
+        )
+
+    assert stale.status_code == 409, stale.text
+
+
 @pytest.mark.parametrize("invalid_version", [True, 1.0, "1"])
 def test_preference_expected_versions_reject_non_integer_json_values(
     persona_db: CharactersRAGDB,

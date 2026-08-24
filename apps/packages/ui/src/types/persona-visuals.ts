@@ -405,6 +405,12 @@ export interface PersonaVisualPackReviewRequest {
   expected_version: number
 }
 
+export interface PersonaVisualPackForkRequest {
+  manifest: PersonaVisualManifest | Record<string, unknown>
+  companion_behavior?: PersonaCompanionBehavior | null
+  expected_version: number
+}
+
 export interface PersonaVisualPackActivateRequest {
   expected_version: number
   reviewed_fingerprint: string

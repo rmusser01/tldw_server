@@ -14,6 +14,26 @@ priority: High
 documentation:
 - Docs/superpowers/specs/2026-08-23-persona-ambient-companion-transparent-video-design.md
 - Docs/superpowers/plans/2026-08-23-persona-ambient-companion-stage-1-implementation-plan.md
+updated_date: 2026-08-24 10:41
+modified_files:
+- apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellDock.tsx
+- apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellHost.tsx
+- apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellPopover.tsx
+- apps/packages/ui/src/components/Common/PersonaBuddy/SpriteFrameRenderer.tsx
+- apps/packages/ui/src/components/Common/PersonaBuddy/personaVisualDiagnostics.ts
+- apps/packages/ui/src/components/Common/PersonaBuddy/personaVisualRenderers.tsx
+- apps/packages/ui/src/components/Common/PersonaBuddy/personaVisualTypes.ts
+- apps/packages/ui/src/components/PersonaGarden/BuddyDraftReviewPanel.tsx
+- apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx
+- apps/packages/ui/src/services/persona-buddy.ts
+- apps/packages/ui/src/services/persona-visuals.ts
+- apps/packages/ui/src/store/persona-buddy-shell.ts
+- apps/packages/ui/src/types/persona-buddy.ts
+- apps/packages/ui/src/types/persona-visuals.ts
+- tldw_Server_API/app/api/v1/endpoints/persona.py
+- tldw_Server_API/app/api/v1/schemas/persona.py
+- tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py
+- tldw_Server_API/app/core/Persona/visual_service.py
 ---
 
 ## Description
@@ -40,9 +60,9 @@ Execute the seven tasks in Docs/superpowers/plans/2026-08-23-persona-ambient-com
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Task 6 implementation started in isolated worktree on 2026-08-24. Controller rulings #7-#9 apply. First strict-TDD slice covers owner-scoped per-Persona preference GET/clear semantics, stale-before-copy visual revision fork API/service, and typed frontend service helpers before renderer/host/editor integration.
+Task 6 implementation complete in the isolated worktree. Added the single hook-owned ambient engine host integration, authenticated/fenced raster renderer, reduced-motion still path, gesture/keyboard/touch arbitration, quiet chrome, layered optimistic Buddy settings (including per-Persona GET/Use-global clear and 409 recovery), review-before-activate Visual Garden flow, active revision fork API/editor behavior, and typed frontend helpers. Verification: backend Persona API/service suites 125/125; frontend Task 6 aggregate 238/238; touched Task 6 TypeScript diagnostics 0 (51 unrelated project baseline); Bandit 0 findings/0 errors at /tmp/bandit_persona_ambient_task6.json; git diff --check clean. Full ignored report: .superpowers/sdd/2026-08-23-persona-ambient-companion-stage-1-implementation-plan/task-6-report.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

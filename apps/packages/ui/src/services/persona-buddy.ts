@@ -1,4 +1,5 @@
 import type {
+  PersonaBuddyOverridePreferences,
   PersonaBuddyPreferences,
   PersonaBuddyPreferencesOverrideUpdate,
   PersonaBuddyPreferencesUpdate
@@ -21,11 +22,18 @@ export const updateBuddyPreferences = (
 export const updatePersonaBuddyPreferences = (
   personaId: string,
   input: PersonaBuddyPreferencesOverrideUpdate
-): Promise<PersonaBuddyPreferences> =>
-  fetchPersonaVisualJson<PersonaBuddyPreferences>(
+): Promise<PersonaBuddyOverridePreferences> =>
+  fetchPersonaVisualJson<PersonaBuddyOverridePreferences>(
     `/api/v1/persona/profiles/${encodeURIComponent(personaId)}/buddy/preferences`,
     {
       method: "PATCH",
       body: input
     }
+  )
+
+export const getPersonaBuddyPreferences = (
+  personaId: string
+): Promise<PersonaBuddyOverridePreferences> =>
+  fetchPersonaVisualJson<PersonaBuddyOverridePreferences>(
+    `/api/v1/persona/profiles/${encodeURIComponent(personaId)}/buddy/preferences`
   )
