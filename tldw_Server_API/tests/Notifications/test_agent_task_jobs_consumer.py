@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from tldw_Server_API.app.core.Scheduled_Tasks import agent_task_jobs
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     DefinitionRow,
@@ -196,20 +198,108 @@ async def test_paused_definition_skips_with_reason(consumer_env) -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_definition_skips(consumer_env) -> None:
+async def test_missing_definition_skips_without_side_effects(
+    consumer_env, monkeypatch
+) -> None:
     user_id = 1013
-    ghost = _create_definition(user_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    sdb.ensure_schema()
+    missing_definition_id = "definition-never-created"
+    executor = AsyncMock(return_value="must not execute")
+    register_executor("recurring_question", executor)
+    fake_logger = Mock()
+    monkeypatch.setattr(agent_task_jobs, "logger", fake_logger)
 
     job = {
         "id": 78,
         "owner_user_id": user_id,
         "job_type": "agent_task_run",
         # A definition id that was never created: unique to this test.
-        "payload": {"definition_id": ghost.id + "deadbeef", "user_id": user_id},
+        "payload": {
+            "definition_id": missing_definition_id,
+            "user_id": user_id,
+            "family": "recurring_question",
+            "scheduled_for": SLOT,
+            "prompt": "private prompt must not be logged",
+        },
     }
     result = await handle_agent_task_job(job)
 
-    assert result["status"] == "skipped"
+    assert result == {
+        "status": "skipped",
+        "definition_id": missing_definition_id,
+        "run_id": None,
+        "reason": "definition_missing",
+    }
+    assert sdb.get_scheduled_task_run_by_slot(
+        definition_id=missing_definition_id, run_slot_key=SLOT
+    ) is None
+    audits, total = sdb.list_audit_events(
+        owner_id=user_id, definition_id=missing_definition_id
+    )
+    assert audits == []
+    assert total == 0
+    assert _latest_notification(user_id) is None
+    executor.assert_not_awaited()
+    fake_logger.warning.assert_called_once_with(
+        "Automation Job skipped because its definition is unavailable",
+        definition_id=missing_definition_id,
+        user_id=user_id,
+        job_id=78,
+    )
+
+
+@pytest.mark.asyncio
+async def test_cross_owner_definition_is_treated_as_missing(
+    consumer_env, monkeypatch
+) -> None:
+    definition_owner_id = 1020
+    job_owner_id = 1021
+    definition = _create_definition(definition_owner_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=job_owner_id)
+    sdb.ensure_schema()
+    executor = AsyncMock(return_value="must not execute")
+    register_executor("recurring_question", executor)
+    fake_logger = Mock()
+    monkeypatch.setattr(agent_task_jobs, "logger", fake_logger)
+
+    result = await handle_agent_task_job(
+        {
+            "id": 79,
+            "owner_user_id": job_owner_id,
+            "job_type": "agent_task_run",
+            "payload": {
+                "definition_id": definition.id,
+                "user_id": job_owner_id,
+                "family": definition.family,
+                "scheduled_for": SLOT,
+                "prompt": "private prompt must not be logged",
+            },
+        }
+    )
+
+    assert result == {
+        "status": "skipped",
+        "definition_id": definition.id,
+        "run_id": None,
+        "reason": "definition_missing",
+    }
+    assert sdb.get_scheduled_task_run_by_slot(
+        definition_id=definition.id, run_slot_key=SLOT
+    ) is None
+    audits, total = sdb.list_audit_events(
+        owner_id=job_owner_id, definition_id=definition.id
+    )
+    assert audits == []
+    assert total == 0
+    assert _latest_notification(job_owner_id) is None
+    executor.assert_not_awaited()
+    fake_logger.warning.assert_called_once_with(
+        "Automation Job skipped because its definition is unavailable",
+        definition_id=definition.id,
+        user_id=job_owner_id,
+        job_id=79,
+    )
 
 
 # ---------------------------------------------------------------------------

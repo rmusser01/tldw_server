@@ -148,6 +148,8 @@ async def handle_agent_task_job(
 
     Returns a result dict shaped like the reminders consumer's (``status``,
     ``definition_id``, ``run_id``, ``deduped`` for no-op redeliveries).
+    ``run_id`` is ``None`` only when the owner-scoped definition is unavailable;
+    that pre-run skip also includes ``reason="definition_missing"``.
     """
     payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
     definition_id = str(payload.get("definition_id") or "").strip()
@@ -163,6 +165,25 @@ async def handle_agent_task_job(
     now_iso = datetime.now(timezone.utc).isoformat()
 
     sdb = scheduled_db or ScheduledTasksDatabase.for_user(user_id=user_id)
+
+    try:
+        definition = sdb.get_definition(owner_id=user_id, definition_id=definition_id)
+    except KeyError:
+        definition = None
+    if definition is None:
+        logger.warning(
+            "Automation Job skipped because its definition is unavailable",
+            definition_id=definition_id,
+            user_id=user_id,
+            job_id=job.get("id"),
+        )
+        return {
+            "status": "skipped",
+            "definition_id": definition_id,
+            "run_id": None,
+            "reason": "definition_missing",
+        }
+
     cdb = collections_db or CollectionsDatabase.for_user(user_id=user_id)
 
     # Durable run row, deduped on (definition, slot): a redelivered Job for
@@ -184,24 +205,6 @@ async def handle_agent_task_job(
             "run_id": run["id"],
             "deduped": True,
         }
-
-    try:
-        definition = sdb.get_definition(owner_id=user_id, definition_id=definition_id)
-    except KeyError:
-        definition = None
-    if definition is None:
-        _finish(
-            sdb,
-            cdb,
-            definition=None,
-            run_id=run["id"],
-            status="skipped",
-            error="definition_missing",
-            summary=None,
-            jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
-            execution_timeout_seconds=execution_timeout_seconds,
-        )
-        return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
 
     # Lifecycle re-check at execution time: arming gates on 'configured',
     # but the definition may have been paused/archived/disabled since.
