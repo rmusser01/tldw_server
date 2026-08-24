@@ -32,6 +32,7 @@ from .models import (
     server_frontend_mutation_enabled_for_policy,
 )
 from .mutation_group_validation import (
+    SYNC_MUTATION_GROUP_MAX_SIZE,
     StoredMutationGroupValidationError,
     materialization_group_view,
     mutation_group_plan_hash,
@@ -43,6 +44,7 @@ from .notes_task_contract import (
     parse_notes_task_activity_v1,
     parse_notes_task_v1,
 )
+from .notes_task_readiness import notes_task_capture_is_active
 from .server_origin import (
     SERVER_ORIGIN_DEVICE_ID,
     SyncServerOriginMutationNotSupportedError,
@@ -68,6 +70,8 @@ class ServerOriginMutationStep:
     adapter_version: int = 1
     client_envelope_id: str | None = None
     object_revision: int | None = None
+    base_object_revision: int | None = None
+    base_object_hash: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +126,7 @@ def capture_server_origin_mutation_batch(
     trusted_notes_attachment_bootstrap_id: str | None = None,
     trusted_notes_task_bootstrap_id: str | None = None,
     trusted_notes_task_activity_bootstrap_id: str | None = None,
+    trusted_notes_task_coordinator: bool = False,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
     | None = None,
     bootstrap_relationship_absence_verifier: Callable[
@@ -135,6 +140,8 @@ def capture_server_origin_mutation_batch(
     plan = tuple(steps)
     if not plan:
         raise SyncStoreError("Sync server-origin mutation batch must contain at least one step")
+    if len(plan) > SYNC_MUTATION_GROUP_MAX_SIZE:
+        raise SyncStoreError("Sync server-origin mutation batch exceeds the 1000-step limit")
     normalized_key = idempotency_key.strip()
     if not normalized_key:
         raise SyncStoreError("Sync server-origin mutation batch requires an idempotency key")
@@ -151,6 +158,12 @@ def capture_server_origin_mutation_batch(
     )
     if len(trusted_contexts) > 1:
         raise SyncStoreError("Only one trusted bootstrap context may be supplied")
+    if trusted_notes_task_coordinator and trusted_contexts:
+        raise SyncStoreError("Task coordinator capture cannot use a bootstrap context")
+    if trusted_notes_task_coordinator and not {
+        step.domain for step in plan
+    }.issubset({"notes.task", "notes.task_activity", "notes.note"}):
+        raise SyncStoreError("Task coordinator capture contains an unsupported domain")
     trusted_bootstrap_id = (
         trusted_notes_organization_bootstrap_id
         or trusted_notes_link_bootstrap_id
@@ -170,6 +183,7 @@ def capture_server_origin_mutation_batch(
         notes_task_activity_bootstrap=(
             trusted_notes_task_activity_bootstrap_id is not None
         ),
+        notes_task_coordinator=trusted_notes_task_coordinator,
     )
     if not server_frontend_mutation_enabled_for_policy(dataset.encryption_policy):
         raise SyncServerOriginMutationNotSupportedError(dataset, plan[0].domain)
@@ -226,6 +240,7 @@ def capture_server_origin_mutation_batch(
         notes_task_activity_bootstrap=(
             trusted_notes_task_activity_bootstrap_id is not None
         ),
+        notes_task_coordinator=trusted_notes_task_coordinator,
         bootstrap_relationship_verifier=bootstrap_relationship_verifier,
         bootstrap_relationship_absence_verifier=(
             bootstrap_relationship_absence_verifier
@@ -233,7 +248,13 @@ def capture_server_origin_mutation_batch(
     )
     try:
         if trusted_bootstrap_id is None:
-            inserted = service.store.insert_envelopes_atomic(envelopes)
+            if trusted_notes_task_coordinator:
+                inserted = service.store.insert_envelopes_atomic(
+                    envelopes,
+                    trusted_notes_task_coordinator=True,
+                )
+            else:
+                inserted = service.store.insert_envelopes_atomic(envelopes)
         else:
             inserted = service.store.insert_envelopes_atomic(
                 envelopes,
@@ -324,13 +345,92 @@ def resume_server_origin_mutation_group(
     envelopes = service.store.list_mutation_group(dataset_id, mutation_group_id)
     if not envelopes:
         raise SyncStoreError("Sync server-origin mutation group was not found")
-    _require_batch_write_ready(dataset, {envelope.domain for envelope in envelopes})
     _validate_stored_group(
         envelopes,
         dataset_id=dataset_id,
         mutation_group_id=mutation_group_id,
     )
+    notes_task_coordinator = _is_trusted_notes_task_coordinator_group(
+        dataset,
+        envelopes,
+    )
+    _require_batch_write_ready(
+        dataset,
+        {envelope.domain for envelope in envelopes},
+        notes_task_coordinator=notes_task_coordinator,
+    )
     return _materialize_group(service=service, dataset=dataset, envelopes=envelopes)
+
+
+def materialize_accepted_mutation_group(
+    *,
+    service: SyncV2Service,
+    dataset: SyncDataset,
+    envelopes: Sequence[SyncEnvelope],
+) -> ServerOriginBatchResult:
+    """Materialize one already-validated accepted group in dependency order."""
+
+    if not envelopes or envelopes[0].mutation_group_id is None:
+        raise SyncStoreError("Sync accepted mutation group is missing group identity")
+    _validate_stored_group(
+        envelopes,
+        dataset_id=dataset.dataset_id,
+        mutation_group_id=envelopes[0].mutation_group_id,
+    )
+    return _materialize_group(service=service, dataset=dataset, envelopes=envelopes)
+
+
+def _is_trusted_notes_task_coordinator_group(
+    dataset: SyncDataset,
+    envelopes: Sequence[SyncEnvelope],
+) -> bool:
+    """Recognize only a validated, closed server-origin task mutation group."""
+
+    if not envelopes or any(
+        envelope.device_id != SERVER_ORIGIN_DEVICE_ID
+        or envelope.routing_metadata.get("origin") != "server"
+        or envelope.routing_metadata.get("server_device_id")
+        != SERVER_ORIGIN_DEVICE_ID
+        or envelope.routing_metadata.get("server_owner_user_id")
+        != dataset.owner_user_id
+        for envelope in envelopes
+    ):
+        return False
+    try:
+        from .notes_task_coordinator import _validate_task_mutation_plan
+
+        _validate_task_mutation_plan(
+            tuple(_canonical_step_from_envelope(envelope) for envelope in envelopes)
+        )
+    except (ImportError, SyncStoreError):
+        return False
+    return True
+
+
+def is_trusted_notes_task_coordinator_envelope(
+    *,
+    service: SyncV2Service,
+    dataset: SyncDataset,
+    envelope: SyncEnvelope,
+) -> bool:
+    """Recognize one envelope only through its complete validated coordinator group."""
+
+    group_id = envelope.mutation_group_id
+    if group_id is None:
+        return False
+    group = service.store.list_mutation_group(dataset.dataset_id, group_id)
+    try:
+        _validate_stored_group(
+            group,
+            dataset_id=dataset.dataset_id,
+            mutation_group_id=group_id,
+        )
+    except (SyncIdempotencyConflictError, SyncStoreError):
+        return False
+    return bool(
+        any(item.server_cursor == envelope.server_cursor for item in group)
+        and _is_trusted_notes_task_coordinator_group(dataset, group)
+    )
 
 
 def _evaluate_plan(
@@ -345,6 +445,7 @@ def _evaluate_plan(
     notes_attachment_bootstrap: bool = False,
     notes_task_bootstrap: bool = False,
     notes_task_activity_bootstrap: bool = False,
+    notes_task_coordinator: bool = False,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
     | None = None,
     bootstrap_relationship_absence_verifier: Callable[
@@ -384,6 +485,25 @@ def _evaluate_plan(
     step_count = len(canonical_steps)
     for index, step in enumerate(canonical_steps):
         prior_head = get_head(step.domain, step.object_id)
+        task_readiness = dataset.metadata.get("notes_task_v1")
+        trusted_prebootstrap_task_capture = bool(
+            notes_task_coordinator
+            and step.domain == "notes.task"
+            and prior_head is None
+            and step.base_object_revision is not None
+            and step.base_object_hash is not None
+            and isinstance(task_readiness, Mapping)
+            and task_readiness.get("state") in {"enrolling", "bootstrapping"}
+        )
+        if step.base_object_revision is not None:
+            if prior_head is None:
+                if not trusted_prebootstrap_task_capture:
+                    raise SyncStoreError("notes_task_prebootstrap_base_invalid")
+            elif (
+                step.base_object_revision != prior_head.object_revision
+                or step.base_object_hash != prior_head.payload_hash
+            ):
+                raise SyncStoreError("notes_task_coordinator_base_conflict")
         object_revision = (
             _next_object_revision(prior_head)
             if step.object_revision is None
@@ -396,7 +516,7 @@ def _evaluate_plan(
                 step.payload,
                 object_revision=object_revision,
             )
-        if notes_task_bootstrap and step.domain == "notes.task":
+        if (notes_task_bootstrap or notes_task_coordinator) and step.domain == "notes.task":
             task_payload = parse_notes_task_v1(
                 step.payload,
                 owner_user_id=dataset.owner_user_id,
@@ -406,7 +526,9 @@ def _evaluate_plan(
                 revision=object_revision,
                 deleted=step.operation == "tombstone",
             )
-        if notes_task_activity_bootstrap and step.domain == "notes.task_activity":
+        if (
+            notes_task_activity_bootstrap or notes_task_coordinator
+        ) and step.domain == "notes.task_activity":
             if step.operation != "upsert" or object_revision != 1:
                 raise SyncStoreError("notes_task_activity_bootstrap_lineage_invalid")
             activity_payload = parse_notes_task_activity_v1(
@@ -438,9 +560,13 @@ def _evaluate_plan(
             device_id=SERVER_ORIGIN_DEVICE_ID,
             base_server_cursor=base_server_cursor,
             base_object_revision=(
-                prior_head.object_revision if prior_head is not None else None
+                prior_head.object_revision
+                if prior_head is not None
+                else step.base_object_revision
             ),
-            base_object_hash=prior_head.payload_hash if prior_head is not None else None,
+            base_object_hash=(
+                prior_head.payload_hash if prior_head is not None else step.base_object_hash
+            ),
             base_version=(
                 (
                     prior_head.entity_version
@@ -486,7 +612,14 @@ def _evaluate_plan(
             prior_envelopes=(*history, *((planned_prior,) if planned_prior else ())),
             get_head=get_head,
             list_heads=list_heads,
-            trusted_server_origin=bootstrap_id is not None,
+            get_authorized_note=lambda note_id: get_head("notes.note", note_id),
+            get_authorized_task=lambda task_id: get_head("notes.task", task_id),
+            trusted_server_origin=(
+                bootstrap_id is not None or notes_task_coordinator
+            ),
+            trusted_notes_task_prebootstrap_capture=(
+                trusted_prebootstrap_task_capture
+            ),
             organization_group_state=("initializing" if bootstrap_id is not None else None),
             organization_bootstrap_id=(
                 bootstrap_id
@@ -546,6 +679,10 @@ def _materialize_group(
         dataset_id=dataset.dataset_id,
         mutation_group_id=group[0].mutation_group_id or "",
     )
+    trusted_notes_task_coordinator = (
+        bootstrap_id is None
+        and _is_trusted_notes_task_coordinator_group(dataset, group)
+    )
     try:
         with service.store.materialization_guard(
             group,
@@ -555,6 +692,7 @@ def _materialize_group(
                 if notes_task_bootstrap or notes_task_activity_bootstrap
                 else None
             ),
+            trusted_notes_task_coordinator=trusted_notes_task_coordinator,
         ) as guarded_store:
             group = guarded_store.list_mutation_group(
                 dataset.dataset_id,
@@ -749,6 +887,16 @@ def _validate_stored_group(
                     if expected.object_revision is not None
                     else None
                 ),
+                base_object_revision=(
+                    stored.base_object_revision
+                    if expected.base_object_revision is not None
+                    else None
+                ),
+                base_object_hash=(
+                    stored.base_object_hash
+                    if expected.base_object_hash is not None
+                    else None
+                ),
             )
             for stored, expected in zip(stored_steps, expected_steps, strict=True)
         )
@@ -772,6 +920,17 @@ def _canonical_step(
         type(step.object_revision) is not int or step.object_revision < 1
     ):
         raise SyncStoreError("Sync server-origin object revision must be positive")
+    base_values = (step.base_object_revision, step.base_object_hash)
+    if any(value is not None for value in base_values) != all(
+        value is not None for value in base_values
+    ):
+        raise SyncStoreError("Sync server-origin object base must be complete")
+    if step.base_object_revision is not None and (
+        type(step.base_object_revision) is not int
+        or step.base_object_revision < 1
+        or step.object_revision != step.base_object_revision + 1
+    ):
+        raise SyncStoreError("Sync server-origin object base revision is invalid")
     routing_metadata = dict(step.routing_metadata)
     if not (step.domain == "attachment.ref" and step.adapter_version == 2):
         routing_metadata.update(
@@ -795,6 +954,8 @@ def _canonical_step(
         adapter_version=step.adapter_version,
         client_envelope_id=step.client_envelope_id,
         object_revision=step.object_revision,
+        base_object_revision=step.base_object_revision,
+        base_object_hash=step.base_object_hash,
     )
 
 
@@ -812,6 +973,8 @@ def _canonical_step_from_envelope(envelope: SyncEnvelope) -> ServerOriginMutatio
         adapter_version=envelope.adapter_version,
         client_envelope_id=envelope.client_envelope_id,
         object_revision=envelope.object_revision,
+        base_object_revision=envelope.base_object_revision,
+        base_object_hash=envelope.base_object_hash,
     )
 
 
@@ -834,6 +997,9 @@ def _mutation_plan_hash(steps: Sequence[ServerOriginMutationStep]) -> str:
             encoded_step["client_envelope_id"] = step.client_envelope_id
         if step.object_revision is not None:
             encoded_step["object_revision"] = step.object_revision
+        if step.base_object_revision is not None:
+            encoded_step["base_object_revision"] = step.base_object_revision
+            encoded_step["base_object_hash"] = step.base_object_hash
         plan.append(encoded_step)
     encoded = json.dumps(
         plan,
@@ -891,12 +1057,18 @@ def _require_batch_write_ready(
     trusted_bootstrap_id: str | None = None,
     notes_task_bootstrap: bool = False,
     notes_task_activity_bootstrap: bool = False,
+    notes_task_coordinator: bool = False,
 ) -> None:
     missing_domains = domains.difference(dataset.domains)
     if notes_task_bootstrap:
         missing_domains = missing_domains.difference({"notes.task"})
     if notes_task_activity_bootstrap:
         missing_domains = missing_domains.difference({"notes.task_activity"})
+    capture_active = notes_task_capture_is_active(dataset.metadata)
+    if notes_task_coordinator and capture_active:
+        missing_domains = missing_domains.difference(
+            {"notes.task", "notes.task_activity"}
+        )
     missing = sorted(missing_domains)
     if missing:
         raise SyncStoreError(
@@ -905,12 +1077,16 @@ def _require_batch_write_ready(
     if "notes.task" in domains:
         metadata = dataset.metadata.get("notes_task_v1")
         state = metadata.get("state") if isinstance(metadata, Mapping) else None
-        if not notes_task_bootstrap or trusted_bootstrap_id is None or state != "bootstrapping":
+        if notes_task_coordinator and capture_active:
+            pass
+        elif not notes_task_bootstrap or trusted_bootstrap_id is None or state != "bootstrapping":
             raise SyncStoreError("notes_task_sync_not_ready")
     if "notes.task_activity" in domains:
         metadata = dataset.metadata.get("notes_task_activity_v1")
         state = metadata.get("state") if isinstance(metadata, Mapping) else None
-        if (
+        if notes_task_coordinator and capture_active:
+            pass
+        elif (
             not notes_task_activity_bootstrap
             or trusted_bootstrap_id is None
             or state != "bootstrapping"
@@ -955,6 +1131,8 @@ def _require_batch_write_ready(
 
 
 __all__ = [
+    "is_trusted_notes_task_coordinator_envelope",
+    "materialize_accepted_mutation_group",
     "ServerOriginBatchResult",
     "ServerOriginMutationStep",
     "SyncServerOriginBatchAppendError",

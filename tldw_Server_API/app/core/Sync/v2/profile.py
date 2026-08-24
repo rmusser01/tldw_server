@@ -13,6 +13,7 @@ from .models import (
     M1_SYNC_DOMAINS,
     NOTES_LINK_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    NOTES_TASK_SYNC_DOMAINS,
     SyncDataset,
     SyncDevice,
     SyncDeviceUpsert,
@@ -217,7 +218,16 @@ class SyncV2ProfileManager:
             raise SyncStoreError("Sync v2 M1 profile bootstrap requires chatbook client_family")
         requested = list(requested_domains or M1_SYNC_DOMAINS)
         capabilities = self.capabilities_factory()
-        invalid_domains = sorted(set(requested).difference(capabilities.supported_domains))
+        requested_task_domains = set(requested).intersection(NOTES_TASK_SYNC_DOMAINS)
+        if requested_task_domains and requested_task_domains != set(
+            NOTES_TASK_SYNC_DOMAINS
+        ):
+            raise SyncStoreError("notes_task_sync_domains_incomplete")
+        invalid_domains = sorted(
+            set(requested).difference(
+                {*capabilities.supported_domains, *NOTES_TASK_SYNC_DOMAINS}
+            )
+        )
         if invalid_domains:
             raise SyncStoreError(
                 "Sync v2 M1 profile bootstrap requested unsupported domains: "
@@ -310,6 +320,10 @@ class SyncV2ProfileManager:
                     user_id=user_id,
                     dataset=dataset,
                 )
+        if requested_task_domains:
+            if self.service is None:
+                raise SyncStoreError("Notes task bootstrap service is unavailable")
+            dataset = self.service._activate_notes_task_sync(dataset)
         return self._build_profile(
             user_id=user_id,
             dataset=dataset,

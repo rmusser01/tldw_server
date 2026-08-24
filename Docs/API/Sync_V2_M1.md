@@ -324,6 +324,56 @@ the projection is current. Cache and pagination cursors bind the canonical datas
 owner graph revision, parser version, and normalized request, so trash, restore,
 link, membership, or projection changes cannot serve a stale cached page.
 
+## Notes task and task activity version 1
+
+`notes.task` and `notes.task_activity` are one coupled capability. Unbound
+capabilities omit both. An owner-authorized, selected default-personal dataset
+advertises both domains, both schemas, and adapter version `1` only after task and
+activity source bootstrap, canonical capture, product authority, and repair wiring
+are all ready. The supported and writable maps always include both domains or
+neither. Devices must request and version-negotiate the complete pair.
+
+Explicit enrollment requires `notes.note`, `server_trusted_v1`, and the complete
+task/activity pair. It first binds the owner's `local-unbound` task graph to the
+default-personal dataset under the dataset fence, then atomically enables task and
+activity capture before either source scan. Task and activity bootstraps are
+bounded, keyset-paged, source-fingerprinted, and resumable. A process failure after
+the product bind cannot make the domains writable: retry verifies the immutable
+binding, resumes the stored cursor, and publishes both domains in one final Sync
+transaction. Readiness diagnostics remain server-private.
+
+`notes.task` schema version `1` is the canonical whole-object task record. Upserts
+and tombstones use immutable UUIDv4 task identity, parent note identity, canonical
+revision/hash, status, description, priority, due date, estimate, recurrence
+metadata, assignee, tags, custom fields, and projection status. Recurrence metadata
+is synchronized; the server does not run a recurrence scheduler. Task creates,
+updates, completion/reopen, delete, restore, and relink expand to a deterministic
+mutation group containing the task, exactly one immutable activity, and when
+linked, the derived `notes.note` checklist projection. Groups are limited to 1,000
+steps and are durably appended before product materialization.
+
+`notes.task_activity` schema version `1` is immutable event history. Ordinary
+lifecycle events are derived by the task coordinator and cannot be directly
+created by a client. A direct client may create only a `corrected` event whose
+`corrects_activity_id` resolves to an exact live activity in the same owner,
+dataset, note, and task scope; missing, foreign, and cross-task targets fail without
+revealing existence. Server-origin REST/MCP activity and trusted legacy bootstrap
+retain bounded provenance. Activity tombstones preserve the original identity and
+require exact lineage.
+
+Managed Markdown checklist markers are the stable link between canonical tasks and
+derived note text. They carry task identity and exact last-common task/note anchors;
+marker and locator caches are rebuildable. Equal edits converge automatically.
+Incompatible task/note edits create privacy-safe drift and block silent overwrite
+until an explicit resolution claim succeeds. Explicit/unmanaged checklist items
+remain note content and are never silently adopted as canonical tasks.
+
+Linked task tombstones and envelopes referenced by open drift are retained until
+their restoration and repair windows close. Restore validates the exact current
+tombstone, former note linkage, and current parent scope; relink is an explicit
+authorized operation. Failures use stable task Sync error codes and never expose
+readiness fingerprints, source rows, foreign IDs, or note content.
+
 ## Shared Types
 
 ### Capability Shape

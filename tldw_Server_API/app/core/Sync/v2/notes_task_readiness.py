@@ -60,6 +60,7 @@ _RESUME_PHASES = frozenset({"bootstrapping", "verifying"})
 _FINGERPRINT = re.compile(r"[0-9a-f]{64}")
 
 CursorOrderKey: TypeAlias = UUID | tuple[datetime, UUID]
+NOTES_TASK_SYNC_DOMAIN_NAMES = frozenset({"notes.task", "notes.task_activity"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +120,47 @@ def redact_notes_task_server_metadata(
         for key, value in metadata.items()
         if key not in NOTES_TASK_SERVER_METADATA_KEYS
     }
+
+
+def notes_task_sync_is_ready(
+    *,
+    domains: object,
+    metadata: object,
+) -> bool:
+    """Return whether the complete coupled task domain is durably ready."""
+
+    if not isinstance(domains, (list, tuple)) or not isinstance(metadata, Mapping):
+        return False
+    enrolled = {domain for domain in domains if isinstance(domain, str)}
+    if not {"notes.note", *NOTES_TASK_SYNC_DOMAIN_NAMES}.issubset(enrolled):
+        return False
+    if metadata.get("task_activity_capture_enabled") is not True:
+        return False
+    for readiness_key in ("notes_task_v1", "notes_task_activity_v1"):
+        parsed = parse_notes_task_readiness_record(
+            metadata.get(readiness_key),
+            readiness_key=readiness_key,
+        )
+        if parsed.record is None or parsed.record.state != "ready":
+            return False
+    return True
+
+
+def notes_task_capture_is_active(metadata: object) -> bool:
+    """Return whether coupled mutation capture must remain active during rollout."""
+
+    if not isinstance(metadata, Mapping):
+        return False
+    if metadata.get("task_activity_capture_enabled") is not True:
+        return False
+    for readiness_key in ("notes_task_v1", "notes_task_activity_v1"):
+        parsed = parse_notes_task_readiness_record(
+            metadata.get(readiness_key),
+            readiness_key=readiness_key,
+        )
+        if parsed.record is None or parsed.record.state == "not_enrolled":
+            return False
+    return True
 
 
 def parse_notes_task_readiness_record(

@@ -127,6 +127,13 @@ NOTES_LINK_DOMAINS: tuple[SyncDomain, ...] = ("notes.link",)
 NOTES_LINK_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "notes.link": ["upsert", "tombstone"]
 }
+NOTES_TASK_SYNC_DOMAINS: tuple[SyncDomain, ...] = (
+    "notes.task",
+    "notes.task_activity",
+)
+NOTES_TASK_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    domain: ["upsert", "tombstone"] for domain in NOTES_TASK_SYNC_DOMAINS
+}
 WORKSPACE_SYNC_DOMAINS: list[SyncDomain] = [
     "workspaces.workspace",
     "workspaces.source_ref",
@@ -165,10 +172,13 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
     **NOTES_LINK_SYNC_OPERATIONS,
 }
+SYNC_V2_KNOWN_DOMAINS: tuple[SyncDomain, ...] = (
+    *SYNC_V2_SUPPORTED_DOMAINS,
+    *NOTES_TASK_SYNC_DOMAINS,
+)
 SYNC_V2_INTERNAL_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **SYNC_V2_SUPPORTED_OPERATIONS,
-    "notes.task": ["upsert", "tombstone"],
-    "notes.task_activity": ["upsert", "tombstone"],
+    **NOTES_TASK_SYNC_OPERATIONS,
 }
 SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS = 100
 SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN = 8
@@ -476,12 +486,19 @@ def _sync_v2_internal_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     return schemas
 
 
-def sync_v2_server_supported_adapter_versions() -> dict[SyncDomain, list[int]]:
+def sync_v2_server_supported_adapter_versions(
+    *,
+    notes_task_sync_ready: bool = False,
+) -> dict[SyncDomain, list[int]]:
     """Return bounded server-supported versions independently of writability."""
 
+    domains = [
+        *SYNC_V2_SUPPORTED_DOMAINS,
+        *(NOTES_TASK_SYNC_DOMAINS if notes_task_sync_ready else ()),
+    ]
     return {
         domain: ([1, 2] if domain == "attachment.ref" else [1])
-        for domain in SYNC_V2_SUPPORTED_DOMAINS
+        for domain in domains
     }
 
 
@@ -490,6 +507,7 @@ def sync_v2_dataset_writable_adapter_versions(
     *,
     notes_attachment_sync_enabled: bool = False,
     supports_attachments: bool = False,
+    notes_task_sync_ready: bool = False,
 ) -> dict[SyncDomain, list[int]]:
     """Return versions writable under one authoritative dataset/settings gate."""
 
@@ -509,6 +527,8 @@ def sync_v2_dataset_writable_adapter_versions(
         supports_attachments=supports_attachments,
     ):
         versions["attachment.ref"] = [2]
+    if notes_task_sync_ready:
+        versions.update(dict.fromkeys(NOTES_TASK_SYNC_DOMAINS, [1]))
     return versions
 
 
@@ -547,13 +567,19 @@ def normalize_sync_v2_requested_domains(value: object) -> list[SyncDomain]:
             "requested_domains may contain at most "
             f"{SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS} domains"
         )
-    known = set(SYNC_V2_SUPPORTED_DOMAINS)
+    known = set(SYNC_V2_KNOWN_DOMAINS)
     for domain in domains:
         if not isinstance(domain, str) or domain not in known:
             raise ValueError(
                 f"requested_domains contains unknown Sync domain: {domain}"
             )
-    return [cast(SyncDomain, domain) for domain in dict.fromkeys(domains)]
+    normalized = [cast(SyncDomain, domain) for domain in dict.fromkeys(domains)]
+    requested_task_domains = set(normalized).intersection(NOTES_TASK_SYNC_DOMAINS)
+    if requested_task_domains and requested_task_domains != set(
+        NOTES_TASK_SYNC_DOMAINS
+    ):
+        raise ValueError("requested_domains must include both Notes task domains")
+    return normalized
 
 
 def normalize_supported_adapter_versions(
@@ -574,7 +600,7 @@ def normalize_supported_adapter_versions(
             f"{SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS} domains"
         )
 
-    known = set(SYNC_V2_SUPPORTED_DOMAINS)
+    known = set(SYNC_V2_KNOWN_DOMAINS)
     requested_set = set(requested)
     normalized: dict[SyncDomain, list[int]] = {
         domain: [1] for domain in requested
@@ -1946,6 +1972,8 @@ __all__ = [
     "NOTES_ORGANIZATION_SYNC_OPERATIONS",
     "NOTES_LINK_DOMAINS",
     "NOTES_LINK_SYNC_OPERATIONS",
+    "NOTES_TASK_SYNC_DOMAINS",
+    "NOTES_TASK_SYNC_OPERATIONS",
     "NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS",
     "NOTES_NOTE_CONTENT_MAX_CHARS",
     "NOTES_NOTE_TITLE_MAX_CHARS",
@@ -1957,6 +1985,7 @@ __all__ = [
     "SYNC_KEY_REWRAP_STATUSES",
     "SYNC_KEY_WRAPPED_FOR_VALUES",
     "SYNC_V2_ENCRYPTION_POLICIES",
+    "SYNC_V2_KNOWN_DOMAINS",
     "SYNC_V2_SUPPORTED_DOMAINS",
     "SYNC_V2_SUPPORTED_OPERATIONS",
     "SyncApplyStatus",

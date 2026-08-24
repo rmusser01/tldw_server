@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     MEDIA_SYNC_DOMAINS,
     NOTES_LINK_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    NOTES_TASK_SYNC_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_INTERNAL_OPERATIONS,
@@ -95,6 +96,8 @@ from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
     NOTES_TASK_SERVER_METADATA_KEYS,
     NotesTaskReadinessRecord,
     default_notes_task_readiness_record,
+    notes_task_capture_is_active,
+    notes_task_sync_is_ready,
     parse_notes_task_readiness_record,
 )
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
@@ -2354,6 +2357,7 @@ class SyncDatabase:
         keys: Sequence[tuple[str, SyncDomain, str]],
         *,
         trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
     ) -> Iterator[Any]:
         """Serialize product projection and Sync bookkeeping by dataset."""
 
@@ -2375,13 +2379,13 @@ class SyncDatabase:
                             f"Sync dataset not found: {dataset_id}"
                         )
                     enrolled = _dataset_domains_from_row(row)
+                    metadata = decode_json(row.get("metadata_json"), default={})
                     for domain in sorted(domains):
                         trusted_task = (
                             domain in {"notes.task", "notes.task_activity"}
                             and trusted_notes_task_bootstrap_id is not None
                         )
                         if trusted_task:
-                            metadata = decode_json(row.get("metadata_json"), default={})
                             readiness_key = (
                                 "notes_task_v1"
                                 if domain == "notes.task"
@@ -2393,6 +2397,12 @@ class SyncDatabase:
                                 or readiness.get("state") != "bootstrapping"
                                 or metadata.get("task_activity_capture_enabled") is not True
                             ):
+                                raise SyncStoreError("notes_task_sync_not_ready")
+                        elif (
+                            domain in {"notes.task", "notes.task_activity"}
+                            and trusted_notes_task_coordinator
+                        ):
+                            if not notes_task_capture_is_active(metadata):
                                 raise SyncStoreError("notes_task_sync_not_ready")
                         elif domain not in enrolled:
                             raise SyncInvalidDomainError(
@@ -3222,6 +3232,7 @@ class SyncDatabase:
                 MEDIA_SYNC_DOMAINS,
                 NOTES_ORGANIZATION_DOMAINS,
                 NOTES_LINK_DOMAINS,
+                NOTES_TASK_SYNC_DOMAINS,
             )
         elif dataset.scope_type == "workspace":
             if not dataset.workspace_id or not dataset.workspace_id.strip():
@@ -3247,6 +3258,14 @@ class SyncDatabase:
             )
             if state not in {"initializing", "ready", "failed"}:
                 raise SyncStoreError("notes_organization_sync_not_ready")
+        task_domains = set(dataset.domains).intersection(NOTES_TASK_SYNC_DOMAINS)
+        if task_domains and task_domains != set(NOTES_TASK_SYNC_DOMAINS):
+            raise SyncInvalidDomainError("notes_task_sync_domains_incomplete")
+        if task_domains and not notes_task_sync_is_ready(
+            domains=dataset.domains,
+            metadata=dataset.metadata,
+        ):
+            raise SyncStoreError("notes_task_sync_not_ready")
 
     def _validate_envelope_contract(self, envelope: SyncEnvelopeCreate) -> None:
         if envelope.domain not in SYNC_V2_INTERNAL_OPERATIONS:
@@ -3271,12 +3290,23 @@ class SyncDatabase:
         )
         has_any_base = any(value is not None for value in base_values)
         has_all_base = all(value is not None for value in base_values)
-        if has_any_base and not has_all_base:
+        has_prebootstrap_product_base = bool(
+            envelope.domain == "notes.task"
+            and envelope.base_server_cursor is None
+            and envelope.base_object_revision is not None
+            and envelope.base_object_hash is not None
+            and envelope.routing_metadata.get("product_transition_base") is True
+        )
+        if has_any_base and not has_all_base and not has_prebootstrap_product_base:
             raise SyncStoreError(
                 "Sync v2 M1 base metadata must be supplied as a complete set"
             )
         if envelope.domain in _WHOLE_OBJECT_DOMAINS:
-            if envelope.operation == "tombstone" and not has_all_base:
+            if (
+                envelope.operation == "tombstone"
+                and not has_all_base
+                and not has_prebootstrap_product_base
+            ):
                 raise SyncStoreError(
                     f"Sync v2 M1 {envelope.domain} tombstones require base metadata"
                 )
@@ -3285,6 +3315,7 @@ class SyncDatabase:
                 and envelope.object_revision is not None
                 and envelope.object_revision > 1
                 and not has_all_base
+                and not has_prebootstrap_product_base
             ):
                 raise SyncStoreError(
                     f"Sync v2 M1 {envelope.domain} updates require base metadata"
@@ -4783,6 +4814,7 @@ class SyncDatabase:
         source_fingerprint: str | None,
         reason_code: str | None = None,
         task_activity_capture_enabled: bool | None = None,
+        captured_source_rebase: bool = False,
     ) -> SyncDataset:
         """Atomically persist one bounded dormant task-domain readiness transition."""
 
@@ -4803,6 +4835,8 @@ class SyncDatabase:
             task_activity_capture_enabled, bool
         ):
             raise SyncStoreError("notes_task_readiness_capture_invalid")
+        if not isinstance(captured_source_rebase, bool):
+            raise SyncStoreError("notes_task_readiness_source_changed")
         with self.backend.transaction() as conn:
             row = self._require_dataset_owner_for_update(
                 dataset_id,
@@ -4861,6 +4895,15 @@ class SyncDatabase:
             current_cursor = current.source_cursor
             current_cursor_key = current.source_cursor_key
             current_fingerprint = current.source_fingerprint
+            capture_active = notes_task_capture_is_active(metadata)
+            permitted_source_rebase = (
+                captured_source_rebase
+                and capture_active
+                and expected_state == "bootstrapping"
+                and state in {"bootstrapping", "verifying"}
+                and source_cursor == current_cursor
+                and source_count == current_count
+            )
             resetting_empty = state == "not_enrolled" and current_count == 0
             if state == "blocked" and any(
                 (
@@ -4944,6 +4987,7 @@ class SyncDatabase:
                     and not count_advanced
                     and current_fingerprint is not None
                     and source_fingerprint != current_fingerprint
+                    and not permitted_source_rebase
                 ):
                     raise SyncStoreError("notes_task_readiness_source_changed")
             if state == "not_enrolled" and not resetting_empty:
@@ -4994,6 +5038,131 @@ class SyncDatabase:
             updated = self._get_dataset_row(dataset_id, connection=conn)
             if updated is None:
                 raise SyncStoreError("Sync dataset readiness transition was not persisted")
+            return _dataset_from_row(updated)
+
+    def begin_notes_task_activation(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDataset:
+        """Enable task and activity capture together before either source scan."""
+
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if row.get("scope_type") != "personal":
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default=None)
+            if not isinstance(metadata, dict):
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            task = self._notes_task_readiness_record(metadata, "notes_task_v1")
+            activity = self._notes_task_readiness_record(
+                metadata,
+                "notes_task_activity_v1",
+            )
+            if task.state == activity.state == "not_enrolled":
+                enrolling = {
+                    "state": "enrolling",
+                    "source_cursor": None,
+                    "source_count": 0,
+                    "source_fingerprint": None,
+                    "reason_code": None,
+                    "resume_phase": None,
+                }
+                metadata["notes_task_v1"] = dict(enrolling)
+                metadata["notes_task_activity_v1"] = dict(enrolling)
+                metadata["task_activity_capture_enabled"] = True
+            elif (
+                task.state == "enrolling"
+                and activity.state == "not_enrolled"
+                and metadata.get("task_activity_capture_enabled") is not True
+            ):
+                metadata["notes_task_activity_v1"] = {
+                    "state": "enrolling",
+                    "source_cursor": None,
+                    "source_count": 0,
+                    "source_fingerprint": None,
+                    "reason_code": None,
+                    "resume_phase": None,
+                }
+                metadata["task_activity_capture_enabled"] = True
+            elif (
+                task.state == "not_enrolled"
+                or activity.state == "not_enrolled"
+                or metadata.get("task_activity_capture_enabled") is not True
+            ):
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            else:
+                return _dataset_from_row(row)
+
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("notes_task_activation_not_persisted")
+            return _dataset_from_row(updated)
+
+    def activate_notes_task_domains(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDataset:
+        """Publish both task domains in one transaction after coupled readiness."""
+
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if row.get("scope_type") != "personal":
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default=None)
+            domains = list(decode_json(row.get("domain_set_json"), default=[]))
+            if not isinstance(metadata, dict) or not notes_task_sync_is_ready(
+                domains=[*domains, *NOTES_TASK_SYNC_DOMAINS],
+                metadata=metadata,
+            ):
+                raise SyncStoreError("notes_task_sync_not_ready")
+            for domain in NOTES_TASK_SYNC_DOMAINS:
+                if domain not in domains:
+                    domains.append(domain)
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(domains, default=[]),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            for domain in NOTES_TASK_SYNC_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=conn,
+                )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("notes_task_activation_not_persisted")
             return _dataset_from_row(updated)
 
     def begin_notes_organization_bootstrap(
@@ -6134,6 +6303,7 @@ class SyncDatabase:
         *,
         connection: Any,
         planned_head: SyncEnvelopeCreate | None = None,
+        allow_unstored_product_base: bool = False,
     ) -> None:
         """CAS one accepted envelope against its preflighted object head."""
 
@@ -6167,6 +6337,16 @@ class SyncDatabase:
                 )
             )
             if row is None:
+                if (
+                    allow_unstored_product_base
+                    and envelope.domain == "notes.task"
+                    and envelope.base_server_cursor is None
+                    and envelope.base_object_revision is not None
+                    and envelope.base_object_hash is not None
+                    and envelope.routing_metadata.get("product_transition_base")
+                    is True
+                ):
+                    return
                 if any(
                     value is not None
                     for value in (
@@ -6348,6 +6528,7 @@ class SyncDatabase:
         *,
         trusted_notes_organization_bootstrap_id: str | None = None,
         trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
@@ -6385,6 +6566,24 @@ class SyncDatabase:
                             envelope=envelope,
                             bootstrap_id=trusted_notes_task_bootstrap_id,
                         )
+                    elif (
+                        envelope.domain in {"notes.task", "notes.task_activity"}
+                        and trusted_notes_task_coordinator
+                    ):
+                        dataset_row = self._get_dataset_row_for_update(
+                            envelope.dataset_id,
+                            connection=conn,
+                        )
+                        if dataset_row is None:
+                            raise SyncDatasetNotFoundError(
+                                f"Sync dataset not found: {envelope.dataset_id}"
+                            )
+                        metadata = decode_json(
+                            dataset_row.get("metadata_json"),
+                            default={},
+                        )
+                        if not notes_task_capture_is_active(metadata):
+                            raise SyncStoreError("notes_task_sync_not_ready")
                     else:
                         dataset_row = self._require_dataset_domain_for_update(
                             envelope.dataset_id,
@@ -6427,6 +6626,7 @@ class SyncDatabase:
                         envelope,
                         connection=conn,
                         planned_head=planned_heads.get(key),
+                        allow_unstored_product_base=trusted_notes_task_coordinator,
                     )
                     if envelope.status == "accepted":
                         planned_heads[key] = envelope
@@ -6765,6 +6965,111 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params), connection=connection)
         return [_envelope_from_row(row) for row in result.rows]
 
+    def get_historical_task_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+        object_revision: int,
+        object_hash: str,
+        envelope_id: str | None = None,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Resolve one applied immutable task envelope from every anchor claim."""
+
+        def _lookup(conn: Any) -> SyncEnvelope | None:
+            dataset = self._require_dataset_domain(
+                dataset_id,
+                "notes.task",
+                connection=conn,
+            )
+            if dataset.get("owner_user_id") != owner_user_id:
+                return None
+            if envelope_id is None:
+                rows = self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND domain = 'notes.task'
+                       AND entity_id = ? AND object_revision = ? AND payload_hash = ?
+                       AND operation = 'upsert' AND status = 'accepted'
+                       AND apply_status = 'applied'
+                     ORDER BY server_sequence DESC
+                     LIMIT 2
+                    """,
+                    (dataset_id, task_id, object_revision, object_hash),
+                    connection=conn,
+                ).rows
+                return _envelope_from_row(rows[0]) if len(rows) == 1 else None
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND client_envelope_id = ?
+                       AND domain = 'notes.task' AND entity_id = ?
+                       AND object_revision = ? AND payload_hash = ?
+                       AND operation = 'upsert' AND status = 'accepted'
+                       AND apply_status = 'applied'
+                     LIMIT 1
+                    """,
+                    (
+                        dataset_id,
+                        envelope_id,
+                        task_id,
+                        object_revision,
+                        object_hash,
+                    ),
+                    connection=conn,
+                )
+            )
+            return _envelope_from_row(row) if row is not None else None
+
+        if connection is not None:
+            return _lookup(connection)
+        with self.backend.transaction() as transaction_conn:
+            return _lookup(transaction_conn)
+
+    def get_projection_note_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        envelope_id: str,
+        object_hash: str,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Resolve the exact applied note envelope named by a projection anchor."""
+
+        def _lookup(conn: Any) -> SyncEnvelope | None:
+            dataset = self._require_dataset_domain(
+                dataset_id,
+                "notes.note",
+                connection=conn,
+            )
+            if dataset.get("owner_user_id") != owner_user_id:
+                return None
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND client_envelope_id = ?
+                       AND domain = 'notes.note' AND entity_id = ?
+                       AND payload_hash = ? AND operation = 'upsert'
+                       AND status = 'accepted' AND apply_status = 'applied'
+                     LIMIT 1
+                    """,
+                    (dataset_id, envelope_id, note_id, object_hash),
+                    connection=conn,
+                )
+            )
+            return _envelope_from_row(row) if row is not None else None
+
+        if connection is not None:
+            return _lookup(connection)
+        with self.backend.transaction() as transaction_conn:
+            return _lookup(transaction_conn)
+
     def get_envelope_for_entity_at_or_before(
         self,
         dataset_id: str,
@@ -6894,6 +7199,7 @@ class SyncDatabase:
         *,
         connection: Any | None = None,
         trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
     ) -> SyncObjectState:
         now = utcnow_iso()
         with self.backend.transaction(connection) as conn:
@@ -6913,6 +7219,14 @@ class SyncDatabase:
                     or readiness.get("state") != "bootstrapping"
                     or metadata.get("task_activity_capture_enabled") is not True
                 ):
+                    raise SyncStoreError("notes_task_sync_not_ready")
+            elif (
+                state.domain in {"notes.task", "notes.task_activity"}
+                and trusted_notes_task_coordinator
+            ):
+                row = self._require_dataset(state.dataset_id, connection=conn)
+                metadata = decode_json(row.get("metadata_json"), default={})
+                if not notes_task_capture_is_active(metadata):
                     raise SyncStoreError("notes_task_sync_not_ready")
             else:
                 self._require_dataset_domain(
@@ -9841,11 +10155,12 @@ class SyncDatabase:
         through_server_sequence: int,
         state: Mapping[str, Any],
         adapter_version: int = 1,
+        connection: Any | None = None,
     ) -> int:
         """Record a non-destructive compaction checkpoint for a domain."""
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_domain(dataset_id, domain, connection=conn)
             existing = _first(
                 self.execute(
