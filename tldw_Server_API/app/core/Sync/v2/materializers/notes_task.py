@@ -98,13 +98,23 @@ class NotesTaskMaterializer:
                     "canonical_hash": envelope.payload_hash or "",
                     "conn": conn,
                 }
-                if current_state is None:
+                if current_state is None and not _has_prebootstrap_product_base(
+                    envelope
+                ):
                     task_store.apply_sync_task_create(**common)
                 else:
                     transition = {
                         **common,
-                        "base_revision": current_state.object_revision,
-                        "base_hash": current_state.object_hash,
+                        "base_revision": (
+                            current_state.object_revision
+                            if current_state is not None
+                            else int(envelope.base_object_revision or 0)
+                        ),
+                        "base_hash": (
+                            current_state.object_hash
+                            if current_state is not None
+                            else str(envelope.base_object_hash or "")
+                        ),
                     }
                     if envelope.operation == "tombstone":
                         task_store.apply_sync_task_tombstone(**transition)
@@ -207,6 +217,8 @@ def _state_conflict(
         )
     )
     if current_state is None:
+        if _has_prebootstrap_product_base(envelope):
+            return None
         if has_base or envelope.routing_metadata.get("restore_intent") is True:
             return _conflict_result("missing_server_object")
         return None
@@ -222,6 +234,18 @@ def _state_conflict(
     elif envelope.routing_metadata.get("restore_intent") is True:
         return _conflict_result("restore_target_not_deleted")
     return None
+
+
+def _has_prebootstrap_product_base(envelope: SyncEnvelope) -> bool:
+    """Return whether routing carries a complete pre-Sync product base."""
+
+    return bool(
+        envelope.base_server_cursor is None
+        and envelope.base_object_revision is not None
+        and envelope.base_object_hash is not None
+        and envelope.routing_metadata.get("product_transition_base") is True
+        and envelope.object_revision == envelope.base_object_revision + 1
+    )
 
 
 def _record_applied(

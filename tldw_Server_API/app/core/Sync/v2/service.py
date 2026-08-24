@@ -50,6 +50,8 @@ from .models import (
     M1_SYNC_DOMAINS,
     NOTES_LINK_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    NOTES_TASK_SYNC_DOMAINS,
+    NOTES_TASK_SYNC_OPERATIONS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_ENCRYPTION_POLICIES,
     SYNC_V2_SUPPORTED_DOMAINS,
@@ -99,6 +101,7 @@ from .models import (
     SyncRestoreBlobCompleteness,
     SyncRestoreCompletenessStatus,
     SyncRestoreDomainCompleteness,
+    _sync_v2_internal_domain_schemas,
     client_private_server_frontend_limitation_warning,
     normalize_supported_adapter_versions,
     normalize_sync_timestamp,
@@ -121,6 +124,7 @@ from .notes_task_contract import (
 )
 from .notes_task_readiness import (
     NOTES_TASK_SERVER_METADATA_KEYS,
+    notes_task_sync_is_ready,
     redact_notes_task_server_metadata,
 )
 from .profile import (
@@ -1061,6 +1065,41 @@ class SyncV2Service:
         self.notes_task_bootstrapper = notes_task_bootstrapper
         self.notes_task_activity_bootstrapper = notes_task_activity_bootstrapper
 
+    def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
+        """Return the single service-level task/activity activation predicate."""
+
+        if dataset is None or not notes_task_sync_is_ready(
+            domains=dataset.domains,
+            metadata=dataset.metadata,
+        ):
+            return False
+        try:
+            adapters_ready = all(
+                self.adapters.supports_version(domain, 1)
+                for domain in NOTES_TASK_SYNC_DOMAINS
+            )
+        except KeyError:
+            return False
+        if not adapters_ready:
+            return False
+        task_db = getattr(self.materializers.get("notes.task"), "note_db", None)
+        activity_db = getattr(
+            self.materializers.get("notes.task_activity"),
+            "note_db",
+            None,
+        )
+        if task_db is None or task_db is not activity_db:
+            return False
+        try:
+            return (
+                task_db.task_store.resolve_task_compatibility_dataset_id(
+                    owner_user_id=dataset.owner_user_id
+                )
+                == dataset.dataset_id
+            )
+        except Exception:  # noqa: BLE001 - malformed product authority fails closed.
+            return False
+
     def capabilities(
         self,
         *,
@@ -1086,6 +1125,25 @@ class SyncV2Service:
         else:
             attachment_v2_writes_enabled = bool(
                 getattr(attachment_adapter, "v2_writes_enabled", False)
+            )
+        notes_task_ready = self._notes_task_domains_ready(dataset)
+        supported_domains = [
+            domain
+            for domain in self.settings.supported_domains
+            if domain not in NOTES_TASK_SYNC_DOMAINS
+        ]
+        operations = {
+            domain: list(domain_operations)
+            for domain, domain_operations in self.settings.operations.items()
+            if domain not in NOTES_TASK_SYNC_DOMAINS
+        }
+        if notes_task_ready:
+            supported_domains.extend(NOTES_TASK_SYNC_DOMAINS)
+            operations.update(
+                {
+                    domain: list(domain_operations)
+                    for domain, domain_operations in NOTES_TASK_SYNC_OPERATIONS.items()
+                }
             )
         blob_transfer: dict[str, object] = {"supported": False}
         quota: dict[str, object] = {}
@@ -1118,20 +1176,27 @@ class SyncV2Service:
         return SyncV2Capabilities(
             protocol_version=self.settings.protocol_version,
             min_supported_protocol_version=self.settings.min_supported_protocol_version,
-            supported_domains=list(self.settings.supported_domains),
-            operations={domain: list(operations) for domain, operations in self.settings.operations.items()},
+            supported_domains=supported_domains,
+            operations=operations,
             encryption=self.settings.server_trusted_encryption.encryption,
             blob_transfer=blob_transfer,
             encryption_policies=list(self.settings.encryption_policies),
             max_batch_size=self.settings.max_batch_size,
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
-            domain_schemas=sync_v2_domain_schemas(),
-            supported_adapter_versions=sync_v2_server_supported_adapter_versions(),
+            domain_schemas=(
+                _sync_v2_internal_domain_schemas()
+                if notes_task_ready
+                else sync_v2_domain_schemas()
+            ),
+            supported_adapter_versions=sync_v2_server_supported_adapter_versions(
+                notes_task_sync_ready=notes_task_ready,
+            ),
             writable_adapter_versions=sync_v2_dataset_writable_adapter_versions(
                 dataset,
                 notes_attachment_sync_enabled=attachment_v2_writes_enabled,
                 supports_attachments=self.settings.supports_attachments,
+                notes_task_sync_ready=notes_task_ready,
             ),
             quota=quota,
             supports_attachments=self.settings.supports_attachments,
@@ -1952,12 +2017,68 @@ class SyncV2Service:
             or reserved_metadata.intersection(requested_metadata)
         ):
             raise SyncStoreError("sync_reserved_dataset_enrollment")
+        requested_task_domains = requested_domains.intersection(
+            NOTES_TASK_SYNC_DOMAINS
+        )
+        if requested_task_domains and requested_task_domains != set(
+            NOTES_TASK_SYNC_DOMAINS
+        ):
+            raise SyncStoreError("notes_task_sync_domains_incomplete")
+        existing = (
+            self.store.get_dataset(dataset_id, owner_user_id=user_id)
+            if dataset_id is not None
+            else None
+        )
+        if (
+            existing is not None
+            and set(NOTES_TASK_SYNC_DOMAINS).issubset(existing.domains)
+            and not requested_task_domains
+        ):
+            raise SyncStoreError("notes_task_sync_disable_forbidden")
         self._require_server_trusted_encryption_ready()
         if scope_type == "workspace":
             self._require_workspace_sync_access(user_id=user_id, workspace_id=workspace_id)
             enrolled_domains = list(domains or WORKSPACE_SYNC_DOMAINS)
         else:
             enrolled_domains = list(domains or M1_SYNC_DOMAINS)
+        if requested_task_domains:
+            if (
+                scope_type != "personal"
+                or encryption_policy != DEFAULT_M1_ENCRYPTION_POLICY
+                or "notes.note" not in enrolled_domains
+            ):
+                raise SyncStoreError("notes_task_sync_enrollment_invalid")
+            if (
+                existing is None
+                or existing.metadata.get("default_personal") is not True
+                or existing.metadata.get("client_family") != "chatbook"
+            ):
+                raise SyncStoreError("notes_task_sync_enrollment_invalid")
+            requested_metadata = {
+                "default_personal": True,
+                "client_family": "chatbook",
+                **requested_metadata,
+            }
+            if notes_task_sync_is_ready(
+                domains=existing.domains,
+                metadata=existing.metadata,
+            ):
+                requested_metadata.update(
+                    {
+                        key: existing.metadata[key]
+                        for key in NOTES_TASK_SERVER_METADATA_KEYS
+                        if key in existing.metadata
+                    }
+                )
+            if existing is None or not notes_task_sync_is_ready(
+                domains=existing.domains,
+                metadata=existing.metadata,
+            ):
+                enrolled_domains = [
+                    domain
+                    for domain in enrolled_domains
+                    if domain not in NOTES_TASK_SYNC_DOMAINS
+                ]
         dataset = self.store.enroll_dataset(
             SyncDatasetCreate(
                 dataset_id=dataset_id or self.id_factory("dataset"),
@@ -1969,6 +2090,8 @@ class SyncV2Service:
                 metadata=requested_metadata,
             )
         )
+        if requested_task_domains:
+            dataset = self._activate_notes_task_sync(dataset)
         return SyncDatasetEnrollment(
             dataset=replace(
                 dataset,
@@ -1976,6 +2099,56 @@ class SyncV2Service:
             ),
             cursors=dict.fromkeys(dataset.domains, "0"),
             key_setup_required=False,
+        )
+
+    def _activate_notes_task_sync(self, dataset: SyncDataset) -> SyncDataset:
+        """Rekey product state and advance one resumable dual-bootstrap page."""
+
+        task_bootstrapper = self.notes_task_bootstrapper
+        activity_bootstrapper = self.notes_task_activity_bootstrapper
+        task_db = getattr(task_bootstrapper, "note_db", None)
+        activity_db = getattr(activity_bootstrapper, "note_db", None)
+        if (
+            task_bootstrapper is None
+            or activity_bootstrapper is None
+            or task_db is None
+            or task_db is not activity_db
+            or any(
+                not self.adapters.has_domain(domain)
+                or not self.adapters.supports_version(domain, 1)
+                or domain not in self.materializers
+                for domain in NOTES_TASK_SYNC_DOMAINS
+            )
+        ):
+            raise SyncStoreError("notes_task_activation_unavailable")
+
+        with self.store.retention_domain_guard(
+            dataset.dataset_id,
+            "notes.note",
+            ("notes-task-activation",),
+        ):
+            task_db.task_store.bind_local_task_graph_to_dataset(
+                owner_user_id=dataset.owner_user_id,
+                target_dataset_id=dataset.dataset_id,
+            )
+        current = self.store.begin_notes_task_activation(
+            dataset.dataset_id,
+            owner_user_id=dataset.owner_user_id,
+        )
+        current = task_bootstrapper.bootstrap(service=self, dataset=current)
+        task_state = current.metadata.get("notes_task_v1")
+        if not isinstance(task_state, Mapping) or task_state.get("state") != "ready":
+            return current
+        current = activity_bootstrapper.bootstrap(service=self, dataset=current)
+        activity_state = current.metadata.get("notes_task_activity_v1")
+        if (
+            not isinstance(activity_state, Mapping)
+            or activity_state.get("state") != "ready"
+        ):
+            return current
+        return self.store.activate_notes_task_domains(
+            current.dataset_id,
+            owner_user_id=current.owner_user_id,
         )
 
     def profile(
@@ -2722,6 +2895,19 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if (
+                envelope.domain in NOTES_TASK_SYNC_DOMAINS
+                and not self._notes_task_domains_ready(dataset)
+            ):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="notes_task_sync_not_ready",
+                        message="Notes task Sync is not ready for this dataset",
+                        retryable=True,
+                    )
+                )
+                continue
             if self._payload_exceeds_size_limit(envelope):
                 rejected.append(
                     SyncPushRejected(
@@ -2767,6 +2953,25 @@ class SyncV2Service:
                 if stop_on_conflict and task_result.conflicts:
                     stopped_after_conflict = True
                 continue
+            if envelope.domain == "notes.task_activity" and (
+                envelope.operation != "upsert"
+                or envelope.payload.get("event_type") != "corrected"
+                or not isinstance(
+                    envelope.payload.get("corrects_activity_id"),
+                    str,
+                )
+            ):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="notes_task_activity_origin_invalid",
+                        message=(
+                            "Clients may append only exact authorized task "
+                            "activity corrections"
+                        ),
+                    )
+                )
+                continue
             try:
                 existing = self.store.get_existing_envelope_for_idempotency(
                     replace(envelope, status="accepted")
@@ -2793,7 +2998,18 @@ class SyncV2Service:
                 accepted.append(self._push_accepted_from_envelope(existing))
                 continue
             try:
-                outcome = self._evaluate_envelope(dataset, envelope)
+                outcome = self._evaluate_envelope(
+                    dataset,
+                    envelope,
+                    context=(
+                        self._task_client_adapter_context(
+                            dataset=dataset,
+                            device=device,
+                        )
+                        if envelope.domain == "notes.task_activity"
+                        else None
+                    ),
+                )
             except KeyError:
                 rejected.append(
                     SyncPushRejected(

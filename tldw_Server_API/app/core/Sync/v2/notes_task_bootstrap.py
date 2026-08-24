@@ -81,7 +81,13 @@ class NotesTaskBootstrapper:
         bootstrap_id = _bootstrap_id(owner, current.dataset_id)
         try:
             source = self._source_summary(owner, current.dataset_id)
-            _verify_stored_progress(state, source)
+            prefix_fingerprint = _verify_stored_progress(
+                service=service,
+                dataset_id=current.dataset_id,
+                bootstrap_id=bootstrap_id,
+                state=state,
+                source=source,
+            )
             after_task_id = _optional_string(state.get("source_cursor"))
             page = self._tasks.page_tasks_for_sync_bootstrap(
                 owner_user_id=owner,
@@ -90,9 +96,7 @@ class NotesTaskBootstrapper:
                 limit=self._page_limit,
             )
             running_count = int(state["source_count"])
-            running_fingerprint = str(
-                state.get("source_fingerprint") or _EMPTY_FINGERPRINT
-            )
+            running_fingerprint = prefix_fingerprint
             for row in page:
                 self._capture_row(
                     service=service,
@@ -124,7 +128,18 @@ class NotesTaskBootstrapper:
                 return current
             verified = self._source_summary(owner, current.dataset_id)
             if verified != source:
-                raise _SourceChanged
+                verified_state = _readiness(current)
+                running_fingerprint = _verify_stored_progress(
+                    service=service,
+                    dataset_id=current.dataset_id,
+                    bootstrap_id=bootstrap_id,
+                    state=verified_state,
+                    source=verified,
+                )
+                running_count = int(verified_state["source_count"])
+                source = verified
+                if running_count < source.count:
+                    return current
             if (
                 running_count != source.count
                 or running_fingerprint != source.fingerprint
@@ -136,6 +151,7 @@ class NotesTaskBootstrapper:
                 )
             ):
                 raise _SourceChanged
+            final_state = _readiness(current)
             current = service.store.transition_notes_task_readiness(
                 current.dataset_id,
                 owner_user_id=owner,
@@ -145,6 +161,11 @@ class NotesTaskBootstrapper:
                 source_cursor=source.cursor,
                 source_count=source.count,
                 source_fingerprint=source.fingerprint,
+                captured_source_rebase=(
+                    source.fingerprint != final_state.get("source_fingerprint")
+                    and source.cursor == final_state.get("source_cursor")
+                    and source.count == final_state.get("source_count")
+                ),
             )
             return service.store.transition_notes_task_readiness(
                 current.dataset_id,
@@ -167,6 +188,12 @@ class NotesTaskBootstrapper:
             }:
                 raise
             return _block(service, current, reason="notes_task_source_invalid")
+
+    @property
+    def note_db(self) -> CharactersRAGDB:
+        """Return the product database whose task graph is being bootstrapped."""
+
+        return self._db
 
     def _ensure_bootstrapping(
         self,
@@ -199,6 +226,17 @@ class NotesTaskBootstrapper:
                     if state.get("source_fingerprint") is not None
                     else None
                 ),
+            )
+        if isinstance(state, Mapping) and state.get("state") == "enrolling":
+            return service.store.transition_notes_task_readiness(
+                dataset.dataset_id,
+                owner_user_id=dataset.owner_user_id,
+                expected_state="enrolling",
+                state="bootstrapping",
+                source_dataset_id=dataset.dataset_id,
+                source_cursor=None,
+                source_count=0,
+                source_fingerprint=_EMPTY_FINGERPRINT,
             )
         if state is not None:
             raise SyncStoreError("notes_task_sync_not_ready")
@@ -284,6 +322,13 @@ class NotesTaskBootstrapper:
 
         task_id = str(row["id"])
         canonical_hash = str(row["canonical_hash"])
+        current_head = service.store.get_current_head(
+            dataset.dataset_id,
+            "notes.task",
+            task_id,
+        )
+        if current_head is not None and _task_head_matches_row(current_head, row):
+            return
         payload = row.get("sync_payload")
         if not isinstance(payload, Mapping):
             raise _SourceInvalid
@@ -353,9 +398,13 @@ class _SourceSummary:
 
 
 def _verify_stored_progress(
+    *,
+    service: SyncV2Service,
+    dataset_id: str,
+    bootstrap_id: str,
     state: Mapping[str, object],
     source: _SourceSummary,
-) -> None:
+) -> str:
     """Reject stored progress that is not an exact prefix of the source."""
 
     count = int(state["source_count"])
@@ -364,14 +413,93 @@ def _verify_stored_progress(
     if count == 0:
         if cursor is not None or fingerprint != _EMPTY_FINGERPRINT:
             raise _SourceChanged
-        return
+        return _EMPTY_FINGERPRINT
     if count > len(source.rows) or source.rows[count - 1][0] != cursor:
         raise _SourceChanged
     expected = _EMPTY_FINGERPRINT
     for task_id, canonical_hash, *_ in source.rows[:count]:
         expected = _task_bootstrap_fingerprint(expected, task_id, canonical_hash)
-    if expected != fingerprint:
+    if expected == fingerprint:
+        return expected
+    if not (
+        _stored_bootstrap_prefix_is_authentic(
+            service=service,
+            dataset_id=dataset_id,
+            bootstrap_id=bootstrap_id,
+            count=count,
+            cursor=cursor,
+            fingerprint=fingerprint,
+        )
+        and _sync_heads_match_source_rows(
+            service,
+            dataset_id,
+            source.rows[:count],
+        )
+    ):
         raise _SourceChanged
+    return expected
+
+
+def _stored_bootstrap_prefix_is_authentic(
+    *,
+    service: SyncV2Service,
+    dataset_id: str,
+    bootstrap_id: str,
+    count: int,
+    cursor: str | None,
+    fingerprint: str,
+) -> bool:
+    """Authenticate stored progress against immutable source-verified envelopes."""
+
+    found: dict[str, SyncEnvelope] = {}
+    after_cursor = 0
+    while True:
+        page = service.store.list_envelopes_after(
+            dataset_id,
+            after_cursor,
+            limit=500,
+            domains=["notes.task"],
+            status="accepted",
+        )
+        for envelope in page:
+            if envelope.server_cursor is None:
+                return False
+            after_cursor = envelope.server_cursor
+            if envelope.routing_metadata.get("bootstrap_id") != bootstrap_id:
+                continue
+            if envelope.object_id in found:
+                return False
+            found[envelope.object_id] = envelope
+        if len(page) < 500:
+            break
+    prefix = [found[task_id] for task_id in sorted(found)[:count]]
+    if (
+        len(prefix) != count
+        or not prefix
+        or prefix[-1].object_id != cursor
+    ):
+        return False
+    expected = _EMPTY_FINGERPRINT
+    for envelope in prefix:
+        canonical_hash = envelope.payload_hash
+        if (
+            envelope.apply_status != "applied"
+            or envelope.object_revision is None
+            or canonical_hash is None
+            or envelope.client_envelope_id
+            != _task_bootstrap_envelope_id(
+                bootstrap_id,
+                envelope.object_id,
+                canonical_hash,
+            )
+        ):
+            return False
+        expected = _task_bootstrap_fingerprint(
+            expected,
+            envelope.object_id,
+            canonical_hash,
+        )
+    return expected == fingerprint
 
 
 def _sync_bootstrap_matches_source(
@@ -383,51 +511,79 @@ def _sync_bootstrap_matches_source(
 ) -> bool:
     """Return whether accepted applied envelopes exactly cover the source."""
 
-    found: dict[str, tuple[str, int, str, str | None, str | None]] = {}
-    cursor = 0
+    del bootstrap_id
+    return _sync_heads_match_source_rows(service, dataset_id, source.rows)
+
+
+def _sync_heads_match_source_rows(
+    service: SyncV2Service,
+    dataset_id: str,
+    rows: tuple[tuple[str, str, int, str, str], ...],
+) -> bool:
+    """Verify that current applied task heads exactly cover canonical source rows."""
+
+    expected = {row[0]: row for row in rows}
+    found: set[str] = set()
+    offset = 0
     while True:
-        page = service.store.list_envelopes_after(
+        page = service.store.list_current_heads(
             dataset_id,
-            cursor,
+            "notes.task",
             limit=500,
-            domains=["notes.task"],
-            status="accepted",
+            offset=offset,
         )
         for envelope in page:
-            if envelope.server_cursor is None:
+            source_row = expected.get(envelope.object_id)
+            if source_row is None or not _task_head_matches_source(
+                envelope,
+                source_row,
+            ):
                 return False
-            cursor = envelope.server_cursor
-            if envelope.routing_metadata.get("bootstrap_id") != bootstrap_id:
-                return False
-            if envelope.apply_status != "applied" or envelope.object_revision is None:
-                return False
-            if envelope.object_id in found:
-                return False
-            found[envelope.object_id] = (
-                envelope.payload_hash or "",
-                envelope.object_revision,
-                envelope.operation,
-                envelope.parent_id,
-                envelope.client_envelope_id,
-            )
+            found.add(envelope.object_id)
         if len(page) < 500:
             break
-    if len(found) != source.count:
-        return False
-    return all(
-        found.get(task_id)
-        == (
-            canonical_hash,
-            canonical_revision,
-            operation,
-            note_id,
-            _task_bootstrap_envelope_id(
-                bootstrap_id,
-                task_id,
-                canonical_hash,
+        offset += len(page)
+    return found == set(expected)
+
+
+def _task_head_matches_row(
+    envelope: SyncEnvelope,
+    row: Mapping[str, object],
+) -> bool:
+    """Return whether one current head is the exact canonical product row."""
+
+    payload = row.get("sync_payload")
+    return bool(
+        isinstance(payload, Mapping)
+        and dict(envelope.payload) == dict(payload)
+        and _task_head_matches_source(
+            envelope,
+            (
+                str(row["id"]),
+                str(row["canonical_hash"]),
+                int(row["canonical_revision"]),
+                "tombstone" if bool(row.get("deleted")) else "upsert",
+                str(row["note_id"]),
             ),
         )
-        for task_id, canonical_hash, canonical_revision, operation, note_id in source.rows
+    )
+
+
+def _task_head_matches_source(
+    envelope: SyncEnvelope,
+    source: tuple[str, str, int, str, str],
+) -> bool:
+    """Return whether one applied current head matches a source identity tuple."""
+
+    task_id, canonical_hash, canonical_revision, operation, note_id = source
+    return bool(
+        envelope.status == "accepted"
+        and envelope.apply_status == "applied"
+        and envelope.object_id == task_id
+        and envelope.payload_hash == canonical_hash
+        and envelope.object_revision == canonical_revision
+        and envelope.operation == operation
+        and envelope.parent_id == note_id
     )
 
 

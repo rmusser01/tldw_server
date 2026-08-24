@@ -506,15 +506,22 @@ def build_task_capture_mutation(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+    routing_metadata: dict[str, object] = {}
+    if restore_intent:
+        routing_metadata["restore_intent"] = True
+    if base_revision is not None:
+        routing_metadata["product_transition_base"] = True
     step = ServerOriginMutationStep(
         domain="notes.task",
         operation=operation,
         object_id=task_id,
         parent_id=note_id,
         payload=dict(after_row["sync_payload"]),
-        routing_metadata={"restore_intent": True} if restore_intent else {},
+        routing_metadata=routing_metadata,
         client_envelope_id=f"notes-task-server-{identity_hash[:32]}",
         object_revision=revision,
+        base_object_revision=base_revision,
+        base_object_hash=base_hash,
     )
     activity = build_task_activity_capture(
         db=db,

@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Notes_Tasks.projection_markers import (
 from .errors import SyncStoreError
 from .models import SyncDataset
 from .mutation_group_validation import SYNC_MUTATION_GROUP_MAX_SIZE
+from .notes_task_readiness import notes_task_sync_is_ready
 from .server_origin import canonical_payload_hash
 from .server_origin_batch import (
     ServerOriginBatchResult,
@@ -234,17 +235,30 @@ def resolve_notes_task_coordinator(
         dataset
         for dataset in service.store.list_datasets_for_user(owner)
         if dataset.scope_type == "personal"
-        and dataset.metadata.get("default_personal") is True
-        and dataset.metadata.get("client_family") == "chatbook"
+        and dataset.dataset_id == selected_dataset
         and dataset.archived_at is None
     ]
-    if len(matches) != 1 or matches[0].dataset_id != selected_dataset:
+    if len(matches) != 1:
         raise SyncStoreError("notes_task_sync_scope_conflict")
     dataset = matches[0]
     task_domains = {"notes.task", "notes.task_activity"}
     enrolled = task_domains.intersection(dataset.domains)
     if not enrolled:
-        return None
+        if dataset.metadata.get("task_activity_capture_enabled") is not True:
+            return None
+        readiness_states = []
+        for readiness_key in ("notes_task_v1", "notes_task_activity_v1"):
+            readiness = dataset.metadata.get(readiness_key)
+            readiness_states.append(
+                readiness.get("state") if isinstance(readiness, Mapping) else None
+            )
+        if any(state in {None, "not_enrolled"} for state in readiness_states):
+            raise SyncStoreError("notes_task_sync_not_ready")
+        return NotesTaskCoordinator(
+            service=service,
+            user_id=owner,
+            dataset_id=dataset.dataset_id,
+        )
     if enrolled != task_domains:
         raise SyncStoreError("notes_task_sync_domains_incomplete")
     _require_task_domains_ready(dataset)
@@ -258,11 +272,11 @@ def resolve_notes_task_coordinator(
 def _require_task_domains_ready(dataset: SyncDataset) -> None:
     """Require the two task domains to share one ready activation state."""
 
-    for readiness_key in ("notes_task_v1", "notes_task_activity_v1"):
-        metadata = dataset.metadata.get(readiness_key)
-        state = metadata.get("state") if isinstance(metadata, Mapping) else None
-        if state != "ready":
-            raise SyncStoreError("notes_task_sync_not_ready")
+    if not notes_task_sync_is_ready(
+        domains=dataset.domains,
+        metadata=dataset.metadata,
+    ):
+        raise SyncStoreError("notes_task_sync_not_ready")
 
 
 def _validate_task_projection_group_metadata(

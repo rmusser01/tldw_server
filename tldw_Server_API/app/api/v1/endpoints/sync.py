@@ -192,6 +192,34 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        notes_task_activation_errors = {
+            "notes_task_sync_domains_incomplete": (
+                status.HTTP_400_BAD_REQUEST,
+                "Both Notes task Sync domains must be requested together.",
+            ),
+            "notes_task_sync_enrollment_invalid": (
+                status.HTTP_400_BAD_REQUEST,
+                "Notes task Sync requires the default personal Notes dataset.",
+            ),
+            "notes_task_sync_disable_forbidden": (
+                status.HTTP_409_CONFLICT,
+                "Active Notes task Sync domains cannot be removed by re-enrollment.",
+            ),
+            "notes_task_activation_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Notes task Sync activation components are unavailable.",
+            ),
+            "notes_task_sync_not_ready": (
+                status.HTTP_409_CONFLICT,
+                "Notes task Sync is not ready for this dataset.",
+            ),
+        }
+        for error_code, (status_code, message) in notes_task_activation_errors.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status_code,
+                    detail={"error_code": error_code, "message": message},
+                )
         pull_errors = {
             "sync_pull_token_invalid": (
                 status.HTTP_400_BAD_REQUEST,

@@ -80,6 +80,11 @@ class NotesTaskDomainAdapter:
             dataset=dataset,
             context=context,
         )
+        trusted_prebootstrap_capture = bool(
+            trusted_server_mutation
+            and context is not None
+            and context.trusted_notes_task_prebootstrap_capture
+        )
         coordinator_projection = _coordinator_task_projection(envelope, context)
         restore_intent = envelope.routing_metadata.get("restore_intent")
         allowed_routing = (
@@ -100,6 +105,7 @@ class NotesTaskDomainAdapter:
                     "server_owner_user_id",
                     "restore_intent",
                     "task_projection",
+                    "product_transition_base",
                 }
                 if trusted_server_mutation
                 else (
@@ -167,6 +173,17 @@ class NotesTaskDomainAdapter:
         if head is None:
             if trusted_bootstrap:
                 if _has_base(envelope) or restore_intent is True:
+                    return _conflict(envelope, "notes_task_base_conflict")
+                return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
+            if trusted_prebootstrap_capture:
+                if (
+                    envelope.base_server_cursor is not None
+                    or envelope.base_object_revision is None
+                    or envelope.base_object_hash is None
+                    or envelope.routing_metadata.get("product_transition_base")
+                    is not True
+                    or expected_revision != envelope.base_object_revision + 1
+                ):
                     return _conflict(envelope, "notes_task_base_conflict")
                 return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
             if _has_base(envelope) or expected_revision != 1:

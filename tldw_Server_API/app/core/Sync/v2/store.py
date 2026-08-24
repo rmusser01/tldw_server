@@ -67,6 +67,7 @@ class SyncV2Store:
         self.db = db
         self._connection = connection
         self._trusted_notes_task_bootstrap_id: str | None = None
+        self._trusted_notes_task_coordinator = False
 
     @contextmanager
     def materialization_guard(
@@ -75,6 +76,7 @@ class SyncV2Store:
         *,
         require_predecessors: bool = True,
         trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
     ) -> Iterator[SyncV2Store]:
         """Hold the durable dataset lock and one Sync transaction for projection."""
 
@@ -85,12 +87,14 @@ class SyncV2Store:
         with self.db.materialization_transaction(
             keys,
             trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,
+            trusted_notes_task_coordinator=trusted_notes_task_coordinator,
         ) as connection:
             guarded = copy(self)
             guarded._connection = connection
             guarded._trusted_notes_task_bootstrap_id = (
                 trusted_notes_task_bootstrap_id
             )
+            guarded._trusted_notes_task_coordinator = trusted_notes_task_coordinator
             if require_predecessors:
                 self.db.require_materialization_predecessors_applied(
                     envelopes,
@@ -351,6 +355,7 @@ class SyncV2Store:
         source_fingerprint: str | None,
         reason_code: str | None = None,
         task_activity_capture_enabled: bool | None = None,
+        captured_source_rebase: bool = False,
     ) -> SyncDataset:
         """Delegate one dormant notes.task readiness transition."""
 
@@ -366,6 +371,7 @@ class SyncV2Store:
             source_fingerprint=source_fingerprint,
             reason_code=reason_code,
             task_activity_capture_enabled=task_activity_capture_enabled,
+            captured_source_rebase=captured_source_rebase,
         )
 
     def transition_notes_task_activity_readiness(
@@ -381,6 +387,7 @@ class SyncV2Store:
         source_fingerprint: str | None,
         reason_code: str | None = None,
         task_activity_capture_enabled: bool | None = None,
+        captured_source_rebase: bool = False,
     ) -> SyncDataset:
         """Delegate one dormant notes.task_activity readiness transition."""
 
@@ -396,6 +403,33 @@ class SyncV2Store:
             source_fingerprint=source_fingerprint,
             reason_code=reason_code,
             task_activity_capture_enabled=task_activity_capture_enabled,
+            captured_source_rebase=captured_source_rebase,
+        )
+
+    def begin_notes_task_activation(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDataset:
+        """Enable coupled task/activity capture before bootstrap scans."""
+
+        return self.db.begin_notes_task_activation(
+            dataset_id,
+            owner_user_id=owner_user_id,
+        )
+
+    def activate_notes_task_domains(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDataset:
+        """Publish both ready task domains atomically."""
+
+        return self.db.activate_notes_task_domains(
+            dataset_id,
+            owner_user_id=owner_user_id,
         )
 
     def begin_notes_organization_bootstrap(
@@ -647,6 +681,7 @@ class SyncV2Store:
         *,
         trusted_notes_organization_bootstrap_id: str | None = None,
         trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
@@ -654,6 +689,7 @@ class SyncV2Store:
             envelopes,
             trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
             trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,
+            trusted_notes_task_coordinator=trusted_notes_task_coordinator,
         )
 
     def list_mutation_group(
@@ -838,6 +874,7 @@ class SyncV2Store:
             trusted_notes_task_bootstrap_id=(
                 self._trusted_notes_task_bootstrap_id
             ),
+            trusted_notes_task_coordinator=self._trusted_notes_task_coordinator,
         )
 
     def mark_envelope_apply_status(

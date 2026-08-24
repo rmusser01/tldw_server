@@ -49,6 +49,8 @@ SyncDomain = Literal[
     "notes.folder",
     "notes.folder_link",
     "notes.link",
+    "notes.task",
+    "notes.task_activity",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -143,6 +145,11 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
     **NOTES_LINK_SYNC_OPERATIONS,
 }
+SYNC_V2_KNOWN_DOMAINS: tuple[SyncDomain, ...] = (
+    *SYNC_V2_SUPPORTED_DOMAINS,
+    "notes.task",
+    "notes.task_activity",
+)
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "server_trusted_v1",
@@ -340,7 +347,7 @@ class SyncCapabilitiesResponse(BaseModel):
     def _default_m1_domains(cls, value: Any) -> list[SyncDomain]:
         if value in (None, []):
             return list(SYNC_V2_SUPPORTED_DOMAINS)
-        if isinstance(value, list) and all(domain in SYNC_V2_SUPPORTED_DOMAINS for domain in value):
+        if isinstance(value, list) and all(domain in SYNC_V2_KNOWN_DOMAINS for domain in value):
             return value
         return list(SYNC_V2_SUPPORTED_DOMAINS)
 

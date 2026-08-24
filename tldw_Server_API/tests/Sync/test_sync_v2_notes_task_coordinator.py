@@ -528,6 +528,7 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
 
         class _FailActivityOnce:
             failed = False
+            note_db = activity_materializer.note_db
 
             def apply(self, envelope: Any, *, store: SyncV2Store) -> MaterializationResult:
                 if not self.failed:
