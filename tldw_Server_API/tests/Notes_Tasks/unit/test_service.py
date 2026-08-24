@@ -10,7 +10,11 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.Notes_Tasks.models import TaskActor
-from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService, _parse_checklist_line
+from tldw_Server_API.app.core.Notes_Tasks.service import (
+    NotesTaskCaptureMutation,
+    NotesTaskService,
+    _parse_checklist_line,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -67,6 +71,33 @@ def test_create_task_for_note_rejects_invalid_status_without_rewriting_note(db: 
         owner_user_id=db.client_id,
         dataset_id="local-unbound",
     ) == []
+
+
+def test_optional_capture_callback_receives_one_task_activity_plan(
+    db: CharactersRAGDB,
+) -> None:
+    captured: list[NotesTaskCaptureMutation] = []
+    service = NotesTaskService(
+        task_capture_callback=lambda mutation, *, conn: captured.append(mutation)
+    )
+    note = _add_note(db, title="Tasks", content="Intro\n")
+
+    service.create_task_for_note(
+        db=db,
+        note_id=str(note["id"]),
+        text="Alpha",
+        status="open",
+        metadata={},
+        expected_note_version=int(note["version"]),
+        actor=TaskActor(actor_type="user", actor_id=db.client_id),
+    )
+
+    assert len(captured) == 1
+    assert [step.domain for step in captured[0].steps] == [
+        "notes.task",
+        "notes.task_activity",
+    ]
+    assert captured[0].activity.payload.event_type == "created"
 
 
 @pytest.mark.parametrize(

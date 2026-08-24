@@ -1329,8 +1329,9 @@ class TaskStore:
             clauses.append("(e.created_at > ? OR (e.created_at = ? AND e.id > ?))")
             params.extend((normalized_after, normalized_after, after_activity_id))
         params.append(limit)
+        # Predicate fragments are fixed above; every value remains parameterized.
         query = (
-            "SELECT e.*, t.note_id AS resolved_task_note_id FROM task_events e "
+            "SELECT e.*, t.note_id AS resolved_task_note_id FROM task_events e "  # nosec B608
             "LEFT JOIN note_tasks t ON t.owner_user_id = e.owner_user_id "
             "AND t.dataset_id = e.dataset_id AND t.id = e.task_id "
             "WHERE "
@@ -2524,8 +2525,9 @@ class TaskStore:
             )
             params.extend((after_server_cursor, after_server_cursor, after_activity_id))
         params.append(bounded_limit)
+        # Predicate fragments are fixed above; every value remains parameterized.
         query = (
-            "SELECT e.* FROM task_events e "
+            "SELECT e.* FROM task_events e "  # nosec B608
             "JOIN notes n ON n.client_id = e.owner_user_id AND n.id = e.note_id "
             "LEFT JOIN note_tasks t ON t.owner_user_id = e.owner_user_id "
             "AND t.dataset_id = e.dataset_id AND t.id = e.task_id AND t.note_id = e.note_id "

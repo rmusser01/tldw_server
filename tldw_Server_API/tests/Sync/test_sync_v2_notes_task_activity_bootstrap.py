@@ -304,4 +304,3 @@ def test_factory_wires_private_activity_components_without_advertising_domain() 
     assert isinstance(registry.get("notes.task_activity"), NotesTaskActivityDomainAdapter)
     assert "notes.task_activity" not in factory._sync_v2_settings_from_env().supported_domains
     assert hasattr(factory, "_validate_notes_task_components")
-
