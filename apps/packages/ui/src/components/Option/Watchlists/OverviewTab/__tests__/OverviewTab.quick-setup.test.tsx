@@ -2,6 +2,7 @@
 
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { extractPipelineErrorMessage, OverviewTab } from "../OverviewTab"
 
@@ -108,10 +109,32 @@ const readyPipelineAction = async (name: string) => {
   return button
 }
 
+const openPipelineWithSources = async (triggerName = "Test now") => {
+  const sourceFetchesBeforeOpen = mocks.fetchSources.mock.calls.length
+  fireEvent.click(await screen.findByRole("button", { name: triggerName }))
+  await screen.findByRole("dialog", { name: "Set up briefing" })
+  await waitFor(() => {
+    expect(mocks.fetchSources).toHaveBeenCalledTimes(sourceFetchesBeforeOpen + 1)
+    expect(pipeline().queryByText("Loading sources...")).not.toBeInTheDocument()
+    expect(pipeline().getByLabelText("AI Feed")).toBeEnabled()
+  })
+}
+
+const setExistingSourceSelected = async (sourceName: string, selected: boolean) => {
+  const user = userEvent.setup()
+  const source = pipeline().getByLabelText(sourceName)
+  if ((source as HTMLInputElement).checked !== selected) {
+    await user.click(source)
+  }
+  await waitFor(() => {
+    const currentSource = pipeline().getByLabelText(sourceName)
+    if (selected) expect(currentSource).toBeChecked()
+    else expect(currentSource).not.toBeChecked()
+  })
+}
+
 const reachTestStep = async () => {
-  const source = pipeline().getByLabelText("AI Feed")
-  fireEvent.click(source)
-  await waitFor(() => expect(source).toBeChecked())
+  await setExistingSourceSelected("AI Feed", true)
   fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
   await waitFor(() => expect(pipeline().getByLabelText("Monitor name")).toBeInTheDocument())
   fireEvent.change(pipeline().getByLabelText("Monitor name"), { target: { value: "Morning Brief" } })
@@ -231,11 +254,8 @@ describe("OverviewTab canonical setup", () => {
 
   it("adapts advanced schedule previews through the authenticated service", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
-    const source = pipeline().getByLabelText("AI Feed")
-    fireEvent.click(source)
-    await waitFor(() => expect(source).toBeChecked())
+    await openPipelineWithSources()
+    await setExistingSourceSelected("AI Feed", true)
     fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
     await waitFor(() => expect(pipeline().getByLabelText("Schedule")).toBeInTheDocument())
 
@@ -256,19 +276,14 @@ describe("OverviewTab canonical setup", () => {
   it("tests an inactive monitor and activates the same id without creating a duplicate", async () => {
     render(<OverviewTab />)
 
-    const trigger = await screen.findByRole("button", { name: "Test now" })
-    fireEvent.click(trigger)
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
-    const source = pipeline().getByLabelText("AI Feed")
-    fireEvent.click(source)
-    await waitFor(() => expect(source).toBeChecked())
+    await openPipelineWithSources()
+    await setExistingSourceSelected("AI Feed", true)
     fireEvent.click(pipeline().getByRole("button", { name: "Test source" }))
     await waitFor(() => expect(mocks.testSource).toHaveBeenCalledWith(
       { url: "https://example.com/ai.xml", source_type: "rss" },
       { limit: 6 }
     ))
-    fireEvent.click(source)
-    await waitFor(() => expect(source).not.toBeChecked())
+    await setExistingSourceSelected("AI Feed", false)
     await reachTestStep()
 
     fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
@@ -290,8 +305,7 @@ describe("OverviewTab canonical setup", () => {
 
   it("applies a safe test contract and restores full delivery on activation", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    await openPipelineWithSources()
     await reachTestStep()
     fireEvent.click(pipeline().getByRole("button", { name: "Delivery" }))
     fireEvent.click(pipeline().getByRole("switch", { name: "Email" }))
@@ -330,8 +344,7 @@ describe("OverviewTab canonical setup", () => {
 
   it("updates the inactive job with the current existing source selection", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    await openPipelineWithSources()
     await reachTestStep()
 
     fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
@@ -391,8 +404,7 @@ describe("OverviewTab canonical setup", () => {
 
   it("never updates a pre-existing source when switching from existing to new", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    await openPipelineWithSources()
     await reachTestStep()
     fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
     await waitFor(() => expect(mocks.createJob).toHaveBeenCalledTimes(1))
