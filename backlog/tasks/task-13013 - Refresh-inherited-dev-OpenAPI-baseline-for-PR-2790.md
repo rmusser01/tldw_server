@@ -15,11 +15,13 @@ references:
 - https://github.com/rmusser01/tldw_server/actions/runs/31756799218/job/94634791973
 - origin/dev@8f94369e517463758071504079e9ab5f8f8a0091
 - origin/dev@2c3589fa09caf328d3327f3868b59ec967cb7648
+- origin/dev@1885fe8ee2156fc6228ef80f89f1ef98b64c8a26
 modified_files:
+- .github/workflows/ci.yml
 - apps/tldw-frontend/lib/api/openapi.fingerprint.json
 - backlog/tasks/task-12973.5 - Integrate-concrete-Embeddings-steps-with-the-inline-runner.md
 - backlog/tasks/task-13013 - Refresh-inherited-dev-OpenAPI-baseline-for-PR-2790.md
-updated_date: '2026-08-24 05:18'
+updated_date: '2026-08-24 06:14'
 ---
 
 ## Description
@@ -51,6 +53,9 @@ Hosted backend-required job 94642521688 passed on exact PR head cdbf81c9bf580468
 2026-08-23 rebase refresh: after rebasing PR #2790 onto origin/dev@2c3589fa09, a clean dev worktree and the rebased PR head generated the same canonical OpenAPI fingerprint under a fresh Python 3.12.12 editable `.[dev]` environment: 2021 paths, 2958 schemas, sha256 07868bfa514217dad1720fbb95d14563886eb9c7ae1a07e58650efeaf6ee4699. The tracked dev fingerprint (2012 paths, 2941 schemas, e0d53b...) was therefore inherited stale state, not a Stage 2E contract change. Refreshed the PR fingerprint to the byte-identical clean-dev result; exact drift and hosted checks remain to be rerun.
 Reviewed the current inherited contract delta against the last matching fingerprint commit 9d2de72b1a using the same fresh Python 3.12 environment. The delta is strictly additive: nine paths (eight Chat Macros routes and one scheduled-task run-now route) and seventeen corresponding schemas; zero removed paths, zero removed schemas, and zero mutations to common paths or schemas. The supported `bun run generate:api-types` workflow completed successfully and regenerated the ignored TypeScript schema.
 Pre-merge independent review corrected the current base provenance to origin/dev@2c3589fa09caf328d3327f3868b59ec967cb7648 and identified stale completion language from the prior CI cycle. The final summary and completion-related Definition of Done items remain open until hosted checks pass on the new exact head.
+Hosted CI attempt 2 exposed an inherited latest-dev shard coverage failure: `tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py` was added on dev but is not assigned to any `.github/workflows/ci.yml` shard. The Stage 2E PR will add the file's `test_chat_macros_*.py` family to the existing `platform-services-core` shard entries and verify with `Helper_Scripts/ci/check_shard_coverage.py` before another exact-head run.
+Applied the shard repair across all five `platform-services-core` matrix definitions. Local verification on Python 3.12.12: shard coverage guard passes with 774 shards, 4291 test files, 4 ignored, baseline 130, and `new_uncovered=0`; `test_chat_macros_jobs_worker_startup.py` passes all 6 tests. CI YAML and Backlog frontmatter parse successfully, including string-typed task dates.
+The subsequent origin/dev@1885fe8ee2156fc6228ef80f89f1ef98b64c8a26 merge independently introduced the broader `test_chat_*.py` assignment in all five service-core matrices. During rebase, PR #2790 retained that upstream rule and dropped its narrower `test_chat_macros_*.py` workflow delta. The local shard guard remains green on the rebased tree; only this diagnostic/task history remains from the PR-local shard repair.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
