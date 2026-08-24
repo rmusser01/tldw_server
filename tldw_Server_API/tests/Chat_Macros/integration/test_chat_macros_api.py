@@ -117,6 +117,7 @@ def test_list_get_and_settings_round_trip(api_client: MacroApiClient):
         f"{PREFIX}/settings",
         json={
             "settings": {
+                "future_authoring": {"options": ["keep"]},
                 "output_profiles": {
                     "compact": {
                         "format": "single_response",
@@ -132,12 +133,14 @@ def test_list_get_and_settings_round_trip(api_client: MacroApiClient):
     assert updated.json()["settings"]["output_profiles"]["compact"]["section_titles"] == {
         "summary": "Executive brief"
     }
+    assert updated.json()["settings"]["future_authoring"] == {"options": ["keep"]}
 
     persisted = api_client.client.get(f"{PREFIX}/settings")
     assert persisted.status_code == 200, persisted.text
     assert persisted.json()["settings"]["output_profiles"]["compact"]["section_titles"] == {
         "summary": "Executive brief"
     }
+    assert persisted.json()["settings"]["future_authoring"] == {"options": ["keep"]}
 
 
 def test_macro_crud_validate_and_clone(api_client: MacroApiClient):

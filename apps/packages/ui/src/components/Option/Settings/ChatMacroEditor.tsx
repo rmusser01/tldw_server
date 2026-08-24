@@ -49,6 +49,7 @@ export interface ChatMacroEditorProps {
   onSaved: (name: string) => void
   onDeleted: (name: string) => void
   onCloneRequested: (macro: ChatMacroSummary) => void
+  onImportConsumed?: (requestId: number) => void
   importSource?: ChatMacroEditorImportSource | null
 }
 
@@ -93,6 +94,7 @@ export const ChatMacroEditor = ({
   onSaved,
   onDeleted,
   onCloneRequested,
+  onImportConsumed,
   importSource = null
 }: ChatMacroEditorProps) => {
   const { t } = useTranslation()
@@ -117,7 +119,8 @@ export const ChatMacroEditor = ({
   const isBuiltin = selected?.source === "builtin" || selected?.immutable === true
   const isCreate = selected === null
   const isBusy = busyAction !== null
-  const hasCurrentDetail = selected === null || loadedDetailName === selected.name
+  const selectedName = selected?.name ?? null
+  const hasCurrentDetail = selectedName === null || loadedDetailName === selectedName
   const importRequestId = importSource?.requestId
   const importedRaw = importSource?.raw
 
@@ -126,7 +129,7 @@ export const ChatMacroEditor = ({
     setValidationError(null)
     setValidationMessage(null)
 
-    if (!selected) {
+    if (!selectedName) {
       setDraft(createBlankMacroDraft())
       setSourceRaw("")
       setServerRaw("")
@@ -144,7 +147,7 @@ export const ChatMacroEditor = ({
     setLoading(true)
     void (async () => {
       try {
-        const response = await getChatMacro(selected.name)
+        const response = await getChatMacro(selectedName)
         if (generation !== requestGeneration.current) return
 
         if (!response.ok || !response.data) {
@@ -161,13 +164,13 @@ export const ChatMacroEditor = ({
         } else {
           setDraft((current) => ({
             ...current,
-            name: response.data.definition.name || selected.name,
-            command: response.data.definition.command || selected.command,
+            name: response.data.definition.name || selectedName,
+            command: response.data.definition.command || "",
             description: response.data.definition.description || ""
           }))
           setMode("source")
         }
-        setLoadedDetailName(selected.name)
+        setLoadedDetailName(selectedName)
       } catch (error) {
         if (generation === requestGeneration.current) {
           setValidationError(error instanceof Error ? error.message : label("detailLoadError", "Unable to load macro details."))
@@ -176,7 +179,7 @@ export const ChatMacroEditor = ({
         if (generation === requestGeneration.current) setLoading(false)
       }
     })()
-  }, [selected])
+  }, [selectedName])
 
   const applyImportedSource = React.useCallback((raw: string, selectedName: string | null) => {
     const parsed = parseMacroSource(raw)
@@ -203,7 +206,8 @@ export const ChatMacroEditor = ({
     setLoadedDetailName(null)
     setLoading(false)
     applyImportedSource(importedRaw, null)
-  }, [applyImportedSource, importedRaw, importRequestId])
+    onImportConsumed?.(importRequestId)
+  }, [applyImportedSource, importedRaw, importRequestId, onImportConsumed])
 
   const updateDraft = <K extends keyof GuidedMacroDraft>(key: K, value: GuidedMacroDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }))
@@ -364,6 +368,7 @@ export const ChatMacroEditor = ({
     if (raw === null) return
     try {
       await navigator.clipboard.writeText(raw)
+      setValidationError(null)
       setValidationMessage(label("copied", "YAML copied."))
     } catch {
       setValidationError(label("copyError", "Unable to copy YAML."))
@@ -465,7 +470,7 @@ export const ChatMacroEditor = ({
               className={fieldClassName}
               value={draft.command}
               readOnly={isBuiltin}
-              disabled={loading}
+              disabled={loading || mode === "source"}
               onChange={(event) => updateDraft("command", event.target.value)}
             />
           </label>
@@ -475,7 +480,7 @@ export const ChatMacroEditor = ({
               id="chat-macro-editor-description"
               className={fieldClassName}
               value={draft.description}
-              disabled={loading || isBuiltin}
+              disabled={loading || isBuiltin || mode === "source"}
               onChange={(event) => updateDraft("description", event.target.value)}
             />
           </label>

@@ -1,20 +1,29 @@
 ---
 id: TASK-13114
 title: Implement Chat Macros v1.1 authoring and output profiles
-status: In Progress
+status: Done
 assignee: []
-created_date: '2026-08-24 04:15'
-updated_date: '2026-08-24 07:37'
+created_date: 2026-08-24 04:15
+updated_date: 2026-08-24 07:59
 labels:
-  - chat-macros
-  - frontend
-  - backend
+- chat-macros
+- frontend
+- backend
 dependencies:
-  - TASK-12126
+- TASK-12126
 documentation:
-  - Docs/superpowers/specs/2026-07-03-chat-macros-design.md
-  - Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
+- Docs/superpowers/specs/2026-07-03-chat-macros-design.md
+- Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
 priority: medium
+modified_files:
+- apps/packages/ui/src/components/Option/Settings/ChatMacroEditor.tsx
+- apps/packages/ui/src/components/Option/Settings/ChatMacrosSettings.tsx
+- apps/packages/ui/src/components/Option/Settings/__tests__/ChatMacroEditor.test.tsx
+- apps/packages/ui/src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx
+- tldw_Server_API/app/core/Chat_Macros/settings.py
+- tldw_Server_API/app/core/Chat_Macros/README.md
+- tldw_Server_API/tests/Chat_Macros/unit/test_macro_service.py
+- tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py
 ---
 
 ## Description
@@ -41,7 +50,7 @@ Detailed TDD plan: Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-23 baseline: backend Chat_Macros suite passed 134 tests with 2 warnings. ChatMacrosSettings frontend component suite passed 4 tests. The frontend service suite could not collect in this isolated worktree because wxt/browser was unresolved across the monorepo dependency roots; stop-after-three-attempts rule applied and the plan requires a complete workspace dependency layout before Task 2.
 
 Current tracked files: Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md; backlog task metadata. Isolated branch: codex/chat-macros-v1-1 from merge commit 5c268daa7a.
@@ -51,7 +60,15 @@ Current tracked files: Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1
 Verification: backend Chat_Macros plus Jobs startup suite 145 passed (2 warnings); frontend focused suites 94 passed (60 settings/service/helper, 33 workspace run surfaces, 1 route); Bandit 0 findings and 0 errors across 3,562 backend LOC; desktop QA 1440x1000 and mobile QA 390x844 with no horizontal overflow; live create/save/reload, import-as-draft, output-profile persistence, clone, built-in immutability, and cancel-focused delete confirmation exercised. Package-wide UI TypeScript remains nonzero on 304 lines of existing diagnostics outside the touched Chat Macros files; scoped diagnostic search returned none. Screenshots: /tmp/chat-macros-v1-1-visual-qa/desktop-macros.png, mobile-macros.png, mobile-output-profiles.png.
 
 Known deferred minor improvements from scoped reviews: complete WAI-ARIA tab keyboard/tabpanel behavior; clarify README wording around standalone validation versus create/update identity checks; strengthen create ordering, delete-cancel/failure, stale-copy-error, and semantic save-label tests. None blocks the implemented contracts or verified workflows.
-<!-- SECTION:NOTES:END -->
+2026-08-24 final-review fix round started at f7253b9b26. Scope is limited to the six verified findings: source-mode canonical-field affordances, dirty-draft/selection preservation across catalog refresh and toggles, one-shot import consumption, unknown settings preservation, stale copy-error clearing, and README validation wording. ARIA tabs remain deferred.
+Final-review TDD evidence: RED frontend run failed 4 targeted cases (source-mode controls, import replay, selection change/dirty draft loss, stale copy error) with 29 unrelated cases passing; RED backend run failed the unit and API unknown-key cases with 22 unrelated cases passing. GREEN: 63/63 focused frontend authoring/profile/service tests and 140/140 full Chat_Macros backend tests passed. Bandit scanned 44 LOC in settings.py with 0 findings and 0 errors. git diff --check passed. ARIA tabs remains deferred as requested.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the bounded Chat Macros v1.1 final-review round. Source-mode command/description controls now reflect YAML ownership; catalog refreshes and toggles preserve stable selection and dirty drafts; imports are consumed once; unknown settings survive normalized API round trips via deep copy; successful copy clears stale errors; and README identity-validation wording now matches runtime behavior. Added focused frontend, backend unit, and API regressions for each behavioral finding.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -59,6 +76,6 @@ Known deferred minor improvements from scoped reviews: complete WAI-ARIA tab key
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
