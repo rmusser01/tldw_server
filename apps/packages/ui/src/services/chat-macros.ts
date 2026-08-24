@@ -5,6 +5,7 @@ const CHAT_MACROS_BASE = "/api/v1/chat/macros"
 const encodePathPart = (value: string): string => encodeURIComponent(value)
 
 export type ChatMacroSource = "builtin" | "user"
+export type ChatMacroValidationStatus = "valid" | "invalid"
 
 export interface ChatMacroSummary {
   name: string
@@ -16,6 +17,8 @@ export interface ChatMacroSummary {
   digest: string
   builtin_version?: number | null
   schema_version: number
+  validation_status?: ChatMacroValidationStatus
+  validation_error?: string | null
 }
 
 export interface ChatMacroListResponse {

@@ -29,11 +29,36 @@ describe("chat macros service", () => {
   })
 
   it("lists chat macros through the REST API", async () => {
-    await listChatMacros()
+    mocks.apiSend.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: {
+        macros: [{
+          name: "wrapup",
+          command: "wrapup",
+          description: "Summarize the active chat",
+          enabled: true,
+          source: "builtin",
+          immutable: true,
+          digest: "digest-wrapup",
+          builtin_version: 1,
+          schema_version: 1,
+          validation_status: "valid",
+          validation_error: null
+        }],
+        count: 1
+      }
+    })
+
+    const response = await listChatMacros()
 
     expect(mocks.apiSend).toHaveBeenCalledWith({
       path: "/api/v1/chat/macros",
       method: "GET"
+    })
+    expect(response.data?.macros[0]).toMatchObject({
+      validation_status: "valid",
+      validation_error: null
     })
   })
 

@@ -38,12 +38,18 @@ const MAX_TIMEOUT_SECONDS = 3_600
 type EditorMode = "guided" | "source"
 type BusyAction = "save" | "delete" | null
 
+export interface ChatMacroEditorImportSource {
+  requestId: number
+  raw: string
+}
+
 export interface ChatMacroEditorProps {
   selected: ChatMacroSummary | null
   outputProfileNames: string[]
   onSaved: (name: string) => void
   onDeleted: (name: string) => void
   onCloneRequested: (macro: ChatMacroSummary) => void
+  importSource?: ChatMacroEditorImportSource | null
 }
 
 const responseError = (status: number, error?: string): string =>
@@ -86,7 +92,8 @@ export const ChatMacroEditor = ({
   outputProfileNames,
   onSaved,
   onDeleted,
-  onCloneRequested
+  onCloneRequested,
+  importSource = null
 }: ChatMacroEditorProps) => {
   const { t } = useTranslation()
   const confirmDanger = useConfirmDanger()
@@ -111,6 +118,8 @@ export const ChatMacroEditor = ({
   const isCreate = selected === null
   const isBusy = busyAction !== null
   const hasCurrentDetail = selected === null || loadedDetailName === selected.name
+  const importRequestId = importSource?.requestId
+  const importedRaw = importSource?.raw
 
   React.useEffect(() => {
     const generation = ++requestGeneration.current
@@ -168,6 +177,33 @@ export const ChatMacroEditor = ({
       }
     })()
   }, [selected])
+
+  const applyImportedSource = React.useCallback((raw: string, selectedName: string | null) => {
+    const parsed = parseMacroSource(raw)
+    setSourceRaw(raw)
+    setServerRaw("")
+    setValidationError(null)
+    setValidationMessage(null)
+    if (parsed.mode === "guided") {
+      setDraft(selectedName ? { ...parsed.draft, name: selectedName } : parsed.draft)
+    } else if (!selectedName) {
+      const importedName = sourceName(raw)
+      if (importedName) {
+        setDraft((current) => ({ ...current, name: importedName }))
+      }
+    }
+    setMode("source")
+  }, [])
+
+  React.useEffect(() => {
+    if (importRequestId === undefined || importedRaw === undefined) return
+
+    requestGeneration.current += 1
+    setDraft(createBlankMacroDraft())
+    setLoadedDetailName(null)
+    setLoading(false)
+    applyImportedSource(importedRaw, null)
+  }, [applyImportedSource, importedRaw, importRequestId])
 
   const updateDraft = <K extends keyof GuidedMacroDraft>(key: K, value: GuidedMacroDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }))
@@ -261,18 +297,7 @@ export const ChatMacroEditor = ({
 
     try {
       const raw = await readMacroImport(file)
-      const parsed = parseMacroSource(raw)
-      setSourceRaw(raw)
-      setServerRaw("")
-      setValidationError(null)
-      setValidationMessage(null)
-      if (parsed.mode === "guided") {
-        setDraft(selected ? { ...parsed.draft, name: selected.name } : parsed.draft)
-      } else if (!selected) {
-        const importedName = sourceName(raw)
-        if (importedName) updateDraft("name", importedName)
-      }
-      setMode("source")
+      applyImportedSource(raw, selected?.name || null)
     } catch (error) {
       setValidationError(error instanceof Error ? error.message : label("importError", "Unable to import YAML."))
     }
