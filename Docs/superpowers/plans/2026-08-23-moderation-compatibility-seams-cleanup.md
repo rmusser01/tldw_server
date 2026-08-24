@@ -121,7 +121,7 @@
 - Modify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
 - Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
 
-- [ ] **Step 1: Add the failing class-local absence invariant**
+- [x] **Step 1: Add the failing class-local absence invariant**
 
 Add this constant near the delegation test helpers and add the test after the
 constructor ownership test:
@@ -144,7 +144,7 @@ def test_obsolete_policy_helper_delegates_are_not_class_local():
 Do not remove production methods or old delegation tests yet. The first run must
 demonstrate that the new surface contract fails against the baseline.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -158,7 +158,7 @@ python -m pytest \
 Expected: FAIL because `_effective_rule_categories` is present in
 `ModerationService.__dict__`.
 
-- [ ] **Step 3: Delete the five direct production delegates**
+- [x] **Step 3: Delete the five direct production delegates**
 
 Delete these complete method blocks from `ModerationService` and make no other
 production changes:
@@ -215,7 +215,7 @@ Keep the public `build_sanitized_snippet()` implementation unchanged. Do not
 remove the `re` import; `moderation_service.py` still compiles regular
 expressions in other paths.
 
-- [ ] **Step 4: Compile the production module immediately**
+- [x] **Step 4: Compile the production module immediately**
 
 Run:
 
@@ -228,7 +228,7 @@ python -m py_compile \
 Expected: exit 0 with no output. Stop and correct compilation before editing
 the wrapper-specific tests.
 
-- [ ] **Step 5: Delete obsolete wrapper-only delegation assertions**
+- [x] **Step 5: Delete obsolete wrapper-only delegation assertions**
 
 Delete these complete tests from
 `test_moderation_policy_evaluator_delegation.py`:
@@ -252,7 +252,7 @@ this obsolete entry from `expected`:
 Keep the public `test_build_sanitized_snippet_delegates_exactly_once()` test and
 all retained signature checks.
 
-- [ ] **Step 6: Run the focused test and verify GREEN**
+- [x] **Step 6: Run the focused test and verify GREEN**
 
 Run:
 
@@ -265,7 +265,7 @@ python -m pytest \
 
 Expected: 1 passed.
 
-- [ ] **Step 7: Run the affected evaluator suites**
+- [x] **Step 7: Run the affected evaluator suites**
 
 Run:
 
@@ -279,7 +279,7 @@ python -m pytest \
 
 Expected: PASS with zero failures.
 
-- [ ] **Step 8: Record Task 1 evidence in Backlog.md**
+- [x] **Step 8: Record Task 1 evidence in Backlog.md**
 
 Use `backlog.task_edit` for `TASK-13112` and append notes containing:
 
@@ -289,7 +289,7 @@ ModerationService.__dict__ absence test failed before deletion and passed after
 deletion. Direct evaluator and service delegation suites passed.
 ```
 
-- [ ] **Step 9: Commit Task 1**
+- [x] **Step 9: Commit Task 1**
 
 ```bash
 git add \
@@ -310,7 +310,7 @@ Expected: one commit containing only Task 1 production, tests, and tracking.
 - Modify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
 - Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
 
-- [ ] **Step 1: Add the failing class-local scan absence invariant**
+- [x] **Step 1: Add the failing class-local scan absence invariant**
 
 Add this constant beside the Task 1 obsolete-name tuple and add the test beside
 the Task 1 absence test:
@@ -328,7 +328,7 @@ def test_obsolete_scan_helper_delegates_are_not_class_local():
         assert name not in ModerationService.__dict__
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -342,7 +342,7 @@ python -m pytest \
 Expected: FAIL because `_iter_scan_chunks` is present in
 `ModerationService.__dict__`.
 
-- [ ] **Step 3: Delete the three instance scan delegates**
+- [x] **Step 3: Delete the three instance scan delegates**
 
 Delete these complete method blocks from `ModerationService`:
 
@@ -384,7 +384,7 @@ Keep `Iterator` imported because blocklist line readers still use it. Keep
 `_evaluation_limits()` unchanged because public evaluator delegation requires a
 fresh locked snapshot.
 
-- [ ] **Step 4: Compile the production module immediately**
+- [x] **Step 4: Compile the production module immediately**
 
 Run:
 
@@ -397,7 +397,7 @@ python -m py_compile \
 Expected: exit 0 with no output. Stop and correct compilation before removing
 wrapper-specific tests.
 
-- [ ] **Step 5: Delete obsolete scan delegation tests and signature entries**
+- [x] **Step 5: Delete obsolete scan delegation tests and signature entries**
 
 Delete these complete tests from
 `test_moderation_policy_evaluator_delegation.py`:
@@ -420,7 +420,7 @@ Remove only these obsolete entries from the `expected` mapping in
 Do not remove `_evaluate_text_core` or `_evaluate_action_internal` from the
 signature mapping or its required-phase loop.
 
-- [ ] **Step 6: Delete duplicated service-private scan characterization**
+- [x] **Step 6: Delete duplicated service-private scan characterization**
 
 Delete `_RecordingPattern` and these complete tests from
 `test_moderation_policy_evaluator_characterization.py`:
@@ -467,7 +467,7 @@ assert list(evaluator.iter_scan_chunks("xx", limits)) == [(0, 2)]
 Keep the existing no-match evaluation assertion with the same evaluator and
 limits.
 
-- [ ] **Step 7: Run the focused test and verify GREEN**
+- [x] **Step 7: Run the focused test and verify GREEN**
 
 Run:
 
@@ -480,7 +480,7 @@ python -m pytest \
 
 Expected: 1 passed.
 
-- [ ] **Step 8: Run all evaluator boundary suites**
+- [x] **Step 8: Run all evaluator boundary suites**
 
 Run:
 
@@ -496,7 +496,7 @@ python -m pytest \
 Expected: PASS with zero failures. A lower collected-test count is expected only
 because wrapper-specific duplicate tests were deliberately deleted.
 
-- [ ] **Step 9: Prove retained dispatch points remain covered**
+- [x] **Step 9: Prove retained dispatch points remain covered**
 
 Run:
 
@@ -512,7 +512,7 @@ python -m pytest -q \
 
 Expected: 5 passed.
 
-- [ ] **Step 10: Record Task 2 evidence in Backlog.md**
+- [x] **Step 10: Record Task 2 evidence in Backlog.md**
 
 Use `backlog.task_edit` for `TASK-13112` and append notes containing:
 
@@ -523,7 +523,7 @@ Direct evaluator, public service dispatch, signature, and policy_types()
 compatibility tests passed.
 ```
 
-- [ ] **Step 11: Commit Task 2**
+- [x] **Step 11: Commit Task 2**
 
 ```bash
 git add \
@@ -545,7 +545,7 @@ Expected: one commit containing only Task 2 production, tests, and tracking.
 - Verify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py`
 - Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
 
-- [ ] **Step 1: Verify production method scope exactly**
+- [x] **Step 1: Verify production method scope exactly**
 
 Run:
 
@@ -565,7 +565,7 @@ rg -n '^    def (_evaluate_text_core|_evaluate_action_internal)\b' \
 
 Expected: exactly two matches, one for each retained private dispatch method.
 
-- [ ] **Step 2: Compile touched Python files**
+- [x] **Step 2: Compile touched Python files**
 
 Run:
 
@@ -580,7 +580,7 @@ python -m py_compile \
 
 Expected: exit 0 with no output.
 
-- [ ] **Step 3: Run formatting and lint checks**
+- [x] **Step 3: Run formatting and lint checks**
 
 Run:
 
@@ -605,7 +605,7 @@ parity; do not mass-format the production module in this structural cleanup. If
 Ruff identifies an import made unused solely by the approved deletion, remove
 that import, rerun compilation, then rerun this step.
 
-- [ ] **Step 4: Run the complete Moderation unit gate**
+- [x] **Step 4: Run the complete Moderation unit gate**
 
 Run:
 
@@ -618,7 +618,7 @@ Expected: PASS with zero failures. Compare with the pre-change baseline of 318
 tests, accounting only for explicitly deleted wrapper-specific tests and the two
 new absence tests.
 
-- [ ] **Step 5: Run Guardian, Chat, Workflow, And Audio caller gates**
+- [x] **Step 5: Run Guardian, Chat, Workflow, And Audio caller gates**
 
 Run each command independently:
 
@@ -659,7 +659,7 @@ python -m pytest \
 
 Expected: 1 passed.
 
-- [ ] **Step 6: Run Bandit on touched production scope**
+- [x] **Step 6: Run Bandit on touched production scope**
 
 Run:
 
@@ -674,7 +674,7 @@ python -m bandit \
 Expected: exit 0 and no new findings. Read the JSON summary; do not infer a
 clean result from file creation alone.
 
-- [ ] **Step 7: Run whitespace and scope checks**
+- [x] **Step 7: Run whitespace and scope checks**
 
 Run:
 
@@ -700,13 +700,13 @@ tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 Backlog task update produced while recording these gates; no generated database,
 cache, report, or unrelated file may be staged.
 
-- [ ] **Step 8: Record verification in Backlog.md**
+- [x] **Step 8: Record verification in Backlog.md**
 
 Use `backlog.task_edit` for `TASK-13112`. Append exact command results, Bandit
 summary, test counts, and any warnings or skips. Do not mark acceptance criteria
 or Definition of Done items complete until the corresponding evidence exists.
 
-- [ ] **Step 9: Commit verification tracking**
+- [x] **Step 9: Commit verification tracking**
 
 ```bash
 git add 'backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md'
@@ -722,7 +722,7 @@ Expected: a tracking-only commit after every technical gate passes.
 - Modify only files required to resolve validated findings
 - Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
 
-- [ ] **Step 1: Request spec compliance review**
+- [x] **Step 1: Request spec compliance review**
 
 Provide an independent reviewer with the approved design, this plan, base SHA,
 head SHA, and exact eight-method list. Require a finding-first response that
@@ -739,7 +739,7 @@ checks:
 
 Expected: APPROVE or actionable findings with file and line references.
 
-- [ ] **Step 2: Resolve every validated spec finding**
+- [x] **Step 2: Resolve every validated spec finding**
 
 For each finding:
 
@@ -753,19 +753,19 @@ For each finding:
 Do not accept suggestions that remove retained dispatch methods, change public
 behavior, alter `policy_types()`, or harden regex behavior in this PR.
 
-- [ ] **Step 3: Request code quality and security review**
+- [x] **Step 3: Request code quality and security review**
 
 Require an independent reviewer to inspect the full branch diff for stale
 imports, accidental test-coverage loss, signature changes, out-of-scope edits,
 security impact, and maintainability. Resolve all critical and important
 findings and re-request review until approved.
 
-- [ ] **Step 4: Repeat the complete Task 3 verification matrix**
+- [x] **Step 4: Repeat the complete Task 3 verification matrix**
 
 Rerun Task 3 Steps 1 through 7 after the final review fix. Previous results are
 not substitutes. Record fresh outputs and counts in `TASK-13112`.
 
-- [ ] **Step 5: Finalize Backlog.md tracking**
+- [x] **Step 5: Finalize Backlog.md tracking**
 
 Use `backlog.task_edit` to:
 
@@ -777,7 +777,7 @@ Use `backlog.task_edit` to:
 - document any known skip or residual private-surface compatibility risk
 - set status to `Done` only after all required work is complete
 
-- [ ] **Step 6: Commit final review and tracking changes**
+- [x] **Step 6: Commit final review and tracking changes**
 
 If review required code or test changes, stage only the validated files plus the
 Backlog task. Otherwise stage only the Backlog task.
@@ -798,7 +798,7 @@ git add 'backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-
 git commit -m "chore(backlog): close moderation compatibility cleanup"
 ```
 
-- [ ] **Step 7: Verify branch cleanliness and summarize PR readiness**
+- [x] **Step 7: Verify branch cleanliness and summarize PR readiness**
 
 Run:
 
