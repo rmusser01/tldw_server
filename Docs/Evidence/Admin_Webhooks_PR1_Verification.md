@@ -441,6 +441,18 @@ Independent re-review of `1263677011` reported no remaining findings. The
 reviewer separately reproduced the `4/4` focused pass on Node 20, 22, and 24,
 plus targeted ESLint and `git diff --check` passes.
 
+Qodo's next pass at pushed head `a1e4557489` reported one performance-rule
+violation: the async regression used `spawnSync` for its isolated child
+processes. Test commit `837b209884` replaces that call with promisified
+`execFile`, preserving child failures as rejected test promises without
+blocking the Vitest event loop. The static-import mutation again failed `1/4`
+for the expected eager-resolution error; the restored guarded import passed
+`4/4` under the current Node runtime and separately under Node 20. Targeted
+ESLint, typecheck, synchronous-child scan, and `git diff --check` passed.
+Independent re-review of `837b209884` reported no findings and separately
+verified the focused test on Node 20, 22, and 24, forced child-error diagnostics,
+shell-free invocation portability, and temporary-directory cleanup.
+
 ```text
 behavioral mutation RED:                   1 failed, 3 passed
 behavioral guard GREEN:                     4 passed

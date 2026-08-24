@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-24 20:38'
+updated_date: '2026-08-24 20:40'
 labels:
   - admin
   - webhooks
@@ -144,6 +144,10 @@ Qodo incremental review at commit 618080c00a resolved five findings and marked t
 2026-08-24 refreshed Qodo review at pushed head a1e4557489 reported one rule violation: spawnSync blocks the event loop inside the new async config regression. Finding validated. Remediation will preserve the same isolated loader behavior while replacing synchronous child execution with promisified execFile, then rerun mutation/focused test proof, targeted ESLint, typecheck, diff checks, independent re-review, and Qodo refresh.
 
 2026-08-24 async child-process remediation verified before commit. Replacing spawnSync with promisified execFile preserves the loader guard without blocking the event loop. Mutation RED reintroduced the static analyzer import and failed 1/4 with the expected eager-resolution error; restored GREEN passed 4/4 under current Node and separately under Node 20. Targeted ESLint, typecheck, synchronous-child scan, and git diff --check passed. Awaiting source commit, independent re-review, evidence refresh, push, and Qodo confirmation.
+
+2026-08-24 immutable async child-process remediation commit: 837b209884. This commit replaces spawnSync with promisified execFile while preserving rejected-promise propagation and guaranteed temporary-directory cleanup. Evidence is being refreshed against this commit; independent re-review is in progress before push.
+
+2026-08-24 independent re-review of 837b209884 found no issues. Reviewer separately verified 4/4 on Node 20, 22, and 24, nonzero child exits reject with diagnostics, shell-free invocation portability, and no leftover temporary directories. Local review gate is closed for this Qodo remediation; evidence commit, push, and refreshed Qodo confirmation remain.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
