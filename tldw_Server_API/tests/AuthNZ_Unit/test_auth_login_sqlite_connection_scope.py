@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -8,6 +9,8 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import auth
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.profile_version import ProfileVersionReadFailed
+from tldw_Server_API.app.services import auth_service
 
 
 class _AcquireContext:
@@ -87,6 +90,89 @@ async def test_sqlite_statement_autocommit_persists_login_write_without_explicit
             "SELECT password_hash FROM users WHERE id = 1"
         ).fetchone()[0]
     assert stored_hash == "new-hash"
+
+
+@pytest.mark.asyncio
+async def test_sqlite_statement_autocommit_supports_versioned_last_login_write(
+    tmp_path,
+) -> None:
+    db_path = str(tmp_path / "login-versioned-write.db")
+    initial_version = "2025-01-01T00:00:00.000000Z"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                last_login TEXT,
+                profile_version TEXT NOT NULL
+            );
+            CREATE TABLE org_members (user_id INTEGER, org_id INTEGER, status TEXT);
+            CREATE TABLE team_members (user_id INTEGER, team_id INTEGER, status TEXT);
+            CREATE TABLE user_config_overrides (user_id INTEGER, updated_at TEXT);
+            CREATE TABLE org_config_overrides (org_id INTEGER, updated_at TEXT);
+            CREATE TABLE team_config_overrides (team_id INTEGER, updated_at TEXT);
+            INSERT INTO users (id, profile_version)
+            VALUES (1, '2025-01-01T00:00:00.000000Z');
+            """
+        )
+
+    pool = _sqlite_pool(db_path)
+    last_login = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    async with pool.acquire_statement_autocommit() as login_conn:
+        try:
+            await auth_service.update_user_last_login(login_conn, 1, last_login)
+        except Exception as exc:  # noqa: BLE001 - surface the production-path failure
+            pytest.fail(f"versioned autocommit write failed: {exc}")
+
+    with sqlite3.connect(db_path) as conn:
+        stored_login, stored_version = conn.execute(
+            "SELECT last_login, profile_version FROM users WHERE id = 1"
+        ).fetchone()
+    assert datetime.fromisoformat(stored_login) == last_login
+    assert stored_version != initial_version
+
+
+@pytest.mark.asyncio
+async def test_sqlite_versioned_last_login_rolls_back_when_anchor_touch_fails(
+    tmp_path,
+) -> None:
+    db_path = str(tmp_path / "login-versioned-write-rollback.db")
+    initial_version = "2025-01-01T00:00:00.000000Z"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                last_login TEXT,
+                profile_version TEXT NOT NULL
+            );
+            CREATE TABLE org_members (user_id INTEGER, org_id INTEGER, status TEXT);
+            CREATE TABLE team_members (user_id INTEGER, team_id INTEGER, status TEXT);
+            CREATE TABLE user_config_overrides (user_id INTEGER, updated_at TEXT);
+            CREATE TABLE org_config_overrides (org_id INTEGER, updated_at TEXT);
+            CREATE TABLE team_config_overrides (team_id INTEGER, updated_at TEXT);
+            CREATE TRIGGER reject_profile_version_touch
+            BEFORE UPDATE OF profile_version ON users
+            BEGIN
+                SELECT RAISE(ABORT, 'profile version touch failed');
+            END;
+            INSERT INTO users (id, profile_version)
+            VALUES (1, '2025-01-01T00:00:00.000000Z');
+            """
+        )
+
+    pool = _sqlite_pool(db_path)
+    last_login = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    with pytest.raises(ProfileVersionReadFailed):
+        async with pool.acquire_statement_autocommit() as login_conn:
+            await auth_service.update_user_last_login(login_conn, 1, last_login)
+
+    with sqlite3.connect(db_path) as conn:
+        stored_login, stored_version = conn.execute(
+            "SELECT last_login, profile_version FROM users WHERE id = 1"
+        ).fetchone()
+    assert stored_login is None
+    assert stored_version == initial_version
 
 
 @pytest.mark.asyncio

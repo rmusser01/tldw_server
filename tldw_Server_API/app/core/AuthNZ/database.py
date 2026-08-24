@@ -1424,28 +1424,7 @@ class DatabasePool:
             )
             await configure_sqlite_connection_async(conn)
             conn.row_factory = aiosqlite.Row
-
-            class _SQLiteAutocommitConnShim:
-                def __init__(self, connection):
-                    self._connection = connection
-
-                async def execute(self, query: str, *args):
-                    normalized_query = _normalize_sqlite_sql(query)
-                    if len(args) == 0:
-                        return await self._connection.execute(normalized_query)
-                    params = (
-                        args[0]
-                        if len(args) == 1 and isinstance(args[0], (list, tuple, dict))
-                        else args
-                    )
-                    if isinstance(params, dict):
-                        return await self._connection.execute(normalized_query, params)
-                    return await self._connection.execute(normalized_query, tuple(params))
-
-                def __getattr__(self, name: str):
-                    return getattr(self._connection, name)
-
-            yield _SQLiteAutocommitConnShim(conn)
+            yield _GuardedSQLiteConnection(conn)
         finally:
             if conn:
                 await conn.close()
