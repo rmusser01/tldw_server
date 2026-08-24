@@ -461,11 +461,20 @@ def _active_capability_count() -> int:
 @lru_cache(maxsize=4096)
 def _classify_sql(query: str, backend: str) -> _SqlClassification:
     normalized_command = " ".join(query.strip().rstrip(";").split()).casefold()
-    if backend == "postgres" and normalized_command in {
+    if backend == "postgres" and query.isascii() and normalized_command in {
         "create extension if not exists pgcrypto",
         'create extension if not exists "uuid-ossp"',
     }:
         return _SqlClassification(False, "trusted_extension_bootstrap", ())
+    # sqlglot treats PostgreSQL VALIDATE CONSTRAINT as an opaque Command.
+    if (
+        backend == "postgres"
+        and query.isascii()
+        and normalized_command
+        == "alter table share_tokens validate constraint "
+        "ck_share_tokens_resource_type"
+    ):
+        return _SqlClassification(False, "trusted_constraint_validation", ())
     try:
         statements = tuple(
             statement

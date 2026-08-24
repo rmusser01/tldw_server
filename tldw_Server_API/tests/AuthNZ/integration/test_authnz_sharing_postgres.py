@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+
+import asyncpg
 import pytest
 from fastapi import HTTPException, Request
 
@@ -13,6 +18,26 @@ from tldw_Server_API.app.api.v1.schemas.sharing_schemas import (
 )
 
 pytestmark = pytest.mark.integration
+
+
+async def _create_test_user(pool: Any, *, username: str, email: str) -> int:
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
+    created = await UsersDB(pool).create_user(
+        username=username,
+        email=email,
+        password_hash="test-hash",
+    )
+    return int(created["id"])
+
+
+@asynccontextmanager
+async def _unmanaged_connection(pool: Any) -> AsyncIterator[asyncpg.Connection]:
+    connection = await asyncpg.connect(pool.settings.DATABASE_URL)
+    try:
+        yield connection
+    finally:
+        await connection.close()
 
 
 @pytest.mark.asyncio
@@ -29,28 +54,16 @@ async def test_postgres_authoritative_share_queries_follow_current_membership_an
 
     pool = await get_db_pool()
     assert await setup_database() is True
-    owner = await pool.fetchone(
-        """
-        INSERT INTO users (username, email, password_hash)
-        VALUES (?, ?, ?)
-        RETURNING id
-        """,
-        ("sharing-authority-owner", "sharing-authority-owner@example.test", "hash"),
+    owner_id = await _create_test_user(
+        pool,
+        username="sharing-authority-owner",
+        email="sharing-authority-owner@example.test",
     )
-    recipient = await pool.fetchone(
-        """
-        INSERT INTO users (username, email, password_hash)
-        VALUES (?, ?, ?)
-        RETURNING id
-        """,
-        (
-            "sharing-authority-recipient",
-            "sharing-authority-recipient@example.test",
-            "hash",
-        ),
+    recipient_id = await _create_test_user(
+        pool,
+        username="sharing-authority-recipient",
+        email="sharing-authority-recipient@example.test",
     )
-    owner_id = int(owner["id"])
-    recipient_id = int(recipient["id"])
     organization = await pool.fetchone(
         """
         INSERT INTO organizations (name, slug, owner_user_id, is_active)
@@ -145,13 +158,14 @@ async def test_postgres_runtime_startup_bootstraps_sharing_tables(
     from tldw_Server_API.app.services.startup_auth import _ensure_pg_extras
 
     pool = await get_db_pool()
-    for table in (
-        "sharing_config",
-        "share_audit_log",
-        "share_tokens",
-        "shared_workspaces",
-    ):
-        await pool.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    async with _unmanaged_connection(pool) as connection:
+        for table in (
+            "sharing_config",
+            "share_audit_log",
+            "share_tokens",
+            "shared_workspaces",
+        ):
+            await connection.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
 
     await _ensure_pg_extras(pool)
 
@@ -171,24 +185,21 @@ async def test_postgres_bootstrap_supports_sharing_repository_and_preserves_rows
     )
 
     pool = await get_db_pool()
-    await pool.execute("DROP TABLE IF EXISTS sharing_config CASCADE")
-    await pool.execute("DROP TABLE IF EXISTS share_audit_log CASCADE")
-    await pool.execute("DROP TABLE IF EXISTS share_tokens CASCADE")
-    await pool.execute("DROP TABLE IF EXISTS shared_workspaces CASCADE")
+    async with _unmanaged_connection(pool) as connection:
+        await connection.execute("DROP TABLE IF EXISTS sharing_config CASCADE")
+        await connection.execute("DROP TABLE IF EXISTS share_audit_log CASCADE")
+        await connection.execute("DROP TABLE IF EXISTS share_tokens CASCADE")
+        await connection.execute("DROP TABLE IF EXISTS shared_workspaces CASCADE")
 
     assert await setup_database() is True
 
     repo = SharedWorkspaceRepo(pool)
     await repo.ensure_tables()
-    owner = await pool.fetchone(
-        """
-        INSERT INTO users (username, email, password_hash)
-        VALUES (?, ?, ?)
-        RETURNING id
-        """,
-        ("sharing-pg-owner", "sharing-pg-owner@example.test", "test-hash"),
+    owner_id = await _create_test_user(
+        pool,
+        username="sharing-pg-owner",
+        email="sharing-pg-owner@example.test",
     )
-    owner_id = int(owner["id"])
 
     share = await repo.create_share(
         workspace_id="pg-workspace",
@@ -275,15 +286,11 @@ async def test_postgres_bootstrap_upgrades_legacy_token_constraint_without_data_
 
     pool = await get_db_pool()
     assert await ensure_sharing_tables_pg(pool) is True
-    owner = await pool.fetchone(
-        """
-        INSERT INTO users (username, email, password_hash)
-        VALUES (?, ?, ?)
-        RETURNING id
-        """,
-        ("sharing-pg-legacy", "sharing-pg-legacy@example.com", "test-hash"),
+    owner_id = await _create_test_user(
+        pool,
+        username="sharing-pg-legacy",
+        email="sharing-pg-legacy@example.com",
     )
-    owner_id = int(owner["id"])
     repo = SharedWorkspaceRepo(pool)
     share = await repo.create_share(
         workspace_id="legacy-workspace",
@@ -300,17 +307,18 @@ async def test_postgres_bootstrap_upgrades_legacy_token_constraint_without_data_
         owner_user_id=owner_id,
     )
 
-    await pool.execute(
-        "ALTER TABLE share_tokens DROP CONSTRAINT ck_share_tokens_resource_type"
-    )
-    await pool.execute(
-        """
-        ALTER TABLE share_tokens
-        ADD CONSTRAINT share_tokens_resource_type_check
-        CHECK (resource_type IN ('chatbook', 'workspace'))
-        """
-    )
-    await pool.execute("DROP INDEX uq_sharing_config_global_key")
+    async with _unmanaged_connection(pool) as connection:
+        await connection.execute(
+            "ALTER TABLE share_tokens DROP CONSTRAINT ck_share_tokens_resource_type"
+        )
+        await connection.execute(
+            """
+            ALTER TABLE share_tokens
+            ADD CONSTRAINT share_tokens_resource_type_check
+            CHECK (resource_type IN ('chatbook', 'workspace'))
+            """
+        )
+        await connection.execute("DROP INDEX uq_sharing_config_global_key")
 
     assert await setup_database() is True
     assert (await repo.get_share(int(share["id"])))["workspace_id"] == "legacy-workspace"
@@ -349,6 +357,97 @@ async def test_postgres_bootstrap_upgrades_legacy_token_constraint_without_data_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("custom_constraint_sql", "canonical_constraint_sql", "literal_fragment"),
+    [
+        (
+            """
+            ALTER TABLE share_tokens
+            ADD CONSTRAINT custom_resource_type_guard
+            CHECK (resource_type IN ('CHATBOOK', 'WORKSPACE'))
+            """,
+            """
+            ALTER TABLE share_tokens
+            ADD CONSTRAINT ck_share_tokens_resource_type
+            CHECK (
+                resource_type IN (
+                    'CHATBOOK', 'WORKSPACE', 'PROTOTYPE_WORKSPACE'
+                )
+            )
+            """,
+            "CHATBOOK",
+        ),
+        (
+            """
+            ALTER TABLE share_tokens
+            ADD CONSTRAINT custom_resource_type_guard
+            CHECK (resource_type IN ('chat book', 'workspace'))
+            """,
+            """
+            ALTER TABLE share_tokens
+            ADD CONSTRAINT ck_share_tokens_resource_type
+            CHECK (
+                resource_type IN (
+                    'chat book', 'workspace', 'prototype_workspace'
+                )
+            )
+            """,
+            "chat book",
+        ),
+    ],
+    ids=["uppercase-literals", "literal-whitespace"],
+)
+async def test_postgres_schema_contract_preserves_and_rejects_literal_drift(
+    isolated_test_environment,
+    custom_constraint_sql: str,
+    canonical_constraint_sql: str,
+    literal_fragment: str,
+) -> None:
+    _client, _db_name = isolated_test_environment
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+        ensure_sharing_tables_pg,
+        sharing_schema_issues_pg,
+    )
+
+    pool = await get_db_pool()
+    assert await ensure_sharing_tables_pg(pool) is True
+    async with _unmanaged_connection(pool) as connection:
+        await connection.execute(
+            "ALTER TABLE share_tokens DROP CONSTRAINT ck_share_tokens_resource_type"
+        )
+        await connection.execute(custom_constraint_sql)
+        await connection.execute(canonical_constraint_sql)
+
+    assert await ensure_sharing_tables_pg(pool) is False
+    rows = await pool.fetchall(
+        """
+        SELECT c.conname AS constraint_name,
+               pg_get_constraintdef(c.oid) AS definition
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        WHERE t.relname = 'share_tokens'
+          AND c.conname IN (
+              'custom_resource_type_guard',
+              'ck_share_tokens_resource_type'
+          )
+        ORDER BY c.conname
+        """,
+        (),
+    )
+    assert {row["constraint_name"] for row in rows} == {
+        "ck_share_tokens_resource_type",
+        "custom_resource_type_guard",
+    }
+    assert all(literal_fragment in row["definition"] for row in rows)
+
+    issues = await sharing_schema_issues_pg(pool)
+    assert "invalid constraint share_tokens.ck_share_tokens_resource_type" in issues
+    assert "invalid constraint share_tokens.custom_resource_type_guard" in issues
+
+
+@pytest.mark.asyncio
 async def test_postgres_schema_contract_rejects_incompatible_drift(
     isolated_test_environment,
 ) -> None:
@@ -366,68 +465,69 @@ async def test_postgres_schema_contract_rejects_incompatible_drift(
     pool = await get_db_pool()
     assert await ensure_sharing_tables_pg(pool) is True
 
-    await pool.execute(
-        "ALTER TABLE share_tokens ALTER COLUMN allow_clone DROP DEFAULT"
-    )
-    await pool.execute(
-        """
-        ALTER TABLE share_tokens
-        ALTER COLUMN allow_clone TYPE TEXT USING allow_clone::TEXT
-        """
-    )
-    await pool.execute(
-        "ALTER TABLE share_tokens ALTER COLUMN allow_clone SET DEFAULT 'true'"
-    )
-    await pool.execute(
-        "ALTER TABLE share_audit_log ALTER COLUMN ip_address SET NOT NULL"
-    )
-    await pool.execute(
-        "ALTER TABLE shared_workspaces ALTER COLUMN allow_clone DROP DEFAULT"
-    )
-    await pool.execute(
-        "ALTER TABLE share_tokens DROP CONSTRAINT ck_share_tokens_resource_type"
-    )
-    await pool.execute(
-        """
-        ALTER TABLE share_tokens
-        ADD CONSTRAINT ck_share_tokens_resource_type
-        CHECK (
-            resource_type IN ('chatbook', 'workspace', 'prototype_workspace')
-            OR TRUE
+    async with _unmanaged_connection(pool) as connection:
+        await connection.execute(
+            "ALTER TABLE share_tokens ALTER COLUMN allow_clone DROP DEFAULT"
         )
-        """
-    )
-    await pool.execute(
-        """
-        ALTER TABLE share_tokens
-        ADD CONSTRAINT share_tokens_resource_guard
-        CHECK (
-            resource_type IN ('chatbook', 'workspace')
-            AND length(resource_id) > 0
+        await connection.execute(
+            """
+            ALTER TABLE share_tokens
+            ALTER COLUMN allow_clone TYPE TEXT USING allow_clone::TEXT
+            """
         )
-        """
-    )
-    await pool.execute(
-        """
-        ALTER TABLE shared_workspaces
-        DROP CONSTRAINT ck_shared_workspaces_access_level
-        """
-    )
-    await pool.execute(
-        """
-        ALTER TABLE shared_workspaces
-        ADD CONSTRAINT ck_shared_workspaces_access_level
-        CHECK (access_level IN ('view_chat', 'view_chat_add', 'full_edit'))
-        NOT VALID
-        """
-    )
-    await pool.execute("DROP INDEX uq_sharing_config_global_key")
-    await pool.execute(
-        """
-        CREATE UNIQUE INDEX uq_sharing_config_global_key
-        ON sharing_config(config_value)
-        """
-    )
+        await connection.execute(
+            "ALTER TABLE share_tokens ALTER COLUMN allow_clone SET DEFAULT 'true'"
+        )
+        await connection.execute(
+            "ALTER TABLE share_audit_log ALTER COLUMN ip_address SET NOT NULL"
+        )
+        await connection.execute(
+            "ALTER TABLE shared_workspaces ALTER COLUMN allow_clone DROP DEFAULT"
+        )
+        await connection.execute(
+            "ALTER TABLE share_tokens DROP CONSTRAINT ck_share_tokens_resource_type"
+        )
+        await connection.execute(
+            """
+            ALTER TABLE share_tokens
+            ADD CONSTRAINT ck_share_tokens_resource_type
+            CHECK (
+                resource_type IN ('chatbook', 'workspace', 'prototype_workspace')
+                OR TRUE
+            )
+            """
+        )
+        await connection.execute(
+            """
+            ALTER TABLE share_tokens
+            ADD CONSTRAINT share_tokens_resource_guard
+            CHECK (
+                resource_type IN ('chatbook', 'workspace')
+                AND length(resource_id) > 0
+            )
+            """
+        )
+        await connection.execute(
+            """
+            ALTER TABLE shared_workspaces
+            DROP CONSTRAINT ck_shared_workspaces_access_level
+            """
+        )
+        await connection.execute(
+            """
+            ALTER TABLE shared_workspaces
+            ADD CONSTRAINT ck_shared_workspaces_access_level
+            CHECK (access_level IN ('view_chat', 'view_chat_add', 'full_edit'))
+            NOT VALID
+            """
+        )
+        await connection.execute("DROP INDEX uq_sharing_config_global_key")
+        await connection.execute(
+            """
+            CREATE UNIQUE INDEX uq_sharing_config_global_key
+            ON sharing_config(config_value)
+            """
+        )
 
     assert await ensure_sharing_tables_pg(pool) is False
     assert await pool.fetchone(
@@ -472,15 +572,11 @@ async def test_postgres_share_endpoint_maps_duplicate_to_conflict(
 
     pool = await get_db_pool()
     assert await setup_database() is True
-    owner = await pool.fetchone(
-        """
-        INSERT INTO users (username, email, password_hash)
-        VALUES (?, ?, ?)
-        RETURNING id
-        """,
-        ("sharing-pg-endpoint", "sharing-pg-endpoint@example.com", "test-hash"),
+    owner_id = await _create_test_user(
+        pool,
+        username="sharing-pg-endpoint",
+        email="sharing-pg-endpoint@example.com",
     )
-    owner_id = int(owner["id"])
     repo = SharedWorkspaceRepo(pool)
 
     async def _allow(*args, **kwargs) -> None:

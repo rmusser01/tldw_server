@@ -397,6 +397,7 @@ def test_uuid_extension_bootstrap_is_narrowly_allowed(statement: str) -> None:
         "CREATE EXTENSION pgcrypto",
         "CREATE EXTENSION IF NOT EXISTS pgcrypto CASCADE",
         "CREATE EXTENSION IF NOT EXISTS pgcrypto; SELECT 1",
+        'CREATE EXTENSION IF NOT EXISTS "uuid-oſſp"',
     ],
 )
 def test_other_extension_commands_remain_rejected(statement: str) -> None:
@@ -404,6 +405,70 @@ def test_other_extension_commands_remain_rejected(statement: str) -> None:
         _guard_sql(
             statement,
             backend="postgres",
+            connection_identity=object(),
+            operation="execute",
+        )
+
+
+def test_sharing_constraint_validation_is_narrowly_allowed() -> None:
+    statement = (
+        "ALTER TABLE share_tokens "
+        "VALIDATE CONSTRAINT ck_share_tokens_resource_type"
+    )
+
+    assert (
+        _guard_sql(
+            statement,
+            backend="postgres",
+            connection_identity=object(),
+            operation="execute",
+        )
+        == statement
+    )
+
+
+@pytest.mark.parametrize(
+    ("backend", "statement"),
+    [
+        (
+            "postgres",
+            "ALTER TABLE users "
+            "VALIDATE CONSTRAINT ck_share_tokens_resource_type",
+        ),
+        (
+            "postgres",
+            "ALTER TABLE share_tokens VALIDATE CONSTRAINT other_constraint",
+        ),
+        (
+            "postgres",
+            "ALTER TABLE share_tokens "
+            "VALIDATE CONSTRAINT ck_share_tokens_resource_type; SELECT 1",
+        ),
+        (
+            "sqlite",
+            "ALTER TABLE share_tokens "
+            "VALIDATE CONSTRAINT ck_share_tokens_resource_type",
+        ),
+        (
+            "postgres",
+            "ALTER TABLE ſhare_tokens "
+            "VALIDATE CONSTRAINT ck_share_tokens_resource_type",
+        ),
+        (
+            "postgres",
+            "ALTER TABLE share_tokens "
+            "VALIDATE CONSTRAINT ck_ſhare_tokens_resource_type",
+        ),
+    ],
+)
+def test_other_constraint_validation_commands_remain_rejected(
+    backend: str,
+    statement: str,
+) -> None:
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement,
+            backend=backend,
             connection_identity=object(),
             operation="execute",
         )

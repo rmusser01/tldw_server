@@ -63,69 +63,6 @@ POSTGRES_SHARING_SCHEMA_STATEMENTS = [
         (),
     ),
     (
-        """
-        DO $$
-        DECLARE
-            canonical_constraint_exists BOOLEAN;
-            stale_constraint_name TEXT;
-        BEGIN
-            FOR stale_constraint_name IN
-                SELECT c.conname
-                FROM pg_constraint c
-                JOIN pg_class t ON t.oid = c.conrelid
-                JOIN pg_namespace n ON n.oid = t.relnamespace
-                WHERE n.nspname = current_schema()
-                  AND t.relname = 'share_tokens'
-                  AND c.contype = 'c'
-                  AND replace(
-                      regexp_replace(
-                          lower(pg_get_constraintdef(c.oid)),
-                          '[[:space:]"()]',
-                          '',
-                          'g'
-                      ),
-                      '::text',
-                      ''
-                  ) IN (
-                      'checkresource_type=anyarray[''chatbook'',''workspace'']',
-                      'checkresource_type=anyarray[''workspace'',''chatbook'']'
-                  )
-            LOOP
-                EXECUTE format(
-                    'ALTER TABLE share_tokens DROP CONSTRAINT %I',
-                    stale_constraint_name
-                );
-            END LOOP;
-
-            SELECT EXISTS (
-                SELECT 1
-                FROM pg_constraint c
-                JOIN pg_class t ON t.oid = c.conrelid
-                JOIN pg_namespace n ON n.oid = t.relnamespace
-                WHERE n.nspname = current_schema()
-                  AND t.relname = 'share_tokens'
-                  AND c.conname = 'ck_share_tokens_resource_type'
-            )
-            INTO canonical_constraint_exists;
-
-            IF NOT canonical_constraint_exists
-            THEN
-                ALTER TABLE share_tokens
-                    ADD CONSTRAINT ck_share_tokens_resource_type
-                    CHECK (
-                        resource_type IN (
-                            'chatbook', 'workspace', 'prototype_workspace'
-                        )
-                    ) NOT VALID;
-                ALTER TABLE share_tokens
-                    VALIDATE CONSTRAINT ck_share_tokens_resource_type;
-            END IF;
-        END
-        $$
-        """,
-        (),
-    ),
-    (
         "CREATE INDEX IF NOT EXISTS idx_share_tokens_prefix ON share_tokens(token_prefix)",
         (),
     ),
@@ -192,6 +129,89 @@ POSTGRES_SHARING_SCHEMA_STATEMENTS = [
         (),
     ),
 ]
+
+_RESOURCE_TYPE_CONSTRAINTS_SQL = """
+WITH share_token_resource_type_constraints AS (
+    SELECT
+        c.conname AS constraint_name,
+        c.convalidated AS is_validated,
+        replace(
+            regexp_replace(
+                lower(
+                    regexp_replace(
+                        pg_get_constraintdef(c.oid),
+                        $sql_literal$'(?:''|[^'])*'$sql_literal$,
+                        '?',
+                        'g'
+                    )
+                ),
+                '[[:space:]()]',
+                '',
+                'g'
+            ),
+            '::text',
+            ''
+        ) AS normalized_structure,
+        ARRAY(
+            SELECT captured[1]
+            FROM regexp_matches(
+                pg_get_constraintdef(c.oid),
+                $sql_literal$'((?:''|[^'])*)'$sql_literal$,
+                'g'
+            ) WITH ORDINALITY AS extracted(captured, position)
+            ORDER BY position
+        ) AS literal_values
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = current_schema()
+      AND t.relname = 'share_tokens'
+      AND (
+          c.conname = 'ck_share_tokens_resource_type'
+          OR (
+              c.contype = 'c'
+              AND EXISTS (
+                  SELECT 1
+                  FROM unnest(c.conkey) AS constrained_column(attnum)
+                  JOIN pg_attribute a
+                    ON a.attrelid = c.conrelid
+                   AND a.attnum = constrained_column.attnum
+                  WHERE a.attname = 'resource_type'
+                    AND NOT a.attisdropped
+              )
+          )
+      )
+)
+SELECT constraint_name, is_validated, normalized_structure, literal_values
+FROM share_token_resource_type_constraints
+ORDER BY constraint_name
+"""
+
+_CANONICAL_RESOURCE_TYPE_CONSTRAINT = "ck_share_tokens_resource_type"
+_STALE_RESOURCE_TYPE_SIGNATURES = {
+    (
+        "checkresource_type=anyarray[?,?]",
+        ("chatbook", "workspace"),
+    ),
+    (
+        "checkresource_type=anyarray[?,?]",
+        ("workspace", "chatbook"),
+    ),
+}
+_ADD_CANONICAL_RESOURCE_TYPE_CONSTRAINT_SQL = """
+ALTER TABLE share_tokens
+ADD CONSTRAINT ck_share_tokens_resource_type
+CHECK (resource_type IN ('chatbook', 'workspace', 'prototype_workspace'))
+NOT VALID
+"""
+_VALIDATE_CANONICAL_RESOURCE_TYPE_CONSTRAINT_SQL = (
+    "ALTER TABLE share_tokens "
+    "VALIDATE CONSTRAINT ck_share_tokens_resource_type"
+)
+_SHARING_SCHEMA_LOCK_SQL = (
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))"
+)
+_SHARING_SCHEMA_LOCK_NAME = "tldw:postgres-sharing-schema"
 
 
 POSTGRES_SHARING_SCHEMA_ISSUES_SQL = """
@@ -287,27 +307,36 @@ required_constraints(table_name, constraint_name, definition_fragment) AS (
             'unique(scope_type,scope_id,config_key)'
         )
 ),
-required_check_constraints(table_name, constraint_name, normalized_definition) AS (
+required_check_constraints(
+    table_name,
+    constraint_name,
+    normalized_structure,
+    literal_values
+) AS (
     VALUES
         (
             'shared_workspaces',
             'ck_shared_workspaces_scope_type',
-            'checkshare_scope_type=anyarray[''team'',''org'']'
+            'checkshare_scope_type=anyarray[?,?]',
+            ARRAY['team', 'org']::TEXT[]
         ),
         (
             'shared_workspaces',
             'ck_shared_workspaces_access_level',
-            'checkaccess_level=anyarray[''view_chat'',''view_chat_add'',''full_edit'']'
+            'checkaccess_level=anyarray[?,?,?]',
+            ARRAY['view_chat', 'view_chat_add', 'full_edit']::TEXT[]
         ),
         (
             'share_tokens',
             'ck_share_tokens_resource_type',
-            'checkresource_type=anyarray[''chatbook'',''workspace'',''prototype_workspace'']'
+            'checkresource_type=anyarray[?,?,?]',
+            ARRAY['chatbook', 'workspace', 'prototype_workspace']::TEXT[]
         ),
         (
             'sharing_config',
             'ck_sharing_config_scope_type',
-            'checkscope_type=anyarray[''global'',''org'',''team'']'
+            'checkscope_type=anyarray[?,?,?]',
+            ARRAY['global', 'org', 'team']::TEXT[]
         )
 ),
 required_indexes(
@@ -436,14 +465,30 @@ sharing_schema_issues(issue) AS (
           AND c.convalidated
           AND replace(
               regexp_replace(
-                  lower(pg_get_constraintdef(c.oid)),
-                  '[[:space:]"()]',
+                  lower(
+                      regexp_replace(
+                          pg_get_constraintdef(c.oid),
+                          $sql_literal$'(?:''|[^'])*'$sql_literal$,
+                          '?',
+                          'g'
+                      )
+                  ),
+                  '[[:space:]()]',
                   '',
                   'g'
               ),
               '::text',
               ''
-          ) = r.normalized_definition
+          ) = r.normalized_structure
+          AND ARRAY(
+              SELECT captured[1]
+              FROM regexp_matches(
+                  pg_get_constraintdef(c.oid),
+                  $sql_literal$'((?:''|[^'])*)'$sql_literal$,
+                  'g'
+              ) WITH ORDINALITY AS extracted(captured, position)
+              ORDER BY position
+          ) = r.literal_values
     )
     UNION ALL
     SELECT 'invalid constraint share_tokens.' || c.conname
@@ -454,7 +499,15 @@ sharing_schema_issues(issue) AS (
       AND t.relname = 'share_tokens'
       AND c.contype = 'c'
       AND c.conname <> 'ck_share_tokens_resource_type'
-      AND lower(pg_get_constraintdef(c.oid)) LIKE '%resource_type%'
+      AND EXISTS (
+          SELECT 1
+          FROM unnest(c.conkey) AS constrained_column(attnum)
+          JOIN pg_attribute a
+            ON a.attrelid = c.conrelid
+           AND a.attnum = constrained_column.attnum
+          WHERE a.attname = 'resource_type'
+            AND NOT a.attisdropped
+      )
     UNION ALL
     SELECT 'missing or invalid index ' || r.table_name || '.' || r.index_name
     FROM required_indexes r
@@ -483,8 +536,54 @@ ORDER BY issue
 
 async def apply_postgres_sharing_schema(pool: Any) -> None:
     """Apply every idempotent canonical sharing schema statement."""
-    for sql, params in POSTGRES_SHARING_SCHEMA_STATEMENTS:
-        await pool.execute(sql, *params)
+    async with pool.acquire() as connection:
+        async with connection.transaction():
+            await connection.fetchval(
+                _SHARING_SCHEMA_LOCK_SQL,
+                _SHARING_SCHEMA_LOCK_NAME,
+            )
+            for sql, params in POSTGRES_SHARING_SCHEMA_STATEMENTS:
+                await connection.execute(sql, *params)
+            await _repair_share_token_resource_type_constraint(connection)
+
+
+async def _repair_share_token_resource_type_constraint(connection: Any) -> None:
+    """Replace recognized legacy resource-type checks with the canonical check."""
+    rows = await connection.fetch(_RESOURCE_TYPE_CONSTRAINTS_SQL)
+    canonical_exists = False
+    for row in rows:
+        constraint_name = row.get("constraint_name")
+        normalized_structure = row.get("normalized_structure")
+        literal_values = row.get("literal_values")
+        if (
+            not isinstance(constraint_name, str)
+            or not isinstance(normalized_structure, str)
+            or not isinstance(literal_values, (list, tuple))
+            or any(not isinstance(value, str) for value in literal_values)
+        ):
+            raise RuntimeError("Invalid PostgreSQL sharing constraint metadata")
+
+        signature = (normalized_structure, tuple(literal_values))
+        if signature in _STALE_RESOURCE_TYPE_SIGNATURES:
+            await connection.execute(
+                "ALTER TABLE share_tokens DROP CONSTRAINT "
+                f"{_quote_postgres_identifier(constraint_name)}"
+            )
+            continue
+
+        if constraint_name == _CANONICAL_RESOURCE_TYPE_CONSTRAINT:
+            canonical_exists = True
+
+    if not canonical_exists:
+        await connection.execute(_ADD_CANONICAL_RESOURCE_TYPE_CONSTRAINT_SQL)
+        await connection.execute(_VALIDATE_CANONICAL_RESOURCE_TYPE_CONSTRAINT_SQL)
+
+
+def _quote_postgres_identifier(identifier: str) -> str:
+    """Quote one catalog-provided PostgreSQL identifier."""
+    if not identifier or "\x00" in identifier:
+        raise RuntimeError("Invalid PostgreSQL sharing constraint identifier")
+    return '"' + identifier.replace('"', '""') + '"'
 
 
 async def postgres_sharing_schema_issues(pool: Any) -> list[str]:
