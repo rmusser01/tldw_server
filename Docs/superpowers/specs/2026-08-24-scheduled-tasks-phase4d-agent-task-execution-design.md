@@ -1,7 +1,7 @@
 # Scheduled Tasks Phase 4D Agent Task Execution Design
 
 Date: 2026-08-24
-Status: Draft For User Review
+Status: Approved
 Owner: Codex brainstorming session
 Backlog: TASK-13112
 
@@ -1573,6 +1573,8 @@ Three independent review tracks completed with no unresolved findings:
 Blocking and high-severity findings from each track were incorporated before approval. This is a design review result, not evidence that the described dependencies are implemented.
 
 A subsequent cross-section review identified and addressed seven additional issues: migration preceding result/recovery surfaces, contradictory `every_run` Result semantics, incomplete retention rules, conflated destructive/export permissions, missing execution feasibility proof, incomplete extension result/attention behavior, and non-canonical OpenAPI path parameter names.
+
+The user approved the revised design on 2026-08-24 after the cross-section remediation and final API-first consistency review.
 
 ## Recommended Implementation Plan Shape
 

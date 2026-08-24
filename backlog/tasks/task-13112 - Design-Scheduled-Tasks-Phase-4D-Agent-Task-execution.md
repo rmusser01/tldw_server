@@ -1,7 +1,7 @@
 ---
 id: TASK-13112
 title: Design Scheduled Tasks Phase 4D Agent Task execution
-status: In Progress
+status: Done
 created_date: 2026-08-24 06:01
 labels:
 - scheduled-tasks
@@ -19,7 +19,7 @@ references:
 - Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md
 dependencies:
 - TASK-13113
-updated_date: 2026-08-24 17:04
+updated_date: 2026-08-24 17:12
 documentation:
 - Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md
 modified_files:
@@ -40,7 +40,7 @@ Create the API-first product/UX and backend dependency design for Scheduled Task
 - [x] #3 Spec preserves API-first ownership, keeps the WebUI/extension as reference clients, and explicitly separates Scheduled Agent Tasks from the existing standalone Agent Tasks and Watchlists personas/jobs.
 - [x] #4 Spec identifies backend dependencies and migration/compatibility constraints without assuming unsupported execution or storing raw Agent Task messages inline.
 - [x] #5 Spec includes alternatives, proposed defaults, risks, open questions, acceptance criteria, and staged implementation recommendations suitable for a follow-up implementation plan.
-- [ ] #6 User reviews and approves the written design before implementation planning begins.
+- [x] #6 User reviews and approves the written design before implementation planning begins.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -54,20 +54,21 @@ Final structured review completed across three independent tracks: API/security,
 
 A later cross-section review found seven additional issues. The spec now gates M2 on certified execution plus durable run/Result/Attention and operator-recovery workflows; defines non-duplicating `noteworthy_only`, `every_run`, and `history_only` Result semantics; adds normative cross-resource retention/deletion/evidence rules; separates prompt reveal, plaintext copy, encrypted clone, and destructive deletion permissions; makes isolation feasibility a deployment-class go/no-go ADR; defines extension result/attention behavior; and uses stable resource-specific OpenAPI path parameter names. A final consistency pass preserved the API-first boundary by requiring WebUI parity only for bundled enterprise deployments while allowing equivalent supported API/CLI evidence for headless deployments, and aligned the extension summary with its compact updates role.
 
-Fresh documentation verification passed: `git diff --check`, Markdown table pipe consistency, duplicate-heading scan, and targeted scans for generic `{id}` parameters, retired permission names, TODO/TBD/FIXME markers, and prohibited punctuation. Referenced files were previously verified. Bandit remains not applicable because this design slice changes Markdown/Backlog records only. Acceptance criterion #6 remains pending explicit user approval of the revised written design.
+Fresh documentation verification passed: `git diff --check`, Markdown table pipe consistency, duplicate-heading scan, and targeted scans for generic `{id}` parameters, retired permission names, TODO/TBD/FIXME markers, and prohibited punctuation. Referenced files were previously verified. Bandit remains not applicable because this design slice changes Markdown/Backlog records only.
+
+The user explicitly approved the revised Phase 4D design on 2026-08-24. Implementation planning may now proceed from the approved contract and staged plan shape.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Approved the API-first Scheduled Tasks Phase 4D Agent Task execution design. The final contract defines safe provider-neutral scheduled agent execution, secure prompt and transcript handling, granular authority and destructive-operation permissions, durable runs/results/attention/recovery, retention and deletion evidence, deployment-class feasibility certification, fenced legacy ACP schedule migration, reference WebUI and extension behavior, accessibility acceptance, and preservation of Watchlists and standalone Agent Tasks. The design was hardened through API/security, UX/accessibility, migration/reliability, and final cross-section reviews; all identified findings were addressed before user approval.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Current repository evidence and affected contracts documented
 - [x] #3 Spec review loop completed with blocking findings addressed
 - [x] #4 Documentation verification recorded
 - [x] #5 Bandit applicability or skip documented
-- [ ] #6 Final summary and known deferrals recorded
+- [x] #6 Final summary and known deferrals recorded
 <!-- DOD:END -->
