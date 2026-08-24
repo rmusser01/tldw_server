@@ -1980,7 +1980,7 @@ test.describe('Watchlists playground smoke', () => {
     await basePage.close().catch(() => {})
 
     await navigateWatchlistsDestination(page, 'Articles')
-    await expect(page.locator('button[data-testid^="watchlists-item-row-"]')).toHaveCount(50)
+    await expect(page.getByTestId(/^watchlists-item-row-\d+$/)).toHaveCount(50)
 
     await page.getByTestId('watchlists-items-mark-page').click()
     const firstConfirm = page.locator('.ant-modal-confirm').last()
@@ -2807,15 +2807,12 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
+    await page.getByTestId('watchlists-help-icon').click()
     await expect(page.getByTestId('watchlists-main-docs-link')).toHaveAttribute(
       'href',
       'https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md'
     )
-    await expect(page.getByTestId('watchlists-beta-docs-link')).toHaveAttribute(
-      'href',
-      'https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md'
-    )
-    await expect(page.getByTestId('watchlists-beta-report-link')).toHaveAttribute(
+    await expect(page.getByRole('link', { name: 'Report an issue' })).toHaveAttribute(
       'href',
       'https://github.com/rmusser01/tldw_server/issues/new'
     )
@@ -2828,13 +2825,10 @@ test.describe('Watchlists playground smoke', () => {
     await page.getByTestId('watchlists-resume-guide').click()
     await expect(page.getByText('Watchlists guided tour')).toBeVisible()
     await expect(page.getByText('Step 3 of 5')).toBeVisible()
-    await expect(page.getByTestId('watchlists-context-docs-link')).toHaveAttribute(
-      'href',
-      'https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md#runs'
-    )
 
     await page.getByRole('button', { name: 'Skip' }).click()
     await navigateWatchlistsDestination(page, 'Feeds')
+    await page.getByTestId('watchlists-help-icon').click()
     await expect(page.getByTestId('watchlists-context-docs-link')).toHaveAttribute(
       'href',
       'https://github.com/rmusser01/tldw_server/blob/main/Docs/API/Watchlists_Filters_OPML.md'
