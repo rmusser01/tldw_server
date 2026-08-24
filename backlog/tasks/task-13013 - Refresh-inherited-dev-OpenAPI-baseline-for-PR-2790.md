@@ -1,7 +1,7 @@
 ---
 id: TASK-13013
 title: Refresh inherited dev OpenAPI baseline for PR 2790
-status: In Progress
+status: Done
 created_date: '2026-08-14 00:46'
 labels:
 - ci
@@ -18,10 +18,13 @@ references:
 - origin/dev@1885fe8ee2156fc6228ef80f89f1ef98b64c8a26
 - origin/dev@83fa300fc1b0e77e81219af2abe5b4ddc2c85069
 - origin/dev@21aed4cc0d1e9e2e2a34fc84307bbd1d3b879871
+- origin/dev@91b927f66ff0bc878e4bb96b33de236836f3a8af
+- https://github.com/rmusser01/tldw_server/actions/runs/32704757026
+- https://github.com/rmusser01/tldw_server/actions/runs/32704757026/job/97371724337
 modified_files:
 - backlog/tasks/task-12973.5 - Integrate-concrete-Embeddings-steps-with-the-inline-runner.md
 - backlog/tasks/task-13013 - Refresh-inherited-dev-OpenAPI-baseline-for-PR-2790.md
-updated_date: '2026-08-24 08:07'
+updated_date: '2026-08-24 09:44'
 ---
 
 ## Description
@@ -36,7 +39,7 @@ Repair the inherited protected-dev OpenAPI drift exposed by Embeddings Stage 2E 
 - [x] #2 The supported generator refreshes the tracked OpenAPI fingerprint and frontend API types from the current contract.
 - [x] #3 Generated deltas are reviewed and contain no unexplained API removal or mutation attributable to PR #2790.
 - [x] #4 The local OpenAPI drift check and focused contract verification pass.
-- [ ] #5 PR #2790 backend-required CI passes on the updated exact head.
+- [x] #5 PR #2790 backend-required CI passes on the updated exact head.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -60,20 +63,21 @@ Latest-base OpenAPI verification at origin/dev@1885fe8ee2156fc6228ef80f89f1ef98b
 Latest-base Stage 2E verification: complete nine-file regression set passes 356 tests on Python 3.12.12; Ruff passes all 9 touched Python files; compileall passes all 5 touched production files; Bandit reports 0 findings, 0 errors, 0 nosec suppressions, and 3 skipped tests (`/tmp/bandit_embeddings_stage2e_latest_dev.json`); `git diff --check`, shard coverage, generated fingerprint equality, and Backlog YAML type checks pass.
 Final pre-push rebase verification at origin/dev@83fa300fc1b0e77e81219af2abe5b4ddc2c85069: both the clean dev worktree and PR head pass the exact OpenAPI drift gate with 2028 paths, 2965 schemas, and sha256 `8aa01ac97bebf2b3ae48467a4aedc3a10ee1da424413609f9a3d3eb5275b5de3`. The latest dev merge already carries this matching generated baseline, so no fingerprint-file delta remains in PR #2790. The complete Stage 2E regression set passes 356 tests; Ruff and compileall pass; Bandit reports 0 findings, 0 errors, 0 nosec suppressions, and 3 skipped tests (`/tmp/bandit_embeddings_stage2e_83fa.json`); shard coverage reports 778 shards, 4309 test files, 4 ignored, and `new_uncovered=0`.
 2026-08-24 latest-dev rebase verification at origin/dev@21aed4cc0d1e9e2e2a34fc84307bbd1d3b879871: the 14 Stage 2E commits rebased cleanly, with no upstream changes in the Embeddings source or test paths. The complete nine-file regression set passes 356 tests with 4695 warnings on Python 3.14.3; Ruff passes all 9 touched Python files; compileall passes all 5 touched production files; Bandit reports 0 findings, 0 errors, 0 nosec suppressions, and 3 skipped tests (`/tmp/bandit_embeddings_stage2e_21ae.json`); shard coverage reports 778 shards, 4309 test files, 4 ignored, and `new_uncovered=0`; and `git diff --check` passes. Both the clean dev worktree and rebased PR pass the exact OpenAPI drift gate with 2028 paths, 2965 schemas, and sha256 `8aa01ac97bebf2b3ae48467a4aedc3a10ee1da424413609f9a3d3eb5275b5de3`; the PR still carries no fingerprint delta. The supported frontend API type generator succeeds with the CI-compatible Python 3.12.12 interpreter and leaves no tracked changes. Hosted exact-head CI remains to be rerun after the rebased head is pushed.
+Hosted CI completed successfully on exact Stage 2E head e7b8070ff82e6f7f1d7b51b2d97c44fef836f1d9: all PR checks passed, including backend-required run 32704757026 / job 97371724337, security-required, CodeQL, container builds, E2E gates, and the four full-suite OS/Python matrix jobs. While that run drained, dev advanced to origin/dev@91b927f66ff0bc878e4bb96b33de236836f3a8af. The final 15-commit rebase was clean; the intervening commits changed no Embeddings source or test path. Post-rebase local verification again passes: 356 tests with 4697 warnings, Ruff, compileall, shard coverage (779 shards, 4330 test files, 4 ignored, `new_uncovered=0`), `git diff --check`, and Bandit with 0 findings, 0 errors, 0 nosec suppressions, and 3 skipped tests (`/tmp/bandit_embeddings_stage2e_91b9.json`). Both a clean latest-dev worktree and the rebased PR pass the exact OpenAPI drift gate against the tracked fingerprint. The final metadata-bearing head will receive a last hosted admission run before merge.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Repaired and verified the inherited OpenAPI/CI state encountered by PR #2790 without introducing an Embeddings contract change. The branch was repeatedly rebased through the active dev merge queue, retained upstream shard and fingerprint fixes, and ended on origin/dev@91b927f66ff0bc878e4bb96b33de236836f3a8af with the Stage 2E implementation unchanged. Clean dev and PR schemas match, the supported frontend generator produces no tracked delta, all focused regression/static/security checks pass, all review threads are resolved, and the complete hosted suite passed on the immediately preceding exact Stage 2E head. A final hosted admission run is required for the task-completion-only head before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
