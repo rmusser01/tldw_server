@@ -170,11 +170,29 @@ def _parse_envelope(
 ) -> _ParsedActivityEnvelope:
     """Parse and verify one canonical activity envelope and its original create."""
 
+    routing = envelope.routing_metadata
+    trusted_bootstrap_routing = bool(
+        set(routing)
+        == {
+            "bootstrap_capture",
+            "bootstrap_id",
+            "source",
+            "origin",
+            "server_device_id",
+            "server_owner_user_id",
+        }
+        and routing.get("bootstrap_capture") is True
+        and isinstance(routing.get("bootstrap_id"), str)
+        and routing.get("bootstrap_id")
+        and routing.get("source") == "notes-task-activity-bootstrap"
+        and routing.get("origin") == "server"
+        and envelope.payload.get("source_kind") == "trusted_bootstrap_v1"
+    )
     if (
         envelope.adapter_version != 1
         or envelope.schema_version != 1
         or envelope.operation not in {"upsert", "tombstone"}
-        or envelope.routing_metadata
+        or (routing and not trusted_bootstrap_routing)
     ):
         raise NotesTaskContractError("notes.task_activity envelope lineage is invalid")
     if envelope.operation == "upsert":

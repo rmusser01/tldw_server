@@ -37,7 +37,12 @@ from .mutation_group_validation import (
     mutation_group_plan_hash,
     validate_stored_mutation_group,
 )
-from .notes_task_contract import notes_task_object_hash, parse_notes_task_v1
+from .notes_task_contract import (
+    notes_task_activity_object_hash,
+    notes_task_object_hash,
+    parse_notes_task_activity_v1,
+    parse_notes_task_v1,
+)
 from .server_origin import (
     SERVER_ORIGIN_DEVICE_ID,
     SyncServerOriginMutationNotSupportedError,
@@ -116,6 +121,7 @@ def capture_server_origin_mutation_batch(
     trusted_notes_link_bootstrap_id: str | None = None,
     trusted_notes_attachment_bootstrap_id: str | None = None,
     trusted_notes_task_bootstrap_id: str | None = None,
+    trusted_notes_task_activity_bootstrap_id: str | None = None,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
     | None = None,
     bootstrap_relationship_absence_verifier: Callable[
@@ -139,6 +145,7 @@ def capture_server_origin_mutation_batch(
             trusted_notes_link_bootstrap_id,
             trusted_notes_attachment_bootstrap_id,
             trusted_notes_task_bootstrap_id,
+            trusted_notes_task_activity_bootstrap_id,
         )
         if item is not None
     )
@@ -149,6 +156,7 @@ def capture_server_origin_mutation_batch(
         or trusted_notes_link_bootstrap_id
         or trusted_notes_attachment_bootstrap_id
         or trusted_notes_task_bootstrap_id
+        or trusted_notes_task_activity_bootstrap_id
     )
     if trusted_bootstrap_id is not None and bootstrap_step_verifier is None:
         raise SyncStoreError("Sync bootstrap capture requires a source-step verifier")
@@ -159,6 +167,9 @@ def capture_server_origin_mutation_batch(
         {step.domain for step in plan},
         trusted_bootstrap_id=trusted_bootstrap_id,
         notes_task_bootstrap=trusted_notes_task_bootstrap_id is not None,
+        notes_task_activity_bootstrap=(
+            trusted_notes_task_activity_bootstrap_id is not None
+        ),
     )
     if not server_frontend_mutation_enabled_for_policy(dataset.encryption_policy):
         raise SyncServerOriginMutationNotSupportedError(dataset, plan[0].domain)
@@ -192,8 +203,12 @@ def capture_server_origin_mutation_batch(
             bootstrap_step_verifier=bootstrap_step_verifier,
             materialize_verified_bootstrap=(
                 trusted_notes_attachment_bootstrap_id is not None
+                or trusted_notes_task_activity_bootstrap_id is not None
             ),
             notes_task_bootstrap=trusted_notes_task_bootstrap_id is not None,
+            notes_task_activity_bootstrap=(
+                trusted_notes_task_activity_bootstrap_id is not None
+            ),
         )
 
     envelopes = _evaluate_plan(
@@ -208,6 +223,9 @@ def capture_server_origin_mutation_batch(
             trusted_notes_attachment_bootstrap_id is not None
         ),
         notes_task_bootstrap=trusted_notes_task_bootstrap_id is not None,
+        notes_task_activity_bootstrap=(
+            trusted_notes_task_activity_bootstrap_id is not None
+        ),
         bootstrap_relationship_verifier=bootstrap_relationship_verifier,
         bootstrap_relationship_absence_verifier=(
             bootstrap_relationship_absence_verifier
@@ -220,7 +238,10 @@ def capture_server_origin_mutation_batch(
             inserted = service.store.insert_envelopes_atomic(
                 envelopes,
                 trusted_notes_organization_bootstrap_id=trusted_bootstrap_id,
-                trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,
+                trusted_notes_task_bootstrap_id=(
+                    trusted_notes_task_bootstrap_id
+                    or trusted_notes_task_activity_bootstrap_id
+                ),
             )
     except SyncIdempotencyConflictError as exc:
         raise SyncServerOriginBatchIdempotencyConflictError(mutation_group_id) from exc
@@ -234,8 +255,12 @@ def capture_server_origin_mutation_batch(
         bootstrap_step_verifier=bootstrap_step_verifier,
         materialize_verified_bootstrap=(
             trusted_notes_attachment_bootstrap_id is not None
+            or trusted_notes_task_activity_bootstrap_id is not None
         ),
         notes_task_bootstrap=trusted_notes_task_bootstrap_id is not None,
+        notes_task_activity_bootstrap=(
+            trusted_notes_task_activity_bootstrap_id is not None
+        ),
     )
 
 
@@ -319,6 +344,7 @@ def _evaluate_plan(
     notes_link_bootstrap: bool = False,
     notes_attachment_bootstrap: bool = False,
     notes_task_bootstrap: bool = False,
+    notes_task_activity_bootstrap: bool = False,
     bootstrap_relationship_verifier: Callable[[SyncDomain, str, Mapping[str, object]], bool]
     | None = None,
     bootstrap_relationship_absence_verifier: Callable[
@@ -380,6 +406,22 @@ def _evaluate_plan(
                 revision=object_revision,
                 deleted=step.operation == "tombstone",
             )
+        if notes_task_activity_bootstrap and step.domain == "notes.task_activity":
+            if step.operation != "upsert" or object_revision != 1:
+                raise SyncStoreError("notes_task_activity_bootstrap_lineage_invalid")
+            activity_payload = parse_notes_task_activity_v1(
+                step.payload,
+                owner_user_id=dataset.owner_user_id,
+                bound_actor_type=str(step.payload.get("actor_type")),
+                bound_actor_id=step.payload.get("actor_id"),
+                authenticated_device_id=None,
+                trusted_server_origin=True,
+            )
+            payload_hash = notes_task_activity_object_hash(
+                activity_payload,
+                revision=1,
+                deleted=False,
+            )
         base_server_cursor = prior_head.server_cursor if prior_head is not None else None
         if isinstance(prior_head, SyncEnvelopeCreate) and base_server_cursor is None:
             # Cursor zero is outside stored history and marks an in-plan virtual head;
@@ -411,7 +453,7 @@ def _evaluate_plan(
             object_revision=object_revision,
             entity_version=(
                 object_revision
-                if step.domain in {"notes.link", "notes.task"}
+                if step.domain in {"notes.link", "notes.task", "notes.task_activity"}
                 else None
             ),
             parent_id=step.parent_id,
@@ -456,6 +498,19 @@ def _evaluate_plan(
                 bootstrap_id if notes_attachment_bootstrap else None
             ),
             notes_task_bootstrap_id=(bootstrap_id if notes_task_bootstrap else None),
+            notes_task_activity_bootstrap_id=(
+                bootstrap_id if notes_task_activity_bootstrap else None
+            ),
+            authenticated_actor_type=(
+                str(step.payload.get("actor_type"))
+                if step.domain == "notes.task_activity"
+                else None
+            ),
+            authenticated_actor_id=(
+                step.payload.get("actor_id")
+                if step.domain == "notes.task_activity"
+                else None
+            ),
             bootstrap_relationship_verifier=bootstrap_relationship_verifier,
             bootstrap_relationship_absence_verifier=(
                 bootstrap_relationship_absence_verifier
@@ -483,6 +538,7 @@ def _materialize_group(
     bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None = None,
     materialize_verified_bootstrap: bool = False,
     notes_task_bootstrap: bool = False,
+    notes_task_activity_bootstrap: bool = False,
 ) -> ServerOriginBatchResult:
     group = list(envelopes)
     _validate_stored_group(
@@ -495,7 +551,9 @@ def _materialize_group(
             group,
             require_predecessors=bootstrap_id is None,
             trusted_notes_task_bootstrap_id=(
-                bootstrap_id if notes_task_bootstrap else None
+                bootstrap_id
+                if notes_task_bootstrap or notes_task_activity_bootstrap
+                else None
             ),
         ) as guarded_store:
             group = guarded_store.list_mutation_group(
@@ -832,10 +890,13 @@ def _require_batch_write_ready(
     *,
     trusted_bootstrap_id: str | None = None,
     notes_task_bootstrap: bool = False,
+    notes_task_activity_bootstrap: bool = False,
 ) -> None:
     missing_domains = domains.difference(dataset.domains)
     if notes_task_bootstrap:
         missing_domains = missing_domains.difference({"notes.task"})
+    if notes_task_activity_bootstrap:
+        missing_domains = missing_domains.difference({"notes.task_activity"})
     missing = sorted(missing_domains)
     if missing:
         raise SyncStoreError(
@@ -846,6 +907,15 @@ def _require_batch_write_ready(
         state = metadata.get("state") if isinstance(metadata, Mapping) else None
         if not notes_task_bootstrap or trusted_bootstrap_id is None or state != "bootstrapping":
             raise SyncStoreError("notes_task_sync_not_ready")
+    if "notes.task_activity" in domains:
+        metadata = dataset.metadata.get("notes_task_activity_v1")
+        state = metadata.get("state") if isinstance(metadata, Mapping) else None
+        if (
+            not notes_task_activity_bootstrap
+            or trusted_bootstrap_id is None
+            or state != "bootstrapping"
+        ):
+            raise SyncStoreError("notes_task_activity_sync_not_ready")
     if "notes.link" in domains:
         metadata = dataset.metadata.get("notes_link_v1")
         state = metadata.get("state") if isinstance(metadata, Mapping) else None

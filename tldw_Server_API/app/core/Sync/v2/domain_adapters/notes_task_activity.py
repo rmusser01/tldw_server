@@ -46,8 +46,22 @@ class NotesTaskActivityDomainAdapter:
             or envelope.operation not in {"upsert", "tombstone"}
             or envelope.adapter_version != 1
             or envelope.schema_version != 1
-            or envelope.routing_metadata
         ):
+            return _rejected(envelope, "notes_task_activity_payload_invalid")
+        trusted_bootstrap = _trusted_activity_bootstrap(envelope, context)
+        allowed_routing = (
+            {
+                "bootstrap_capture",
+                "bootstrap_id",
+                "source",
+                "origin",
+                "server_device_id",
+                "server_owner_user_id",
+            }
+            if trusted_bootstrap
+            else set()
+        )
+        if set(envelope.routing_metadata) != allowed_routing:
             return _rejected(envelope, "notes_task_activity_payload_invalid")
 
         head = _get_head(envelope, context)
@@ -65,7 +79,7 @@ class NotesTaskActivityDomainAdapter:
                 task_id is None or isinstance(task_id, str)
             ):
                 return _rejected(envelope, "notes_task_activity_payload_invalid")
-            parent_outcome = _authorize_parents(
+            parent_outcome = None if trusted_bootstrap else _authorize_parents(
                 envelope,
                 dataset=dataset,
                 context=context,
@@ -124,7 +138,7 @@ class NotesTaskActivityDomainAdapter:
         if envelope.object_id != activity_id or envelope.parent_id != note_id:
             return _conflict(envelope, "notes_task_activity_identity_conflict")
 
-        parent_outcome = _authorize_parents(
+        parent_outcome = None if trusted_bootstrap else _authorize_parents(
             envelope,
             dataset=dataset,
             context=context,
@@ -247,6 +261,31 @@ def _same_activity_scope(
         return False
     payload = head.payload
     return payload.get("note_id") == note_id and payload.get("task_id") == task_id
+
+
+def _trusted_activity_bootstrap(
+    envelope: SyncEnvelopeCreate,
+    context: SyncAdapterContext | None,
+) -> bool:
+    """Return whether context and routing authorize legacy activity capture."""
+
+    bootstrap_id = envelope.routing_metadata.get("bootstrap_id")
+    metadata = envelope.payload.get("metadata")
+    return bool(
+        context is not None
+        and context.trusted_server_origin
+        and isinstance(bootstrap_id, str)
+        and bootstrap_id
+        and context.notes_task_activity_bootstrap_id == bootstrap_id
+        and envelope.operation == "upsert"
+        and envelope.payload.get("source_kind") == "trusted_bootstrap_v1"
+        and isinstance(metadata, dict)
+        and metadata.get("legacy_source_verified") is True
+        and envelope.routing_metadata.get("bootstrap_capture") is True
+        and envelope.routing_metadata.get("source")
+        == "notes-task-activity-bootstrap"
+        and envelope.routing_metadata.get("origin") == "server"
+    )
 
 
 def _exact_semantic_replay(head: SyncHead, envelope: SyncEnvelopeCreate) -> bool:

@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
     NotesTaskActivityTombstoneV1,
     NotesTaskActivityV1,
     NotesTaskV1Payload,
+    convert_legacy_task_event,
     notes_task_activity_object_hash,
     notes_task_object_hash,
     parse_notes_task_v1,
@@ -1290,6 +1291,66 @@ class TaskStore:
         decoded["sync_payload"] = payload.model_dump(mode="json")
         return decoded
 
+    def page_legacy_events_for_sync_bootstrap(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        after_created_at: str | None = None,
+        after_activity_id: str | None = None,
+        limit: int = 1_000,
+        conn: TaskConnection | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return one exact legacy/adopted activity source page."""
+
+        if isinstance(limit, bool) or not 1 <= limit <= 1_000:
+            raise ValueError("Notes task activity bootstrap page limit must be 1..1000")
+        if (after_created_at is None) != (after_activity_id is None):
+            raise ValueError("Notes task activity bootstrap cursor fields must be paired")
+        normalized_after = normalize_sync_timestamp(after_created_at)
+        if after_created_at is not None and (
+            normalized_after != after_created_at
+            or not isinstance(after_activity_id, str)
+            or not after_activity_id
+        ):
+            raise ValueError("Notes task activity bootstrap cursor is invalid")
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        clauses = [
+            "e.owner_user_id = ?",
+            "e.dataset_id = ?",
+            "((e.sync_server_cursor IS NULL "
+            "AND e.source_diagnostic_code = 'legacy_task_activity_unverified') "
+            "OR (e.sync_server_cursor IS NOT NULL "
+            "AND e.source_kind = 'trusted_bootstrap_v1'))",
+            "(e.task_id IS NULL OR t.id IS NOT NULL)",
+        ]
+        params: list[Any] = [owner, dataset]
+        if normalized_after is not None:
+            clauses.append("(e.created_at > ? OR (e.created_at = ? AND e.id > ?))")
+            params.extend((normalized_after, normalized_after, after_activity_id))
+        params.append(limit)
+        query = (
+            "SELECT e.*, t.note_id AS resolved_task_note_id FROM task_events e "
+            "LEFT JOIN note_tasks t ON t.owner_user_id = e.owner_user_id "
+            "AND t.dataset_id = e.dataset_id AND t.id = e.task_id "
+            "WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY e.created_at ASC, e.id ASC LIMIT ?"
+        )
+
+        def _page(read_conn: TaskConnection | None) -> list[dict[str, Any]]:
+            rows = self._read(query, tuple(params), conn=read_conn).fetchall()
+            result: list[dict[str, Any]] = []
+            for raw in rows:
+                row = self._decode_event_row(raw)
+                if row is None:
+                    continue
+                row["created_at"] = normalize_sync_timestamp(row.get("created_at"))
+                result.append(row)
+            return result
+
+        return self._with_scoped_read(dataset_id=dataset, conn=conn, fn=_page)
+
     def update_unlinked_task_metadata_record_only(
         self,
         *,
@@ -2076,17 +2137,12 @@ class TaskStore:
                 entity_id=payload.activity_id,
             )  # noqa: TRY003
         self._require_authorized_write_scope(conn, owner_user_id=owner, dataset_id=dataset)
-        if self.get_sync_task_activity(
+        existing = self.get_sync_task_activity(
             owner_user_id=owner,
             dataset_id=dataset,
             activity_id=payload.activity_id,
             conn=conn,
-        ) is not None:
-            raise ConflictError(
-                "Sync task activity identity already exists.",
-                entity="task_activity",
-                entity_id=payload.activity_id,
-            )  # noqa: TRY003
+        )
         self._require_sync_activity_parents(
             owner_user_id=owner,
             dataset_id=dataset,
@@ -2094,6 +2150,85 @@ class TaskStore:
             conn=conn,
         )
         tool_name, policy_mode, approval_id = self._sync_activity_legacy_context(payload)
+        if existing is not None:
+            if not self._legacy_sync_activity_matches(
+                existing,
+                payload=payload,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                conn=conn,
+            ):
+                raise ConflictError(
+                    "Sync task activity identity already exists.",
+                    entity="task_activity",
+                    entity_id=payload.activity_id,
+                )  # noqa: TRY003
+            cursor = self._execute(
+                conn,
+                """
+                UPDATE task_events
+                   SET event_type = ?, actor_type = ?, actor_id = ?, tool_name = ?,
+                       policy_mode = ?, approval_id = ?, old_value_json = ?,
+                       new_value_json = ?, sync_revision = 1, sync_object_hash = ?,
+                       sync_server_cursor = ?, source_device_id = ?, client_occurred_at = ?,
+                       source_kind = ?, corrects_activity_id = ?, deleted = ?,
+                       deleted_at = NULL, delete_reason = NULL,
+                       source_diagnostic_code = NULL, source_diagnostic_hash = NULL
+                 WHERE owner_user_id = ? AND dataset_id = ? AND id = ?
+                   AND sync_server_cursor IS NULL
+                   AND source_diagnostic_code = 'legacy_task_activity_unverified'
+                """,
+                (
+                    payload.event_type,
+                    payload.actor_type,
+                    payload.actor_id,
+                    tool_name,
+                    policy_mode,
+                    approval_id,
+                    json.dumps(payload.old_value, sort_keys=True)
+                    if payload.old_value is not None
+                    else None,
+                    json.dumps(payload.new_value, sort_keys=True)
+                    if payload.new_value is not None
+                    else None,
+                    sync_object_hash,
+                    sync_server_cursor,
+                    payload.source_device_id,
+                    payload.client_occurred_at,
+                    payload.source_kind,
+                    payload.corrects_activity_id,
+                    self._deleted_value(False),
+                    owner,
+                    dataset,
+                    payload.activity_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError(
+                    "Sync task activity legacy adoption compare-and-swap failed.",
+                    entity="task_activity",
+                    entity_id=payload.activity_id,
+                )  # noqa: TRY003
+            self._sync_task_activity_materialization_checkpoint("adopt")
+            if not self.verify_sync_task_activity_postcondition(
+                owner_user_id=owner,
+                dataset_id=dataset,
+                payload=payload,
+                sync_revision=1,
+                sync_object_hash=sync_object_hash,
+                sync_server_cursor=sync_server_cursor,
+                conn=conn,
+            ):
+                raise CharactersRAGDBError("Sync task activity adoption postcondition failed.")  # noqa: TRY003
+            adopted = self.get_sync_task_activity(
+                owner_user_id=owner,
+                dataset_id=dataset,
+                activity_id=payload.activity_id,
+                conn=conn,
+            )
+            if adopted is None:
+                raise CharactersRAGDBError("Sync task activity adoption readback failed.")  # noqa: TRY003
+            return adopted
         now = self._db._get_current_utc_timestamp_iso()
         self._execute(
             conn,
@@ -2152,6 +2287,65 @@ class TaskStore:
         if created is None:
             raise CharactersRAGDBError("Sync task activity create readback failed.")  # noqa: TRY003
         return created
+
+    def _legacy_sync_activity_matches(
+        self,
+        row: Mapping[str, Any],
+        *,
+        payload: NotesTaskActivityV1,
+        owner_user_id: str,
+        dataset_id: str,
+        conn: TaskConnection,
+    ) -> bool:
+        """Verify that an unmaterialized legacy row converts to the payload."""
+
+        if (
+            row.get("sync_server_cursor") is not None
+            or row.get("source_diagnostic_code") != "legacy_task_activity_unverified"
+            or bool(row.get("deleted"))
+        ):
+            return False
+        resolved_note_id: str | None = None
+        if row.get("task_id") is not None:
+            task = self._fetch_task(
+                str(row["task_id"]),
+                owner_user_id=owner_user_id,
+                dataset_id=dataset_id,
+                include_deleted=True,
+                conn=conn,
+            )
+            if task is None:
+                return False
+            resolved_note_id = str(task["note_id"])
+        source = {
+            key: row.get(key)
+            for key in (
+                "id",
+                "task_id",
+                "note_id",
+                "event_type",
+                "actor_type",
+                "actor_id",
+                "tool_name",
+                "policy_mode",
+                "approval_id",
+                "old_value",
+                "new_value",
+                "created_at",
+                "client_id",
+            )
+        }
+        source["old_value"] = row.get("old_value_json")
+        source["new_value"] = row.get("new_value_json")
+        try:
+            converted = convert_legacy_task_event(
+                source,
+                owner_user_id=owner_user_id,
+                resolved_task_note_id=resolved_note_id,
+            )
+        except Exception:  # noqa: BLE001 - mismatch is a closed boolean result.
+            return False
+        return converted.model_dump(mode="json") == payload.model_dump(mode="json")
 
     def tombstone_sync_task_activity(
         self,

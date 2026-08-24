@@ -66,6 +66,7 @@ class SyncV2Store:
     def __init__(self, db: SyncDatabase, *, connection: Any | None = None) -> None:
         self.db = db
         self._connection = connection
+        self._trusted_notes_task_bootstrap_id: str | None = None
 
     @contextmanager
     def materialization_guard(
@@ -87,6 +88,9 @@ class SyncV2Store:
         ) as connection:
             guarded = copy(self)
             guarded._connection = connection
+            guarded._trusted_notes_task_bootstrap_id = (
+                trusted_notes_task_bootstrap_id
+            )
             if require_predecessors:
                 self.db.require_materialization_predecessors_applied(
                     envelopes,
@@ -773,7 +777,13 @@ class SyncV2Store:
         )
 
     def upsert_object_state(self, state: SyncObjectState) -> SyncObjectState:
-        return self.db.upsert_object_state(state, connection=self._connection)
+        return self.db.upsert_object_state(
+            state,
+            connection=self._connection,
+            trusted_notes_task_bootstrap_id=(
+                self._trusted_notes_task_bootstrap_id
+            ),
+        )
 
     def mark_envelope_apply_status(
         self,

@@ -141,6 +141,7 @@ class SyncAdapterContext:
     notes_link_bootstrap_id: str | None = None
     attachment_ref_bootstrap_id: str | None = None
     notes_task_bootstrap_id: str | None = None
+    notes_task_activity_bootstrap_id: str | None = None
     bootstrap_relationship_verifier: BootstrapRelationshipVerifier | None = None
     bootstrap_relationship_absence_verifier: BootstrapRelationshipVerifier | None = None
     supports_attachments: bool = False
