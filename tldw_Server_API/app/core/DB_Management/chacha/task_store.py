@@ -3208,11 +3208,11 @@ class TaskStore:
             else ""
         )
         query = (
-            "SELECT * FROM task_projection_drifts "
+            "SELECT * FROM task_projection_drifts "  # nosec B608 -- fixed SQL;
             "WHERE owner_user_id = ? AND dataset_id = ? AND id = ? "
             "AND (? IS NULL OR note_id = ?) AND (? IS NULL OR task_id = ?)"
             + lock_clause
-        )  # nosec B608 - fixed SQL plus a backend-controlled row-lock suffix
+        )  # the only concatenated value is a backend-controlled row-lock suffix
         cursor = self._read(
             query,
             (

@@ -54,6 +54,7 @@ from .models import (
     NOTES_TASK_SYNC_OPERATIONS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_ENCRYPTION_POLICIES,
+    SYNC_V2_KNOWN_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
     SYNC_V2_SUPPORTED_OPERATIONS,
     WORKSPACE_SYNC_DOMAINS,
@@ -8574,7 +8575,7 @@ def _device_requested_domains(device: SyncDevice) -> list[SyncDomain]:
     if isinstance(raw_supported, list):
         supported = {item for item in raw_supported if isinstance(item, str)}
         requested = [item for item in requested if item in supported]
-    known = set(SYNC_V2_SUPPORTED_DOMAINS)
+    known = set(SYNC_V2_KNOWN_DOMAINS)
     return [item for item in requested if item in known]
 
 

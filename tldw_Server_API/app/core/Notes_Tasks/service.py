@@ -1555,7 +1555,12 @@ class NotesTaskService:
                     drift_count += 1
                 continue
 
-            assert task is not None and historical is not None
+            if task is None or historical is None:
+                raise ConflictError(
+                    "Task projection classification state is incomplete.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )
             current = db.task_store._sync_bootstrap_task_row(
                 task,
                 scope.owner_user_id,
