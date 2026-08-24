@@ -21,10 +21,11 @@ modified_files:
 - Docs/superpowers/specs/2026-08-23-moderation-compatibility-seams-cleanup-design.md
 - Docs/superpowers/plans/2026-08-23-moderation-compatibility-seams-cleanup.md
 - tldw_Server_API/app/core/Moderation/moderation_service.py
+- tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 - backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
-updated_date: 2026-08-24 06:20
+updated_date: 2026-08-24 06:40
 ---
 
 ## Description
@@ -60,6 +61,7 @@ The revised design is user-approved. The implementation plan was written and sel
 Task 1 removed the five class/static direct PolicyEvaluator shims. The new ModerationService.__dict__ absence test failed before deletion and passed after deletion. Direct evaluator and service delegation suites passed.
 Task 1 spec compliance review: approved with no issues. Task 1 code quality review: approved with no critical, important, or minor findings. Reviewer verification passed compilation, 313 Moderation unit tests, 78 evaluator/delegation tests, retained dispatch and policy type checks, Ruff, Bandit, and `git diff --check`. Black would reformat the same production file at the base SHA, so that formatting result is pre-existing and not part of this cleanup.
 Task 2 removed the three instance scan shims and wrapper-only duplicate characterization. The class-local absence test completed a red/green cycle. Direct evaluator, public service dispatch, signature, and policy_types() compatibility tests passed.
+Task 2 quality review found the numeric-string chunk-geometry gap, and the direct evaluator test now preserves max_scan_chars="2" geometry.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
