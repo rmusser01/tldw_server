@@ -15,9 +15,13 @@
 - Design: `Docs/superpowers/specs/2026-08-23-moderation-compatibility-seams-cleanup-design.md`
 - Backlog: `TASK-13112`
 - Initial base: `origin/dev` at `2c3589fa09`
-- Current verification base after rebase: `origin/dev` at
+- First verification base after initial rebase (historical): `origin/dev` at
   `83fa300fc1b0e77e81219af2abe5b4ddc2c85069`
-- Task 3 pre-tracking HEAD: `83f489876e7828e7e1fbd42cd043f6d6ed95b57d`
+- Task 3 pre-tracking HEAD (historical):
+  `83f489876e7828e7e1fbd42cd043f6d6ed95b57d`
+- Final verification base after second rebase: `origin/dev` at
+  `21aed4cc0d1e9e2e2a34fc84307bbd1d3b879871`
+- Task 4 pre-tracking HEAD: `8b51d70c642a3f597ccd5c35726296bbd5ba9529`
 - Worktree: `.worktrees/moderation-compatibility-seams`
 - Branch: `codex/moderation-compatibility-seams`
 
@@ -106,7 +110,7 @@
 
 **Tests:** Rerun every affected gate after any review fix and rerun the complete final matrix before readiness is claimed.
 
-**Status:** In Progress
+**Status:** Complete
 
 ---
 
@@ -811,20 +815,20 @@ the required human-written `Change summary` explaining what changed and why.
 
 ## Final Self-Review Checklist
 
-- [ ] Exactly eight approved private service delegates are removed.
-- [ ] `_evaluate_text_core()` remains and still dispatches redaction through
+- [x] Exactly eight approved private service delegates are removed.
+- [x] `_evaluate_text_core()` remains and still dispatches redaction through
   public `redact_text()`.
-- [ ] `_evaluate_action_internal()` remains and still dispatches through public
+- [x] `_evaluate_action_internal()` remains and still dispatches through public
   `evaluate_text()`.
-- [ ] Public method signatures and tuple ordering are unchanged.
-- [ ] `PolicyCompiler.policy_types()` and `PolicyEvaluator.policy_types()` are
+- [x] Public method signatures and tuple ordering are unchanged.
+- [x] `PolicyCompiler.policy_types()` and `PolicyEvaluator.policy_types()` are
   unchanged.
-- [ ] No production file except `moderation_service.py` changed.
-- [ ] Direct evaluator tests retain every deleted service-private scan behavior.
-- [ ] Two absence tests completed documented red/green cycles.
-- [ ] Compilation, changed-test Black, Ruff, pytest, Bandit, scope, and
+- [x] No production file except `moderation_service.py` changed.
+- [x] Direct evaluator tests retain every deleted service-private scan behavior.
+- [x] Two absence tests completed documented red/green cycles.
+- [x] Compilation, changed-test Black, Ruff, pytest, Bandit, scope, and
   whitespace gates pass, with any production-file Black result compared to the
   base revision and documented.
-- [ ] Independent spec and quality reviews approve the final diff.
-- [ ] `TASK-13112` contains exact evidence, residual risk, and final summary.
-- [ ] Human-written PR `Change summary` gate is respected.
+- [x] Independent spec and quality reviews approve the final diff.
+- [x] `TASK-13112` contains exact evidence, residual risk, and final summary.
+- [x] Human-written PR `Change summary` gate is respected.
