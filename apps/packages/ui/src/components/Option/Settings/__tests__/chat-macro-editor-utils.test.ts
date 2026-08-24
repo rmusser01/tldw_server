@@ -53,6 +53,36 @@ describe("chat macro editor utils", () => {
     expect(result).toEqual({ mode: "guided", draft })
   })
 
+  it("rejects guided drafts with no branches", () => {
+    expect(() => serializeGuidedMacro({ ...draft, branches: [] })).toThrow(
+      "Guided macros require between 1 and 6 branches."
+    )
+  })
+
+  it("rejects guided drafts above the runtime branch cap", () => {
+    const branches = Array.from({ length: 7 }, (_, index) => ({
+      id: `branch_${index + 1}`,
+      label: `Branch ${index + 1}`,
+      output: `branch_${index + 1}`,
+      prompt: `Prompt ${index + 1}`
+    }))
+
+    expect(() => serializeGuidedMacro({ ...draft, branches })).toThrow(
+      "Guided macros require between 1 and 6 branches."
+    )
+  })
+
+  it("rejects guided drafts above their selected branch cap", () => {
+    const branches = [
+      ...draft.branches,
+      { id: "actions", label: "Actions", output: "actions", prompt: "List actions." }
+    ]
+
+    expect(() => serializeGuidedMacro({ ...draft, maxBranches: 2, branches })).toThrow(
+      "Guided macro branch count cannot exceed max branches."
+    )
+  })
+
   it("keeps unsupported definitions in source mode without rewriting YAML", () => {
     const raw = `schema_version: 1
 name: handoff

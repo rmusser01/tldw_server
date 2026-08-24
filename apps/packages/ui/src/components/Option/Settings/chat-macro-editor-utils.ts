@@ -223,7 +223,13 @@ export const createBlankMacroDraft = (): GuidedMacroDraft => ({
 })
 
 export const serializeGuidedMacro = (draft: GuidedMacroDraft): string => {
+  if (draft.branches.length < 1 || draft.branches.length > MAX_BRANCHES) {
+    throw new Error(`Guided macros require between 1 and ${MAX_BRANCHES} branches.`)
+  }
   const maxBranches = boundedInteger(draft.maxBranches, 6, MAX_BRANCHES)
+  if (draft.branches.length > maxBranches) {
+    throw new Error("Guided macro branch count cannot exceed max branches.")
+  }
   const maxConcurrency = Math.min(
     maxBranches,
     boundedInteger(draft.maxConcurrency, 3, MAX_BRANCHES)
