@@ -1,7 +1,7 @@
 ---
 id: TASK-13111
 title: Expose automatic conversation-title prompt in Service Prompts
-status: In Progress
+status: Done
 created_date: 2026-08-23 21:58
 labels:
 - service-prompts
@@ -28,7 +28,7 @@ modified_files:
 - apps/packages/ui/src/components/Option/Settings/__tests__/ServicePromptsSettings.test.tsx
 - apps/packages/ui/src/assets/locale/en/settings.json
 - apps/packages/ui/src/public/_locales/en/settings.json
-updated_date: 2026-08-24 03:56
+updated_date: 2026-08-24 04:19
 ---
 
 ## Description
@@ -83,6 +83,17 @@ Final cleanup (2026-08-23):
 - Known baseline/tooling caveats retained: `bun run typecheck` in apps/tldw-frontend has unrelated diagnostics only in untouched scripts/__tests__/skills-certification-{evidence,lifecycle,profile,runner}.test.ts; the original packages/ui `bunx eslint` command cannot discover an ESLint config, so the repository-pinned lint command above is the applicable gate. Existing host Darwin confstr() temporary-directory warnings are benign.
 - Final rationale: one centrally loaded/rendered immutable request-scope-bound title snapshot protects every automatic-title caller while preserving ordinary prompt/model fallback behavior so completed chats remain usable. Settings shows the prompt without duplicating the Chat enablement control.
 PR #2811 follow-up (2026-08-24): reopened for requested rebase onto latest dev and verified review/CI follow-up. Qodo reported two bounded items in generateTitle: add safe failure-stage/type/status context without logging prompt/provider payloads, and honor a pre-aborted caller before the settings read. Changes will follow RED→GREEN and be reverified before the task returns to Done.
+PR #2811 review follow-up completed (2026-08-23):
+- Rebased cleanly onto the then-current origin/dev 5c268daa7adde606c80908cb48e0dca7bce19553 after a fresh fetch.
+- Addressed both Qodo findings with RED→GREEN coverage: pre-aborted callers now fail before reading title settings; ordinary failures log only a fixed coarse stage (settings/snapshot/render/model/invoke/response), never authored prompt, query, provider payload, or raw error text.
+- RED evidence: focused title suite failed 7 assertions on the old implementation (settings read occurred for pre-abort; all safe-stage log assertions missing). GREEN evidence: focused title suite 19/19.
+- PASS focused UI matrix: 7 files / 247 tests.
+- PASS backend prompt-management matrix: 2 files / 78 tests, 9 warnings.
+- PASS extension compile; locale sync regenerated the public bundle after the dev rebase and the follow-up dry-run reports no pending write.
+- PASS pinned repository ESLint: 0 errors / 11 pre-existing no-explicit-any warnings plus the existing pages-directory notice.
+- PASS Bandit on service_prompts.py: 0 findings, 363 LOC, 0 nosec/skips.
+- PASS full git diff --check.
+- Old-head CI classification: exact origin/dev produces the same OpenAPI hash/count drift as the PR (07868bfa..., 2021 paths / 2958 schemas), so no unrelated fingerprint was imported here. The old mypy NumPy-stub parse failure and Watchlists/Prompt Improvement E2E failures are likewise outside the branch diff.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
