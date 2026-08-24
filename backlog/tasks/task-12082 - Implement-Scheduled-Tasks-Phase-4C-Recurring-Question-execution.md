@@ -4,7 +4,7 @@ title: Implement Scheduled Tasks Phase 4C Recurring Question execution
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-01 04:08
+updated_date: 2026-08-24 04:14
 labels:
 - scheduled-tasks
 - phase-4c
@@ -67,7 +67,7 @@ Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-exe
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation started from plan `Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md` after rebasing the planning branch onto `origin/dev` at merge `85ab688b34`.
 
 Stage 1 storage/schema slice added durable recurring-question definition resolution defaults, owner-scoped run/result persistence, result review state, owner+dedupe uniqueness, canonical JSON snapshots, and redacted source-ref guards. Verification: focused scheduled task DB pytest passed (31 passed, 3 warnings); Bandit on touched production files reported zero findings.
@@ -87,8 +87,8 @@ Stage 5 scheduler slice added the APScheduler bridge for configured/open Recurri
 Stage 6 frontend/API-client slice added typed WebUI control-plane methods for runs, results, result review, mark-solved, and reopen; guided Recurring Question creation controls with advanced scope JSON disclosure; normalized result mapping and details with answer/evidence; definition detail run history/result sections and execution actions; `/scheduled-tasks` normalized results wiring with projected legacy fallback; and Home Automation Inbox normalized result surfacing that respects Home visibility and dismissed review state while preserving Watchlists and notification-derived signals. Verification: focused Companion Home normalized result test passed after the expected red failure; Companion Home suite passed (12 passed); Automation Inbox card and results panel suites passed (9 passed); full Stage 6 UI bundle passed (9 test files, 125 tests); git diff --check passed. Bandit skipped for Stage 6 because touched production code is TypeScript/UI only and no Python production files changed.
 
 Stage 7 retention/privacy/accessibility hardening added repository pruning for old no-match runs and old dismissible results, service-level retention policy application, solved-result preservation until dismissal, and running-state live-region coverage in `/scheduled-tasks` results surfaces. Existing privacy guard tests continue to cover raw document text, raw RAG debug payloads, provider/API-key sentinels, and raw agent-message storage; existing Watchlists preservation tests continue to cover projected Watchlists rows, Home surfacing, and Watchlists links. Verification: backend targeted suite passed (202 passed, 14 warnings); frontend targeted suite passed (9 files, 126 tests, with existing jsdom CSS/i18next warnings); Bandit on touched backend production scope reported zero findings in `/tmp/bandit_scheduled_tasks_phase4c.json`; `git diff --check` passed. WebUI smoke was skipped because no dev server was part of this final hardening turn; route/component tests covered `/scheduled-tasks`, `/scheduled-tasks/results`, result drawers, Home surfacing, and Watchlists preservation.
-<!-- SECTION:NOTES:END -->
-
+2026-08-23 review remediation pass: fetched unresolved PR #2566 review threads and confirmed actionable items across backend reliability/validation/security, frontend result/home/editor behavior, and policy compliance. Next step is rebasing onto latest origin/dev, then applying test-first fixes for each still-valid comment.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
