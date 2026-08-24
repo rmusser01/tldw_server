@@ -97,6 +97,7 @@ export const ChatMacroEditor = ({
   const [serverRaw, setServerRaw] = React.useState("")
   const [mode, setMode] = React.useState<EditorMode>("guided")
   const [loading, setLoading] = React.useState(false)
+  const [loadedDetailName, setLoadedDetailName] = React.useState<string | null>(null)
   const [busyAction, setBusyAction] = React.useState<BusyAction>(null)
   const [validationError, setValidationError] = React.useState<string | null>(null)
   const [validationMessage, setValidationMessage] = React.useState<string | null>(null)
@@ -109,6 +110,7 @@ export const ChatMacroEditor = ({
   const isBuiltin = selected?.source === "builtin" || selected?.immutable === true
   const isCreate = selected === null
   const isBusy = busyAction !== null
+  const hasCurrentDetail = selected === null || loadedDetailName === selected.name
 
   React.useEffect(() => {
     const generation = ++requestGeneration.current
@@ -120,36 +122,51 @@ export const ChatMacroEditor = ({
       setSourceRaw("")
       setServerRaw("")
       setMode("guided")
+      setLoadedDetailName(null)
       setLoading(false)
       return
     }
 
+    setDraft(createBlankMacroDraft())
+    setSourceRaw("")
+    setServerRaw("")
+    setMode("guided")
+    setLoadedDetailName(null)
     setLoading(true)
-    void getChatMacro(selected.name).then((response) => {
-      if (generation !== requestGeneration.current) return
+    void (async () => {
+      try {
+        const response = await getChatMacro(selected.name)
+        if (generation !== requestGeneration.current) return
 
-      setLoading(false)
-      if (!response.ok || !response.data) {
-        setValidationError(responseError(response.status, response.error))
-        return
-      }
+        if (!response.ok || !response.data) {
+          setValidationError(responseError(response.status, response.error))
+          return
+        }
 
-      const parsed = parseMacroSource(response.data.raw)
-      setServerRaw(response.data.raw)
-      setSourceRaw(response.data.raw)
-      if (parsed.mode === "guided") {
-        setDraft(parsed.draft)
-        setMode("guided")
-      } else {
-        setDraft((current) => ({
-          ...current,
-          name: response.data.definition.name || selected.name,
-          command: response.data.definition.command || selected.command,
-          description: response.data.definition.description || ""
-        }))
-        setMode("source")
+        const parsed = parseMacroSource(response.data.raw)
+        setServerRaw(response.data.raw)
+        setSourceRaw(response.data.raw)
+        if (parsed.mode === "guided") {
+          setDraft(parsed.draft)
+          setMode("guided")
+        } else {
+          setDraft((current) => ({
+            ...current,
+            name: response.data.definition.name || selected.name,
+            command: response.data.definition.command || selected.command,
+            description: response.data.definition.description || ""
+          }))
+          setMode("source")
+        }
+        setLoadedDetailName(selected.name)
+      } catch (error) {
+        if (generation === requestGeneration.current) {
+          setValidationError(error instanceof Error ? error.message : label("detailLoadError", "Unable to load macro details."))
+        }
+      } finally {
+        if (generation === requestGeneration.current) setLoading(false)
       }
-    })
+    })()
   }, [selected])
 
   const updateDraft = <K extends keyof GuidedMacroDraft>(key: K, value: GuidedMacroDraft[K]) => {
@@ -250,8 +267,8 @@ export const ChatMacroEditor = ({
       setValidationError(null)
       setValidationMessage(null)
       if (parsed.mode === "guided") {
-        setDraft(parsed.draft)
-      } else {
+        setDraft(selected ? { ...parsed.draft, name: selected.name } : parsed.draft)
+      } else if (!selected) {
         const importedName = sourceName(raw)
         if (importedName) updateDraft("name", importedName)
       }
@@ -273,7 +290,7 @@ export const ChatMacroEditor = ({
 
   const saveMacro = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (isBuiltin || isBusy) return
+    if (isBuiltin || isBusy || loading || !hasCurrentDetail) return
 
     const raw = rawForSave()
     if (raw === null) return
@@ -281,29 +298,43 @@ export const ChatMacroEditor = ({
     setBusyAction("save")
     setValidationError(null)
     setValidationMessage(null)
-    const validation = await validateChatMacro(raw)
-    if (!validation.ok || !validation.data?.valid) {
-      setValidationError(validation.data?.error || responseError(validation.status, validation.error))
+    try {
+      const validation = await validateChatMacro(raw)
+      if (!validation.ok || !validation.data?.valid) {
+        setValidationError(validation.data?.error || responseError(validation.status, validation.error))
+        return
+      }
+
+      const expectedName = selected?.name || draft.name
+      const validatedName = isRecord(validation.data.macro) && typeof validation.data.macro.name === "string"
+        ? validation.data.macro.name
+        : null
+      if (validatedName !== expectedName) {
+        setValidationError(label("validatedNameMismatch", "Validated macro name must match the selected macro."))
+        return
+      }
+
+      const response = isCreate
+        ? await createChatMacro({ name: draft.name, raw })
+        : await updateChatMacro(selected.name, { raw })
+      if (!response.ok || !response.data) {
+        setValidationError(responseError(response.status, response.error))
+        return
+      }
+
+      setServerRaw(response.data.raw)
+      setSourceRaw(response.data.raw)
+      setValidationMessage(label("validationPassed", "Server validation passed."))
+      onSaved(response.data.summary.name)
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : label("saveError", "Unable to save macro."))
+    } finally {
       setBusyAction(null)
-      return
     }
-
-    const response = isCreate
-      ? await createChatMacro({ name: draft.name, raw })
-      : await updateChatMacro(selected.name, { raw })
-    setBusyAction(null)
-    if (!response.ok || !response.data) {
-      setValidationError(responseError(response.status, response.error))
-      return
-    }
-
-    setServerRaw(response.data.raw)
-    setSourceRaw(response.data.raw)
-    setValidationMessage(label("validationPassed", "Server validation passed."))
-    onSaved(response.data.summary.name)
   }
 
   const copyYaml = async () => {
+    if (loading || !hasCurrentDetail) return
     const raw = serverRaw || rawForSave()
     if (raw === null) return
     try {
@@ -315,6 +346,7 @@ export const ChatMacroEditor = ({
   }
 
   const downloadYaml = () => {
+    if (loading || !hasCurrentDetail) return
     const raw = serverRaw || rawForSave()
     if (raw === null) return
     const name = selected?.name || draft.name || "macro"
@@ -322,27 +354,29 @@ export const ChatMacroEditor = ({
   }
 
   const removeMacro = async () => {
-    if (!selected || isBuiltin || isBusy) return
+    if (!selected || isBuiltin || isBusy || loading || !hasCurrentDetail) return
     setBusyAction("delete")
-    const confirmed = await confirmDanger({
-      title: label("deleteTitle", "Delete macro?"),
-      content: label("deleteContent", "This macro will be permanently removed."),
-      okText: label("confirmDelete", "Delete"),
-      cancelText: label("cancel", "Cancel"),
-      autoFocusButton: "cancel"
-    })
-    if (!confirmed) {
-      setBusyAction(null)
-      return
-    }
+    try {
+      const confirmed = await confirmDanger({
+        title: label("deleteTitle", "Delete macro?"),
+        content: label("deleteContent", "This macro will be permanently removed."),
+        okText: label("confirmDelete", "Delete"),
+        cancelText: label("cancel", "Cancel"),
+        autoFocusButton: "cancel"
+      })
+      if (!confirmed) return
 
-    const response = await deleteChatMacro(selected.name)
-    setBusyAction(null)
-    if (!response.ok) {
-      setValidationError(responseError(response.status, response.error))
-      return
+      const response = await deleteChatMacro(selected.name)
+      if (!response.ok) {
+        setValidationError(responseError(response.status, response.error))
+        return
+      }
+      onDeleted(selected.name)
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : label("deleteError", "Unable to delete macro."))
+    } finally {
+      setBusyAction(null)
     }
-    onDeleted(selected.name)
   }
 
   const actionLabel = busyAction === "save"
@@ -405,7 +439,7 @@ export const ChatMacroEditor = ({
               id="chat-macro-editor-command"
               className={fieldClassName}
               value={draft.command}
-              readOnly={!isCreate}
+              readOnly={isBuiltin}
               disabled={loading}
               onChange={(event) => updateDraft("command", event.target.value)}
             />
@@ -640,7 +674,7 @@ export const ChatMacroEditor = ({
             type="button"
             aria-label={label("download", "Download macro YAML")}
             className={iconButtonClassName}
-            disabled={loading || !serverRaw && !sourceRaw && !draft.name}
+            disabled={loading || !hasCurrentDetail || !serverRaw && !sourceRaw && !draft.name}
             onClick={downloadYaml}
           >
             <Download aria-hidden="true" size={16} />
@@ -651,7 +685,7 @@ export const ChatMacroEditor = ({
             type="button"
             aria-label={label("copy", "Copy macro YAML")}
             className={iconButtonClassName}
-            disabled={loading || !serverRaw && !sourceRaw && !draft.name}
+            disabled={loading || !hasCurrentDetail || !serverRaw && !sourceRaw && !draft.name}
             onClick={() => void copyYaml()}
           >
             <Clipboard aria-hidden="true" size={16} />
@@ -671,7 +705,7 @@ export const ChatMacroEditor = ({
             <button
               type="submit"
               className="inline-flex h-9 min-w-[118px] items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-white transition-colors hover:bg-primaryStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={loading || isBusy}
+              disabled={loading || !hasCurrentDetail || isBusy}
             >
               <Save aria-hidden="true" size={16} />
               {actionLabel}
@@ -682,7 +716,7 @@ export const ChatMacroEditor = ({
               type="button"
               aria-label={label("delete", "Delete macro")}
               className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-danger/50 bg-surface text-danger transition-colors hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={loading || isBusy}
+              disabled={loading || !hasCurrentDetail || isBusy}
               onClick={() => void removeMacro()}
             >
               <Trash2 aria-hidden="true" size={16} />
