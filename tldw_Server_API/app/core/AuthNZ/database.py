@@ -800,6 +800,44 @@ class _GuardedSQLiteConnection:
     def in_transaction(self) -> bool:
         return self._connection.in_transaction
 
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[_GuardedSQLiteConnection]:
+        """Run a short atomic unit on this managed connection."""
+        if self.in_transaction:
+            yield self
+            return
+
+        await self._connection.execute("BEGIN IMMEDIATE")
+        failure: BaseException | None = None
+        try:
+            yield self
+        except BaseException as exc:  # noqa: BLE001 - rollback must cover cancellation
+            failure = exc
+
+        if failure is None:
+            try:
+                await await_cancellation_safe_cleanup(self._connection.commit())
+            except BaseException as exc:  # noqa: BLE001 - rollback after commit failure
+                failure = exc
+
+        if failure is not None and self.in_transaction:
+            try:
+                await await_cancellation_safe_cleanup(self._connection.rollback())
+            except BaseException as cleanup_exc:  # noqa: BLE001 - preserve failure order
+                failure, should_log = select_transaction_cleanup_failure(
+                    failure,
+                    cleanup_exc,
+                )
+                if should_log:
+                    logger.bind(
+                        backend="sqlite",
+                        operation="rollback",
+                        error_type=type(cleanup_exc).__name__,
+                    ).error("SQLite managed-connection rollback failed")
+
+        if failure is not None:
+            raise failure
+
     @property
     def total_changes(self) -> int:
         return self._connection.total_changes
