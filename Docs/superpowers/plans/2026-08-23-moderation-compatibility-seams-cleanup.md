@@ -14,7 +14,10 @@
 
 - Design: `Docs/superpowers/specs/2026-08-23-moderation-compatibility-seams-cleanup-design.md`
 - Backlog: `TASK-13112`
-- Base: `origin/dev` at `2c3589fa09`
+- Initial base: `origin/dev` at `2c3589fa09`
+- Current verification base after rebase: `origin/dev` at
+  `83fa300fc1b0e77e81219af2abe5b4ddc2c85069`
+- Task 3 pre-tracking HEAD: `83f489876e7828e7e1fbd42cd043f6d6ed95b57d`
 - Worktree: `.worktrees/moderation-compatibility-seams`
 - Branch: `codex/moderation-compatibility-seams`
 
@@ -93,7 +96,7 @@
 
 **Tests:** Exact pre-change matrix repeated after implementation.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 4: Independent Review And PR Readiness
 
@@ -103,7 +106,7 @@
 
 **Tests:** Rerun every affected gate after any review fix and rerun the complete final matrix before readiness is claimed.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ---
 

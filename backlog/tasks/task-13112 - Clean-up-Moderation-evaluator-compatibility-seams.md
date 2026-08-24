@@ -25,7 +25,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 - backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
-updated_date: 2026-08-24 06:47
+updated_date: 2026-08-24 07:00
 ---
 
 ## Description
@@ -64,6 +64,35 @@ Task 2 removed the three instance scan shims and wrapper-only duplicate characte
 Task 2 quality review found the numeric-string chunk-geometry gap, and the direct evaluator test now preserves max_scan_chars="2" geometry.
 Task 2 spec compliance review approved the exact three-shim removal and retained dispatch boundaries with no issues.
 Task 2 code quality review identified one coverage gap: the deleted service-private numeric-string test asserted max_scan_chars="2" chunk geometry, while the direct evaluator replacement only checked a no-match result with "1". Commit c601412b7c restores the exact [(0, 2)] geometry assertion with one evaluator and the same limits. Fresh re-review approved with no remaining findings; 134 evaluator-boundary tests, Ruff, and diff checks passed.
+Task 3 stability, quality, and security verification completed after rebase.
+
+Rebase evidence:
+- Worktree: /Users/appledev/Documents/GitHub/tldw_server/.worktrees/moderation-compatibility-seams
+- Branch: codex/moderation-compatibility-seams
+- Current origin/dev: 83fa300fc1b0e77e81219af2abe5b4ddc2c85069
+- git merge-base origin/dev HEAD: 83fa300fc1b0e77e81219af2abe5b4ddc2c85069
+- Pre-tracking HEAD: 83f489876e7828e7e1fbd42cd043f6d6ed95b57d
+- Initial verification status was clean and the branch was 7 commits ahead of origin/dev.
+
+Fresh Task 3 evidence:
+- Removed-method scope rg exited 1 with zero matches for all eight approved names. Retained-dispatch rg returned exactly two definitions: _evaluate_text_core at line 743 and _evaluate_action_internal at line 766.
+- py_compile passed for moderation_service.py and the three changed evaluator test files.
+- Black passed the three changed tests: 3 files would be left unchanged.
+- Black separately reported moderation_service.py would be reformatted (exit 1). The same Black version/check against origin/dev's moderation_service.py snapshot at /tmp/moderation_service_origin_dev_task_13112.py also reported it would be reformatted (exit 1), confirming pre-existing base/head parity. The service was not reformatted.
+- Ruff passed all four files: All checks passed.
+- Full Moderation unit gate: 299 passed, 605 warnings in 11.87s. The count is consistent with the approved removal of wrapper-specific duplicate tests and addition of the two absence invariants from the original 318-test baseline.
+- Guardian supervised-policy gate: 89 passed, 184 warnings in 11.67s.
+- Chat moderation integration gate: 16 passed, 81 warnings in 26.43s.
+- Workflow moderation-adapter gate: 12 passed, 45 deselected, 35 warnings in 8.81s.
+- Exact Audio retention/redaction node: 1 passed, 10 warnings in 9.11s.
+- Bandit completed with exit 0. JSON report /tmp/bandit_task_13112.json: 965 LOC, 0 findings/results, 0 errors, 0 high/medium/low/undefined severity, 0 high/medium/low/undefined confidence, 0 nosec lines, and 0 skipped tests.
+- git diff --check origin/dev...HEAD passed with no output.
+- git diff --name-only origin/dev...HEAD contained exactly the seven approved files: plan, design, TASK-13112, moderation_service.py, and the three evaluator tests.
+- Pre-tracking git status --short was clean.
+- Full branch diff self-review found no issues: production changes delete only the exact eight approved methods; retained dispatch and policy_types() coverage remains; no policy_evaluator.py or caller files changed; deleted wrapper-specific characterization maps to direct evaluator coverage.
+
+Stage 3 is complete. Stage 4 independent review and final PR-readiness verification is now in progress. TASK-13112 remains In Progress and is not marked Done.
+Rebase SHA mapping: pre-rebase c601412b7c is d7a5468f6f on the current branch.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
