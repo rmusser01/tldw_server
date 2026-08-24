@@ -234,6 +234,10 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 
   const isOpen = usePersonaBuddyShellStore((state) => state.isOpen)
   const setOpen = usePersonaBuddyShellStore((state) => state.setOpen)
+  const closeControls = React.useCallback(() => {
+    setFocusWithin(false)
+    setOpen(false)
+  }, [setOpen])
   const resetSessionState = usePersonaBuddyShellStore(
     (state) => state.resetSessionState
   )
@@ -253,6 +257,15 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   React.useEffect(() => {
     resetSessionState()
   }, [resetSessionState])
+
+  React.useEffect(() => {
+    if (!isOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeControls()
+    }
+    window.addEventListener("keydown", closeOnEscape)
+    return () => window.removeEventListener("keydown", closeOnEscape)
+  }, [closeControls, isOpen])
 
   React.useEffect(() => {
     const handleVisibility = () => setVisibility(
@@ -998,6 +1011,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       onVisualComplete={handleVisualComplete}
       position={dockPosition}
       onOpenControls={() => setOpen(true)}
+      onCloseControls={closeControls}
       onBuddyPointerDown={handleBuddyPointerDown}
       onBuddyKeyDown={handleBuddyKeyDown}
       onFocusWithinChange={setFocusWithin}

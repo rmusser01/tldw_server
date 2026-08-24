@@ -4,7 +4,7 @@ title: Implement Stage 1 Persona ambient companion
 status: In Progress
 assignee: []
 created_date: 2026-08-24 05:42
-updated_date: 2026-08-24 13:36
+updated_date: 2026-08-24 14:19
 labels:
 - persona
 - persona-visuals
@@ -79,6 +79,7 @@ Task 6 review round 3 fixes the single Important A→B→A stale Persona mutatio
 Task 7 release-proof work started from reviewed Task 6 HEAD e29141f5483c93a590806384a3e05e3f76ac1473 (Task 6 final review: 0 Critical, 0 Important). Scope is limited to deterministic Playwright coverage in the existing persona-buddy interaction workflow, final executable API/engine boundary tests, runtime/author documentation, legacy quiet-dock E2E expectation updates, and the prescribed verification/security gates.
 
 Task 7 release proof implemented. Added 12 deterministic isolated Chromium scenarios across quiet 64px chrome, Off/direct reactions, keyboard/touch/double-click, semantic and hidden fresh intervals, reduced motion, preference failure, focused Persona switch, protected Blob retention, and ephemeral bounded roaming with explicit-drag persistence. Added executable owner/path API and engine no-model/no-network boundaries plus runtime/author docs. Task 7 discovered a real identity-reset defect: the engine canceled the old handle but retained ambientDueAt; direct RED observed ambient at old due +1, and the minimal GREEN resets ambientDueAt in the existing identityChanged path. Verification: backend 353/353; frontend 248/248 across 12 files; isolated Playwright 12/12 in 58.7s; ESLint 0 errors (9 existing broad-scope warnings); TypeScript 5.9.3 has 0 Task 7 diagnostics and 16 unrelated current-environment diagnostics; Bandit 0 findings/0 errors; git diff --check clean. Full ignored report: .superpowers/sdd/2026-08-23-persona-ambient-companion-stage-1-implementation-plan/task-7-report.md.
+Stage 1 final whole-branch review fix round 1 started from 4feb15b13f460a0ce68b49562ed62df69a20b890. Scope is exactly Important findings I1-I5: durable ever-activated revision sealing and lifecycle review binding; presence-aware movement validation; accessible controls close/Escape with fresh ambient resume; deterministic movement-ratio interpolation; and transient-offset rebase for explicit drag. Minor findings M1-M3 and the Ponytail unused-policy deletion remain explicitly deferred. Use two incremental commits when clean: backend I1/I2, then frontend I3/I4/I5.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

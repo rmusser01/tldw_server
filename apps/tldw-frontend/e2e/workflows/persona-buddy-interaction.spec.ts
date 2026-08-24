@@ -772,7 +772,7 @@ test.describe("Persona Buddy interaction", () => {
     })
     const buddyDock = authedPage.getByTestId("persona-buddy-dock")
     const buddyButton = authedPage.getByRole("button", {
-      name: "Toggle buddy for Visual Persona"
+      name: "Buddy for Visual Persona"
     })
     await expect(buddyButton).toBeVisible({ timeout: 15_000 })
     await expect(buddyButton).toHaveCSS("width", "64px")
@@ -860,7 +860,7 @@ test.describe("Persona Buddy interaction", () => {
     await expect(dock).toHaveAttribute("data-companion-transient-offset-x", "0")
 
     await authedPage
-      .getByRole("button", { name: "Toggle buddy for Visual Persona" })
+      .getByRole("button", { name: "Buddy for Visual Persona" })
       .click()
     await authedPage.clock.runFor(299)
     await expect(dock).toHaveAttribute("data-companion-phase", "idle")
@@ -886,7 +886,7 @@ test.describe("Persona Buddy interaction", () => {
     await pauseBrowserClock(authedPage)
 
     const buddyButton = authedPage.getByRole("button", {
-      name: "Toggle buddy for Visual Persona"
+      name: "Buddy for Visual Persona"
     })
     await buddyButton.dblclick()
     await expect(authedPage.getByTestId("persona-buddy-popover")).toBeVisible()
@@ -904,11 +904,53 @@ test.describe("Persona Buddy interaction", () => {
     await pauseBrowserClock(authedPage)
 
     const keyboardBuddyButton = authedPage.getByRole("button", {
-      name: "Toggle buddy for Visual Persona"
+      name: "Buddy for Visual Persona"
     })
     await keyboardBuddyButton.focus()
     await keyboardBuddyButton.press("Enter")
     await expect(authedPage.getByTestId("persona-buddy-popover")).toBeVisible()
+    expect(diagnostics.pageErrors).toHaveLength(0)
+  })
+
+  test("closes controls by name and Escape with a fresh ambient interval", async ({
+    authedPage,
+    diagnostics
+  }) => {
+    await authedPage.clock.install({
+      time: new Date("2026-08-24T12:00:00.000Z")
+    })
+    await installDeterministicRandom(authedPage, [0])
+    await installBuddyInteractionApiMocks(authedPage, {
+      globalMode: "expressive",
+      ambientState: "look"
+    })
+    const dock = await gotoPersonaBuddy(authedPage, "expressive")
+    await pauseBrowserClock(authedPage)
+
+    await authedPage.getByRole("button", { name: "Open Buddy controls" }).click()
+    await expect(dock).toHaveAttribute("data-companion-suspension", "controls")
+    await authedPage.clock.runFor(90_000)
+    await authedPage.getByRole("button", { name: "Close Buddy controls" }).click()
+    await expect(authedPage.getByTestId("persona-buddy-popover")).toHaveCount(0)
+    await expect(dock).toHaveAttribute("data-companion-suspension", "none")
+    const generationAtClose = Number(
+      await dock.getAttribute("data-companion-generation")
+    )
+    await authedPage.clock.runFor(29_999)
+    await expect(dock).toHaveAttribute("data-companion-requested-state", "idle")
+    await expect(dock).toHaveAttribute(
+      "data-companion-generation",
+      String(generationAtClose)
+    )
+    await authedPage.clock.runFor(1)
+    await expect(dock).toHaveAttribute(
+      "data-companion-requested-state",
+      "ambient.look"
+    )
+
+    await authedPage.getByRole("button", { name: "Open Buddy controls" }).click()
+    await authedPage.keyboard.press("Escape")
+    await expect(authedPage.getByTestId("persona-buddy-popover")).toHaveCount(0)
     expect(diagnostics.pageErrors).toHaveLength(0)
   })
 
@@ -924,7 +966,7 @@ test.describe("Persona Buddy interaction", () => {
     const dock = await gotoPersonaBuddy(authedPage, "off")
     await pauseBrowserClock(authedPage)
     const buddyButton = authedPage.getByRole("button", {
-      name: "Toggle buddy for Visual Persona"
+      name: "Buddy for Visual Persona"
     })
 
     await buddyButton.focus()
@@ -1190,7 +1232,7 @@ test.describe("Persona Buddy interaction", () => {
       .click()
     await expect(
       authedPage.getByRole("button", {
-        name: "Toggle buddy for Second Persona"
+        name: "Buddy for Second Persona"
       })
     ).toBeVisible()
     await expect(
@@ -1275,13 +1317,17 @@ test.describe("Persona Buddy interaction", () => {
         })
       )
     })
-    await installDeterministicRandom(authedPage, [0])
+    await installDeterministicRandom(authedPage, [1])
     await installBuddyInteractionApiMocks(authedPage, {
       globalMode: "roaming",
       ambientState: "walk"
     })
     const dock = await gotoPersonaBuddy(authedPage, "roaming")
     await pauseBrowserClock(authedPage)
+    await setDocumentHidden(authedPage, true)
+    await expect(dock).toHaveAttribute("data-companion-suspension", "hidden")
+    await setDocumentHidden(authedPage, false)
+    await expect(dock).toHaveAttribute("data-companion-suspension", "none")
     const activePositionBucket = "sidepanel-desktop" as const
     const persistedBeforeAmbient = await readPersistedPosition(
       authedPage,
@@ -1290,15 +1336,31 @@ test.describe("Persona Buddy interaction", () => {
     const boxBeforeAmbient = await dock.boundingBox()
     expect(boxBeforeAmbient).not.toBeNull()
 
-    await authedPage.clock.runFor(30_000)
-    await expect(dock).toHaveAttribute(
-      "data-companion-requested-state",
-      "ambient.walk"
-    )
+    await authedPage.clock.runFor(89_998)
+    const beforeAmbient = await dock.evaluate((element) => ({
+      state: element.getAttribute("data-companion-requested-state"),
+      offset: element.getAttribute("data-companion-transient-offset-x")
+    }))
+    expect(beforeAmbient).toEqual({ state: "idle", offset: "0" })
+
+    await authedPage.clock.runFor(1)
+    const atAmbientStart = await dock.evaluate((element) => ({
+      state: element.getAttribute("data-companion-requested-state"),
+      offset: element.getAttribute("data-companion-transient-offset-x")
+    }))
+    expect(atAmbientStart).toEqual({ state: "ambient.walk", offset: "0" })
+    await authedPage.clock.runFor(99)
+    expect(
+      await dock.getAttribute("data-companion-transient-offset-x")
+    ).toBe("0")
+    const boxBeforeMotion = await dock.boundingBox()
+    expect(boxBeforeMotion?.x).toBe(boxBeforeAmbient?.x)
+    await authedPage.clock.runFor(401)
     const transientOffset = Number(
       await dock.getAttribute("data-companion-transient-offset-x")
     )
     expect(Math.abs(transientOffset)).toBeGreaterThan(0)
+    expect(Math.abs(transientOffset)).toBeLessThan(48)
     const boxDuringAmbient = await dock.boundingBox()
     expect(boxDuringAmbient).not.toBeNull()
     expect(boxDuringAmbient?.y).toBe(boxBeforeAmbient?.y)
@@ -1312,14 +1374,14 @@ test.describe("Persona Buddy interaction", () => {
       await readPersistedPosition(authedPage, activePositionBucket)
     ).toEqual(persistedBeforeAmbient)
 
-    await authedPage.clock.runFor(1_000)
+    await authedPage.clock.runFor(500)
     await expect(dock).toHaveAttribute("data-companion-requested-state", "idle")
     expect(
       await readPersistedPosition(authedPage, activePositionBucket)
     ).toEqual(persistedBeforeAmbient)
 
     const buddyButton = authedPage.getByRole("button", {
-      name: "Toggle buddy for Visual Persona"
+      name: "Buddy for Visual Persona"
     })
     const dragBox = await buddyButton.boundingBox()
     if (!dragBox) throw new Error("expected visible Buddy button")
@@ -1383,6 +1445,13 @@ test.describe("Persona Buddy interaction", () => {
           await readPersistedPosition(authedPage, activePositionBucket)
       )
       .not.toEqual(persistedBeforeAmbient)
+    const persistedAfterDrag = await readPersistedPosition(
+      authedPage,
+      activePositionBucket
+    )
+    const boxAfterDrag = await dock.boundingBox()
+    expect(boxAfterDrag?.x).toBe(persistedAfterDrag?.x)
+    await expect(dock).toHaveAttribute("data-companion-transient-offset-x", "0")
     await expect(dock).toHaveAttribute(
       "data-companion-requested-state",
       "reaction.drag"

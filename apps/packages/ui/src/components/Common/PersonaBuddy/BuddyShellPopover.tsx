@@ -1,6 +1,6 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { Mic, MicOff, Palette, Send, Square, Sparkles } from "lucide-react"
+import { Mic, MicOff, Palette, Send, Square, Sparkles, X } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import type {
@@ -27,6 +27,7 @@ type BuddyShellPopoverProps = {
   ambientPreferenceMessage?: string | null
   onGlobalAmbientModeChange?: (mode: PersonaAmbientMode) => void
   onPersonaAmbientModeChange?: (mode: PersonaAmbientMode | null) => void
+  onClose?: () => void
 }
 
 const generateDraftClientMessageId = () => {
@@ -49,7 +50,8 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   ambientSurface = "web",
   ambientPreferenceMessage = null,
   onGlobalAmbientModeChange,
-  onPersonaAmbientModeChange
+  onPersonaAmbientModeChange,
+  onClose
 }) => {
   const { t } = useTranslation("common")
   const [draft, setDraft] = React.useState("")
@@ -123,8 +125,16 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   return (
     <div
       data-testid="persona-buddy-popover"
-      className="min-w-[220px] rounded-2xl border border-border bg-bg/95 p-3 shadow-xl backdrop-blur"
+      className="relative min-w-[220px] rounded-2xl border border-border bg-bg/95 p-3 shadow-xl backdrop-blur"
     >
+      <button
+        type="button"
+        aria-label="Close Buddy controls"
+        onClick={onClose}
+        className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <X aria-hidden="true" className="h-4 w-4" />
+      </button>
       <div className="text-xs uppercase tracking-[0.18em] text-text-muted">
         {t("personaBuddy.title", "Persona Buddy")}
       </div>

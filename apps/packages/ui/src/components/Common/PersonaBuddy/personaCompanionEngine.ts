@@ -133,6 +133,12 @@ type ActiveAction = {
   entry: NormalizedEntry
   trigger: "ambient" | "click" | "drag"
   pendingMove?: PreparedMove
+  motion?: {
+    startOffsetX: number
+    targetOffsetX: number
+    startAt: number
+    endAt: number
+  }
 }
 
 const AMBIENT_MIN_MS = 30_000
@@ -145,6 +151,7 @@ const LEASE_MIN_MS = 150
 const LEASE_MAX_MS = 86_400_000
 const DEFAULT_ACTION_MS = 1_000
 const DEFAULT_MOVEMENT_PX = 48
+const MOTION_TICK_MS = 16
 let nextActionToken = 0
 
 const clampNumber = (
@@ -334,6 +341,7 @@ export const createPersonaCompanionEngine = (
   let scheduledTimer: PersonaCompanionTimer | null = null
   let ambientDueAt: number | null = null
   let actionDueAt: number | null = null
+  let motionDueAt: number | null = null
   let currentAction: ActiveAction | null = null
   let lastAmbientState: PersonaVisualStateId | null = null
   let transientOffsetX = 0
@@ -473,10 +481,40 @@ export const createPersonaCompanionEngine = (
     ) {
       facing = prepared.desiredFacing
     }
-    transientOffsetX = prepared.targetOffsetX
-    currentAction = { token: ++nextActionToken, entry: prepared.entry, trigger }
-    actionDueAt = runtime.now() + input.timing.actionDurationMs
+    const now = runtime.now()
+    const duration = input.timing.actionDurationMs
+    const movement = prepared.entry.movement
+    currentAction = {
+      token: ++nextActionToken,
+      entry: prepared.entry,
+      trigger,
+      motion: {
+        startOffsetX: transientOffsetX,
+        targetOffsetX: prepared.targetOffsetX,
+        startAt: now + duration * (movement?.motion_start_ratio ?? 0),
+        endAt: now + duration * (movement?.motion_end_ratio ?? 1)
+      }
+    }
+    actionDueAt = now + duration
+    motionDueAt = currentAction.motion.startAt
     advanceGeneration()
+  }
+
+  const applyMotion = (now: number) => {
+    const motion = currentAction?.motion
+    if (!motion || now < motion.startAt) return
+    const progress = motion.endAt === motion.startAt
+      ? 1
+      : Math.min(1, Math.max(0, (now - motion.startAt) / (motion.endAt - motion.startAt)))
+    transientOffsetX = clampNumber(
+      motion.startOffsetX + (motion.targetOffsetX - motion.startOffsetX) * progress,
+      input.horizontalBounds.min,
+      input.horizontalBounds.max,
+      motion.startOffsetX
+    )
+    motionDueAt = progress >= 1
+      ? null
+      : Math.min(motion.endAt, now + MOTION_TICK_MS)
   }
 
   const startEntry = (
@@ -571,8 +609,13 @@ export const createPersonaCompanionEngine = (
       return false
     }
     const completed = currentAction
+    if (completed.motion) {
+      if (succeeded) transientOffsetX = completed.motion.targetOffsetX
+      else applyMotion(runtime.now())
+    }
     currentAction = null
     actionDueAt = null
+    motionDueAt = null
     advanceGeneration()
     if (completed.pendingMove) {
       if (
@@ -593,6 +636,7 @@ export const createPersonaCompanionEngine = (
     if (disposed) return
     const dueTimes = [
       actionDueAt,
+      motionDueAt,
       ambientDueAt,
       ...[...leases.values()].map((lease) => lease.expiresAt)
     ].filter((due): due is number => due !== null && Number.isFinite(due))
@@ -611,6 +655,7 @@ export const createPersonaCompanionEngine = (
       }
       const now = runtime.now()
       if (expireLeases()) advanceGeneration()
+      if (motionDueAt !== null && motionDueAt <= now) applyMotion(now)
       if (actionDueAt !== null && actionDueAt <= now) {
         if (scheduledActionToken === null) {
           diagnose({ event: "stale_generation", failureClass: "stale_timer" })
@@ -675,6 +720,7 @@ export const createPersonaCompanionEngine = (
   }
 
   const cancelActionForInputChange = () => {
+    applyMotion(runtime.now())
     if (currentAction?.trigger === "ambient") {
       diagnose({
         event: "ambient_preempted",
@@ -684,6 +730,7 @@ export const createPersonaCompanionEngine = (
     }
     currentAction = null
     actionDueAt = null
+    motionDueAt = null
     ambientDueAt = null
   }
 
@@ -703,6 +750,7 @@ export const createPersonaCompanionEngine = (
         transientOffsetX = 0
         ambientDueAt = null
       }
+      if (normalized.dragging && !input.dragging) transientOffsetX = 0
       input = normalized
       hasInput = true
       transientOffsetX = clampNumber(
@@ -788,6 +836,7 @@ export const createPersonaCompanionEngine = (
       currentAction = null
       ambientDueAt = null
       actionDueAt = null
+      motionDueAt = null
     }
   }
 }

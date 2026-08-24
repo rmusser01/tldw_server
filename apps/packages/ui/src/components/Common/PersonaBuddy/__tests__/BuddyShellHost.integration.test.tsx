@@ -309,7 +309,7 @@ describe("BuddyShellHost real companion integration", () => {
 
   it("selects an authored Space reaction after real focus suspension is active", async () => {
     renderRealHost()
-    const buddy = await screen.findByRole("button", { name: "Toggle buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
     fireEvent.focus(buddy)
     fireEvent.keyDown(buddy, { key: " " })
 
@@ -324,7 +324,7 @@ describe("BuddyShellHost real companion integration", () => {
   it("selects the authored static PNG reaction through the real engine in reduced motion", async () => {
     mocks.reducedMotion = true
     renderRealHost()
-    const buddy = await screen.findByRole("button", { name: "Toggle buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
     fireEvent.focus(buddy)
     fireEvent.keyDown(buddy, { key: " " })
 
@@ -342,7 +342,7 @@ describe("BuddyShellHost real companion integration", () => {
 
   it("runs the completed-drag reaction only after the real engine leaves drag suspension", async () => {
     renderRealHost()
-    const buddy = await screen.findByRole("button", { name: "Toggle buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
     fireEvent.pointerDown(buddy, {
       button: 0,
       pointerId: 31,
@@ -370,7 +370,7 @@ describe("BuddyShellHost real companion integration", () => {
 
   it("drops a completed drag when the real controller is replaced by another Persona", async () => {
     const view = renderControllableRealHost()
-    const buddy = await screen.findByRole("button", { name: "Toggle buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
     await waitFor(() => {
       expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
         "data-visual-state",
@@ -411,7 +411,7 @@ describe("BuddyShellHost real companion integration", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("button", {
-        name: "Toggle buddy for Persona Two"
+        name: "Buddy for Persona Two"
       })).toBeInTheDocument()
       expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
         "data-visual-state",
@@ -427,7 +427,7 @@ describe("BuddyShellHost real companion integration", () => {
     mocks.visualPack = buildPack(true)
     vi.spyOn(Math, "random").mockReturnValue(0.75)
     renderRealHost()
-    const buddy = await screen.findByRole("button", { name: "Toggle buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, {
       button: 0,
@@ -440,7 +440,7 @@ describe("BuddyShellHost real companion integration", () => {
       clientX: 20,
       clientY: 100
     })
-    act(() => vi.advanceTimersByTime(300))
+    act(() => vi.advanceTimersByTime(1_200))
     expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({ left: "68px" })
     expect(usePersonaBuddyShellStore.getState().positions["web-desktop"]).toEqual({
       x: 20,
@@ -456,5 +456,53 @@ describe("BuddyShellHost real companion integration", () => {
       x: 20,
       y: 100
     })
+  })
+
+  it("rebases a roaming offset when drag begins and releases at the persisted anchor", async () => {
+    mocks.visualPack = buildPack(true)
+    vi.spyOn(Math, "random").mockReturnValue(0.75)
+    renderRealHost()
+    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(buddy, {
+      button: 0,
+      pointerId: 35,
+      clientX: 20,
+      clientY: 100
+    })
+    fireEvent.pointerUp(window, {
+      pointerId: 35,
+      clientX: 20,
+      clientY: 100
+    })
+    act(() => vi.advanceTimersByTime(1_200))
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({ left: "68px" })
+
+    fireEvent.pointerDown(buddy, {
+      button: 0,
+      pointerId: 36,
+      clientX: 68,
+      clientY: 100
+    })
+    fireEvent.pointerMove(window, {
+      pointerId: 36,
+      clientX: 88,
+      clientY: 100
+    })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveAttribute(
+      "data-companion-transient-offset-x",
+      "0"
+    )
+    fireEvent.pointerUp(window, {
+      pointerId: 36,
+      clientX: 88,
+      clientY: 100
+    })
+
+    expect(usePersonaBuddyShellStore.getState().positions["web-desktop"]).toEqual({
+      x: 88,
+      y: 100
+    })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({ left: "88px" })
   })
 })

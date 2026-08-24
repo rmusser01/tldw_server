@@ -223,6 +223,18 @@ describe("createPersonaCompanionEngine", () => {
     expect(engine.getSnapshot().requestedState).toBe("ambient.look")
   })
 
+  it("starts a fresh full interval after controls close", () => {
+    const fake = createFakeCompanionRuntime([0, 0])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(idleInput({ controlsOpen: true }))
+    fake.advanceBy(90_000)
+    engine.update(idleInput())
+    fake.advanceBy(29_999)
+    expect(engine.getSnapshot().requestedState).toBe("idle")
+    fake.advanceBy(1)
+    expect(engine.getSnapshot().requestedState).toBe("ambient.look")
+  })
+
   it("uses relative weights and avoids an immediate repeat when an alternative exists", () => {
     const fake = createFakeCompanionRuntime([0, 0.9, 0, 0.9])
     const engine = createPersonaCompanionEngine(fake.runtime)
@@ -327,7 +339,7 @@ describe("createPersonaCompanionEngine", () => {
     expect(engine.getSnapshot().phase).toBe("idle")
     fake.advanceBy(1)
     expect(engine.getSnapshot()).toEqual(
-      expect.objectContaining({ phase: "action", transientOffsetX: -20 })
+      expect.objectContaining({ phase: "action", transientOffsetX: 0 })
     )
     fake.advanceBy(149)
     expect(engine.getSnapshot().phase).toBe("action")
@@ -336,6 +348,78 @@ describe("createPersonaCompanionEngine", () => {
     expect(Object.values(engine.getSnapshot()).every((value) => {
       return typeof value !== "number" || Number.isFinite(value)
     })).toBe(true)
+  })
+
+  it("interpolates movement only inside its authored action ratios without restarting the sprite", () => {
+    const fake = createFakeCompanionRuntime([0, 0])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(idleInput({
+      mode: "roaming",
+      behavior: {
+        schema_version: 1,
+        entries: [{
+          ...walkEntry,
+          movement: {
+            ...horizontalMovement,
+            motion_start_ratio: 0.25,
+            motion_end_ratio: 0.75
+          }
+        }]
+      },
+      availableStates: [walk],
+      timing: {
+        ambientMinMs: 30_000,
+        ambientMaxMs: 30_000,
+        actionDurationMs: 1_000,
+        movementDistancePx: 48
+      }
+    }))
+
+    fake.advanceBy(30_000)
+    const started = engine.getSnapshot()
+    expect(started.transientOffsetX).toBe(0)
+    fake.advanceBy(249)
+    expect(engine.getSnapshot().transientOffsetX).toBe(0)
+    fake.advanceBy(257)
+    expect(engine.getSnapshot().transientOffsetX).toBeLessThan(-20)
+    expect(engine.getSnapshot().transientOffsetX).toBeGreaterThan(-28)
+    expect(engine.getSnapshot().generation).toBe(started.generation)
+    expect(engine.getSnapshot().actionToken).toBe(started.actionToken)
+    fake.advanceBy(244)
+    expect(engine.getSnapshot().transientOffsetX).toBe(-48)
+    expect(engine.getSnapshot().generation).toBe(started.generation)
+    fake.advanceBy(250)
+    expect(engine.getSnapshot()).toEqual(
+      expect.objectContaining({ phase: "idle", transientOffsetX: -48 })
+    )
+  })
+
+  it("uses each movement ratio pair to determine progress at the same action time", () => {
+    const offsetAtQuarter = (motion_start_ratio: number, motion_end_ratio: number) => {
+      const fake = createFakeCompanionRuntime([0, 0])
+      const engine = createPersonaCompanionEngine(fake.runtime)
+      engine.update(idleInput({
+        mode: "roaming",
+        behavior: {
+          schema_version: 1,
+          entries: [{
+            ...walkEntry,
+            movement: { ...horizontalMovement, motion_start_ratio, motion_end_ratio }
+          }]
+        },
+        availableStates: [walk],
+        timing: {
+          ambientMinMs: 30_000,
+          ambientMaxMs: 30_000,
+          actionDurationMs: 1_000,
+          movementDistancePx: 48
+        }
+      }))
+      fake.advanceBy(30_250)
+      return engine.getSnapshot().transientOffsetX
+    }
+
+    expect(offsetAtQuarter(0, 1)).toBeLessThan(offsetAtQuarter(0.25, 0.75))
   })
 
   it("fails closed when every declared entry has invalid present metadata", () => {
@@ -690,7 +774,7 @@ describe("createPersonaCompanionEngine", () => {
       expect.objectContaining({
         requestedState: "ambient.walk",
         facing: "left",
-        transientOffsetX: -48
+        transientOffsetX: 0
       })
     )
 
@@ -764,6 +848,37 @@ describe("createPersonaCompanionEngine", () => {
     )
   })
 
+  it("freezes interpolated movement on preemption and clears it when drag begins", () => {
+    const fake = createFakeCompanionRuntime([0, 0])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    const movementInput = idleInput({
+      mode: "roaming",
+      behavior: { schema_version: 1, entries: [walkEntry] },
+      availableStates: [walk],
+      timing: {
+        ambientMinMs: 30_000,
+        ambientMaxMs: 30_000,
+        actionDurationMs: 1_000,
+        movementDistancePx: 48
+      }
+    })
+    engine.update(movementInput)
+    fake.advanceBy(30_506)
+    const movingOffset = engine.getSnapshot().transientOffsetX
+    expect(movingOffset).toBeLessThan(0)
+
+    engine.update({ ...movementInput, focusWithin: true })
+    const frozenOffset = engine.getSnapshot().transientOffsetX
+    expect(frozenOffset).toBeLessThanOrEqual(movingOffset)
+    fake.advanceBy(1_000)
+    expect(engine.getSnapshot().transientOffsetX).toBe(frozenOffset)
+    engine.update({ ...movementInput, focusWithin: false })
+    engine.update({ ...movementInput, dragging: true })
+    expect(engine.getSnapshot()).toEqual(
+      expect.objectContaining({ suspension: "drag", transientOffsetX: 0 })
+    )
+  })
+
   it("reclamps transient roaming offset when viewport bounds change", () => {
     const fake = createFakeCompanionRuntime([0, 0])
     const engine = createPersonaCompanionEngine(fake.runtime)
@@ -784,7 +899,7 @@ describe("createPersonaCompanionEngine", () => {
         }
       })
     )
-    fake.advanceBy(30_000)
+    fake.advanceBy(30_900)
     expect(engine.getSnapshot().transientOffsetX).toBe(-80)
     engine.update(
       idleInput({

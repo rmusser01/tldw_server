@@ -329,7 +329,7 @@ const mockDockRect = () =>
   } as DOMRect)
 
 const dragBuddyBy = async (deltaX: number) => {
-  const buddy = await screen.findByRole("button", { name: /Toggle buddy for/i })
+  const buddy = await screen.findByRole("button", { name: /Buddy for/i })
   fireEvent.pointerDown(buddy, {
     button: 0,
     pointerId: 1,
@@ -653,7 +653,7 @@ describe("BuddyShellHost", () => {
     })
 
     expect(screen.getByRole("button", {
-      name: "Toggle buddy for Persona persona-2"
+      name: "Buddy for Persona persona-2"
     })).toBeInTheDocument()
     expect(screen.getByTestId("persona-buddy-dock")).not.toHaveTextContent("owl")
   })
@@ -677,7 +677,7 @@ describe("BuddyShellHost", () => {
       "true"
     )
     expect(screen.getByRole("button", {
-      name: "Toggle buddy for Persona Buddy"
+      name: "Buddy for Persona Buddy"
     })).toBeDisabled()
     expect(screen.getByTestId("persona-buddy-dock")).not.toHaveTextContent("owl")
   })
@@ -911,7 +911,7 @@ describe("BuddyShellHost", () => {
     )
     expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
     expect(screen.getByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })).toBeInTheDocument()
   })
 
@@ -957,7 +957,7 @@ describe("BuddyShellHost", () => {
     )
     expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
     expect(screen.getByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })).toBeInTheDocument()
   })
 
@@ -1019,6 +1019,30 @@ describe("BuddyShellHost", () => {
     expect(
       screen.getByRole("link", { name: "Choose/Change Buddy" })
     ).toHaveAttribute("href", "/persona?persona_id=persona-1&tab=visuals")
+  })
+
+  it("closes controls through the named button and Escape", () => {
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "web-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1")
+      }
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close Buddy controls" }))
+    expect(usePersonaBuddyShellStore.getState().isOpen).toBe(false)
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ controlsOpen: false })
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(usePersonaBuddyShellStore.getState().isOpen).toBe(false)
   })
 
   it("keeps connected resting chrome quiet", async () => {
@@ -1562,7 +1586,7 @@ describe("BuddyShellHost", () => {
       expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledWith("persona-1")
     })
     expect(screen.getByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })).toBeInTheDocument()
     expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
       "Visual pack did not load"
@@ -1604,7 +1628,7 @@ describe("BuddyShellHost", () => {
       )
     })
     expect(screen.getByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })).toBeInTheDocument()
     expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
       "tool-asset"
@@ -2102,7 +2126,7 @@ describe("BuddyShellHost", () => {
       }
     })
     const buddy = await screen.findByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, {
@@ -2140,7 +2164,7 @@ describe("BuddyShellHost", () => {
       }
     })
     const buddy = await screen.findByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 1, clientX: 100, clientY: 100 })
@@ -2157,7 +2181,7 @@ describe("BuddyShellHost", () => {
   it("drops a deferred click when the focused Persona changes", async () => {
     const view = renderSwitchableHost(personaContext("persona-1"))
     const buddy = await screen.findByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 21, clientX: 100, clientY: 100 })
@@ -2180,7 +2204,7 @@ describe("BuddyShellHost", () => {
     const context = personaContext("persona-1")
     const view = renderSwitchableHost(context)
     const buddy = await screen.findByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 22, clientX: 100, clientY: 100 })
@@ -2207,7 +2231,7 @@ describe("BuddyShellHost", () => {
       .mockResolvedValue({ packs: [packB], active_pack: packB })
     renderSwitchableHost(personaContext("persona-1"))
     const buddy = await screen.findByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })
     await waitFor(() => {
       expect(companionMocks.calls.at(-1)).toEqual(
@@ -2246,7 +2270,7 @@ describe("BuddyShellHost", () => {
     const idleContext = personaContext("persona-1")
     const view = renderSwitchableHost(idleContext)
     const buddy = await screen.findByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })
     await screen.findByTestId("persona-buddy-visual-wrapper")
     vi.useFakeTimers()
@@ -2313,7 +2337,7 @@ describe("BuddyShellHost", () => {
       }
     })
     const buddy = await screen.findByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })
     const initial = usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 9, clientX: 140, clientY: 130 })
@@ -2330,7 +2354,7 @@ describe("BuddyShellHost", () => {
     const rectSpy = mockDockRect()
     renderHost({ root: "sidepanel", context: personaContext("persona-1") })
     const buddy = await screen.findByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })
     const initial = usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 23, clientX: 140, clientY: 130 })
@@ -2366,7 +2390,7 @@ describe("BuddyShellHost", () => {
     })
     await act(async () => {})
     const buddy = screen.getByRole("button", {
-      name: "Toggle buddy for Persona persona-1"
+      name: "Buddy for Persona persona-1"
     })
     fireEvent.keyDown(buddy, { key: "Enter" })
     expect(usePersonaBuddyShellStore.getState().isOpen).toBe(true)

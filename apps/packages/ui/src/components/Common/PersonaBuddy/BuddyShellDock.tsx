@@ -45,6 +45,7 @@ type BuddyShellDockProps = {
   onVisualComplete?: () => void
   position: PersonaBuddyShellPosition
   onOpenControls: () => void
+  onCloseControls: () => void
   onBuddyPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void
   onBuddyKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void
   onFocusWithinChange?: (focused: boolean) => void
@@ -82,6 +83,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
   onVisualComplete,
   position,
   onOpenControls,
+  onCloseControls,
   onBuddyPointerDown,
   onBuddyKeyDown,
   onFocusWithinChange,
@@ -145,7 +147,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         onKeyDown={onBuddyKeyDown}
         disabled={isDormant}
         aria-expanded={isOpen}
-        aria-label={`Toggle buddy for ${buddySummary.persona_name}`}
+        aria-label={`Buddy for ${buddySummary.persona_name}`}
         className="relative flex h-16 w-16 cursor-grab items-center justify-center rounded-2xl border border-border bg-bg/90 p-2 shadow-lg backdrop-blur focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary active:cursor-grabbing"
       >
         {canMountVisualRenderer && visualPack ? (
@@ -232,6 +234,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
           ambientPreferenceMessage={ambientPreferenceMessage}
           onGlobalAmbientModeChange={onGlobalAmbientModeChange}
           onPersonaAmbientModeChange={onPersonaAmbientModeChange}
+          onClose={onCloseControls}
         />
       ) : null}
     </div>
