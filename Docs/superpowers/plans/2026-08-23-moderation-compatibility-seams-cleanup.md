@@ -51,6 +51,9 @@
   - Delete service-private scan characterization duplicated by direct evaluator
     tests.
   - Keep all public service behavior and dynamic-dispatch characterization.
+- Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py`
+  - Preserve the exact numeric-string scan-limit geometry formerly asserted by
+    the deleted service-private characterization.
 - Modify: `Docs/superpowers/specs/2026-08-23-moderation-compatibility-seams-cleanup-design.md`
   - Record approved status only.
 - Modify: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
@@ -80,7 +83,7 @@
 
 **Tests:** Focused red/green absence test plus evaluator, characterization, and delegation suites.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 3: Stability And Security Verification
 
@@ -90,7 +93,7 @@
 
 **Tests:** Exact pre-change matrix repeated after implementation.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 4: Independent Review And PR Readiness
 
@@ -296,6 +299,7 @@ Expected: one commit containing only Task 1 production, tests, and tracking.
 **Files:**
 - Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py`
 - Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py`
+- Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py`
 - Modify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
 - Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
 
@@ -442,6 +446,20 @@ redaction tests. Keep the `re` import if any remaining characterization test
 uses it; run Ruff to determine whether import cleanup is required rather than
 guessing.
 
+Quality review identified that the deleted numeric-string characterization used
+`max_scan_chars="2"` and asserted exact chunk geometry, while the direct test
+used `"1"` and only asserted the evaluation result. Preserve that behavior in
+`test_direct_numeric_string_limits_are_coerced_for_evaluation()` with:
+
+```python
+limits = EvaluationLimits(max_scan_chars="2")
+evaluator = PolicyEvaluator()
+assert list(evaluator.iter_scan_chunks("xx", limits)) == [(0, 2)]
+```
+
+Keep the existing no-match evaluation assertion with the same evaluator and
+limits.
+
 - [ ] **Step 7: Run the focused test and verify GREEN**
 
 Run:
@@ -515,6 +533,7 @@ Expected: one commit containing only Task 2 production, tests, and tracking.
 
 **Files:**
 - Verify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
+- Verify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py`
 - Verify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py`
 - Verify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py`
 - Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
@@ -547,6 +566,7 @@ Run:
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
 python -m py_compile \
   tldw_Server_API/app/core/Moderation/moderation_service.py \
+  tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 ```
@@ -560,18 +580,23 @@ Run:
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
 python -m black --check \
-  tldw_Server_API/app/core/Moderation/moderation_service.py \
+  tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 python -m ruff check \
   tldw_Server_API/app/core/Moderation/moderation_service.py \
+  tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 ```
 
-Expected: Black reports three unchanged files and Ruff reports
-`All checks passed!`. If Ruff identifies an import made unused solely by the
-approved deletion, remove that import, rerun compilation, then rerun this step.
+Expected: Black reports the three changed test files unchanged and Ruff reports
+`All checks passed!`. Run Black against `moderation_service.py` separately. If
+it still reports that the production file would be reformatted, compare the
+same check against the `origin/dev` version and document the pre-existing
+parity; do not mass-format the production module in this structural cleanup. If
+Ruff identifies an import made unused solely by the approved deletion, remove
+that import, rerun compilation, then rerun this step.
 
 - [ ] **Step 4: Run the complete Moderation unit gate**
 
@@ -659,6 +684,7 @@ Docs/superpowers/plans/2026-08-23-moderation-compatibility-seams-cleanup.md
 Docs/superpowers/specs/2026-08-23-moderation-compatibility-seams-cleanup-design.md
 backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
 tldw_Server_API/app/core/Moderation/moderation_service.py
+tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py
 tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 ```
@@ -793,7 +819,9 @@ the required human-written `Change summary` explaining what changed and why.
 - [ ] No production file except `moderation_service.py` changed.
 - [ ] Direct evaluator tests retain every deleted service-private scan behavior.
 - [ ] Two absence tests completed documented red/green cycles.
-- [ ] Compilation, Black, Ruff, pytest, Bandit, scope, and whitespace gates pass.
+- [ ] Compilation, changed-test Black, Ruff, pytest, Bandit, scope, and
+  whitespace gates pass, with any production-file Black result compared to the
+  base revision and documented.
 - [ ] Independent spec and quality reviews approve the final diff.
 - [ ] `TASK-13112` contains exact evidence, residual risk, and final summary.
 - [ ] Human-written PR `Change summary` gate is respected.
