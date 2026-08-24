@@ -6,20 +6,9 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_analytics_exports import 
 )
 
 
-@given(
-    st.lists(
-        st.sampled_from(["queued", "processing", "failed", "ready", "unknown"]),
-        max_size=30,
-    )
-)
-def test_ready_state_is_monotonic(candidate_states: list[str]) -> None:
-    state = "queued"
-    for candidate in candidate_states:
-        state = apply_export_transition(state, candidate)
-        if state == "ready":
-            assert apply_export_transition(state, "processing") == "ready"
-            assert apply_export_transition(state, "failed") == "ready"
-            assert apply_export_transition(state, "queued") == "ready"
+@given(st.sampled_from(["queued", "processing", "failed", "ready", "unknown"]))
+def test_ready_state_is_monotonic(candidate_state: str) -> None:
+    assert apply_export_transition("ready", candidate_state) == "ready"
 
 
 @given(

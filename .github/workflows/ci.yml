@@ -1746,6 +1746,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
+              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py
@@ -3209,6 +3210,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
+              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py
@@ -4543,6 +4545,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
+              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py
@@ -5800,6 +5803,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
+              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py
@@ -7063,6 +7067,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
+              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py
