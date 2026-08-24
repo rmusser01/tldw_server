@@ -639,7 +639,7 @@ Material change effects are explicit:
 
 Immutable revision provenance does not freeze live authority. Before every mediated action and every credential issuance, the mediator rechecks grant revocation, credential status, execution-subject status, deny policy, and administrator kill switch. Revocation prevents all future actions immediately, revokes outstanding action tokens, and requests session cancellation. Effects already produced remain recorded; loss of confirmation enters unknown-effect reconciliation.
 
-Missing-definition handling occurs before run creation. A stale Job for a never-created, deleted, or concealed definition completes deterministically as `status=skipped`, `reason=definition_missing`, and `run_id=null`. It creates no definition run, Result, or notification. It emits one low-cardinality metric and an owner-safe Jobs or global audit event. Redelivery remains idempotent and never reveals cross-owner definition existence.
+Owner-matched run-slot dedupe precedes missing-definition handling. When no matching run exists, a stale Job for a never-created, deleted, or concealed definition completes deterministically as `status=skipped`, `reason=definition_missing`, and `run_id=null`; it creates no definition run, Result, or notification. A redelivered terminal slot returns its recorded run with `deduped=true`, even if the definition later becomes unavailable. An owner-mismatched run from an incorrectly injected or mixed repository is concealed as `definition_missing`. The 4D.0 prerequisite records a bounded warning and Jobs result; the canonical Phase 4D path also emits one low-cardinality metric and an owner-safe Jobs or global audit event. Neither path reveals cross-owner definition existence.
 
 ## Scheduling, Overlap, Retry, And Cancellation
 
@@ -1369,7 +1369,7 @@ A failed or partial proof never relaxes isolation requirements. It narrows the a
 
 | Stage | Product capability |
 | --- | --- |
-| 4D.0 | Fix TASK-13113 with pre-run missing-definition handling and establish a green focused baseline. |
+| 4D.0 | Fix TASK-13113 with dedupe-preserving missing-definition handling and establish a green focused baseline. |
 | 4D.0F | Certify or reject execution feasibility per deployment class; publish the isolation/adapter ADR and capability outcome. |
 | 4D.0E | Expand canonical schemas, deploy epoch-compatible readers/writers, converge every process on the required `schema_writer_epoch`, drain stale work, and backfill before revision-dependent execution is enabled. |
 | 4D.M1 | Deploy legacy generation/idempotency fields and handler fencing to every instance; run migration inventory and dry-run without ownership transfer. |
@@ -1445,7 +1445,7 @@ Read-only pilot execution requires enforced denial of every side-effect-capable 
 - Legacy read projection and `410 Gone` write compatibility.
 - Plaintext cleanup and residual storage-scope reporting.
 - Existing Phase 4B/4C schema backfill plus stale old-Job rejection.
-- Deleted, never-created, redelivered, and cross-owner missing-definition Jobs with `run_id=null`.
+- Deleted, never-created, and cross-owner no-run Jobs with `run_id=null`, plus terminal redeliveries that retain their recorded `run_id` and deduped outcome.
 - M2 refusal until certified execution, the 4D.1B run/Result/Attention vertical slice, the API operator workflow, and the applicable bundled-WebUI or headless-operator 4D.1C gate pass.
 
 ### Reference Clients
@@ -1580,7 +1580,7 @@ The user approved the revised design on 2026-08-24 after the cross-section remed
 
 The follow-up implementation plan should split reviewable work into:
 
-1. TASK-13113 pre-run missing-definition fix and contract characterization.
+1. TASK-13113 dedupe-preserving missing-definition fix and contract characterization.
 2. 4D.0F isolation, scheduled-transcript, adapter-idempotency, cancellation-evidence, and deployment feasibility proof plus ADR.
 3. 4D.0E immutable-revision/schema backfill, normative granular RBAC, actor/delegation rules, retention fields, and compatibility mappings.
 4. 4D.M1 legacy generation/idempotency fields, handler fencing, inventory, and dry run without ownership transfer.

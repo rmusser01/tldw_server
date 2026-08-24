@@ -3,22 +3,21 @@ id: TASK-13113
 title: Fix Agent Task Jobs consumer missing-definition crash
 status: Done
 assignee: []
-created_date: '2026-08-24 06:08'
-updated_date: '2026-08-24 20:05'
+created_date: 2026-08-24 06:08
+updated_date: 2026-08-25 00:34
 labels:
-  - scheduled-tasks
-  - agent-task
-  - bug
-  - jobs
-  - phase-4d-dependency
+- scheduled-tasks
+- agent-task
+- bug
+- jobs
+- phase-4d-dependency
 dependencies: []
 references:
-  - tldw_Server_API/app/core/Scheduled_Tasks/agent_task_jobs.py
-  - tldw_Server_API/app/core/DB_Management/Scheduled_Tasks_DB.py
-  - tldw_Server_API/tests/Notifications/test_agent_task_jobs_consumer.py
+- tldw_Server_API/app/core/Scheduled_Tasks/agent_task_jobs.py
+- tldw_Server_API/app/core/DB_Management/Scheduled_Tasks_DB.py
+- tldw_Server_API/tests/Notifications/test_agent_task_jobs_consumer.py
 documentation:
-  - >-
-    Docs/superpowers/plans/2026-08-24-scheduled-tasks-phase4d-prerequisite-implementation-plan.md
+- Docs/superpowers/plans/2026-08-24-scheduled-tasks-phase4d-prerequisite-implementation-plan.md
 priority: high
 ---
 
@@ -38,18 +37,14 @@ The existing Agent Task Jobs consumer creates a normalized scheduled-task run be
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
-Implemented test-first in the isolated codex/scheduled-tasks-phase4d-agent-task-design worktree based on origin/dev 2c6553c4ed. RED: missing and cross-owner definitions both raised KeyError from create_scheduled_task_run before the fix. GREEN: the final four-file scheduled-task matrix passed 108 tests. Bandit scanned agent_task_jobs.py with zero findings. Worker review confirmed every returned result reaches complete_job(), while only raised exceptions reach fail_job(). Independent code review found no Critical or Important issues; its one Minor test-fixture precision finding was addressed before the final test run. TASK-13122 separately repaired a stale dev-baseline DefinitionRow test helper so the adjacent gate could execute. No known blockers or skipped required checks. Two unrelated untracked Watchlists templates remain intentionally excluded.
-<!-- SECTION:NOTES:END -->
-
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Implemented test-first on the rebased codex/scheduled-tasks-phase4d-agent-task-design branch at origin/dev 4091735b6f. PR #2816 review remediation restored terminal run-slot dedupe before missing-definition handling, added a defensive owner match for injected repositories, made definition/user/job identifiers visible in the rendered warning without logging payload data, and added typed/docstring-compliant regressions. RED runs reproduced the dedupe and owner-leak failures; GREEN verification passed the final four-file Scheduled Tasks matrix with 110 tests. Bandit reported zero findings, Ruff import-order checks passed, git diff --check passed, and independent review found no Critical or Important issues. Qodo's four inline findings were addressed. Two unrelated untracked Watchlists templates remain intentionally excluded.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Moved the owner-scoped definition lookup ahead of run and notification database creation. Missing, deleted, or cross-owner definition IDs now produce the same explicit skipped Job result with run_id=None and reason=definition_missing, plus a bounded structured warning. No invalid run, notification, definition audit, or executor call is created. Existing valid-definition execution behavior is unchanged, and focused tests now enforce the exact result, side-effect, secrecy, and ownership contracts.
+The consumer now lets the existing storage boundary resolve an owner-matched terminal run before checking definition availability, preserving idempotent redelivery and recorded history. When no run exists, or an injected repository returns another owner's run, the Job returns the concealed side-effect-free definition_missing result with run_id=None. Missing-definition warnings render only definition_id, user_id, and job_id; focused tests verify the rendered output, owner isolation, terminal dedupe, and no invalid run, audit, notification, or executor call. The implementation plan and Phase 4D design now document the corrected dedupe-first contract.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
