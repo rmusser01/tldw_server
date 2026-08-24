@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { ChatMacroDetail, ChatMacroSummary } from "@/services/chat-macros"
 import { ChatMacroEditor } from "../ChatMacroEditor"
+import { createBlankMacroDraft, serializeGuidedMacro } from "../chat-macro-editor-utils"
 
 const mocks = vi.hoisted(() => ({
   createChatMacro: vi.fn(),
@@ -82,6 +83,23 @@ const makeDetail = (overrides: Partial<ChatMacroDetail> = {}): ChatMacroDetail =
 })
 
 const success = <T,>(data: T) => ({ ok: true, status: 200, data })
+
+const createGuidedRaw = (overrides: Partial<ReturnType<typeof createBlankMacroDraft>> = {}) => {
+  const draft = createBlankMacroDraft()
+  return serializeGuidedMacro({
+    ...draft,
+    name: "research",
+    command: "research",
+    description: "Collect evidence",
+    ...overrides
+  })
+}
+
+const fillNewMacro = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.type(screen.getByLabelText("Name"), "handoff")
+  await user.type(screen.getByLabelText("Command"), "handoff")
+}
+
 const renderEditor = (props: Partial<React.ComponentProps<typeof ChatMacroEditor>> = {}) => {
   const allProps: React.ComponentProps<typeof ChatMacroEditor> = {
     selected: null,
@@ -101,7 +119,7 @@ describe("ChatMacroEditor", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getChatMacro.mockResolvedValue(success(makeDetail()))
-    mocks.validateChatMacro.mockResolvedValue(success({ valid: true }))
+    mocks.validateChatMacro.mockResolvedValue(success({ valid: true, macro: { name: "handoff" } }))
     mocks.createChatMacro.mockResolvedValue(success(makeDetail()))
     mocks.updateChatMacro.mockResolvedValue(success(makeDetail()))
     mocks.deleteChatMacro.mockResolvedValue(success(undefined))
@@ -112,8 +130,7 @@ describe("ChatMacroEditor", () => {
     const user = userEvent.setup()
     renderEditor()
 
-    await user.type(screen.getByLabelText("Name"), "handoff")
-    await user.type(screen.getByLabelText("Command"), "handoff")
+    await fillNewMacro(user)
     await user.type(screen.getByLabelText("Branch prompt 1"), "List decisions")
     await user.click(screen.getByRole("button", { name: "Save macro" }))
 
@@ -236,5 +253,115 @@ describe("ChatMacroEditor", () => {
       resolveFirst?.(success(makeDetail({ raw: "name: first" })))
     })
     expect(screen.getByLabelText("Macro YAML")).toHaveValue("name: second")
+  })
+
+  it("clears the previous detail and gates data actions when a new detail load fails", async () => {
+    mocks.getChatMacro
+      .mockResolvedValueOnce(success(makeDetail({ raw: "name: first" })))
+      .mockResolvedValueOnce({ ok: false, status: 503, error: "Detail unavailable" })
+    const { rerender, props } = renderEditor({ selected: makeSummary({ name: "first" }) })
+
+    expect(await screen.findByLabelText("Macro YAML")).toHaveValue("name: first")
+    rerender(<ChatMacroEditor {...props} selected={makeSummary({ name: "second" })} />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Detail unavailable")
+    expect(screen.queryByLabelText("Macro YAML")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save macro" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Download macro YAML" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Copy macro YAML" })).toBeDisabled()
+  })
+
+  it("preserves the selected name and blocks a validated imported YAML name mismatch", async () => {
+    const user = userEvent.setup()
+    mocks.validateChatMacro.mockResolvedValueOnce(success({ valid: true, macro: { name: "other" } }))
+    const { container } = renderEditor({ selected: makeSummary() })
+
+    await screen.findByLabelText("Macro YAML")
+    const upload = container.querySelector('input[type="file"]') as HTMLInputElement
+    await user.upload(upload, new File(["name: other\ncustom: keep"], "other.yaml", { type: "text/yaml" }))
+
+    expect(screen.getByLabelText("Name")).toHaveValue("research")
+    expect(screen.getByLabelText("Macro YAML")).toHaveValue("name: other\ncustom: keep")
+    await user.click(screen.getByRole("button", { name: "Save macro" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Validated macro name must match")
+    expect(mocks.updateChatMacro).not.toHaveBeenCalled()
+  })
+
+  it("allows an existing user macro command to change in Guided mode", async () => {
+    const user = userEvent.setup()
+    mocks.getChatMacro.mockResolvedValueOnce(success(makeDetail({ raw: createGuidedRaw() })))
+    renderEditor({ selected: makeSummary() })
+
+    await waitFor(() => expect(screen.getByLabelText("Command")).toHaveValue("research"))
+    expect(screen.getByLabelText("Command")).not.toHaveAttribute("readonly")
+    await user.clear(screen.getByLabelText("Command"))
+    await user.type(screen.getByLabelText("Command"), "handoff")
+    await user.click(screen.getByRole("button", { name: "YAML" }))
+
+    expect((screen.getByLabelText("Macro YAML") as HTMLTextAreaElement).value).toContain("command: handoff")
+  })
+
+  it("recovers from a rejected validation request without losing the create draft", async () => {
+    const user = userEvent.setup()
+    mocks.validateChatMacro.mockRejectedValueOnce(new Error("Validation unavailable"))
+    renderEditor()
+
+    await fillNewMacro(user)
+    await user.click(screen.getByRole("button", { name: "Save macro" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Validation unavailable")
+    expect(screen.getByLabelText("Name")).toHaveValue("handoff")
+    expect(screen.getByRole("button", { name: "Save macro" })).toBeEnabled()
+  })
+
+  it("recovers from a rejected create request", async () => {
+    const user = userEvent.setup()
+    mocks.createChatMacro.mockRejectedValueOnce(new Error("Create unavailable"))
+    renderEditor()
+
+    await fillNewMacro(user)
+    await user.click(screen.getByRole("button", { name: "Save macro" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Create unavailable")
+    expect(screen.getByRole("button", { name: "Save macro" })).toBeEnabled()
+  })
+
+  it("recovers from a rejected update request", async () => {
+    const user = userEvent.setup()
+    mocks.validateChatMacro.mockResolvedValueOnce(success({ valid: true, macro: { name: "research" } }))
+    mocks.updateChatMacro.mockRejectedValueOnce(new Error("Update unavailable"))
+    renderEditor({ selected: makeSummary() })
+
+    await screen.findByLabelText("Macro YAML")
+    await user.click(screen.getByRole("button", { name: "Save macro" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Update unavailable")
+    expect(screen.getByRole("button", { name: "Save macro" })).toBeEnabled()
+  })
+
+  it("recovers from a rejected delete confirmation", async () => {
+    const user = userEvent.setup()
+    mocks.confirmDanger.mockRejectedValueOnce(new Error("Confirmation unavailable"))
+    renderEditor({ selected: makeSummary() })
+
+    await screen.findByLabelText("Macro YAML")
+    await user.click(screen.getByRole("button", { name: "Delete macro" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Confirmation unavailable")
+    expect(mocks.deleteChatMacro).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Delete macro" })).toBeEnabled()
+  })
+
+  it("recovers from a rejected delete request", async () => {
+    const user = userEvent.setup()
+    mocks.deleteChatMacro.mockRejectedValueOnce(new Error("Delete unavailable"))
+    renderEditor({ selected: makeSummary() })
+
+    await screen.findByLabelText("Macro YAML")
+    await user.click(screen.getByRole("button", { name: "Delete macro" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Delete unavailable")
+    expect(screen.getByRole("button", { name: "Delete macro" })).toBeEnabled()
   })
 })
