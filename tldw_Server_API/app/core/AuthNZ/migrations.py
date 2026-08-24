@@ -4,6 +4,7 @@
 # Imports
 import contextlib
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +16,16 @@ from loguru import logger
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.admin_webhook_secrets import encrypt_admin_webhook_secret
+from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
+    SQLITE_PROFILE_CANDIDATE_TABLE_STATEMENTS,
+    validate_sqlite_profile_candidate_schema,
+)
+from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
+    _leading_schema_identifier,
+    _table_definition_spans,
+    rebuild_sqlite_users_with_profile_version,
+    validate_sqlite_profile_version_readiness,
+)
 from tldw_Server_API.app.core.DB_Management.migrations import Migration, MigrationManager
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import acquire_migration_lock
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
@@ -1092,6 +1103,144 @@ def migration_090_seed_notification_permissions(conn: sqlite3.Connection) -> Non
 
     conn.commit()
     logger.info("Migration 090: Seeded notification permissions and role memberships")
+
+
+def migration_091_add_user_profile_version(conn: sqlite3.Connection) -> None:
+    """Add and strictly backfill the durable user profile-version anchor."""
+    if not _sqlite_table_exists(conn, "users"):
+        raise RuntimeError("AuthNZ users table is missing required columns: profile_version")
+    rebuild_sqlite_users_with_profile_version(conn)
+    validate_sqlite_profile_version_readiness(conn)
+    logger.info("Migration 091: Added and validated users.profile_version")
+
+
+_CANDIDATE_TIMESTAMP_COLUMNS = {
+    "organizations": ("updated_at", "created_at"),
+    "teams": ("updated_at", "created_at"),
+    "org_members": ("added_at", None),
+    "team_members": ("added_at", None),
+    "user_config_overrides": ("updated_at", "created_at"),
+    "org_config_overrides": ("updated_at", "created_at"),
+    "team_config_overrides": ("updated_at", "created_at"),
+}
+
+
+def _add_not_null_to_sqlite_column(
+    create_sql: str,
+    column_name: str,
+) -> str:
+    _body_open, _body_close, spans = _table_definition_spans(create_sql)
+    for start, end in spans:
+        definition = create_sql[start:end]
+        if _leading_schema_identifier(definition) != column_name:
+            continue
+        if re.search(r"\bNOT\s+NULL\b", definition, re.IGNORECASE):
+            return create_sql
+        default_match = re.search(r"\bDEFAULT\b", definition, re.IGNORECASE)
+        insertion = default_match.start() if default_match else len(definition)
+        hardened = (
+            definition[:insertion].rstrip()
+            + " NOT NULL "
+            + definition[insertion:].lstrip()
+        ).rstrip()
+        return create_sql[:start] + hardened + create_sql[end:]
+    raise RuntimeError(
+        f"AuthNZ candidate timestamp migration is missing {column_name}"
+    )
+
+
+def _rebuild_sqlite_candidate_timestamp(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    column_name: str,
+    fallback_column: str | None,
+) -> None:
+    table_row = conn.execute(
+        "SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    if table_row is None or not table_row[0]:
+        raise RuntimeError(
+            f"AuthNZ candidate timestamp migration is missing {table_name}"
+        )
+    table_info = conn.execute(
+        f'PRAGMA main.table_info("{table_name}")'  # nosec B608
+    ).fetchall()
+    column_metadata = {str(row[1]): row for row in table_info}
+    if column_name not in column_metadata:
+        raise RuntimeError(
+            f"AuthNZ candidate timestamp migration is missing {table_name}.{column_name}"
+        )
+
+    quoted_table = table_name.replace('"', '""')
+    quoted_column = column_name.replace('"', '""')
+    fallback = (
+        f'"{fallback_column.replace(chr(34), chr(34) * 2)}", CURRENT_TIMESTAMP'
+        if fallback_column
+        else "CURRENT_TIMESTAMP"
+    )
+    conn.execute(
+        f'UPDATE "{quoted_table}" SET "{quoted_column}" = '  # nosec B608
+        f'COALESCE("{quoted_column}", {fallback}) '
+        f'WHERE "{quoted_column}" IS NULL'
+    )
+    if bool(column_metadata[column_name][3]):
+        return
+
+    schema_objects = conn.execute(
+        "SELECT type, name, sql FROM main.sqlite_master "
+        "WHERE tbl_name = ? AND type IN ('index', 'trigger') AND sql IS NOT NULL",
+        (table_name,),
+    ).fetchall()
+    create_sql = _add_not_null_to_sqlite_column(str(table_row[0]), column_name)
+    body_open, _body_close, _spans = _table_definition_spans(create_sql)
+    rebuild_name = f"__authnz_{table_name}_candidate_v92"
+    if _sqlite_table_exists(conn, rebuild_name):
+        raise RuntimeError(
+            "AuthNZ candidate timestamp migration found an unsafe rebuild table"
+        )
+    quoted_rebuild = rebuild_name.replace('"', '""')
+    conn.execute(f'CREATE TABLE "{quoted_rebuild}" ' + create_sql[body_open:])  # nosec B608
+
+    columns = [str(row[1]) for row in table_info]
+    column_list = ", ".join(
+        f'"{column.replace(chr(34), chr(34) * 2)}"' for column in columns
+    )
+    conn.execute(
+        f'INSERT INTO "{quoted_rebuild}" ({column_list}) '  # nosec B608
+        f'SELECT {column_list} FROM "{quoted_table}"'
+    )
+    conn.execute(f'DROP TABLE "{quoted_table}"')  # nosec B608
+    conn.execute(
+        f'ALTER TABLE "{quoted_rebuild}" RENAME TO "{quoted_table}"'  # nosec B608
+    )
+    for _object_type, _object_name, object_sql in schema_objects:
+        conn.execute(str(object_sql))
+
+
+def migration_092_harden_profile_candidate_timestamps(
+    conn: sqlite3.Connection,
+) -> None:
+    """Backfill and require every profile candidate version-source timestamp."""
+    for statement in SQLITE_PROFILE_CANDIDATE_TABLE_STATEMENTS:
+        conn.execute(statement)
+    for table_name, (column_name, fallback_column) in (
+        _CANDIDATE_TIMESTAMP_COLUMNS.items()
+    ):
+        _rebuild_sqlite_candidate_timestamp(
+            conn,
+            table_name=table_name,
+            column_name=column_name,
+            fallback_column=fallback_column,
+        )
+    foreign_key_errors = conn.execute("PRAGMA main.foreign_key_check").fetchall()
+    if foreign_key_errors:
+        raise RuntimeError(
+            "AuthNZ candidate timestamp migration found invalid foreign keys"
+        )
+    validate_sqlite_profile_candidate_schema(conn)
+    logger.info("Migration 092: Hardened profile candidate timestamps")
 
 
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
@@ -4855,10 +5004,11 @@ def migration_082_harden_admin_webhooks_and_create_admin_settings(conn: sqlite3.
 
     migrated_rows: list[tuple[Any, ...]] = []
     for row in rows:
-        secret_encrypted = row["secret_encrypted"] if "secret_encrypted" in row.keys() else None
-        secret_key_id = row["secret_key_id"] if "secret_key_id" in row.keys() else None
+        row_values = dict(row)
+        secret_encrypted = row_values.get("secret_encrypted")
+        secret_key_id = row_values.get("secret_key_id")
         if not secret_encrypted:
-            plaintext_secret = row["secret"] if "secret" in row.keys() else None
+            plaintext_secret = row_values.get("secret")
             if not plaintext_secret:
                 raise ValueError(f"Admin webhook {row['id']} is missing a secret for migration")
             encrypted = encrypt_admin_webhook_secret(str(plaintext_secret))
@@ -5365,6 +5515,16 @@ def get_authnz_migrations() -> list[Migration]:
             "Seed notification permissions and role memberships",
             migration_090_seed_notification_permissions,
         ),
+        Migration(
+            91,
+            "Add durable user profile version anchor",
+            migration_091_add_user_profile_version,
+        ),
+        Migration(
+            92,
+            "Harden profile candidate version timestamps",
+            migration_092_harden_profile_candidate_timestamps,
+        ),
     ]
 
 
@@ -5484,6 +5644,10 @@ def ensure_authnz_tables(db_path: Path) -> None:
         apply_authnz_migrations(db_path)
     else:
         logger.debug("AuthNZ tables are up to date")
+
+    with sqlite3.connect(db_path) as conn:
+        validate_sqlite_profile_version_readiness(conn)
+        validate_sqlite_profile_candidate_schema(conn)
 
 
 #

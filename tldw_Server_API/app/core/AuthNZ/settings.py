@@ -2,6 +2,7 @@
 # Description: Pydantic settings for user registration system with persistent JWT secret management
 #
 from __future__ import annotations
+
 # Imports
 import contextlib
 import json
@@ -12,6 +13,7 @@ from typing import Annotated, Literal, Optional
 
 #
 # Local imports
+from dotenv import dotenv_values
 from loguru import logger
 from pydantic import Field, field_validator
 
@@ -49,8 +51,7 @@ _SETTINGS_NONCRITICAL_EXCEPTIONS = (
 
 try:
     # Prefer centralized loader to honor project config precedence
-    from tldw_Server_API.app.core.config import get_tldw_env_file_path
-    from tldw_Server_API.app.core.config import load_comprehensive_config
+    from tldw_Server_API.app.core.config import get_tldw_env_file_path, load_comprehensive_config
     from tldw_Server_API.app.core.config import settings as core_settings
 except _SETTINGS_IMPORT_EXCEPTIONS:
     get_tldw_env_file_path = None  # Fallback if import graph changes
@@ -59,8 +60,10 @@ except _SETTINGS_IMPORT_EXCEPTIONS:
 
 try:
     from tldw_Server_API.app.core.testing import (
-        is_truthy as _is_truthy,
         is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+    )
+    from tldw_Server_API.app.core.testing import (
+        is_truthy as _is_truthy,
     )
 except _SETTINGS_IMPORT_EXCEPTIONS:
     def _is_truthy(value: str | None) -> bool:
@@ -117,6 +120,25 @@ def _authnz_default_env_file() -> Path:
 
 
 AUTHNZ_DEFAULT_ENV_FILE = _authnz_default_env_file()
+_AUTHNZ_TRANSACTION_POLICY_CONFIG_KEYS = (
+    ("AUTHNZ_SQLITE_LOCK_MAX_RETRIES", "authnz_sqlite_lock_max_retries"),
+    (
+        "AUTHNZ_SQLITE_LOCK_RETRY_BASE_SECONDS",
+        "authnz_sqlite_lock_retry_base_seconds",
+    ),
+    (
+        "AUTHNZ_SQLITE_LOCK_RETRY_MAX_SECONDS",
+        "authnz_sqlite_lock_retry_max_seconds",
+    ),
+    (
+        "AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS",
+        "authnz_sqlite_lock_retry_after_seconds",
+    ),
+    (
+        "AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS",
+        "authnz_db_pool_acquire_timeout_seconds",
+    ),
+)
 ENTERPRISE_SUPPORTED_PROFILES = {
     "enterprise",
     "enterprise-postgres",
@@ -378,6 +400,31 @@ class Settings(BaseSettings):
     DATABASE_MAX_INACTIVE_CONNECTION_LIFETIME: int = Field(
         default=300,
         description="Maximum inactive connection lifetime in seconds"
+    )
+
+    AUTHNZ_SQLITE_LOCK_MAX_RETRIES: int | str = Field(
+        default=2,
+        description="Raw AuthNZ SQLite transaction-entry retry count",
+    )
+
+    AUTHNZ_SQLITE_LOCK_RETRY_BASE_SECONDS: float | str = Field(
+        default=0.05,
+        description="Raw AuthNZ SQLite transaction-entry base backoff",
+    )
+
+    AUTHNZ_SQLITE_LOCK_RETRY_MAX_SECONDS: float | str = Field(
+        default=0.25,
+        description="Raw AuthNZ SQLite transaction-entry maximum backoff",
+    )
+
+    AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS: int | str = Field(
+        default=1,
+        description="Raw Retry-After metadata for AuthNZ database contention",
+    )
+
+    AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS: float | str = Field(
+        default=5.0,
+        description="Raw PostgreSQL transaction pool acquisition timeout",
     )
 
     # ===== Session Settings =====
@@ -1315,6 +1362,8 @@ def _load_overrides_from_config() -> dict:
         maybe_set("DATABASE_URL", "database_url", lambda v: v.strip())
         maybe_set("JWT_SECRET_KEY", "jwt_secret_key", lambda v: v.strip())
         maybe_set("SINGLE_USER_API_KEY", "single_user_api_key", lambda v: v.strip())
+        for field, key in _AUTHNZ_TRANSACTION_POLICY_CONFIG_KEYS:
+            maybe_set(field, key, lambda v: v.strip())
         maybe_set("BYOK_ENABLED", "byok_enabled", _bool_from_str)
         maybe_set("BYOK_ALLOWED_PROVIDERS", "byok_allowed_providers", _split_csv)
         maybe_set("BYOK_ALLOWED_BASE_URL_PROVIDERS", "byok_allowed_base_url_providers", _split_csv)
@@ -1451,6 +1500,30 @@ def _load_overrides_from_config() -> dict:
     except _SETTINGS_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"AuthNZ settings: failed to load overrides from config.txt: {e}")
     return overrides
+
+
+def get_authnz_transaction_policy_fallback_values() -> dict[str, str]:
+    """Read non-process transaction settings without constructing Settings."""
+    values: dict[str, str] = {}
+    if load_comprehensive_config:
+        try:
+            config = load_comprehensive_config()
+            if config and config.has_section("AuthNZ"):
+                for field, key in _AUTHNZ_TRANSACTION_POLICY_CONFIG_KEYS:
+                    if config.has_option("AuthNZ", key):
+                        values[field] = config.get("AuthNZ", key)
+        except _SETTINGS_NONCRITICAL_EXCEPTIONS:
+            pass
+
+    try:
+        env_file_values = dotenv_values(str(AUTHNZ_DEFAULT_ENV_FILE))
+    except (OSError, UnicodeError, ValueError):
+        env_file_values = {}
+    for field, _ in _AUTHNZ_TRANSACTION_POLICY_CONFIG_KEYS:
+        raw = env_file_values.get(field)
+        if raw is not None:
+            values[field] = raw
+    return values
 
 
 # Internal generation counter for settings cache invalidation

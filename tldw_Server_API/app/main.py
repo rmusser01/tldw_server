@@ -33,6 +33,7 @@ from starlette.requests import ClientDisconnect
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 from tldw_Server_API.app.core.startup_logging import (
     startup_api_key_log_value as _startup_api_key_log_value,
 )
@@ -119,6 +120,7 @@ _REQUEST_GUARD_EXCEPTIONS = (
     ValueError,
 )
 _READINESS_GUARD_EXCEPTIONS = _REQUEST_GUARD_EXCEPTIONS + (
+    DatabaseError,
     ImportError,
     ModuleNotFoundError,
 )
@@ -2866,6 +2868,40 @@ async def health_check():
 
 
 # Readiness check (verifies critical dependencies) - registered conditionally below
+def _public_database_health(health: object) -> dict[str, Any]:
+    """Allowlist database health details exposed by public readiness probes."""
+    if not isinstance(health, dict):
+        return {
+            "status": "unhealthy",
+            "type": "unknown",
+            "error": "database_unavailable",
+        }
+    database_type = health.get("type")
+    if database_type not in {"postgresql", "sqlite"}:
+        database_type = "unknown"
+    if health.get("status") != "healthy":
+        return {
+            "status": "unhealthy",
+            "type": database_type,
+            "error": "database_unavailable",
+        }
+    public_health: dict[str, Any] = {
+        "status": "healthy",
+        "type": database_type,
+    }
+    allowed_metrics = (
+        "pool_size",
+        "idle_connections",
+        "active_connections",
+        "database_size_mb",
+    )
+    for metric in allowed_metrics:
+        value = health.get(metric)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            public_health[metric] = value
+    return public_health
+
+
 async def readiness_check(request: Request) -> JSONResponse:
     """Readiness probe for orchestrators and load balancers."""
     try:
@@ -2887,7 +2923,7 @@ async def readiness_check(request: Request) -> JSONResponse:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
         db_pool = await get_db_pool()
-        db_health = await db_pool.health_check()
+        db_health = _public_database_health(await db_pool.health_check())
 
         # Workflows backend schema check
         try:
@@ -2975,7 +3011,9 @@ async def readiness_check(request: Request) -> JSONResponse:
             pass
         return JSONResponse(body, status_code=(200 if ready else 503))
     except _READINESS_GUARD_EXCEPTIONS as exc:
-        logger.debug(f"Readiness check failed: {type(exc).__name__}: {exc}")
+        logger.bind(exception_type=type(exc).__name__).debug(
+            "Readiness check failed"
+        )
         return JSONResponse(
             {"status": "not_ready", "reason": "dependency_check_failed"},
             status_code=503,

@@ -5,7 +5,7 @@
 import asyncio
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 # Guarded optional imports for async drivers. Users_DB relies on the
@@ -36,14 +36,27 @@ except ImportError:  # pragma: no cover
         pass
 #
 # 3rd-party imports
-import contextlib
 
 from loguru import logger
 
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, TransactionError
+from tldw_Server_API.app.core.AuthNZ.postgres_profile_version_schema import (
+    ensure_postgres_profile_version_on_connection,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
+    PROFILE_CANDIDATE_TABLES,
+    profile_candidate_schema_is_valid,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _execute_profile_users_bootstrap,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    PROFILE_VISIBLE_USER_FIELDS,
+    VersionedUserWriteGateway,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
@@ -100,6 +113,48 @@ class UsersDB:
             return False
         return getattr(self.db_pool, "pool", None) is not None
 
+    @staticmethod
+    def _normalize_user_row(row: Any, *, is_postgres: bool) -> dict[str, Any]:
+        if row is None:
+            raise UserNotFoundError("User not found")
+        user = dict(row)
+        if not is_postgres:
+            for field, default in (
+                ("is_active", 1),
+                ("is_superuser", 0),
+                ("email_verified", 0),
+                ("is_verified", 0),
+            ):
+                user[field] = bool(user.get(field, default))
+        return user
+
+    async def _get_user_by_id_on_connection(
+        self,
+        conn: Any,
+        user_id: int,
+        *,
+        is_postgres: bool,
+    ) -> dict[str, Any]:
+        if is_postgres:
+            row = await conn.fetchrow(
+                "SELECT * FROM public.users WHERE id = $1",
+                user_id,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT * FROM main.users WHERE id = ?",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+        return self._normalize_user_row(row, is_postgres=is_postgres)
+
+    def _log_storage_failure(self, operation: str, error: BaseException) -> None:
+        logger.bind(
+            operation=operation,
+            backend="postgres" if self._using_postgres_backend() else "sqlite",
+            exception_type=type(error).__name__,
+        ).error("UsersDB storage operation failed")
+
     async def initialize(self):
         """Initialize database connection and ensure tables exist"""
         if self._initialized:
@@ -124,96 +179,118 @@ class UsersDB:
                 async with self.db_pool.transaction() as conn:
                     is_postgres = getattr(self.db_pool, "pool", None) is not None
                     if is_postgres:
-                        # PostgreSQL
-                        # Prefer pgcrypto (gen_random_uuid); gracefully fall back to uuid-ossp if unavailable.
-                        try:
-                            await conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
-                        except _USERS_DB_NONCRITICAL_EXCEPTIONS as ext_err:  # pragma: no cover - env dependent
-                            logger.warning(f"pgcrypto extension not available: {ext_err}. Trying uuid-ossp as fallback.")
-                            try:
-                                await conn.execute("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
-                            except _USERS_DB_NONCRITICAL_EXCEPTIONS as ext2_err:
-                                logger.warning(
-                                    f"uuid-ossp extension also unavailable: {ext2_err}. Proceeding without extension; "
-                                    "UUID defaults may be set separately if functions exist."
-                                )
-                        await conn.execute("""
-                            CREATE TABLE IF NOT EXISTS users (
+                        uuid_default = self._postgres_uuid_default()
+                        users_ddl = """
+                            CREATE TABLE IF NOT EXISTS public.users (
                                 id SERIAL PRIMARY KEY,
-                                uuid UUID UNIQUE,
+                                uuid UUID UNIQUE NOT NULL DEFAULT __UUID_DEFAULT__,
                                 username VARCHAR(50) UNIQUE NOT NULL,
                                 email VARCHAR(255) UNIQUE NOT NULL,
                                 password_hash TEXT NOT NULL,
                                 metadata JSONB,
-                                is_active BOOLEAN DEFAULT TRUE,
-                                is_superuser BOOLEAN DEFAULT FALSE,
-                                role VARCHAR(50) DEFAULT 'user',
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                last_login TIMESTAMP,
-                                email_verified BOOLEAN DEFAULT FALSE,
-                                is_verified BOOLEAN DEFAULT FALSE,
-                                storage_quota_mb INTEGER DEFAULT 5120,
-                                storage_used_mb INTEGER DEFAULT 0
+                                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                                is_superuser BOOLEAN NOT NULL DEFAULT FALSE,
+                                role VARCHAR(50) NOT NULL DEFAULT 'user',
+                                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                last_login TIMESTAMPTZ,
+                                email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+                                is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+                                two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                                failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+                                locked_until TIMESTAMPTZ,
+                                storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
+                                storage_used_mb INTEGER NOT NULL DEFAULT 0,
+                                email_verified_at TIMESTAMPTZ,
+                                two_factor_secret TEXT,
+                                totp_secret TEXT,
+                                backup_codes TEXT,
+                                created_by INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+                                password_changed_at TIMESTAMPTZ,
+                                profile_version TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                             )
-                        """)
+                        """.replace("__UUID_DEFAULT__", uuid_default)
+                        await _execute_profile_users_bootstrap(
+                            conn,
+                            users_ddl,
+                            backend="postgres",
+                        )
+                        await ensure_postgres_profile_version_on_connection(conn)
 
                         # Create indexes
-                        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
-                        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-                        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
-                        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS metadata JSONB")
-                        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS uuid UUID")
+                        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON public.users(username)")
+                        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email)")
+                        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role)")
+                        await conn.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS metadata JSONB")
+                        await conn.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS uuid UUID")
                         await conn.execute(
-                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_quota_mb INTEGER DEFAULT 5120"
+                            "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS storage_quota_mb INTEGER DEFAULT 5120"
                         )
                         await conn.execute(
-                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_used_mb INTEGER DEFAULT 0"
+                            "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS storage_used_mb INTEGER DEFAULT 0"
                         )
-                        # Populate missing UUIDs using available function
+                        await self._ensure_profile_candidate_tables(conn, is_postgres=True)
+                        await self._validate_profile_candidate_tables(
+                            conn,
+                            is_postgres=True,
+                        )
+                        rows = await conn.fetch("SELECT id FROM public.users WHERE uuid IS NULL")
+                        gateway = VersionedUserWriteGateway("postgres")
+                        for row in rows:
+                            user_id = int(row["id"])
+                            await gateway.execute_update(
+                                conn,
+                                user_id=user_id,
+                                profile_visible_fields=("uuid",),
+                                statement="UPDATE public.users SET uuid = $1 WHERE id = $2",
+                                parameters=(str(uuid.uuid4()), user_id),
+                            )
+                        await conn.execute("ALTER TABLE public.users ALTER COLUMN uuid SET NOT NULL")
                         try:
-                            await conn.execute("UPDATE users SET uuid = gen_random_uuid() WHERE uuid IS NULL")
-                        except _USERS_DB_NONCRITICAL_EXCEPTIONS:
-                            try:
-                                await conn.execute("UPDATE users SET uuid = uuid_generate_v4() WHERE uuid IS NULL")
-                            except _USERS_DB_NONCRITICAL_EXCEPTIONS as uuid_err:
-                                logger.warning(
-                                    "Unable to populate UUIDs with gen_random_uuid or uuid_generate_v4: "
-                                    f"{uuid_err}"
-                                )
-                        await conn.execute("ALTER TABLE users ALTER COLUMN uuid SET NOT NULL")
-                        try:
-                            await conn.execute("ALTER TABLE users ALTER COLUMN uuid SET DEFAULT gen_random_uuid()")
+                            await conn.execute("ALTER TABLE public.users ALTER COLUMN uuid SET DEFAULT gen_random_uuid()")
                         except _USERS_DB_NONCRITICAL_EXCEPTIONS:
                             try:
                                 await conn.execute(
-                                    "ALTER TABLE users ALTER COLUMN uuid SET DEFAULT uuid_generate_v4()"
+                                    "ALTER TABLE public.users ALTER COLUMN uuid SET DEFAULT uuid_generate_v4()"
                                 )
                             except _USERS_DB_NONCRITICAL_EXCEPTIONS as def_err:
-                                logger.warning(f"Could not set UUID default via pgcrypto/uuid-ossp: {def_err}")
+                                logger.bind(
+                                    operation="users_uuid_default",
+                                    exception_type=type(def_err).__name__,
+                                ).warning("Could not set PostgreSQL users UUID default")
 
                     else:
                         # SQLite
-                        await conn.execute("""
-                            CREATE TABLE IF NOT EXISTS users (
+                        await _execute_profile_users_bootstrap(conn, """
+                            CREATE TABLE IF NOT EXISTS main.users (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                                 uuid TEXT UNIQUE NOT NULL DEFAULT (lower(hex(randomblob(16)))),
                                 username TEXT UNIQUE NOT NULL,
                                 email TEXT UNIQUE NOT NULL,
                                 password_hash TEXT NOT NULL,
                                 metadata TEXT,
-                                is_active INTEGER DEFAULT 1,
-                                is_superuser INTEGER DEFAULT 0,
-                                role TEXT DEFAULT 'user',
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                is_active INTEGER NOT NULL DEFAULT 1,
+                                is_superuser INTEGER NOT NULL DEFAULT 0,
+                                role TEXT NOT NULL DEFAULT 'user',
+                                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                 last_login TIMESTAMP,
-                                email_verified INTEGER DEFAULT 0,
-                                is_verified INTEGER DEFAULT 0,
-                                storage_quota_mb INTEGER DEFAULT 5120,
-                                storage_used_mb INTEGER DEFAULT 0
+                                email_verified INTEGER NOT NULL DEFAULT 0,
+                                is_verified INTEGER NOT NULL DEFAULT 0,
+                                two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+                                failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+                                locked_until TIMESTAMP,
+                                storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
+                                storage_used_mb INTEGER NOT NULL DEFAULT 0,
+                                email_verified_at TIMESTAMP,
+                                two_factor_secret TEXT,
+                                totp_secret TEXT,
+                                backup_codes TEXT,
+                                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                                password_changed_at TIMESTAMP,
+                                profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now'))
                             )
-                        """)
+                        """, backend="sqlite")
 
                         # Create indexes
                         await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
@@ -226,21 +303,54 @@ class UsersDB:
                             await conn.execute("ALTER TABLE users ADD COLUMN metadata TEXT")
                         if "uuid" not in columns:
                             await conn.execute("ALTER TABLE users ADD COLUMN uuid TEXT")
+                        if "is_superuser" not in columns:
+                            await conn.execute(
+                                "ALTER TABLE users ADD COLUMN is_superuser INTEGER DEFAULT 0"
+                            )
+                        if "is_verified" not in columns:
+                            await conn.execute(
+                                "ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0"
+                            )
                         if "storage_quota_mb" not in columns:
                             await conn.execute("ALTER TABLE users ADD COLUMN storage_quota_mb INTEGER DEFAULT 5120")
                         if "storage_used_mb" not in columns:
                             await conn.execute("ALTER TABLE users ADD COLUMN storage_used_mb INTEGER DEFAULT 0")
-                        await conn.execute(
-                            "UPDATE users SET uuid = lower(hex(randomblob(16))) WHERE uuid IS NULL OR uuid = ''"
+                        if "profile_version" not in columns:
+                            raise RuntimeError(
+                                "AuthNZ users table is missing required columns: "
+                                "profile_version"
+                            )
+                        await self._ensure_profile_candidate_tables(
+                            conn,
+                            is_postgres=False,
                         )
+                        await self._validate_profile_candidate_tables(
+                            conn,
+                            is_postgres=False,
+                        )
+                        cursor = await conn.execute(
+                            "SELECT id FROM users WHERE uuid IS NULL OR uuid = ''"
+                        )
+                        rows = await cursor.fetchall()
+                        gateway = VersionedUserWriteGateway("sqlite")
+                        for row in rows:
+                            user_id = int(row[0])
+                            await gateway.execute_update(
+                                conn,
+                                user_id=user_id,
+                                profile_visible_fields=("uuid",),
+                                statement="UPDATE users SET uuid = ? WHERE id = ?",
+                                parameters=(str(uuid.uuid4()), user_id),
+                            )
                         try:
                             await conn.execute(
                                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uuid ON users(uuid)"
                             )
                         except _USERS_DB_NONCRITICAL_EXCEPTIONS as idx_err:
-                            logger.warning(f"Could not create unique index on users.uuid: {idx_err}")
-
-                        await conn.commit()
+                            logger.bind(
+                                operation="users_uuid_index",
+                                exception_type=type(idx_err).__name__,
+                            ).warning("Could not create users UUID index")
 
                     logger.debug("Users table and indexes created/verified")
                 return
@@ -249,8 +359,343 @@ class UsersDB:
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, 1.0)
                     continue
-                logger.error(f"Failed to create users table: {e}")
-                raise DatabaseError(f"Failed to create users table: {e}") from e
+                self._log_storage_failure("create_tables", e)
+                if "profile_version" in str(e).lower():
+                    raise DatabaseError(
+                        "AuthNZ users.profile_version readiness validation failed"
+                    ) from None
+                raise DatabaseError("Failed to create users table") from None
+
+    @staticmethod
+    def _postgres_uuid_default() -> str:
+        return "gen_random_uuid()"
+
+    @staticmethod
+    async def _ensure_profile_candidate_tables(conn: Any, *, is_postgres: bool) -> None:
+        if is_postgres:
+            statements = (
+                """CREATE TABLE IF NOT EXISTS public.organizations (
+                    id SERIAL PRIMARY KEY,
+                    uuid VARCHAR(64) UNIQUE,
+                    name VARCHAR(255) UNIQUE NOT NULL,
+                    slug VARCHAR(255) UNIQUE,
+                    owner_user_id INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )""",
+                """CREATE TABLE IF NOT EXISTS public.teams (
+                    id SERIAL PRIMARY KEY,
+                    org_id INTEGER NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+                    name VARCHAR(255) NOT NULL,
+                    slug VARCHAR(255),
+                    description TEXT,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (org_id, name)
+                )""",
+                """CREATE TABLE IF NOT EXISTS public.org_members (
+                    org_id INTEGER NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                    role VARCHAR(32) DEFAULT 'member',
+                    status VARCHAR(32) DEFAULT 'active',
+                    added_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (org_id, user_id)
+                )""",
+                """CREATE TABLE IF NOT EXISTS public.team_members (
+                    team_id INTEGER NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                    role VARCHAR(32) DEFAULT 'member',
+                    status VARCHAR(32) DEFAULT 'active',
+                    added_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (team_id, user_id)
+                )""",
+                """CREATE TABLE IF NOT EXISTS public.user_config_overrides (
+                    user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                    key TEXT NOT NULL,
+                    value_json TEXT,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_by INTEGER,
+                    updated_by INTEGER,
+                    PRIMARY KEY (user_id, key)
+                )""",
+                """CREATE TABLE IF NOT EXISTS public.org_config_overrides (
+                    org_id INTEGER NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+                    key TEXT NOT NULL,
+                    value_json TEXT,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_by INTEGER,
+                    updated_by INTEGER,
+                    PRIMARY KEY (org_id, key)
+                )""",
+                """CREATE TABLE IF NOT EXISTS public.team_config_overrides (
+                    team_id INTEGER NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+                    key TEXT NOT NULL,
+                    value_json TEXT,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_by INTEGER,
+                    updated_by INTEGER,
+                    PRIMARY KEY (team_id, key)
+                )""",
+            )
+        else:
+            statements = (
+                """CREATE TABLE IF NOT EXISTS main.organizations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uuid TEXT UNIQUE,
+                    name TEXT UNIQUE NOT NULL,
+                    slug TEXT UNIQUE,
+                    owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    is_active INTEGER DEFAULT 1,
+                    metadata TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )""",
+                """CREATE TABLE IF NOT EXISTS main.teams (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    slug TEXT,
+                    description TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    metadata TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (org_id, name)
+                )""",
+                """CREATE TABLE IF NOT EXISTS main.org_members (
+                    org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    role TEXT DEFAULT 'member',
+                    status TEXT DEFAULT 'active',
+                    added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (org_id, user_id)
+                )""",
+                """CREATE TABLE IF NOT EXISTS main.team_members (
+                    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    role TEXT DEFAULT 'member',
+                    status TEXT DEFAULT 'active',
+                    added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (team_id, user_id)
+                )""",
+                """CREATE TABLE IF NOT EXISTS main.user_config_overrides (
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    key TEXT NOT NULL,
+                    value_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_by INTEGER,
+                    updated_by INTEGER,
+                    PRIMARY KEY (user_id, key)
+                )""",
+                """CREATE TABLE IF NOT EXISTS main.org_config_overrides (
+                    org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                    key TEXT NOT NULL,
+                    value_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_by INTEGER,
+                    updated_by INTEGER,
+                    PRIMARY KEY (org_id, key)
+                )""",
+                """CREATE TABLE IF NOT EXISTS main.team_config_overrides (
+                    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+                    key TEXT NOT NULL,
+                    value_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_by INTEGER,
+                    updated_by INTEGER,
+                    PRIMARY KEY (team_id, key)
+                )""",
+            )
+        for statement in statements:
+            await conn.execute(statement)
+
+    @staticmethod
+    async def _validate_profile_candidate_tables(
+        conn: Any,
+        *,
+        is_postgres: bool,
+    ) -> None:
+        columns_by_table: dict[str, dict[str, dict[str, Any]]] = {
+            table_name: {} for table_name in PROFILE_CANDIDATE_TABLES
+        }
+        primary_key_rows: dict[str, list[tuple[int, str]]] = {
+            table_name: [] for table_name in PROFILE_CANDIDATE_TABLES
+        }
+        unique_key_rows: dict[tuple[str, str], list[tuple[int, str]]] = {}
+        foreign_keys_by_table: dict[
+            str,
+            set[tuple[str, str, str, str, str]],
+        ] = {table_name: set() for table_name in PROFILE_CANDIDATE_TABLES}
+
+        if is_postgres:
+            placeholders = ", ".join(
+                f"${position}"
+                for position in range(1, len(PROFILE_CANDIDATE_TABLES) + 1)
+            )
+            table_filter = f"({placeholders})"
+            column_rows = await conn.fetch(
+                "SELECT table_name, column_name, data_type, is_nullable, "
+                "column_default, is_identity, identity_generation "
+                "FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name IN "
+                + table_filter,  # nosec B608 -- fixed-count placeholders only.
+                *PROFILE_CANDIDATE_TABLES,
+            )
+            for row in column_rows:
+                columns_by_table[str(row["table_name"])][str(row["column_name"])] = {
+                    "data_type": row["data_type"],
+                    "not_null": str(row["is_nullable"]).upper() == "NO",
+                    "default": row["column_default"],
+                    "is_identity": row["is_identity"],
+                    "identity_generation": row["identity_generation"],
+                }
+
+            primary_rows = await conn.fetch(
+                "SELECT tc.table_name, kcu.column_name, kcu.ordinal_position "
+                "FROM information_schema.table_constraints AS tc "
+                "JOIN information_schema.key_column_usage AS kcu "
+                "ON tc.constraint_name = kcu.constraint_name "
+                "AND tc.constraint_schema = kcu.constraint_schema "
+                "WHERE tc.table_schema = 'public' "
+                "AND tc.constraint_type = 'PRIMARY KEY' "
+                "AND tc.table_name IN "
+                + table_filter,  # nosec B608 -- fixed-count placeholders only.
+                *PROFILE_CANDIDATE_TABLES,
+            )
+            for row in primary_rows:
+                primary_key_rows[str(row["table_name"])].append(
+                    (int(row["ordinal_position"]), str(row["column_name"]))
+                )
+
+            unique_rows = await conn.fetch(
+                "SELECT tc.table_name, tc.constraint_name, kcu.column_name, "
+                "kcu.ordinal_position FROM information_schema.table_constraints AS tc "
+                "JOIN information_schema.key_column_usage AS kcu "
+                "ON tc.constraint_name = kcu.constraint_name "
+                "AND tc.constraint_schema = kcu.constraint_schema "
+                "WHERE tc.table_schema = 'public' "
+                "AND tc.constraint_type = 'UNIQUE' AND tc.table_name IN "
+                + table_filter,  # nosec B608 -- fixed-count placeholders only.
+                *PROFILE_CANDIDATE_TABLES,
+            )
+            for row in unique_rows:
+                key = (str(row["table_name"]), str(row["constraint_name"]))
+                unique_key_rows.setdefault(key, []).append(
+                    (int(row["ordinal_position"]), str(row["column_name"]))
+                )
+
+            foreign_rows = await conn.fetch(
+                "SELECT tc.table_name, kcu.column_name, "
+                "ccu.table_schema AS foreign_table_schema, "
+                "ccu.table_name AS foreign_table_name, "
+                "ccu.column_name AS foreign_column_name, rc.delete_rule "
+                "FROM information_schema.table_constraints AS tc "
+                "JOIN information_schema.key_column_usage AS kcu "
+                "ON tc.constraint_name = kcu.constraint_name "
+                "AND tc.constraint_schema = kcu.constraint_schema "
+                "JOIN information_schema.referential_constraints AS rc "
+                "ON tc.constraint_name = rc.constraint_name "
+                "AND tc.constraint_schema = rc.constraint_schema "
+                "JOIN information_schema.constraint_column_usage AS ccu "
+                "ON rc.unique_constraint_name = ccu.constraint_name "
+                "AND rc.unique_constraint_schema = ccu.constraint_schema "
+                "WHERE tc.table_schema = 'public' "
+                "AND tc.constraint_type = 'FOREIGN KEY' "
+                "AND tc.table_name IN "
+                + table_filter,  # nosec B608 -- fixed-count placeholders only.
+                *PROFILE_CANDIDATE_TABLES,
+            )
+            for row in foreign_rows:
+                foreign_keys_by_table[str(row["table_name"])].add(
+                    (
+                        str(row["column_name"]),
+                        str(row["foreign_table_schema"]),
+                        str(row["foreign_table_name"]),
+                        str(row["foreign_column_name"]),
+                        str(row["delete_rule"]),
+                    )
+                )
+            backend = "postgres"
+        else:
+            for table_name in PROFILE_CANDIDATE_TABLES:
+                cursor = await conn.execute(f'PRAGMA table_info("{table_name}")')  # nosec B608
+                table_info = await cursor.fetchall()
+                columns_by_table[table_name] = {
+                    str(row[1]): {
+                        "data_type": row[2],
+                        "not_null": bool(row[3]) or int(row[5]) > 0,
+                        "default": row[4],
+                    }
+                    for row in table_info
+                }
+                primary_key_rows[table_name] = [
+                    (int(row[5]), str(row[1]))
+                    for row in table_info
+                    if int(row[5]) > 0
+                ]
+                cursor = await conn.execute(
+                    "SELECT index_list.name AS index_name, "
+                    "index_info.name AS column_name, index_info.seqno "
+                    "FROM pragma_index_list(?) AS index_list "
+                    "JOIN pragma_index_info(index_list.name) AS index_info "
+                    "WHERE index_list.[unique] = 1 "
+                    "AND index_list.origin <> 'pk' "
+                    "ORDER BY index_list.name, index_info.seqno",
+                    (table_name,),
+                )
+                for row in await cursor.fetchall():
+                    unique_key_rows.setdefault(
+                        (table_name, str(row[0])),
+                        [],
+                    ).append((int(row[2]), str(row[1])))
+                cursor = await conn.execute(
+                    f'PRAGMA foreign_key_list("{table_name}")'  # nosec B608
+                )
+                foreign_keys_by_table[table_name] = {
+                    (
+                        str(row[3]),
+                        "main",
+                        str(row[2]),
+                        str(row[4]),
+                        str(row[6]),
+                    )
+                    for row in await cursor.fetchall()
+                }
+            backend = "sqlite"
+
+        primary_keys = {
+            table_name: tuple(
+                column for _position, column in sorted(primary_key_rows[table_name])
+            )
+            for table_name in PROFILE_CANDIDATE_TABLES
+        }
+        unique_keys: dict[str, set[tuple[str, ...]]] = {
+            table_name: set() for table_name in PROFILE_CANDIDATE_TABLES
+        }
+        for (table_name, _constraint_name), rows in unique_key_rows.items():
+            unique_keys[table_name].add(
+                tuple(column for _position, column in sorted(rows))
+            )
+        if not profile_candidate_schema_is_valid(
+            backend=backend,
+            columns=columns_by_table,
+            primary_keys=primary_keys,
+            unique_keys=unique_keys,
+            foreign_keys=foreign_keys_by_table,
+        ):
+            raise DatabaseError(
+                "Required profile candidate schema validation failed"
+            )
 
     async def get_user_by_id(self, user_id: int) -> Optional[dict[str, Any]]:
         """
@@ -449,91 +894,39 @@ class UsersDB:
         # Check for existing user
         existing = await self.get_user_by_username(username)
         if existing:
-            raise DuplicateUserError(f"Username '{username}' already exists")
+            raise DuplicateUserError("Username already exists")
 
         existing = await self.get_user_by_email(email)
         if existing:
-            raise DuplicateUserError(f"Email '{email}' already exists")
+            raise DuplicateUserError("Email already exists")
 
         try:
             generated_uuid = str(uuid_value) if uuid_value is not None else str(uuid.uuid4())
             user_id: Optional[int] = None
 
             async with self.db_pool.transaction() as conn:
-                if self._using_postgres_backend():
-                    # PostgreSQL
-                    user_id = await conn.fetchval(
-                        """
-                        INSERT INTO users (
-                            uuid, username, email, password_hash, role,
-                            is_active, is_verified, is_superuser, storage_quota_mb
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                        RETURNING id
-                        """,
-                        generated_uuid, username, email.lower(), password_hash, role,
-                        is_active, is_verified, is_superuser, storage_quota_mb
-                    )
-                else:
-                    # SQLite
-                    # Defensive: ensure legacy schemas have required columns
-                    try:
-                        cur = await conn.execute("PRAGMA table_info(users)")
-                        cols = {row[1] for row in await cur.fetchall()}
-                        # Add commonly-missing columns for older installs
-                        added_uuid = False
-                        async def _add_col(name: str, decl: str):
-                            nonlocal cols
-                            nonlocal added_uuid
-                            if name not in cols:
-                                await conn.execute(f"ALTER TABLE users ADD COLUMN {decl}")
-                                cols.add(name)
-                                if name == "uuid":
-                                    added_uuid = True
-
-                        await _add_col('uuid', "uuid TEXT")
-                        await _add_col('is_active', "is_active INTEGER DEFAULT 1")
-                        await _add_col('is_superuser', "is_superuser INTEGER DEFAULT 0")
-                        await _add_col('email_verified', "email_verified INTEGER DEFAULT 0")
-                        await _add_col('is_verified', "is_verified INTEGER DEFAULT 0")
-                        await _add_col('storage_quota_mb', "storage_quota_mb INTEGER DEFAULT 5120")
-                        await _add_col('storage_used_mb', "storage_used_mb INTEGER DEFAULT 0")
-                        if added_uuid:
-                            with contextlib.suppress(_USERS_DB_NONCRITICAL_EXCEPTIONS):
-                                await conn.execute(
-                                    "UPDATE users SET uuid = lower(hex(randomblob(16))) WHERE uuid IS NULL OR uuid = ''"
-                                )
-                            with contextlib.suppress(_USERS_DB_NONCRITICAL_EXCEPTIONS):
-                                await conn.execute(
-                                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uuid ON users(uuid)"
-                                )
-                    except _USERS_DB_NONCRITICAL_EXCEPTIONS:
-                        # Best-effort; insertion may still succeed if columns already present
-                        pass
-                    cursor = await conn.execute(
-                        """
-                        INSERT INTO users (
-                            uuid, username, email, password_hash, role,
-                            is_active, is_verified, is_superuser, storage_quota_mb
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            generated_uuid,
-                            username,
-                            email.lower(),
-                            password_hash,
-                            role,
-                            int(is_active),
-                            int(is_verified),
-                            int(is_superuser),
-                            storage_quota_mb,
-                        )
-                    )
-                    user_id = cursor.lastrowid
-                    await conn.commit()
-
-            logger.info(f"Created user: {username} (ID: {user_id})")
+                is_postgres = self._using_postgres_backend()
+                gateway = VersionedUserWriteGateway(
+                    "postgres" if is_postgres else "sqlite"
+                )
+                insert_result = await gateway.insert_user(
+                    conn,
+                    values={
+                        "uuid": generated_uuid,
+                        "username": username,
+                        "email": email.lower(),
+                        "password_hash": password_hash,
+                        "role": role,
+                        "is_active": is_active if is_postgres else int(is_active),
+                        "is_verified": is_verified if is_postgres else int(is_verified),
+                        "is_superuser": (
+                            is_superuser if is_postgres else int(is_superuser)
+                        ),
+                        "storage_quota_mb": storage_quota_mb,
+                    },
+                )
+                user_id = insert_result.affected_user_ids[0]
+            logger.info("Created user")
 
             if user_id is None:
                 raise DatabaseError("Failed to create user: no id returned from insert")
@@ -544,22 +937,36 @@ class UsersDB:
         except DuplicateUserError:
             raise
         except _PG_UniqueViolationError as e:
-            logger.warning(f"Duplicate user detected during create_user for '{username}': {e}")
-            raise DuplicateUserError("Username or email already exists") from e
+            self._log_storage_failure("create_user_duplicate", e)
+            raise DuplicateUserError("Username or email already exists") from None
         except (_AIOSQLITE_IntegrityError, sqlite3.IntegrityError) as e:
             message = str(e).lower()
             if "unique constraint failed" in message or "unique constraint violation" in message:
-                logger.warning(f"Duplicate user detected during create_user for '{username}': {e}")
-                raise DuplicateUserError("Username or email already exists") from e
-            logger.error(f"Failed to create user {username}: {e}")
-            raise DatabaseError(f"Failed to create user: {e}") from e
+                self._log_storage_failure("create_user_duplicate", e)
+                raise DuplicateUserError("Username or email already exists") from None
+            self._log_storage_failure("create_user", e)
+            raise DatabaseError("Failed to create user") from None
         except _USERS_DB_NONCRITICAL_EXCEPTIONS as e:
+            if isinstance(e, TransactionError):
+                try:
+                    duplicate = await self.db_pool.fetchone(
+                        "SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1",
+                        username,
+                        email.lower(),
+                    )
+                except _USERS_DB_NONCRITICAL_EXCEPTIONS:
+                    duplicate = None
+                if duplicate is not None:
+                    self._log_storage_failure("create_user_duplicate", e)
+                    raise DuplicateUserError(
+                        "Username or email already exists"
+                    ) from None
             msg = str(e)
             if "UNIQUE constraint failed" in msg and "users" in msg:
-                logger.warning(f"Duplicate user detected during create_user for '{username}': {e}")
-                raise DuplicateUserError("Username or email already exists") from e
-            logger.error(f"Failed to create user {username}: {e}")
-            raise DatabaseError(f"Failed to create user: {e}") from e
+                self._log_storage_failure("create_user_duplicate", e)
+                raise DuplicateUserError("Username or email already exists") from None
+            self._log_storage_failure("create_user", e)
+            raise DatabaseError("Failed to create user") from None
 
     async def update_user(
         self,
@@ -615,7 +1022,18 @@ class UsersDB:
                         "WHERE id = ${user_id_param}"
                     )
                     query = update_user_sql_template.format_map(locals())  # nosec B608
-                    await conn.execute(query, *values)
+                    visible_fields = tuple(
+                        field
+                        for field in field_names
+                        if field in PROFILE_VISIBLE_USER_FIELDS
+                    )
+                    await VersionedUserWriteGateway("postgres").execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=visible_fields,
+                        statement=query,
+                        parameters=tuple(values),
+                    )
                 else:
                     # SQLite - convert bools to ints and use '?' placeholders
                     for key in ['is_active', 'is_superuser', 'email_verified', 'is_verified']:
@@ -625,20 +1043,30 @@ class UsersDB:
                     values = [updates[k] for k in field_names] + [user_id]
                     update_user_sql_template = "UPDATE users SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
                     query = update_user_sql_template.format_map(locals())  # nosec B608
-                    await conn.execute(query, values)
+                    visible_fields = tuple(
+                        field
+                        for field in field_names
+                        if field in PROFILE_VISIBLE_USER_FIELDS
+                    )
+                    await VersionedUserWriteGateway("sqlite").execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=visible_fields,
+                        statement=query,
+                        parameters=tuple(values),
+                    )
 
-                # SQLite shim commits on transaction exit, but keep for compatibility
-                if not is_postgres:
-                    await conn.commit()
-
-                logger.info(f"Updated user {user_id}: {list(updates.keys())}")
-
-                # Return updated user
-                return await self.get_user_by_id(user_id)
+                updated_user = await self._get_user_by_id_on_connection(
+                    conn,
+                    user_id,
+                    is_postgres=is_postgres,
+                )
+                logger.info("Updated user")
+                return updated_user
 
         except _USERS_DB_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to update user {user_id}: {e}")
-            raise DatabaseError(f"Failed to update user: {e}") from e
+            self._log_storage_failure("update_user", e)
+            raise DatabaseError("Failed to update user") from None
 
     async def delete_user(self, user_id: int) -> bool:
         """
@@ -665,7 +1093,7 @@ class UsersDB:
 
     async def update_last_login(self, user_id: int):
         """Update user's last login timestamp"""
-        await self.update_user(user_id, last_login=datetime.utcnow())
+        await self.update_user(user_id, last_login=datetime.now(timezone.utc))
 
     async def list_users(
         self,

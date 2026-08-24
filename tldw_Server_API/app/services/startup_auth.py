@@ -8,8 +8,11 @@ from importlib import import_module
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
+    DatabaseError,
     OSError,
     RuntimeError,
     TypeError,
@@ -43,15 +46,24 @@ async def init_auth_services() -> object:
     except AuthStartupError:
         raise
     except _STARTUP_GUARD_EXCEPTIONS as exc:
-        logger.error(f"App Startup: Failed to initialize database pool: {exc}")
-        raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_FAILED") from exc
+        logger.bind(exception_type=type(exc).__name__).error(
+            "App Startup: Failed to initialize database pool"
+        )
+        raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_FAILED") from None
 
     try:
         from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once
-
-        await ensure_authnz_schema_ready_once()
-    except _IMPORT_EXCEPTIONS as exc:
-        logger.warning(f"App Startup: Skipped AuthNZ SQLite migration ensure: {exc}")
+    except _IMPORT_EXCEPTIONS:
+        logger.error("App Startup: Required AuthNZ schema readiness is unavailable")
+        raise AuthStartupError("AUTHNZ_SCHEMA_READINESS_UNAVAILABLE") from None
+    else:
+        try:
+            await ensure_authnz_schema_ready_once()
+        except _STARTUP_GUARD_EXCEPTIONS as exc:
+            logger.bind(exception_type=type(exc).__name__).error(
+                "App Startup: AuthNZ schema is not ready"
+            )
+            raise AuthStartupError("AUTHNZ_SCHEMA_NOT_READY") from None
 
     await _ensure_pg_extras(db_pool)
 
@@ -61,7 +73,9 @@ async def init_auth_services() -> object:
         await ensure_single_user_rbac_seed_if_needed()
         logger.info("App Startup: Ensured single-user RBAC seed (baseline roles/permissions)")
     except _IMPORT_EXCEPTIONS as exc:
-        logger.debug(f"App Startup: RBAC single-user seed ensure skipped: {exc}")
+        logger.bind(exception_type=type(exc).__name__).debug(
+            "App Startup: RBAC single-user seed ensure skipped"
+        )
 
     override_store = None
     try:
@@ -117,7 +131,20 @@ async def _ensure_pg_extras(db_pool: object) -> None:
         ]
 
         for label, ensure_fn in pg_ensures:
-            ok = await ensure_fn(db_pool)
+            try:
+                ok = await ensure_fn(db_pool)
+            except _STARTUP_GUARD_EXCEPTIONS:
+                if ensure_fn is ensure_user_timestamp_timezones_pg:
+                    raise AuthStartupError(
+                        "AUTHNZ_USER_TIMESTAMPS_NOT_READY"
+                    ) from None
+                if ensure_fn is ensure_authnz_core_tables_pg:
+                    raise AuthStartupError("AUTHNZ_CORE_SCHEMA_NOT_READY") from None
+                raise
+            if ensure_fn is ensure_user_timestamp_timezones_pg and not ok:
+                raise AuthStartupError("AUTHNZ_USER_TIMESTAMPS_NOT_READY")
+            if ensure_fn is ensure_authnz_core_tables_pg and not ok:
+                raise AuthStartupError("AUTHNZ_CORE_SCHEMA_NOT_READY")
             if ok:
                 logger.info(f"App Startup: Ensured PG {label}")
             else:
@@ -125,5 +152,9 @@ async def _ensure_pg_extras(db_pool: object) -> None:
                     f"App Startup: PG {label} ensure returned False; "
                     "canonical database state may be incomplete"
                 )
+    except AuthStartupError:
+        raise
     except _STARTUP_GUARD_EXCEPTIONS as exc:
-        logger.debug(f"App Startup: PG extras ensure failed/skipped: {exc}")
+        logger.bind(exception_type=type(exc).__name__).debug(
+            "App Startup: PG extras ensure failed/skipped"
+        )

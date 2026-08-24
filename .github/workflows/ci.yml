@@ -1737,6 +1737,7 @@ jobs:
           - name: platform-services-startup
             paths: >-
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -3201,6 +3202,7 @@ jobs:
           - name: platform-services-startup
             paths: >-
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -4536,6 +4538,7 @@ jobs:
           - name: platform-services-startup
             paths: >-
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -5794,6 +5797,7 @@ jobs:
           - name: platform-services-startup
             paths: >-
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -7058,6 +7062,7 @@ jobs:
           - name: platform-services-startup
             paths: >-
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py

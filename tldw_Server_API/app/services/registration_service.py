@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     RegistrationError,
 )
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, get_password_service
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 
 #
 # Local imports
@@ -409,34 +410,26 @@ class RegistrationService:
                 if privileged_creation:
                     is_verified = bool(is_verified_override) if is_verified_override is not None else True
 
-                if self._is_postgres_backend():
-                    # PostgreSQL
-                    user_id = await conn.fetchval(
-                        """
-                        INSERT INTO users (
-                            uuid, username, email, password_hash, role,
-                            is_active, is_verified, created_by, storage_quota_mb
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                        RETURNING id
-                        """,
-                        user_uuid, username, email, password_hash, role,
-                        is_active, is_verified, created_by, storage_quota
-                    )
-                else:
-                    # SQLite
-                    cursor = await conn.execute(
-                        """
-                        INSERT INTO users (
-                            uuid, username, email, password_hash, role,
-                            is_active, is_verified, created_by, storage_quota_mb
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (user_uuid, username, email, password_hash, role,
-                         int(is_active), int(is_verified), created_by, storage_quota)
-                    )
-                    user_id = cursor.lastrowid
+                gateway = VersionedUserWriteGateway(
+                    "postgres" if self._is_postgres_backend() else "sqlite"
+                )
+                insert_result = await gateway.insert_user(
+                    conn,
+                    values={
+                        "uuid": user_uuid,
+                        "username": username,
+                        "email": email,
+                        "password_hash": password_hash,
+                        "role": role,
+                        "is_active": is_active if self._is_postgres_backend() else int(is_active),
+                        "is_verified": (
+                            is_verified if self._is_postgres_backend() else int(is_verified)
+                        ),
+                        "created_by": created_by,
+                        "storage_quota_mb": storage_quota,
+                    },
+                )
+                user_id = insert_result.affected_user_ids[0]
 
                 await self._insert_role_membership(
                     conn,
@@ -540,11 +533,23 @@ class RegistrationService:
 
         try:
             async with self.db_pool.transaction() as conn:
+                gateway = VersionedUserWriteGateway(
+                    "postgres" if self._is_postgres_backend() else "sqlite"
+                )
                 if self._is_postgres_backend():
                     existing = await conn.fetchrow("SELECT id FROM users WHERE id = $1", user_id)
                     if not existing:
                         return False
-                    await conn.execute(
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=(
+                            "username",
+                            "email",
+                            "is_active",
+                            "is_verified",
+                        ),
+                        statement=
                         """
                         UPDATE users
                         SET username = $2,
@@ -554,16 +559,23 @@ class RegistrationService:
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = $1
                         """,
-                        user_id,
-                        tombstone,
-                        tombstone_email,
+                        parameters=(user_id, tombstone, tombstone_email),
                     )
                 else:
                     cursor = await conn.execute("SELECT id FROM users WHERE id = ?", (user_id,))
                     existing = await cursor.fetchone()
                     if not existing:
                         return False
-                    await conn.execute(
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=(
+                            "username",
+                            "email",
+                            "is_active",
+                            "is_verified",
+                        ),
+                        statement=
                         """
                         UPDATE users
                         SET username = ?,
@@ -573,7 +585,7 @@ class RegistrationService:
                             updated_at = datetime('now')
                         WHERE id = ?
                         """,
-                        (tombstone, tombstone_email, user_id),
+                        parameters=(tombstone, tombstone_email, user_id),
                     )
 
             await asyncio.to_thread(self._cleanup_user_directories, user_id)

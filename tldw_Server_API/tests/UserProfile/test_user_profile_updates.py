@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import uuid
 from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileUpdateEntry,
     UserProfileUpdateRequest,
 )
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_org_member,
     add_team_member,
@@ -21,12 +24,16 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import get_rate_limiter
+from tldw_Server_API.app.core.AuthNZ.repos.mfa_repo import AuthnzMfaRepo
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.app.core.UserProfiles import update_service as update_service_module
 from tldw_Server_API.app.core.UserProfiles.contracts import ProfileContractMode
 from tldw_Server_API.app.core.UserProfiles.response_mappers import (
     LegacyProfileCommandResult,
 )
+from tldw_Server_API.app.core.UserProfiles.version_gateway import ProfileVersionGateway
 from tldw_Server_API.app.main import app
+from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 
 def _run_async(coro):
@@ -39,13 +46,151 @@ def _get_user_id(client: TestClient, auth_headers) -> int:
     return resp.json()["user"]["id"]
 
 
+def _get_profile_version(client: TestClient, auth_headers) -> datetime:
+    resp = client.get("/api/v1/users/me/profile", headers=auth_headers)
+    assert resp.status_code == 200
+    return datetime.fromisoformat(resp.json()["profile_version"].replace("Z", "+00:00"))
+
+
+@pytest.mark.asyncio
+async def test_legacy_users_db_last_login_uses_utc_aware_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    users = UsersDB(db_pool=object())
+    captured: dict[str, object] = {}
+
+    async def _capture_update(user_id: int, **updates: object) -> None:
+        captured["user_id"] = user_id
+        captured.update(updates)
+
+    monkeypatch.setattr(users, "update_user", _capture_update)
+
+    await users.update_last_login(17)
+
+    assert captured["user_id"] == 17
+    assert isinstance(captured["last_login"], datetime)
+    assert captured["last_login"].tzinfo is timezone.utc
+
+
+@pytest.mark.asyncio
+async def test_user_field_mutation_failure_log_is_sanitized() -> None:
+    secret = "email=private@example.com database=/private/authnz.db"
+
+    class _Anchor:
+        async def capture(self) -> None:
+            raise RuntimeError(secret)
+
+    output = io.StringIO()
+    sink = logger.add(output, format="{message} {extra}")
+    try:
+        with pytest.raises(RuntimeError, match="private@example.com"):
+            await update_service_module._update_user_field(  # noqa: SLF001
+                object(),
+                7,
+                "email",
+                "new@example.com",
+                anchor=_Anchor(),
+                is_postgres_backend=False,
+            )
+    finally:
+        logger.remove(sink)
+
+    assert secret not in output.getvalue()
+
+
+def test_committed_identity_update_strictly_advances_profile_version(auth_headers) -> None:
+    with TestClient(app) as client:
+        before = _get_profile_version(client, auth_headers)
+        email = f"profile-version-{uuid.uuid4().hex[:8]}@example.com"
+
+        response = client.patch(
+            "/api/v1/users/me/profile",
+            headers=auth_headers,
+            json={"updates": [{"key": "identity.email", "value": email}]},
+        )
+
+        assert response.status_code == 200
+        assert _get_profile_version(client, auth_headers) > before
+
+
+def test_committed_quota_status_and_mfa_updates_strictly_advance_profile_version(
+    auth_headers,
+) -> None:
+    with TestClient(app) as client:
+        user_id = _get_user_id(client, auth_headers)
+
+        async def _exercise_writers() -> tuple[datetime, ...]:
+            pool = await get_db_pool()
+            reader = ProfileVersionGateway(pool)
+            users = UsersDB(db_pool=pool)
+            await users.initialize()
+            original = await users.get_user_by_id(user_id)
+            assert original is not None
+            original_quota = int(original.get("storage_quota_mb") or 5120)
+            original_active = bool(original.get("is_active", True))
+
+            versions = [await reader.read(user_id)]
+            quota_service = StorageQuotaService(db_pool=pool)
+            await quota_service.set_user_quota(user_id, original_quota + 1)
+            versions.append(await reader.read(user_id))
+
+            await users.update_user(user_id, is_active=not original_active)
+            versions.append(await reader.read(user_id))
+            await users.update_user(user_id, is_active=original_active)
+
+            mfa_repo = AuthnzMfaRepo(pool)
+            await mfa_repo.set_mfa_config(
+                user_id=user_id,
+                encrypted_secret="encrypted-test-secret",
+                backup_codes_json="[]",
+                updated_at=datetime.now(timezone.utc),
+            )
+            versions.append(await reader.read(user_id))
+
+            await mfa_repo.clear_mfa_config(
+                user_id=user_id,
+                updated_at=datetime.now(timezone.utc),
+            )
+            await quota_service.set_user_quota(user_id, original_quota)
+            return tuple(versions)
+
+        before, after_quota, after_status, after_mfa = _run_async(
+            _exercise_writers()
+        )
+
+        assert after_quota > before
+        assert after_status > after_quota
+        assert after_mfa > after_status
+
+
+def test_deprecated_profile_update_strictly_advances_profile_version(auth_headers) -> None:
+    with TestClient(app) as client:
+        before = _get_profile_version(client, auth_headers)
+        email = f"legacy-version-{uuid.uuid4().hex[:8]}@example.com"
+
+        response = client.put(
+            "/api/v1/users/me",
+            headers=auth_headers,
+            json={"email": email},
+        )
+
+        assert response.status_code == 200
+        assert _get_profile_version(client, auth_headers) > before
+
+
 @pytest.mark.asyncio
 async def test_user_profile_update_accepts_valid_identity_email_with_pydantic_v2(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     updates: list[tuple[int, str, str]] = []
 
-    async def _capture_update(_db_conn, user_id: int, field: str, value: str) -> None:
+    async def _capture_update(
+        _db_conn,
+        user_id: int,
+        field: str,
+        value: str,
+        **_kwargs,
+    ) -> None:
         updates.append((user_id, field, value))
 
     monkeypatch.setattr(update_service_module, "_update_user_field", _capture_update)
@@ -90,6 +235,7 @@ async def test_invalid_identity_email_log_excludes_validation_details(
             is_platform_admin=False,
             membership_context=None,
             is_postgres_backend=False,
+            anchor=object(),
         )
 
     assert debug_calls == [("Invalid email update for user {}", (7,))]
@@ -136,7 +282,24 @@ def test_user_profile_update_preferences(auth_headers) -> None:
 async def test_user_profile_override_writes_use_transaction_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_conn = object()
+    class _Cursor:
+        rowcount = 1
+
+        def __init__(self, rows=None) -> None:
+            self._rows = rows or []
+
+        async def fetchall(self):
+            return self._rows
+
+    class _DbConn:
+        async def execute(self, query, params):
+            if str(query).lstrip().lower().startswith("with target_user as"):
+                return _Cursor(
+                    [("user", int(params[0]), "2026-07-26T12:00:00.000000Z")]
+                )
+            return _Cursor()
+
+    db_conn = _DbConn()
     calls: list[tuple[str, str, object | None]] = []
 
     class FakeOverridesRepo:
@@ -523,6 +686,7 @@ def test_admin_profile_update_team_member_add_remove(auth_headers) -> None:
         memberships = _run_async(_list_memberships())
         team_ids = {int(item.get("team_id")) for item in memberships}
         assert team_b_id in team_ids
+        before_remove = _get_profile_version(client, auth_headers)
 
         resp = client.patch(
             f"/api/v1/admin/users/{user_id}/profile",
@@ -542,6 +706,7 @@ def test_admin_profile_update_team_member_add_remove(auth_headers) -> None:
         memberships = _run_async(_list_memberships())
         team_ids = {int(item.get("team_id")) for item in memberships}
         assert team_a_id not in team_ids
+        assert _get_profile_version(client, auth_headers) > before_remove
 
 
 def test_user_profile_update_rejects_inactive_user(auth_headers, monkeypatch) -> None:

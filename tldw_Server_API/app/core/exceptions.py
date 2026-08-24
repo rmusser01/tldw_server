@@ -116,6 +116,39 @@ class NotesAttachmentSyncNotReadyError(NotesAttachmentMutationError):
     """Raised when canonical attachment mutation is not writable."""
 
 
+class ProfileTransactionError(RuntimeError):
+    """Base class for sanitized, transport-neutral profile transaction failures."""
+
+    code = "profile_update_failed"
+    retry_after_seconds: int | None = None
+
+
+class ProfileDatabaseBusy(ProfileTransactionError):
+    """Raised when a profile transaction cannot acquire the database in time."""
+
+    code = "database_busy"
+
+    def __init__(self, *, retry_after_seconds: int) -> None:
+        super().__init__("Database is temporarily busy")
+        self.retry_after_seconds = retry_after_seconds
+
+
+class ProfileUpdateConcurrencyConflict(ProfileTransactionError):
+    """Raised when a profile write loses a serialization or deadlock race."""
+
+    code = "profile_update_concurrency_conflict"
+
+    def __init__(self) -> None:
+        super().__init__("Profile update conflicted")
+
+
+class ProfileTransactionFailed(ProfileTransactionError):
+    """Raised for sanitized non-retryable profile transaction failures."""
+
+    def __init__(self) -> None:
+        super().__init__("Profile update transaction failed")
+
+
 class PromptImprovementDispatchError(RuntimeError):
     """Sanitized infrastructure failure for endpoint error mapping."""
 

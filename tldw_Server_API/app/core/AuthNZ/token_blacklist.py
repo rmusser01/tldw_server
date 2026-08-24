@@ -422,7 +422,8 @@ class TokenBlacklist:
         user_id: int,
         reason: str = "User requested logout from all devices",
         revoked_by: Optional[int] = None,
-        ip_address: Optional[str] = None
+        ip_address: Optional[str] = None,
+        except_session_id: Optional[int] = None,
     ) -> int:
         """
         Revoke all tokens for a specific user
@@ -432,6 +433,7 @@ class TokenBlacklist:
             reason: Reason for revocation
             revoked_by: User who initiated revocation
             ip_address: IP address of request
+            except_session_id: Session that must remain active
 
         Returns:
             Number of tokens revoked
@@ -450,12 +452,16 @@ class TokenBlacklist:
                     await self._ensure_session_revocation_columns(conn)
 
             # Snapshot the sessions' token metadata for blacklist use
-            sessions = await repo.fetch_session_token_metadata_for_user(user_id)
+            sessions = await repo.fetch_session_token_metadata_for_user(
+                user_id,
+                except_session_id=except_session_id,
+            )
             # Mark sessions as revoked with audit metadata
             await repo.mark_sessions_revoked_for_user_with_audit(
                 user_id=user_id,
                 revoked_by=revoked_by,
                 reason=reason,
+                except_session_id=except_session_id,
             )
 
             def _to_datetime(value: Optional[Any]) -> Optional[datetime]:
@@ -616,10 +622,18 @@ async def is_token_blacklisted(jti: str) -> bool:
     return await blacklist.is_blacklisted(jti)
 
 
-async def revoke_all_user_tokens(user_id: int, reason: str = "User logout") -> int:
+async def revoke_all_user_tokens(
+    user_id: int,
+    reason: str = "User logout",
+    except_session_id: Optional[int] = None,
+) -> int:
     """Convenience function to revoke all user tokens"""
     blacklist = get_token_blacklist()
-    return await blacklist.revoke_all_user_tokens(user_id, reason)
+    return await blacklist.revoke_all_user_tokens(
+        user_id,
+        reason,
+        except_session_id=except_session_id,
+    )
 
 
 async def reset_token_blacklist():

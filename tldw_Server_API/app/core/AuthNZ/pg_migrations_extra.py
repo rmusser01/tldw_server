@@ -15,8 +15,17 @@ from loguru import logger
 
 from .database import DatabasePool, get_db_pool
 from .exceptions import DatabaseError as AuthNZDatabaseError
+from .postgres_profile_version_schema import (
+    ensure_postgres_profile_version_on_connection,
+    ensure_postgres_user_timestamp_timezones_on_connection,
+)
+from .profile_candidate_schema import (
+    repair_postgres_profile_candidate_timestamps,
+    validate_postgres_profile_candidate_schema,
+)
 
 _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
+    AuthNZDatabaseError,
     OSError,
     ValueError,
     TypeError,
@@ -34,40 +43,6 @@ _BUDGET_FIELD_KEYS = {
     "budget_day_tokens",
     "budget_month_tokens",
 }
-
-_ENSURE_USER_TIMESTAMP_TIMEZONES_SQL = """
-DO $$
-DECLARE
-    col_name text;
-BEGIN
-    FOREACH col_name IN ARRAY ARRAY[
-        'created_at',
-        'updated_at',
-        'last_login',
-        'locked_until',
-        'email_verified_at',
-        'password_changed_at'
-    ]
-    LOOP
-        IF EXISTS (
-            SELECT 1
-            FROM information_schema.columns c
-            WHERE c.table_schema = current_schema()
-              AND c.table_name = 'users'
-              AND c.column_name = col_name
-              AND c.data_type = 'timestamp without time zone'
-        ) THEN
-            EXECUTE format(
-                'ALTER TABLE users ALTER COLUMN %I TYPE TIMESTAMPTZ USING %I AT TIME ZONE ''UTC''',
-                col_name,
-                col_name
-            );
-        END IF;
-    END LOOP;
-END
-$$
-"""
-
 
 _CREATE_TOOL_CATALOGS = [
     # tool_catalogs
@@ -664,27 +639,33 @@ _CREATE_MCP_HUB_TABLES = [
     ),
     (
         """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1
-                FROM pg_indexes
-                WHERE indexname = 'uq_mcp_governance_packs_active_scope'
-                  AND schemaname = ANY (current_schemas(false))
-            ) THEN
-                UPDATE mcp_governance_packs
-                SET is_active_install = FALSE;
-
-                WITH latest AS (
-                    SELECT MAX(id) AS id
-                    FROM mcp_governance_packs
-                    GROUP BY pack_id, owner_scope_type, COALESCE(owner_scope_id, -1)
-                )
-                UPDATE mcp_governance_packs
-                SET is_active_install = TRUE
-                WHERE id IN (SELECT id FROM latest);
-            END IF;
-        END $$;
+        UPDATE mcp_governance_packs
+        SET is_active_install = FALSE
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM pg_indexes
+            WHERE indexname = 'uq_mcp_governance_packs_active_scope'
+              AND schemaname = ANY (current_schemas(false))
+        )
+        """,
+        (),
+    ),
+    (
+        """
+        WITH latest AS (
+            SELECT MAX(id) AS id
+            FROM mcp_governance_packs
+            GROUP BY pack_id, owner_scope_type, COALESCE(owner_scope_id, -1)
+        )
+        UPDATE mcp_governance_packs
+        SET is_active_install = TRUE
+        WHERE id IN (SELECT id FROM latest)
+          AND NOT EXISTS (
+              SELECT 1
+              FROM pg_indexes
+              WHERE indexname = 'uq_mcp_governance_packs_active_scope'
+                AND schemaname = ANY (current_schemas(false))
+          )
         """,
         (),
     ),
@@ -1065,61 +1046,6 @@ _CREATE_AUTHNZ_CORE_TABLES = [
         """,
         (),
     ),
-    # user profile config overrides
-    (
-        """
-        CREATE TABLE IF NOT EXISTS user_config_overrides (
-            user_id INTEGER NOT NULL,
-            key TEXT NOT NULL,
-            value_json TEXT,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER,
-            updated_by INTEGER,
-            PRIMARY KEY (user_id, key),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-        """,
-        (),
-    ),
-    ("CREATE INDEX IF NOT EXISTS idx_user_config_overrides_user_id ON user_config_overrides(user_id)", ()),
-    ("CREATE INDEX IF NOT EXISTS idx_user_config_overrides_key ON user_config_overrides(key)", ()),
-    (
-        """
-        CREATE TABLE IF NOT EXISTS org_config_overrides (
-            org_id INTEGER NOT NULL,
-            key TEXT NOT NULL,
-            value_json TEXT,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER,
-            updated_by INTEGER,
-            PRIMARY KEY (org_id, key),
-            FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
-        )
-        """,
-        (),
-    ),
-    ("CREATE INDEX IF NOT EXISTS idx_org_config_overrides_org_id ON org_config_overrides(org_id)", ()),
-    ("CREATE INDEX IF NOT EXISTS idx_org_config_overrides_key ON org_config_overrides(key)", ()),
-    (
-        """
-        CREATE TABLE IF NOT EXISTS team_config_overrides (
-            team_id INTEGER NOT NULL,
-            key TEXT NOT NULL,
-            value_json TEXT,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER,
-            updated_by INTEGER,
-            PRIMARY KEY (team_id, key),
-            FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
-        )
-        """,
-        (),
-    ),
-    ("CREATE INDEX IF NOT EXISTS idx_team_config_overrides_team_id ON team_config_overrides(team_id)", ()),
-    ("CREATE INDEX IF NOT EXISTS idx_team_config_overrides_key ON team_config_overrides(key)", ()),
     # sessions (core columns + additive columns/indexes)
     (
         """
@@ -1196,22 +1122,6 @@ _CREATE_AUTHNZ_CORE_TABLES = [
     ("ALTER TABLE registration_codes ADD COLUMN IF NOT EXISTS description TEXT", ()),
     ("ALTER TABLE registration_codes ADD COLUMN IF NOT EXISTS allowed_email_domain TEXT", ()),
     ("ALTER TABLE IF EXISTS org_invites ADD COLUMN IF NOT EXISTS allowed_email_domain TEXT", ()),
-    (
-        """
-        DO $$
-        BEGIN
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'registration_codes' AND column_name = 'uses'
-            ) THEN
-                UPDATE registration_codes
-                SET times_used = uses
-                WHERE times_used IS NULL OR times_used = 0;
-            END IF;
-        END $$;
-        """,
-        (),
-    ),
     # RBAC core tables
     (
         """
@@ -1300,67 +1210,119 @@ _CREATE_AUTHNZ_CORE_TABLES = [
     # Organizations and teams hierarchy
     (
         """
-        CREATE TABLE IF NOT EXISTS organizations (
+        CREATE TABLE IF NOT EXISTS public.organizations (
             id SERIAL PRIMARY KEY,
             uuid VARCHAR(64) UNIQUE,
             name VARCHAR(255) UNIQUE NOT NULL,
             slug VARCHAR(255) UNIQUE,
-            owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            owner_user_id INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
             is_active BOOLEAN DEFAULT TRUE,
             metadata JSONB,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
         (),
     ),
-    ("CREATE INDEX IF NOT EXISTS idx_orgs_owner ON organizations(owner_user_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_orgs_owner ON public.organizations(owner_user_id)", ()),
     (
         """
-        CREATE TABLE IF NOT EXISTS org_members (
-            org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS public.org_members (
+            org_id INTEGER NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
             role VARCHAR(32) DEFAULT 'member',
             status VARCHAR(32) DEFAULT 'active',
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            added_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (org_id, user_id)
         )
         """,
         (),
     ),
-    ("CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_org_members_user ON public.org_members(user_id)", ()),
     (
         """
-        CREATE TABLE IF NOT EXISTS teams (
+        CREATE TABLE IF NOT EXISTS public.teams (
             id SERIAL PRIMARY KEY,
-            org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            org_id INTEGER NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
             name VARCHAR(255) NOT NULL,
             slug VARCHAR(255),
             description TEXT,
             is_active BOOLEAN DEFAULT TRUE,
             metadata JSONB,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (org_id, name)
         )
         """,
         (),
     ),
-    ("CREATE INDEX IF NOT EXISTS idx_teams_org ON teams(org_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_teams_org ON public.teams(org_id)", ()),
     (
         """
-        CREATE TABLE IF NOT EXISTS team_members (
-            team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS public.team_members (
+            team_id INTEGER NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
             role VARCHAR(32) DEFAULT 'member',
             status VARCHAR(32) DEFAULT 'active',
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            added_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (team_id, user_id)
         )
         """,
         (),
     ),
-    ("CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_team_members_user ON public.team_members(user_id)", ()),
+    # Profile candidate overrides depend on the hierarchy above.
+    (
+        """
+        CREATE TABLE IF NOT EXISTS public.user_config_overrides (
+            user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value_json TEXT,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_by INTEGER,
+            updated_by INTEGER,
+            PRIMARY KEY (user_id, key)
+        )
+        """,
+        (),
+    ),
+    ("CREATE INDEX IF NOT EXISTS idx_user_config_overrides_user_id ON public.user_config_overrides(user_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_user_config_overrides_key ON public.user_config_overrides(key)", ()),
+    (
+        """
+        CREATE TABLE IF NOT EXISTS public.org_config_overrides (
+            org_id INTEGER NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value_json TEXT,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_by INTEGER,
+            updated_by INTEGER,
+            PRIMARY KEY (org_id, key)
+        )
+        """,
+        (),
+    ),
+    ("CREATE INDEX IF NOT EXISTS idx_org_config_overrides_org_id ON public.org_config_overrides(org_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_org_config_overrides_key ON public.org_config_overrides(key)", ()),
+    (
+        """
+        CREATE TABLE IF NOT EXISTS public.team_config_overrides (
+            team_id INTEGER NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value_json TEXT,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_by INTEGER,
+            updated_by INTEGER,
+            PRIMARY KEY (team_id, key)
+        )
+        """,
+        (),
+    ),
+    ("CREATE INDEX IF NOT EXISTS idx_team_config_overrides_team_id ON public.team_config_overrides(team_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_team_config_overrides_key ON public.team_config_overrides(key)", ()),
     (
         """
         CREATE TABLE IF NOT EXISTS org_invites (
@@ -2671,7 +2633,9 @@ async def ensure_mcp_prompt_read_permission_pg(pool: DatabasePool | None = None)
         logger.info("Ensured PostgreSQL MCP prompts.read permission and default grants")
         return True
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"Failed to ensure PostgreSQL MCP prompts.read permission: {exc}")
+        logger.bind(exception_type=type(exc).__name__).warning(
+            "Failed to ensure PostgreSQL MCP prompts.read permission"
+        )
         return False
 
 
@@ -2751,16 +2715,27 @@ async def ensure_notification_permissions_pg(pool: DatabasePool | None = None) -
 
 async def ensure_user_timestamp_timezones_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure legacy PostgreSQL users timestamp columns accept aware UTC datetimes."""
-    try:
-        db_pool = pool or await get_db_pool()
-        if getattr(db_pool, "pool", None) is None:
-            return False
-        await db_pool.execute(_ENSURE_USER_TIMESTAMP_TIMEZONES_SQL)
-        logger.info("Ensured PostgreSQL users timestamp columns use TIMESTAMPTZ")
-        return True
-    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"Failed to ensure PostgreSQL users timestamp time zones: {exc}")
+    db_pool = pool or await get_db_pool()
+    if getattr(db_pool, "pool", None) is None:
         return False
+    async with db_pool.transaction() as conn:
+        await ensure_postgres_user_timestamp_timezones_on_connection(conn)
+    logger.info("Ensured PostgreSQL users timestamp columns use TIMESTAMPTZ")
+    return True
+
+
+async def ensure_user_profile_version_pg(pool: DatabasePool | None = None) -> bool:
+    """Transactionally add, backfill, and verify users.profile_version."""
+    db_pool = pool or await get_db_pool()
+    if getattr(db_pool, "pool", None) is None:
+        return False
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await ensure_postgres_profile_version_on_connection(conn)
+
+    logger.info("Ensured PostgreSQL users.profile_version anchor")
+    return True
 
 
 async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool:
@@ -2771,24 +2746,44 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
     intended as a bootstrap guardrail for Postgres deployments that have
     not yet run dedicated migrations for these tables.
     """
-    try:
-        db_pool = pool or await get_db_pool()
-        if getattr(db_pool, "pool", None) is None:
-            return False
-        for sql, params in _CREATE_AUTHNZ_CORE_TABLES:
-            try:
-                await db_pool.execute(sql, *params)
-            except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"PG ensure authnz core tables DDL failed: {exc}")
-        await ensure_mcp_prompt_read_permission_pg(db_pool)
-        logger.info(
-            "Ensured PostgreSQL AuthNZ core tables "
-            "(audit_logs, sessions, registration_codes, RBAC, orgs/teams)"
-        )
-        return True
-    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"Failed to ensure PostgreSQL AuthNZ core tables: {exc}")
+    db_pool = pool or await get_db_pool()
+    if getattr(db_pool, "pool", None) is None:
         return False
+    try:
+        async with db_pool.transaction() as conn:
+            for sql, params in _CREATE_AUTHNZ_CORE_TABLES:
+                await conn.execute(sql, *params)
+            has_legacy_uses = await conn.fetchval(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = 'public' "
+                "AND table_name = 'registration_codes' "
+                "AND column_name = 'uses'"
+                ")"
+            )
+            if has_legacy_uses is True:
+                await conn.execute(
+                    "UPDATE public.registration_codes "
+                    "SET times_used = uses "
+                    "WHERE times_used IS NULL OR times_used = 0"
+                )
+            await ensure_postgres_profile_version_on_connection(conn)
+            await repair_postgres_profile_candidate_timestamps(conn)
+            await validate_postgres_profile_candidate_schema(conn)
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.bind(exception_type=type(exc).__name__).warning(
+            "Failed to ensure PostgreSQL AuthNZ core tables"
+        )
+        return False
+
+    if not await ensure_mcp_prompt_read_permission_pg(db_pool):
+        return False
+
+    logger.info(
+        "Ensured PostgreSQL AuthNZ core tables "
+        "(audit_logs, sessions, registration_codes, RBAC, orgs/teams)"
+    )
+    return True
 
 
 def _parse_json_payload_pg(raw: Any) -> dict[str, Any]:

@@ -20,6 +20,10 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     update_org_member_role,
     update_team_member_role,
 )
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    UserVersionOwnership,
+    VersionedUserWriteGateway,
+)
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import get_rate_limiter
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import (
@@ -50,6 +54,33 @@ class _MembershipContext:
     target_team_orgs: dict[int, int] = field(default_factory=dict)
     actor_org_roles: dict[int, str] = field(default_factory=dict)
     actor_team_roles: dict[int, str] = field(default_factory=dict)
+
+
+@dataclass
+class _CallerOwnedAnchor:
+    gateway: VersionedUserWriteGateway
+    db_conn: Any
+    user_id: int
+    version_floor: Any | None = None
+    changed: bool = False
+
+    async def capture(self) -> None:
+        if self.version_floor is None:
+            self.version_floor = await self.gateway.capture_floor(
+                self.db_conn,
+                user_id=self.user_id,
+            )
+
+    def mark_changed(self) -> None:
+        self.changed = True
+
+    async def finalize(self) -> None:
+        if self.changed and self.version_floor is not None:
+            await self.gateway.final_touch(
+                self.db_conn,
+                user_id=self.user_id,
+                version_floor=self.version_floor,
+            )
 
 
 def _is_postgres_backend_for_pool(db_pool: Any) -> bool:
@@ -91,6 +122,13 @@ class UserProfileUpdateService:
                 is_platform_admin=is_platform_admin,
             )
         is_postgres_backend = _is_postgres_backend_for_pool(self._db_pool)
+        anchor = _CallerOwnedAnchor(
+            gateway=VersionedUserWriteGateway(
+                "postgres" if is_postgres_backend else "sqlite"
+            ),
+            db_conn=db_conn,
+            user_id=user_id,
+        )
 
         for key, value in updates_list:
             entry = catalog_map.get(key)
@@ -110,7 +148,9 @@ class UserProfileUpdateService:
                             repo = UserProfileOverridesRepo(self._db_pool)
                             await repo.ensure_tables()
                             repo_holder["repo"] = repo
+                        await anchor.capture()
                         await repo.delete_override(user_id=user_id, key=key, db_conn=db_conn)
+                        anchor.mark_changed()
                     result.applied.append(key)
                     continue
                 result.skipped.append({"key": key, "message": "null_not_allowed"})
@@ -137,6 +177,7 @@ class UserProfileUpdateService:
                     is_platform_admin=is_platform_admin,
                     membership_context=membership_context,
                     is_postgres_backend=is_postgres_backend,
+                    anchor=anchor,
                 )
             except ValueError as exc:
                 result.skipped.append({"key": key, "message": str(exc)})
@@ -147,6 +188,8 @@ class UserProfileUpdateService:
             else:
                 result.skipped.append({"key": key, "message": "unsupported_key"})
 
+        if not dry_run:
+            await anchor.finalize()
         return result
 
     async def _apply_key_update(
@@ -163,6 +206,7 @@ class UserProfileUpdateService:
         is_platform_admin: bool,
         membership_context: _MembershipContext | None,
         is_postgres_backend: bool,
+        anchor: _CallerOwnedAnchor,
     ) -> bool:
         if key == "identity.email":
             try:
@@ -171,26 +215,55 @@ class UserProfileUpdateService:
                 logger.debug("Invalid email update for user {}", user_id)
                 raise ValueError("invalid_email") from exc
             if not dry_run:
-                await _update_user_field(db_conn, user_id, "email", str(email).lower())
+                await _update_user_field(
+                    db_conn,
+                    user_id,
+                    "email",
+                    str(email).lower(),
+                    anchor=anchor,
+                    is_postgres_backend=is_postgres_backend,
+                )
             return True
 
         if key == "identity.role":
             if not dry_run:
-                await _update_user_field(db_conn, user_id, "role", str(value))
+                await _update_user_field(
+                    db_conn,
+                    user_id,
+                    "role",
+                    str(value),
+                    anchor=anchor,
+                    is_postgres_backend=is_postgres_backend,
+                )
             return True
 
         if key == "identity.is_active":
             if not dry_run:
-                await _update_user_field(db_conn, user_id, "is_active", int(bool(value)))
+                await _update_user_field(
+                    db_conn,
+                    user_id,
+                    "is_active",
+                    int(bool(value)),
+                    anchor=anchor,
+                    is_postgres_backend=is_postgres_backend,
+                )
             return True
 
         if key == "identity.is_verified":
             if not dry_run:
-                await _update_user_field(db_conn, user_id, "is_verified", int(bool(value)))
+                await _update_user_field(
+                    db_conn,
+                    user_id,
+                    "is_verified",
+                    int(bool(value)),
+                    anchor=anchor,
+                    is_postgres_backend=is_postgres_backend,
+                )
             return True
 
         if key == "identity.is_locked":
             if not dry_run:
+                await anchor.capture()
                 username = await _fetch_username(
                     db_conn,
                     user_id,
@@ -208,11 +281,19 @@ class UserProfileUpdateService:
                 else:
                     await limiter.reset_failed_attempts(identifier=username, attempt_type="login")
                 await _touch_user_updated_at(db_conn, user_id)
+                anchor.mark_changed()
             return True
 
         if key == "limits.storage_quota_mb":
             if not dry_run:
-                await _update_user_field(db_conn, user_id, "storage_quota_mb", int(value))
+                await _update_user_field(
+                    db_conn,
+                    user_id,
+                    "storage_quota_mb",
+                    int(value),
+                    anchor=anchor,
+                    is_postgres_backend=is_postgres_backend,
+                )
                 try:
                     from tldw_Server_API.app.services.storage_quota_service import (
                         invalidate_storage_cache_for_user,
@@ -234,6 +315,7 @@ class UserProfileUpdateService:
                     repo = UserProfileOverridesRepo(self._db_pool)
                     await repo.ensure_tables()
                     repo_holder["repo"] = repo
+                await anchor.capture()
                 await repo.upsert_override(
                     user_id=user_id,
                     key=key,
@@ -241,6 +323,7 @@ class UserProfileUpdateService:
                     updated_by=updated_by,
                     db_conn=db_conn,
                 )
+                anchor.mark_changed()
             return True
 
         if key in {"limits.evaluations_per_minute", "limits.evaluations_per_day"}:
@@ -250,6 +333,7 @@ class UserProfileUpdateService:
                     repo = UserProfileOverridesRepo(self._db_pool)
                     await repo.ensure_tables()
                     repo_holder["repo"] = repo
+                await anchor.capture()
                 await repo.upsert_override(
                     user_id=user_id,
                     key=key,
@@ -257,6 +341,7 @@ class UserProfileUpdateService:
                     updated_by=updated_by,
                     db_conn=db_conn,
                 )
+                anchor.mark_changed()
                 try:
                     from tldw_Server_API.app.core.Evaluations.user_rate_limiter import (
                         UserTier,
@@ -299,6 +384,7 @@ class UserProfileUpdateService:
                     repo = UserProfileOverridesRepo(self._db_pool)
                     await repo.ensure_tables()
                     repo_holder["repo"] = repo
+                await anchor.capture()
                 await repo.upsert_override(
                     user_id=user_id,
                     key=key,
@@ -306,6 +392,7 @@ class UserProfileUpdateService:
                     updated_by=updated_by,
                     db_conn=db_conn,
                 )
+                anchor.mark_changed()
             return True
 
         if key == "memberships.orgs.role":
@@ -334,6 +421,7 @@ class UserProfileUpdateService:
                     is_platform_admin=is_platform_admin,
                 )
             if not dry_run:
+                await anchor.capture()
                 result = await update_org_member_role(
                     org_id=org_id,
                     user_id=user_id,
@@ -344,6 +432,7 @@ class UserProfileUpdateService:
                 if result.get("error") == "owner_required":
                     raise ValueError("owner_required")
                 await _touch_user_updated_at(db_conn, user_id)
+                anchor.mark_changed()
             return True
 
         if key == "memberships.teams.role":
@@ -375,6 +464,7 @@ class UserProfileUpdateService:
                     is_platform_admin=is_platform_admin,
                 )
             if not dry_run:
+                await anchor.capture()
                 result = await update_team_member_role(
                     team_id=team_id,
                     user_id=user_id,
@@ -383,6 +473,7 @@ class UserProfileUpdateService:
                 if not result:
                     raise ValueError("membership_not_found")
                 await _touch_user_updated_at(db_conn, user_id)
+                anchor.mark_changed()
             return True
 
         if key == "memberships.teams.member":
@@ -390,6 +481,7 @@ class UserProfileUpdateService:
                 raise ValueError("membership_context_unavailable")
             team_id, action, role = _parse_team_membership_payload(value)
             if not dry_run:
+                await anchor.capture()
                 team = await get_team(team_id)
                 if not team:
                     raise ValueError("team_not_found")
@@ -410,6 +502,7 @@ class UserProfileUpdateService:
                     if not res.get("removed"):
                         raise ValueError("membership_not_found")
                 await _touch_user_updated_at(db_conn, user_id)
+                anchor.mark_changed()
             return True
 
         return False
@@ -576,17 +669,40 @@ def _validate_numeric(entry: UserProfileCatalogEntry, value: float) -> tuple[boo
     return True, value, None
 
 
-async def _update_user_field(db_conn: Any, user_id: int, column: str, value: Any) -> None:
+async def _update_user_field(
+    db_conn: Any,
+    user_id: int,
+    column: str,
+    value: Any,
+    *,
+    anchor: _CallerOwnedAnchor,
+    is_postgres_backend: bool,
+) -> None:
     try:
-        update_user_sql_template = "UPDATE users SET {column} = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2"
-        update_user_sql = update_user_sql_template.format_map(locals())  # nosec B608
-        await db_conn.execute(
-            update_user_sql,
-            value,
-            user_id,
+        await anchor.capture()
+        placeholders = ("$1", "$2") if is_postgres_backend else ("?", "?")
+        update_user_sql_template = (
+            "UPDATE users SET {column} = {placeholders[0]}, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = {placeholders[1]}"
         )
+        update_user_sql = update_user_sql_template.format_map(locals())  # nosec B608
+        write_result = await anchor.gateway.execute_update(
+            db_conn,
+            user_id=user_id,
+            profile_visible_fields=(column,),
+            statement=update_user_sql,
+            parameters=(value, user_id),
+            ownership=UserVersionOwnership.CALLER_OWNS_ANCHOR,
+        )
+        if write_result.affected_user_ids:
+            anchor.mark_changed()
     except Exception as exc:
-        logger.error("Failed to update user field {} for user {}: {}", column, user_id, exc)
+        logger.bind(
+            operation="update_user_field",
+            field=column,
+            user_id=user_id,
+            exception_type=type(exc).__name__,
+        ).error("Failed to update user field")
         raise
 
 
@@ -597,7 +713,11 @@ async def _touch_user_updated_at(db_conn: Any, user_id: int) -> None:
             user_id,
         )
     except Exception as exc:
-        logger.error("Failed to update user timestamp for user {}: {}", user_id, exc)
+        logger.bind(
+            operation="update_user_timestamp",
+            user_id=user_id,
+            exception_type=type(exc).__name__,
+        ).error("Failed to update user timestamp")
         raise
 
 
@@ -630,7 +750,11 @@ async def _fetch_username(
                 raw = row[0]
         return str(raw) if raw is not None else None
     except Exception as exc:
-        logger.error("Failed to fetch username for user {}: {}", user_id, exc)
+        logger.bind(
+            operation="fetch_username",
+            user_id=user_id,
+            exception_type=type(exc).__name__,
+        ).error("Failed to fetch username")
         raise
 
 

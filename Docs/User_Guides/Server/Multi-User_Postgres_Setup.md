@@ -85,11 +85,10 @@ CREATE USER tldw_user WITH ENCRYPTED PASSWORD 'StrongPassword';
 GRANT ALL PRIVILEGES ON DATABASE tldw_users TO tldw_user;
 ```
 
-2) Ensure extension privileges for UUIDs:
-`tldw_server` attempts to enable `pgcrypto` (fallback: `uuid-ossp`) when creating the users table. If your DB user cannot create extensions, run once as a superuser:
+2) Confirm the PostgreSQL version:
+PostgreSQL 13+ provides `gen_random_uuid()` as a built-in function. `tldw_server` does not install database extensions during startup, so the application role does not need extension-management privileges.
 ```sql
-\c tldw_users
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+SHOW server_version;
 ```
 
 3) Configure `.env` (or export env vars):
@@ -129,7 +128,7 @@ curl -H "Authorization: Bearer <jwt>" \
 ## Troubleshooting
 - `JWT_SECRET_KEY must be set`: set a 32+ char key.
 - `SQLite is not supported in production`: set `DATABASE_URL` to Postgres and `tldw_production=true`.
-- `permission denied to create extension`: run `CREATE EXTENSION pgcrypto` as a Postgres superuser.
+- `function gen_random_uuid() does not exist`: upgrade to PostgreSQL 13 or newer.
 - Login fails after setup: re-run `AuthNZ.initialize` and confirm the admin user was created.
 
 ## Related docs
