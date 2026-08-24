@@ -36,6 +36,20 @@ async def test_parse_and_dispatch_time(monkeypatch):
     assert "Current time" in res.content
 
 
+@pytest.mark.unit
+def test_extract_slash_candidate_returns_unknown_macro_candidate():
+    assert command_router.extract_slash_candidate("/wrapup --preset dev") == ("wrapup", "--preset dev")
+    assert command_router.extract_slash_candidate(" /wrapup  ") == ("wrapup", None)
+    assert command_router.extract_slash_candidate("not a command") is None
+
+
+@pytest.mark.unit
+def test_core_parse_still_only_returns_registered_core_commands():
+    assert command_router.parse_slash_command("/time") == ("time", None)
+    assert command_router.parse_slash_command("/wrapup") is None
+    assert "time" in command_router.reserved_core_command_names()
+
+
 @pytest.mark.asyncio
 async def test_rate_limit_per_user_per_command(monkeypatch):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")

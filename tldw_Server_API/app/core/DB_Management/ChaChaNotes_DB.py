@@ -5927,6 +5927,92 @@ UPDATE db_schema_version
    AND version < 51;
 """
 
+    _CHAT_MACROS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS chat_macro_registry (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  name              TEXT NOT NULL,
+  command           TEXT NOT NULL,
+  description       TEXT,
+  enabled           BOOLEAN NOT NULL DEFAULT 1,
+  source            TEXT NOT NULL,
+  builtin_version   INTEGER,
+  schema_version    INTEGER NOT NULL,
+  digest            TEXT NOT NULL,
+  validation_status TEXT NOT NULL,
+  validation_error  TEXT,
+  updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at        DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS chat_macro_settings (
+  user_id       TEXT PRIMARY KEY,
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chat_macro_runs (
+  run_id               TEXT PRIMARY KEY,
+  user_id              TEXT NOT NULL,
+  macro_name           TEXT NOT NULL,
+  macro_command        TEXT NOT NULL,
+  macro_source         TEXT,
+  macro_version        INTEGER,
+  macro_digest         TEXT,
+  status               TEXT NOT NULL DEFAULT 'pending',
+  surface              TEXT,
+  conversation_id      TEXT,
+  workspace_id         TEXT,
+  acp_session_id       TEXT,
+  normalized_args      TEXT NOT NULL DEFAULT '{}',
+  output_profile       TEXT,
+  context_snapshot     TEXT,
+  model_selection      TEXT,
+  status_message_id    TEXT,
+  final_message_id     TEXT,
+  final_output         TEXT,
+  final_output_format  TEXT,
+  final_post_status    TEXT,
+  post_idempotency_key TEXT,
+  cancel_requested_at  DATETIME,
+  error_code           TEXT,
+  error_message        TEXT,
+  created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at           DATETIME,
+  completed_at         DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS chat_macro_run_branches (
+  branch_id            TEXT PRIMARY KEY,
+  run_id               TEXT NOT NULL REFERENCES chat_macro_runs(run_id) ON DELETE CASCADE,
+  step_id              TEXT NOT NULL,
+  label                TEXT,
+  status               TEXT NOT NULL DEFAULT 'pending',
+  attempt_count        INTEGER NOT NULL DEFAULT 0,
+  prompt_digest        TEXT,
+  output_text          TEXT,
+  citations            TEXT NOT NULL DEFAULT '[]',
+  usage                TEXT NOT NULL DEFAULT '{}',
+  acp_child_session_id TEXT,
+  retained             BOOLEAN NOT NULL DEFAULT 0,
+  error_code           TEXT,
+  error_message        TEXT,
+  created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at         DATETIME
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_macro_registry_user_command
+  ON chat_macro_registry(user_id, command);
+CREATE INDEX IF NOT EXISTS idx_chat_macro_runs_user_status_created
+  ON chat_macro_runs(user_id, status, created_at);
+DROP INDEX IF EXISTS idx_chat_macro_runs_post_idempotency_key_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_macro_runs_run_post_idempotency_key_unique
+  ON chat_macro_runs(run_id, post_idempotency_key)
+  WHERE post_idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_macro_run_branches_run_step
+  ON chat_macro_run_branches(run_id, step_id);
+"""
+
     _MIGRATION_SQL_V51_TO_V52 = """
 /*───────────────────────────────────────────────────────────────
   Migration to Version 52 - Source review plan storage (2026-07-09)
@@ -14827,6 +14913,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring SQLite source review schema: {exc}") from exc  # noqa: TRY003
 
+    def _ensure_chat_macros_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure chat macro storage tables and indexes exist for SQLite."""
+        try:
+            conn.executescript(self._CHAT_MACROS_SCHEMA_SQL)
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite chat macro schema: {exc}") from exc  # noqa: TRY003
+
     def _ensure_source_review_schema_postgres(self, conn: Any) -> None:
         """Ensure source review storage, indexes, and sync triggers exist for PostgreSQL."""
         statements = [
@@ -15023,6 +15116,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self.backend.execute(statement, connection=conn)
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL source review schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_chat_macros_schema_postgres(self, conn: Any) -> None:
+        """Ensure chat macro storage tables and indexes exist for PostgreSQL."""
+        try:
+            for statement in self._convert_sqlite_schema_to_postgres_statements(self._CHAT_MACROS_SCHEMA_SQL):
+                self.backend.execute(statement, connection=conn)
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL chat macro schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_workspace_assistant_defaults_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure Workspace Assistant Defaults storage exists for SQLite."""
@@ -15827,6 +15928,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
                         self._ensure_manuscript_annotations_schema_sqlite(conn)
                         self._ensure_source_review_schema_sqlite(conn)
+                        self._ensure_chat_macros_schema_sqlite(conn)
                         self._ensure_workspace_source_saved_view_schema_sqlite(conn)
                         # Seed/heal character_cards_fts before request traffic. Schema V4
                         # inserts "Default Assistant" before FTS triggers are created.
@@ -16452,6 +16554,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_workspace_activity_events_schema_sqlite(conn)
                 self._ensure_manuscript_annotations_schema_sqlite(conn)
                 self._ensure_source_review_schema_sqlite(conn)
+                self._ensure_chat_macros_schema_sqlite(conn)
                 self._ensure_workspace_source_saved_view_schema_sqlite(conn)
 
                 final_version_check = self._get_db_version(conn)
@@ -20422,6 +20525,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_workspace_subresource_schema_postgres(conn)
             self._ensure_workspace_file_inventory_schema_postgres(conn)
             self._ensure_workspace_migration_schema_postgres(conn)
+            self._ensure_chat_macros_schema_postgres(conn)
             self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
             self._ensure_chacha_rls_postgres(conn)
 

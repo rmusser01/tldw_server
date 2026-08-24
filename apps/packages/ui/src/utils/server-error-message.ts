@@ -46,6 +46,10 @@ export const sanitizeServerErrorMessage = (
     "$1=[redacted-secret]"
   )
   cleaned = cleaned.replace(
+    /\bAuthorization:\s*Bearer\s+[A-Za-z0-9._~+/_=-]{6,}\b/gi,
+    "[redacted bearer token]"
+  )
+  cleaned = cleaned.replace(
     /\bBearer\s+[A-Za-z0-9._~+/_=-]{6,}\b/gi,
     "Bearer [redacted-secret]"
   )

@@ -196,6 +196,7 @@
   "evaluationsSettingsNav": "Evaluations",
   "promptStudioNav": "Prompt Studio",
   "chatSettingsNav": "Chat",
+  "chatMacrosNav": "Chat Macros",
   "quickIngestSettingsNav": "Quick Ingest",
   "speechSettingsNav": "Speech",
   "audioSourcePicker": {

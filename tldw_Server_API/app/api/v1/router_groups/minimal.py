@@ -44,6 +44,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "paper_search",
     "chat",
     "chat_loop",
+    "chat_macros",
     "conversations_alias",
     "characters",
     "character_memory",

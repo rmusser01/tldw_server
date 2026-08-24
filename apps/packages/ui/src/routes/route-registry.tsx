@@ -117,6 +117,10 @@ const OptionChatSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/ChatSettings"),
   "ChatSettings"
 )
+const OptionChatMacrosSettings = createSettingsRoute(
+  () => import("~/components/Option/Settings/ChatMacrosSettings"),
+  "ChatMacrosSettings"
+)
 const OptionUiCustomization = createSettingsRoute(
   () => import("~/components/Option/Settings/ui-customization"),
   "UiCustomizationSettings"
@@ -231,6 +235,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     kind: "options",
     path: "/settings/chat",
     element: <OptionChatSettings />,
+  },
+  {
+    kind: "options",
+    path: "/settings/chat-macros",
+    element: <OptionChatMacrosSettings />,
   },
   {
     kind: "options",

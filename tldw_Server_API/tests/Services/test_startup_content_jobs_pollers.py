@@ -53,6 +53,7 @@ def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
+        "chat_macros_jobs_task",
         "llamacpp_acquisition_jobs_task",
         "visual_identity_jobs_task",
         "vn_asset_jobs_task",
@@ -87,6 +88,7 @@ def test_content_jobs_worker_specs_use_expected_names() -> None:
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
+        "chat_macros_jobs_task",
         "llamacpp_acquisition_jobs_task",
         "visual_identity_jobs_task",
         "vn_asset_jobs_task",
@@ -109,6 +111,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("media_ingest_jobs_task", "_run_media_ingest_jobs_worker_service"),
         ("media_ingest_heavy_jobs_task", "_run_media_ingest_heavy_jobs_worker_service"),
         ("reading_digest_jobs_task", "_run_reading_digest_jobs_worker_service"),
+        ("chat_macros_jobs_task", "_run_chat_macros_jobs_worker_service"),
         ("llamacpp_acquisition_jobs_task", "_run_llamacpp_acquisition_jobs_worker_service"),
         ("visual_identity_jobs_task", "_run_visual_identity_jobs_worker_service"),
         ("vn_asset_jobs_task", "_run_vn_asset_jobs_worker_service"),
@@ -135,6 +138,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("media_ingest_jobs_task", "media_ingest_jobs_task-stop"),
         ("media_ingest_heavy_jobs_task", "media_ingest_heavy_jobs_task-stop"),
         ("reading_digest_jobs_task", "reading_digest_jobs_task-stop"),
+        ("chat_macros_jobs_task", "chat_macros_jobs_task-stop"),
         ("llamacpp_acquisition_jobs_task", "llamacpp_acquisition_jobs_task-stop"),
         ("visual_identity_jobs_task", "visual_identity_jobs_task-stop"),
         ("vn_asset_jobs_task", "vn_asset_jobs_task-stop"),
@@ -168,6 +172,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
+        "chat_macros_jobs_task",
         "llamacpp_acquisition_jobs_task",
         "visual_identity_jobs_task",
         "vn_asset_jobs_task",
@@ -183,6 +188,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
                 "media_ingest_jobs_task": "MEDIA_INGEST_JOBS_WORKER_ENABLED",
                 "media_ingest_heavy_jobs_task": "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
                 "reading_digest_jobs_task": "READING_DIGEST_JOBS_WORKER_ENABLED",
+                "chat_macros_jobs_task": "CHAT_MACROS_JOBS_WORKER_ENABLED",
                 "llamacpp_acquisition_jobs_task": "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
                 "visual_identity_jobs_task": "VISUAL_IDENTITY_JOBS_WORKER_ENABLED",
                 "vn_asset_jobs_task": "VN_ASSET_JOBS_WORKER_ENABLED",
@@ -201,6 +207,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         (("slides",), {}),
         (("research-workspace-output-jobs",), {"default_stable": True}),
         (("reading",), {}),
+        (("chat-macros",), {}),
         (("llamacpp-acquisition",), {}),
         (("visual-identities",), {"default_stable": True}),
         (("vn-assets",), {"default_stable": True}),
@@ -254,6 +261,11 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         calls.append("reading-digest")
         return ("reading-stop", "reading-task")
 
+    async def _record_chat_macros(**kwargs):
+        del kwargs
+        calls.append("chat-macros")
+        return ("chat-stop", "chat-task")
+
     async def _record_llamacpp_acquisition(**kwargs):
         del kwargs
         calls.append("llamacpp-acquisition")
@@ -285,6 +297,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     monkeypatch.setattr(startup_pollers, "_start_research_workspace_output_jobs_worker", _record_research_output)
     monkeypatch.setattr(startup_pollers, "_start_media_ingest_jobs_workers", _record_media_ingest)
     monkeypatch.setattr(startup_pollers, "_start_reading_digest_jobs_worker", _record_reading_digest)
+    monkeypatch.setattr(startup_pollers, "_start_chat_macros_jobs_worker", _record_chat_macros)
     monkeypatch.setattr(
         startup_pollers,
         "_start_llamacpp_acquisition_jobs_worker",
@@ -309,6 +322,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         "research-output",
         "media-ingest",
         "reading-digest",
+        "chat-macros",
         "llamacpp-acquisition",
         "visual-identity",
         "vn-asset",
@@ -330,6 +344,8 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     assert handles.media_ingest_heavy_jobs_task == "media-heavy-task"
     assert handles.reading_digest_jobs_stop_event == "reading-stop"
     assert handles.reading_digest_jobs_task == "reading-task"
+    assert handles.chat_macros_jobs_stop_event == "chat-stop"
+    assert handles.chat_macros_jobs_task == "chat-task"
     assert handles.llamacpp_acquisition_jobs_stop_event == "llamacpp-stop"
     assert handles.llamacpp_acquisition_jobs_task == "llamacpp-task"
     assert handles.visual_identity_jobs_stop_event == "visual-identity-stop"
@@ -398,6 +414,11 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
     )
     monkeypatch.setattr(
         startup_pollers,
+        "_start_chat_macros_jobs_worker",
+        _record_worker("chat-macros", ("chat-stop", "chat-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
         "_start_llamacpp_acquisition_jobs_worker",
         _record_worker("llamacpp-acquisition", ("llamacpp-stop", "llamacpp-task")),
     )
@@ -436,6 +457,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
         "research-output": worker_inventory,
         "media-ingest": worker_inventory,
         "reading-digest": worker_inventory,
+        "chat-macros": worker_inventory,
         "llamacpp-acquisition": worker_inventory,
         "visual-identity": worker_inventory,
         "vn-asset": worker_inventory,
@@ -499,6 +521,14 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "reading",
             "reading_digest_jobs_task",
             "_run_reading_digest_jobs_worker_service",
+            {},
+        ),
+        (
+            "_start_chat_macros_jobs_worker",
+            "CHAT_MACROS_JOBS_WORKER_ENABLED",
+            "chat-macros",
+            "chat_macros_jobs_task",
+            "_run_chat_macros_jobs_worker_service",
             {},
         ),
         (

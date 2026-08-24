@@ -75,13 +75,14 @@ def is_authentication_required() -> bool:
     """
     return True
 from loguru import logger
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     get_chacha_db_for_user_id,
 )
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
     NOTES_SYNC_EXCEPTIONS,
     notes_sync_http_error,
@@ -293,6 +294,13 @@ from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
 from tldw_Server_API.app.core.Chat import command_router
+from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError, MacroValidationError
+from tldw_Server_API.app.core.Chat_Macros.jobs import enqueue_chat_macro_run_job
+from tldw_Server_API.app.core.Chat_Macros.context_snapshot import build_macro_context_snapshot
+from tldw_Server_API.app.core.Chat_Macros.parser import enforce_background_execution, parse_macro_args
+from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
+from tldw_Server_API.app.core.Chat_Macros.service import ChatMacroCatalogItem, ChatMacrosService
+from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
 from tldw_Server_API.app.core.Chat.validate_dictionary import validate_dictionary as _validate_dictionary
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
@@ -2053,6 +2061,229 @@ def _extract_assistant_text_from_completion_payload(payload: dict[str, Any]) -> 
     return _extract_text_from_message_content(message_block.get("content"))
 
 
+def _build_chat_macro_service(
+    *,
+    current_user: User,
+    chat_db: CharactersRAGDB,
+    user_base_dir: Any,
+) -> ChatMacrosService | None:
+    """Build the current user's macro service when durable context is available."""
+    user_id = getattr(current_user, "id", None)
+    if user_id is None or user_base_dir is None:
+        return None
+    repository = ChatMacroRepository(chat_db)
+    repository.ensure_ready()
+    return ChatMacrosService(
+        user_id=str(user_id),
+        storage=ChatMacroStorage(user_base_dir),
+        repository=repository,
+        core_commands=command_router.reserved_core_command_names(),
+    )
+
+
+def _find_enabled_chat_macro(
+    service: ChatMacrosService,
+    command: str,
+) -> ChatMacroCatalogItem | None:
+    """Return the enabled macro bound to a slash command, if one exists."""
+    normalized = str(command or "").strip().lower()
+    if not normalized:
+        return None
+    return next(
+        (item for item in service.list_macros() if item.enabled and item.command == normalized),
+        None,
+    )
+
+
+def _chat_macro_completion_payload(
+    *,
+    request_data: ChatCompletionRequest,
+    model: str | None,
+    content: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Build an OpenAI-compatible completion carrying chat macro metadata."""
+    return {
+        "id": f"chatmacro-{uuid.uuid4().hex[:12]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model or request_data.model or "chat-macro",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                    "metadata": {"chat_macro": metadata},
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "tldw_conversation_id": request_data.conversation_id,
+    }
+
+
+def _chat_macro_completion_response(
+    request_data: ChatCompletionRequest,
+    payload: dict[str, Any],
+) -> JSONResponse | StreamingResponse:
+    """Return JSON or OpenAI-compatible SSE according to the request stream flag."""
+    if not request_data.stream:
+        return JSONResponse(content=payload)
+    message = payload["choices"][0]["message"]
+    first_chunk = {
+        "id": payload["id"],
+        "object": "chat.completion.chunk",
+        "created": payload["created"],
+        "model": payload["model"],
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "content": message["content"],
+                    "metadata": message["metadata"],
+                },
+                "finish_reason": None,
+            }
+        ],
+    }
+    final_chunk = {
+        "id": payload["id"],
+        "object": "chat.completion.chunk",
+        "created": payload["created"],
+        "model": payload["model"],
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    frames = [
+        f"data: {json.dumps(first_chunk, separators=(',', ':'))}\n\n",
+        f"data: {json.dumps(final_chunk, separators=(',', ':'))}\n\n",
+        "data: [DONE]\n\n",
+    ]
+    return StreamingResponse(
+        iter(frames),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _chat_macro_error_payload(
+    *,
+    request_data: ChatCompletionRequest,
+    model: str | None,
+    command: str,
+    error_code: str,
+    public_error: str,
+) -> dict[str, Any]:
+    """Build a bounded chat-visible failure for a positively identified macro."""
+    return _chat_macro_completion_payload(
+        request_data=request_data,
+        model=model,
+        content=f"Could not run /{command}: {public_error}",
+        metadata={
+            "command": command,
+            "status": "error",
+            "error_code": error_code,
+            "error": public_error,
+        },
+    )
+
+
+class _ChatMacroJobsUnavailableError(RuntimeError):
+    """Raised when a macro run cannot be dispatched because Jobs is unavailable."""
+
+
+def _create_chat_macro_run_payload(
+    *,
+    request_data: ChatCompletionRequest,
+    service: ChatMacrosService,
+    item: ChatMacroCatalogItem,
+    raw_args: str | None,
+    selected_provider: str | None,
+    selected_model: str | None,
+    job_manager: Any | None,
+) -> dict[str, Any]:
+    """Create and enqueue a durable macro run, returning its status completion."""
+    normalized_args = parse_macro_args(
+        raw_args,
+        item.definition.args,
+        max_repeated_values=item.definition.execution.max_branches,
+    )
+    enforce_background_execution(normalized_args)
+    normalized_args["mode"] = str(
+        normalized_args.get("mode") or item.definition.execution.mode_default
+    )
+    output_profile = str(normalized_args.get("output_profile") or item.definition.output_profile)
+    resolved_profile = service.resolve_output_profile(output_profile)
+    normalized_args["output_profile"] = resolved_profile.name
+    if job_manager is None:
+        raise _ChatMacroJobsUnavailableError("Jobs manager unavailable.")
+
+    request_metadata = dict(request_data.__pydantic_extra__ or {})
+    snapshot = build_macro_context_snapshot(
+        chat_db=None,
+        conversation_id=request_data.conversation_id,
+        workspace_id=request_metadata.get("workspace_id"),
+        acp_session_id=request_metadata.get("acp_session_id"),
+        request_messages=request_data.messages,
+        model_selection={
+            "api_provider": selected_provider or request_data.api_provider,
+            "model": selected_model or request_data.model,
+        },
+        output_profile=resolved_profile.name,
+        request_metadata=request_metadata,
+    )
+    run = service.repository.create_run(
+        user_id=service.user_id,
+        macro_name=item.name,
+        macro_command=item.command,
+        macro_source=item.source,
+        macro_version=item.builtin_version,
+        macro_digest=item.digest,
+        normalized_args=normalized_args,
+        status="pending",
+        surface="chat",
+        conversation_id=request_data.conversation_id,
+        output_profile=resolved_profile.name,
+        workspace_id=snapshot.workspace_id,
+        acp_session_id=snapshot.acp_session_id,
+        context_snapshot=snapshot.model_dump(mode="json"),
+        model_selection=snapshot.model_selection,
+    )
+    try:
+        enqueue_chat_macro_run_job(
+            macro_run_id=run.run_id,
+            user_id=service.user_id,
+            macro_digest=item.digest,
+            normalized_args=normalized_args,
+            job_manager=job_manager,
+        )
+    except (MacroStorageError, TypeError, ValueError, RuntimeError) as exc:
+        service.repository.update_run_status(
+            run.run_id,
+            status="failed",
+            error_code="job_enqueue_failed",
+            error_message="Failed to enqueue macro run.",
+        )
+        raise MacroStorageError("Failed to enqueue macro run.") from exc
+
+    metadata = {
+        "run_id": run.run_id,
+        "name": item.name,
+        "command": item.command,
+        "status": run.status,
+        "detail_url": f"/api/v1/chat/macros/runs/{run.run_id}",
+        "output_profile": run.output_profile,
+    }
+    return _chat_macro_completion_payload(
+        request_data=request_data,
+        model=selected_model,
+        content=f"Started /{item.command}. Macro run {run.run_id} is pending.",
+        metadata=metadata,
+    )
+
+
 def _persona_memory_write_enabled(assistant_context: dict[str, Any] | None) -> bool:
     if not isinstance(assistant_context, dict):
         return False
@@ -3124,6 +3355,7 @@ async def create_chat_completion(
     audit_service=Depends(get_audit_service_for_user),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
     billing_org_id: int | None = Depends(get_billing_org_id),
+    job_manager: Any = Depends(try_get_job_manager),
     # background_tasks: BackgroundTasks = Depends(), # Replaced by starlette.background.BackgroundTask for StreamingResponse
 ):
     """
@@ -3349,6 +3581,7 @@ async def create_chat_completion(
         # Billing: initialized after request_json is available (see below)
         _billing_enforcer: LimitEnforcer | None = None
         _billing_enforcer_entered = False
+        chat_macro_intent: dict[str, Any] | None = None
 
         _track_request_cm = metrics.track_request(
             provider=provider, model=model, streaming=request_data.stream, client_id=client_id
@@ -3555,6 +3788,40 @@ async def create_chat_completion(
                                         request_data.messages.append(sys_msg)
                                     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as inj_err:
                                         logger.debug(f"Failed to append system injection message: {inj_err}")
+                        else:
+                            candidate = command_router.extract_slash_candidate(last_text)
+                            if candidate:
+                                macro_command, macro_args = candidate
+                                try:
+                                    macro_service = await asyncio.to_thread(
+                                        _build_chat_macro_service,
+                                        current_user=current_user,
+                                        chat_db=chat_db,
+                                        user_base_dir=user_base_dir,
+                                    )
+                                    macro_item = (
+                                        await asyncio.to_thread(
+                                            _find_enabled_chat_macro,
+                                            macro_service,
+                                            macro_command,
+                                        )
+                                        if macro_service is not None
+                                        else None
+                                    )
+                                except Exception as macro_error:  # noqa: BLE001 - discovery must fall through
+                                    logger.warning(
+                                        "Failed to resolve chat macro for /{}; continuing as normal chat: {}",
+                                        macro_command,
+                                        type(macro_error).__name__,
+                                    )
+                                else:
+                                    if macro_service is not None and macro_item is not None:
+                                        chat_macro_intent = {
+                                            "command": macro_command,
+                                            "raw_args": macro_args,
+                                            "service": macro_service,
+                                            "item": macro_item,
+                                        }
             except HTTPException as _cmd_err:
                 detail = getattr(_cmd_err, "detail", None)
                 if (
@@ -3908,6 +4175,60 @@ async def create_chat_completion(
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
                     logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
                     _billing_enforcer = None
+
+            if chat_macro_intent is not None:
+                macro_command = str(chat_macro_intent["command"])
+                try:
+                    macro_payload = await asyncio.to_thread(
+                        _create_chat_macro_run_payload,
+                        request_data=request_data,
+                        service=chat_macro_intent["service"],
+                        item=chat_macro_intent["item"],
+                        raw_args=chat_macro_intent.get("raw_args"),
+                        selected_provider=selected_provider,
+                        selected_model=selected_model,
+                        job_manager=job_manager,
+                    )
+                except MacroValidationError as macro_error:
+                    macro_payload = _chat_macro_error_payload(
+                        request_data=request_data,
+                        model=selected_model,
+                        command=macro_command,
+                        error_code="validation_error",
+                        public_error=str(macro_error)[:500],
+                    )
+                except _ChatMacroJobsUnavailableError:
+                    macro_payload = _chat_macro_error_payload(
+                        request_data=request_data,
+                        model=selected_model,
+                        command=macro_command,
+                        error_code="jobs_unavailable",
+                        public_error="Jobs manager unavailable.",
+                    )
+                except MacroStorageError as macro_error:
+                    logger.warning(
+                        "Failed to create chat macro run for /{}: {}",
+                        macro_command,
+                        type(macro_error).__name__,
+                    )
+                    macro_payload = _chat_macro_error_payload(
+                        request_data=request_data,
+                        model=selected_model,
+                        command=macro_command,
+                        error_code="storage_error",
+                        public_error="Macro storage is unavailable.",
+                    )
+
+                if _rg_handle_id and not rg_finalized:
+                    try:
+                        governor = getattr(request.app.state, "rg_governor", None)
+                        if governor is not None:
+                            await governor.commit(_rg_handle_id, actuals={"tokens": 0})
+                            rg_finalized = True
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as rg_error:
+                        logger.debug("RG macro zero-usage commit skipped/failed: {}", rg_error)
+                return _chat_macro_completion_response(request_data, macro_payload)
+
             try:
                 input_moderation_chat_type = await resolve_input_moderation_chat_type(
                     chat_db=chat_db,
