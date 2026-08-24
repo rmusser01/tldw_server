@@ -31,6 +31,7 @@ def gateway_config(
     model: str,
     voice: str,
     *,
+    speech_timeout_seconds: float | None = None,
     fallback: Mapping[str, Any] | None = None,
     formats: tuple[str, ...] = ("mp3",),
     supports_speed: bool = True,
@@ -39,7 +40,7 @@ def gateway_config(
     enabled: bool = True,
     conversion: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    config = {
         "enabled": enabled,
         "base_url": "https://speech.example/v1/",
         "speech_path": "audio/speech",
@@ -61,6 +62,9 @@ def gateway_config(
         "fallback": dict(fallback or {}),
         "conversion": dict(conversion or {}),
     }
+    if speech_timeout_seconds is not None:
+        config["speech_timeout_seconds"] = speech_timeout_seconds
+    return config
 
 
 def specs(
@@ -411,6 +415,26 @@ async def test_native_stream_success_preserves_caller_and_sets_safe_metadata_bef
     await result.audio_stream.aclose()
     assert registry.adapters[0].source.closed == 1
     assert registry.adapters[0].closed == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_speech_timeout_comes_from_backend_config() -> None:
+    gateway_specs = normalize_gateway_specs(
+        {},
+        {
+            "primary": gateway_config(
+                "Primary/Model",
+                "PrimaryVoice",
+                speech_timeout_seconds=12.5,
+            )
+        },
+    )
+    registry = FakeRegistry({"gateway:primary": [(MP3,)]})
+
+    result = await executor(registry, gateway_specs).execute(request(), user_id=7)
+    assert await collect(result) == MP3
+
+    assert registry.calls[0][1]["timeout_seconds"] == 12.5
 
 
 @pytest.mark.asyncio

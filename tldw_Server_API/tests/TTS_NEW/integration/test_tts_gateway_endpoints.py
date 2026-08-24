@@ -391,6 +391,55 @@ async def test_tts_catalog_routes_enforce_rate_limit_dependency(
     assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
 
 
+async def test_tts_catalog_routes_remain_public_with_server_credential_context(
+    test_client,
+) -> None:
+    catalog_user_ids: list[int | None] = []
+
+    class _Service:
+        async def get_capabilities(self):
+            return {"openai": {"models": ["tts-1"]}}
+
+        async def list_voices(self):
+            return {"openai": [{"id": "alloy"}]}
+
+        def get_status(self):
+            return {"providers": {"openai": {"available": True}}}
+
+        async def get_gateway_provider_catalog(
+            self,
+            *,
+            user_id: int | None,
+            backend: str | None = None,
+        ):
+            del backend
+            catalog_user_ids.append(user_id)
+            return {}
+
+    async def _get_service():
+        return _Service()
+
+    async def _reject_required_user():
+        raise HTTPException(status_code=401, detail="authentication required")
+
+    test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _get_service
+    test_client.app.dependency_overrides[audio_tts.get_request_user] = _reject_required_user
+    try:
+        providers = test_client.get("/api/v1/audio/providers")
+        model_info = test_client.get(
+            "/api/v1/audio/tts/providers/openai/model-info"
+        )
+        voices = test_client.get("/api/v1/audio/voices/catalog?provider=openai")
+    finally:
+        test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+        test_client.app.dependency_overrides.pop(audio_tts.get_request_user, None)
+
+    assert providers.status_code == status.HTTP_200_OK
+    assert model_info.status_code == status.HTTP_200_OK
+    assert voices.status_code == status.HTTP_200_OK
+    assert catalog_user_ids == [None, None, None]
+
+
 async def test_gateway_provider_and_model_scoped_voice_catalog(
     test_client,
     auth_headers,

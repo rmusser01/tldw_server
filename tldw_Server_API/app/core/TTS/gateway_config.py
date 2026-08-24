@@ -267,6 +267,7 @@ class GatewayConfig(_FrozenModel):
     headers: tuple[tuple[str, str], ...] = ()
     api_key: str | None = Field(default=None, repr=False)
     allow_user_api_key: bool = False
+    speech_timeout_seconds: float = Field(default=30.0, gt=0)
     default_model: str | None = None
     default_voice: str | None = None
     allowed_models: tuple[str, ...] | None = None
@@ -300,6 +301,7 @@ class GatewaySpec:
     headers: tuple[tuple[str, str], ...]
     api_key: str | None = dataclass_field(repr=False)
     allow_user_api_key: bool
+    speech_timeout_seconds: float
     default_model: str | None
     default_voice: str | None
     allowed_models: frozenset[str]
@@ -842,6 +844,7 @@ def _normalize_one(
         "discovery_query": discovery_query,
         "headers": headers,
         "allow_user_api_key": config.allow_user_api_key,
+        "speech_timeout_seconds": config.speech_timeout_seconds,
         "default_model": config.default_model,
         "default_voice": config.default_voice,
         "allowed_models": sorted(allowed_models),
@@ -869,6 +872,7 @@ def _normalize_one(
         headers=headers,
         api_key=config.api_key,
         allow_user_api_key=config.allow_user_api_key,
+        speech_timeout_seconds=config.speech_timeout_seconds,
         default_model=config.default_model,
         default_voice=config.default_voice,
         allowed_models=allowed_models,

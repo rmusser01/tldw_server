@@ -695,7 +695,7 @@ class GatewaySpeechExecutor:
             "capabilities": capabilities.model_dump(mode="python"),
             "source_format": attempt.source_format.value,
             "conversion_needed": attempt.requested_format is not attempt.source_format,
-            "timeout_seconds": 30.0,
+            "timeout_seconds": spec.speech_timeout_seconds,
         }
 
     async def _convert(self, prepared: _PreparedAttempt, source: bytes) -> bytes:

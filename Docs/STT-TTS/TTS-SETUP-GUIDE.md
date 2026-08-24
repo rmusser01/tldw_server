@@ -36,9 +36,11 @@ examples for both backends. To enable one:
    credential source.
 3. Review its fallback targets. Enable and configure every target, or set
    `max_attempts: 1` with an empty target list before canarying only one backend.
-4. Set `enabled: true` and restart the server. Gateway definitions are validated
+4. Set `speech_timeout_seconds` to the maximum duration of one upstream
+   synthesis request (default: 30 seconds).
+5. Set `enabled: true` and restart the server. Gateway definitions are validated
    and registered at startup; hot reload is not supported in this release.
-5. Confirm the canonical ID and effective catalog with
+6. Confirm the canonical ID and effective catalog with
    `GET /api/v1/audio/providers` before sending synthesis traffic.
 
 OpenRouter currently documents an OpenAI-compatible speech endpoint and model

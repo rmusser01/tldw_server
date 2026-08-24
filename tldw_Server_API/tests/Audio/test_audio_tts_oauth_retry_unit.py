@@ -328,6 +328,24 @@ async def test_list_tts_voices_failure_log_is_sanitized(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_speech_iterator_close_failure_is_logged_without_exception_text(monkeypatch):
+    class _FailingCloseIterator:
+        async def aclose(self):
+            raise RuntimeError("iterator close leaked /private/tts-close.json")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    await audio_tts._close_speech_iterator(_FailingCloseIterator())
+
+    fake_logger.bind.assert_called_once_with(error_type="RuntimeError")
+    fake_logger.bind.return_value.warning.assert_called_once_with(
+        "Failed to close TTS speech iterator"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_reset_tts_metrics_failure_log_is_sanitized(monkeypatch):
     class _FailingTTSService:
         def reset_metrics(self):

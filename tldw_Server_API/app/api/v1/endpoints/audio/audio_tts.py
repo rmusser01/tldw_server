@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     check_rate_limit,
+    get_auth_principal,
     get_request_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
@@ -32,6 +33,7 @@ from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error, _sa
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -172,10 +174,14 @@ async def _close_speech_iterator(speech_iter: Any) -> None:
     """Close the endpoint-owned iterator when consumption stops for any reason."""
     close = getattr(speech_iter, "aclose", None)
     if callable(close):
-        with contextlib.suppress(Exception, asyncio.CancelledError):
+        try:
             result = close()
             if inspect.isawaitable(result):
                 await result
+        except Exception as exc:
+            logger.bind(error_type=type(exc).__name__).warning(
+                "Failed to close TTS speech iterator"
+            )
 
 
 def _append_gateway_response_headers(
@@ -202,6 +208,31 @@ def _request_user_id(current_user: User) -> int:
     """Return the authenticated integer user identity used by TTS runtime."""
     try:
         return int(current_user.id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user identity is invalid",
+        ) from exc
+
+
+async def _get_optional_tts_catalog_principal(
+    request: Request,
+) -> AuthPrincipal | None:
+    """Return authenticated catalog identity while preserving public reads."""
+    try:
+        return await get_auth_principal(request)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            return None
+        raise
+
+
+def _tts_catalog_user_id(principal: AuthPrincipal | None) -> int | None:
+    """Return optional user identity for credential-scoped gateway discovery."""
+    if principal is None or principal.user_id is None:
+        return None
+    try:
+        return int(principal.user_id)
     except (TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1497,7 +1528,7 @@ async def create_speech_metadata(
 async def list_tts_providers(
     request: Request,
     tts_service: TTSServiceV2 = Depends(get_tts_service),
-    current_user: User = Depends(get_request_user),
+    principal: AuthPrincipal | None = Depends(_get_optional_tts_catalog_principal),
 ):
     """
     List all available TTS providers and their capabilities.
@@ -1509,7 +1540,7 @@ async def list_tts_providers(
         voices = await tts_service.list_voices()
         gateway_catalog = getattr(tts_service, "get_gateway_provider_catalog", None)
         if callable(gateway_catalog):
-            dynamic = await gateway_catalog(user_id=_request_user_id(current_user))
+            dynamic = await gateway_catalog(user_id=_tts_catalog_user_id(principal))
             if isinstance(dynamic, dict):
                 capabilities = {**capabilities, **dynamic}
 
@@ -1537,7 +1568,7 @@ async def get_tts_provider_model_info(
     provider: str,
     request: Request,
     tts_service: TTSServiceV2 = Depends(get_tts_service),
-    current_user: User = Depends(get_request_user),
+    principal: AuthPrincipal | None = Depends(_get_optional_tts_catalog_principal),
 ):
     """Return focused status and capability metadata for one TTS provider."""
     request_id = ensure_request_id(request)
@@ -1546,7 +1577,7 @@ async def get_tts_provider_model_info(
         gateway_catalog = getattr(tts_service, "get_gateway_provider_catalog", None)
         if callable(gateway_catalog):
             dynamic = await gateway_catalog(
-                user_id=_request_user_id(current_user),
+                user_id=_tts_catalog_user_id(principal),
                 backend=provider,
             )
             gateway_info = dynamic.get(provider_key) if isinstance(dynamic, dict) else None
@@ -1648,7 +1679,7 @@ async def list_tts_voices(
     model: Optional[str] = None,
     catalog_format: Optional[str] = Query(default=None, alias="format"),
     tts_service: TTSServiceV2 = Depends(get_tts_service),
-    current_user: User = Depends(get_request_user),
+    principal: AuthPrincipal | None = Depends(_get_optional_tts_catalog_principal),
 ):
     """
     List available voices from TTS providers.
@@ -1663,7 +1694,7 @@ async def list_tts_voices(
             gateway_catalog = getattr(tts_service, "get_gateway_provider_catalog", None)
             if callable(gateway_catalog):
                 dynamic = await gateway_catalog(
-                    user_id=_request_user_id(current_user),
+                    user_id=_tts_catalog_user_id(principal),
                     backend=provider,
                 )
                 gateway_info = dynamic.get(provider_key) if isinstance(dynamic, dict) else None

@@ -473,7 +473,7 @@ class TTSServiceV2:
         self,
         request: TTSRequest,
         *,
-        user_id: int,
+        user_id: int | None,
         voice_manager: Any,
         metadata: Optional[Any],
     ) -> None:
@@ -1521,10 +1521,10 @@ class TTSServiceV2:
     async def get_gateway_provider_catalog(
         self,
         *,
-        user_id: int,
+        user_id: int | None,
         backend: str | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Return safe per-user catalog overlays for enabled explicit gateways."""
+        """Return safe credential-scoped catalog overlays for enabled gateways."""
         manager = self.gateway_config_manager
         resolver = self.gateway_credential_resolver
         if manager is None or resolver is None:

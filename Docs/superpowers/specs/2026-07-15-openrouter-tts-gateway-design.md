@@ -153,6 +153,7 @@ providers:
     speech_path: audio/speech
     api_key: ${OPENROUTER_API_KEY}
     allow_user_api_key: true
+    speech_timeout_seconds: 30
     default_model: ${OPENROUTER_TTS_MODEL}
     default_voice: ${OPENROUTER_TTS_VOICE}
 
@@ -199,6 +200,7 @@ gateways:
     speech_path: audio/speech
     api_key: ${COMPANY_TTS_KEY}
     allow_user_api_key: true
+    speech_timeout_seconds: 30
     default_model: Vendor/Expressive-TTS
     default_voice: narrator
 

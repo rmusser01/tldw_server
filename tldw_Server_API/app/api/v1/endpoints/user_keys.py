@@ -444,6 +444,7 @@ def _metadata_key_contains_gateway_authority(key: Any) -> bool:
 
 
 def _metadata_contains_gateway_authority(value: Any) -> bool:
+    """Return whether nested metadata contains gateway authority fields."""
     if isinstance(value, Mapping):
         for key, child in value.items():
             if _metadata_key_contains_gateway_authority(key):
@@ -456,6 +457,7 @@ def _metadata_contains_gateway_authority(value: Any) -> bool:
 
 
 def _is_named_user_key_gateway(provider: str, gateway_spec: Any | None) -> bool:
+    """Return whether a named gateway accepts per-user credentials."""
     return (
         provider.startswith("gateway:")
         and gateway_spec is not None
@@ -464,6 +466,7 @@ def _is_named_user_key_gateway(provider: str, gateway_spec: Any | None) -> bool:
 
 
 def _validate_gateway_metadata(provider: str, metadata: dict[str, Any] | None) -> None:
+    """Reject user metadata that could override named gateway authority."""
     if (
         provider.startswith("gateway:")
         and metadata is not None
@@ -476,6 +479,7 @@ def _validate_gateway_metadata(provider: str, metadata: dict[str, Any] | None) -
 
 
 def _gateway_verification_from_row(row: dict[str, Any] | None) -> str | None:
+    """Read the safe gateway credential verification marker from a row."""
     metadata = _row_metadata(row)
     if not metadata:
         return None
@@ -487,6 +491,7 @@ def _with_gateway_verification(
     metadata: dict[str, Any] | None,
     verification_status: str | None,
 ) -> dict[str, Any] | None:
+    """Return metadata with a recognized gateway verification marker."""
     if verification_status not in {"verified", "stored-unverified"}:
         return metadata
     merged = dict(metadata or {})
