@@ -3,27 +3,18 @@ id: TASK-13114
 title: Implement Chat Macros v1.1 authoring and output profiles
 status: Done
 assignee: []
-created_date: 2026-08-24 04:15
-updated_date: 2026-08-24 07:59
+created_date: '2026-08-24 04:15'
+updated_date: '2026-08-24 08:13'
 labels:
-- chat-macros
-- frontend
-- backend
+  - chat-macros
+  - frontend
+  - backend
 dependencies:
-- TASK-12126
+  - TASK-12126
 documentation:
-- Docs/superpowers/specs/2026-07-03-chat-macros-design.md
-- Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
+  - Docs/superpowers/specs/2026-07-03-chat-macros-design.md
+  - Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
 priority: medium
-modified_files:
-- apps/packages/ui/src/components/Option/Settings/ChatMacroEditor.tsx
-- apps/packages/ui/src/components/Option/Settings/ChatMacrosSettings.tsx
-- apps/packages/ui/src/components/Option/Settings/__tests__/ChatMacroEditor.test.tsx
-- apps/packages/ui/src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx
-- tldw_Server_API/app/core/Chat_Macros/settings.py
-- tldw_Server_API/app/core/Chat_Macros/README.md
-- tldw_Server_API/tests/Chat_Macros/unit/test_macro_service.py
-- tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py
 ---
 
 ## Description
@@ -50,6 +41,7 @@ Detailed TDD plan: Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_a
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-23 baseline: backend Chat_Macros suite passed 134 tests with 2 warnings. ChatMacrosSettings frontend component suite passed 4 tests. The frontend service suite could not collect in this isolated worktree because wxt/browser was unresolved across the monorepo dependency roots; stop-after-three-attempts rule applied and the plan requires a complete workspace dependency layout before Task 2.
 
@@ -64,10 +56,19 @@ Known deferred minor improvements from scoped reviews: complete WAI-ARIA tab key
 Final-review TDD evidence: RED frontend run failed 4 targeted cases (source-mode controls, import replay, selection change/dirty draft loss, stale copy error) with 29 unrelated cases passing; RED backend run failed the unit and API unknown-key cases with 22 unrelated cases passing. GREEN: 63/63 focused frontend authoring/profile/service tests and 140/140 full Chat_Macros backend tests passed. Bandit scanned 44 LOC in settings.py with 0 findings and 0 errors. git diff --check passed. ARIA tabs remains deferred as requested.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+Final review closeout: the independent whole-branch review identified four blocking authoring/persistence defects. Commit 58eaf7ccbfa fixed source-mode canonical-field affordances, stable catalog refresh/selection, import consumption, unknown top-level settings preservation, stale copy errors, and README validation wording. Scoped re-review confirmed three blockers resolved but correctly rejected losing the edited import on tab unmount. Commit cbb3a52657 then kept both panels mounted/hidden, added tabpanel relationships, and changed the regression to require the edited import to survive a full tab round trip. Live browser verification returned the exact edited YAML after Macros -> Output profiles -> Macros.
+
+Final evidence: frontend 97 passed (63 authoring/profile/service, 33 workspace run/cancel/retry, 1 WebUI route); backend Chat_Macros plus Jobs startup 146 passed with 2 existing warnings; Bandit 0 findings/0 errors across 3,564 LOC; git diff --check clean; branch current with origin/dev; desktop and mobile document widths equal viewports. Package TypeScript remains exit 2 on the unchanged 304-line repository baseline, with no diagnostics naming touched Chat Macros files. Final screenshots: /tmp/chat-macros-v1-1-visual-qa/desktop-macros-final.png and mobile-macros-final.png.
+
+Remaining non-blocking follow-ups: add roving Arrow/Home/End behavior to the tabs (tabpanel relationships are now present); strengthen deferred validation-order and delete failure/cancel cases; replace the existing global fixed N control behavior that overlaps lower mobile content in the wider settings shell. None is introduced as a functional blocker by this branch.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the bounded Chat Macros v1.1 final-review round. Source-mode command/description controls now reflect YAML ownership; catalog refreshes and toggles preserve stable selection and dirty drafts; imports are consumed once; unknown settings survive normalized API round trips via deep copy; successful copy clears stale errors; and README identity-validation wording now matches runtime behavior. Added focused frontend, backend unit, and API regressions for each behavioral finding.
+Delivered Chat Macros v1.1 authoring and configurable output profiles on codex/chat-macros-v1-1. Users can create, validate, edit, import, export, clone, enable/disable, and delete user macros while built-ins remain immutable; advanced YAML stays canonical, dirty drafts survive refreshes and tab changes, and imports remain one-shot without losing edits. Output profiles support structured or single responses, ordered sections, custom headings, and branch-output inclusion while preserving unknown future settings. Backend identity, ownership, validation, path, and size protections remain authoritative.
+
+Independent whole-branch review and scoped re-review findings were resolved. Final verification: 97 frontend tests, 146 backend/Jobs tests, Bandit with zero findings across 3,564 LOC, clean diff checks, responsive live browser QA, and no Chat Macros diagnostics within the known package-wide TypeScript baseline.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
