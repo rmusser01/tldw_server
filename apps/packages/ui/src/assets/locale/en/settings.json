@@ -42,6 +42,10 @@
       "mediaTextTranslation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation."
+      },
+      "notesTitleGenerate": {
+        "label": "Notes title",
+        "description": "Controls the wording used by LLM-backed automatic Notes titles."
       }
     },
     "workflows": {
@@ -52,7 +56,8 @@
       "mainChatWebSearch": "Main chat web search",
       "compareWebSearch": "Compare web search",
       "automaticConversationTitles": "Automatic conversation titles",
-      "textTranslation": "Text translation"
+      "textTranslation": "Text translation",
+      "automaticNotesTitles": "Automatic Notes titles"
     },
     "titleGeneration": {
       "note": "Automatic title generation is enabled or disabled in Chat settings.",
@@ -61,6 +66,7 @@
     "parts": {
       "template": "Template",
       "system": "System instructions",
+      "titleInstruction": "Title instruction",
       "userTemplate": "User template"
     },
     "scope": {

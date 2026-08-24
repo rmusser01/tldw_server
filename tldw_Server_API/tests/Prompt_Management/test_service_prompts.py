@@ -74,6 +74,15 @@ EXPECTED_REGISTRY = {
         ),
         "workflows": (("media.text.translation", "Text translation"),),
     },
+    "notes.title.generate": {
+        "label": "Notes title",
+        "description": "Controls the wording used by LLM-backed automatic Notes titles.",
+        "parts": (
+            ("system", "System instructions", "literal", ()),
+            ("title_instruction", "Title instruction", "literal", ()),
+        ),
+        "workflows": (("notes.title.generate", "Automatic Notes titles"),),
+    },
 }
 
 

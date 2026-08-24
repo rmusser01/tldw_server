@@ -197,6 +197,28 @@ const catalog: ServicePromptCatalogItem[] = [
     affected_workflows: [
       { id: "chat.title.generation", label: "Server title workflow" }
     ]
+  },
+  {
+    id: "notes.title.generate",
+    label: "Server Notes title prompt",
+    description: "Server Notes title prompt description",
+    parts: [
+      {
+        key: "system",
+        label: "Server system label",
+        mode: "literal",
+        required_variables: []
+      },
+      {
+        key: "title_instruction",
+        label: "Server title instruction label",
+        mode: "literal",
+        required_variables: []
+      }
+    ],
+    affected_workflows: [
+      { id: "notes.title.generate", label: "Server Notes title workflow" }
+    ]
   }
 ]
 
@@ -219,6 +241,11 @@ const detailFor = (
       ? { template: "History: {chat_history}\nQuestion: {question}" }
       : definition.id === "chat.title.generation"
         ? { user_template: "Create a short title for {query}" }
+      : definition.id === "notes.title.generate"
+        ? {
+            system: "Write concise document titles.",
+            title_instruction: "Write a descriptive title"
+          }
         : { template: "At {current_date_time}:\n{search_results}" }
   const effective = options.parts ?? defaults
   const source = options.source ?? "packaged"
@@ -445,7 +472,7 @@ describe("ServicePromptsSettings", () => {
     expect(document.querySelector("h1")).toBeNull()
   })
 
-  it("renders the five localized definitions, query selection, status, workflows, and exact scope", async () => {
+  it("renders the six localized definitions, query selection, status, workflows, and exact scope", async () => {
     window.history.replaceState(
       {},
       "",
@@ -454,7 +481,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(5)
+      .toHaveLength(6)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -477,6 +504,22 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("Automatic conversation titles")).toBeVisible()
     expect(screen.getByRole("link", { name: "Open Chat settings" }))
       .toHaveAttribute("href", "/settings/chat")
+  })
+
+  it("localizes and edits the Notes title prompt", async () => {
+    renderSettings()
+
+    await openPrompt("Notes title")
+
+    expect(screen.getByRole("heading", { name: "Notes title" })).toBeVisible()
+    expect(screen.getByLabelText("System instructions")).toHaveValue(
+      "Write concise document titles."
+    )
+    expect(screen.getByLabelText("Title instruction")).toHaveValue(
+      "Write a descriptive title"
+    )
+    expect(screen.getByText("Automatic Notes titles")).toBeVisible()
+    expect(screen.queryByText("Server Notes title prompt")).not.toBeInTheDocument()
   })
 
   it("uses the Prompts Link and reverses dirty HashRouter Back and Forward", async () => {

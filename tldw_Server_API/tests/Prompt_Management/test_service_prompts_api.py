@@ -35,6 +35,12 @@ CUSTOM_PARTS = {
 TITLE_ID = "chat.title.generation"
 TITLE_PATH = f"/api/v1/service-prompts/{TITLE_ID}"
 TITLE_CUSTOM_PARTS = {"user_template": "Name this request: {query}"}
+NOTES_TITLE_ID = "notes.title.generate"
+NOTES_TITLE_PATH = f"/api/v1/service-prompts/{NOTES_TITLE_ID}"
+NOTES_TITLE_CUSTOM_PARTS = {
+    "system": "Write note titles in the account style.",
+    "title_instruction": "Create a specific note title",
+}
 
 
 def _principal(*, api_key_id: int | None = None) -> AuthPrincipal:
@@ -185,6 +191,28 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
                 {"id": "media.text.translation", "label": "Text translation"}
             ],
         },
+        {
+            "id": "notes.title.generate",
+            "label": "Notes title",
+            "description": "Controls the wording used by LLM-backed automatic Notes titles.",
+            "parts": [
+                {
+                    "key": "system",
+                    "label": "System instructions",
+                    "mode": "literal",
+                    "required_variables": [],
+                },
+                {
+                    "key": "title_instruction",
+                    "label": "Title instruction",
+                    "mode": "literal",
+                    "required_variables": [],
+                },
+            ],
+            "affected_workflows": [
+                {"id": "notes.title.generate", "label": "Automatic Notes titles"}
+            ],
+        },
     ]
     assert "You are a helpful AI assistant" not in response.text
 
@@ -212,6 +240,23 @@ def test_title_prompt_can_be_saved_and_reset_through_generic_api(api_context) ->
 
     reset = api_context.client.delete(
         TITLE_PATH,
+        params={"expected_revision": saved.json()["revision"]},
+    )
+    assert reset.status_code == 200
+    assert reset.json()["source"] == "packaged"
+    assert reset.json()["effective_parts"] == reset.json()["default_parts"]
+
+
+def test_notes_title_prompt_can_be_saved_and_reset_through_generic_api(api_context) -> None:
+    saved = api_context.client.put(
+        NOTES_TITLE_PATH,
+        json={"parts": NOTES_TITLE_CUSTOM_PARTS, "expected_revision": None},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["effective_parts"] == NOTES_TITLE_CUSTOM_PARTS
+
+    reset = api_context.client.delete(
+        NOTES_TITLE_PATH,
         params={"expected_revision": saved.json()["revision"]},
     )
     assert reset.status_code == 200
