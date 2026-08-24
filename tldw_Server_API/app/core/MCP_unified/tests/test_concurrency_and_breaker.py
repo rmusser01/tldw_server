@@ -1,5 +1,6 @@
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -10,6 +11,8 @@ from tldw_Server_API.app.core.MCP_unified.modules.base import (
     ModuleCircuitBreakerOpenError,
     ModuleConfig,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class SlowModule(BaseModule):
@@ -60,7 +63,7 @@ async def test_per_module_concurrency_guard_limits_parallelism():
 
 
 @pytest.mark.asyncio
-async def test_per_module_concurrency_queue_wait_is_bounded_by_operation_timeout():
+async def test_per_module_concurrency_queue_wait_is_bounded_by_operation_timeout() -> None:
     mod = SlowModule(
         ModuleConfig(name="bounded_queue", max_concurrent=1, timeout_seconds=0.01)
     )
@@ -80,13 +83,13 @@ async def test_per_module_concurrency_queue_wait_is_bounded_by_operation_timeout
 
 
 @pytest.mark.asyncio
-async def test_admission_check_dispatches_before_scheduled_definition_drift():
+async def test_admission_check_dispatches_before_scheduled_definition_drift() -> None:
     mod = SlowModule(ModuleConfig(name="admission_handoff", max_concurrent=1))
     definition = {"version": "prepared"}
     observed_versions: list[str] = []
 
     class _MutatingBreaker:
-        async def call_async(self, operation):
+        async def call_async(self, operation: Callable[[], Awaitable[Any]]) -> Any:
             definition["version"] = "changed"
             return await operation()
 
@@ -107,7 +110,7 @@ async def test_admission_check_dispatches_before_scheduled_definition_drift():
 
 
 @pytest.mark.asyncio
-async def test_open_breaker_rejects_before_saturated_concurrency_queue():
+async def test_open_breaker_rejects_before_saturated_concurrency_queue() -> None:
     mod = FlappyModule(
         ModuleConfig(
             name="open_before_queue",

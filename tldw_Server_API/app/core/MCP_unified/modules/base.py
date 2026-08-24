@@ -37,16 +37,20 @@ class AdmittedModuleOperation:
         admission_check: Callable[[], Awaitable[None]],
         operation: Callable[..., Awaitable[Any]],
     ) -> None:
+        """Store the final admission check and admitted operation."""
         self._admission_check = admission_check
         self._operation = operation
 
     async def admit(self) -> None:
+        """Run the final admission check without entering breaker accounting."""
         await self._admission_check()
 
     async def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        """Invoke the operation after admission has already succeeded."""
         return await self._operation(*args, **kwargs)
 
     async def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Admit and invoke the operation in the required order."""
         await self.admit()
         return await self.invoke(*args, **kwargs)
 

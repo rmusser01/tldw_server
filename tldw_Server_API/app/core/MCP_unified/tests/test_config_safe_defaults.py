@@ -6,6 +6,8 @@ from tldw_Server_API.app.core.MCP_unified import config as config_module
 from tldw_Server_API.app.core.MCP_unified.config import _is_local_only_safe_profile, get_config, validate_config
 from tldw_Server_API.app.core.MCP_unified.tests.support import SAFE_DEFAULT_ENV_VARS
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _clear_mcp_config_cache(monkeypatch):
