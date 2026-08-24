@@ -21,6 +21,14 @@ The design is based on refreshed `origin/dev` commit
 and dirty, so implementation must use an isolated worktree based on refreshed
 `origin/dev` and must not modify or reset the local checkout.
 
+Immediately before implementation begins, fetch `origin/dev` and compare it with
+the recorded baseline. If it is unchanged, proceed from the pinned commit. If it
+has advanced, do not silently mix the new code with these characterization
+results: inspect the intervening commits for hierarchy or `process_text` changes,
+rebase the isolated branch onto the new `origin/dev`, update the baseline hash in
+this spec and the Backlog task, and rerun the focused characterization suite before
+editing production code. Any resulting contract change returns to design review.
+
 Focused baseline verification on the isolated worktree passed:
 
 - 92 tests collected
@@ -161,9 +169,21 @@ Use a frozen internal dataclass to carry:
 - shallow-copied method options
 - `sanitize_output`
 
+Method-option preparation preserves the current order and failure behavior:
+
+1. Create `method_options` with `dict(method_options or {})`.
+2. Default `sanitize_output` to `True`.
+3. When the key exists, evaluate `bool(method_options.get("sanitize_output"))`
+   inside the current noncritical-exception policy and fall back to `True` when
+   that evaluation raises a covered exception.
+4. Remove `sanitize_output` from the copied options before method resolution and
+   before every leaf strategy call.
+5. Preserve the identities of all other nested option values.
+
 The model must not introduce validation or coercion absent from current behavior.
-In particular, option values retain current truthiness and type behavior, and
-nested method-option objects retain their identities.
+In particular, resolved option values retain current truthiness and runtime type
+behavior. Internal annotations use `Any` where the existing API admits uncoerced
+values; the frozen model does not add `__post_init__` validation.
 
 Public hierarchy trees and chunks remain dictionaries.
 
@@ -181,6 +201,15 @@ supported internal detector. It preserves current handling for:
 - safe custom template boundary kinds
 - template rule count and pattern-length caps
 - regex-safety checks, flags, warnings, and fallback behavior
+
+The first extraction preserves the current helper lookup behavior rather than
+hardening it implicitly. Boundary preparation uses `check_pattern` and
+`compile_flags`; failure under the current noncritical-exception policy disables
+custom template patterns for that call. Accepted patterns use `safe_search` when
+its call-time lookup succeeds. If that lookup raises a covered exception, matching
+falls back to the compiled pattern's direct `search`, and per-pattern search
+failures continue to skip that pattern. Changing or removing this fallback is a
+security hardening change and must pass the behavior-correction gate separately.
 
 Tree construction and multi-level `process_text` dispatch import this function
 directly from `hierarchical.spans`.
@@ -250,8 +279,14 @@ fields for empty input.
 
 - rewrite methods emit rewritten text with `None` offsets and
   `offsets_valid=False`;
-- words and sentences prefer metadata offsets, then use bounded source search;
-- tokens prefer metadata offsets, then use the current fallback;
+- words and sentences make one metadata-bearing strategy call on the successful
+  path; returned results with missing or non-integer offsets are skipped rather
+  than retried;
+- tokens have the same per-result skip behavior for missing or non-integer
+  metadata offsets;
+- words, sentences, and tokens enter their local plain `chunk_text` fallback only
+  when the metadata-bearing call raises an exception covered by the current local
+  policy;
 - structure-aware mode carries the exact block span;
 - other methods use rolling, segment-bounded source search;
 - the last-resort mapping remains bounded to the source block and makes monotonic
@@ -260,6 +295,19 @@ fields for empty input.
 Sanitized and raw source slices retain their current selection behavior. The
 refactor does not reinterpret missing metadata, change exception breadth, or
 normalize questionable offsets unless a separate correction satisfies the gate.
+
+Leaf call multiplicity and order are compatibility behavior because rewrite
+methods can invoke external or LLM-backed work. Per non-empty source block, a
+successful rewrite or ordinary-method path calls `chunk_text` once; a successful
+words, sentences, or tokens path calls `chunk_text_with_metadata` once and
+`chunk_text` zero times; an exception fallback calls metadata first and plain
+chunking second; and structure-aware mode calls neither leaf API. The outer
+last-resort path reuses already computed chunks and calls `chunk_text` only when no
+plain result has been obtained. Consequently, when an earlier plain `chunk_text`
+attempt itself raises a covered exception, the current outer fallback makes one
+additional plain attempt. The extraction preserves that bounded existing retry
+but must not add preflight calls, retries, or duplicate invocations beyond these
+characterized paths.
 
 ## Flattening And Grouping Data Flow
 
@@ -274,15 +322,21 @@ adding a schema validator:
    weighted grouping to `grouping.py`.
 5. Preserve header buffering, separators, language-sensitive joining, overlap,
    element weights, and source-offset aggregation.
-6. Copy chunk metadata before adding ancestry, section path, normalized chunk
-   type, chunk index, and total count.
+6. Shallow-copy the top-level chunk metadata dictionary before adding ancestry,
+   section path, normalized chunk type, chunk index, and total count.
 7. Return fresh flat chunk dictionaries.
 
 The implementation must characterize selected partial and malformed trees and
 preserve their exact current result or exception. It must not assume all malformed
 children are skipped, because current behavior is not uniformly tolerant.
 
-Input trees and nested metadata are not mutated by flatten-added fields.
+Flattening creates a fresh flat chunk dictionary and a fresh top-level metadata
+dictionary for each output row. Existing nested mutable metadata values retain
+their identities; this is a shallow copy, not deep isolation. The traversal's
+current `ancestry_titles` list is assigned directly and may therefore be shared by
+multiple output rows in the same ancestry context. Flattening itself does not
+mutate caller-owned nested values, but later caller mutation through these aliases
+remains observable. Changing that aliasing requires a separately gated correction.
 Existing `chunk_index` and `total_chunks` values retain `setdefault` semantics.
 
 ## Error And Logging Policy
@@ -329,20 +383,31 @@ Coverage includes:
 
 - spans for paragraphs, blanks, headers, rules, lists, tables, code fences, and
   custom boundaries;
+- safe template behavior for rejected, overlong, invalid, and accepted patterns;
+  `safe_search` use and its current direct-search fallback; and warning level plus
+  materially stable message assertions;
 - tree construction for preface content, nested sections, bold subsections,
   header-only sections, duplicate text, and sanitization modes;
 - leaf behavior for words, sentences, tokens, structure-aware mode, rewrite
   methods, metadata fallback, and bounded naive mapping;
+- exact leaf API call order and multiplicity on successful, metadata-exception,
+  missing-offset, rewrite, ordinary, structure-aware, and last-resort paths;
+- exact `sanitize_output` default, truthiness, covered-exception fallback, removal
+  before method resolution and strategy dispatch, and nested-option identity;
 - ancestry, section paths, chunk-type normalization, and index defaults;
 - legacy `blocks`, structure-aware element grouping, weighted grouping, overlap,
   header buffering, and no-space languages;
-- input-tree and metadata non-mutation;
+- input-tree and top-level metadata non-mutation, shallow nested-value identity,
+  and current ancestry-list aliasing;
 - exact current behavior for selected partial and malformed trees;
 - public flat composition through overridable tree and flatten methods;
 - unchanged `process_text` hierarchical outputs;
 - unchanged multi-level `process_text` outputs after direct span import;
 - the package-level flatten helper's explicit exception-to-empty-list behavior;
-- import boundaries and removal of private protocol/helper members.
+- exact public hierarchy signatures through `inspect.signature`;
+- import boundaries enforced with AST-based import inspection, plus removal of
+  private protocol/helper members;
+- offset and metadata fallback log levels and materially stable diagnostic text.
 
 Verification includes:
 
@@ -359,16 +424,19 @@ silently excluded.
 
 ## Implementation Staging
 
-1. Add and freeze baseline characterization tests.
-2. Add models and span detection, wire both active callers, then remove
+1. Reconcile `origin/dev` against the recorded baseline and, if it advanced,
+   update the baseline and rerun the focused suite before production edits.
+2. Add and freeze baseline characterization tests, including option, aliasing,
+   call-trace, regex, logging, signature, and import-boundary contracts.
+3. Add models and span detection, wire both active callers, then remove
    `_compute_paragraph_spans` and its `ProcessTextContext` member.
-3. Extract leaf processing and tree construction, wire the public tree method,
+4. Extract leaf processing and tree construction, wire the public tree method,
    then remove `_extract_header_title` from `Chunker`.
-4. Extract grouping and flatten traversal, then wire the public flatten method.
-5. Confirm the public flat method still composes the two public methods.
-6. Remove stale imports, tighten protocols, and verify dependency direction.
-7. Apply only qualifying corrections as separate red/green commits.
-8. Run the complete verification gate and record results.
+5. Extract grouping and flatten traversal, then wire the public flatten method.
+6. Confirm the public flat method still composes the two public methods.
+7. Remove stale imports, tighten protocols, and verify dependency direction.
+8. Apply only qualifying corrections as separate red/green commits.
+9. Run the complete verification gate and record results.
 
 Every stage wires new code into the active production path immediately. No
 dormant duplicate subsystem is added, and focused tests must pass before the next
@@ -380,11 +448,16 @@ stage begins.
 - Behavior drift from option coercion, deep copying, or stricter tree validation.
 - Public composition drift if the flat method bypasses overridable public methods.
 - Offset drift across sanitized/raw text and repeated source content.
+- Side-effect drift from duplicated leaf calls, implicit retries, or changed
+  metadata-fallback triggers.
 - Metadata drift from replacing `setdefault` with assignment.
-- Mutation drift if flattening writes ancestry or indexes into caller trees.
+- Mutation or identity drift if flattening writes into caller trees, deep-copies
+  nested values, or changes current ancestry-list aliasing.
 - Grouping drift in final-window overlap, by-kind weights, separators, or
   header-only sections.
 - Error drift from broadening service-level catches.
+- Security/logging drift from changing regex helper lookup, direct-search fallback,
+  warning levels, or materially stable diagnostics during structural extraction.
 - Accidental adoption of unmerged behavior from other historical worktrees rather
   than the refreshed `origin/dev` baseline.
 
@@ -397,6 +470,9 @@ stage begins.
   migrated.
 - The hierarchy package does not import `Chunker` or `process_text`.
 - Characterization and component tests cover spans, trees, leaves, grouping,
-  flattening, mutation, and integration behavior.
+  flattening, shallow aliasing, exact call traces, logging, signatures, import
+  boundaries, and integration behavior.
+- The implementation baseline is explicitly reconciled with current `origin/dev`;
+  an advanced baseline is recorded and re-characterized before production edits.
 - Any included correction satisfies and records the correction gate.
 - The complete focused verification gate passes, including Bandit.
