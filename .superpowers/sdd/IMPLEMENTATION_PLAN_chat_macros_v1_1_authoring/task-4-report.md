@@ -90,3 +90,31 @@ The same focused command passed all 10 tests after two narrow fixes:
 - `bun -e 'JSON.parse(await Bun.file("src/assets/locale/en/settings.json").text())'`
   exited 0.
 - `git diff --check` exited 0.
+
+## Fix Round 2
+
+### RED
+
+Command:
+
+```bash
+bunx vitest run src/components/Option/Settings/__tests__/OutputProfileEditor.test.tsx
+```
+
+Result: 1 expected failure in 11 tests. After changing `summary` to the
+existing `action_items` key, the second row's `Action plan` heading was replaced
+by `Executive summary` before duplicate validation rejected the save.
+
+### GREEN
+
+The same focused command passed all 11 tests after retaining headings as
+row-aligned editor draft data and deriving the persisted `section_titles` map
+only during normalization. The regression verifies duplicate-key validation
+still prevents the request, followed by a corrected unique key that persists
+both original headings.
+
+### Final Checks
+
+- `bun -e 'JSON.parse(await Bun.file("src/assets/locale/en/settings.json").text())'`
+  exited 0.
+- `git diff --check` exited 0.
