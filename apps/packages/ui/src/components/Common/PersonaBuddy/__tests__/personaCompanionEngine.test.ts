@@ -150,6 +150,10 @@ const StrictModeWrapper = ({ children }: PropsWithChildren) =>
 const PROHIBITED_ENGINE_IMPORTS = [
   "@/services/tldw",
   "@/services/tldw/TldwApiClient",
+  "@/services/tldw/TldwChat",
+  "@/services/tldw/TldwModels",
+  "@/services/chat-loop/client",
+  "@/services/model-settings",
   "@/services/persona-visual-assets",
   "@/services/persona-visuals",
   "@/store/model",
@@ -199,6 +203,26 @@ describe("createPersonaCompanionEngine", () => {
     expect(engine.getSnapshot().requestedState).toBe("ambient.look")
   })
 
+  it("starts a fresh full interval after semantic idle resumes", () => {
+    const fake = createFakeCompanionRuntime([0, 0])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(idleInput({ semanticState: "speaking" }))
+    fake.advanceBy(90_000)
+    expect(engine.getSnapshot()).toEqual(
+      expect.objectContaining({
+        phase: "idle",
+        requestedState: "speaking",
+        suspension: "semantic"
+      })
+    )
+
+    engine.update(idleInput())
+    fake.advanceBy(29_999)
+    expect(engine.getSnapshot().requestedState).toBe("idle")
+    fake.advanceBy(1)
+    expect(engine.getSnapshot().requestedState).toBe("ambient.look")
+  })
+
   it("uses relative weights and avoids an immediate repeat when an alternative exists", () => {
     const fake = createFakeCompanionRuntime([0, 0.9, 0, 0.9])
     const engine = createPersonaCompanionEngine(fake.runtime)
@@ -231,7 +255,19 @@ describe("createPersonaCompanionEngine", () => {
     const fetch = vi.fn(() => {
       throw new Error("network access is forbidden")
     })
+    const webSocket = vi.fn(() => {
+      throw new Error("WebSocket access is forbidden")
+    })
+    const xmlHttpRequest = vi.fn(() => {
+      throw new Error("XMLHttpRequest access is forbidden")
+    })
+    const eventSource = vi.fn(() => {
+      throw new Error("EventSource access is forbidden")
+    })
     vi.stubGlobal("fetch", fetch)
+    vi.stubGlobal("WebSocket", webSocket)
+    vi.stubGlobal("XMLHttpRequest", xmlHttpRequest)
+    vi.stubGlobal("EventSource", eventSource)
     for (const moduleId of PROHIBITED_ENGINE_IMPORTS) {
       vi.doMock(moduleId, () => {
         throw new Error(`companion engine imported ${moduleId}`)
@@ -261,6 +297,9 @@ describe("createPersonaCompanionEngine", () => {
     completeCurrentAction(engine)
 
     expect(fetch).not.toHaveBeenCalled()
+    expect(webSocket).not.toHaveBeenCalled()
+    expect(xmlHttpRequest).not.toHaveBeenCalled()
+    expect(eventSource).not.toHaveBeenCalled()
   })
 
   it("clamps engine timing and movement distance with allowed metadata defaults", () => {
@@ -776,6 +815,21 @@ describe("createPersonaCompanionEngine", () => {
     expect(fake.diagnostics.at(-1)).toEqual(
       expect.objectContaining({ event: "stale_generation" })
     )
+  })
+
+  it("starts a fresh full interval when the Persona identity changes", () => {
+    const fake = createFakeCompanionRuntime()
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(idleInput())
+    fake.advanceBy(29_999)
+
+    engine.update(idleInput({ personaId: "persona-2" }))
+    fake.advanceBy(1)
+    expect(engine.getSnapshot().requestedState).toBe("idle")
+    fake.advanceBy(29_998)
+    expect(engine.getSnapshot().requestedState).toBe("idle")
+    fake.advanceBy(1)
+    expect(engine.getSnapshot().requestedState).toBe("ambient.look")
   })
 
   it("never calls a persisted-position hook during roaming", () => {

@@ -12,6 +12,7 @@ import type {
 } from "@/types/persona-visuals"
 
 import { BuddyShellPopover } from "./BuddyShellPopover"
+import type { PersonaCompanionSnapshot } from "./personaCompanionEngine"
 import {
   getPersonaVisualDiagnosticToneClassName,
   type PersonaVisualDiagnostic
@@ -30,6 +31,9 @@ type BuddyShellDockProps = {
   visualPack?: PersonaVisualPack | null
   visualState?: PersonaVisualStateId
   visualGeneration?: number
+  companionPhase?: PersonaCompanionSnapshot["phase"]
+  companionSuspension?: PersonaCompanionSnapshot["suspension"]
+  companionTransientOffsetX?: number
   reducedMotion?: boolean
   visualFacing?: "left" | "right"
   nudgeActive?: boolean
@@ -64,6 +68,9 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
   visualPack = null,
   visualState = "idle",
   visualGeneration = 0,
+  companionPhase = "idle",
+  companionSuspension = "none",
+  companionTransientOffsetX = 0,
   reducedMotion = false,
   visualFacing = "right",
   nudgeActive = false,
@@ -114,6 +121,12 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
       ref={dockRef}
       data-testid="persona-buddy-dock"
       data-dormant={isDormant ? "true" : "false"}
+      data-companion-phase={companionPhase}
+      data-companion-suspension={companionSuspension}
+      data-companion-generation={visualGeneration}
+      data-companion-requested-state={visualState}
+      data-companion-effective-mode={effectiveAmbientMode}
+      data-companion-transient-offset-x={companionTransientOffsetX}
       className="group fixed z-[1100] flex flex-col gap-2"
       onFocusCapture={() => onFocusWithinChange?.(true)}
       onBlurCapture={(event) => {

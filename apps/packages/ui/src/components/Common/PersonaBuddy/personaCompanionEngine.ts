@@ -699,7 +699,10 @@ export const createPersonaCompanionEngine = (
           normalized.packRevision !== input.packRevision ||
           normalized.surface !== input.surface)
       if (currentAction) cancelActionForInputChange()
-      if (identityChanged) transientOffsetX = 0
+      if (identityChanged) {
+        transientOffsetX = 0
+        ambientDueAt = null
+      }
       input = normalized
       hasInput = true
       transientOffsetX = clampNumber(

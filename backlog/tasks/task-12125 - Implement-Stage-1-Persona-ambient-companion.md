@@ -4,7 +4,7 @@ title: Implement Stage 1 Persona ambient companion
 status: In Progress
 assignee: []
 created_date: 2026-08-24 05:42
-updated_date: 2026-08-24 11:57
+updated_date: 2026-08-24 13:36
 labels:
 - persona
 - persona-visuals
@@ -36,6 +36,9 @@ modified_files:
 - apps/packages/ui/src/store/persona-buddy-shell.ts
 - apps/packages/ui/src/types/persona-buddy.ts
 - apps/packages/ui/src/types/persona-visuals.ts
+- apps/tldw-frontend/e2e/workflows/persona-buddy-interaction.spec.ts
+- Docs/Code_Documentation/Persona_Visual_Packs.md
+- Docs/Code_Documentation/Persona_Ambient_Companion.md
 - tldw_Server_API/app/api/v1/endpoints/persona.py
 - tldw_Server_API/app/api/v1/schemas/persona.py
 - tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py
@@ -73,6 +76,9 @@ Task 6 review round 1 fix work started from commit 3375a3d732. Scope is limited 
 Task 6 review round 1 fixes implemented for all seven Important findings; the two deferred Minor findings remain out of scope. Real-hook integration now proves focused Space, reduced-motion authored PNG reaction, completed drag after drag suspension, and reactive transient resize re-clamping without anchor persistence. Persona preference reads/writes and click/nudge work are Persona/pack/engine-generation fenced; pointercancel discards partial drag; invalid reduced-motion transitions release animated Blobs; and the HTTP fork route admits only immutable active sources before service/file access. Verification: frontend Task 6 aggregate 258/258 across 14 files (real-host suite 4/4), backend aggregate 128/128, touched TS diagnostics 0 with unrelated project baseline remaining, Bandit 0 findings/0 errors at /tmp/bandit_persona_ambient_task6_review1.json, and git diff --check clean.
 Task 6 review round 2 fixes completed for both Important rereview findings; the two deferred Minors and Task 7 remain out of scope. Layered reads now have coordination independent from user-scoped global and Persona-scoped mutations, so an in-flight global save neither strands the only Persona read nor loses its result across focus changes. Deferred drag completion now carries stable interaction identity plus engine generation and is cleared/rejected across identity replacement, cancel, new pointer, and unmount. Strict RED evidence: the two preference races failed as Off/Expressive instead of durable Roaming, and actual-engine instrumentation recorded stale drag on Persona B generation 4. GREEN: focused Host suites 56/56; full Task 6 frontend aggregate 261/261 across 14 files; touched TS diagnostics 0 against 51 unrelated baseline diagnostics; git diff --check clean. Bandit not rerun because round 2 touched no Python; prior /tmp/bandit_persona_ambient_task6_review1.json remains 0 findings/0 errors.
 Task 6 review round 3 fixes the single Important A→B→A stale Persona mutation finding without touching global preference coordination, drag fencing, deferred Minors, or Task 7. Each Persona mutation now captures a focus epoch in addition to Persona ID and mutation generation; success, rollback/error, conflict refresh, and messages fail closed after any focus cycle. Strict RED: delayed error and success both overwrote the returning A read (`Off`, version 9). GREEN: both preserve `Off`, emit no stale message, and the next save uses `expected_version: 9`. Verification: focused Host suites 58/58; Task 6 frontend aggregate 263/263 across 14 files; touched TS diagnostics 0 against the unchanged 51-error unrelated baseline; git diff check clean. Bandit not rerun because no Python changed; prior Task 6 result remains 0 findings/0 errors.
+Task 7 release-proof work started from reviewed Task 6 HEAD e29141f5483c93a590806384a3e05e3f76ac1473 (Task 6 final review: 0 Critical, 0 Important). Scope is limited to deterministic Playwright coverage in the existing persona-buddy interaction workflow, final executable API/engine boundary tests, runtime/author documentation, legacy quiet-dock E2E expectation updates, and the prescribed verification/security gates.
+
+Task 7 release proof implemented. Added 12 deterministic isolated Chromium scenarios across quiet 64px chrome, Off/direct reactions, keyboard/touch/double-click, semantic and hidden fresh intervals, reduced motion, preference failure, focused Persona switch, protected Blob retention, and ephemeral bounded roaming with explicit-drag persistence. Added executable owner/path API and engine no-model/no-network boundaries plus runtime/author docs. Task 7 discovered a real identity-reset defect: the engine canceled the old handle but retained ambientDueAt; direct RED observed ambient at old due +1, and the minimal GREEN resets ambientDueAt in the existing identityChanged path. Verification: backend 353/353; frontend 248/248 across 12 files; isolated Playwright 12/12 in 58.7s; ESLint 0 errors (9 existing broad-scope warnings); TypeScript 5.9.3 has 0 Task 7 diagnostics and 16 unrelated current-environment diagnostics; Bandit 0 findings/0 errors; git diff --check clean. Full ignored report: .superpowers/sdd/2026-08-23-persona-ambient-companion-stage-1-implementation-plan/task-7-report.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

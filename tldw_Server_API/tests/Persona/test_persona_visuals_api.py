@@ -825,6 +825,44 @@ def test_other_user_cannot_access_pack(persona_db: CharactersRAGDB) -> None:
     assert response.status_code == 404
 
 
+def test_visual_asset_content_enforces_owner_and_nested_path_boundaries(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Protected raster bytes must remain scoped to their owner and nested route."""
+    expected_bytes = _png_bytes()
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Asset Owner Persona")
+        other_persona_id = _create_persona(client, name="Other Path Persona")
+        pack = _create_visual_pack(client, persona_id)
+        other_pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        content_path = (
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+            f"/assets/{asset['id']}/content"
+        )
+
+        owned = client.get(content_path)
+        wrong_persona = client.get(
+            f"/api/v1/persona/profiles/{other_persona_id}/visual-packs/{pack['id']}"
+            f"/assets/{asset['id']}/content"
+        )
+        wrong_pack = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{other_pack['id']}"
+            f"/assets/{asset['id']}/content"
+        )
+
+    with _client_for_user(2, persona_db) as other_client:
+        wrong_owner = other_client.get(content_path)
+
+    assert owned.status_code == 200, owned.text
+    assert owned.content == expected_bytes
+    assert owned.headers["content-type"] == "image/png"
+    assert owned.headers["cache-control"] == "private, max-age=3600"
+    assert wrong_persona.status_code == 404
+    assert wrong_pack.status_code == 404
+    assert wrong_owner.status_code == 404
+
+
 def test_accept_and_reject_generated_candidates(persona_db: CharactersRAGDB) -> None:
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Candidate Persona")
