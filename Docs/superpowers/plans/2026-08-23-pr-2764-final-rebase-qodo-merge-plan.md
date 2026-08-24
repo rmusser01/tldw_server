@@ -4,13 +4,13 @@
 **Goal**: Rebase the PR branch onto the latest `origin/dev` in the existing isolated worktree.
 **Success Criteria**: The worktree is clean before the operation, the rebase completes without unresolved conflicts, and the branch is force-pushed with lease.
 **Tests**: Confirm `origin/dev...HEAD` reports zero commits behind and PR metadata points to the rebased head.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 2: Qodo review validation
 **Goal**: Wait for Qodo to review the rebased head and collect every posted finding and inline comment.
 **Success Criteria**: Each item is mapped to current code and classified as valid, invalid, duplicate, or already addressed with supporting evidence.
 **Tests**: Inspect current review submissions, issue comments, and unresolved review threads for the final head SHA.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 3: Remediation and verification
 **Goal**: Address every validated issue without broadening the MCP execution-hardening scope.
