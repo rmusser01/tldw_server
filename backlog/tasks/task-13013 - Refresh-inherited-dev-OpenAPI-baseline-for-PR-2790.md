@@ -16,12 +16,11 @@ references:
 - origin/dev@8f94369e517463758071504079e9ab5f8f8a0091
 - origin/dev@2c3589fa09caf328d3327f3868b59ec967cb7648
 - origin/dev@1885fe8ee2156fc6228ef80f89f1ef98b64c8a26
+- origin/dev@83fa300fc1b0e77e81219af2abe5b4ddc2c85069
 modified_files:
-- .github/workflows/ci.yml
-- apps/tldw-frontend/lib/api/openapi.fingerprint.json
 - backlog/tasks/task-12973.5 - Integrate-concrete-Embeddings-steps-with-the-inline-runner.md
 - backlog/tasks/task-13013 - Refresh-inherited-dev-OpenAPI-baseline-for-PR-2790.md
-updated_date: '2026-08-24 06:14'
+updated_date: '2026-08-24 06:48'
 ---
 
 ## Description
@@ -56,6 +55,9 @@ Pre-merge independent review corrected the current base provenance to origin/dev
 Hosted CI attempt 2 exposed an inherited latest-dev shard coverage failure: `tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py` was added on dev but is not assigned to any `.github/workflows/ci.yml` shard. The Stage 2E PR will add the file's `test_chat_macros_*.py` family to the existing `platform-services-core` shard entries and verify with `Helper_Scripts/ci/check_shard_coverage.py` before another exact-head run.
 Applied the shard repair across all five `platform-services-core` matrix definitions. Local verification on Python 3.12.12: shard coverage guard passes with 774 shards, 4291 test files, 4 ignored, baseline 130, and `new_uncovered=0`; `test_chat_macros_jobs_worker_startup.py` passes all 6 tests. CI YAML and Backlog frontmatter parse successfully, including string-typed task dates.
 The subsequent origin/dev@1885fe8ee2156fc6228ef80f89f1ef98b64c8a26 merge independently introduced the broader `test_chat_*.py` assignment in all five service-core matrices. During rebase, PR #2790 retained that upstream rule and dropped its narrower `test_chat_macros_*.py` workflow delta. The local shard guard remains green on the rebased tree; only this diagnostic/task history remains from the PR-local shard repair.
+Latest-base OpenAPI verification at origin/dev@1885fe8ee2156fc6228ef80f89f1ef98b64c8a26: a clean dev worktree and the rebased PR produce byte-identical canonical schemas with 2028 paths, 2965 schemas, and sha256 `db683d8cfa2535887d22c76c7d56695fa08dfbdf10f1a59f6ef5752a1b1560a4`. Relative to the prior 2c3589fa09 baseline, the inherited delta has seven added scheduled-task lifecycle/result paths, seven added scheduled-task schemas, two changed Claims analytics export paths, and four changed Claims/scheduled-task schemas; no path or schema removals. These names match the newly merged Scheduled Tasks and Claims workstreams. The supported frontend generator and exact drift check pass on the rebased tree.
+Latest-base Stage 2E verification: complete nine-file regression set passes 356 tests on Python 3.12.12; Ruff passes all 9 touched Python files; compileall passes all 5 touched production files; Bandit reports 0 findings, 0 errors, 0 nosec suppressions, and 3 skipped tests (`/tmp/bandit_embeddings_stage2e_latest_dev.json`); `git diff --check`, shard coverage, generated fingerprint equality, and Backlog YAML type checks pass.
+Final pre-push rebase verification at origin/dev@83fa300fc1b0e77e81219af2abe5b4ddc2c85069: both the clean dev worktree and PR head pass the exact OpenAPI drift gate with 2028 paths, 2965 schemas, and sha256 `8aa01ac97bebf2b3ae48467a4aedc3a10ee1da424413609f9a3d3eb5275b5de3`. The latest dev merge already carries this matching generated baseline, so no fingerprint-file delta remains in PR #2790. The complete Stage 2E regression set passes 356 tests; Ruff and compileall pass; Bandit reports 0 findings, 0 errors, 0 nosec suppressions, and 3 skipped tests (`/tmp/bandit_embeddings_stage2e_83fa.json`); shard coverage reports 778 shards, 4309 test files, 4 ignored, and `new_uncovered=0`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
