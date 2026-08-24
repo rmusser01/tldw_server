@@ -11,9 +11,11 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
 from tldw_Server_API.app.core.Notes_Tasks.models import ParsedChecklistItem
 from tldw_Server_API.app.core.Notes_Tasks.projection_markers import (
     TaskMarker,
+    render_task_marker,
     task_marker_hash,
 )
 
@@ -101,6 +103,7 @@ class NotesTaskCoordinator:
 
     service: SyncV2Service | None = None
     user_id: str | None = None
+    dataset_id: str | None = None
 
     def plan_task_mutation(
         self,
@@ -183,6 +186,33 @@ class NotesTaskCoordinator:
             trusted_notes_task_coordinator=True,
         )
 
+    def capture_note_projection(
+        self,
+        note_step: ServerOriginMutationStep,
+        *,
+        idempotency_key: str,
+        source: str = "notes.tasks.reconciliation",
+    ) -> ServerOriginBatchResult:
+        """Append one note-only projection repair without inventing a task mutation."""
+
+        normalized_key = idempotency_key.strip()
+        if not normalized_key:
+            raise SyncStoreError("notes_task_mutation_group_invalid")
+        if self.service is None or not self.user_id:
+            raise SyncStoreError("notes_task_coordinator_not_bound")
+        planned = _canonical_note_step(
+            note_step,
+            identity_parts=(normalized_key,),
+        )
+        return capture_server_origin_mutation_batch(
+            service=self.service,
+            user_id=self.user_id,
+            steps=(planned,),
+            source=source,
+            idempotency_key=normalized_key,
+            trusted_notes_task_coordinator=True,
+        )
+
 
 def resolve_notes_task_coordinator(
     *,
@@ -218,7 +248,11 @@ def resolve_notes_task_coordinator(
     if enrolled != task_domains:
         raise SyncStoreError("notes_task_sync_domains_incomplete")
     _require_task_domains_ready(dataset)
-    return NotesTaskCoordinator(service=service, user_id=owner)
+    return NotesTaskCoordinator(
+        service=service,
+        user_id=owner,
+        dataset_id=dataset.dataset_id,
+    )
 
 
 def _require_task_domains_ready(dataset: SyncDataset) -> None:
@@ -282,6 +316,71 @@ def _task_activity_id(identity: Sequence[object]) -> str:
     return str(UUID(bytes=digest[:16], version=4))
 
 
+def project_task_payload_into_note(
+    *,
+    content: str,
+    note_id: str,
+    note_revision: int,
+    task_id: str,
+    base_revision: int,
+    base_hash: str,
+    task_revision: int,
+    task_hash: str,
+    payload: Mapping[str, object],
+) -> str:
+    """Rewrite the sole exact managed line to one canonical task projection."""
+
+    parsed = parse_note_checklists(
+        note_id=note_id,
+        note_version=note_revision,
+        content=content,
+    )
+    matches = [
+        item
+        for item in parsed.items
+        if item.marker
+        == TaskMarker(
+            task_id=task_id,
+            revision=base_revision,
+            object_hash=base_hash,
+        )
+    ]
+    if len(matches) != 1:
+        raise SyncStoreError("notes_task_projection_base_invalid")
+    item = matches[0]
+    marker_index = item.raw_line.find("[")
+    marker_end = item.raw_line.find("]", marker_index + 1)
+    if marker_index < 0 or marker_end != marker_index + 2:
+        raise SyncStoreError("notes_task_projection_base_invalid")
+    status = payload.get("status")
+    title = payload.get("title")
+    if status not in {"open", "done"} or not isinstance(title, str) or not title:
+        raise SyncStoreError("notes_task_projection_payload_invalid")
+    body = [title]
+    for key, token_name in (
+        ("due_date", "due"),
+        ("priority", "priority"),
+        ("estimate", "estimate"),
+    ):
+        value = payload.get(key)
+        if value is not None:
+            body.append(f"@{token_name}({value})")
+    body.append(
+        render_task_marker(
+            task_id,
+            revision=task_revision,
+            object_hash=task_hash,
+        )
+    )
+    checked = "x" if status == "done" else " "
+    new_line = f"{item.raw_line[:marker_index]}[{checked}] {' '.join(body)}"
+    return (
+        content[: item.locator.start_offset]
+        + new_line
+        + content[item.locator.end_offset :]
+    )
+
+
 def _canonical_note_step(
     note_step: ServerOriginMutationStep,
     *,
@@ -335,8 +434,15 @@ def _bind_projection_anchor(
         note_envelope_id=note_envelope_id,
         note_hash=note_hash,
         linked=(
-            mutation.after.get("projection_status") == "live"
-            and not bool(mutation.after.get("deleted"))
+            (
+                mutation.after.get("projection_status") == "live"
+                and not bool(mutation.after.get("deleted"))
+            )
+            or (
+                bool(mutation.after.get("deleted"))
+                and mutation.before is not None
+                and mutation.before.get("projection_status") == "live"
+            )
         ),
         marker_hash=task_marker_hash(marker),
     )

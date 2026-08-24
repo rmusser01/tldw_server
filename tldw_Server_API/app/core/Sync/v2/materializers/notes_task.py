@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from loguru import logger
@@ -111,6 +112,22 @@ class NotesTaskMaterializer:
                         task_store.apply_sync_task_restore(**transition)
                     else:
                         task_store.apply_sync_task_upsert(**transition)
+                projection = envelope.routing_metadata.get("task_projection")
+                if (
+                    envelope.operation == "upsert"
+                    and isinstance(projection, Mapping)
+                    and type(projection.get("linked")) is bool
+                ):
+                    task_store.apply_sync_task_projection_status(
+                        owner_user_id=str(self.note_db.client_id),
+                        dataset_id=envelope.dataset_id,
+                        task_id=envelope.object_id,
+                        note_id=str(envelope.parent_id),
+                        projection_status=(
+                            "live" if projection["linked"] else "unlinked"
+                        ),
+                        conn=conn,
+                    )
             return _record_applied(envelope, store)
         except ConflictError:
             return _mark_conflict(
@@ -167,6 +184,9 @@ def _expected_projection_status(envelope: SyncEnvelope) -> str | None:
 
     if envelope.operation == "tombstone":
         return "deleted"
+    projection = envelope.routing_metadata.get("task_projection")
+    if isinstance(projection, Mapping) and type(projection.get("linked")) is bool:
+        return "live" if projection["linked"] else "unlinked"
     if envelope.object_revision == 1 or envelope.routing_metadata.get("restore_intent") is True:
         return "unlinked"
     return None

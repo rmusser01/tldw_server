@@ -20,6 +20,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.exceptions import NotesTaskContractError
 
 from ..models import SyncEnvelope, SyncObjectState
+from ..mutation_group_validation import (
+    StoredMutationGroupValidationError,
+    validate_stored_mutation_group,
+)
 from ..notes_task_contract import (
     NotesTaskActivityTombstoneV1,
     NotesTaskActivityV1,
@@ -190,11 +194,17 @@ def _parse_envelope(
         and envelope.payload.get("source_kind") == "trusted_bootstrap_v1"
     )
     trusted_server_routing = _valid_server_routing(envelope)
+    client_projection_routing = _valid_client_projection_routing(envelope, store)
     if (
         envelope.adapter_version != 1
         or envelope.schema_version != 1
         or envelope.operation not in {"upsert", "tombstone"}
-        or (routing and not trusted_bootstrap_routing and not trusted_server_routing)
+        or (
+            routing
+            and not trusted_bootstrap_routing
+            and not trusted_server_routing
+            and not client_projection_routing
+        )
     ):
         raise NotesTaskContractError("notes.task_activity envelope lineage is invalid")
     if envelope.operation == "upsert":
@@ -279,6 +289,53 @@ def _valid_server_routing(envelope: SyncEnvelope) -> bool:
     return (
         envelope.payload.get("task_id") == anchor.task_id
         and envelope.payload.get("note_id") == envelope.parent_id
+    )
+
+
+def _valid_client_projection_routing(
+    envelope: SyncEnvelope,
+    store: SyncV2Store,
+) -> bool:
+    """Recognize only a closed client task group derived before atomic append."""
+
+    routing = envelope.routing_metadata
+    if (
+        set(routing) != {"task_projection"}
+        or envelope.payload.get("source_kind") != "client"
+        or envelope.mutation_group_id is None
+    ):
+        return False
+    projection = routing.get("task_projection")
+    if not isinstance(projection, Mapping):
+        return False
+    try:
+        from ..notes_task_coordinator import (
+            _validate_task_projection_group_metadata,
+        )
+
+        anchor = _validate_task_projection_group_metadata(projection)
+        group = store.list_mutation_group(
+            envelope.dataset_id,
+            envelope.mutation_group_id,
+        )
+        validate_stored_mutation_group(
+            group,
+            dataset_id=envelope.dataset_id,
+            mutation_group_id=envelope.mutation_group_id,
+        )
+    except (ImportError, StoredMutationGroupValidationError, ValueError):
+        return False
+    return bool(
+        len(group) == 3
+        and [item.domain for item in group]
+        == ["notes.task", "notes.task_activity", "notes.note"]
+        and group[0].client_envelope_id == anchor.task_envelope_id
+        and group[0].object_id == anchor.task_id
+        and group[0].object_revision == anchor.task_revision
+        and group[0].payload_hash == anchor.task_hash
+        and group[2].client_envelope_id == anchor.note_envelope_id
+        and group[2].payload_hash == anchor.note_hash
+        and envelope.payload.get("task_id") == anchor.task_id
     )
 
 

@@ -9,6 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 TaskStatusValue = Literal["open", "done"]
 ProjectionStatusValue = Literal["live", "unlinked", "ambiguous", "deleted"]
+TaskProjectionDriftAction = Literal[
+    "keep_task",
+    "accept_markdown",
+    "unlink",
+    "dismiss",
+]
 
 
 class TaskMetadata(BaseModel):
@@ -137,7 +143,7 @@ class TaskUpdateRequest(BaseModel):
         return stripped
 
     @model_validator(mode="after")
-    def require_mutation(self) -> "TaskUpdateRequest":
+    def require_mutation(self) -> TaskUpdateRequest:
         if self.text is None and self.metadata is None:
             raise ValueError("At least one task field must be provided.")
         return self
@@ -175,7 +181,7 @@ class TaskActivityPatchRequest(BaseModel):
     dismissed: bool = False
 
     @model_validator(mode="after")
-    def require_state_change(self) -> "TaskActivityPatchRequest":
+    def require_state_change(self) -> TaskActivityPatchRequest:
         if not self.read and not self.dismissed:
             raise ValueError("Either read or dismissed must be true.")
         return self
@@ -186,3 +192,57 @@ class TaskActivityStateResponse(BaseModel):
     user_id: str
     read_at: str | None = None
     dismissed_at: str | None = None
+
+
+class TaskProjectionDriftResponse(BaseModel):
+    """Privacy-safe projection drift claims and lifecycle state."""
+
+    id: str
+    note_id: str
+    task_id: str
+    marker_base_revision: int
+    marker_base_hash: str
+    note_head_cursor: int | None = None
+    note_head_hash: str | None = None
+    task_head_cursor: int | None = None
+    task_head_hash: str | None = None
+    reason_code: str
+    status: Literal["open", "resolved", "dismissed"]
+    lifecycle_revision: int
+    created_at: str
+    updated_at: str
+    resolved_at: str | None = None
+
+
+class TaskProjectionDriftListResponse(BaseModel):
+    drifts: list[TaskProjectionDriftResponse]
+
+
+class TaskProjectionDriftResolveRequest(BaseModel):
+    """Exact current claims required to resolve one open drift."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note_id: str = Field(..., min_length=1, max_length=128)
+    action: TaskProjectionDriftAction
+    expected_lifecycle_revision: int = Field(..., ge=1)
+    expected_note_head_cursor: int | None = Field(None, ge=1)
+    expected_note_head_hash: str | None = Field(
+        None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    expected_task_head_cursor: int | None = Field(None, ge=1)
+    expected_task_head_hash: str | None = Field(
+        None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+
+    @model_validator(mode="after")
+    def validate_head_claim_pairs(self) -> TaskProjectionDriftResolveRequest:
+        for cursor, object_hash in (
+            (self.expected_note_head_cursor, self.expected_note_head_hash),
+            (self.expected_task_head_cursor, self.expected_task_head_hash),
+        ):
+            if (cursor is None) != (object_hash is None):
+                raise ValueError("Projection drift cursor and hash claims must be paired.")
+        return self

@@ -299,12 +299,15 @@ def _same_client_task_submission(
         "encryption_metadata",
         "stable_key",
         "dependencies",
-        "routing_metadata",
         "adapter_version",
         "base_version",
         "entity_version",
     )
-    return all(getattr(stored, field) == getattr(incoming, field) for field in fields)
+    stored_routing = dict(stored.routing_metadata)
+    stored_routing.pop("task_projection", None)
+    return stored_routing == dict(incoming.routing_metadata) and all(
+        getattr(stored, field) == getattr(incoming, field) for field in fields
+    )
 
 
 def _key_recovery_metadata_string(
@@ -2035,7 +2038,7 @@ class SyncV2Service:
         dataset: SyncDataset,
         device: SyncDevice,
         envelope: SyncEnvelopeCreate,
-    ) -> tuple[SyncEnvelopeCreate, SyncEnvelopeCreate]:
+    ) -> tuple[SyncEnvelopeCreate, ...]:
         """Expand one authenticated task envelope into its closed activity group."""
 
         if envelope.domain != "notes.task":
@@ -2140,13 +2143,105 @@ class SyncV2Service:
             envelope.client_envelope_id,
         )
         placeholder_plan_hash = "0" * 64
+        note_step: SyncEnvelopeCreate | None = None
+        projection_anchor: dict[str, object] | None = None
+        if prior_head is not None:
+            from tldw_Server_API.app.core.Notes_Tasks.projection_markers import (
+                TaskMarker,
+                task_marker_hash,
+            )
+
+            from .notes_task_coordinator import (
+                TASK_PROJECTION_ROUTING_KEY,
+                TaskProjectionGroupMetadata,
+                _projection_anchor_from_envelope,
+                project_task_payload_into_note,
+            )
+            from .server_origin import canonical_payload_hash
+
+            base_anchor = _projection_anchor_from_envelope(prior_head)
+            if base_anchor is not None and base_anchor.linked:
+                note_head = self.store.get_current_head(
+                    dataset.dataset_id,
+                    "notes.note",
+                    after.note_id,
+                )
+                if (
+                    note_head is None
+                    or note_head.client_envelope_id != base_anchor.note_envelope_id
+                    or note_head.payload_hash != base_anchor.note_hash
+                    or note_head.object_revision is None
+                ):
+                    raise SyncStoreError("notes_task_projection_base_invalid")
+                note_wire = dict(note_head.payload)
+                note_wire["content"] = project_task_payload_into_note(
+                    content=str(note_wire.get("content") or ""),
+                    note_id=after.note_id,
+                    note_revision=int(note_head.object_revision),
+                    task_id=after.task_id,
+                    base_revision=int(prior_head.object_revision or 0),
+                    base_hash=str(prior_head.payload_hash or ""),
+                    task_revision=int(envelope.object_revision or 0),
+                    task_hash=str(envelope.payload_hash or ""),
+                    payload=envelope.payload,
+                )
+                note_hash, note_size = canonical_payload_hash(note_wire)
+                note_envelope_id = (
+                    f"notes-task-note-client-{activity_id.replace('-', '')}"
+                )
+                marker = TaskMarker(
+                    task_id=after.task_id,
+                    revision=int(envelope.object_revision or 0),
+                    object_hash=str(envelope.payload_hash or ""),
+                )
+                projection_anchor = TaskProjectionGroupMetadata(
+                    projection_version=1,
+                    task_id=after.task_id,
+                    task_envelope_id=envelope.client_envelope_id,
+                    task_revision=marker.revision,
+                    task_hash=marker.object_hash,
+                    note_envelope_id=note_envelope_id,
+                    note_hash=note_hash,
+                    linked=True,
+                    marker_hash=task_marker_hash(marker),
+                ).as_routing_value()
+                note_step = SyncEnvelopeCreate(
+                    dataset_id=dataset.dataset_id,
+                    client_envelope_id=note_envelope_id,
+                    domain="notes.note",
+                    operation="upsert",
+                    object_id=after.note_id,
+                    device_id=device.device_id,
+                    base_server_cursor=note_head.server_cursor,
+                    base_object_revision=note_head.object_revision,
+                    base_object_hash=note_head.payload_hash,
+                    object_revision=int(note_head.object_revision) + 1,
+                    payload=note_wire,
+                    payload_hash=note_hash,
+                    payload_size_bytes=note_size,
+                    created_at_client=occurred_at,
+                    deleted=False,
+                    encryption_metadata=dict(envelope.encryption_metadata),
+                    status="accepted",
+                    mutation_group_id=mutation_group_id,
+                    mutation_step=2,
+                    mutation_step_count=3,
+                    mutation_plan_hash=placeholder_plan_hash,
+                )
+        step_count = 3 if note_step is not None else 2
+        task_routing = dict(envelope.routing_metadata)
+        activity_routing: dict[str, object] = {}
+        if projection_anchor is not None:
+            task_routing[TASK_PROJECTION_ROUTING_KEY] = projection_anchor
+            activity_routing[TASK_PROJECTION_ROUTING_KEY] = projection_anchor
         task_step = replace(
             envelope,
             device_id=device.device_id,
             status="accepted",
+            routing_metadata=task_routing,
             mutation_group_id=mutation_group_id,
             mutation_step=0,
-            mutation_step_count=2,
+            mutation_step_count=step_count,
             mutation_plan_hash=placeholder_plan_hash,
         )
         activity_step = SyncEnvelopeCreate(
@@ -2177,17 +2272,21 @@ class SyncV2Service:
             created_at_client=occurred_at,
             deleted=False,
             encryption_metadata=dict(envelope.encryption_metadata),
+            routing_metadata=activity_routing,
             status="accepted",
             mutation_group_id=mutation_group_id,
             mutation_step=1,
-            mutation_step_count=2,
+            mutation_step_count=step_count,
             mutation_plan_hash=placeholder_plan_hash,
         )
-        plan = (task_step, activity_step)
+        plan = (
+            (task_step, activity_step, note_step)
+            if note_step is not None
+            else (task_step, activity_step)
+        )
         plan_hash = mutation_group_plan_hash(plan)
-        return (
-            replace(task_step, mutation_plan_hash=plan_hash),
-            replace(activity_step, mutation_plan_hash=plan_hash),
+        return tuple(
+            replace(step, mutation_plan_hash=plan_hash) for step in plan
         )
 
     def _task_client_adapter_context(
@@ -2197,6 +2296,7 @@ class SyncV2Service:
         device: SyncDevice,
         planned_task: SyncEnvelopeCreate | None = None,
         derived_activity: bool = False,
+        derived_projection: bool = False,
     ) -> SyncAdapterContext:
         """Build the authenticated overlay used to preflight a task group."""
 
@@ -2221,7 +2321,56 @@ class SyncV2Service:
             authenticated_actor_id=dataset.owner_user_id,
             authenticated_device_id=device.device_id,
             coordinator_derived_task_activity=derived_activity,
+            coordinator_derived_task_projection=derived_projection,
         )
+
+    def _repair_task_client_projection_cache(
+        self,
+        *,
+        dataset: SyncDataset,
+        envelopes: Sequence[SyncEnvelope],
+    ) -> None:
+        """Rebuild the disposable locator after a linked client group applies."""
+
+        if len(envelopes) != 3:
+            return
+        task_materializer = self.materializers.get("notes.task")
+        note_db = getattr(task_materializer, "note_db", None)
+        if note_db is None:
+            raise SyncStoreError("notes_task_projection_cache_unavailable")
+        note = note_db.get_note_by_id(envelopes[2].object_id)
+        if note is None:
+            raise SyncStoreError("notes_task_projection_cache_unavailable")
+        from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import (
+            parse_note_checklists,
+        )
+
+        from .notes_task_coordinator import rebuild_task_projection_cache
+
+        matches = [
+            item
+            for item in parse_note_checklists(
+                note_id=str(note["id"]),
+                note_version=int(note["version"]),
+                content=str(note.get("content") or ""),
+            ).items
+            if item.marker is not None
+            and item.marker.task_id == envelopes[0].object_id
+        ]
+        if len(matches) != 1:
+            raise SyncStoreError("notes_task_projection_cache_unavailable")
+        rebuilt = rebuild_task_projection_cache(
+            task_store=note_db.task_store,
+            sync_store=self.store,
+            owner_user_id=dataset.owner_user_id,
+            dataset_id=dataset.dataset_id,
+            note_id=str(note["id"]),
+            item=matches[0],
+        )
+        if rebuilt.projection is None:
+            raise SyncStoreError(
+                rebuilt.reason_code or "notes_task_projection_cache_unavailable"
+            )
 
     def _push_task_client_group(
         self,
@@ -2248,9 +2397,12 @@ class SyncV2Service:
             except StoredMutationGroupValidationError:
                 return self._task_client_idempotency_rejection(dataset, envelope)
             if (
-                len(inserted) != 2
+                len(inserted) not in {2, 3}
                 or [item.domain for item in inserted]
-                != ["notes.task", "notes.task_activity"]
+                not in (
+                    ["notes.task", "notes.task_activity"],
+                    ["notes.task", "notes.task_activity", "notes.note"],
+                )
                 or not _same_client_task_submission(inserted[0], envelope)
             ):
                 return self._task_client_idempotency_rejection(dataset, envelope)
@@ -2280,6 +2432,7 @@ class SyncV2Service:
                 context=self._task_client_adapter_context(
                     dataset=dataset,
                     device=device,
+                    derived_projection=len(plan) == 3,
                 ),
             )
             if not isinstance(task_outcome, AdapterAccepted):
@@ -2296,6 +2449,7 @@ class SyncV2Service:
                     device=device,
                     planned_task=plan[0],
                     derived_activity=True,
+                    derived_projection=len(plan) == 3,
                 ),
             )
             if not isinstance(activity_outcome, AdapterAccepted):
@@ -2304,6 +2458,22 @@ class SyncV2Service:
                     envelope=plan[0],
                     outcome=activity_outcome,
                 )
+            if len(plan) == 3:
+                note_outcome = self._evaluate_envelope(
+                    dataset,
+                    plan[2],
+                    context=self._task_client_adapter_context(
+                        dataset=dataset,
+                        device=device,
+                        planned_task=plan[0],
+                    ),
+                )
+                if not isinstance(note_outcome, AdapterAccepted):
+                    return self._task_client_outcome_result(
+                        dataset=dataset,
+                        envelope=plan[0],
+                        outcome=note_outcome,
+                    )
             try:
                 inserted = self.store.insert_envelopes_atomic(plan)
             except SyncIdempotencyConflictError:
@@ -2330,7 +2500,16 @@ class SyncV2Service:
                 dataset=dataset,
                 envelopes=inserted,
             )
-        except Exception:  # noqa: BLE001 - accepted groups remain replayable.
+            self._repair_task_client_projection_cache(
+                dataset=dataset,
+                envelopes=materialized.envelopes,
+            )
+        except Exception as exc:  # noqa: BLE001 - accepted groups remain replayable.
+            logger.warning(
+                "Task compound projection remains incomplete for {}: {}",
+                envelope.client_envelope_id,
+                str(exc) if isinstance(exc, SyncStoreError) else type(exc).__name__,
+            )
             return SyncPushResult(
                 dataset_id=dataset.dataset_id,
                 rejected=[

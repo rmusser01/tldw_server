@@ -751,6 +751,66 @@ class TaskStore:
             fn=_verify,
         )
 
+    def apply_sync_task_projection_status(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+        note_id: str,
+        projection_status: str,
+        conn: TaskConnection,
+    ) -> dict[str, Any]:
+        """Apply validated Sync projection linkage without advancing task lineage."""
+
+        owner, dataset = self._scope(owner_user_id, dataset_id)
+        status = self._validate_projection_status(projection_status)
+        if status not in {"live", "unlinked"}:
+            raise InputError("Sync task projection status must be live or unlinked.")
+        self._require_authorized_write_scope(
+            conn,
+            owner_user_id=owner,
+            dataset_id=dataset,
+        )
+        current = self._require_active_task(
+            self._fetch_task(
+                task_id,
+                owner_user_id=owner,
+                dataset_id=dataset,
+                include_deleted=True,
+                conn=conn,
+            ),
+            task_id,
+        )
+        if str(current["note_id"]) != note_id:
+            raise ConflictError(
+                "Sync task projection note does not match its task.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        self._execute(
+            conn,
+            "UPDATE note_tasks SET projection_status = ? "
+            "WHERE owner_user_id = ? AND dataset_id = ? AND id = ? AND note_id = ?",
+            (status, owner, dataset, task_id, note_id),
+        )
+        self._execute(
+            conn,
+            "UPDATE task_note_projections SET projection_status = ? "
+            "WHERE owner_user_id = ? AND dataset_id = ? AND task_id = ? AND note_id = ?",
+            (status, owner, dataset, task_id, note_id),
+        )
+        updated = self._fetch_task(
+            task_id,
+            owner_user_id=owner,
+            dataset_id=dataset,
+            include_deleted=True,
+            conn=conn,
+        )
+        if updated is None or str(updated["projection_status"]) != status:
+            raise CharactersRAGDBError("Sync task projection status did not apply.")
+        return updated
+
     def apply_sync_task_create(
         self,
         *,

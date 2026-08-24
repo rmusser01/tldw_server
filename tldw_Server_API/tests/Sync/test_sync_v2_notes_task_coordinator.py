@@ -10,11 +10,16 @@ from uuid import UUID
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+)
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
 from tldw_Server_API.app.core.Notes_Tasks.models import TaskActor
 from tldw_Server_API.app.core.Notes_Tasks.projection_markers import (
     TaskMarker,
+    render_task_marker,
     task_marker_hash,
 )
 from tldw_Server_API.app.core.Notes_Tasks.service import (
@@ -24,16 +29,18 @@ from tldw_Server_API.app.core.Notes_Tasks.service import (
 )
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters import (
+    NotesDomainAdapter,
     NotesTaskActivityDomainAdapter,
     NotesTaskDomainAdapter,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import (
     MaterializationResult,
+    NotesMaterializer,
     NotesTaskActivityMaterializer,
     NotesTaskMaterializer,
 )
-from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate, SyncObjectState
 from tldw_Server_API.app.core.Sync.v2.notes_task_activity_bootstrap import (
     NotesTaskActivityBootstrapper,
 )
@@ -258,7 +265,7 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
         )
         note_payload = {"title": "Tasks", "content": "body"}
         note_hash, note_size = canonical_payload_hash(note_payload)
-        sync_store.insert_envelope(
+        note_envelope = sync_store.insert_envelope(
             SyncEnvelopeCreate(
                 dataset_id=dataset.dataset_id,
                 client_envelope_id="note-existing-1",
@@ -276,12 +283,29 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
                 applied_at="2026-08-24T10:00:00+00:00",
             )
         )
+        assert note_envelope.server_cursor is not None
+        sync_store.upsert_object_state(
+            SyncObjectState(
+                dataset_id=dataset.dataset_id,
+                domain="notes.note",
+                object_id=NOTE_ID,
+                object_revision=1,
+                object_hash=note_hash,
+                latest_server_cursor=note_envelope.server_cursor,
+                deleted=False,
+            )
+        )
         service = SyncV2Service(
             store=sync_store,
             adapters=SyncAdapterRegistry(
-                [NotesTaskDomainAdapter(), NotesTaskActivityDomainAdapter()]
+                [
+                    NotesDomainAdapter(),
+                    NotesTaskDomainAdapter(),
+                    NotesTaskActivityDomainAdapter(),
+                ]
             ),
             materializers={
+                "notes.note": NotesMaterializer(note_db),
                 "notes.task": NotesTaskMaterializer(note_db),
                 "notes.task_activity": NotesTaskActivityMaterializer(note_db),
             },
@@ -302,7 +326,11 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
                 dataset.dataset_id,
             ),
         )
-        coordinator = NotesTaskCoordinator(service=service, user_id=OWNER_ID)
+        coordinator = NotesTaskCoordinator(
+            service=service,
+            user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+        )
         task_service = NotesTaskService(
             task_coordinator_resolver=lambda **_kwargs: coordinator
         )
@@ -372,6 +400,74 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
         )
         assert mcp_group[1].payload["source_kind"] == "mcp"
 
+        marker = render_task_marker(
+            str(updated["id"]),
+            revision=int(updated["canonical_revision"]),
+            object_hash=str(updated["canonical_hash"]),
+        )
+        note_db.update_note(
+            note_id=NOTE_ID,
+            update_data={"content": f"- [ ] Task 2 @priority(medium) {marker}\n"},
+            expected_version=1,
+        )
+        projected_note = note_db.get_note_by_id(NOTE_ID)
+        assert projected_note is not None
+        projected_item = parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(projected_note["version"]),
+            content=str(projected_note["content"]),
+        ).items[0]
+        note_db.set_task_projection(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(updated["id"]),
+            note_id=NOTE_ID,
+            note_version=int(projected_note["version"]),
+            line_number=projected_item.locator.line_number,
+            start_offset=projected_item.locator.start_offset,
+            end_offset=projected_item.locator.end_offset,
+            normalized_text_hash=projected_item.locator.normalized_text_hash,
+            occurrence_index=projected_item.locator.occurrence_index,
+            block_fingerprint=projected_item.locator.block_fingerprint,
+            raw_line=projected_item.raw_line,
+            has_child_content=projected_item.has_child_content,
+        )
+        projected_task = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(updated["id"]),
+        )
+        assert projected_task is not None
+        active_dataset = sync_store.get_dataset(dataset.dataset_id)
+        assert active_dataset is not None
+        active_metadata = dict(active_dataset.metadata)
+        active_metadata["notes_organization_v1"] = {"state": "ready"}
+        sync_store.db.execute(
+            "UPDATE sync_datasets SET metadata_json = ? WHERE dataset_id = ?",
+            (json.dumps(active_metadata), dataset.dataset_id),
+        )
+
+        completed = task_service.update_task(
+            db=note_db,
+            task_id=str(projected_task["id"]),
+            expected_task_version=int(projected_task["version"]),
+            expected_note_version=int(projected_note["version"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            status="done",
+        )
+        completed_note = note_db.get_note_by_id(NOTE_ID)
+        assert completed_note is not None
+        assert completed["status"] == "done"
+        assert "- [x] Task 2 @priority(medium)" in completed_note["content"]
+        completed_marker = parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(completed_note["version"]),
+            content=str(completed_note["content"]),
+        ).items[0].marker
+        assert completed_marker is not None
+        assert completed_marker.revision == completed["canonical_revision"]
+        assert completed_marker.object_hash == completed["canonical_hash"]
+
         device_id = "22222222-2222-4222-8222-222222222222"
         service.register_device(
             user_id=OWNER_ID,
@@ -425,6 +521,7 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
         assert [item.domain for item in expanded] == [
             "notes.task",
             "notes.task_activity",
+            "notes.note",
         ]
 
         activity_materializer = service.materializers["notes.task_activity"]
@@ -474,8 +571,13 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
         assert [item.domain for item in client_group] == [
             "notes.task",
             "notes.task_activity",
+            "notes.note",
         ]
-        assert [item.apply_status for item in client_group] == ["applied", "failed"]
+        assert [item.apply_status for item in client_group] == [
+            "applied",
+            "failed",
+            "pending",
+        ]
 
         replay = service.push(
             user_id=OWNER_ID,
@@ -491,7 +593,7 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
                 dataset.dataset_id,
                 client_task_head.mutation_group_id,
             )
-        ) == 2
+        ) == 3
         assert all(
             item.apply_status == "applied"
             for item in sync_store.list_mutation_group(
@@ -499,6 +601,16 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
                 client_task_head.mutation_group_id,
             )
         )
+        client_note = note_db.get_note_by_id(NOTE_ID)
+        assert client_note is not None
+        client_item = parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(client_note["version"]),
+            content=str(client_note["content"]),
+        ).items[0]
+        assert client_item.metadata["priority"] == "low"
+        assert client_item.marker is not None
+        assert client_item.marker.revision == client_revision
 
         changed_reuse = service.push(
             user_id=OWNER_ID,
@@ -510,6 +622,416 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
         assert [item.error_code for item in changed_reuse.rejected] == [
             "idempotency_conflict"
         ]
+
+        note_edit_marker = client_item.marker
+        assert note_edit_marker is not None
+        note_db.update_note(
+            note_id=NOTE_ID,
+            update_data={
+                "content": (
+                    "- [ ] Markdown edit @priority(low) "
+                    + render_task_marker(
+                        note_edit_marker.task_id,
+                        revision=note_edit_marker.revision,
+                        object_hash=note_edit_marker.object_hash,
+                    )
+                    + "\n"
+                )
+            },
+            expected_version=int(client_note["version"]),
+        )
+        markdown_note = note_db.get_note_by_id(NOTE_ID)
+        assert markdown_note is not None
+        markdown_result = task_service.reconcile_note(
+            db=note_db,
+            note_id=NOTE_ID,
+            note_version=int(markdown_note["version"]),
+            content=str(markdown_note["content"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        markdown_task = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(task["id"]),
+        )
+        assert markdown_result.updated_count == 1
+        assert markdown_task is not None
+        assert markdown_task["text"] == "Markdown edit"
+        reconciled_note = note_db.get_note_by_id(NOTE_ID)
+        assert reconciled_note is not None
+        reconciled_item = parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(reconciled_note["version"]),
+            content=str(reconciled_note["content"]),
+        ).items[0]
+        assert reconciled_item.marker is not None
+        assert reconciled_item.marker.revision == markdown_task["canonical_revision"]
+
+        current_task = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(task["id"]),
+        )
+        current_note = note_db.get_note_by_id(NOTE_ID)
+        assert current_task is not None
+        assert current_note is not None
+        deleted = task_service.delete_task(
+            db=note_db,
+            task_id=str(task["id"]),
+            expected_task_version=int(current_task["version"]),
+            expected_note_version=int(current_note["version"]),
+            record_only=False,
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+        )
+        deleted_head = sync_store.get_current_head(
+            dataset.dataset_id,
+            "notes.task",
+            str(task["id"]),
+        )
+        assert bool(deleted["deleted"]) is True
+        assert deleted_head is not None
+        assert deleted_head.operation == "tombstone"
+        deleted_note = note_db.get_note_by_id(NOTE_ID)
+        assert deleted_note is not None
+        assert parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(deleted_note["version"]),
+            content=str(deleted_note["content"]),
+        ).items == []
+
+        created = task_service.create_task_for_note(
+            db=note_db,
+            note_id=NOTE_ID,
+            text="Replacement",
+            status="open",
+            metadata={"estimate": "2h"},
+            expected_note_version=int(deleted_note["version"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+        )
+        created_head = sync_store.get_current_head(
+            dataset.dataset_id,
+            "notes.task",
+            str(created["id"]),
+        )
+        assert created_head is not None
+        assert created_head.object_revision == 1
+        created_note = note_db.get_note_by_id(NOTE_ID)
+        assert created_note is not None
+        created_item = parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(created_note["version"]),
+            content=str(created_note["content"]),
+        ).items[0]
+        assert created_item.text == "Replacement"
+        assert created_item.marker is not None
+        assert created_item.marker.task_id == created["id"]
+
+        note_db.update_note(
+            note_id=NOTE_ID,
+            update_data={"content": "\n"},
+            expected_version=int(created_note["version"]),
+        )
+        removed_note = note_db.get_note_by_id(NOTE_ID)
+        assert removed_note is not None
+        unlink_result = task_service.reconcile_note(
+            db=note_db,
+            note_id=NOTE_ID,
+            note_version=int(removed_note["version"]),
+            content=str(removed_note["content"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        unlinked = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(created["id"]),
+        )
+        assert unlink_result.unlinked_task_ids == [created["id"]]
+        assert unlinked is not None
+        assert unlinked["projection_status"] == "unlinked"
+
+        conflict_note = note_db.get_note_by_id(NOTE_ID)
+        assert conflict_note is not None
+        conflict_task = task_service.create_task_for_note(
+            db=note_db,
+            note_id=NOTE_ID,
+            text="Conflict base",
+            status="open",
+            metadata={},
+            expected_note_version=int(conflict_note["version"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+        )
+        conflict_base_note = note_db.get_note_by_id(NOTE_ID)
+        assert conflict_base_note is not None
+        conflict_base_item = parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(conflict_base_note["version"]),
+            content=str(conflict_base_note["content"]),
+        ).items[0]
+        conflict_base_marker = conflict_base_item.marker
+        assert conflict_base_marker is not None
+        explicit = task_service.update_task(
+            db=note_db,
+            task_id=str(conflict_task["id"]),
+            expected_task_version=int(conflict_task["version"]),
+            expected_note_version=int(conflict_base_note["version"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            text="Explicit task edit",
+        )
+        explicit_note = note_db.get_note_by_id(NOTE_ID)
+        assert explicit_note is not None
+        note_db.update_note(
+            note_id=NOTE_ID,
+            update_data={
+                "content": (
+                    "- [ ] Markdown conflict "
+                    + render_task_marker(
+                        conflict_base_marker.task_id,
+                        revision=conflict_base_marker.revision,
+                        object_hash=conflict_base_marker.object_hash,
+                    )
+                    + "\n"
+                )
+            },
+            expected_version=int(explicit_note["version"]),
+        )
+        drift_note = note_db.get_note_by_id(NOTE_ID)
+        assert drift_note is not None
+        drift_result = task_service.reconcile_note(
+            db=note_db,
+            note_id=NOTE_ID,
+            note_version=int(drift_note["version"]),
+            content=str(drift_note["content"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        drifts = note_db.task_store.list_task_projection_drifts(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            note_id=NOTE_ID,
+            task_id=str(conflict_task["id"]),
+        )
+        preserved = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(conflict_task["id"]),
+        )
+        assert drift_result.warning_count == 1
+        assert len(drifts) == 1
+        assert drifts[0]["reason_code"] == "both_changed"
+        assert "content" not in drifts[0]
+        assert "title" not in drifts[0]
+        assert preserved is not None
+        assert preserved["text"] == explicit["text"] == "Explicit task edit"
+        assert "Markdown conflict" in drift_note["content"]
+
+        drift = drifts[0]
+        resolved = task_service.resolve_projection_drift(
+            db=note_db,
+            note_id=NOTE_ID,
+            task_id=str(conflict_task["id"]),
+            drift_id=str(drift["id"]),
+            action="keep_task",
+            expected_lifecycle_revision=1,
+            expected_note_head_cursor=drift["note_head_cursor"],
+            expected_note_head_hash=drift["note_head_hash"],
+            expected_task_head_cursor=drift["task_head_cursor"],
+            expected_task_head_hash=drift["task_head_hash"],
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        resolved_note = note_db.get_note_by_id(NOTE_ID)
+        assert resolved["status"] == "resolved"
+        assert resolved_note is not None
+        assert "Explicit task edit" in resolved_note["content"]
+        assert "Markdown conflict" not in resolved_note["content"]
+        with pytest.raises(ConflictError):
+            task_service.resolve_projection_drift(
+                db=note_db,
+                note_id=NOTE_ID,
+                task_id=str(conflict_task["id"]),
+                drift_id=str(drift["id"]),
+                action="keep_task",
+                expected_lifecycle_revision=1,
+                expected_note_head_cursor=drift["note_head_cursor"],
+                expected_note_head_hash=drift["note_head_hash"],
+                expected_task_head_cursor=drift["task_head_cursor"],
+                expected_task_head_hash=drift["task_head_hash"],
+                actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+                owner_user_id=OWNER_ID,
+            )
+
+        def create_conflict(
+            base_task: dict[str, Any],
+            *,
+            explicit_text: str,
+            markdown_text: str,
+        ) -> tuple[dict[str, Any], dict[str, Any]]:
+            base_note = note_db.get_note_by_id(NOTE_ID)
+            assert base_note is not None
+            base_items = [
+                item
+                for item in parse_note_checklists(
+                    note_id=NOTE_ID,
+                    note_version=int(base_note["version"]),
+                    content=str(base_note["content"]),
+                ).items
+                if item.marker is not None
+                and item.marker.task_id == str(base_task["id"])
+            ]
+            assert len(base_items) == 1
+            base_marker = base_items[0].marker
+            assert base_marker is not None
+            explicit_task = task_service.update_task(
+                db=note_db,
+                task_id=str(base_task["id"]),
+                expected_task_version=int(base_task["version"]),
+                expected_note_version=int(base_note["version"]),
+                actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+                text=explicit_text,
+            )
+            after_explicit = note_db.get_note_by_id(NOTE_ID)
+            assert after_explicit is not None
+            note_db.update_note(
+                note_id=NOTE_ID,
+                update_data={
+                    "content": (
+                        f"- [ ] {markdown_text} "
+                        + render_task_marker(
+                            base_marker.task_id,
+                            revision=base_marker.revision,
+                            object_hash=base_marker.object_hash,
+                        )
+                        + "\n"
+                    )
+                },
+                expected_version=int(after_explicit["version"]),
+            )
+            conflict_note = note_db.get_note_by_id(NOTE_ID)
+            assert conflict_note is not None
+            task_service.reconcile_note(
+                db=note_db,
+                note_id=NOTE_ID,
+                note_version=int(conflict_note["version"]),
+                content=str(conflict_note["content"]),
+                actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+                owner_user_id=OWNER_ID,
+            )
+            open_drifts = note_db.task_store.list_task_projection_drifts(
+                owner_user_id=OWNER_ID,
+                dataset_id=dataset.dataset_id,
+                note_id=NOTE_ID,
+                task_id=str(base_task["id"]),
+            )
+            assert len(open_drifts) == 1
+            return explicit_task, open_drifts[0]
+
+        keep_task = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(conflict_task["id"]),
+        )
+        assert keep_task is not None
+        _, accept_drift = create_conflict(
+            keep_task,
+            explicit_text="Explicit second edit",
+            markdown_text="Accepted Markdown edit",
+        )
+        accepted = task_service.resolve_projection_drift(
+            db=note_db,
+            note_id=NOTE_ID,
+            task_id=str(keep_task["id"]),
+            drift_id=str(accept_drift["id"]),
+            action="accept_markdown",
+            expected_lifecycle_revision=1,
+            expected_note_head_cursor=accept_drift["note_head_cursor"],
+            expected_note_head_hash=accept_drift["note_head_hash"],
+            expected_task_head_cursor=accept_drift["task_head_cursor"],
+            expected_task_head_hash=accept_drift["task_head_hash"],
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        accepted_task = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(keep_task["id"]),
+        )
+        assert accepted["status"] == "resolved"
+        assert accepted_task is not None
+        assert accepted_task["text"] == "Accepted Markdown edit"
+
+        _, unlink_drift = create_conflict(
+            accepted_task,
+            explicit_text="Explicit unlink edit",
+            markdown_text="Unlinked Markdown",
+        )
+        unlinked_drift = task_service.resolve_projection_drift(
+            db=note_db,
+            note_id=NOTE_ID,
+            task_id=str(accepted_task["id"]),
+            drift_id=str(unlink_drift["id"]),
+            action="unlink",
+            expected_lifecycle_revision=1,
+            expected_note_head_cursor=unlink_drift["note_head_cursor"],
+            expected_note_head_hash=unlink_drift["note_head_hash"],
+            expected_task_head_cursor=unlink_drift["task_head_cursor"],
+            expected_task_head_hash=unlink_drift["task_head_hash"],
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        unlink_task = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(accepted_task["id"]),
+        )
+        unlink_note = note_db.get_note_by_id(NOTE_ID)
+        assert unlinked_drift["status"] == "resolved"
+        assert unlink_task is not None
+        assert unlink_task["projection_status"] == "unlinked"
+        assert unlink_note is not None
+        assert "tldw-task" not in unlink_note["content"]
+        assert "Unlinked Markdown" in unlink_note["content"]
+
+        dismiss_base = task_service.create_task_for_note(
+            db=note_db,
+            note_id=NOTE_ID,
+            text="Dismiss base",
+            status="open",
+            metadata={},
+            expected_note_version=int(unlink_note["version"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+        )
+        dismiss_explicit, dismiss_drift = create_conflict(
+            dismiss_base,
+            explicit_text="Dismiss explicit",
+            markdown_text="Dismiss Markdown",
+        )
+        dismissed = task_service.resolve_projection_drift(
+            db=note_db,
+            note_id=NOTE_ID,
+            task_id=str(dismiss_base["id"]),
+            drift_id=str(dismiss_drift["id"]),
+            action="dismiss",
+            expected_lifecycle_revision=1,
+            expected_note_head_cursor=dismiss_drift["note_head_cursor"],
+            expected_note_head_hash=dismiss_drift["note_head_hash"],
+            expected_task_head_cursor=dismiss_drift["task_head_cursor"],
+            expected_task_head_hash=dismiss_drift["task_head_hash"],
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        dismissed_task = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(dismiss_base["id"]),
+        )
+        dismissed_note = note_db.get_note_by_id(NOTE_ID)
+        assert dismissed["status"] == "dismissed"
+        assert dismissed_task is not None
+        assert dismissed_task["text"] == dismiss_explicit["text"]
+        assert dismissed_note is not None
+        assert "Dismiss Markdown" in dismissed_note["content"]
     finally:
         note_db.close_connection()
 

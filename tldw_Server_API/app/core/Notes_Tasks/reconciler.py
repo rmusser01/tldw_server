@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
@@ -23,6 +24,73 @@ if TYPE_CHECKING:
 class _ProjectedTask:
     task: dict[str, Any]
     projection: dict[str, Any]
+
+
+ProjectionDecision = Literal[
+    "no_change",
+    "task_to_note",
+    "note_to_task",
+    "same_result",
+    "drift",
+]
+
+
+def classify_managed_projection(
+    *,
+    item: ParsedChecklistItem,
+    anchor_revision: int,
+    anchor_hash: str,
+    anchor_payload: Mapping[str, object],
+    current_revision: int,
+    current_hash: str,
+    current_payload: Mapping[str, object],
+) -> ProjectionDecision:
+    """Classify one managed checklist line against its last-common task base."""
+
+    marker = item.marker
+    if (
+        item.marker_reason_code is not None
+        or marker is None
+        or marker.revision != anchor_revision
+        or marker.object_hash != anchor_hash
+    ):
+        return "drift"
+    anchor_projection = _projectable_task_values(anchor_payload)
+    current_projection = _projectable_task_values(current_payload)
+    note_projection = {
+        "title": item.text,
+        "status": "done" if item.checked else "open",
+        "priority": item.metadata.get("priority"),
+        "due_date": item.metadata.get("due_date"),
+        "estimate": item.metadata.get("estimate"),
+    }
+    task_changed = (
+        current_revision != anchor_revision or current_hash != anchor_hash
+    )
+    note_changed = note_projection != anchor_projection
+    if not task_changed and not note_changed:
+        return "no_change"
+    if task_changed and not note_changed:
+        return "task_to_note"
+    if not task_changed:
+        return "note_to_task"
+    if current_projection == note_projection:
+        return "same_result"
+    return "drift"
+
+
+def _projectable_task_values(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    """Return the canonical subset represented by one Markdown checklist line."""
+
+    return {
+        "title": payload.get("title"),
+        "status": payload.get("status"),
+        "priority": payload.get("priority"),
+        "due_date": payload.get("due_date"),
+        "estimate": payload.get("estimate"),
+    }
 
 
 class NotesTaskReconciler:

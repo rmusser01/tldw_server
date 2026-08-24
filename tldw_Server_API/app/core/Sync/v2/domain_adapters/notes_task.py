@@ -80,6 +80,7 @@ class NotesTaskDomainAdapter:
             dataset=dataset,
             context=context,
         )
+        coordinator_projection = _coordinator_task_projection(envelope, context)
         restore_intent = envelope.routing_metadata.get("restore_intent")
         allowed_routing = (
             {
@@ -101,7 +102,11 @@ class NotesTaskDomainAdapter:
                     "task_projection",
                 }
                 if trusted_server_mutation
-                else {"restore_intent"}
+                else (
+                    {"restore_intent", "task_projection"}
+                    if coordinator_projection
+                    else {"restore_intent"}
+                )
             )
         )
         if set(envelope.routing_metadata) - allowed_routing or restore_intent not in {
@@ -296,6 +301,33 @@ def _trusted_server_task_mutation(
         from ..notes_task_coordinator import (  # Local import avoids adapter cycles.
             _validate_task_projection_group_metadata,
         )
+
+        anchor = _validate_task_projection_group_metadata(projection)
+    except (ImportError, ValueError):
+        return False
+    return (
+        anchor.task_id == envelope.object_id
+        and anchor.task_envelope_id == envelope.client_envelope_id
+        and anchor.task_revision == envelope.object_revision
+        and anchor.task_hash == envelope.payload_hash
+    )
+
+
+def _coordinator_task_projection(
+    envelope: SyncEnvelopeCreate,
+    context: SyncAdapterContext | None,
+) -> bool:
+    """Authorize only the exact projection anchor derived during client expansion."""
+
+    projection = envelope.routing_metadata.get("task_projection")
+    if not (
+        context is not None
+        and context.coordinator_derived_task_projection
+        and isinstance(projection, Mapping)
+    ):
+        return False
+    try:
+        from ..notes_task_coordinator import _validate_task_projection_group_metadata
 
         anchor = _validate_task_projection_group_metadata(projection)
     except (ImportError, ValueError):

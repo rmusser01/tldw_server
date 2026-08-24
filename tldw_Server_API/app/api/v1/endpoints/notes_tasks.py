@@ -1,5 +1,9 @@
 """REST API routes for note-backed task operations."""
 
+# Endpoint boundaries intentionally funnel all service/database failures through
+# the single sanitized mapper below.
+# ruff: noqa: BLE001
+
 from __future__ import annotations
 
 from typing import Any
@@ -29,6 +33,9 @@ from tldw_Server_API.app.api.v1.schemas.notes_tasks_schemas import (
     TaskListResponse,
     TaskMetadata,
     TaskNoteSummaryResponse,
+    TaskProjectionDriftListResponse,
+    TaskProjectionDriftResolveRequest,
+    TaskProjectionDriftResponse,
     TaskProjectionResponse,
     TaskReconciliationSummaryResponse,
     TaskResponse,
@@ -141,6 +148,32 @@ def _timestamp_response(value: Any) -> str | None:
         return None
     isoformat = getattr(value, "isoformat", None)
     return str(isoformat() if callable(isoformat) else value)
+
+
+def _drift_response(drift: dict[str, Any]) -> TaskProjectionDriftResponse:
+    """Build a content-free drift response from authorized storage claims."""
+
+    created_at = _timestamp_response(drift.get("created_at"))
+    updated_at = _timestamp_response(drift.get("updated_at"))
+    if created_at is None or updated_at is None:
+        raise CharactersRAGDBError("Projection drift timestamps are unavailable.")
+    return TaskProjectionDriftResponse(
+        id=str(drift["id"]),
+        note_id=str(drift["note_id"]),
+        task_id=str(drift["task_id"]),
+        marker_base_revision=int(drift["marker_base_revision"]),
+        marker_base_hash=str(drift["marker_base_hash"]),
+        note_head_cursor=drift.get("note_head_cursor"),
+        note_head_hash=drift.get("note_head_hash"),
+        task_head_cursor=drift.get("task_head_cursor"),
+        task_head_hash=drift.get("task_head_hash"),
+        reason_code=str(drift["reason_code"]),
+        status=drift["status"],
+        lifecycle_revision=1 if drift["status"] == "open" else 2,
+        created_at=created_at,
+        updated_at=updated_at,
+        resolved_at=_timestamp_response(drift.get("resolved_at")),
+    )
 
 
 def _task_response(
@@ -367,6 +400,92 @@ async def update_task_activity_state(
     except Exception as exc:
         _handle_task_error(exc)
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Task activity update failed")
+
+
+@router.get(
+    "/tasks/drifts",
+    response_model=TaskProjectionDriftListResponse,
+    tags=["notes"],
+)
+async def list_task_projection_drifts(
+    note_id: str = Query(..., min_length=1, max_length=128),
+    task_id: str | None = Query(None, min_length=1, max_length=128),
+    drift_status: str = Query("open", alias="status", pattern="^(open|resolved|dismissed)$"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+    current_user: User = Depends(get_request_user),
+    _: None = Depends(rbac_rate_limit("notes.read")),
+) -> TaskProjectionDriftListResponse:
+    """List bounded content-free projection drift claims for one note."""
+
+    await _check_rate_limit(rate_limiter, current_user, "notes.read")
+    try:
+        scope = resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=str(current_user.id),
+        )
+        drifts = db.task_store.list_task_projection_drifts(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            note_id=note_id,
+            task_id=task_id,
+            status=drift_status,
+            limit=limit,
+            offset=offset,
+        )
+        return TaskProjectionDriftListResponse(
+            drifts=[_drift_response(drift) for drift in drifts]
+        )
+    except Exception as exc:
+        _handle_task_error(exc)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Projection drift list failed",
+    )
+
+
+@router.post(
+    "/tasks/{task_id}/drifts/{drift_id}/resolve",
+    response_model=TaskProjectionDriftResponse,
+    tags=["notes"],
+)
+async def resolve_task_projection_drift(
+    task_id: str,
+    drift_id: str,
+    request: TaskProjectionDriftResolveRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+    current_user: User = Depends(get_request_user),
+    task_service: NotesTaskService = Depends(get_notes_task_service),
+    _: None = Depends(rbac_rate_limit("notes.update")),
+) -> TaskProjectionDriftResponse:
+    """Resolve or dismiss one drift only against exact current claims."""
+
+    await _check_rate_limit(rate_limiter, current_user, "notes.update")
+    try:
+        drift = task_service.resolve_projection_drift(
+            db=db,
+            owner_user_id=str(current_user.id),
+            note_id=request.note_id,
+            task_id=task_id,
+            drift_id=drift_id,
+            action=request.action,
+            expected_lifecycle_revision=request.expected_lifecycle_revision,
+            expected_note_head_cursor=request.expected_note_head_cursor,
+            expected_note_head_hash=request.expected_note_head_hash,
+            expected_task_head_cursor=request.expected_task_head_cursor,
+            expected_task_head_hash=request.expected_task_head_hash,
+            actor=_actor(current_user),
+        )
+        return _drift_response(drift)
+    except Exception as exc:
+        _handle_task_error(exc)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Projection drift resolution failed",
+    )
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse, tags=["notes"])
