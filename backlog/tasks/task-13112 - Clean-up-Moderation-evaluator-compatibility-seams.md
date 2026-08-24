@@ -25,7 +25,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 - backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
-updated_date: 2026-08-24 06:40
+updated_date: 2026-08-24 06:47
 ---
 
 ## Description
@@ -62,6 +62,8 @@ Task 1 removed the five class/static direct PolicyEvaluator shims. The new Moder
 Task 1 spec compliance review: approved with no issues. Task 1 code quality review: approved with no critical, important, or minor findings. Reviewer verification passed compilation, 313 Moderation unit tests, 78 evaluator/delegation tests, retained dispatch and policy type checks, Ruff, Bandit, and `git diff --check`. Black would reformat the same production file at the base SHA, so that formatting result is pre-existing and not part of this cleanup.
 Task 2 removed the three instance scan shims and wrapper-only duplicate characterization. The class-local absence test completed a red/green cycle. Direct evaluator, public service dispatch, signature, and policy_types() compatibility tests passed.
 Task 2 quality review found the numeric-string chunk-geometry gap, and the direct evaluator test now preserves max_scan_chars="2" geometry.
+Task 2 spec compliance review approved the exact three-shim removal and retained dispatch boundaries with no issues.
+Task 2 code quality review identified one coverage gap: the deleted service-private numeric-string test asserted max_scan_chars="2" chunk geometry, while the direct evaluator replacement only checked a no-match result with "1". Commit c601412b7c restores the exact [(0, 2)] geometry assertion with one evaluator and the same limits. Fresh re-review approved with no remaining findings; 134 evaluator-boundary tests, Ruff, and diff checks passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
