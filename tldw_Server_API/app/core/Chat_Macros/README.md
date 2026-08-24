@@ -40,7 +40,10 @@ The manager supports:
 - Creating a blank user macro, editing it, and deleting it with an accessible
   confirmation that defaults focus to cancel.
 - Selecting any catalog entry to inspect its command, source, enabled state,
-  and catalog validation status.
+  and catalog validation status. `GET /api/v1/chat/macros` returns
+  `validation_status` and `validation_error` for every catalog summary; entries
+  that successfully reach this catalog are explicitly reported as `valid` with
+  no validation error.
 - Enabling or disabling built-in and user macros without changing the YAML.
 - Cloning the currently selected built-in into a user macro. Built-ins remain
   read-only: they expose disable and clone actions, not edit or delete actions.

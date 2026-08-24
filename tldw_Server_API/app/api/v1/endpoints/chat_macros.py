@@ -75,6 +75,8 @@ def _summary(item: ChatMacroCatalogItem) -> ChatMacroSummary:
         digest=item.digest,
         builtin_version=item.builtin_version,
         schema_version=item.definition.schema_version,
+        validation_status="valid",
+        validation_error=None,
     )
 
 
