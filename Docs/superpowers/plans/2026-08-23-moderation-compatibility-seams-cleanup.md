@@ -70,7 +70,7 @@
 
 **Tests:** Focused red/green absence test plus the evaluator delegation and direct evaluator suites.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 2: Remove Instance Scan Helper Shims
 
@@ -80,7 +80,7 @@
 
 **Tests:** Focused red/green absence test plus evaluator, characterization, and delegation suites.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 3: Stability And Security Verification
 
