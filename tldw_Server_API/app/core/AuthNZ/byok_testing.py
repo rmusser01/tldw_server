@@ -494,7 +494,7 @@ def provider_validation_public_error(value: Any) -> SanitizedProviderStreamError
             message=PROVIDER_STREAM_ERROR_MESSAGES[value.error_code],
             status_code=500,
         )
-    if isinstance(value, ChatProviderError):
+    if isinstance(value, ChatAPIError):
         status_code = value.status_code if value.status_code in {500, 502, 503, 504} else 502
         return SanitizedProviderStreamError(
             code="provider_unavailable",

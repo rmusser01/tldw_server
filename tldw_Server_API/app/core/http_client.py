@@ -110,6 +110,7 @@ from tldw_Server_API.app.core.testing import (
     is_truthy,
 )
 
+
 class _TerminalHTTPStatusError(Exception):
     """Carry an already-classified terminal HTTP status past transport retry logic."""
 
@@ -5380,7 +5381,9 @@ async def _astream_bytes_httpx(
                         ),
                     )
                 ) as (resp, byte_iter):
-                    if resp.status_code >= 400:
+                    try:
+                        resp.raise_for_status()
+                    except httpx.HTTPStatusError:
                         should, rsn = _should_retry(method, resp.status_code, None, retry)
                         if should and attempt < attempts:
                             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):

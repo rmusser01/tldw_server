@@ -715,7 +715,16 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
         )
       : []
     if (!caps || !models.includes(form.values.tldwTtsModel)) {
-      setFormValues(getBackendDefaults(caps ? selectedBackend : ""))
+      const defaults = getBackendDefaults(caps ? selectedBackend : "")
+      if (
+        defaults.tldwTtsBackend !== form.values.tldwTtsBackend ||
+        defaults.tldwTtsModel !== form.values.tldwTtsModel ||
+        defaults.tldwTtsVoice !== form.values.tldwTtsVoice ||
+        defaults.tldwTtsResponseFormat !==
+          form.values.tldwTtsResponseFormat
+      ) {
+        setFormValues(defaults)
+      }
       return
     }
     const modelCaps = caps.model_capabilities?.[form.values.tldwTtsModel]
@@ -736,7 +745,9 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
     }
   }, [
     explicitBackendSupported,
+    form.values.tldwTtsBackend,
     form.values.tldwTtsModel,
+    form.values.tldwTtsResponseFormat,
     form.values.tldwTtsVoice,
     form.values.ttsProvider,
     getBackendDefaults,

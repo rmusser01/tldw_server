@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import * as simpleFormHook from "@/hooks/useSimpleForm"
 import { TTSModeSettings } from "../TTSModeSettings"
 
 const {
@@ -716,6 +717,62 @@ describe("TTSModeSettings explicit backend discovery", () => {
         })
       )
     })
+  })
+
+  it("does not rewrite form values when backend defaults already match", async () => {
+    const realUseSimpleForm = simpleFormHook.useSimpleForm
+    const setValuesCalls = vi.fn()
+    const useSimpleFormSpy = vi
+      .spyOn(simpleFormHook, "useSimpleForm")
+      .mockImplementation((options) => {
+        const form = realUseSimpleForm(options)
+        const setValues = form.setValues
+        form.setValues = React.useCallback(
+          (next) => {
+            setValuesCalls(next)
+            setValues(next)
+          },
+          [setValues]
+        )
+        return form
+      })
+
+    getTTSSettingsMock.mockResolvedValue(
+      buildTtsSettings({
+        ttsProvider: "tldw",
+        tldwTtsBackend: "gateway:empty",
+        tldwTtsModel: "",
+        tldwTtsVoice: "",
+        tldwTtsResponseFormat: "mp3"
+      })
+    )
+    fetchTtsProvidersMock.mockResolvedValue({
+      supports_explicit_backend: true,
+      providers: {
+        "gateway:empty": {
+          display_name: "Empty Speech",
+          models: [],
+          default_model: "",
+          model_capabilities: {},
+          formats: ["mp3"],
+          default_format: "mp3",
+          fallback: { available: false, targets: [] }
+        }
+      },
+      voices: {}
+    })
+
+    try {
+      renderSettings()
+
+      await screen.findByLabelText("tldw TTS backend")
+      await waitFor(() => {
+        expect(fetchTldwTtsModelsMock).toHaveBeenCalledWith("gateway:empty")
+      })
+      expect(setValuesCalls).toHaveBeenCalledTimes(1)
+    } finally {
+      useSimpleFormSpy.mockRestore()
+    }
   })
 
   it("shows display names while retaining canonical backend values", async () => {

@@ -32,23 +32,23 @@
 - Consumes: remote branch `origin/codex/openrouter-tts-gateways-pr` at the recorded pre-rebase SHA and `origin/dev`
 - Produces: a clean local branch whose merge base is current `origin/dev`
 
-- [ ] **Step 1: Record recovery and ancestry evidence**
+- [x] **Step 1: Record recovery and ancestry evidence**
 
 Run: `git status --short --branch && git rev-parse HEAD origin/codex/openrouter-tts-gateways-pr origin/dev && git rev-list --left-right --count origin/dev...HEAD`
 
 Expected: clean feature worktree; local and remote feature SHA match before rebase.
 
-- [ ] **Step 2: Rebase onto the fetched dev tip**
+- [x] **Step 2: Rebase onto the fetched dev tip**
 
 Run: `git rebase origin/dev`
 
 Expected: replay completes, or stops at explicit conflicts without discarding either side.
 
-- [ ] **Step 3: Resolve conflicts by contract**
+- [x] **Step 3: Resolve conflicts by contract**
 
 For every conflict, compare the feature commit intent with the current `origin/dev` implementation. Preserve current-dev API/runtime improvements and retain only the approved gateway behavior listed under Global Constraints. After each resolution, run `git add <resolved-files>` and `git rebase --continue`.
 
-- [ ] **Step 4: Validate the replayed range**
+- [x] **Step 4: Validate the replayed range**
 
 Run: `git status --short && git diff --check origin/dev...HEAD && git diff --name-status origin/dev...HEAD && git range-diff 29acaca8c781213e27b12066372df13855e2e7a6..b5660be12734c9cafe8a322e5dbe7206101013b4 origin/dev...HEAD`
 
@@ -66,25 +66,25 @@ Expected: clean tree, no conflict markers or whitespace errors, and every intent
 - Consumes: rebased backend capability/default data and read-along session state
 - Produces: stable form synchronization and null-safe cacheability evaluation
 
-- [ ] **Step 1: Verify each reviewer claim against rebased code**
+- [x] **Step 1: Verify each reviewer claim against rebased code**
 
 Inspect the complete effect around gateway-default synchronization and the complete read-along session construction path. Determine whether setters can receive equal values repeatedly and whether `providerContext` is structurally optional at runtime.
 
-- [ ] **Step 2: Add focused regressions only for reproducible risks**
+- [x] **Step 2: Add focused regressions only for reproducible risks**
 
 For an equal-value setter loop, add a component test that renders a backend with already-resolved defaults and asserts the form-update callback is not re-issued. For missing provider context, add a read-along test with `providerContext` omitted and assert synthesis proceeds without throwing while cache defaults remain enabled.
 
-- [ ] **Step 3: Prove the regressions fail before production changes**
+- [x] **Step 3: Prove the regressions fail before production changes**
 
 Run: `bunx vitest run src/components/Option/Settings/__tests__/TTSModeSettings.test.tsx src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx --maxWorkers=1 --no-file-parallelism`
 
 Expected: any newly added regression for a verified issue fails for the reviewed reason. If current-dev already fixed an issue, record it as non-actionable instead of changing production code.
 
-- [ ] **Step 4: Implement the minimal root-cause fixes**
+- [x] **Step 4: Implement the minimal root-cause fixes**
 
-Guard default synchronization with field equality before `setFormValues`, and use `session.providerContext?.cacheSettings?.cacheable` if `providerContext` remains optional after rebase. Do not refactor unrelated settings or read-along behavior.
+Guard default synchronization with field equality before `setFormValues`. The read-along claim is non-actionable because `providerContext` is required, constructed before session use, and dereferenced earlier on the same path; do not weaken that invariant with a later optional chain. Do not refactor unrelated settings or read-along behavior.
 
-- [ ] **Step 5: Verify focused frontend behavior**
+- [x] **Step 5: Verify focused frontend behavior**
 
 Run: `bunx vitest run src/components/Option/Settings/__tests__/TTSModeSettings.test.tsx src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx --maxWorkers=1 --no-file-parallelism`
 
@@ -104,11 +104,11 @@ Expected: both files pass with zero failures.
 
 Run the GitHub Actions inspection helper against PR #2751 and preserve failing job names, run URLs, and root error snippets. Separate aggregate jobs that failed only because shards were cancelled from actionable leaf failures.
 
-- [ ] **Step 2: Run local feature-focused verification after the rebase**
+- [x] **Step 2: Run local feature-focused verification after the rebase**
 
 Activate `.venv`, run the gateway/config/BYOK/audio/http/audiobook backend tests listed in the Backlog task, then run the touched frontend Vitest suites and pinned ESLint. Use an 8 GB heap for TypeScript and compare diagnostics in touched files to `origin/dev`.
 
-- [ ] **Step 3: Run security and syntax gates**
+- [x] **Step 3: Run security and syntax gates**
 
 Run compileall for touched Python modules and `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/audio tldw_Server_API/app/api/v1/endpoints/user_keys.py tldw_Server_API/app/api/v1/schemas/audio_schemas.py tldw_Server_API/app/api/v1/schemas/audiobook_schemas.py tldw_Server_API/app/api/v1/schemas/user_keys.py tldw_Server_API/app/core/Audio/tts_service.py tldw_Server_API/app/core/AuthNZ/byok_helpers.py tldw_Server_API/app/core/AuthNZ/byok_runtime.py tldw_Server_API/app/core/AuthNZ/byok_testing.py tldw_Server_API/app/core/Infrastructure/provider_registry.py tldw_Server_API/app/core/TTS tldw_Server_API/app/core/http_client.py tldw_Server_API/app/services/audiobook_jobs_worker.py tldw_Server_API/app/services/startup_heavy_init.py -f json -o /tmp/bandit_task_12116_1_pr_maintenance.json` from the project virtual environment.
 
