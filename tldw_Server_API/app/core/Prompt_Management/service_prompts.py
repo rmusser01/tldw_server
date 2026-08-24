@@ -98,6 +98,13 @@ _TITLE_GENERATION_USER_TEMPLATE_DEFAULT = (
     "Response:"
 )
 
+_IMAGE_PROMPT_REFINEMENT_SYSTEM_DEFAULT = (
+    "You refine image-generation prompts. Preserve intent while improving clarity, visual specificity, and composition."
+)
+_IMAGE_PROMPT_REFINEMENT_REWRITE_DEFAULT = (
+    "Rewrite the prompt to be concise, concrete, and generation-ready."
+)
+
 _TRANSLATION_SYSTEM_DEFAULT = """You are an expert translator. Your task is to provide accurate,
 natural-sounding translations that preserve the original meaning, tone, and formatting.
 Do not add explanations or notes - only provide the translation."""
@@ -189,6 +196,37 @@ _DEFINITION_SEQUENCE = (
             ServicePromptWorkflow(
                 id="chat.title.generation",
                 label="Automatic conversation titles",
+            ),
+        ),
+    ),
+    ServicePromptDefinition(
+        id="image.prompt.refinement",
+        label="Image prompt refinement",
+        description="Controls the semantic instructions used to refine image-generation prompt drafts.",
+        parts=(
+            ServicePromptPart(
+                key="system_semantics",
+                label="Refinement guidance",
+                mode="literal",
+                required_variables=(),
+            ),
+            ServicePromptPart(
+                key="rewrite_semantics",
+                label="Rewrite guidance",
+                mode="literal",
+                required_variables=(),
+            ),
+        ),
+        default_parts=MappingProxyType(
+            {
+                "system_semantics": _IMAGE_PROMPT_REFINEMENT_SYSTEM_DEFAULT,
+                "rewrite_semantics": _IMAGE_PROMPT_REFINEMENT_REWRITE_DEFAULT,
+            }
+        ),
+        affected_workflows=(
+            ServicePromptWorkflow(
+                id="image.prompt.refinement",
+                label="Image prompt refinement",
             ),
         ),
     ),

@@ -65,6 +65,15 @@ EXPECTED_REGISTRY = {
         "parts": (("user_template", "User template", "template", ("query",)),),
         "workflows": (("chat.title.generation", "Automatic conversation titles"),),
     },
+    "image.prompt.refinement": {
+        "label": "Image prompt refinement",
+        "description": "Controls the semantic instructions used to refine image-generation prompt drafts.",
+        "parts": (
+            ("system_semantics", "Refinement guidance", "literal", ()),
+            ("rewrite_semantics", "Rewrite guidance", "literal", ()),
+        ),
+        "workflows": (("image.prompt.refinement", "Image prompt refinement"),),
+    },
     "media.text.translation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation.",

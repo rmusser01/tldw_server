@@ -9,6 +9,7 @@ export type KnownServicePromptId =
   | "chat.rag.question_rewrite"
   | "chat.web_search.answer"
   | "chat.title.generation"
+  | "image.prompt.refinement"
   | "media.text.translation"
   | "notes.title.generate"
 

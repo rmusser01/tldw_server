@@ -12,6 +12,10 @@
     "chat.title.generation": {
       "user_template": "Here is the query:\n\n--------------\n\n{query}\n\n--------------\n\nCreate a concise, 3-5 word phrase as a title for the previous query. Avoid quotation marks or special formatting. RESPOND ONLY WITH THE TITLE TEXT. ANSWER USING THE SAME LANGUAGE AS THE QUERY.\n\n\nExamples of titles:\n\nStellar Achievement Celebration\nFamily Bonding Activities\n🇫🇷 Voyage à Paris\n🍜 Receta de Ramen Casero\nShakespeare Analyse Literarische\n日本の春祭り体験\nДревнегреческая Философия Обзор\n\nResponse:"
     },
+    "image.prompt.refinement": {
+      "system_semantics": "You refine image-generation prompts. Preserve intent while improving clarity, visual specificity, and composition.",
+      "rewrite_semantics": "Rewrite the prompt to be concise, concrete, and generation-ready."
+    },
     "media.text.translation": {
       "system": "You are an expert translator. Your task is to provide accurate,\nnatural-sounding translations that preserve the original meaning, tone, and formatting.\nDo not add explanations or notes - only provide the translation.",
       "user_template": "Translate the following text to {target_language}.\nPreserve the original formatting, meaning, and tone.\nOnly output the translation, no explanations, notes, or additional text.\n\nText to translate:\n{text}"

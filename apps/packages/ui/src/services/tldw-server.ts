@@ -513,6 +513,12 @@ Shakespeare Analyse Literarische
 Древнегреческая Философия Обзор
 
 Response:`
+  }),
+  "image.prompt.refinement": Object.freeze({
+    system_semantics:
+      "You refine image-generation prompts. Preserve intent while improving clarity, visual specificity, and composition.",
+    rewrite_semantics:
+      "Rewrite the prompt to be concise, concrete, and generation-ready."
   })
 })
 

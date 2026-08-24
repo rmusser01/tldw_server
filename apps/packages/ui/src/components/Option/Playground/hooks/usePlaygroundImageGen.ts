@@ -33,6 +33,11 @@ import {
 } from "../compare-response-diff"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import {
+  loadServicePromptSnapshot,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { parseJsonObject } from "./utils"
 
 // ---------------------------------------------------------------------------
@@ -338,27 +343,50 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
 
     setImagePromptRefineSubmitting(true)
     setImageGenerateRefineMetadata(undefined)
+    let servicePromptSnapshot: ServicePromptSnapshot | null = null
     try {
       const startedAt =
         typeof performance !== "undefined" ? performance.now() : Date.now()
       await tldwClient.initialize().catch(() => null)
+      servicePromptSnapshot = await loadServicePromptSnapshot([
+        "image.prompt.refinement"
+      ])
+      const refinementPrompt =
+        servicePromptSnapshot.definitions["image.prompt.refinement"]
+      if (!refinementPrompt) {
+        throw new Error("Image prompt refinement settings are unavailable.")
+      }
       const provider = await resolveApiProviderForModel({
         modelId: normalizedModel,
         explicitProvider: currentApiProvider
       })
-      const completionResponse = await tldwClient.createChatCompletion({
-        model: normalizedModel,
-        api_provider: provider || undefined,
-        temperature: 0.1,
-        max_tokens: 320,
-        messages: buildImagePromptRefineMessages({
-          originalPrompt: prompt,
-          strategyLabel,
-          backend: imageGenerateBackend,
-          contextEntries
-        })
-      })
+      if (servicePromptSnapshot.scopeInvalidatedSignal.aborted) {
+        throw createServicePromptScopeChangedError()
+      }
+      const completionResponse = await tldwClient.createChatCompletion(
+        {
+          model: normalizedModel,
+          api_provider: provider || undefined,
+          temperature: 0.1,
+          max_tokens: 320,
+          messages: buildImagePromptRefineMessages({
+            originalPrompt: prompt,
+            strategyLabel,
+            backend: imageGenerateBackend,
+            contextEntries,
+            systemSemantics: refinementPrompt.parts.system_semantics,
+            rewriteSemantics: refinementPrompt.parts.rewrite_semantics
+          })
+        },
+        {
+          signal: servicePromptSnapshot.scopeSignal,
+          requestScope: servicePromptSnapshot.requestScope
+        }
+      )
       const completionPayload = await completionResponse.json().catch(() => null)
+      if (servicePromptSnapshot.scopeInvalidatedSignal.aborted) {
+        throw createServicePromptScopeChangedError()
+      }
       const candidate = extractImagePromptRefineCandidate(completionPayload)
       if (!candidate) {
         throw new Error(
@@ -395,6 +423,7 @@ export function usePlaygroundImageGen(deps: UsePlaygroundImageGenDeps) {
           )
       })
     } finally {
+      servicePromptSnapshot?.release()
       setImagePromptRefineSubmitting(false)
     }
   }, [

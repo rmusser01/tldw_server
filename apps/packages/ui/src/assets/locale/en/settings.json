@@ -39,6 +39,10 @@
         "label": "Conversation title",
         "description": "Controls the instruction used to generate automatic conversation titles."
       },
+      "imagePromptRefinement": {
+        "label": "Image prompt refinement",
+        "description": "Controls the semantic instructions used to refine image-generation prompt drafts."
+      },
       "mediaTextTranslation": {
         "label": "Text translation",
         "description": "Controls the visible instructions used by synchronous text translation."
@@ -56,6 +60,7 @@
       "mainChatWebSearch": "Main chat web search",
       "compareWebSearch": "Compare web search",
       "automaticConversationTitles": "Automatic conversation titles",
+      "imagePromptRefinement": "Image prompt refinement",
       "textTranslation": "Text translation",
       "automaticNotesTitles": "Automatic Notes titles"
     },
@@ -66,6 +71,8 @@
     "parts": {
       "template": "Template",
       "system": "System instructions",
+      "systemSemantics": "Refinement guidance",
+      "rewriteSemantics": "Rewrite guidance",
       "titleInstruction": "Title instruction",
       "userTemplate": "User template"
     },
