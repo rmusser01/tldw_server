@@ -150,7 +150,9 @@ describe("SharedResearchWorkspace accessibility", () => {
     ).toBeDisabled()
 
     resolveAsk(chatResponse)
-    expect(await screen.findByRole("status")).toHaveTextContent("Answer added")
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Answer added")
+    )
     expect(
       screen.getByRole("button", { name: "Ask shared workspace" })
     ).toBeInTheDocument()

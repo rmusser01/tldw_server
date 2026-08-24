@@ -785,7 +785,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     ) {
       throw new Error(
         streamTransportInterruptionReason ||
-          "The provider did not return a response."
+          EMPTY_RESPONSE_ERROR_MESSAGE
       )
     }
 

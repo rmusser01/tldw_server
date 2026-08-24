@@ -554,7 +554,9 @@ describe("SharedResearchWorkspace recipient surface", () => {
     await waitFor(() => expect(api.listSources).toHaveBeenCalled())
 
     fireEvent.click(screen.getByRole("button", { name: "Ask shared workspace" }))
-    expect(await screen.findByRole("status")).toHaveTextContent(/Try again in 1 second/)
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(/Try again in 1 second/)
+    )
     expect(api.ask.mock.calls[1][1].request_id).not.toBe(
       api.ask.mock.calls[0][1].request_id
     )
