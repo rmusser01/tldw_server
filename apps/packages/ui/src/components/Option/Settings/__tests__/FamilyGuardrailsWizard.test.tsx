@@ -2070,7 +2070,7 @@ describe("FamilyGuardrailsWizard", () => {
 
     expect(screen.getByLabelText("Dependent 1 display name")).toBeInTheDocument()
     expect(screen.getByText("Selected: 0")).toBeInTheDocument()
-  }, 15_000)
+  })
 
   it("supports assigning templates to selected dependents in table mode", async () => {
     render(<FamilyGuardrailsWizard />)
@@ -2092,7 +2092,7 @@ describe("FamilyGuardrailsWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: /Apply \"Teen Balanced\" to selected/i }))
 
     expect(screen.getByText("Applied Teen Balanced template to 5 selected dependents.")).toBeInTheDocument()
-  }, 15_000)
+  })
 
   it("supports keyboard select-all shortcut in dependent table mode", async () => {
     render(<FamilyGuardrailsWizard />)

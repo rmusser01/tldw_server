@@ -109,11 +109,16 @@ const readyPipelineAction = async (name: string) => {
 }
 
 const reachTestStep = async () => {
-  fireEvent.click(pipeline().getByLabelText("AI Feed"))
+  const source = pipeline().getByLabelText("AI Feed")
+  fireEvent.click(source)
+  await waitFor(() => expect(source).toBeChecked())
   fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+  await waitFor(() => expect(pipeline().getByLabelText("Monitor name")).toBeInTheDocument())
   fireEvent.change(pipeline().getByLabelText("Monitor name"), { target: { value: "Morning Brief" } })
   fireEvent.click(pipeline().getByRole("button", { name: "Next: Briefing" }))
+  await waitFor(() => expect(pipeline().getByRole("button", { name: "Next: Delivery" })).toBeInTheDocument())
   fireEvent.click(pipeline().getByRole("button", { name: "Next: Delivery" }))
+  await waitFor(() => expect(pipeline().getByRole("button", { name: "Next: Test" })).toBeInTheDocument())
   fireEvent.click(pipeline().getByRole("button", { name: "Next: Test" }))
   await waitFor(() => {
     expect(pipeline().getByRole("button", { name: "Generate 60-second sample" })).toBeInTheDocument()
@@ -228,8 +233,11 @@ describe("OverviewTab canonical setup", () => {
     render(<OverviewTab />)
     fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
     await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
-    fireEvent.click(pipeline().getByLabelText("AI Feed"))
+    const source = pipeline().getByLabelText("AI Feed")
+    fireEvent.click(source)
+    await waitFor(() => expect(source).toBeChecked())
     fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+    await waitFor(() => expect(pipeline().getByLabelText("Schedule")).toBeInTheDocument())
 
     fireEvent.mouseDown(pipeline().getByLabelText("Schedule"))
     fireEvent.click(await screen.findByText("Advanced cron", {
@@ -251,13 +259,16 @@ describe("OverviewTab canonical setup", () => {
     const trigger = await screen.findByRole("button", { name: "Test now" })
     fireEvent.click(trigger)
     await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
-    fireEvent.click(pipeline().getByLabelText("AI Feed"))
+    const source = pipeline().getByLabelText("AI Feed")
+    fireEvent.click(source)
+    await waitFor(() => expect(source).toBeChecked())
     fireEvent.click(pipeline().getByRole("button", { name: "Test source" }))
     await waitFor(() => expect(mocks.testSource).toHaveBeenCalledWith(
       { url: "https://example.com/ai.xml", source_type: "rss" },
       { limit: 6 }
     ))
-    fireEvent.click(pipeline().getByLabelText("AI Feed"))
+    fireEvent.click(source)
+    await waitFor(() => expect(source).not.toBeChecked())
     await reachTestStep()
 
     fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))

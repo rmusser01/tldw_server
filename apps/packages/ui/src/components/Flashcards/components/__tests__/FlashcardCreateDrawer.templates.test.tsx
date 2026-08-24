@@ -314,6 +314,9 @@ describe("FlashcardCreateDrawer template flows", () => {
       expect(activeModal).toBeDefined()
       return activeModal as HTMLElement
     })
+    await waitFor(() => {
+      expect(within(modal).getByLabelText("Term")).toBeInTheDocument()
+    })
 
     return modal
   }

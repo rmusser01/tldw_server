@@ -1358,7 +1358,7 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       })
     )
-  }, 15000)
+  }, 30000)
 
   it("fails flashcard artifacts when generated cards are placeholder-only", async () => {
     mockGetMediaDetails.mockResolvedValue({

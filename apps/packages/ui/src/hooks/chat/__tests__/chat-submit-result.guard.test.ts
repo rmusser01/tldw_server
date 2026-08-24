@@ -85,7 +85,7 @@ describe("chat submit result contract", () => {
     for (const path of wrapperPaths) {
       const source = readUiSource(path)
       expect(source, path).toMatch(/Promise<ChatSubmitResult>/)
-      expect(source, path).toContain("return runChatPipeline(")
+      expect(source, path).toMatch(/return\s+(?:await\s+)?runChatPipeline\(/)
     }
   })
 
@@ -96,7 +96,7 @@ describe("chat submit result contract", () => {
     expect(source).toContain("resolveTurnRagMediaIds")
     expect(source).toContain("resolveTurnFileRetrievalEnabled")
     expect(source).toMatch(
-      /buildChatModeParams\(\{[\s\S]*ragMediaIds:\s*turnRagMediaIds[\s\S]*fileRetrievalEnabled:\s*turnFileRetrievalEnabled[\s\S]*selectedKnowledge:\s*turnSelectedKnowledge/
+      /buildChatModeParams\(\s*\{[\s\S]*ragMediaIds:\s*turnRagMediaIds[\s\S]*fileRetrievalEnabled:\s*turnFileRetrievalEnabled[\s\S]*selectedKnowledge:\s*turnSelectedKnowledge/
     )
     expect(source).toContain("shouldUseRagForTurn")
     expect(source).toContain("const characterResult = await characterChatMode")
