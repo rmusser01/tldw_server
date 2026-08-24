@@ -1,6 +1,6 @@
 # Persona Ambient Companion and Transparent-Video Visual Packs
 
-**Status:** Approved design; pending human review of this document
+**Status:** Approved design with review amendments; pending final human review
 
 **Date:** 2026-08-23
 
@@ -17,13 +17,14 @@ This design evolves the existing Persona Buddy into a calm, renderer-neutral web
 
 The shared companion engine owns semantic state, timing, interaction, accessibility, position, and safety. Renderer adapters only display the state selected by the engine. No runtime model or LLM call is allowed.
 
-Every video pack must include a reviewed `sprite_frames` v1 fallback. The fallback is visible first and remains the authoritative recovery path for unsupported browsers, missing alpha, decode or playback failure, and reduced-motion mode.
+Every video pack must include a reviewed `sprite_frames` v1 fallback and a genuinely non-animated PNG still for reduced-motion use. The fallback is visible first and remains the authoritative recovery path for unsupported browsers, missing alpha, authenticated-asset loading failure, decode or playback failure, and reduced-motion mode.
 
 ## Product Decisions
 
 | Area | Decision |
 | --- | --- |
 | Surfaces | Web app only. Expressive may also run in the side panel; Roaming is restricted to the full web app. |
+| Touch scope | Touch-capable surfaces where Buddy already mounts are supported. This work does not introduce narrow-mobile Buddy positioning or a new mobile surface. |
 | Focus | One focused Buddy remains visible. Other live Persona sessions are represented by existing badges/status. |
 | Ambient scope | Ambient actions run only while the Persona is idle. They never compete with listening, thinking, speaking, tool activity, approval, error, or offline states. |
 | Modes | `Off`, `Expressive`, and `Roaming`. |
@@ -32,7 +33,7 @@ Every video pack must include a reviewed `sprite_frames` v1 fallback. The fallba
 | Runtime intelligence | Deterministic, seeded scheduling and declared pack metadata only. No model calls. |
 | Configuration | Engine safety defaults, then pack suggestions, then the effective user mode. A global default may be overridden per Persona. |
 | Video | VP9-alpha WebM is preferred, silent, muted, inline, and without native controls. |
-| Fallback | A reviewed still or sprite fallback is mandatory. Static fallback is encoded as a one-frame `sprite_frames` animation. |
+| Fallback | A reviewed sprite fallback and a genuinely non-animated PNG still are mandatory. The static selection is represented through the strict `sprite_frames` v1 contract. |
 | Creation | Guided local conversion with automatic proposals, before/after review, and a small set of controls. |
 | Source retention | Delete source and temporary intermediates after successful publication by default; offer an explicit retain-source option. |
 | Licensing | Technical validation only. Licensing review and enforcement are outside this workflow. |
@@ -73,6 +74,7 @@ The implementation should extend the current Persona Visual and Persona Buddy pa
 - The Buddy already has focused-Persona behavior, position persistence, viewport clamping, visual-state selection, and accessibility-related UI.
 - `persona_buddies.overlay_preferences_json` already holds per-Persona Buddy overlay preferences.
 - Jobs provide the appropriate user-visible execution, retry, cancellation, and status model for conversion.
+- Persona visual asset endpoints are authenticated. Native image and video elements cannot attach the application's API-key or bearer headers, so direct protected asset URLs are not a sufficient renderer transport.
 
 The current Chatbook importer accepts only its strict `sprite_frames` v1 schema and retains only supported sprite content. Unknown renderer fields are not a forward-compatible extension point. Consequently:
 
@@ -111,6 +113,8 @@ The shared companion engine owns:
 - renderer generation tokens and stale-result rejection;
 - selection of the requested visual state and fallback policy.
 
+A shared authenticated asset loader sits below the renderer adapters. It uses the existing authenticated API client to fetch bounded asset bytes, exposes Blob object URLs to image and video elements, caches by immutable asset identity and checksum, cancels stale generations, and revokes URLs when a pack or generation is released. Stage 2 does not add signed query tokens, a service worker, MediaSource, or a second asset-delivery protocol. Strict video size caps make a bounded whole-clip Blob the initial implementation; a streaming design requires separate evidence and review.
+
 Renderer adapters own only:
 
 - resolving a requested state to declared assets;
@@ -132,27 +136,31 @@ Effective mode resolution is:
 2. global `ambient_mode`, when present;
 3. safe default: `Expressive` with calm engine settings.
 
+A successful read with no stored preference uses the calm `Expressive` default. A failed or unauthorized preference read is different: ambient scheduling fails closed to `Off` until the saved choice can be recovered, while the Buddy and its controls remain visible. The existing Buddy-enabled setting remains the independent visibility gate.
+
 `Roaming` is coerced to `Expressive` outside the full web app. Reduced motion is an independent accessibility constraint, not another ambient mode.
 
 Per-Persona updates must use a targeted, version-checked JSON patch so changing `ambient_mode` cannot overwrite existing accessory, eye, or other overlay preferences. Stale writes return a conflict and preserve the newer document.
 
 ### Mode semantics
 
-- **Off:** no ambient variants or roaming. The Buddy still represents active Persona state and supports controls and direct interaction.
+- **Off:** no scheduled ambient variants or roaming. The renderer may continue its declared base semantic idle playback; only reduced motion freezes it. The Buddy still represents active Persona state and supports controls and direct interaction.
 - **Expressive:** continuous subtle idle rendering plus occasional non-moving idle reactions. Larger reactions are scheduled approximately every 30–90 seconds, subject to engine clamps and eligibility.
 - **Roaming:** Expressive behavior plus occasional grounded horizontal movement within the current Buddy surface.
 
-Pack weights are relative suggestions; they do not need to sum to 100. The engine rejects non-finite, negative, or otherwise invalid values and supplies safe defaults when suggestions are absent.
+Pack weights are relative suggestions; they do not need to sum to 100. The engine rejects non-finite, negative, or otherwise invalid values and supplies bounded cadence/cooldown defaults for declared actions. It does not invent actions when behavior metadata is absent.
 
 ### State precedence
 
 Only one semantic visual intent wins at a time:
 
-1. approval, error, or offline;
-2. active Persona state: listening, thinking, speaking, or tool activity;
-3. direct interaction when the Persona is otherwise idle;
-4. ambient action;
-5. base idle.
+1. error;
+2. approval needed;
+3. offline;
+4. active Persona state: wake armed, listening, thinking, speaking, or tool activity;
+5. direct interaction when the Persona is otherwise idle;
+6. ambient action;
+7. base idle.
 
 Controls remain accessible in every state. Dragging may reposition the Buddy without replacing a higher-priority semantic state.
 
@@ -174,9 +182,11 @@ Hidden time does not accumulate into an immediate reaction. On visibility restor
 
 ### Calm scheduler
 
-Use a deterministic pseudo-random scheduler with an injectable seed and clock. The engine owns interval bounds, maximum action duration, repeat suppression, movement distance bounds, and cooldown clamps. Packs may suggest relative weights and cooldowns but cannot weaken those safeguards.
+Use a deterministic pseudo-random scheduler with an injectable seed and monotonic clock. Production seeds are scoped to the current visible Buddy session; tests inject a fixed seed. The engine owns interval bounds, maximum action duration, repeat suppression, movement distance bounds, and cooldown clamps. Packs may suggest relative weights and cooldowns but cannot weaken those safeguards.
 
 Avoid selecting the immediately previous larger action when another eligible action exists. If no declared action is eligible, remain in base idle without error.
+
+Bundled raster packs receive explicit minimal behavior metadata so the default Expressive experience has declared eligible actions. Do not infer ambient actions from arbitrary user-authored packs. A pack without behavior metadata remains in its declared base idle and the controls report unsupported optional actions rather than inventing them.
 
 ### Generation-fenced intent
 
@@ -208,11 +218,13 @@ A concise first-use hint explains the available gestures and is dismissible. Pet
 
 Single-click reaction is deferred for the platform double-click window. A recognized double-click or drag cancels the pending single-click. Drag begins only after a movement threshold, uses pointer capture, and does not also emit a click reaction.
 
+Click and Space request a declared pack reaction when one is available. If the pack has no click reaction, the inner visual wrapper gives a small renderer-neutral press/nudge acknowledgment; it does not introduce another Persona visual state, move the outer Buddy position, or run under reduced motion.
+
 Ambient and roaming pause while controls are open or the Buddy has actionable focus. Keyboard interaction must not depend on hover, and all controls require accessible names and visible focus indication.
 
 ### Reduced motion
 
-When `prefers-reduced-motion` is active, immediately present a deterministic still frame from the required fallback:
+When `prefers-reduced-motion` is active, immediately present a deterministic, genuinely non-animated PNG still from the required fallback:
 
 - do not load or play video;
 - do not crossfade;
@@ -220,7 +232,9 @@ When `prefers-reduced-motion` is active, immediately present a deterministic sti
 - do not animate the sprite fallback;
 - retain semantic state changes by selecting the declared still for each state.
 
-If a state shares the same one-frame fallback asset as other states, the behavior remains valid. The review UI should warn about limited visual differentiation without rejecting a technically complete pack.
+Static selection is exact after resolving the state to its fallback animation: use that animation's `preview_frame` when declared, then its `preview_asset_id`, then its first frame. The selected bytes must be a non-animated raster; wrapping an animated GIF or animated WebP in a one-frame sprite animation is invalid for static coverage. Creation and import normalize accepted static fallbacks to PNG.
+
+If a state shares the same still asset as other states, the behavior remains valid. The review UI should warn about limited visual differentiation without rejecting a technically complete pack.
 
 ## Pack and Manifest Contracts
 
@@ -320,7 +334,11 @@ Behavior suggestions belong in pack metadata beside `visual_manifest`, so the ex
         "trigger": "ambient",
         "category": "move",
         "suggested_weight": 1,
-        "movement": { "direction": "horizontal" }
+        "movement": {
+          "direction": "horizontal",
+          "motion_start_ratio": 0.1,
+          "motion_end_ratio": 0.9
+        }
       },
       {
         "state": "reaction.click",
@@ -332,7 +350,9 @@ Behavior suggestions belong in pack metadata beside `visual_manifest`, so the ex
 }
 ```
 
-Entries reference built-in or custom state IDs already declared by the visual pack; they do not establish a second action registry. The engine owns cadence, duration, displacement, repeat policy, and all safety clamps.
+Entries reference built-in or custom state IDs already declared by the visual pack; they do not establish a second action registry. The engine owns cadence, duration, displacement, repeat policy, and all safety clamps. Movement ratios are finite values clamped to `0..1`, with start no later than end; they describe when normalized engine-owned displacement occurs, never its pixel distance.
+
+Validation imposes configured maxima for entry count and identifier length, unique `(trigger, state)` pairs, known trigger/category values, finite bounded weights and cooldowns, and references that resolve through the pack's active renderer or required fallback. Invalid metadata blocks review or activation rather than being silently normalized.
 
 Behavior metadata participates in pack fingerprints, duplication, native import/export, stale-review detection, and runtime generations.
 
@@ -342,6 +362,7 @@ Activation requires:
 
 - at least one valid transparent idle animation;
 - a complete reviewed raster fallback for the nine built-in Persona states;
+- a genuinely non-animated PNG selection for every reduced-motion state;
 - native pack and renderer metadata;
 - successful bounded media validation.
 
@@ -353,14 +374,17 @@ Click reactions, walking, turning, drag reactions, and additional ambient action
 
 For every semantic transition:
 
-1. Render the matching fallback immediately.
-2. Resolve and load the candidate clip without hiding the fallback.
-3. Verify the generation is still current.
-4. Call `play()` and handle its returned promise.
-5. Wait for a real presented frame, preferring `requestVideoFrameCallback`; use a guarded `loadeddata`/`playing` fallback where unavailable.
-6. Recheck the generation, then swap the video into view.
+1. Resolve the matching fallback through the authenticated asset loader and keep the previous visual visible until that fallback is ready.
+2. Present the matching fallback.
+3. Resolve and load the candidate clip through the same authenticated asset loader without hiding the fallback.
+4. Verify the generation is still current.
+5. Call `play()` and handle its returned promise.
+6. Wait for a real presented frame, preferring `requestVideoFrameCallback`; use a guarded `loadeddata`/`playing` fallback where unavailable.
+7. Recheck the generation, then swap the video into view.
 
 At most two video elements are retained during a transition. Release the stale source promptly after the new source is visible. Position and mirroring transforms apply to the outer Buddy container, never to separate renderer-owned coordinates.
+
+A request for the already-presented state and pack revision is idempotent: it does not restart media, flash the fallback, or advance renderer resources unless the current presentation has failed.
 
 ### Capability and alpha validation
 
@@ -374,6 +398,7 @@ If the session probe fails, disable the video renderer for that browser session 
 | --- | --- |
 | Codec or alpha incompatibility | Disable video rendering for the browser session; use fallback for every pack. |
 | Corrupt or invalid clip | Disable that clip for the active pack revision; continue with fallback. |
+| Authentication, network, or transient asset fetch failure | Keep the fallback, do not mark the clip corrupt, and retry only after authentication or connectivity recovery. |
 | Stall or rejected `play()` | Retry the clip once; then use fallback for that action. |
 | Stale load or callback | Ignore and release resources without changing visible state. |
 | Missing optional state | Filter the action from selection; do not surface a runtime error. |
@@ -382,7 +407,7 @@ Diagnostics should identify the renderer, pack revision, state, and failure clas
 
 ### Roaming
 
-Roaming moves the existing outer Buddy container along the x-axis only. Displacement is clamped to the current viewport and expressed using normalized Buddy-width units so imported packs do not dictate pixels. Resize and surface changes reclamp immediately.
+Roaming moves the existing outer Buddy container along the x-axis only. The user-dragged position remains the persisted anchor. Ambient movement uses an in-memory transient x-coordinate and never calls the persisted position setter on animation frames. It may settle at another in-memory resting coordinate for the session, but reload, Persona switch, surface change, or explicit reset returns to the saved anchor. Displacement is clamped to the current viewport and expressed using normalized Buddy-width units so imported packs do not dictate pixels. Resize and surface changes reclamp immediately.
 
 Turning changes facing only after the current declared turn clip completes successfully. If no turn clip exists or it fails, the engine may change facing only when mirroring is declared safe; otherwise it preserves the current facing.
 
@@ -392,7 +417,7 @@ Turning changes facing only after the current declared turn clip completes succe
 
 1. Upload a green-screen or already-transparent clip into private staging.
 2. Run bounded media inspection.
-3. Generate deterministic automatic proposals from border sampling: key color, tolerance, spill suppression, crop, scale, and baseline alignment.
+3. Sample multiple bounded timestamps and generate deterministic automatic proposals in HSV space from border pixels: key color, tolerance, spill suppression, crop, scale, baseline alignment, and proposal confidence.
 4. Show before/after previews and expose only those controls.
 5. Let the user choose or confirm fallback state coverage.
 6. Submit final conversion as a user-visible Job.
@@ -400,7 +425,7 @@ Turning changes facing only after the current declared turn clip completes succe
 8. Save an immutable inactive draft and review record.
 9. Activate explicitly in a separate atomic operation.
 
-No model is involved in detection, mapping, conversion, or review.
+No model is involved in detection, mapping, conversion, or review. Low-confidence background detection never auto-accepts or publishes a proposal; it requires manual preview adjustment and confirmation.
 
 ### Preview and final conversion
 
@@ -408,13 +433,17 @@ Preview requests are cancellable and generation-fenced so stale previews cannot 
 
 - addresses staged input by server storage identity plus checksum, never by a client-supplied filesystem path;
 - uses fixed subprocess argument arrays with no interpolated shell;
+- runs FFmpeg with `-nostdin`, a strict local-file protocol allowlist, and no network-capable input;
 - enforces file, frame, duration, pixel, CPU, memory, wall-clock, and output-size bounds;
+- terminates and waits for the complete subprocess tree on cancellation or timeout;
 - strips audio;
 - removes the selected background and suppresses spill;
 - normalizes crop, canvas, scale, and baseline;
 - encodes VP9-alpha WebM;
 - generates or normalizes the required raster fallback;
 - decodes and probes produced assets before publication.
+
+Output validation samples bounded decoded frames and requires both transparent and visible pixels, non-empty visible bounds, sane canvas/crop dimensions, and valid baseline alignment. It rejects all-opaque, all-transparent, empty-content, audio-bearing, and nominal-codec-only outputs. The capability endpoint reports FFmpeg, libvpx VP9-alpha encoding, and required decode support with actionable setup blockers. Missing conversion capability disables Stage 2 creator/import operations without affecting Stage 1 ambient behavior.
 
 Final-conversion idempotency includes source checksum, normalized controls, fallback selection, and converter version. A retry must either return the same durable result or safely resume without publishing a duplicate mutable revision.
 
@@ -445,7 +474,7 @@ Saving creates an inactive immutable pack revision. Activation validates the exp
 
 ### Safe ingestion
 
-Accept ZIP and npm TGZ inputs by signature and reuse the existing bounded safe-archive boundary. The adapter never invokes npm, installs a package, loads JavaScript, executes scripts, or follows remote references.
+Accept ZIP and npm TGZ inputs by signature. Promote and reuse the existing path normalization, entry-type, traversal, and resource-limit policy through a streaming file-based archive adapter; do not load a potentially large video archive or every expanded member into memory. The adapter never invokes npm, installs a package, loads JavaScript, executes scripts, or follows remote references.
 
 Reject:
 
@@ -454,7 +483,7 @@ Reject:
 - ambiguous configuration files;
 - entries, expanded size, compression ratio, media dimensions, duration, or frame counts beyond configured limits.
 
-Locate configuration and assets either at archive root or beneath the conventional `package/` prefix. Parse JSONC with a comment-aware parser; do not strip comments with regular expressions.
+Locate configuration and assets either at archive root or beneath the conventional `package/` prefix. Promote and reuse the existing state-machine JSONC comment stripper; do not strip comments with regular expressions or add a JSON5 dependency unless a real accepted input requires syntax beyond comments.
 
 ### Mapping
 
@@ -462,15 +491,15 @@ The adapter proposes all entries from dsh-pet plural pools:
 
 | dsh-pet concept | Native proposal |
 | --- | --- |
-| `idle` pool | base `idle`, with additional entries such as `ambient.idle.*` |
-| `turn` pool | `ambient.turn.*` |
-| `move` pool | `ambient.move.*` with normalized horizontal motion |
-| click pool | `reaction.click.*` |
-| drag pool | `reaction.drag.*` |
-| weighted categories | companion behavior categories and relative weights |
+| `animations.idle` pool | base `idle`, with additional entries such as `ambient.idle.*` |
+| `animations.turn` pool | `ambient.turn.*` |
+| `animations.moves.default` and `animations.moves.actions` | `ambient.move.*` with normalized horizontal motion |
+| `animations.clicks` pool | `reaction.click.*` |
+| `animations.drag` pool | `reaction.drag.*` |
+| `categories` and top-level `animationWeights` | companion behavior categories and relative weights |
 | `noMirror` | mirroring prohibited |
 
-Move lead and tail values are interpreted as ratios of the declared clip duration and clamped by the engine. Imported positions and pet multiplicity are ignored. The first pet size is only a review-time normalization hint, never a runtime layout command.
+Move lead and tail values are converted into `motion_start_ratio` and `motion_end_ratio` against the inspected clip duration, shown in the mapping review, and clamped by the engine. Imported positions and pet multiplicity are ignored. The first pet size is only a review-time normalization hint, never a runtime layout command.
 
 Unicode display labels are stored separately from native state IDs. IDs use a sanitized label plus a stable short digest to prevent normalization collisions.
 
@@ -491,6 +520,7 @@ The export must:
 - include only raster assets reachable from the projected manifest;
 - rewrite paths and asset declarations consistently;
 - emit exact asset checksums through the normal archive inventory;
+- omit native `companion_behavior`, video provenance, and other server-only metadata from the strict Chatbook pack body;
 - contain no video, remote references, dependencies, or unused files;
 - validate the projected manifest independently before offering download.
 
@@ -502,17 +532,28 @@ A golden compatibility archive and exact schema assertions belong in the server 
 
 ## Persistence, Activation, and Migration
 
+Use the existing visual-pack tables and lifecycle rather than introducing a second pack or binding subsystem:
+
+- add `video_clips` to renderer-type constraints and add a `video_clip` asset role;
+- add nullable pack-level `companion_behavior_json`, separate from `manifest_json`;
+- add a dedicated user-owned Buddy preference record with `user_id`, global `ambient_mode`, `version`, and timestamps;
+- extend per-Persona overlay normalization with optional `ambient_mode` while preserving unknown and unrelated overlay keys;
+- migrate both supported SQLite and PostgreSQL schemas, constraints, row adapters, API types, duplication, fingerprints, and native import/export.
+
+The current one-active-pack invariant remains the binding mechanism; no new binding table is required. Activation runs in one expected-version transaction that deactivates the prior pack and activates the reviewed revision. Deleting an active pack is rejected until another pack is activated or the user explicitly deactivates it.
+
 Stage 1 includes a prerequisite hardening of current visual-pack lifecycle rules:
 
-- active pack revisions are immutable;
+- active pack payloads are immutable: renderer type/version, normalized manifest, companion behavior, asset membership, and asset bytes/checksums cannot change after activation; lifecycle status and `active_at` may change;
 - edits always fork a new inactive revision;
-- review records bind to a complete pack fingerprint, including companion behavior;
+- review records bind reviewer identity, review time, and a complete pack fingerprint covering normalized renderer manifest, companion behavior, reachable asset metadata/checksums, and relevant converter/provenance version;
 - activation accepts an expected revision/fingerprint and updates the Persona binding atomically;
+- activation validation is pure and never writes a normalized manifest or behavior document into the candidate revision;
 - stale reviews and activation races fail with a conflict;
 - duplication, native export, and native import preserve behavior metadata;
 - deleting an inactive revision cannot invalidate the active binding.
 
-Existing raster packs require no migration of their strict renderer manifests. Packs without `companion_behavior` use engine defaults. Existing users without Buddy preference rows receive the calm Expressive default; applications may create the row lazily on first change.
+Existing raster packs require no migration of their strict renderer manifests. Bundled raster packs are backfilled with explicit minimal behavior metadata. Other packs without `companion_behavior` retain base idle only and do not gain inferred user-visible actions. Existing users without Buddy preference rows receive the calm Expressive default; applications may create the row lazily on first change. A preference-read failure is not treated as a missing row and fails ambient scheduling closed to Off.
 
 ## API Direction
 
@@ -520,6 +561,7 @@ Exact route names should follow existing Persona Visual and Jobs conventions. Th
 
 - read and update global Buddy preferences;
 - version-checked update of the per-Persona ambient override;
+- report local FFmpeg/VP9-alpha creator capability and actionable blockers;
 - inspect and preview staged media;
 - submit, cancel, retry, and inspect final conversion Jobs;
 - review an inactive revision;
@@ -529,15 +571,17 @@ Exact route names should follow existing Persona Visual and Jobs conventions. Th
 
 All write routes use existing AuthNZ ownership checks, upload limits, rate limits, and consistent error responses.
 
+Asset responses remain protected by existing AuthNZ ownership checks. Frontend renderers obtain their Blob URLs only through the shared authenticated loader, with tests for single-user API-key and multi-user bearer-token modes.
+
 ## Security and Privacy
 
 - Treat every archive and media file as hostile input.
-- Reuse the existing safe ZIP/TAR extraction boundary rather than create an adapter-specific extractor.
+- Promote the smallest existing ZIP/TAR normalization and safety primitives into a bounded streaming file-based boundary shared by current ingestion and this adapter.
 - Never execute imported content or package lifecycle hooks.
 - Reject local-path, URI, and remote-resource escape attempts.
 - Keep staging, source, intermediate, draft, and review records user-owned.
 - Resolve worker inputs from server-side storage IDs and checksums.
-- Apply subprocess timeouts, cancellation, resource limits, and fixed argument vectors.
+- Apply subprocess timeouts, complete process-tree cancellation and wait, resource limits, fixed argument vectors, `-nostdin`, and a local-file protocol allowlist.
 - Sanitize user-visible labels independently from stable internal IDs.
 - Do not log API credentials, client paths, source frame contents, or sensitive archive metadata.
 - Rate-limit preview generation and final conversion separately.
@@ -547,7 +591,7 @@ Licensing remains entirely outside the Persona Visual workflow. The UI should no
 
 ## Errors, Diagnostics, and Observability
 
-User-facing errors should distinguish unsupported browser capability, invalid media, unsafe archive, incomplete fallback, stale review, conversion failure, and activation conflict. Each error should state the recovery action without exposing internal paths.
+User-facing errors should distinguish unsupported browser capability, missing local conversion capability, authentication/connectivity failure, invalid media, unsafe archive, incomplete fallback, stale review, conversion failure, and activation conflict. Each error should state the recovery action without exposing internal paths.
 
 Structured diagnostics should include user-safe identifiers for Job, pack, revision, renderer, state, and failure class. Useful counters include:
 
@@ -569,11 +613,14 @@ No analytics or telemetry is sent outside the self-hosted server.
 - Exact strict validation of nested `sprite_frames` v1 fallback.
 - Resolution of all nine built-in states, including valid shared one-frame fallback.
 - Behavior metadata validation, fingerprint participation, import/export, and stale-review detection.
+- SQLite and PostgreSQL migrations and constraints for `video_clips`, `video_clip`, pack-level behavior, and global Buddy preferences.
 - Immutable active revisions, fork-on-edit, and expected-revision atomic activation.
 - Global/per-Persona preference resolution and stale JSON patch conflict.
-- Safe archive cases: traversal, links, duplicate paths, ambiguity, nested archives, bombs, oversized media, and remote references.
-- JSONC comments, Unicode labels, digest collision prevention, plural pools, invalid weights, and ignored dsh fields.
-- Jobs cancellation, retry, idempotency, publication boundary, default cleanup, retain-source, and expiry.
+- Preference absence versus authentication/network read failure.
+- Safe streaming archive cases: traversal, links, duplicate paths, ambiguity, nested archives, bombs, oversized media, and remote references.
+- JSONC comments, Unicode labels, digest collision prevention, `animations.moves` pools, invalid weights, and ignored dsh fields.
+- Jobs process-tree cancellation, protocol restriction, retry, idempotency, publication boundary, default cleanup, retain-source, and expiry.
+- Multi-timestamp proposal confidence and output rejection for all-opaque, all-transparent, animated-static, empty-content, audio-bearing, and invalid-baseline media.
 - Golden Chatbook fallback archive with exact schema and reachable-assets-only assertions.
 - Dependency-boundary test preventing model-client and arbitrary-network coupling.
 
@@ -586,7 +633,10 @@ Use deterministic media fixtures and mock subprocess/probe results for most test
 - Fake-clock hidden-tab pause and fresh idle interval on resume.
 - Mode and surface coercion, controls/focus/drag suspension, and resize reclamping.
 - Deferred click versus double-click, drag threshold, pointer capture, keyboard, and touch behavior.
+- Declared click reaction and renderer-neutral fallback acknowledgment.
 - Reduced-motion deterministic still with no video, animation, crossfade, or roaming.
+- Authenticated asset loading in API-key and bearer modes, generation cancellation, cache bounds, and object-URL revocation.
+- Same-state idempotence, fallback readiness before transition, and transient roaming with no persistence writes per frame.
 - Raster and video adapters passing the same renderer contract tests.
 - Playwright coverage for focus, grounded roaming, fallback-first display, Persona switch, and playback failure.
 
@@ -606,7 +656,7 @@ Use one real transparent-video Chromium smoke test. Keep WebKit alpha/fallback b
 
 **Goal:** Ship the renderer-neutral idle companion over the existing raster renderer.
 
-1. Harden pack immutability, behavior metadata, activation, and Buddy preferences.
+1. Harden pack immutability, behavior metadata and persistence, activation, Buddy preferences, bundled raster behavior declarations, and authenticated raster asset loading.
 2. Add the shared ambient engine, state leases, seeded scheduler, precedence, and generation fencing.
 3. Add adaptive interaction, accessibility behavior, first-use hint, and grounded roaming.
 
@@ -616,7 +666,7 @@ Use one real transparent-video Chromium smoke test. Keep WebKit alpha/fallback b
 
 **Goal:** Add reliable native video packs while keeping raster fallback universal.
 
-4. Add the `video_clips` v1 contract, fallback-first adapter, alpha probe, and scoped failures.
+4. Add the `video_clips` v1 contract, extend the shared authenticated asset loader to bounded video Blobs, and add the fallback-first adapter, alpha probe, and scoped failures.
 5. Add staged analysis, preview, final conversion Jobs, review, publication, and cleanup.
 6. Add the dsh-pet adapter and Chatbook fallback projection.
 
@@ -629,6 +679,7 @@ Each numbered item is a reviewable implementation unit. Stage 1 can ship without
 | Risk | Mitigation |
 | --- | --- |
 | Browser claims WebM support but renders alpha incorrectly | Known-alpha session probe plus fallback-first presentation. |
+| Protected media URLs fail in native image/video elements | One bounded authenticated Blob loader shared by raster and video adapters, with cache and URL cleanup. |
 | Media events arrive after Persona, pack, or state changes | Generation fence every callback, promise, timer, and load. |
 | Ambient behavior becomes distracting | Idle-only eligibility, calm defaults, explicit modes, cooldown/repeat clamps, and focus/control suspension. |
 | Packs bypass engine safety through metadata | Treat pack values as bounded suggestions; engine retains all authority. |
@@ -636,7 +687,8 @@ Each numbered item is a reviewable implementation unit. Stage 1 can ship without
 | Cleanup destroys recoverable work | Delete only after durable publication and durable Job completion; temporary expiry for failed work. |
 | Existing raster/Chatbook schema breaks | Keep envelope and sprite v1 exact; put behavior at pack level; project fallback into a separate archive. |
 | Active visuals change beneath a user | Immutable revisions, fork-on-edit, fingerprinted review, expected-revision atomic activation. |
-| Roaming moves the Buddy out of reach | Existing position store and viewport clamp, horizontal-only normalized motion, immediate resize reclamp. |
+| Roaming moves the Buddy out of reach or churns persisted storage | Persist only the user anchor; keep ambient x transient, horizontally clamp it, and reclamp on resize. |
+| A nominal one-frame fallback still animates | Require and validate a genuinely non-animated PNG static selection for every built-in state. |
 | Cross-repository compatibility drifts | Golden server archive plus consumer-owned Chatbook import test follow-up and manual release check meanwhile. |
 
 ## Implementation-Planning Checkpoints

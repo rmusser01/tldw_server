@@ -17,7 +17,7 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-08-23-persona-ambient-companion-transparent-video-design.md
 - backlog/tasks/task-12122 - Design-ambient-Persona-Buddy-and-transparent-video-visual-packs.md
-updated_date: 2026-08-24 04:44
+updated_date: 2026-08-24 05:06
 ---
 
 ## Description
@@ -41,11 +41,13 @@ Consolidate the approved architectural design for staged Persona Buddy ambient b
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved through terminal-only architectural brainstorming on 2026-08-23. Chatbook source reviewed from sibling tldw_chatbook origin/dev Persona_Visual and Persona_Buddy modules.
 Verification: self-reviewed the design against the approved brainstorming decisions; parsed both JSON examples successfully; confirmed required stage, mode, fallback, immutability, renderer, Jobs, dsh-pet, Chatbook, accessibility, and no-model-call boundaries with targeted text checks. Bandit and runtime tests skipped because this task changes documentation only. No known blockers.
+Reopened on 2026-08-23 after post-spec review identified approved amendments: authenticated asset loading, explicit video/behavior persistence and migrations, deterministic mode/state semantics, transient roaming position, truly static reduced-motion fallback, and conversion/import hardening. Applying design-only revisions before implementation planning.
+Revision verification: both JSON examples parsed; targeted assertions confirmed authenticated asset loading, explicit video/behavior storage, fail-closed preference handling, movement timing, non-animated PNG fallback, dsh-pet moves mapping, subprocess hardening, dual-database migration, and reuse of the existing binding invariant. Placeholder scan and scoped git diff --check passed. Bandit and runtime tests remain not applicable because only design/Backlog Markdown changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Documented the approved two-stage Persona Buddy design: idle-only ambient behavior first, then native transparent-video creation/import. The spec defines the shared renderer-neutral engine, modes and preference precedence, adaptive controls and accessibility, immutable visual-pack lifecycle, strict raster fallback, fallback-first video renderer, review-first local conversion Jobs, safe dsh-pet mapping, current Chatbook fallback projection, security boundaries, tests, risks, and delivery gates. No implementation code was changed.
+Documented and post-review hardened the approved two-stage Persona Buddy design: idle-only ambient behavior first, then native transparent-video creation/import. The revised spec closes authenticated asset delivery, explicit storage and migrations, deterministic mode/state precedence, transient roaming persistence, true reduced-motion stills, conversion validation/cancellation, exact dsh-pet mapping, and Chatbook fallback-projection gaps while preserving the shared renderer-neutral engine, immutable activation, mandatory raster fallback, no-runtime-model boundary, and current archive envelope. No implementation code changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
