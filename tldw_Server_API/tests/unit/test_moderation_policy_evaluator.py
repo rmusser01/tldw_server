@@ -555,14 +555,17 @@ def test_direct_long_limit_coercion_errors_are_literal(
 
 def test_direct_numeric_string_limits_are_coerced_for_evaluation():
     limits = EvaluationLimits(
-        max_scan_chars="1",  # type: ignore[arg-type]
+        max_scan_chars="2",  # type: ignore[arg-type]
         match_window_chars="2",  # type: ignore[arg-type]
         max_fallback_scan_chars="20",  # type: ignore[arg-type]
         max_replacements_per_pattern=10,
     )
+    evaluator = PolicyEvaluator()
+
+    assert list(evaluator.iter_scan_chunks("xx", limits)) == [(0, 2)]
 
     assert (
-        PolicyEvaluator().find_match_span(
+        evaluator.find_match_span(
             re.compile("never"),
             "long text",
             limits,
