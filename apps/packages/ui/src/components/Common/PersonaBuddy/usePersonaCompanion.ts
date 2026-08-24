@@ -1,15 +1,22 @@
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 
 import {
   createPersonaCompanionEngine,
   type PersonaCompanionEngine,
   type PersonaCompanionInput,
+  type PersonaCompanionReactionTrigger,
   type PersonaCompanionRuntime,
   type PersonaCompanionSnapshot
 } from "./personaCompanionEngine"
 
 export type UsePersonaCompanionInput = PersonaCompanionInput & {
   runtime?: PersonaCompanionRuntime
+}
+
+export type PersonaCompanionController = {
+  snapshot: PersonaCompanionSnapshot
+  react: (trigger: PersonaCompanionReactionTrigger) => boolean
+  completeAction: (actionToken: number, succeeded: boolean) => void
 }
 
 const INITIAL_SNAPSHOT: PersonaCompanionSnapshot = Object.freeze({
@@ -50,6 +57,10 @@ const createHookStore = () => {
     update(input: PersonaCompanionInput) {
       engine?.update(input)
     },
+    react: (trigger: PersonaCompanionReactionTrigger) =>
+      engine?.react(trigger) ?? false,
+    completeAction: (actionToken: number, succeeded: boolean) =>
+      engine?.completeAction(actionToken, succeeded),
     subscribe(listener: () => void) {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -61,7 +72,7 @@ const createHookStore = () => {
 export const usePersonaCompanion = ({
   runtime,
   ...input
-}: UsePersonaCompanionInput): PersonaCompanionSnapshot => {
+}: UsePersonaCompanionInput): PersonaCompanionController => {
   const [store] = useState(createHookStore)
 
   useEffect(() => {
@@ -75,9 +86,18 @@ export const usePersonaCompanion = ({
 
   useEffect(() => store.update(input), [input, store])
 
-  return useSyncExternalStore(
+  const snapshot = useSyncExternalStore(
     store.subscribe,
     store.getSnapshot,
     store.getSnapshot
+  )
+
+  return useMemo(
+    () => ({
+      snapshot,
+      react: store.react,
+      completeAction: store.completeAction
+    }),
+    [snapshot, store]
   )
 }

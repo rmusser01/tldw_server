@@ -82,6 +82,31 @@ const badNegativeCooldown = asPersonaVisualCustomStateId(
 )
 const badMovement = asPersonaVisualCustomStateId("ambient.bad_movement")
 const badOrder = asPersonaVisualCustomStateId("ambient.bad_order")
+const badNullMovement = asPersonaVisualCustomStateId(
+  "ambient.bad_null_movement"
+)
+const badMovementShape = asPersonaVisualCustomStateId(
+  "ambient.bad_movement_shape"
+)
+const badDirection = asPersonaVisualCustomStateId("ambient.bad_direction")
+const badMissingMovement = asPersonaVisualCustomStateId(
+  "ambient.bad_missing_movement"
+)
+const badMovementCategory = asPersonaVisualCustomStateId(
+  "ambient.bad_movement_category"
+)
+
+const horizontalMovement = {
+  direction: "horizontal" as const,
+  motion_start_ratio: 0.1,
+  motion_end_ratio: 0.9
+}
+const walkEntry = {
+  state: walk,
+  trigger: "ambient" as const,
+  category: "move" as const,
+  movement: horizontalMovement
+}
 
 const entries = (...states: Array<typeof look | typeof wave>) =>
   states.map((state) => ({
@@ -238,7 +263,7 @@ describe("createPersonaCompanionEngine", () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it("clamps engine timing and movement distance with omitted metadata defaults", () => {
+  it("clamps engine timing and movement distance with allowed metadata defaults", () => {
     const fake = createFakeCompanionRuntime([0, 0, 0])
     const engine = createPersonaCompanionEngine(fake.runtime)
     engine.update(
@@ -246,13 +271,7 @@ describe("createPersonaCompanionEngine", () => {
         mode: "roaming",
         behavior: {
           schema_version: 1,
-          entries: [
-            {
-              state: walk,
-              trigger: "ambient",
-              category: "move",
-            }
-          ]
+          entries: [walkEntry]
         },
         availableStates: [walk],
         horizontalBounds: { min: -20, max: 30 },
@@ -388,6 +407,100 @@ describe("createPersonaCompanionEngine", () => {
     expect(engine.getSnapshot().requestedState).toBe("ambient.look")
   })
 
+  it("excludes malformed movement declarations by presence, shape, direction, and category", () => {
+    const fake = createFakeCompanionRuntime([0, 0])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(
+      idleInput({
+        mode: "roaming",
+        behavior: {
+          schema_version: 1,
+          entries: [
+            {
+              state: badNullMovement,
+              trigger: "ambient",
+              category: "move",
+              movement: null
+            },
+            {
+              state: badMovementShape,
+              trigger: "ambient",
+              category: "move",
+              movement: "horizontal"
+            },
+            {
+              state: badDirection,
+              trigger: "ambient",
+              category: "move",
+              movement: { ...horizontalMovement, direction: "vertical" }
+            },
+            {
+              state: badMissingMovement,
+              trigger: "ambient",
+              category: "move"
+            },
+            {
+              state: badMovementCategory,
+              trigger: "ambient",
+              category: "idle_variant",
+              movement: horizontalMovement
+            }
+          ]
+        },
+        availableStates: [
+          badNullMovement,
+          badMovementShape,
+          badDirection,
+          badMissingMovement,
+          badMovementCategory
+        ]
+      })
+    )
+    fake.advanceBy(30_000)
+
+    expect(engine.getSnapshot()).toEqual(
+      expect.objectContaining({
+        phase: "idle",
+        actionToken: null,
+        requestedState: "idle",
+        transientOffsetX: 0
+      })
+    )
+    expect(fake.diagnostics.at(-1)).toEqual(
+      expect.objectContaining({
+        event: "ambient_skipped",
+        failureClass: "empty_set"
+      })
+    )
+  })
+
+  it("still schedules valid omitted suggestions beside malformed movement", () => {
+    const fake = createFakeCompanionRuntime([0, 0.9])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(
+      idleInput({
+        mode: "roaming",
+        behavior: {
+          schema_version: 1,
+          entries: [
+            ...entries(look),
+            {
+              state: badDirection,
+              trigger: "ambient",
+              category: "move",
+              movement: { ...horizontalMovement, direction: "vertical" },
+              suggested_weight: 1_000
+            }
+          ]
+        },
+        availableStates: [look, badDirection]
+      })
+    )
+    fake.advanceBy(30_000)
+
+    expect(engine.getSnapshot().requestedState).toBe("ambient.look")
+  })
+
   it("clamps cadence and duration at their upper bounds", () => {
     const fake = createFakeCompanionRuntime([0, 0])
     const engine = createPersonaCompanionEngine(fake.runtime)
@@ -513,7 +626,7 @@ describe("createPersonaCompanionEngine", () => {
       behavior: {
         schema_version: 1 as const,
         entries: [
-          { state: walk, trigger: "ambient" as const, category: "move" as const },
+          walkEntry,
           {
             state: turnLeft,
             trigger: "ambient" as const,
@@ -617,18 +730,7 @@ describe("createPersonaCompanionEngine", () => {
     const engine = createPersonaCompanionEngine(fake.runtime)
     const movement = {
       schema_version: 1 as const,
-      entries: [
-        {
-          state: walk,
-          trigger: "ambient" as const,
-          category: "move" as const,
-          movement: {
-            direction: "horizontal" as const,
-            motion_start_ratio: 0.1,
-            motion_end_ratio: 0.9
-          }
-        }
-      ]
+      entries: [walkEntry]
     }
     engine.update(
       idleInput({
@@ -686,9 +788,7 @@ describe("createPersonaCompanionEngine", () => {
         mode: "roaming",
         behavior: {
           schema_version: 1,
-          entries: [
-            { state: walk, trigger: "ambient", category: "move" }
-          ]
+          entries: [walkEntry]
         },
         availableStates: [walk]
       })
@@ -729,9 +829,7 @@ describe("createPersonaCompanionEngine", () => {
         surface: "sidepanel",
         behavior: {
           schema_version: 1,
-          entries: [
-            { state: walk, trigger: "ambient", category: "move" }
-          ]
+          entries: [walkEntry]
         },
         availableStates: [walk]
       })
@@ -754,7 +852,7 @@ describe("createPersonaCompanionEngine", () => {
         behavior: {
           schema_version: 1,
           entries: [
-            { state: walk, trigger: "ambient", category: "move" },
+            walkEntry,
             {
               state: turnLeft,
               trigger: "ambient",
@@ -780,7 +878,7 @@ describe("createPersonaCompanionEngine", () => {
       mode: "roaming" as const,
       behavior: {
         schema_version: 1 as const,
-        entries: [{ state: walk, trigger: "ambient" as const, category: "move" as const }]
+        entries: [walkEntry]
       },
       availableStates: [walk]
     }
@@ -803,7 +901,7 @@ describe("createPersonaCompanionEngine", () => {
       behavior: {
         schema_version: 1 as const,
         entries: [
-          { state: walk, trigger: "ambient" as const, category: "move" as const },
+          walkEntry,
           {
             state: turnLeft,
             trigger: "ambient" as const,
@@ -847,7 +945,7 @@ describe("createPersonaCompanionEngine", () => {
     )
     expect(fake.activeTimerCount()).toBe(1)
     act(() => fake.advanceBy(30_000))
-    expect(result.current.requestedState).toBe("ambient.look")
+    expect(result.current.snapshot.requestedState).toBe("ambient.look")
     rerender({ ...initialProps, packRevision: 2 })
     expect(fake.activeTimerCount()).toBe(1)
     const updated = result.current
@@ -855,6 +953,90 @@ describe("createPersonaCompanionEngine", () => {
     expect(result.current).toBe(updated)
     act(() => unmount())
     expect(fake.activeTimerCount()).toBe(0)
+  })
+
+  it("exposes stable interaction and token-scoped completion commands", () => {
+    const fake = createFakeCompanionRuntime([0])
+    const initialProps = idleInput({
+      mode: "off",
+      behavior: {
+        schema_version: 1,
+        entries: [{ state: click, trigger: "click", category: "reaction" }]
+      },
+      availableStates: [click]
+    })
+    const { result, rerender, unmount } = renderHook(
+      (input) => usePersonaCompanion({ ...input, runtime: fake.runtime }),
+      { initialProps, wrapper: StrictModeWrapper }
+    )
+    const controller = () => result.current
+    const react = controller().react
+    const completeAction = controller().completeAction
+
+    act(() => expect(controller().react("click")).toBe(true))
+    const clickToken = controller().snapshot.actionToken
+    expect(controller().snapshot.requestedState).toBe("reaction.click")
+    if (clickToken === null) throw new Error("expected click action token")
+    act(() => controller().completeAction(clickToken, true))
+    act(() => expect(controller().react("space")).toBe(true))
+    rerender(initialProps)
+
+    expect(controller().react).toBe(react)
+    expect(controller().completeAction).toBe(completeAction)
+    act(() => unmount())
+    expect(fake.activeTimerCount()).toBe(0)
+  })
+
+  it("rejects an old renderer callback after the hook recreates its engine", () => {
+    const first = createFakeCompanionRuntime([0])
+    const second = createFakeCompanionRuntime([0])
+    const companionInput = idleInput({
+      mode: "off",
+      behavior: {
+        schema_version: 1,
+        entries: [{ state: click, trigger: "click", category: "reaction" }]
+      },
+      availableStates: [click]
+    })
+    const initialProps = { runtime: first.runtime, packRevision: 1 }
+    const { result, rerender, unmount } = renderHook(
+      ({ runtime, packRevision }) =>
+        usePersonaCompanion({ ...companionInput, packRevision, runtime }),
+      { initialProps, wrapper: StrictModeWrapper }
+    )
+    const controller = () => result.current
+
+    act(() => expect(controller().react("click")).toBe(true))
+    const oldToken = controller().snapshot.actionToken
+    const staleRendererCompletion = controller().completeAction
+    if (oldToken === null) throw new Error("expected old action token")
+    expect(first.activeTimerCount()).toBe(1)
+
+    rerender({ runtime: second.runtime, packRevision: 2 })
+    expect(first.activeTimerCount()).toBe(0)
+    expect(second.activeTimerCount()).toBe(0)
+    act(() => expect(controller().react("click")).toBe(true))
+    const currentToken = controller().snapshot.actionToken
+    if (currentToken === null) throw new Error("expected current action token")
+    expect(currentToken).not.toBe(oldToken)
+    const currentSnapshot = controller().snapshot
+    expect(currentSnapshot).toEqual(
+      expect.objectContaining({
+        actionToken: currentToken,
+        requestedState: "reaction.click",
+        facing: "right",
+        transientOffsetX: 0
+      })
+    )
+    expect(second.activeTimerCount()).toBe(1)
+
+    act(() => staleRendererCompletion(oldToken, true))
+    expect(controller().snapshot).toBe(currentSnapshot)
+    expect(controller().snapshot.generation).toBe(currentSnapshot.generation)
+    expect(second.activeTimerCount()).toBe(1)
+
+    act(() => unmount())
+    expect(second.activeTimerCount()).toBe(0)
   })
 
   it("disposes the sole timer chain with live leases and actions", () => {

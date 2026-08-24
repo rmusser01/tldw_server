@@ -145,6 +145,7 @@ const LEASE_MIN_MS = 150
 const LEASE_MAX_MS = 86_400_000
 const DEFAULT_ACTION_MS = 1_000
 const DEFAULT_MOVEMENT_PX = 48
+let nextActionToken = 0
 
 const clampNumber = (
   value: unknown,
@@ -163,12 +164,41 @@ const randomUnit = (random: () => number): number => {
     : 0
 }
 
+const isValidHorizontalMovement = (movement: unknown): boolean => {
+  if (
+    typeof movement !== "object" ||
+    movement === null ||
+    Array.isArray(movement)
+  ) {
+    return false
+  }
+  const {
+    direction,
+    motion_start_ratio: start,
+    motion_end_ratio: end
+  } = movement as Record<string, unknown>
+  return (
+    direction === "horizontal" &&
+    typeof start === "number" &&
+    Number.isFinite(start) &&
+    start >= 0 &&
+    start <= 1 &&
+    typeof end === "number" &&
+    Number.isFinite(end) &&
+    end >= 0 &&
+    end <= 1 &&
+    start <= end
+  )
+}
+
 const normalizeEntry = (
   entry: PersonaCompanionBehaviorEntry
 ): NormalizedEntry | null => {
   const weight = entry.suggested_weight
   const cooldown = entry.suggested_cooldown_ms
-  const movement = entry.movement
+  const hasMovement = Object.prototype.hasOwnProperty.call(entry, "movement")
+  const movement = entry.movement as unknown
+  const validMovement = isValidHorizontalMovement(movement)
   if (
     (weight !== undefined &&
       (typeof weight !== "number" || !Number.isFinite(weight) || weight < 0)) ||
@@ -176,14 +206,7 @@ const normalizeEntry = (
       (typeof cooldown !== "number" ||
         !Number.isFinite(cooldown) ||
         cooldown < 0)) ||
-    (movement &&
-      (!Number.isFinite(movement.motion_start_ratio) ||
-        !Number.isFinite(movement.motion_end_ratio) ||
-        movement.motion_start_ratio < 0 ||
-        movement.motion_start_ratio > 1 ||
-        movement.motion_end_ratio < 0 ||
-        movement.motion_end_ratio > 1 ||
-        movement.motion_start_ratio > movement.motion_end_ratio))
+    (entry.category === "move" ? !hasMovement || !validMovement : hasMovement)
   ) {
     return null
   }
@@ -308,7 +331,6 @@ export const createPersonaCompanionEngine = (
   let disposed = false
   let generation = 0
   let leaseToken = 0
-  let nextActionToken = 0
   let scheduledTimer: PersonaCompanionTimer | null = null
   let ambientDueAt: number | null = null
   let actionDueAt: number | null = null
