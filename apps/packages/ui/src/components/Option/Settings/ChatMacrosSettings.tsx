@@ -204,7 +204,7 @@ export const ChatMacrosSettings = () => {
         setCatalogError(responseError(response.status, response.error))
         return
       }
-      await refreshCatalog(macro.name)
+      await refreshCatalog()
     } catch (error) {
       if (mountedRef.current) {
         setCatalogError(error instanceof Error ? error.message : "Unable to update macro state.")
@@ -267,6 +267,10 @@ export const ChatMacrosSettings = () => {
 
   const handleSettingsSaved = React.useCallback((nextSettings: ChatMacroSettings) => {
     if (mountedRef.current) setSettings(nextSettings)
+  }, [])
+
+  const handleImportConsumed = React.useCallback((requestId: number) => {
+    setImportSource((current) => current?.requestId === requestId ? null : current)
   }, [])
 
   return (
@@ -455,6 +459,7 @@ export const ChatMacrosSettings = () => {
               onSaved={handleSaved}
               onDeleted={handleDeleted}
               onCloneRequested={requestClone}
+              onImportConsumed={handleImportConsumed}
               importSource={importSource}
             />
           </div>

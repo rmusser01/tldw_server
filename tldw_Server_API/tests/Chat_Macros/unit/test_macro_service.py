@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Chat_Macros.output_profiles import (
 )
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.Chat_Macros.service import ChatMacrosService
+from tldw_Server_API.app.core.Chat_Macros.settings import normalize_settings
 from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -150,6 +151,20 @@ def test_user_enabled_override_preserves_authored_yaml(service: ChatMacrosServic
 
     assert enabled.enabled is True
     assert service.storage.read("daily_digest").raw == raw
+
+
+def test_normalize_settings_preserves_unknown_keys_without_aliasing() -> None:
+    raw = {
+        "disabled_builtins": ["wrapup"],
+        "future_authoring": {"options": ["keep"]},
+    }
+
+    normalized = normalize_settings(raw)
+    raw["future_authoring"]["options"].append("changed")
+
+    assert normalized["future_authoring"] == {"options": ["keep"]}
+    assert normalized["disabled_builtins"] == ["wrapup"]
+    assert "default" in normalized["output_profiles"]
 
 
 def test_collision_validation_does_not_sync_registry(
