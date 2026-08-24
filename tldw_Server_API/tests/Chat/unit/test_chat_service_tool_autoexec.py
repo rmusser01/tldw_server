@@ -3087,10 +3087,14 @@ async def test_tool_autoexec_rejects_multi_choice_fallback_args_before_provider_
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_fallback_call)
 
     provider_manager = _ProviderManagerStub("anthropic")
+    primary_error = chat_service.ChatAPIError("primary failed")
+    primary_error.upstream_dispatched = False
+    primary_error.output_emitted = False
+    primary_error.allow_non_stream_fallback = True
 
     with pytest.raises(HTTPException) as exc_info:
         await _run_execute_non_stream_call(
-            llm_call_func=lambda: (_ for _ in ()).throw(chat_service.ChatAPIError("primary failed")),
+            llm_call_func=lambda: (_ for _ in ()).throw(primary_error),
             save_message_fn=save_message_fn,
             provider_manager=provider_manager,
             enable_provider_fallback=True,
@@ -3114,7 +3118,7 @@ async def test_tool_autoexec_rejects_multi_choice_fallback_args_before_provider_
         "code": "unsupported_multi_choice_tool_autoexec",
         "message": "Local tool auto-execution supports one assistant choice per request.",
     }
-    assert provider_manager.failures == [("openai", "ChatAPIError")]
+    assert provider_manager.failures == [("openai", "SanitizedProviderStreamError")]
 
 
 @pytest.mark.asyncio

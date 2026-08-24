@@ -10,6 +10,22 @@ from fastapi import HTTPException, status
 _ABSENT_CHOICE_STRINGS = {"", "none", "false", "null"}
 
 
+class UnsupportedMultiChoiceToolAutoexecError(HTTPException):
+    """Canonical local request error for unsupported tool auto-execution."""
+
+    error_code = "unsupported_multi_choice_tool_autoexec"
+    public_message = "Local tool auto-execution supports one assistant choice per request."
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": self.error_code,
+                "message": self.public_message,
+            },
+        )
+
+
 def request_choice_count(cleaned_args: dict[str, Any] | None) -> int:
     """Return the requested assistant choice count, defaulting invalid input to one."""
 
@@ -58,10 +74,4 @@ def ensure_tool_autoexec_supports_request(
         and request_declares_local_tool_use(cleaned_args)
         and request_choice_count(cleaned_args) > 1
     ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "unsupported_multi_choice_tool_autoexec",
-                "message": "Local tool auto-execution supports one assistant choice per request.",
-            },
-        )
+        raise UnsupportedMultiChoiceToolAutoexecError()

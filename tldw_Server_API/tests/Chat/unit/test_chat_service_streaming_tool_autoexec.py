@@ -341,12 +341,16 @@ async def test_streaming_tool_autoexec_rejects_multi_choice_fallback_args_before
         return "message-1"
 
     provider_manager = _ProviderManagerStub("anthropic")
+    primary_error = chat_service.ChatAPIError("primary failed")
+    primary_error.upstream_dispatched = False
+    primary_error.output_emitted = False
+    primary_error.allow_non_stream_fallback = True
 
     monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
     monkeypatch.setattr(chat_service, "perform_chat_api_call", fake_fallback_call)
 
     response = await _run_execute_streaming_call(
-        llm_call_func=lambda: (_ for _ in ()).throw(chat_service.ChatAPIError("primary failed")),
+        llm_call_func=lambda: (_ for _ in ()).throw(primary_error),
         save_message_fn=save_message_fn,
         provider_manager=provider_manager,
         enable_provider_fallback=True,
@@ -366,7 +370,7 @@ async def test_streaming_tool_autoexec_rejects_multi_choice_fallback_args_before
     chunks = await _collect_sse_chunks(response)
 
     assert fallback_provider_called is False
-    assert provider_manager.failures == [("openai", "ChatAPIError")]
+    assert provider_manager.failures == [("openai", "SanitizedProviderStreamError")]
     assert "unsupported_multi_choice_tool_autoexec" in "".join(chunks)
 
 
@@ -398,7 +402,7 @@ async def test_streaming_tool_autoexec_rejects_multi_choice_queued_fallback_args
                     else:
                         for chunk in result:
                             await stream_channel.put(chunk)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - mirrors the queue worker boundary
                     await stream_channel.put(f"data: {json.dumps({'error': {'message': str(exc)}})}\n\n")
                     await stream_channel.put("data: [DONE]\n\n")
                 finally:
@@ -410,13 +414,17 @@ async def test_streaming_tool_autoexec_rejects_multi_choice_queued_fallback_args
             return fut
 
     provider_manager = _ProviderManagerStub("anthropic")
+    primary_error = chat_service.ChatAPIError("primary failed")
+    primary_error.upstream_dispatched = False
+    primary_error.output_emitted = False
+    primary_error.allow_non_stream_fallback = True
 
     monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
     monkeypatch.setattr(chat_service, "perform_chat_api_call", fake_fallback_call)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: _FakeActiveQueue())
 
     response = await _run_execute_streaming_call(
-        llm_call_func=lambda: (_ for _ in ()).throw(chat_service.ChatAPIError("primary failed")),
+        llm_call_func=lambda: (_ for _ in ()).throw(primary_error),
         save_message_fn=save_message_fn,
         provider_manager=provider_manager,
         queue_execution_enabled=True,
@@ -437,7 +445,7 @@ async def test_streaming_tool_autoexec_rejects_multi_choice_queued_fallback_args
     chunks = await _collect_sse_chunks(response)
 
     assert fallback_provider_called is False
-    assert provider_manager.failures == [("openai", "ChatAPIError")]
+    assert provider_manager.failures == [("openai", "SanitizedProviderStreamError")]
     assert "unsupported_multi_choice_tool_autoexec" in "".join(chunks)
 
 

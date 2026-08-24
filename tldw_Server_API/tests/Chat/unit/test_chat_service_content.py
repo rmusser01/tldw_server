@@ -6,16 +6,17 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import execute_non_stream_call
-from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
-    StructuredGenerationSchemaError,
-)
 from tldw_Server_API.app.core.Chat.persistence_service import (
     build_assistant_message_payload,
     save_tool_messages,
 )
 from tldw_Server_API.app.core.Chat.response_processor import (
+    apply_redaction_to_content,
     collect_non_stream_choices,
     extract_text_from_content,
+)
+from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
+    StructuredGenerationSchemaError,
 )
 
 
@@ -361,7 +362,7 @@ async def _run_non_stream_content_test(
 
 
 @pytest.mark.asyncio
-async def test_execute_non_stream_call_does_not_persist_supported_later_choice_when_first_unsupported(
+async def test_execute_non_stream_call_rejects_malformed_choice_without_persistence(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(chat_service, "INJECT_ASSISTANT_NAME", False)
@@ -376,15 +377,15 @@ async def test_execute_non_stream_call_does_not_persist_supported_later_choice_w
         ]
     }
 
-    response, save_calls, _logged_usage = await _run_non_stream_content_test(
-        monkeypatch,
-        llm_response=llm_response,
-        moderation=_NoModeration(),
-        should_persist=True,
-        save_calls=save_calls,
-    )
+    with pytest.raises(chat_service.SanitizedProviderStreamError):
+        await _run_non_stream_content_test(
+            monkeypatch,
+            llm_response=llm_response,
+            moderation=_NoModeration(),
+            should_persist=True,
+            save_calls=save_calls,
+        )
 
-    assert response["choices"] == llm_response["choices"]
     assert save_calls == []
 
 
@@ -404,7 +405,6 @@ async def test_execute_non_stream_call_redacts_list_content(monkeypatch):
                         "role": "assistant",
                         "content": [
                             {"type": "text", "text": "secret"},
-                            "loose secret",
                             {
                                 "type": "image_url",
                                 "image_url": {"url": "data:image/png;base64,AAA"},
@@ -461,8 +461,7 @@ async def test_execute_non_stream_call_redacts_list_content(monkeypatch):
     content = response["choices"][0]["message"]["content"]
     assert isinstance(content, list)
     assert content[0]["text"].startswith("REDACTED:")
-    assert content[1] == "REDACTED:loose secret"
-    assert content[2]["type"] == "image_url"
+    assert content[1]["type"] == "image_url"
 
 
 @pytest.mark.asyncio
@@ -789,45 +788,25 @@ async def test_execute_non_stream_call_persists_first_choice_function_call_only(
     assert save_calls[0]["function_call"] == {"name": "first_lookup", "arguments": "{}"}
 
 
-@pytest.mark.asyncio
-async def test_execute_non_stream_call_redacts_object_style_content_part(monkeypatch):
+def test_response_processor_redacts_object_style_content_part():
     text_part = _ObjectTextPart("secret")
-    response, _save_calls, _logged_usage = await _run_non_stream_content_test(
-        monkeypatch,
-        llm_response={
-            "choices": [
-                {
-                    "message": {"role": "assistant", "content": [text_part]},
-                    "finish_reason": "stop",
-                },
-            ]
-        },
-        moderation=_RedactingModeration(),
+    content = apply_redaction_to_content(
+        [text_part],
+        lambda text: f"REDACTED:{text}",
     )
 
-    content = response["choices"][0]["message"]["content"]
-    assert content[0]["text"] == "REDACTED:secret"
+    assert content[0].text == "REDACTED:secret"
     assert text_part.text == "secret"
     assert text_part.model_copy_updates == [{"text": "REDACTED:secret"}]
 
 
-@pytest.mark.asyncio
-async def test_execute_non_stream_call_redacts_dict_content_text(monkeypatch):
+def test_response_processor_redacts_dict_content_text():
     original_content = {"type": "text", "text": "secret"}
-    response, _save_calls, _logged_usage = await _run_non_stream_content_test(
-        monkeypatch,
-        llm_response={
-            "choices": [
-                {
-                    "message": {"role": "assistant", "content": original_content},
-                    "finish_reason": "stop",
-                },
-            ]
-        },
-        moderation=_RedactingModeration(),
+    content = apply_redaction_to_content(
+        original_content,
+        lambda text: f"REDACTED:{text}",
     )
 
-    content = response["choices"][0]["message"]["content"]
     assert content == {"type": "text", "text": "REDACTED:secret"}
     assert original_content == {"type": "text", "text": "secret"}
 

@@ -14,6 +14,7 @@ references:
 - tldw_Server_API/app/core/Chat/chat_service.py
 - tldw_Server_API/app/core/Chat/README.md
 - tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md
+- https://github.com/rmusser01/tldw_server/pull/2516
 documentation:
 - Docs/Design/2026-06-24-chat-completion-pipeline-refactor-design.md
 - Docs/superpowers/plans/2026-06-24-chat-completion-pipeline-refactor.md
@@ -44,7 +45,7 @@ modified_files:
 - tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py
 - tldw_Server_API/tests/Chat_NEW/integration/test_chat_command_audit.py
 - tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py
-updated_date: 2026-07-14 15:39
+updated_date: 2026-08-24 05:29
 ---
 
 ## Description
@@ -101,6 +102,8 @@ Task 13 verification update 2026-06-24: Wide Chat regression rerun after fixing 
 2026-07-09 independent completion-review follow-up: review found that the original refactor commit had replaced current-dev bulk_generate behavior with an older implementation and reduced its regression test to a no-op. Restored the current-dev bulk generation contract, including provider/model/API-key/app-config fallback and overrides, DocumentType normalization, asyncio.to_thread execution, and llm_config initialization. TDD evidence: restored regression test failed before the fix with a missing api_key TypeError, then passed after the fix. Verification after remediation: single regression 1 passed; full document generator file 23 passed; primary PR regression slice 88 passed; compileall passed; Bandit on document_generator.py reported 0 findings in /tmp/bandit_chat_document_generator_followup.json.
 2026-07-14 final latest-dev refresh: origin/dev advanced to 38bc70fd02 with no intervening Chat changes. Rebased all five PR commits cleanly onto that base. Fresh combined verification on the final rebased tree: 163 passed, 1 skipped across the primary PR, streaming, and provider/model conflict-sensitive tests; compileall over changed Chat/API production files passed; Bandit over changed Chat/API production files reported 0 findings in /tmp/bandit_chat_completion_pipeline_final_rebase.json.
 2026-07-14 final base correction and refresh: the prior rebase note named ancestor 38bc70fd02, while the rebase reflog confirms the actual checkout tip was its descendant 83428eff33. origin/dev subsequently advanced to f05fe296db with no new Chat changes, and all six PR commits were replayed cleanly onto f05fe296db. Fresh final verification: 163 passed, 1 skipped across the combined PR/conflict-sensitive slice; compileall passed; Bandit over changed Chat/API production files reported 0 findings in /tmp/bandit_chat_completion_pipeline_f05_rebase.json.
+2026-08-23 latest-dev rebase and compatibility repair: fetched origin/dev at 2c3589fa09, rebased all seven PR commits, and resolved Chat endpoint/service/test conflicts by retaining current-dev provider error sanitization, cancellation accounting, macro behavior, and replay-certified fallback rules while preserving the extracted completion services. Focused debugging found that the extracted multi-choice local tool guard was being normalized as an untrusted provider failure after the rebase. Added a canonical local exception plus an allowlisted private-provenance SSE frame so direct, fallback, and queued streaming paths return the intended bounded 400/error code without allowing provider-controlled frames to bypass sanitization. Updated stale tests to current-dev malformed-provider and replay-safety contracts and added utility-boundary tests for the trusted local frame allowlist/terminal behavior. Verification before publish: conflict-sensitive Chat suite 643 passed, 1 skipped; new boundary tests 2 passed; compileall passed; Bandit reported zero findings in all production files touched by the PR. A broad Chat scan retained the same seven historical low-severity findings in untouched chat_exceptions.py, chat_helpers.py, and tool_auto_exec.py.
+2026-08-23 post-review verification: Ruff passed on all files modified during the latest-dev repair. The final conflict-sensitive suite, including the new trusted-frame boundary coverage, passed with 645 passed and 1 skipped. `git diff --check` remained clean; generated watchlist templates created by test startup were removed from the worktree.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

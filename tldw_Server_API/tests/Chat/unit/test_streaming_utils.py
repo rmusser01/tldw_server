@@ -6,8 +6,7 @@ import json
 import threading
 import time
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from loguru import logger
@@ -16,15 +15,15 @@ from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import streaming_utils
 from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+from tldw_Server_API.app.core.Chat.streaming_pipeline import (
+    StreamingPipelineRequest,
+    create_chat_streaming_response,
+)
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     HEARTBEAT_INTERVAL,
     STREAMING_IDLE_TIMEOUT,
     StreamingResponseHandler,
     create_streaming_response_with_timeout,
-)
-from tldw_Server_API.app.core.Chat.streaming_pipeline import (
-    StreamingPipelineRequest,
-    create_chat_streaming_response,
 )
 
 
@@ -102,6 +101,32 @@ async def _collect_handler_wire(handler, stream) -> str:
 
 async def _collect_async_items(stream) -> list[object]:
     return [item async for item in stream]
+
+
+def test_trusted_local_stream_error_frame_rejects_unknown_code():
+    with pytest.raises(ValueError, match="Unsupported local stream error code"):
+        streaming_utils.trusted_local_stream_error_frame("provider_controlled_code")
+
+
+@pytest.mark.asyncio
+async def test_trusted_local_stream_error_frame_is_forwarded_once():
+    handler = StreamingResponseHandler("conv_local_error", "gpt-4")
+    frame = streaming_utils.trusted_local_stream_error_frame(
+        "unsupported_multi_choice_tool_autoexec"
+    )
+
+    async def local_stream():
+        yield frame
+        yield "provider output after local terminal error"
+
+    messages = [
+        message async for message in handler.safe_stream_generator(local_stream())
+    ]
+
+    assert messages.count(frame) == 1
+    assert all("provider output after local terminal error" not in message for message in messages)
+    assert handler.error_occurred is True
+    assert handler.full_response == []
 
 
 class TestStreamingResponseHandler:

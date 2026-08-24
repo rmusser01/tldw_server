@@ -73,14 +73,23 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
 )
-from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.chat_logging import (
     exception_summary,
     prompt_template_summary,
     text_summary,
 )
+from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.completion_pipeline import ChatCompletionPipeline
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
+from tldw_Server_API.app.core.Chat.moderation_pipeline import (
+    OutputModerationRuntime,
+    apply_output_safety_to_choices,
+)
+from tldw_Server_API.app.core.Chat.persistence_service import (
+    build_assistant_message_payload,
+    save_assistant_message,
+    save_tool_messages,
+)
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     PromptCostGuardrailDecision,
@@ -92,6 +101,12 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     apply_template_to_string,
     load_template,
 )
+from tldw_Server_API.app.core.Chat.request_queue import (
+    QueueStreamChannel,
+    QueueStreamTerminalError,
+    RequestPriority,
+    get_request_queue,
+)
 from tldw_Server_API.app.core.Chat.response_processor import (
     NonStreamChoice,
     collect_non_stream_choices,
@@ -101,24 +116,13 @@ from tldw_Server_API.app.core.Chat.response_processor import (
     primary_choice,
     validate_structured_choices,
 )
-from tldw_Server_API.app.core.Chat.moderation_pipeline import (
-    OutputModerationRuntime,
-    apply_output_safety_to_choices,
-)
-from tldw_Server_API.app.core.Chat.persistence_service import (
-    build_assistant_message_payload,
-    save_assistant_message,
-    save_tool_messages,
-)
-from tldw_Server_API.app.core.Chat.request_queue import (
-    QueueStreamChannel,
-    QueueStreamTerminalError,
-    RequestPriority,
-    get_request_queue,
-)
 from tldw_Server_API.app.core.Chat.run_first_presentation import (
     present_chat_tools,
     tool_names_from_definitions,
+)
+from tldw_Server_API.app.core.Chat.streaming_pipeline import (
+    StreamingPipelineRequest,
+    create_chat_streaming_response,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
@@ -133,10 +137,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_allows_replay,
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
-)
-from tldw_Server_API.app.core.Chat.streaming_pipeline import (
-    StreamingPipelineRequest,
-    create_chat_streaming_response,
+    trusted_local_stream_error_frame,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
@@ -145,7 +146,10 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
-from tldw_Server_API.app.core.Chat.tool_execution_service import ensure_tool_autoexec_supports_request
+from tldw_Server_API.app.core.Chat.tool_execution_service import (
+    UnsupportedMultiChoiceToolAutoexecError,
+    ensure_tool_autoexec_supports_request,
+)
 from tldw_Server_API.app.core.config import (
     load_comprehensive_config,
     resolve_chat_run_first_presentation_variant,
@@ -3325,7 +3329,7 @@ def build_structured_http_exception(exc: StructuredGenerationError) -> HTTPExcep
 def _is_trusted_local_chat_http_exception(exc: BaseException) -> bool:
     """Return whether an HTTP error was created and bounded by this service."""
 
-    return (
+    return isinstance(exc, UnsupportedMultiChoiceToolAutoexecError) or (
         isinstance(exc, HTTPException)
         and trusted_local_chat_signal_kind(exc) is not None
     )
@@ -4551,7 +4555,16 @@ async def execute_streaming_call(
     queue_enabled = False
 
     def _public_stream_error_payload(value: Any) -> dict[str, Any]:
-        payload: dict[str, Any] = provider_stream_error_payload(value)
+        if isinstance(value, UnsupportedMultiChoiceToolAutoexecError):
+            payload: dict[str, Any] = {
+                "error": {
+                    "code": value.error_code,
+                    "type": value.error_code,
+                    "message": value.public_message,
+                }
+            }
+        else:
+            payload = provider_stream_error_payload(value)
         if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
             payload["conversation_id"] = final_conversation_id
             payload["tldw_conversation_id"] = final_conversation_id
@@ -4715,10 +4728,19 @@ async def execute_streaming_call(
                                     raise_detached_error(
                                         _bound_provider_http_exception(refresh_error)
                                     )
-                                ensure_tool_autoexec_supports_request(
-                                    cleaned_args=refreshed_args,
-                                    should_run_tool_autoexec=should_run_legacy_tool_autoexec,
-                                )
+                                try:
+                                    ensure_tool_autoexec_supports_request(
+                                        cleaned_args=refreshed_args,
+                                        should_run_tool_autoexec=should_run_legacy_tool_autoexec,
+                                    )
+                                except UnsupportedMultiChoiceToolAutoexecError as guard_error:
+                                    return iter(
+                                        [
+                                            trusted_local_stream_error_frame(
+                                                guard_error.error_code
+                                            )
+                                        ]
+                                    )
                                 model = refreshed_model or model
                                 def llm_call_func_fb():
                                     return perform_chat_api_call(**refreshed_args)
@@ -4978,7 +5000,16 @@ async def execute_streaming_call(
                             outcome="error",
                         )
                         await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
-                        return _streaming_error_response(guard_error)
+                        return StreamingResponse(
+                            _terminal_stream_error(
+                                _public_stream_error_payload(guard_error)
+                            ),
+                            media_type="text/event-stream",
+                            headers={
+                                "Cache-Control": "no-cache",
+                                "X-Accel-Buffering": "no",
+                            },
+                        )
                     cleaned_args = refreshed_args
                     model = refreshed_model or model
                     fallback_start_time = time.time()
@@ -6693,16 +6724,12 @@ async def _execute_non_stream_call_impl(
                         continuation_response = _wrap_raw_string_response(continuation_response, model)
 
                     continuation_content: Any | None = None
-                    continuation_tool_calls: Any | None = None
-                    continuation_function_call: Any | None = None
                     if continuation_response and isinstance(continuation_response, dict):
                         continuation_choices = continuation_response.get("choices")
                         if continuation_choices and isinstance(continuation_choices, list):
                             continuation_message = continuation_choices[0].get("message") or {}
                             if isinstance(continuation_message, dict):
                                 continuation_content = continuation_message.get("content")
-                                continuation_tool_calls = continuation_message.get("tool_calls")
-                                continuation_function_call = continuation_message.get("function_call")
                     elif isinstance(continuation_response, str):
                         continuation_content = continuation_response
 
