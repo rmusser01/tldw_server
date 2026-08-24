@@ -67,7 +67,7 @@ If the provider requires auth and no key resolves, the API returns:
 
 Explicit TTS gateways use the narrower `admin URL + optional user API key`
 contract documented in the
-[TTS Provider Setup Guide](../../STT-TTS/TTS-SETUP-GUIDE.md). Their canonical
+[TTS Provider Setup Guide](../WebUI_Extension/TTS-SETUP-GUIDE.md). Their canonical
 provider IDs are `openrouter` and `gateway:<slug>`.
 
 An enabled gateway with `allow_user_api_key: true` is added dynamically to the
