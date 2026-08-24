@@ -563,6 +563,52 @@ def test_active_visual_pack_creation_cannot_bypass_review(db_instance: Character
         )
 
 
+def test_visual_pack_review_requires_named_reviewer_and_inactive_pack(
+    db_instance: CharactersRAGDB,
+) -> None:
+    """Reviews are only meaningful for a named reviewer on an inactive revision."""
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Review Guard Persona"})
+    pack = db_instance.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        title="Review Guard Pack",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+    )
+
+    with pytest.raises(InputError, match="reviewer_user_id"):
+        db_instance.create_persona_visual_pack_review(
+            pack_id=pack["id"],
+            user_id="user-1",
+            reviewer_user_id="  ",
+            fingerprint="d" * 64,
+            expected_pack_version=int(pack["version"]),
+        )
+
+    review = db_instance.create_persona_visual_pack_review(
+        pack_id=pack["id"],
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        fingerprint="e" * 64,
+        expected_pack_version=int(pack["version"]),
+    )
+    active = db_instance.activate_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=pack["id"],
+        expected_version=int(pack["version"]),
+        reviewed_fingerprint=review["fingerprint"],
+    )
+
+    with pytest.raises(InputError, match="active"):
+        db_instance.create_persona_visual_pack_review(
+            pack_id=active["id"],
+            user_id="user-1",
+            reviewer_user_id="user-1",
+            fingerprint="f" * 64,
+            expected_pack_version=int(active["version"]),
+        )
+
+
 def test_inactive_deletion_preserves_active_pack_and_activation_requires_review(
     db_instance: CharactersRAGDB,
 ) -> None:

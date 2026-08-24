@@ -20839,7 +20839,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 61:
                 self._migrate_from_v60_to_v61_postgres(conn)
                 current_version = 61
-            if current_version < 62:
+            if target_version >= 62 and current_version < 62:
                 self._migrate_from_v61_to_v62_postgres(conn)
                 current_version = 62
 

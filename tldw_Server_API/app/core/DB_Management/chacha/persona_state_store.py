@@ -2109,9 +2109,13 @@ class PersonaStateStore:
             raise InputError("derivation_version must be an integer >= 1.")  # noqa: TRY003
 
         derived_core_json = self._ensure_json_string(derived_core if isinstance(derived_core, dict) else {}) or "{}"
-        overlay_preferences_json = (
-            self._ensure_json_string(overlay_preferences if isinstance(overlay_preferences, dict) else {}) or "{}"
+        incoming_overlay_preferences = (
+            dict(overlay_preferences) if isinstance(overlay_preferences, dict) else {}
         )
+        try:
+            normalize_persona_buddy_overlay_preferences(incoming_overlay_preferences)
+        except ValueError as exc:
+            raise InputError(str(exc)) from exc  # noqa: TRY003
         now = self._get_current_utc_timestamp_iso()
         update_query = (
             "UPDATE persona_buddies "
@@ -2122,38 +2126,12 @@ class PersonaStateStore:
             "derived_core_json <> ? OR overlay_preferences_json <> ?"
             ")"
         )
-        update_params = (
-            user_id,
-            derivation_version_value,
-            source_fingerprint,
-            derived_core_json,
-            overlay_preferences_json,
-            now,
-            persona_id,
-            user_id,
-            derivation_version_value,
-            source_fingerprint,
-            derived_core_json,
-            overlay_preferences_json,
-        )
         insert_query = (
             "INSERT INTO persona_buddies("
             "persona_id, user_id, derivation_version, source_fingerprint, derived_core_json, "
             "overlay_preferences_json, created_at, last_modified, version"
             ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
-        insert_params = (
-            persona_id,
-            user_id,
-            derivation_version_value,
-            source_fingerprint,
-            derived_core_json,
-            overlay_preferences_json,
-            now,
-            now,
-            1,
-        )
-
         def _load_persisted_item(connection: Any) -> dict[str, Any]:
             row = connection.execute(
                 "SELECT * FROM persona_buddies WHERE persona_id = ? LIMIT 1",
@@ -2166,6 +2144,43 @@ class PersonaStateStore:
 
         with self.transaction() as conn:
             self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            existing_row = conn.execute(
+                "SELECT overlay_preferences_json FROM persona_buddies WHERE persona_id = ? LIMIT 1",
+                (persona_id,),
+            ).fetchone()
+            existing_overlay_preferences = self._decode_persona_json_object(
+                dict(existing_row).get("overlay_preferences_json") if existing_row else None,
+                field_name="overlay_preferences_json",
+                context_label=f"persona buddy {persona_id}",
+            )
+            merged_overlay_preferences = dict(existing_overlay_preferences)
+            merged_overlay_preferences.update(incoming_overlay_preferences)
+            overlay_preferences_json = self._ensure_json_string(merged_overlay_preferences) or "{}"
+            update_params = (
+                user_id,
+                derivation_version_value,
+                source_fingerprint,
+                derived_core_json,
+                overlay_preferences_json,
+                now,
+                persona_id,
+                user_id,
+                derivation_version_value,
+                source_fingerprint,
+                derived_core_json,
+                overlay_preferences_json,
+            )
+            insert_params = (
+                persona_id,
+                user_id,
+                derivation_version_value,
+                source_fingerprint,
+                derived_core_json,
+                overlay_preferences_json,
+                now,
+                now,
+                1,
+            )
             prepared_update, prepared_update_params = self._prepare_backend_statement(update_query, update_params)
             update_cursor = conn.execute(prepared_update, prepared_update_params or ())
 
@@ -2581,6 +2596,9 @@ class PersonaStateStore:
         fingerprint_value = str(fingerprint or "").strip()
         if len(fingerprint_value) != 64:
             raise InputError("persona visual pack fingerprint must be 64 characters.")  # noqa: TRY003
+        reviewer_user_id_value = str(reviewer_user_id or "").strip()
+        if not reviewer_user_id_value:
+            raise InputError("reviewer_user_id is required for persona visual pack reviews.")  # noqa: TRY003
         expected = self._parse_version_input(expected_pack_version)
         review_id = self._generate_uuid()
         now = self._get_current_utc_timestamp_iso()
@@ -2596,18 +2614,25 @@ class PersonaStateStore:
                     entity_id=pack_id,
                 )
             pack = dict(row)
+            self._require_active_persona_profile_owner(
+                conn,
+                persona_id=str(pack["persona_id"]),
+                user_id=user_id,
+            )
             if int(pack["version"]) != expected:
                 raise ConflictError(
                     "Persona visual pack version mismatch.",
                     entity="persona_visual_packs",
                     entity_id=pack_id,
                 )
+            if str(pack["status"]) == "active":
+                raise InputError("active persona visual packs cannot receive reviews.")  # noqa: TRY003
             query = (
                 "INSERT INTO persona_visual_pack_reviews("
                 "id, pack_id, user_id, reviewer_user_id, fingerprint, pack_version, reviewed_at, created_at"
                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             )
-            params = (review_id, pack_id, user_id, str(reviewer_user_id or "").strip(), fingerprint_value, expected, now, now)
+            params = (review_id, pack_id, user_id, reviewer_user_id_value, fingerprint_value, expected, now, now)
             prepared_query, prepared_params = self._prepare_backend_statement(query, params)
             try:
                 conn.execute(prepared_query, prepared_params or ())
@@ -2629,7 +2654,7 @@ class PersonaStateStore:
             "id": review_id,
             "pack_id": pack_id,
             "user_id": user_id,
-            "reviewer_user_id": str(reviewer_user_id or "").strip(),
+            "reviewer_user_id": reviewer_user_id_value,
             "fingerprint": fingerprint_value,
             "pack_version": expected,
             "reviewed_at": now,

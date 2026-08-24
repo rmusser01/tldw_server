@@ -167,6 +167,48 @@ def test_upsert_persona_buddy_is_noop_when_payload_is_unchanged(
     assert persisted["last_modified"] == original["last_modified"]
 
 
+def test_upsert_persona_buddy_validates_ambient_mode_and_preserves_unknown_overlay_keys(
+    db_instance: CharactersRAGDB,
+) -> None:
+    """Direct upserts validate ambient mode without replacing opaque preferences."""
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Opaque Overlay Persona"})
+    profile = db_instance.get_persona_profile(persona_id, user_id="user-1")
+    assert profile is not None
+    original = ensure_persona_buddy_for_profile(db_instance, profile)
+    seeded = db_instance.upsert_persona_buddy(
+        persona_id=persona_id,
+        user_id="user-1",
+        derivation_version=int(original["derivation_version"]),
+        source_fingerprint=str(original["source_fingerprint"]),
+        derived_core=original["derived_core"],
+        overlay_preferences={"future_key": {"keep": True}, "ambient_mode": "off"},
+    )
+
+    with pytest.raises(InputError, match="ambient_mode"):
+        db_instance.upsert_persona_buddy(
+            persona_id=persona_id,
+            user_id="user-1",
+            derivation_version=int(seeded["derivation_version"]),
+            source_fingerprint=str(seeded["source_fingerprint"]),
+            derived_core=seeded["derived_core"],
+            overlay_preferences={"ambient_mode": "chaotic"},
+        )
+
+    updated = db_instance.upsert_persona_buddy(
+        persona_id=persona_id,
+        user_id="user-1",
+        derivation_version=int(seeded["derivation_version"]),
+        source_fingerprint=str(seeded["source_fingerprint"]),
+        derived_core=seeded["derived_core"],
+        overlay_preferences={"ambient_mode": "roaming"},
+    )
+
+    assert updated["overlay_preferences"] == {
+        "future_key": {"keep": True},
+        "ambient_mode": "roaming",
+    }
+
+
 def test_ensure_persona_buddy_preserves_overlay_preferences_on_rederive(
     db_instance: CharactersRAGDB,
 ) -> None:
