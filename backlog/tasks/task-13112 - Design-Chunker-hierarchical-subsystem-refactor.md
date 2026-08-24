@@ -1,0 +1,66 @@
+---
+id: TASK-13112
+title: Design Chunker hierarchical subsystem refactor
+status: In Progress
+created_date: 2026-08-24 05:37
+dependencies:
+- TASK-9937
+labels:
+- chunking
+- refactor
+- design
+priority: High
+references:
+- Docs/superpowers/specs/2026-06-24-chunker-process-text-refactor-design.md
+- Docs/superpowers/plans/2026-06-24-chunker-process-text-refactor.md
+- https://github.com/rmusser01/tldw_server/pull/2517
+documentation:
+- Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
+modified_files:
+- Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
+- backlog/tasks/task-13112 - Design-Chunker-hierarchical-subsystem-refactor.md
+updated_date: 2026-08-24 05:42
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Create a behavior-preserving design for extracting Chunker's full hierarchical chunking subsystem into focused internal modules. Preserve public tree/flat methods and output contracts, remove the approved private span/title helper seams, allow only reproduced corrections, and base the work on current origin/dev after the merged process_text refactor. Scope is design documentation only; implementation planning follows user review.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 The spec defines focused hierarchy package ownership, dependency direction, and narrow context contracts
+- [x] #2 The spec preserves public hierarchy signatures, tree/flat dictionary contracts, composition seams, and module-level fallback behavior
+- [x] #3 The spec defines the direct shared span API and approved removal of private span/title helper seams
+- [x] #4 The spec defines reproduced-defect correction gates, characterization coverage, staged extraction, and verification
+- [ ] #5 The committed spec is self-reviewed and presented to the user before implementation planning
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Reconcile current origin/dev hierarchy behavior and focused tests. 2. Write the approved design spec. 3. Self-review for placeholders, contradictions, scope, and ambiguity. 4. Commit the design and request user review before writing an implementation plan.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Approved design decisions: extract the full hierarchy subsystem through a stateless context-backed service; split spans, leaves, tree building, grouping, and flatten traversal into focused modules; keep public tree/flatten/flat signatures and public flat composition; preserve the package-level flatten fallback; remove the private paragraph-span and header-title seams; route multi-level process_text directly through hierarchical.spans; allow only reproduced, separately tested corrections. Baseline pinned to refreshed origin/dev 4958cfed65d3c6e9baa43ea47e2b155fed204e13. Focused baseline verification: 91 passed, 1 skipped, 0 failures. Spec self-review found no placeholders, contradictions, unresolved scope decisions, or ambiguous compatibility requirements. Bandit is not applicable because this task changes documentation and Backlog metadata only. Acceptance criterion 5 remains open until the committed spec is presented for user review.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
