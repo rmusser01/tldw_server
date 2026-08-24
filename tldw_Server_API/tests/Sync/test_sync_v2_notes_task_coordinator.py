@@ -245,7 +245,10 @@ def test_capture_submits_the_complete_plan_once(monkeypatch: pytest.MonkeyPatch)
     assert calls == [plan.steps]
 
 
-def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: Path) -> None:
+def test_ready_server_capture_appends_task_and_activity_as_one_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     note_db = CharactersRAGDB(tmp_path / "product.db", client_id=OWNER_ID)
     sync_store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db"))
     try:
@@ -475,6 +478,16 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
             client_type="chatbook",
             device_id=device_id,
         )
+        unrelated_content = f"Context preserved\n\n{completed_note['content']}"
+        unrelated_capture = coordinator.capture_note_projection(
+            task_service._note_projection_step(
+                coordinator=coordinator,
+                note=completed_note,
+                content=unrelated_content,
+            ),
+            idempotency_key="unrelated-note-edit-before-client-task-push",
+        )
+        assert unrelated_capture.fully_applied is True
         task_head = sync_store.get_current_head(
             dataset.dataset_id,
             "notes.task",
@@ -513,6 +526,41 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
         client_device = sync_store.get_device(OWNER_ID, device_id)
         assert active_dataset is not None
         assert client_device is not None
+        unrelated_note = note_db.get_note_by_id(NOTE_ID)
+        assert unrelated_note is not None
+        duplicate_content = (
+            f"{unrelated_note['content']}"
+            f"- [ ] Stale duplicate {render_task_marker(str(task['id']), revision=999, object_hash='sha256:' + 'f' * 64)}\n"
+        )
+        duplicate_capture = coordinator.capture_note_projection(
+            task_service._note_projection_step(
+                coordinator=coordinator,
+                note=unrelated_note,
+                content=duplicate_content,
+            ),
+            idempotency_key="duplicate-task-marker-before-client-push",
+        )
+        assert duplicate_capture.fully_applied is True
+        with pytest.raises(
+            SyncStoreError,
+            match="notes_task_projection_base_invalid",
+        ):
+            service._expand_task_client_push(
+                dataset=active_dataset,
+                device=client_device,
+                envelope=client_envelope,
+            )
+        duplicate_note = note_db.get_note_by_id(NOTE_ID)
+        assert duplicate_note is not None
+        corrected_capture = coordinator.capture_note_projection(
+            task_service._note_projection_step(
+                coordinator=coordinator,
+                note=duplicate_note,
+                content=unrelated_content,
+            ),
+            idempotency_key="remove-duplicate-task-marker-before-client-push",
+        )
+        assert corrected_capture.fully_applied is True
         expanded = service._expand_task_client_push(
             dataset=active_dataset,
             device=client_device,
@@ -604,6 +652,7 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
         )
         client_note = note_db.get_note_by_id(NOTE_ID)
         assert client_note is not None
+        assert "Context preserved" in client_note["content"]
         client_item = parse_note_checklists(
             note_id=NOTE_ID,
             note_version=int(client_note["version"]),
@@ -924,8 +973,156 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
 
         note_db.update_note(
             note_id=NOTE_ID,
-            update_data={"content": "\n"},
+            update_data={"content": "- [ ] Replacement renamed without marker\n"},
             expected_version=int(created_note["version"]),
+        )
+        missing_marker_note = note_db.get_note_by_id(NOTE_ID)
+        assert missing_marker_note is not None
+        missing_marker_result = task_service.reconcile_note(
+            db=note_db,
+            note_id=NOTE_ID,
+            note_version=int(missing_marker_note["version"]),
+            content=str(missing_marker_note["content"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        missing_marker_drifts = note_db.task_store.list_task_projection_drifts(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            note_id=NOTE_ID,
+            task_id=str(created["id"]),
+        )
+        missing_marker_task = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(created["id"]),
+        )
+        assert missing_marker_result.unlinked_count == 0
+        assert missing_marker_result.warning_count == 1
+        assert missing_marker_task is not None
+        assert missing_marker_task["projection_status"] == "live"
+        assert len(missing_marker_drifts) == 1
+        assert missing_marker_drifts[0]["reason_code"] == "missing_marker_base"
+
+        missing_marker_drift = missing_marker_drifts[0]
+        original_drift_cas = note_db.task_store.compare_and_set_task_projection_drift
+        fail_drift_cas_once = True
+
+        def injected_drift_cas(**kwargs: Any) -> dict[str, Any]:
+            nonlocal fail_drift_cas_once
+            if fail_drift_cas_once:
+                fail_drift_cas_once = False
+                raise RuntimeError("injected crash after drift resolution capture")
+            return original_drift_cas(**kwargs)
+
+        monkeypatch.setattr(
+            note_db.task_store,
+            "compare_and_set_task_projection_drift",
+            injected_drift_cas,
+        )
+        with pytest.raises(
+            RuntimeError,
+            match="injected crash after drift resolution capture",
+        ):
+            task_service.resolve_projection_drift(
+                db=note_db,
+                note_id=NOTE_ID,
+                task_id=str(created["id"]),
+                drift_id=str(missing_marker_drift["id"]),
+                action="keep_task",
+                expected_lifecycle_revision=1,
+                expected_note_head_cursor=missing_marker_drift["note_head_cursor"],
+                expected_note_head_hash=missing_marker_drift["note_head_hash"],
+                expected_task_head_cursor=missing_marker_drift["task_head_cursor"],
+                expected_task_head_hash=missing_marker_drift["task_head_hash"],
+                actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+                owner_user_id=OWNER_ID,
+            )
+        repaired_drift = task_service.resolve_projection_drift(
+            db=note_db,
+            note_id=NOTE_ID,
+            task_id=str(created["id"]),
+            drift_id=str(missing_marker_drift["id"]),
+            action="keep_task",
+            expected_lifecycle_revision=1,
+            expected_note_head_cursor=missing_marker_drift["note_head_cursor"],
+            expected_note_head_hash=missing_marker_drift["note_head_hash"],
+            expected_task_head_cursor=missing_marker_drift["task_head_cursor"],
+            expected_task_head_hash=missing_marker_drift["task_head_hash"],
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        assert repaired_drift["status"] == "resolved"
+        repaired_missing_note = note_db.get_note_by_id(NOTE_ID)
+        assert repaired_missing_note is not None
+        repaired_missing_item = parse_note_checklists(
+            note_id=NOTE_ID,
+            note_version=int(repaired_missing_note["version"]),
+            content=str(repaired_missing_note["content"]),
+        ).items[0]
+        assert repaired_missing_item.marker is not None
+        assert repaired_missing_item.text == "Replacement"
+
+        note_db.update_note(
+            note_id=NOTE_ID,
+            update_data={
+                "content": (
+                    "- [ ] Accepted malformed edit "
+                    "<!-- tldw-task:v1:not-a-task:1:not-a-hash -->\n"
+                )
+            },
+            expected_version=int(repaired_missing_note["version"]),
+        )
+        malformed_marker_note = note_db.get_note_by_id(NOTE_ID)
+        assert malformed_marker_note is not None
+        malformed_marker_result = task_service.reconcile_note(
+            db=note_db,
+            note_id=NOTE_ID,
+            note_version=int(malformed_marker_note["version"]),
+            content=str(malformed_marker_note["content"]),
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        malformed_marker_drifts = note_db.task_store.list_task_projection_drifts(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            note_id=NOTE_ID,
+            task_id=str(created["id"]),
+        )
+        assert malformed_marker_result.unlinked_count == 0
+        assert malformed_marker_result.warning_count == 1
+        assert len(malformed_marker_drifts) == 1
+        assert malformed_marker_drifts[0]["reason_code"] == "malformed_marker"
+
+        malformed_marker_drift = malformed_marker_drifts[0]
+        task_service.resolve_projection_drift(
+            db=note_db,
+            note_id=NOTE_ID,
+            task_id=str(created["id"]),
+            drift_id=str(malformed_marker_drift["id"]),
+            action="accept_markdown",
+            expected_lifecycle_revision=1,
+            expected_note_head_cursor=malformed_marker_drift["note_head_cursor"],
+            expected_note_head_hash=malformed_marker_drift["note_head_hash"],
+            expected_task_head_cursor=malformed_marker_drift["task_head_cursor"],
+            expected_task_head_hash=malformed_marker_drift["task_head_hash"],
+            actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+            owner_user_id=OWNER_ID,
+        )
+        repaired_malformed_note = note_db.get_note_by_id(NOTE_ID)
+        repaired_malformed_task = note_db.get_task(
+            owner_user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            task_id=str(created["id"]),
+        )
+        assert repaired_malformed_note is not None
+        assert repaired_malformed_task is not None
+        assert repaired_malformed_task["text"] == "Accepted malformed edit"
+
+        note_db.update_note(
+            note_id=NOTE_ID,
+            update_data={"content": "\n"},
+            expected_version=int(repaired_malformed_note["version"]),
         )
         removed_note = note_db.get_note_by_id(NOTE_ID)
         assert removed_note is not None
@@ -1133,6 +1330,41 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(tmp_path: P
             explicit_text="Explicit second edit",
             markdown_text="Accepted Markdown edit",
         )
+        task_materializer = service.materializers["notes.task"]
+
+        class _InjectedProcessExit(BaseException):
+            pass
+
+        class _CrashBeforeTaskMaterialization:
+            note_db = task_materializer.note_db
+
+            def apply(
+                self,
+                envelope: Any,
+                *,
+                store: SyncV2Store,
+            ) -> MaterializationResult:
+                raise _InjectedProcessExit
+
+        service.materializers["notes.task"] = _CrashBeforeTaskMaterialization()
+        try:
+            with pytest.raises(_InjectedProcessExit):
+                task_service.resolve_projection_drift(
+                    db=note_db,
+                    note_id=NOTE_ID,
+                    task_id=str(keep_task["id"]),
+                    drift_id=str(accept_drift["id"]),
+                    action="accept_markdown",
+                    expected_lifecycle_revision=1,
+                    expected_note_head_cursor=accept_drift["note_head_cursor"],
+                    expected_note_head_hash=accept_drift["note_head_hash"],
+                    expected_task_head_cursor=accept_drift["task_head_cursor"],
+                    expected_task_head_hash=accept_drift["task_head_hash"],
+                    actor=TaskActor(actor_type="user", actor_id=OWNER_ID),
+                    owner_user_id=OWNER_ID,
+                )
+        finally:
+            service.materializers["notes.task"] = task_materializer
         accepted = task_service.resolve_projection_drift(
             db=note_db,
             note_id=NOTE_ID,

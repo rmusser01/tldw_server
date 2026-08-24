@@ -6,7 +6,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 from uuid import UUID
@@ -1364,6 +1364,198 @@ class NotesTaskService:
         return updated
 
     @staticmethod
+    def _projection_candidate_without_marker(
+        *,
+        items: list[ParsedChecklistItem],
+        projection: dict[str, Any],
+        claimed_offsets: set[int] | None = None,
+    ) -> ParsedChecklistItem | None:
+        """Locate one review-only markerless candidate from disposable hints."""
+
+        claimed = claimed_offsets if claimed_offsets is not None else set()
+        candidates = [
+            item
+            for item in items
+            if item.marker is None and item.locator.start_offset not in claimed
+        ]
+        exact_text = [
+            item
+            for item in candidates
+            if item.locator.normalized_text_hash
+            == projection["normalized_text_hash"]
+            and item.locator.occurrence_index == projection["occurrence_index"]
+        ]
+        if len(exact_text) == 1:
+            return exact_text[0]
+        same_line = [
+            item
+            for item in candidates
+            if item.locator.line_number == projection["line_number"]
+        ]
+        if len(same_line) == 1:
+            return same_line[0]
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
+
+    @staticmethod
+    def _projection_drift_resolution_identity(
+        *,
+        drift_id: str,
+        action: str,
+    ) -> tuple[str, str]:
+        """Return the reserved source and key for one drift resolution."""
+
+        source = (
+            "notes.tasks.reconciliation"
+            if action == "keep_task"
+            else "notes.tasks.repair"
+        )
+        return source, f"notes-task-drift-{drift_id}-{action}"
+
+    @staticmethod
+    def _resume_applied_projection_drift_resolution(
+        *,
+        coordinator: NotesTaskCoordinator,
+        dataset_id: str,
+        note_id: str,
+        task_id: str,
+        action: str,
+        source: str,
+        idempotency_key: str,
+        expected_task_claim: tuple[int | None, str | None],
+    ) -> bool:
+        """Repair an exact resolution group committed before drift CAS."""
+
+        from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+            resume_server_origin_mutation_group,
+            server_origin_mutation_batch_group_id,
+        )
+
+        group_id = server_origin_mutation_batch_group_id(
+            dataset_id=dataset_id,
+            source=source,
+            idempotency_key=idempotency_key,
+        )
+        if not coordinator.service.store.list_mutation_group(dataset_id, group_id):
+            return False
+        result = resume_server_origin_mutation_group(
+            service=coordinator.service,
+            dataset_id=dataset_id,
+            mutation_group_id=group_id,
+        )
+        if not result.fully_applied:
+            return False
+        domains = [envelope.domain for envelope in result.envelopes]
+        expected_domains = (
+            ["notes.note"]
+            if action == "keep_task"
+            else ["notes.task", "notes.task_activity", "notes.note"]
+        )
+        if domains != expected_domains:
+            return False
+        note_members = [
+            envelope
+            for envelope in result.envelopes
+            if envelope.domain == "notes.note" and envelope.object_id == note_id
+        ]
+        task_members = [
+            envelope
+            for envelope in result.envelopes
+            if envelope.domain == "notes.task" and envelope.object_id == task_id
+        ]
+        if len(note_members) != 1 or len(task_members) != (0 if action == "keep_task" else 1):
+            return False
+        note_head = coordinator.service.store.get_current_head(
+            dataset_id,
+            "notes.note",
+            note_id,
+        )
+        task_head = coordinator.service.store.get_current_head(
+            dataset_id,
+            "notes.task",
+            task_id,
+        )
+        note_member = note_members[0]
+        if (
+            note_head is None
+            or note_head.server_cursor != note_member.server_cursor
+            or note_head.payload_hash != note_member.payload_hash
+        ):
+            return False
+        current_task_claim = (
+            (task_head.server_cursor, task_head.payload_hash)
+            if task_head is not None
+            else (None, None)
+        )
+        if action == "keep_task":
+            return current_task_claim == expected_task_claim
+        task_member = task_members[0]
+        return current_task_claim == (
+            task_member.server_cursor,
+            task_member.payload_hash,
+        )
+
+    def _complete_projection_drift_resolution(
+        self,
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        note_id: str,
+        task_id: str,
+        drift_id: str,
+        action: str,
+        expected_note_head_cursor: int | None,
+        expected_note_head_hash: str | None,
+        expected_task_head_cursor: int | None,
+        expected_task_head_hash: str | None,
+    ) -> dict[str, Any]:
+        """Close one drift and refresh its disposable projection cache."""
+
+        resolved = db.task_store.compare_and_set_task_projection_drift(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            note_id=note_id,
+            task_id=task_id,
+            drift_id=drift_id,
+            expected_note_head_cursor=expected_note_head_cursor,
+            expected_note_head_hash=expected_note_head_hash,
+            expected_task_head_cursor=expected_task_head_cursor,
+            expected_task_head_hash=expected_task_head_hash,
+            status="resolved",
+        )
+        if action == "unlink":
+            return resolved
+        final_note = self._require_note(db, note_id)
+        final_matches = [
+            item
+            for item in parse_note_checklists(
+                note_id=note_id,
+                note_version=int(final_note["version"]),
+                content=str(final_note.get("content") or ""),
+            ).items
+            if item.marker is not None and item.marker.task_id == task_id
+        ]
+        if len(final_matches) == 1:
+            final_item = final_matches[0]
+            db.set_task_projection(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                task_id=task_id,
+                note_id=note_id,
+                note_version=int(final_note["version"]),
+                line_number=final_item.locator.line_number,
+                start_offset=final_item.locator.start_offset,
+                end_offset=final_item.locator.end_offset,
+                normalized_text_hash=final_item.locator.normalized_text_hash,
+                occurrence_index=final_item.locator.occurrence_index,
+                block_fingerprint=final_item.locator.block_fingerprint,
+                raw_line=final_item.raw_line,
+                has_child_content=final_item.has_child_content,
+            )
+        return resolved
+
+    @staticmethod
     def _record_projection_drift(
         *,
         db: CharactersRAGDB,
@@ -1483,6 +1675,7 @@ class NotesTaskService:
         updated_task_ids: list[str] = []
         unlinked_task_ids: list[str] = []
         drift_count = 0
+        claimed_markerless_offsets: set[int] = set()
 
         for item in parsed.items:
             marker = item.marker
@@ -1651,14 +1844,10 @@ class NotesTaskService:
             task_id = str(task["id"])
             if task_id in matched_task_ids:
                 continue
-            possible_line = next(
-                (
-                    item
-                    for item in parsed.items
-                    if item.locator.normalized_text_hash
-                    == projection["normalized_text_hash"]
-                ),
-                None,
+            possible_line = self._projection_candidate_without_marker(
+                items=parsed.items,
+                projection=projection,
+                claimed_offsets=claimed_markerless_offsets,
             )
             old_item = parse_note_checklists(
                 note_id=note_id,
@@ -1667,6 +1856,7 @@ class NotesTaskService:
             ).items
             old_marker = old_item[0].marker if old_item else None
             if possible_line is not None and old_marker is not None:
+                claimed_markerless_offsets.add(possible_line.locator.start_offset)
                 self._record_projection_drift(
                     db=db,
                     scope=scope,
@@ -1900,6 +2090,10 @@ class NotesTaskService:
                 entity="tasks",
                 entity_id=drift_id,
             )
+        resolution_source, resolution_key = self._projection_drift_resolution_identity(
+            drift_id=drift_id,
+            action=action,
+        )
         note_head = coordinator.service.store.get_current_head(
             scope.dataset_id,
             "notes.note",
@@ -1920,6 +2114,28 @@ class NotesTaskService:
             if task_head is not None
             else (None, None)
         )
+        if action != "dismiss" and self._resume_applied_projection_drift_resolution(
+            coordinator=coordinator,
+            dataset_id=scope.dataset_id,
+            note_id=note_id,
+            task_id=task_id,
+            action=action,
+            source=resolution_source,
+            idempotency_key=resolution_key,
+            expected_task_claim=expected_task,
+        ):
+            return self._complete_projection_drift_resolution(
+                db=db,
+                scope=scope,
+                note_id=note_id,
+                task_id=task_id,
+                drift_id=drift_id,
+                action=action,
+                expected_note_head_cursor=expected_note_head_cursor,
+                expected_note_head_hash=expected_note_head_hash,
+                expected_task_head_cursor=expected_task_head_cursor,
+                expected_task_head_hash=expected_task_head_hash,
+            )
         if current_note_claim != expected_note or current_task_claim != expected_task:
             raise ConflictError(
                 "Projection drift heads changed concurrently.",
@@ -1999,6 +2215,26 @@ class NotesTaskService:
             and item.marker.revision == int(drift["marker_base_revision"])
             and item.marker.object_hash == str(drift["marker_base_hash"])
         ]
+        if not base_matches and drift["reason_code"] in {
+            "missing_marker_base",
+            "malformed_marker",
+            "duplicate_marker",
+        }:
+            projection = db.task_store.get_task_projection(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                task_id=task_id,
+            )
+            candidate = (
+                self._projection_candidate_without_marker(
+                    items=parsed.items,
+                    projection=projection,
+                )
+                if projection is not None
+                else None
+            )
+            if candidate is not None:
+                base_matches = [candidate]
         if len(base_matches) != 1:
             raise ConflictError(
                 "Projection drift Markdown claim changed concurrently.",
@@ -2044,7 +2280,8 @@ class NotesTaskService:
             )
             capture = coordinator.capture_note_projection(
                 note_step,
-                idempotency_key=f"notes-task-drift-{drift_id}-keep-task",
+                idempotency_key=resolution_key,
+                source=resolution_source,
             )
         else:
             source_row = db.task_store._sync_bootstrap_task_row(
@@ -2095,12 +2332,21 @@ class NotesTaskService:
                     "source_diagnostic_code": None,
                     "source_diagnostic_hash": None,
                 }
-                marker_text = render_task_marker(
-                    task_id,
-                    revision=int(drift["marker_base_revision"]),
-                    object_hash=str(drift["marker_base_hash"]),
-                )
-                new_line = item.raw_line.removesuffix(f" {marker_text}")
+                if item.marker is not None:
+                    marker_text = render_task_marker(
+                        task_id,
+                        revision=int(drift["marker_base_revision"]),
+                        object_hash=str(drift["marker_base_hash"]),
+                    )
+                    new_line = item.raw_line.removesuffix(f" {marker_text}")
+                else:
+                    new_line = self._rewrite_line(
+                        raw_line=item.raw_line,
+                        checked=item.checked,
+                        text=item.text,
+                        metadata=item.metadata,
+                        preserve_existing_body=False,
+                    )
             mutation = build_task_capture_mutation(
                 db=db,
                 owner_user_id=scope.owner_user_id,
@@ -2122,9 +2368,13 @@ class NotesTaskService:
                     new_line=new_line,
                 ),
             )
-            capture = coordinator.capture(
+            plan = replace(
                 coordinator.plan_task_mutation(mutation, note_step=note_step),
-                source="notes.tasks.repair",
+                idempotency_key=resolution_key,
+            )
+            capture = coordinator.capture(
+                plan,
+                source=resolution_source,
             )
         if not capture.fully_applied:
             raise ConflictError(
@@ -2132,48 +2382,33 @@ class NotesTaskService:
                 entity="tasks",
                 entity_id=drift_id,
             )
-        resolved = db.task_store.compare_and_set_task_projection_drift(
-            owner_user_id=scope.owner_user_id,
+        if not self._resume_applied_projection_drift_resolution(
+            coordinator=coordinator,
             dataset_id=scope.dataset_id,
             note_id=note_id,
             task_id=task_id,
+            action=action,
+            source=resolution_source,
+            idempotency_key=resolution_key,
+            expected_task_claim=expected_task,
+        ):
+            raise ConflictError(
+                "Projection drift heads changed concurrently.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        return self._complete_projection_drift_resolution(
+            db=db,
+            scope=scope,
+            note_id=note_id,
+            task_id=task_id,
             drift_id=drift_id,
+            action=action,
             expected_note_head_cursor=expected_note_head_cursor,
             expected_note_head_hash=expected_note_head_hash,
             expected_task_head_cursor=expected_task_head_cursor,
             expected_task_head_hash=expected_task_head_hash,
-            status="resolved",
         )
-        if action != "unlink":
-            final_note = self._require_note(db, note_id)
-            final_matches = [
-                parsed_item
-                for parsed_item in parse_note_checklists(
-                    note_id=note_id,
-                    note_version=int(final_note["version"]),
-                    content=str(final_note.get("content") or ""),
-                ).items
-                if parsed_item.marker is not None
-                and parsed_item.marker.task_id == task_id
-            ]
-            if len(final_matches) == 1:
-                final_item = final_matches[0]
-                db.set_task_projection(
-                    owner_user_id=scope.owner_user_id,
-                    dataset_id=scope.dataset_id,
-                    task_id=task_id,
-                    note_id=note_id,
-                    note_version=int(final_note["version"]),
-                    line_number=final_item.locator.line_number,
-                    start_offset=final_item.locator.start_offset,
-                    end_offset=final_item.locator.end_offset,
-                    normalized_text_hash=final_item.locator.normalized_text_hash,
-                    occurrence_index=final_item.locator.occurrence_index,
-                    block_fingerprint=final_item.locator.block_fingerprint,
-                    raw_line=final_item.raw_line,
-                    has_child_content=final_item.has_child_content,
-                )
-        return resolved
 
     def reconcile_note(
         self,

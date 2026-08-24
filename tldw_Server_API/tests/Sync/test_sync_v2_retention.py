@@ -1989,6 +1989,103 @@ def test_notes_task_open_drift_blocks_exact_envelope_until_resolved(
         product.close_connection()
 
 
+def test_notes_task_open_drift_blocks_standalone_note_envelope(
+    tmp_path: Path,
+) -> None:
+    service, product, note_id, task_id = _notes_task_retention_service(tmp_path)
+    try:
+        first_hash = "sha256:" + "5" * 64
+        first = service.store.insert_envelope(
+            SyncEnvelopeCreate(
+                dataset_id="task-retention-dataset",
+                client_envelope_id="note-retention-v1",
+                domain="notes.note",
+                operation="upsert",
+                object_id=note_id,
+                device_id="server-origin",
+                object_revision=1,
+                payload={"title": "Tasks", "content": "First"},
+                payload_hash=first_hash,
+                created_at_client="2026-05-20T00:00:00+00:00",
+                status="accepted",
+                apply_status="applied",
+                applied_at="2026-05-20T00:00:00+00:00",
+            )
+        )
+        second_hash = "sha256:" + "6" * 64
+        service.store.insert_envelope(
+            SyncEnvelopeCreate(
+                dataset_id="task-retention-dataset",
+                client_envelope_id="note-retention-v2",
+                domain="notes.note",
+                operation="upsert",
+                object_id=note_id,
+                device_id="server-origin",
+                base_server_cursor=first.server_cursor,
+                base_object_revision=1,
+                base_object_hash=first_hash,
+                object_revision=2,
+                payload={"title": "Tasks", "content": "Second"},
+                payload_hash=second_hash,
+                created_at_client="2026-05-21T00:00:00+00:00",
+                status="accepted",
+                apply_status="applied",
+                applied_at="2026-05-21T00:00:00+00:00",
+            )
+        )
+        assert first.server_cursor is not None
+        drift = product.task_store.create_task_projection_drift(
+            owner_user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            drift_id="note-retention-drift",
+            note_id=note_id,
+            task_id=task_id,
+            marker_base_revision=1,
+            marker_base_hash="sha256:" + "1" * 64,
+            note_head_cursor=first.server_cursor,
+            note_head_hash=first_hash,
+            task_head_cursor=None,
+            task_head_hash=None,
+            reason_code="both_changed",
+        )
+
+        blocked = service.retention_dry_run(
+            user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            domains=["notes.note"],
+            audit_mode=False,
+        )
+        candidate = next(
+            item for item in blocked.candidates if item.server_sequence == first.server_sequence
+        )
+        assert "retention_task_projection_drift" in candidate.blockers
+
+        product.task_store.compare_and_set_task_projection_drift(
+            owner_user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            note_id=note_id,
+            task_id=task_id,
+            drift_id=str(drift["id"]),
+            expected_note_head_cursor=first.server_cursor,
+            expected_note_head_hash=first_hash,
+            expected_task_head_cursor=None,
+            expected_task_head_hash=None,
+            status="resolved",
+        )
+        released = service.retention_dry_run(
+            user_id="task-retention-owner",
+            dataset_id="task-retention-dataset",
+            domains=["notes.note"],
+            audit_mode=False,
+        )
+        candidate = next(
+            item for item in released.candidates if item.server_sequence == first.server_sequence
+        )
+        assert "retention_task_projection_drift" not in candidate.blockers
+    finally:
+        product.close_connection()
+
+
 def test_notes_task_linked_tombstone_retains_immutable_anchor_without_cache(
     tmp_path: Path,
 ) -> None:

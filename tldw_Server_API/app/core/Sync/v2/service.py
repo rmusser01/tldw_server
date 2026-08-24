@@ -2337,6 +2337,9 @@ class SyncV2Service:
         note_step: SyncEnvelopeCreate | None = None
         projection_anchor: dict[str, object] | None = None
         if prior_head is not None:
+            from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import (
+                parse_note_checklists,
+            )
             from tldw_Server_API.app.core.Notes_Tasks.projection_markers import (
                 TaskMarker,
                 task_marker_hash,
@@ -2359,14 +2362,35 @@ class SyncV2Service:
                     "notes.note",
                     after.note_id,
                 )
-                if (
-                    note_head is None
-                    or note_head.client_envelope_id != base_anchor.note_envelope_id
-                    or note_head.payload_hash != base_anchor.note_hash
-                    or note_head.object_revision is None
-                ):
+                if note_head is None or note_head.object_revision is None:
                     raise SyncStoreError("notes_task_projection_base_invalid")
                 note_wire = dict(note_head.payload)
+                current_items = parse_note_checklists(
+                    note_id=after.note_id,
+                    note_version=int(note_head.object_revision),
+                    content=str(note_wire.get("content") or ""),
+                ).items
+                if restore_intent:
+                    marker_base_is_valid = not any(
+                        item.marker is not None
+                        and item.marker.task_id == after.task_id
+                        for item in current_items
+                    )
+                else:
+                    expected_marker = TaskMarker(
+                        task_id=after.task_id,
+                        revision=int(prior_head.object_revision or 0),
+                        object_hash=str(prior_head.payload_hash or ""),
+                    )
+                    task_markers = [
+                        item.marker
+                        for item in current_items
+                        if item.marker is not None
+                        and item.marker.task_id == after.task_id
+                    ]
+                    marker_base_is_valid = task_markers == [expected_marker]
+                if not marker_base_is_valid:
+                    raise SyncStoreError("notes_task_projection_base_invalid")
                 projection_kwargs = {
                     "content": str(note_wire.get("content") or ""),
                     "note_id": after.note_id,
@@ -6302,15 +6326,42 @@ class SyncV2Service:
             except (StoredMutationGroupValidationError, SyncStoreError):
                 return ["retention_task_projection_repair"]
         task_members = [member for member in group if member.domain == "notes.task"]
+        task_materializer = self.materializers.get("notes.task")
+        note_db = getattr(task_materializer, "note_db", None)
+        task_store = getattr(note_db, "task_store", None)
+        blockers: list[str] = []
+        if task_store is not None:
+            for member in group:
+                if member.server_cursor is None or member.payload_hash is None:
+                    continue
+                if member.domain == "notes.task" and member.object_revision is not None:
+                    if task_store.has_open_task_projection_drift_for_task_envelope(
+                        owner_user_id=dataset.owner_user_id,
+                        dataset_id=dataset.dataset_id,
+                        task_id=member.object_id,
+                        object_revision=member.object_revision,
+                        object_hash=member.payload_hash,
+                        server_cursor=member.server_cursor,
+                    ):
+                        blockers.append("retention_task_projection_drift")
+                        break
+                if member.domain == "notes.note" and task_store.has_open_task_projection_drift_for_note_envelope(
+                    owner_user_id=dataset.owner_user_id,
+                    dataset_id=dataset.dataset_id,
+                    note_id=member.object_id,
+                    object_hash=member.payload_hash,
+                    server_cursor=member.server_cursor,
+                ):
+                    blockers.append("retention_task_projection_drift")
+                    break
         if not task_members:
-            return []
+            return blockers
         if any(member.apply_status != "applied" for member in group):
             return ["retention_task_projection_repair"]
 
         from .notes_task_coordinator import _projection_anchor_from_envelope
 
         member_ids = {member.client_envelope_id for member in group}
-        blockers: list[str] = []
         for task_member in task_members:
             current = active_store.get_current_head(
                 dataset.dataset_id,
@@ -6333,34 +6384,8 @@ class SyncV2Service:
             ):
                 blockers.append("retention_task_projection_anchor")
 
-        task_materializer = self.materializers.get("notes.task")
-        note_db = getattr(task_materializer, "note_db", None)
-        task_store = getattr(note_db, "task_store", None)
         if task_store is None:
             return [*blockers, "retention_task_projection_authority_unavailable"]
-        for member in group:
-            if member.server_cursor is None or member.payload_hash is None:
-                continue
-            if member.domain == "notes.task" and member.object_revision is not None:
-                if task_store.has_open_task_projection_drift_for_task_envelope(
-                    owner_user_id=dataset.owner_user_id,
-                    dataset_id=dataset.dataset_id,
-                    task_id=member.object_id,
-                    object_revision=member.object_revision,
-                    object_hash=member.payload_hash,
-                    server_cursor=member.server_cursor,
-                ):
-                    blockers.append("retention_task_projection_drift")
-                    break
-            if member.domain == "notes.note" and task_store.has_open_task_projection_drift_for_note_envelope(
-                owner_user_id=dataset.owner_user_id,
-                dataset_id=dataset.dataset_id,
-                note_id=member.object_id,
-                object_hash=member.payload_hash,
-                server_cursor=member.server_cursor,
-            ):
-                blockers.append("retention_task_projection_drift")
-                break
         return list(dict.fromkeys(blockers))
 
     def _apply_retention_binding_releases(
