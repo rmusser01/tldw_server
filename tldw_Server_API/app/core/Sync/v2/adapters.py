@@ -95,6 +95,7 @@ SyncAdapterOutcome = AdapterAccepted | AdapterRejected | AdapterConflict | Adapt
 SyncHead = SyncEnvelope | SyncEnvelopeCreate
 SyncHeadLookup = Callable[[SyncDomain, str], SyncHead | None]
 AuthorizedNoteLookup = Callable[[str], SyncHead | None]
+AuthorizedTaskLookup = Callable[[str], SyncHead | None]
 SyncDomainHeadLoader = Callable[[SyncDomain], Sequence[SyncHead]]
 BootstrapRelationshipVerifier = Callable[
     [SyncDomain, str, Mapping[str, object]], bool
@@ -129,8 +130,12 @@ class SyncAdapterContext:
     prior_envelopes: Sequence[SyncHead] = field(default_factory=tuple)
     get_head: SyncHeadLookup | None = None
     get_authorized_note: AuthorizedNoteLookup | None = None
+    get_authorized_task: AuthorizedTaskLookup | None = None
     list_heads: SyncDomainHeadLoader | None = None
     trusted_server_origin: bool = False
+    authenticated_actor_type: str | None = None
+    authenticated_actor_id: object = None
+    authenticated_device_id: str | None = None
     organization_group_state: str | None = None
     organization_bootstrap_id: str | None = None
     notes_link_bootstrap_id: str | None = None
@@ -485,6 +490,7 @@ __all__ = [
     "StaticSyncAdapter",
     "SyncAdapterContext",
     "SyncDomainHeadLoader",
+    "AuthorizedTaskLookup",
     "SyncHead",
     "SyncHeadLookup",
     "SyncAdapterOutcome",
