@@ -1,6 +1,8 @@
 # Chunker Hierarchical Subsystem Refactor Design
 
-Backlog: `TASK-13112`
+Backlog design task: `TASK-13112`
+
+Backlog implementation task: `TASK-13113`
 
 ## Purpose
 
@@ -81,6 +83,25 @@ the public flatten method, and converts a specific exception set to `[]`.
 Those consumers continue to call the same public methods. This refactor does not
 require caller migrations.
 
+## Delivery Tracking And PR Ownership
+
+`TASK-13112` remains design-only. `TASK-13113` owns the implementation plan,
+production code, tests, verification results, and PR links, and depends on the
+completed design task. No production file is edited until this spec is approved,
+`TASK-13112` is finalized, `TASK-13113` is moved to `In Progress`, and the isolated
+implementation branch passes the baseline reconciliation gate.
+
+The implementation plan is linked from `TASK-13113` and references both tasks and
+this spec. Design-review history remains on `TASK-13112`; implementation findings,
+correction-gate evidence, touched files, and verification results belong on
+`TASK-13113`.
+
+The implementation PR is not merge-ready until the human requester writes the
+required `Change summary` in their own words. The agent may prepare factual inputs,
+test evidence, and questions, but must not present agent-authored prose as the
+human-owned summary. The summary must explain both what changed and why these
+module boundaries and compatibility decisions were chosen.
+
 ## Proposed Package
 
 Create:
@@ -99,8 +120,9 @@ tldw_Server_API/app/core/Chunking/hierarchical/
 
 Ownership is intentionally narrow:
 
-- `models.py`: `HierarchyContext`, `ResolvedHierarchyOptions`, and only similarly
-  narrow internal state proven necessary during implementation.
+- `models.py`: `LeafChunkingContext`, `HierarchyContext`,
+  `ResolvedHierarchyOptions`, `HierarchyTextViews`, and only similarly narrow
+  internal state proven necessary during implementation.
 - `spans.py`: safe template-boundary preparation and exact paragraph/block span
   classification.
 - `leaves.py`: leaf strategy calls, rewrite-method handling, metadata mapping,
@@ -139,18 +161,21 @@ package free of circular ownership.
 
 ## Internal Contracts
 
-### HierarchyContext
+### Hierarchy Contexts
 
-`HierarchyService` receives a context satisfying a narrow protocol. `Chunker`
-passes `self`, but the hierarchy package is written against only these needs:
+`LeafChunkingContext` contains only `chunk_text(...)` and
+`chunk_text_with_metadata(...)`. Leaf construction and the builder depend on this
+protocol so their test fakes do not implement service-only behavior.
+
+`HierarchyService` receives a `HierarchyContext` that extends
+`LeafChunkingContext`. `Chunker` passes `self`, but service coordination is written
+against only these additional needs:
 
 - current configuration defaults
 - `_enforce_text_size(...)`
 - `_normalize_method_argument(...)`
 - `_resolve_method(...)`
 - `_sanitize_input(...)`
-- `chunk_text(...)`
-- `chunk_text_with_metadata(...)`
 - `normalize_chunk_type(...)`
 
 The service is stateless beyond its context reference. It does not copy
@@ -186,6 +211,51 @@ behavior. Internal annotations use `Any` where the existing API admits uncoerced
 values; the frozen model does not add `__post_init__` validation.
 
 Public hierarchy trees and chunks remain dictionaries.
+
+### Component Interfaces And Mutation Ownership
+
+Add a frozen `HierarchyTextViews` internal dataclass containing `original`,
+`sanitized`, and `output` strings. It is a passive per-call container and adds no
+validation, coercion, copying, or length invariant beyond current behavior.
+
+The component call boundaries are:
+
+```python
+def build_hierarchy_tree(
+    context: LeafChunkingContext,
+    texts: HierarchyTextViews,
+    spans: list[tuple[int, int, str]],
+    options: ResolvedHierarchyOptions,
+) -> dict[str, Any]: ...
+
+def build_leaf_block(
+    context: LeafChunkingContext,
+    texts: HierarchyTextViews,
+    span: tuple[int, int, str],
+    options: ResolvedHierarchyOptions,
+) -> dict[str, Any] | None: ...
+
+def flatten_tree(
+    tree: dict[str, Any],
+    normalize_chunk_type: Callable[[Any], str | None],
+) -> list[dict[str, Any]]: ...
+```
+
+`HierarchyService` owns validation, option resolution, text sanitization, span
+coordination, and delegation. `builder.py` exclusively owns root, section-stack,
+preface, subsection, section-bound, and parent-child mutation. It calls
+`build_leaf_block(...)` and appends the returned fresh node when non-`None`.
+The builder treats text views, resolved options, and the span list as read-only.
+`leaves.py` never receives or mutates a parent, root, section stack, or span list,
+and it treats the supplied text views, span tuple, and resolved options as
+read-only.
+
+`grouping.py` exposes focused merge, element-window, and weighted-by-kind helpers.
+They do not mutate input containers or metadata. They may preserve current item or
+nested-value identities when compatibility requires it. `flatten.py` owns
+traversal and output assembly and receives only the chunk-type normalizer callable,
+not the full hierarchy context. These rules are enforced with component tests and
+AST-based dependency checks.
 
 ## Shared Span API
 
@@ -326,9 +396,10 @@ adding a schema validator:
    section path, normalized chunk type, chunk index, and total count.
 7. Return fresh flat chunk dictionaries.
 
-The implementation must characterize selected partial and malformed trees and
-preserve their exact current result or exception. It must not assume all malformed
-children are skipped, because current behavior is not uniformly tolerant.
+The implementation must characterize the minimum partial and malformed tree
+matrix below and preserve each exact current result or exception. It must not
+assume all malformed children are skipped, because current behavior is not
+uniformly tolerant.
 
 Flattening creates a fresh flat chunk dictionary and a fresh top-level metadata
 dictionary for each output row. Existing nested mutable metadata values retain
@@ -338,6 +409,25 @@ multiple output rows in the same ancestry context. Flattening itself does not
 mutate caller-owned nested values, but later caller mutation through these aliases
 remains observable. Changing that aliasing requires a separately gated correction.
 Existing `chunk_index` and `total_chunks` values retain `setdefault` semantics.
+
+The malformed-tree characterization matrix includes at least:
+
+- a falsey `root` with legacy `blocks`, preserving fallback traversal;
+- a truthy non-dictionary `root` such as `"invalid"`, preserving the public
+  method's current exception and the package helper's behavior for that exception
+  type;
+- non-dictionary children, preserving their current skip behavior;
+- a string `chunks` value such as `"ab"`, preserving its current per-character
+  iteration result;
+- string chunk metadata such as `"invalid"`, preserving the current exception and
+  the package helper's explicit catch behavior;
+- structure-aware `element_weights` containing an invalid string weight,
+  preserving the current public exception and package-helper fallback.
+
+Each fixture records the exact public-method output or exception and, where the
+package-level helper differs, its exact result. The implementation plan may add
+more malformed cases but must not substitute an unspecified sample for this
+minimum matrix.
 
 ## Error And Logging Policy
 
@@ -351,6 +441,10 @@ Existing `chunk_index` and `total_chunks` values retain `setdefault` semantics.
   `CHUNKER_NONCRITICAL_EXCEPTIONS` policy where current code does.
 - Log levels and materially stable diagnostic text are preserved, especially for
   offset and metadata fallback paths.
+- Loguru record provenance is allowed to change when code moves: module name,
+  function name, source path, and line number are not compatibility contracts.
+  Tests assert level, rendered message, and exception behavior using a temporary
+  Loguru sink and always remove that sink in cleanup.
 
 ## Behavior Correction Gate
 
@@ -399,7 +493,7 @@ Coverage includes:
   header buffering, and no-space languages;
 - input-tree and top-level metadata non-mutation, shallow nested-value identity,
   and current ancestry-list aliasing;
-- exact current behavior for selected partial and malformed trees;
+- exact current behavior for the required partial and malformed tree matrix;
 - public flat composition through overridable tree and flatten methods;
 - unchanged `process_text` hierarchical outputs;
 - unchanged multi-level `process_text` outputs after direct span import;
@@ -415,16 +509,30 @@ Verification includes:
 2. Existing hierarchy, template, offset, `process_text`, and streaming-overlap
    tests.
 3. The complete `tldw_Server_API/tests/Chunking` suite.
-4. Compilation and unused-import checks for touched files.
-5. Bandit over touched production Chunking paths.
-6. `git diff --check`.
+4. `compileall` for every touched Python file and the new hierarchy package.
+5. Ruff for all touched production Chunking files and every newly created test
+   file. New violations are fixed; unrelated baseline violations are recorded
+   rather than hidden with blanket ignores.
+6. Black `--check` for the new hierarchy package and newly created test files.
+   Legacy `chunker.py`, existing `process_text` modules, and existing tests are not
+   reformatted wholesale because that would introduce unrelated churn. The current
+   `chunker.py` and `process_text` baseline is not Black-clean; changed lines still
+   follow project style.
+7. Mypy is informational for the new hierarchy package, not a hard gate for
+   existing `chunker.py` or `process_text`, whose current baseline has known type
+   errors. New hierarchy-local errors are fixed or recorded with exact evidence;
+   no broad suppression is added.
+8. Bandit over touched production Chunking paths.
+9. `git diff --check` and the repository commit hooks without `--no-verify`.
 
 Any unrelated failure is investigated and recorded before proceeding rather than
 silently excluded.
 
 ## Implementation Staging
 
-1. Reconcile `origin/dev` against the recorded baseline and, if it advanced,
+1. Confirm `TASK-13112` is complete, move `TASK-13113` to `In Progress`, link the
+   approved implementation plan, and reconcile `origin/dev` against the recorded
+   baseline. If it advanced,
    update the baseline and rerun the focused suite before production edits.
 2. Add and freeze baseline characterization tests, including option, aliasing,
    call-trace, regex, logging, signature, and import-boundary contracts.
@@ -474,5 +582,9 @@ stage begins.
   boundaries, and integration behavior.
 - The implementation baseline is explicitly reconciled with current `origin/dev`;
   an advanced baseline is recorded and re-characterized before production edits.
+- `TASK-13113` owns implementation tracking and links the approved spec, plan,
+  verification evidence, commits, and PR.
 - Any included correction satisfies and records the correction gate.
 - The complete focused verification gate passes, including Bandit.
+- The PR remains non-merge-ready until the human requester supplies a compliant
+  human-written `Change summary` covering both what changed and why.
