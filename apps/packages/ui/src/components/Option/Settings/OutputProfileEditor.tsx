@@ -142,9 +142,17 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
     (index: number, key: "section" | "heading", value: string) => {
       updateCurrentProfile((profile) => {
         if (key === "section") {
+          const previousSection = profile.sections[index]
           const sections = [...profile.sections]
           sections[index] = value
-          return { ...profile, sections }
+          const { [previousSection]: heading, ...section_titles } = profile.section_titles
+          return {
+            ...profile,
+            sections,
+            section_titles: Object.hasOwn(profile.section_titles, previousSection)
+              ? { ...section_titles, [value]: heading }
+              : section_titles
+          }
         }
 
         const section = profile.sections[index]
@@ -307,6 +315,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
             id="output-profile-select"
             className={fieldClassName}
             value={selectedProfile}
+            disabled={saving}
             onChange={(event) => {
               setSelectedProfile(event.target.value)
               clearFeedback()
@@ -327,6 +336,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
               id="new-output-profile-name"
               className={fieldClassName}
               value={newProfileName}
+              disabled={saving}
               onChange={(event) => {
                 setNewProfileName(event.target.value)
                 clearFeedback()
@@ -338,6 +348,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
               type="button"
               className={iconButtonClassName}
               aria-label={label("addProfile", "Add profile")}
+              disabled={saving}
               onClick={addProfile}
             >
               <Plus className="size-4" aria-hidden="true" />
@@ -353,7 +364,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
                   ? label("defaultProtected", "The default profile cannot be deleted.")
                   : label("deleteProfile", "Delete profile")
               }
-              disabled={selectedProfile === "default"}
+              disabled={saving || selectedProfile === "default"}
               onClick={deleteProfile}
             >
               <Trash2 className="size-4" aria-hidden="true" />
@@ -371,6 +382,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
             type="button"
             className={`rounded-l-md ${segmentClassName(currentProfile.format === "structured_sections")}`}
             aria-pressed={currentProfile.format === "structured_sections"}
+            disabled={saving}
             onClick={() => updateCurrentProfile((profile) => ({ ...profile, format: "structured_sections" }))}
           >
             {label("structuredSections", "Structured sections")}
@@ -379,6 +391,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
             type="button"
             className={`rounded-r-md border-l border-border ${segmentClassName(currentProfile.format === "single_response")}`}
             aria-pressed={currentProfile.format === "single_response"}
+            disabled={saving}
             onClick={() => updateCurrentProfile((profile) => ({ ...profile, format: "single_response" }))}
           >
             {label("singleResponse", "Single response")}
@@ -392,6 +405,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
           type="checkbox"
           className="size-4 rounded border-border text-primary focus:ring-2 focus:ring-focus"
           checked={currentProfile.include_branch_outputs}
+          disabled={saving}
           onChange={(event) =>
             updateCurrentProfile((profile) => ({
               ...profile,
@@ -408,6 +422,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
           <button
             type="button"
             className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm font-medium text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            disabled={saving}
             onClick={addSection}
           >
             <Plus className="size-4" aria-hidden="true" />
@@ -428,6 +443,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
                   id={`output-profile-section-key-${index}`}
                   className={`${fieldClassName} mt-1`}
                   value={section}
+                  disabled={saving}
                   onChange={(event) => updateSection(index, "section", event.target.value)}
                 />
               </label>
@@ -437,6 +453,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
                   id={`output-profile-section-heading-${index}`}
                   className={`${fieldClassName} mt-1`}
                   value={currentProfile.section_titles[section] || ""}
+                  disabled={saving}
                   onChange={(event) => updateSection(index, "heading", event.target.value)}
                 />
               </label>
@@ -446,7 +463,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
                     type="button"
                     className={iconButtonClassName}
                     aria-label={indexedLabel("moveSectionUp", `Move section ${index + 1} up`, index + 1)}
-                    disabled={index === 0}
+                    disabled={saving || index === 0}
                     onClick={() => moveSection(index, -1)}
                   >
                     <ChevronUp className="size-4" aria-hidden="true" />
@@ -457,7 +474,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
                     type="button"
                     className={iconButtonClassName}
                     aria-label={indexedLabel("moveSectionDown", `Move section ${index + 1} down`, index + 1)}
-                    disabled={index === currentProfile.sections.length - 1}
+                    disabled={saving || index === currentProfile.sections.length - 1}
                     onClick={() => moveSection(index, 1)}
                   >
                     <ChevronDown className="size-4" aria-hidden="true" />
@@ -468,6 +485,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
                     type="button"
                     className={iconButtonClassName}
                     aria-label={indexedLabel("removeSection", `Remove section ${index + 1}`, index + 1)}
+                    disabled={saving}
                     onClick={() => removeSection(index)}
                   >
                     <Trash2 className="size-4" aria-hidden="true" />

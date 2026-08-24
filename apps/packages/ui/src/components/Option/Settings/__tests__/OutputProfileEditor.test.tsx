@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -94,6 +94,24 @@ describe("OutputProfileEditor", () => {
         })
       )
     )
+  })
+
+  it("moves a custom heading with its renamed section key", async () => {
+    const user = userEvent.setup()
+    const settings = makeSettings()
+    settings.output_profiles.default.section_titles = { summary: "Executive summary" }
+    renderProfileEditor({ settings })
+
+    await user.clear(screen.getByLabelText("Section key 1"))
+    await user.type(screen.getByLabelText("Section key 1"), "overview")
+    await user.click(screen.getByRole("button", { name: "Save profiles" }))
+
+    await waitFor(() => expect(mocks.updateChatMacroSettings).toHaveBeenCalled())
+    const [savedSettings] = mocks.updateChatMacroSettings.mock.calls[0] as [ChatMacroSettings]
+    expect(savedSettings.output_profiles.default.sections).toEqual(["overview", "action_items"])
+    expect(savedSettings.output_profiles.default.section_titles).toEqual({
+      overview: "Executive summary"
+    })
   })
 
   it("saves single response format and branch-output inclusion", async () => {
@@ -226,5 +244,63 @@ describe("OutputProfileEditor", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Settings unavailable")
     expect(screen.getByLabelText("Section heading 1")).toHaveValue("Executive summary")
     expect(screen.getByRole("button", { name: "Save profiles" })).toBeEnabled()
+  })
+
+  it("prevents draft mutations while a save is pending and applies the normalized response", async () => {
+    const user = userEvent.setup()
+    const settings = makeSettings()
+    settings.output_profiles.concise = {
+      format: "single_response",
+      sections: ["summary", "action_items"],
+      section_titles: {},
+      include_branch_outputs: false
+    }
+    const normalizedSettings = makeSettings()
+    normalizedSettings.output_profiles.concise = {
+      format: "structured_sections",
+      sections: ["normalized"],
+      section_titles: { normalized: "Normalized heading" },
+      include_branch_outputs: true
+    }
+    let resolveSave: ((response: ReturnType<typeof success>) => void) | undefined
+    mocks.updateChatMacroSettings.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveSave = resolve
+      })
+    )
+    renderProfileEditor({ settings })
+
+    await user.selectOptions(screen.getByLabelText("Profile"), "concise")
+    expect(screen.getByRole("button", { name: "Delete profile" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Move section 1 down" })).toBeEnabled()
+    await user.click(screen.getByRole("button", { name: "Save profiles" }))
+
+    await waitFor(() => expect(mocks.updateChatMacroSettings).toHaveBeenCalled())
+    expect(screen.getByLabelText("Profile")).toBeDisabled()
+    expect(screen.getByLabelText("New profile name")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Add profile" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Delete profile" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Structured sections" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Single response" })).toBeDisabled()
+    expect(screen.getByLabelText("Include branch outputs")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Add section" })).toBeDisabled()
+    expect(screen.getByLabelText("Section key 1")).toBeDisabled()
+    expect(screen.getByLabelText("Section heading 1")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Move section 1 down" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Remove section 1" })).toBeDisabled()
+
+    await user.type(screen.getByLabelText("Section key 1"), "mutated")
+    expect(screen.getByLabelText("Section key 1")).toHaveValue("summary")
+
+    await act(async () => {
+      resolveSave?.(success(normalizedSettings))
+    })
+
+    expect(await screen.findByLabelText("Section key 1")).toHaveValue("normalized")
+    expect(screen.getByRole("button", { name: "Structured sections" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByLabelText("Include branch outputs")).toBeChecked()
   })
 })
