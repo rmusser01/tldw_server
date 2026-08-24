@@ -11,9 +11,13 @@ vi.mock("@/services/api-send", () => ({
 import {
   cancelChatMacroRun,
   cloneChatMacro,
+  createChatMacro,
+  deleteChatMacro,
+  getChatMacro,
   getChatMacroRun,
   listChatMacros,
   setChatMacroEnabled,
+  updateChatMacro,
   updateChatMacroSettings,
   validateChatMacro
 } from "@/services/chat-macros"
@@ -30,6 +34,39 @@ describe("chat macros service", () => {
     expect(mocks.apiSend).toHaveBeenCalledWith({
       path: "/api/v1/chat/macros",
       method: "GET"
+    })
+  })
+
+  it("creates, loads, updates, and deletes user macros", async () => {
+    await createChatMacro({ name: "handoff", raw: "schema_version: 1" })
+    await getChatMacro("handoff")
+    await updateChatMacro("handoff", { raw: "schema_version: 1" })
+    await deleteChatMacro("handoff")
+
+    expect(mocks.apiSend).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        path: "/api/v1/chat/macros",
+        method: "POST"
+      })
+    )
+    expect(mocks.apiSend).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        path: "/api/v1/chat/macros/handoff",
+        method: "GET"
+      })
+    )
+    expect(mocks.apiSend).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        path: "/api/v1/chat/macros/handoff",
+        method: "PUT"
+      })
+    )
+    expect(mocks.apiSend).toHaveBeenNthCalledWith(4, {
+      path: "/api/v1/chat/macros/handoff",
+      method: "DELETE"
     })
   })
 
