@@ -128,6 +128,12 @@ describe("ChatMacroEditor", () => {
     mocks.confirmDanger.mockResolvedValue(true)
   })
 
+  it("uses the themed surface token for editor fields", () => {
+    renderEditor()
+
+    expect(screen.getByLabelText("Name")).toHaveClass("bg-surface")
+  })
+
   it("creates a guided macro only after server validation succeeds", async () => {
     const user = userEvent.setup()
     renderEditor()
