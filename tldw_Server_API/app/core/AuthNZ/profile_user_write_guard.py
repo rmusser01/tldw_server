@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Any
 
 import sqlglot
+from asyncpg.pool import PoolConnectionProxy
 from sqlglot import exp
 from sqlglot.errors import ParseError, TokenError
 
@@ -269,6 +270,7 @@ def _guard_sql(
 
 def _profile_user_connection_identity(connection: object) -> object:
     """Resolve the stable identity shared by managed connection adapters."""
+    connection = _unwrap_trusted_pool_proxy(connection)
     try:
         identity = getattr(connection, _GUARD_IDENTITY_ATTRIBUTE)
     except AttributeError:
@@ -282,6 +284,7 @@ def _profile_user_connection_identity(connection: object) -> object:
 
 def _profile_user_backend(connection: object) -> str | None:
     """Return a validated managed backend marker, or None for legacy adapters."""
+    connection = _unwrap_trusted_pool_proxy(connection)
     try:
         getattr_static(connection, _BACKEND_ATTRIBUTE)
     except AttributeError:
@@ -295,6 +298,19 @@ def _profile_user_backend(connection: object) -> str | None:
     if type(backend) is not str or backend not in _SUPPORTED_BACKENDS:
         raise ProfileUserWriteRejected()
     return backend
+
+
+def _unwrap_trusted_pool_proxy(connection: object) -> object:
+    """Return the guarded connection behind asyncpg's exact pool proxy type."""
+    if type(connection) is not PoolConnectionProxy:
+        return connection
+    try:
+        wrapped = connection._con
+    except BaseException:  # noqa: BLE001 - proxy state is fail-closed
+        raise ProfileUserWriteRejected() from None
+    if wrapped is None:
+        raise ProfileUserWriteRejected()
+    return wrapped
 
 
 def _canonical_users_table(backend: str) -> str:

@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
 _POSTGRES_TYPES = {
     "integer": "bigint",
     "text": "text",
+    "identifier": "text",
     "boolean": "boolean",
     "json": "jsonb",
     "timestamp": "timestamp with time zone",
@@ -92,6 +93,13 @@ def test_postgres_candidate_contract_requires_public_foreign_key_targets() -> No
     }
 
     assert not profile_candidate_schema_is_valid(**metadata)
+
+
+def test_postgres_candidate_contract_accepts_native_uuid_organization_identifier() -> None:
+    metadata = _postgres_contract()
+    metadata["columns"]["organizations"]["uuid"]["data_type"] = "uuid"
+
+    assert profile_candidate_schema_is_valid(**metadata)
 
 
 def test_candidate_contract_requires_non_null_override_update_timestamps() -> None:

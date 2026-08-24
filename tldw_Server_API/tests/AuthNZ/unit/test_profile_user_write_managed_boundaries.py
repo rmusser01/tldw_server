@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     ProfileUserWriteRejected,
     _guard_sql,
     _mint_profile_user_sql,
+    _profile_user_backend,
     _profile_user_connection_identity,
     _revoke_profile_user_sql,
 )
@@ -335,6 +336,48 @@ async def test_asyncpg_connection_guards_all_raw_query_and_copy_entrypoints(
 
 
 @pytest.mark.asyncio
+async def test_asyncpg_connection_reset_bypasses_guard_for_driver_cleanup_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reset_query = "SELECT pg_advisory_unlock_all();\nCLOSE ALL;\nRESET ALL;"
+    delegated: list[tuple[str, str | None, float | None]] = []
+
+    async def _reset(connection: Any) -> None:
+        del connection
+        delegated.append(("reset", None, None))
+
+    def _get_reset_query(connection: Any) -> str:
+        del connection
+        return reset_query
+
+    async def _execute(
+        connection: Any,
+        query: str,
+        *args: Any,
+        timeout: float | None = None,
+    ) -> str:
+        del connection, args
+        delegated.append(("execute", query, timeout))
+        return "RESET"
+
+    monkeypatch.setattr(asyncpg.Connection, "_reset", _reset)
+    monkeypatch.setattr(asyncpg.Connection, "get_reset_query", _get_reset_query)
+    monkeypatch.setattr(asyncpg.Connection, "execute", _execute)
+    connection = object.__new__(_GuardedAsyncpgConnection)
+    connection._authnz_profile_user_guard_identity = object()
+    connection._aborted = True
+
+    await connection.reset(timeout=2.0)
+
+    assert delegated == [
+        ("reset", None, None),
+        ("execute", reset_query, 2.0),
+    ]
+    with pytest.raises(ProfileUserWriteRejected):
+        await connection.execute(reset_query)
+
+
+@pytest.mark.asyncio
 async def test_asyncpg_connection_rejects_stored_routine_ddl_without_delegation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -425,6 +468,31 @@ async def test_asyncpg_pool_proxy_and_connection_share_capability_identity(
             ("pool@example.com", 9),
         )
     ]
+
+
+def test_asyncpg_pool_proxy_resolves_guarded_backend_and_identity() -> None:
+    connection = object.__new__(_GuardedAsyncpgConnection)
+    connection._authnz_profile_user_guard_identity = object()
+    connection._aborted = True
+    proxy = object.__new__(asyncpg.pool.PoolConnectionProxy)
+    proxy._con = connection
+    proxy._holder = None
+
+    assert _profile_user_backend(proxy) == "postgres"
+    assert _profile_user_connection_identity(proxy) is (
+        connection._authnz_profile_user_guard_identity
+    )
+
+
+def test_released_asyncpg_pool_proxy_rejects_managed_boundary_resolution() -> None:
+    proxy = object.__new__(asyncpg.pool.PoolConnectionProxy)
+    proxy._con = None
+    proxy._holder = None
+
+    with pytest.raises(ProfileUserWriteRejected):
+        _profile_user_backend(proxy)
+    with pytest.raises(ProfileUserWriteRejected):
+        _profile_user_connection_identity(proxy)
 
 
 def test_asyncpg_cursor_factory_rejects_protected_query_without_delegation(

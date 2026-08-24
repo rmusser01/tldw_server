@@ -205,7 +205,7 @@ _POSTGRES_VERSION_SOURCE_COLUMNS = {
 _COLUMN_KINDS = {
     "organizations": {
         "id": "integer",
-        "uuid": "text",
+        "uuid": "identifier",
         "name": "text",
         "slug": "text",
         "owner_user_id": "integer",
@@ -332,6 +332,7 @@ def _type_matches(value: object, *, backend: str, kind: str) -> bool:
         allowed = {
             "integer": {"INTEGER", "BIGINT"},
             "text": {"TEXT", "CHARACTER VARYING"},
+            "identifier": {"UUID", "TEXT", "CHARACTER VARYING"},
             "boolean": {"BOOLEAN"},
             "json": {"JSON", "JSONB"},
             "timestamp": {"TIMESTAMP WITH TIME ZONE"},
@@ -340,6 +341,7 @@ def _type_matches(value: object, *, backend: str, kind: str) -> bool:
         allowed = {
             "integer": {"INTEGER"},
             "text": {"TEXT"},
+            "identifier": {"TEXT"},
             "boolean": {"INTEGER", "BOOLEAN"},
             "json": {"TEXT"},
             "timestamp": {"TEXT", "TIMESTAMP", "DATETIME"},

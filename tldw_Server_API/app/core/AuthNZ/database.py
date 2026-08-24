@@ -500,6 +500,14 @@ class _GuardedAsyncpgConnection(asyncpg.Connection):
             operation=operation,
         )
 
+    async def reset(self, *, timeout: float | None = None) -> None:
+        """Reset pooled driver state without treating driver SQL as caller SQL."""
+        async with asyncio.timeout(timeout):
+            await asyncpg.Connection._reset(self)
+            reset_query = asyncpg.Connection.get_reset_query(self)
+            if reset_query:
+                await asyncpg.Connection.execute(self, reset_query, timeout=timeout)
+
     async def execute(
         self,
         query: Any,
