@@ -106,6 +106,91 @@ def test_validate_success_report_rejects_failed_vitest_report(tmp_path: Path) ->
         validate_success_report(report_path, package_root)
 
 
+def test_validate_success_report_rejects_unknown_test_result_status(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    report_path = tmp_path / "head.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "testResults": [
+                    {
+                        "name": str(package_root / "src/passed.test.ts"),
+                        "status": "flaky",
+                        "assertionResults": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RatchetError, match="test result status"):
+        validate_success_report(report_path, package_root)
+
+
+def test_validate_success_report_rejects_unknown_assertion_status(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    report_path = tmp_path / "head.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "testResults": [
+                    {
+                        "name": str(package_root / "src/passed.test.ts"),
+                        "status": "passed",
+                        "assertionResults": [
+                            {
+                                "fullName": "suite reports a known status",
+                                "status": "flaky",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RatchetError, match="assertion status"):
+        validate_success_report(report_path, package_root)
+
+
+def test_failing_test_files_rejects_passed_result_with_failed_assertion(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    report_path = tmp_path / "head.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "success": False,
+                "testResults": [
+                    {
+                        "name": str(package_root / "src/contradictory.test.ts"),
+                        "status": "passed",
+                        "assertionResults": [
+                            {
+                                "fullName": "suite contradictory status",
+                                "status": "failed",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RatchetError, match="passed.*failed assertion"):
+        failing_test_files(report_path, package_root)
+
+
 def test_compare_reports_accepts_only_exact_unchanged_base_failures(tmp_path: Path) -> None:
     head_root = tmp_path / "head" / "apps" / "packages" / "ui"
     base_root = tmp_path / "base" / "apps" / "packages" / "ui"

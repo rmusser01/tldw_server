@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+_ASSERTION_STATUSES = frozenset(
+    {"passed", "failed", "skipped", "pending", "todo", "disabled"}
+)
+_TEST_RESULT_STATUSES = frozenset({"passed", "failed"})
+
 
 class RatchetError(ValueError):
     """Raised when a Vitest report cannot be compared safely."""
@@ -87,6 +92,12 @@ def _load_failures(report_path: Path, package_root: Path) -> tuple[FailedTest, .
         if not isinstance(test_result, dict):
             raise RatchetError(f"Vitest report {report_path} has an invalid test result")
         relative_path = _relative_test_path(test_result.get("name"), package_root)
+        test_result_status = test_result.get("status")
+        if test_result_status not in _TEST_RESULT_STATUSES:
+            raise RatchetError(
+                f"Vitest result {relative_path} has an invalid test result status: "
+                f"{test_result_status!r}"
+            )
         assertion_results = test_result.get("assertionResults")
         if not isinstance(assertion_results, list):
             raise RatchetError(
@@ -99,12 +110,22 @@ def _load_failures(report_path: Path, package_root: Path) -> tuple[FailedTest, .
                 raise RatchetError(
                     f"Vitest result {relative_path} has an invalid assertion"
                 )
-            if assertion.get("status") == "failed":
+            assertion_status = assertion.get("status")
+            if assertion_status not in _ASSERTION_STATUSES:
+                raise RatchetError(
+                    f"Vitest result {relative_path} has an invalid assertion status: "
+                    f"{assertion_status!r}"
+                )
+            if assertion_status == "failed":
                 failed_assertions.append(assertion)
 
-        if test_result.get("status") == "failed" and not failed_assertions:
+        if test_result_status == "failed" and not failed_assertions:
             raise RatchetError(
                 f"collection-level failure in {relative_path} cannot be ratcheted"
+            )
+        if test_result_status == "passed" and failed_assertions:
+            raise RatchetError(
+                f"passed Vitest result {relative_path} contains failed assertions"
             )
 
         for assertion in failed_assertions:
