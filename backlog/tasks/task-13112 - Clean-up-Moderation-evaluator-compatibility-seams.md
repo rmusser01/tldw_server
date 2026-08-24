@@ -24,7 +24,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 - backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
-updated_date: 2026-08-24 06:13
+updated_date: 2026-08-24 06:20
 ---
 
 ## Description
@@ -59,6 +59,7 @@ Pre-change verification passed: 318 unit Moderation tests, 89 Guardian tests, 16
 The revised design is user-approved. The implementation plan was written and self-reviewed against the spec: exact retained pytest nodes collect successfully, compilation precedes test cleanup in both implementation stages, placeholder and whitespace scans are clean, and all eight deletions map to retained direct-evaluator coverage.
 Task 1 removed the five class/static direct PolicyEvaluator shims. The new ModerationService.__dict__ absence test failed before deletion and passed after deletion. Direct evaluator and service delegation suites passed.
 Task 1 spec compliance review: approved with no issues. Task 1 code quality review: approved with no critical, important, or minor findings. Reviewer verification passed compilation, 313 Moderation unit tests, 78 evaluator/delegation tests, retained dispatch and policy type checks, Ruff, Bandit, and `git diff --check`. Black would reformat the same production file at the base SHA, so that formatting result is pre-existing and not part of this cleanup.
+Task 2 removed the three instance scan shims and wrapper-only duplicate characterization. The class-local absence test completed a red/green cycle. Direct evaluator, public service dispatch, signature, and policy_types() compatibility tests passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

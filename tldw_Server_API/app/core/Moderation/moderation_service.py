@@ -788,38 +788,6 @@ class ModerationService:
         result = self.evaluate_text(text, policy, phase)
         return result.action, result.redacted_text, result.matched_pattern, result.category, result.match_span
 
-    def _iter_scan_chunks(
-        self,
-        text: str,
-    ) -> Iterator[tuple[int, int]]:
-        yield from self._policy_evaluator.iter_scan_chunks(
-            text,
-            self._evaluation_limits(),
-        )
-
-    def _find_match_span(
-        self,
-        pat: re.Pattern,
-        text: str,
-    ) -> tuple[int, int] | None:
-        return self._policy_evaluator.find_match_span(
-            pat,
-            text,
-            self._evaluation_limits(),
-        )
-
-    def _collect_rule_matches(
-        self,
-        text: str,
-        pat: re.Pattern,
-    ) -> list[re.Match]:
-        """Collect non-overlapping matches across scan chunks for soft-capped redaction."""
-        return self._policy_evaluator.collect_rule_matches(
-            text,
-            pat,
-            self._evaluation_limits(),
-        )
-
     # --------------- Persistence helpers ---------------
     def list_user_overrides(self) -> dict[str, dict[str, object]]:
         """Return a shallow copy of all user overrides."""
