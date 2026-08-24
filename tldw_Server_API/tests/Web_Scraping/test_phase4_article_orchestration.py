@@ -8,7 +8,7 @@ import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import FrozenInstanceError, dataclass
 from typing import Any
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 
@@ -622,6 +622,78 @@ def test_log_failure_preserves_complete_guarded_browser_stage_contract() -> None
     assert [entry["stage"] for entry in harness.logs] == sorted(expected_stages)
 
 
+@pytest.mark.unit
+def test_observability_boundary_failures_emit_sanitized_fallback_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep best-effort metrics and logging failures diagnosable without leaking details."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+
+    fallback_logger = Mock()
+    harness = _harness()
+
+    def fail_observability(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("token=private")
+
+    dependencies = dataclasses.replace(
+        harness.dependencies,
+        increment_counter=fail_observability,
+        observe_histogram=fail_observability,
+        log=fail_observability,
+    )
+    monkeypatch.setattr(canonical, "logger", fallback_logger)
+
+    canonical._record_counter(dependencies, "counter", {"private": "secret"})
+    canonical._record_histogram(dependencies, "histogram", 1.0, {"private": "secret"})
+    canonical._log_failure(
+        dependencies,
+        RuntimeError("token=private"),
+        code="browser_error",
+        stage="acquire",
+        url="https://user:secret@example.com/private",
+    )
+
+    assert fallback_logger.warning.call_args_list == [
+        call(
+            "Article metric recording failed.",
+            metric_type="counter",
+            exception_type="RuntimeError",
+        ),
+        call(
+            "Article metric recording failed.",
+            metric_type="histogram",
+            exception_type="RuntimeError",
+        ),
+        call(
+            "Article failure logging failed.",
+            code="browser_error",
+            stage="acquire",
+            host="example.com",
+            exception_type="RuntimeError",
+        ),
+    ]
+
+
+@pytest.mark.unit
+def test_observability_fallback_logger_cannot_change_article_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep metrics best-effort even when both observability layers fail."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+
+    fallback_logger = Mock()
+    fallback_logger.warning.side_effect = RuntimeError("logger unavailable")
+
+    def fail_metric(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("metrics unavailable")
+
+    harness = _harness()
+    dependencies = dataclasses.replace(harness.dependencies, increment_counter=fail_metric)
+    monkeypatch.setattr(canonical, "logger", fallback_logger)
+
+    canonical._record_counter(dependencies, "counter", {})
+
+
 @pytest.mark.asyncio
 async def test_runner_preserves_curl_to_httpx_fallback() -> None:
     from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
@@ -633,6 +705,153 @@ async def test_runner_preserves_curl_to_httpx_fallback() -> None:
 
     assert result["extraction_successful"] is True
     assert [request.backend for request in harness.fetch.requests] == ["curl", "httpx"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_lightweight_redirect_rechecks_policy_before_following() -> None:
+    """Reject a redirect destination before issuing a request or falling back to a browser."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
+
+    redirect_url = "https://blocked.example/private"
+    denied_target = PreflightTarget(
+        url=redirect_url,
+        decision=PolicyDecision(
+            allowed=False,
+            mode="enforce",
+            reason="robots_disallowed",
+            stage="redirect",
+            source="article_extract",
+        ),
+        request_context=RuntimeRequestContext(source="article_extract", stage="redirect"),
+    )
+    harness = _harness(
+        fetch_outcomes=[
+            FetchResponse(
+                url=URL,
+                status=302,
+                headers={"Location": redirect_url},
+                text="",
+                backend="httpx",
+            )
+        ]
+    )
+    harness.evaluate_target.side_effect = [_allowed_target(), denied_target]
+
+    result = await _run_article(URL, None, True, dependencies=harness.dependencies)
+
+    assert result["extraction_successful"] is False
+    assert result["policy_reason"] == "robots_disallowed"
+    assert len(harness.fetch.requests) == 1
+    assert harness.fetch.requests[0].allow_redirects is False
+    assert harness.evaluate_target.await_args_list[1].args[0] == redirect_url
+    assert harness.evaluate_target.await_args_list[1].kwargs["request_context"].stage == "redirect"
+    assert harness.browser.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_curl_redirect_policy_denial_is_not_retried_with_httpx() -> None:
+    """Treat policy denial as terminal instead of a curl transport failure."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
+
+    redirect_url = "https://blocked.example/private"
+    denied_target = PreflightTarget(
+        url=redirect_url,
+        decision=PolicyDecision(
+            allowed=False,
+            mode="enforce",
+            reason="robots_disallowed",
+            stage="redirect",
+            source="article_extract",
+        ),
+        request_context=RuntimeRequestContext(source="article_extract", stage="redirect"),
+    )
+    harness = _harness(
+        backend="curl",
+        fetch_outcomes=[FetchResponse(URL, 302, {"Location": redirect_url}, "", "curl")],
+    )
+    harness.evaluate_target.side_effect = [_allowed_target(), denied_target]
+
+    result = await _run_article(URL, None, True, dependencies=harness.dependencies)
+
+    assert result["policy_reason"] == "robots_disallowed"
+    assert [request.backend for request in harness.fetch.requests] == ["curl"]
+    assert harness.browser.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_lightweight_redirect_loop_is_terminal_before_browser_fallback() -> None:
+    """Do not bypass per-hop redirect governance by switching acquisition modes."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
+
+    harness = _harness(
+        fetch_outcomes=[FetchResponse(URL, 302, {"Location": URL}, "", "httpx")],
+    )
+
+    result = await _run_article(URL, None, True, dependencies=harness.dependencies)
+
+    assert result["error"] == "fetch_error"
+    assert len(harness.fetch.requests) == 1
+    assert harness.browser.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_lightweight_cross_origin_redirect_strips_credentials() -> None:
+    """Follow admitted redirects without forwarding origin-bound headers or cookies."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
+
+    redirect_url = "https://other.example/final"
+    harness = _harness(
+        fetch_outcomes=[
+            FetchResponse(
+                url=URL,
+                status=302,
+                headers={"location": redirect_url},
+                text="",
+                backend="httpx",
+            ),
+            FetchResponse(
+                url=redirect_url,
+                status=200,
+                headers={},
+                text="<html><body>redirected article</body></html>",
+                backend="httpx",
+            ),
+        ]
+    )
+    redirect_plan = dataclasses.replace(
+        _plan(),
+        headers={
+            "Authorization": "Bearer private",
+            "User-Agent": "redirect-test-agent",
+            "Accept-Encoding": "identity",
+            "X-Private": "secret",
+        },
+    )
+    harness.dependencies = dataclasses.replace(
+        harness.dependencies,
+        resolve_plan=lambda _url, _config: redirect_plan,
+    )
+    harness.evaluate_target.side_effect = [_allowed_target(), _allowed_target(redirect_url)]
+
+    result = await _run_article(
+        URL,
+        [{"name": "session", "value": "private"}],
+        True,
+        dependencies=harness.dependencies,
+    )
+
+    assert result["extraction_successful"] is True
+    assert [request.url for request in harness.fetch.requests] == [URL, redirect_url]
+    assert [request.allow_redirects for request in harness.fetch.requests] == [False, False]
+    assert dict(harness.fetch.requests[1].headers) == {
+        "User-Agent": "redirect-test-agent",
+        "Accept-Encoding": "identity",
+    }
+    assert dict(harness.fetch.requests[1].cookies) == {}
 
 
 @pytest.mark.asyncio

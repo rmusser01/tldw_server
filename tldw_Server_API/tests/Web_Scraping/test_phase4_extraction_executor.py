@@ -54,7 +54,9 @@ def _own(
     return manager
 
 
+@pytest.mark.unit
 def test_public_contract_is_importable_without_starting_threads() -> None:
+    """Importing the public executor contract must not eagerly create threads."""
     script = """
 import json
 import threading

@@ -2450,7 +2450,9 @@ async def test_task16_rendered_html_is_measured_in_browser_without_page_content(
     assert isinstance(expression, str)
     assert "new XMLSerializer().serializeToString(document.doctype)" in expression
     assert "document.documentElement.outerHTML" in expression
-    assert "new TextEncoder().encode(html).length" in expression
+    assert "TextEncoder" not in expression
+    assert "for (const character of html)" in expression
+    assert "if (size > maxBytes)" in expression
     assert expression.endswith(f")({limit})")
 
 

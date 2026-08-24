@@ -224,7 +224,7 @@ async def test_scrape_article_uses_runtime_fetch_client_for_httpx_success(monkey
     assert request.url == "https://example.com/path"
     assert request.method == "GET"
     assert request.backend == "httpx"
-    assert request.allow_redirects is True
+    assert request.allow_redirects is False
 
 
 @pytest.mark.unit

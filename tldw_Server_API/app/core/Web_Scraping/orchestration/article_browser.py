@@ -41,8 +41,15 @@ _HTML_SERIALIZATION_EXPRESSION = """(maxBytes) => {
     ? new XMLSerializer().serializeToString(document.doctype) + "\\n"
     : "";
   const html = doctype + document.documentElement.outerHTML;
-  const size = new TextEncoder().encode(html).length;
-  return size <= maxBytes ? { ok: true, html } : { ok: false, size };
+  let size = 0;
+  for (const character of html) {
+    const codePoint = character.codePointAt(0);
+    size += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+    if (size > maxBytes) {
+      return { ok: false, size };
+    }
+  }
+  return { ok: true, html };
 }"""
 
 

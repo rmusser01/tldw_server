@@ -8,12 +8,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 from loguru import logger
 
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.http_client import DEFAULT_MAX_REDIRECTS
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
@@ -50,6 +51,8 @@ _BLOCKING_FETCH_TIMEOUT_SECONDS = 30.0
 _AUTO_BACKEND = "auto"
 _PLAYWRIGHT = "playwright"
 _HTTP_BACKENDS = frozenset({_AUTO_BACKEND, "curl", "httpx"})
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_REDIRECT_SAFE_HEADERS = frozenset({"accept-encoding", "user-agent"})
 _SAFE_POLICY_FAILURE = "policy_error"
 _RESPONSE_TOO_LARGE_MESSAGE = "Response exceeds max_response_bytes limit"
 ACTIVE_EVENT_LOOP_ERROR = "Synchronous article scraping cannot run while an event loop is active in this thread"
@@ -82,6 +85,7 @@ _ARTICLE_LOG_STAGES = frozenset(
         "preflight",
         "preflight_advice",
         "preflight_payload",
+        "redirect",
         "rendered_html",
         "result",
         "routing",
@@ -144,7 +148,16 @@ class _PreparedArticle:
     advised_backend: str
     advised_method: str
     cookies: Mapping[str, str]
+    policy_config: Mapping[str, Any]
     preflight_payload: dict[str, Any] | None
+
+
+class _RedirectPolicyBlocked(Exception):
+    """Carry a denied redirect decision across the fetch boundary."""
+
+    def __init__(self, decision: Any) -> None:
+        super().__init__("Redirect target denied by outbound policy")
+        self.decision = decision
 
 
 def _snapshot_config(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -315,11 +328,23 @@ def _js_required(html: str, headers: Mapping[str, Any], url: str | None = None) 
     return False
 
 
+def _fallback_warning(message: str, **fields: str) -> None:
+    """Emit a sanitized last-resort warning without affecting scrape outcomes."""
+    try:
+        logger.warning(message, **fields)
+    except Exception:  # noqa: BLE001 - no observability backend may break scraping
+        return
+
+
 def _record_counter(dependencies: ArticleDependencies, name: str, labels: Mapping[str, str]) -> None:
     try:
         dependencies.increment_counter(name, labels=dict(labels))
-    except Exception:  # noqa: BLE001 - metrics must not change article outcomes
-        return
+    except Exception as exc:  # noqa: BLE001 - metrics must not change article outcomes
+        _fallback_warning(
+            "Article metric recording failed.",
+            metric_type="counter",
+            exception_type=type(exc).__name__[:80],
+        )
 
 
 def _record_histogram(
@@ -330,8 +355,12 @@ def _record_histogram(
 ) -> None:
     try:
         dependencies.observe_histogram(name, value, labels=dict(labels))
-    except Exception:  # noqa: BLE001 - metrics must not change article outcomes
-        return
+    except Exception as exc:  # noqa: BLE001 - metrics must not change article outcomes
+        _fallback_warning(
+            "Article metric recording failed.",
+            metric_type="histogram",
+            exception_type=type(exc).__name__[:80],
+        )
 
 
 def _log_failure(
@@ -352,8 +381,14 @@ def _log_failure(
             stage=safe_stage,
             host=sanitized_host(url),
         )
-    except Exception:  # noqa: BLE001 - logging must not change article outcomes
-        return
+    except Exception as fallback_exc:  # noqa: BLE001 - logging must not change article outcomes
+        _fallback_warning(
+            "Article failure logging failed.",
+            exception_type=type(fallback_exc).__name__[:80],
+            code=safe_code,
+            stage=safe_stage,
+            host=sanitized_host(url),
+        )
 
 
 async def _fetch_response(dependencies: ArticleDependencies, request: FetchRequest) -> FetchResponse:
@@ -366,25 +401,68 @@ def _response_too_large_error(exc: ValueError) -> ArticleFailure | None:
     return None
 
 
+def _redirect_location(response: FetchResponse) -> str | None:
+    for key, value in response.headers.items():
+        if str(key).lower() == "location":
+            location = str(value).strip()
+            return location or None
+    return None
+
+
+def _redirect_target(current_url: str, response: FetchResponse, location: str) -> str:
+    try:
+        target = urljoin(response.url or current_url, location)
+        parsed = urlsplit(target)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            raise ValueError
+        _ = parsed.port
+    except (TypeError, UnicodeError, ValueError):
+        raise ArticleFailure("fetch_error", "redirect") from None
+    return target
+
+
+def _redirect_crosses_credential_boundary(current_url: str, target_url: str) -> bool:
+    try:
+        current = urlsplit(current_url)
+        target = urlsplit(target_url)
+        current_port = current.port or (443 if current.scheme.lower() == "https" else 80)
+        target_port = target.port or (443 if target.scheme.lower() == "https" else 80)
+        cross_host = (current.hostname, current_port) != (target.hostname, target_port)
+        downgrade = current.scheme.lower() == "https" and target.scheme.lower() == "http"
+        return cross_host or downgrade
+    except (TypeError, UnicodeError, ValueError):
+        return True
+
+
+def _redirect_boundary_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    return {str(key): str(value) for key, value in headers.items() if str(key).lower() in _REDIRECT_SAFE_HEADERS}
+
+
 async def _fetch_lightweight(
     dependencies: ArticleDependencies,
     plan: ArticlePlan,
     *,
     url: str,
     cookies: Mapping[str, str],
+    policy_config: Mapping[str, Any],
     backend: str,
     timeout: float = _FETCH_TIMEOUT_SECONDS,
     source: str = "article_extract",
 ) -> tuple[FetchResponse, str]:
-    def request_for(selected_backend: str) -> FetchRequest:
+    def request_for(
+        selected_backend: str,
+        request_url: str,
+        request_headers: Mapping[str, str],
+        request_cookies: Mapping[str, str],
+    ) -> FetchRequest:
         return FetchRequest(
-            url=url,
+            url=request_url,
             method="GET",
-            headers=plan.headers,
-            cookies=cookies,
+            headers=request_headers,
+            cookies=request_cookies,
             timeout=timeout,
             backend=selected_backend,
-            allow_redirects=True,
+            allow_redirects=False,
             impersonate=plan.impersonate,
             proxies=plan.proxies,
             context=RuntimeRequestContext(source=source, stage="fetch"),
@@ -392,19 +470,70 @@ async def _fetch_lightweight(
         )
 
     async def fetch_backend(selected_backend: str) -> tuple[FetchResponse, str]:
-        try:
-            response = await _fetch_response(dependencies, request_for(selected_backend))
-        except ValueError as exc:
-            overflow = _response_too_large_error(exc)
-            if overflow is not None:
-                raise overflow from None
-            raise
-        return response, _bounded_backend(response.backend)
+        current_url = url
+        current_headers = dict(plan.headers)
+        current_cookies = dict(cookies)
+        seen_urls = {current_url}
+
+        for redirect_count in range(DEFAULT_MAX_REDIRECTS + 1):
+            try:
+                response = await _fetch_response(
+                    dependencies,
+                    request_for(
+                        selected_backend,
+                        current_url,
+                        current_headers,
+                        current_cookies,
+                    ),
+                )
+            except ValueError as exc:
+                overflow = _response_too_large_error(exc)
+                if overflow is not None:
+                    raise overflow from None
+                raise
+
+            location = _redirect_location(response)
+            if response.status not in _REDIRECT_STATUSES or location is None:
+                return response, _bounded_backend(response.backend)
+            if redirect_count == DEFAULT_MAX_REDIRECTS:
+                raise ArticleFailure("fetch_error", "redirect")
+
+            target_url = _redirect_target(current_url, response, location)
+            if target_url in seen_urls:
+                raise ArticleFailure("fetch_error", "redirect")
+            seen_urls.add(target_url)
+
+            try:
+                target = await dependencies.evaluate_target(
+                    target_url,
+                    respect_robots=plan.respect_robots,
+                    user_agent=current_headers.get("User-Agent") or plan.browser.user_agent,
+                    request_context=RuntimeRequestContext(source=source, stage="redirect"),
+                    config=policy_config,
+                    policy_checker=dependencies.policy_checker,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - redirect policy failures are fail-closed
+                raise ArticleFailure(_SAFE_POLICY_FAILURE, "redirect") from exc
+
+            decision = getattr(target, "decision", None)
+            if not bool(getattr(decision, "allowed", False)):
+                raise _RedirectPolicyBlocked(decision)
+
+            if _redirect_crosses_credential_boundary(current_url, target_url):
+                current_headers = _redirect_boundary_headers(current_headers)
+                current_cookies = {}
+            current_url = target_url
+
+        raise ArticleFailure("fetch_error", "redirect")
 
     if backend == "curl":
         try:
             return await fetch_backend("curl")
         except asyncio.CancelledError:
+            raise
+        except _RedirectPolicyBlocked:
             raise
         except ArticleFailure:
             raise
@@ -465,6 +594,7 @@ async def _run_article(
     advised_backend = prepared.advised_backend
     advised_method = prepared.advised_method
     cookies = prepared.cookies
+    policy_config = prepared.policy_config
     preflight_payload = prepared.preflight_payload
 
     if advised_backend != _PLAYWRIGHT and advised_method != _PLAYWRIGHT:
@@ -477,12 +607,18 @@ async def _run_article(
                 plan,
                 url=url,
                 cookies=cookies,
+                policy_config=policy_config,
                 backend=requested_backend,
             )
         except asyncio.CancelledError:
             raise
+        except _RedirectPolicyBlocked as exc:
+            decision = exc.decision
+            if str(getattr(decision, "reason", "")).startswith("robots_"):
+                _record_counter(dependencies, "scrape_blocked_by_robots_total", {})
+            return _attach_preflight(_policy_blocked_result(url, decision), preflight_payload)
         except ArticleFailure as exc:
-            if exc.code == "response_too_large":
+            if exc.code in {"policy_error", "response_too_large"} or exc.stage == "redirect":
                 _log_failure(dependencies, exc, code=exc.code, stage=exc.stage, url=url)
                 return _attach_preflight(_failure_result(url, exc.code), preflight_payload)
             _log_failure(dependencies, exc, code="fetch_error", stage="fetch", url=url)
@@ -672,6 +808,7 @@ async def _prepare_article(
         plan = plan_modifier(plan)
 
     values = _web_scraper_values(config)
+    policy_config = MappingProxyType({"web_scraper": values})
     effective_user_agent = plan.headers.get("User-Agent") or plan.browser.user_agent
     request_context = RuntimeRequestContext(source=source, stage="pre_fetch")
     preflight_payload: dict[str, Any] | None = None
@@ -681,7 +818,7 @@ async def _prepare_article(
             respect_robots=plan.respect_robots,
             user_agent=effective_user_agent,
             request_context=request_context,
-            config={"web_scraper": values},
+            config=policy_config,
             policy_checker=dependencies.policy_checker,
         )
     except asyncio.CancelledError:
@@ -749,6 +886,7 @@ async def _prepare_article(
         advised_backend=advised_backend,
         advised_method=advised_method,
         cookies=MappingProxyType(cookies),
+        policy_config=policy_config,
         preflight_payload=preflight_payload,
     )
 
@@ -815,14 +953,23 @@ async def _run_blocking_article(
                 prepared.plan,
                 url=url,
                 cookies=prepared.cookies,
+                policy_config=prepared.policy_config,
                 backend=_bounded_backend(prepared.advised_backend),
                 timeout=_BLOCKING_FETCH_TIMEOUT_SECONDS,
                 source="article_extract_blocking",
             )
         except asyncio.CancelledError:
             raise
+        except _RedirectPolicyBlocked as exc:
+            decision = exc.decision
+            if str(getattr(decision, "reason", "")).startswith("robots_"):
+                _record_counter(dependencies, "scrape_blocked_by_robots_total", {})
+            return _attach_preflight(
+                _policy_blocked_result(url, decision),
+                prepared.preflight_payload,
+            )
         except ArticleFailure as exc:
-            if exc.code == "response_too_large":
+            if exc.code in {"policy_error", "response_too_large"}:
                 return _attach_preflight(_failure_result(url, exc.code), prepared.preflight_payload)
             return _attach_preflight(_blocking_failure_result(url), prepared.preflight_payload)
         except Exception:  # noqa: BLE001 - historical blocking fetch failures stay compact
