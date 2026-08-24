@@ -6304,5 +6304,8 @@
   },
   "servicePrompts_titleGeneration_openChatSettings": {
     "message": "Open Chat settings"
+  },
+  "chatMacrosNav": {
+    "message": "Chat Macros"
   }
 }
