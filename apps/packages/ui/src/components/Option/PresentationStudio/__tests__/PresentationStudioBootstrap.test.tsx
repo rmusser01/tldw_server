@@ -19,6 +19,7 @@ const routerMocks = vi.hoisted(() => ({
 
 const clientMocks = vi.hoisted(() => ({
   createPresentation: vi.fn(),
+  getPresentationMetadata: vi.fn(),
   getPresentation: vi.fn(),
   listVisualStyles: vi.fn()
 }))
@@ -47,6 +48,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     style ? { ...style } : null,
   tldwClient: {
     createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args),
+    getPresentationMetadata: (...args: unknown[]) => clientMocks.getPresentationMetadata(...args),
     getPresentation: (...args: unknown[]) => clientMocks.getPresentation(...args),
     listVisualStyles: (...args: unknown[]) => clientMocks.listVisualStyles(...args)
   }
@@ -57,6 +59,7 @@ describe("PresentationStudioPage bootstrap", () => {
     usePresentationStudioStore.getState().reset()
     routerMocks.navigate.mockReset()
     clientMocks.createPresentation.mockReset()
+    clientMocks.getPresentationMetadata.mockReset()
     clientMocks.getPresentation.mockReset()
     clientMocks.listVisualStyles.mockReset()
     onlineMocks.useServerOnline.mockReturnValue(true)
@@ -81,6 +84,10 @@ describe("PresentationStudioPage bootstrap", () => {
         version: 1
       }
     ])
+    clientMocks.getPresentationMetadata.mockImplementation(async (presentationId: string) => ({
+      record: { id: presentationId, content_kind: "structured_slides" },
+      etag: null
+    }))
   })
 
   it("loads the precreate form in strict mode without creating until submit", async () => {
@@ -111,6 +118,7 @@ describe("PresentationStudioPage bootstrap", () => {
 
     resolveCreate?.({
       id: "presentation-strict",
+      content_kind: "structured_slides",
       title: "Untitled Presentation",
       description: null,
       theme: "white",
@@ -163,45 +171,49 @@ describe("PresentationStudioPage bootstrap", () => {
 
   it("leaves the loading state after a detail fetch resolves", async () => {
     clientMocks.getPresentation.mockResolvedValue({
-      id: "presentation-load",
-      title: "Loaded Presentation",
-      description: null,
-      theme: "black",
-      visual_style_id: "minimal-academic",
-      visual_style_scope: "builtin",
-      visual_style_name: "Minimal Academic",
-      visual_style_version: 1,
-      visual_style_snapshot: {
-        id: "minimal-academic",
-        scope: "builtin",
-        name: "Minimal Academic",
-        appearance_defaults: { theme: "white" }
-      },
-      slides: [
-        {
-          order: 0,
-          layout: "title",
-          title: "Loaded slide",
-          content: "",
-          speaker_notes: "",
-          metadata: {
-            studio: {
-              slideId: "slide-load",
-              transition: "fade",
-              timing_mode: "auto",
-              manual_duration_ms: null,
-              audio: { status: "missing" },
-              image: { status: "missing" }
+      record: {
+        id: "presentation-load",
+        title: "Loaded Presentation",
+        description: null,
+        theme: "black",
+        content_kind: "structured_slides",
+        visual_style_id: "minimal-academic",
+        visual_style_scope: "builtin",
+        visual_style_name: "Minimal Academic",
+        visual_style_version: 1,
+        visual_style_snapshot: {
+          id: "minimal-academic",
+          scope: "builtin",
+          name: "Minimal Academic",
+          appearance_defaults: { theme: "white" }
+        },
+        slides: [
+          {
+            order: 0,
+            layout: "title",
+            title: "Loaded slide",
+            content: "",
+            speaker_notes: "",
+            metadata: {
+              studio: {
+                slideId: "slide-load",
+                transition: "fade",
+                timing_mode: "auto",
+                manual_duration_ms: null,
+                audio: { status: "missing" },
+                image: { status: "missing" }
+              }
             }
           }
-        }
-      ],
-      studio_data: { origin: "blank" },
-      created_at: "2026-03-13T00:00:00Z",
-      last_modified: "2026-03-13T00:00:00Z",
-      deleted: false,
-      client_id: "1",
-      version: 1
+        ],
+        studio_data: { origin: "blank" },
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      etag: '"server-detail-etag"'
     })
 
     render(

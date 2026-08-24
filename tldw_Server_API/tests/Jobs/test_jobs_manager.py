@@ -26,6 +26,43 @@ def jobs_db(tmp_path):
     yield db_path
 
 
+def test_sqlite_archive_collision_queries_live_in_db_management(jobs_db):
+    from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
+        fetch_slides_archive_collision_rows,
+    )
+
+    connection = sqlite3.connect(jobs_db)
+    connection.row_factory = sqlite3.Row
+    try:
+        with connection:
+            connection.execute(
+                "INSERT INTO jobs "
+                "(id, uuid, domain, queue, job_type, payload, status, created_at) "
+                "VALUES (41, 'collision-uuid', 'slides', 'default', "
+                "'presentation.generate', '{}', 'completed', DATETIME('now'))"
+            )
+            connection.execute(
+                "INSERT INTO jobs_archive "
+                "(id, uuid, domain, queue, job_type, payload, status, created_at) "
+                "VALUES (41, 'collision-uuid', 'slides', 'default', "
+                "'presentation.generate', '{}', 'completed', DATETIME('now'))"
+            )
+
+        collisions = fetch_slides_archive_collision_rows(
+            connection,
+            backend="sqlite",
+            where_clause=" WHERE id = ?",
+            params=(41,),
+        )
+    finally:
+        connection.close()
+
+    assert len(collisions) == 1
+    active, archived = collisions[0]
+    assert active["uuid"] == "collision-uuid"
+    assert [row["uuid"] for row in archived] == ["collision-uuid"]
+
+
 def _capture_sqlite_archive_query_plan(
     manager: JobManager,
     monkeypatch,
@@ -130,6 +167,16 @@ def test_pg_ensure_ignores_optional_index_psycopg_error_after_required_indexes(
         pg_migrations,
         "_ensure_pg_archive_batch_read_indexes",
         lambda _cursor: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_mark_slides_audit_failure_pg",
+        lambda _cursor: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
+        "_audit_slides_generation_pg",
+        lambda _cursor: (None, 0),
     )
     monkeypatch.setattr(
         pg_migrations,
@@ -574,11 +621,10 @@ def test_list_archived_jobs_paginates_same_second_microsecond_timestamps(
 ):
     jm = JobManager(jobs_db)
     archived_id = 17
-    archived_uuid = "reused-archive-uuid"
     timestamp_versions = (
-        ("2026-01-01 00:00:00.900000", "newest"),
-        ("2026-01-01T00:00:00.500000", "middle"),
-        ("2026-01-01 00:00:00.100000+00:00", "oldest"),
+        ("2026-01-01 00:00:00.900000", "newest", "archive-newest"),
+        ("2026-01-01T00:00:00.500000", "middle", "archive-middle"),
+        ("2026-01-01 00:00:00.100000+00:00", "oldest", "archive-oldest"),
     )
     conn = sqlite3.connect(jobs_db)
     try:
@@ -594,7 +640,7 @@ def test_list_archived_jobs_paginates_same_second_microsecond_timestamps(
                     json.dumps({"version": version}),
                     timestamp,
                 )
-                for timestamp, version in timestamp_versions
+                for timestamp, version, archived_uuid in timestamp_versions
             ],
         )
         conn.commit()
@@ -619,7 +665,7 @@ def test_list_archived_jobs_paginates_same_second_microsecond_timestamps(
                 str(row["_archive_cursor_created_at"])
             ),
             "before_id": archived_id,
-            "before_uuid": archived_uuid,
+            "before_uuid": str(row["_archive_cursor_uuid"]),
             "before_archive_locator": row["_archive_locator"],
         }
 
@@ -647,11 +693,11 @@ def test_list_archived_jobs_paginates_submillisecond_ties_by_locator(
         conn.executemany(
             "INSERT INTO jobs_archive "
             "(id, uuid, domain, queue, job_type, payload, status, created_at) "
-            "VALUES (23, 'submillisecond-tie', 'prompt_studio', 'default', "
+            "VALUES (23, ?, 'prompt_studio', 'default', "
             "'optimization', ?, 'cancelled', ?)",
             (
-                (json.dumps({"version": "first"}), "2026-01-01 00:00:00.100900"),
-                (json.dumps({"version": "second"}), "2026-01-01 00:00:00.100800"),
+                ("submillisecond-first", json.dumps({"version": "first"}), "2026-01-01 00:00:00.100900"),
+                ("submillisecond-second", json.dumps({"version": "second"}), "2026-01-01 00:00:00.100800"),
             ),
         )
         conn.commit()
@@ -1106,11 +1152,11 @@ def test_sqlite_archive_full_cursor_uses_cursor_index_without_temp_sort(
         conn.executemany(
             "INSERT INTO jobs_archive "
             "(id, uuid, domain, queue, job_type, payload, status, created_at) "
-            "VALUES (3, 'full-cursor-plan', 'prompt_studio', 'default', "
+            "VALUES (3, ?, 'prompt_studio', 'default', "
             "'optimization', '{}', 'cancelled', ?)",
             (
-                ("2026-01-01 00:00:00.900000",),
-                ("2026-01-01 00:00:00.100000",),
+                ("full-cursor-newer", "2026-01-01 00:00:00.900000"),
+                ("full-cursor-older", "2026-01-01 00:00:00.100000"),
             ),
         )
         conn.commit()

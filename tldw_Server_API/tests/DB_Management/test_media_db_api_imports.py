@@ -266,6 +266,7 @@ def test_media_db_api_exposes_read_contract_functions() -> None:
     assert callable(getattr(media_db_api, "lookup_section_for_offset", None))
     assert callable(getattr(media_db_api, "lookup_section_by_heading", None))
     assert callable(getattr(media_db_api, "get_media_by_id", None))
+    assert callable(getattr(media_db_api, "get_media_source_projection", None))
     assert callable(getattr(media_db_api, "get_media_status_by_id", None))
     assert callable(getattr(media_db_api, "has_unvectorized_chunks", None))
     assert callable(getattr(media_db_api, "get_media_by_uuid", None))
@@ -549,6 +550,28 @@ def test_media_db_api_get_media_status_by_id_accepts_lightweight_status_double()
         "has_content": True,
         "include_deleted": True,
         "include_trash": True,
+    }
+
+
+def test_media_db_api_get_media_source_projection_accepts_lightweight_read_double() -> None:
+    class StubReader:
+        def get_media_source_projection(self, media_id: int, *, max_chars: int):
+            assert media_id == 9
+            assert max_chars == 20
+            return {
+                "id": 9,
+                "source_text": "document",
+                "source_invalid": False,
+            }
+
+    assert media_db_api.get_media_source_projection(
+        StubReader(),
+        9,
+        max_chars=20,
+    ) == {
+        "id": 9,
+        "source_text": "document",
+        "source_invalid": False,
     }
 
 

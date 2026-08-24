@@ -7,12 +7,12 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    _CHACHA_NONCRITICAL_EXCEPTIONS,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
     FTSQueryTranslator,
     InputError,
-    _CHACHA_NONCRITICAL_EXCEPTIONS,
     logger,
 )
 
@@ -310,6 +310,223 @@ class MessageStore:
     # ------------------------------------------------------------------
     # Message retrieval
     # ------------------------------------------------------------------
+
+    def get_source_message_projection(
+        self,
+        conversation_id: str,
+        *,
+        max_chars: int,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one bounded, statement-consistent source-message snapshot."""
+        if not isinstance(conversation_id, str) or not conversation_id.strip():
+            raise InputError("conversation_id cannot be empty.")  # noqa: TRY003
+        if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 1:
+            raise InputError("max_chars must be a positive integer.")  # noqa: TRY003
+        if owner_user_id is not None and (not isinstance(owner_user_id, str) or not owner_user_id.strip()):
+            raise InputError("owner_user_id must be a non-empty string.")  # noqa: TRY003
+
+        is_postgres = self._db.backend_type == BackendType.POSTGRESQL
+        if is_postgres and owner_user_id is None:
+            raise InputError("owner_user_id is required for PostgreSQL source projections.")  # noqa: TRY003
+        owner_clause = " AND c.client_id = ?" if is_postgres and owner_user_id else ""
+        owner_params = [owner_user_id.strip()] if owner_clause else []
+        false_literal = "FALSE" if is_postgres else "0"
+        true_literal = "TRUE" if is_postgres else "1"
+        invalid_expression = (
+            "FALSE"
+            if is_postgres
+            else "(INSTR(COALESCE(m.sender, ''), CHAR(0)) > 0 "
+            "OR INSTR(m.content, CHAR(0)) > 0)"
+        )
+        # Every eligible formatted message costs at least four characters, and
+        # every message after the first also costs a one-character separator.
+        # One row beyond the maximum possible fit is sufficient to prove overflow.
+        row_limit = (max_chars + 2) // 5 + 1
+        char_budget = max_chars + 1
+        failure_type = "UnknownDatabaseError"
+
+        try:
+            cursor = self._db.execute_query(
+                f"""
+                    WITH settings AS (
+                        SELECT CAST(? AS INTEGER) AS char_budget
+                    ),
+                    live_conversation AS (
+                        SELECT c.id
+                        FROM conversations c
+                        WHERE c.id = ?
+                          AND c.deleted = {false_literal}
+                          {owner_clause}
+                        LIMIT 1
+                    ),
+                    eligible AS (
+                        SELECT
+                            m.id,
+                            m.timestamp,
+                            m.last_modified,
+                            COALESCE(NULLIF(m.sender, ''), 'unknown') || ': ' || m.content
+                                AS formatted_text,
+                            {invalid_expression} AS source_invalid
+                        FROM messages m
+                        JOIN live_conversation c ON c.id = m.conversation_id
+                        WHERE m.deleted = {false_literal}
+                          AND m.content IS NOT NULL
+                          AND m.content != ''
+                        ORDER BY m.timestamp ASC, m.last_modified ASC, m.id ASC
+                        LIMIT ?
+                    ),
+                    numbered AS (
+                        SELECT
+                            id,
+                            formatted_text,
+                            source_invalid,
+                            ROW_NUMBER() OVER (
+                                ORDER BY timestamp ASC, last_modified ASC, id ASC
+                            ) AS ordinal,
+                            LENGTH(formatted_text) AS source_length
+                        FROM eligible
+                    ),
+                    costed AS (
+                        SELECT
+                            ordinal,
+                            formatted_text,
+                            source_invalid,
+                            source_length,
+                            CASE WHEN ordinal = 1 THEN 0 ELSE 1 END AS separator_chars,
+                            COALESCE(
+                                SUM(
+                                    source_length + CASE WHEN ordinal = 1 THEN 0 ELSE 1 END
+                                ) OVER (
+                                    ORDER BY ordinal ASC
+                                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                                ),
+                                0
+                            ) AS prior_chars
+                        FROM numbered
+                    ),
+                    allocated AS (
+                        SELECT
+                            costed.ordinal,
+                            costed.formatted_text,
+                            costed.source_invalid,
+                            costed.source_length,
+                            CASE
+                                WHEN settings.char_budget
+                                     - costed.prior_chars
+                                     - costed.separator_chars <= 0
+                                THEN NULL
+                                WHEN costed.source_length <= settings.char_budget
+                                     - costed.prior_chars
+                                     - costed.separator_chars
+                                THEN costed.source_length
+                                ELSE settings.char_budget
+                                     - costed.prior_chars
+                                     - costed.separator_chars
+                            END AS char_cap
+                        FROM costed
+                        CROSS JOIN settings
+                    ),
+                    stats AS (
+                        SELECT
+                            COALESCE(
+                                MAX(CASE WHEN source_invalid THEN 1 ELSE 0 END),
+                                0
+                            ) AS source_invalid,
+                            COALESCE(
+                                MAX(
+                                    CASE
+                                        WHEN char_cap IS NULL OR source_length > char_cap
+                                        THEN 1
+                                        ELSE 0
+                                    END
+                                ),
+                                0
+                            ) AS source_truncated
+                        FROM allocated
+                    ),
+                    projected AS (
+                        SELECT
+                            ordinal,
+                            SUBSTR(
+                                formatted_text,
+                                1,
+                                CAST(char_cap AS INTEGER)
+                            ) AS source_text
+                        FROM allocated
+                        WHERE char_cap IS NOT NULL AND char_cap > 0
+                    )
+                    SELECT
+                        projected.ordinal,
+                        projected.source_text,
+                        {true_literal} AS conversation_exists,
+                        stats.source_invalid,
+                        stats.source_truncated
+                    FROM projected
+                    CROSS JOIN stats
+                    UNION ALL
+                    SELECT
+                        NULL AS ordinal,
+                        NULL AS source_text,
+                        {true_literal} AS conversation_exists,
+                        stats.source_invalid,
+                        stats.source_truncated
+                    FROM live_conversation
+                    CROSS JOIN stats
+                    WHERE NOT EXISTS (SELECT 1 FROM projected)
+                    ORDER BY ordinal ASC
+                """,  # nosec B608 - interpolated fragments are fixed by backend type.
+                (
+                    char_budget,
+                    conversation_id,
+                    *owner_params,
+                    row_limit,
+                ),
+                log_params=False,
+                log_errors=False,
+            )
+            records = [dict(row) for row in cursor.fetchall()]
+            if not records:
+                return {
+                    "rows": [],
+                    "conversation_exists": False,
+                    "invalid": False,
+                    "truncated": False,
+                }
+
+            first = records[0]
+            invalid = first.get("source_invalid")
+            truncated = first.get("source_truncated")
+            if not isinstance(invalid, (bool, int)) or invalid not in (0, 1):
+                raise CharactersRAGDBError("Invalid source-message validation marker.")
+            if not isinstance(truncated, (bool, int)) or truncated not in (0, 1):
+                raise CharactersRAGDBError("Invalid source-message truncation marker.")
+
+            projected_rows: list[dict[str, str]] = []
+            for record in records:
+                if record.get("source_invalid") != invalid or record.get("source_truncated") != truncated:
+                    raise CharactersRAGDBError("Inconsistent source-message projection markers.")
+                source_text = record.get("source_text")
+                if source_text is None:
+                    continue
+                if not isinstance(source_text, str) or not source_text:
+                    raise CharactersRAGDBError("Invalid bounded source-message projection.")
+                projected_rows.append({"source_text": source_text})
+
+            return {
+                "rows": projected_rows,
+                "conversation_exists": True,
+                "invalid": bool(invalid),
+                "truncated": bool(truncated),
+            }
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            failure_type = type(exc).__name__
+
+        logger.error(
+            "Database error fetching bounded source messages ({})",
+            failure_type,
+        )
+        raise CharactersRAGDBError("Source-message projection failed.")
 
     def get_message_conversation_id(self, message_id: str) -> str | None:
         """Return the conversation_id for a message if it exists and is not deleted."""

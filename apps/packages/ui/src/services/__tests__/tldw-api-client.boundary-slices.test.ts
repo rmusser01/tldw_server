@@ -200,13 +200,19 @@ describe("TldwApiClient Wave 5 boundary slices", () => {
         created_at: "2026-04-17T00:00:00Z"
       })
       .mockResolvedValueOnce({
-        id: "pres-1",
-        title: "Deck",
-        theme: "black",
-        slides: [],
-        version: 1,
-        created_at: "2026-04-17T00:00:00Z",
-        last_modified: "2026-04-17T00:00:00Z"
+        ok: true,
+        status: 200,
+        headers: { ETag: '"detail-etag"' },
+        data: {
+          id: "pres-1",
+          title: "Deck",
+          theme: "black",
+          content_kind: "structured_slides",
+          slides: [],
+          version: 1,
+          created_at: "2026-04-17T00:00:00Z",
+          last_modified: "2026-04-17T00:00:00Z"
+        }
       })
       .mockResolvedValueOnce({
         data: new ArrayBuffer(0)

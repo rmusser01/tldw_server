@@ -1,19 +1,69 @@
 import React from "react"
-import { HashRouter, MemoryRouter } from "react-router-dom"
+import {
+  RouterProvider,
+  createHashRouter,
+  createMemoryRouter
+} from "react-router-dom"
 
-const routerFutureConfig = {
-  v7_startTransition: true,
+export { RouteLeavePrompt, type RouteLeavePromptProps } from "./route-leave-prompt"
+
+const dataRouterFutureConfig = {
   v7_relativeSplatPath: true
 }
 
+const providerFutureConfig = { v7_startTransition: true }
+const RouterChildrenContext = React.createContext<React.ReactNode>(null)
+
+const RouterChildrenHost = () => <>{React.useContext(RouterChildrenContext)}</>
+
+const DataRouterWithChildren: React.FC<{
+  children: React.ReactNode
+  createRouter: () => ReturnType<typeof createMemoryRouter>
+}> = ({ children, createRouter }) => {
+  const createRouterRef = React.useRef(createRouter)
+  createRouterRef.current = createRouter
+  const [router, setRouter] = React.useState<ReturnType<typeof createMemoryRouter> | null>(null)
+  React.useEffect(() => {
+    const ownedRouter = createRouterRef.current()
+    setRouter(ownedRouter)
+    return () => {
+      ownedRouter.dispose()
+      setRouter((current) => current === ownedRouter ? null : current)
+    }
+  }, [])
+  if (!router) return <div aria-hidden="true" />
+  return (
+    <RouterChildrenContext.Provider value={children}>
+      <RouterProvider router={router} future={providerFutureConfig} />
+    </RouterChildrenContext.Provider>
+  )
+}
+
+const hostRoutes = [{ path: "*", element: <RouterChildrenHost /> }]
+
 export const HashRouterWithFuture: React.FC<{ children: React.ReactNode }> = ({
   children
-}) => <HashRouter future={routerFutureConfig}>{children}</HashRouter>
+}) => (
+  <DataRouterWithChildren
+    createRouter={() => createHashRouter(hostRoutes, { future: dataRouterFutureConfig })}
+  >
+    {children}
+  </DataRouterWithChildren>
+)
 
 export const MemoryRouterWithFuture: React.FC<{
   children: React.ReactNode
 }> = ({ children }) => (
-  <MemoryRouter future={routerFutureConfig}>{children}</MemoryRouter>
+  <DataRouterWithChildren
+    createRouter={() =>
+      createMemoryRouter(hostRoutes, {
+        initialEntries: ["/"],
+        future: dataRouterFutureConfig
+      })
+    }
+  >
+    {children}
+  </DataRouterWithChildren>
 )
 
 const resolveMemoryInitialEntry = () => {
@@ -34,9 +84,16 @@ export const HashAwareMemoryRouter: React.FC<{
 }> = ({ children }) => {
   const initialEntries = React.useMemo(() => [resolveMemoryInitialEntry()], [])
   return (
-    <MemoryRouter initialEntries={initialEntries} future={routerFutureConfig}>
+    <DataRouterWithChildren
+      createRouter={() =>
+        createMemoryRouter(hostRoutes, {
+          initialEntries,
+          future: dataRouterFutureConfig
+        })
+      }
+    >
       {children}
-    </MemoryRouter>
+    </DataRouterWithChildren>
   )
 }
 

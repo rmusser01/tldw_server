@@ -7,6 +7,13 @@ from typing import Any, Protocol
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.media_db import (
+    legacy_content_queries,
+    legacy_maintenance,
+    legacy_reads,
+    legacy_state,
+    legacy_wrappers,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
     DocumentVersionsRepository,
@@ -19,19 +26,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_lookup_r
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
     MediaSearchRepository,
 )
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_content_queries
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_maintenance
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_reads
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_state
-from tldw_Server_API.app.core.DB_Management.media_db import legacy_wrappers
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.defaults import (
+    build_media_runtime_config,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.factory import (
     MediaDbRuntimeConfig,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.factory import (
     create_media_database as runtime_create_media_database,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.defaults import (
-    build_media_runtime_config,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.session import (
     MediaDbFactory,
@@ -201,6 +203,35 @@ def get_media_status_by_id(
         media_id,
         include_deleted=include_deleted,
         include_trash=include_trash,
+    )
+
+
+def get_media_source_projection(
+    db: MediaDbLike | MediaDbReadLike,
+    media_id: int,
+    *,
+    max_chars: int,
+    owner_user_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Return a bounded active text projection for standalone Slides generation."""
+    db_instance = unwrap_media_database_like(db)
+    if is_media_database_like(db_instance):
+        return MediaLookupRepository.from_legacy_db(db_instance).source_projection_by_id(
+            media_id,
+            max_chars=max_chars,
+            owner_user_id=owner_user_id,
+        )
+    reader = _require_read_method(
+        db,
+        "get_media_source_projection",
+        error_message="db must expose the bounded Media DB source read contract.",
+    )
+    if owner_user_id is None:
+        return reader.get_media_source_projection(media_id, max_chars=max_chars)
+    return reader.get_media_source_projection(
+        media_id,
+        max_chars=max_chars,
+        owner_user_id=owner_user_id,
     )
 
 
@@ -1170,6 +1201,7 @@ __all__ = [
     "check_media_exists",
     "permanently_delete_item",
     "get_media_by_id",
+    "get_media_source_projection",
     "get_media_status_by_id",
     "get_media_by_uuid",
     "managed_media_database",

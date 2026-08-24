@@ -1,14 +1,30 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import re
+from collections.abc import Callable
 
 from fastapi import FastAPI
+from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from tldw_Server_API.app.services.app_lifecycle import is_lifecycle_draining
+
+CORS_EXPOSE_HEADERS: tuple[str, ...] = (
+    "Content-Disposition",
+    "ETag",
+    "Last-Modified",
+    "Retry-After",
+    "Content-Length",
+    "X-Request-ID",
+    "traceparent",
+    "X-Trace-Id",
+    "X-TLDW-TTS-Backend",
+    "X-TLDW-TTS-Fallback-Used",
+)
+CORS_EXPOSE_HEADERS_VALUE = ", ".join(CORS_EXPOSE_HEADERS)
+
 CONTROL_PLANE_DRAIN_PATHS: frozenset[str] = frozenset(
     {
         "/health",
@@ -61,6 +77,15 @@ def _resolve_drain_gate_allow_origin(request: Request) -> str | None:
     return None
 
 
+def merge_vary_origin(headers: MutableHeaders) -> None:
+    """Add ``Origin`` to a response's Vary values without dropping existing values."""
+    vary = headers.get("Vary", "")
+    values = [value.strip() for value in vary.split(",") if value.strip()]
+    if not any(value.casefold() == "origin" for value in values):
+        values.append("Origin")
+        headers["Vary"] = ", ".join(values)
+
+
 def _apply_drain_gate_cors_headers(request: Request, response: Response) -> Response:
     allow_origin = _resolve_drain_gate_allow_origin(request)
     if not allow_origin:
@@ -69,7 +94,7 @@ def _apply_drain_gate_cors_headers(request: Request, response: Response) -> Resp
     config = getattr(getattr(request.app, "state", None), "_tldw_drain_gate_cors_config", {})
     response.headers.setdefault("Access-Control-Allow-Origin", allow_origin)
     if allow_origin != "*":
-        response.headers.setdefault("Vary", "Origin")
+        merge_vary_origin(response.headers)
     if config.get("allow_credentials"):
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
 
@@ -79,7 +104,7 @@ def _apply_drain_gate_cors_headers(request: Request, response: Response) -> Resp
     response.headers.setdefault("Access-Control-Allow-Headers", requested_headers or "*")
     response.headers.setdefault(
         "Access-Control-Expose-Headers",
-        config.get("expose_headers", "X-Request-ID, traceparent, X-Trace-Id"),
+        config.get("expose_headers", CORS_EXPOSE_HEADERS_VALUE),
     )
     return response
 
@@ -101,9 +126,12 @@ class DrainGateMiddleware(BaseHTTPMiddleware):
 
 
 __all__ = [
+    "CORS_EXPOSE_HEADERS",
+    "CORS_EXPOSE_HEADERS_VALUE",
     "CONTROL_PLANE_DRAIN_ALLOWLIST",
     "CONTROL_PLANE_DRAIN_PATHS",
     "DrainGateMiddleware",
     "_apply_drain_gate_cors_headers",
     "_is_allowlisted_control_plane_path",
+    "merge_vary_origin",
 ]

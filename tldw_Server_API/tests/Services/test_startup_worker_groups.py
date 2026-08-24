@@ -95,6 +95,7 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
     specs = startup_groups.collect_startup_worker_specs(_context())
     spec_names = {spec.name for spec in specs}
     expected_spec_names = {
+        "agent_task_jobs_task",
         "admin_backup_jobs_task",
         "admin_backup_sched_task",
         "admin_byok_validation_jobs_task",
@@ -102,7 +103,9 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "audio_jobs_task",
         "audiobook_jobs_task",
         "authnz_scheduler",
+        "automation_definitions_sched_task",
         "chatbooks_cleanup",
+        "chat_macros_jobs_task",
         "claims_alerts_task",
         "claims_jobs_task",
         "claims_rebuild",
@@ -140,6 +143,7 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "persona_visual_generation_task",
         "persona_visual_portability_task",
         "presentation_render_jobs_task",
+        "standalone_html_generation_jobs_task",
         "privilege_snapshot_task",
         "prompt_studio_jobs_task",
         "quality_eval_task",
@@ -149,6 +153,8 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "recipe_run_jobs_task",
         "reminder_jobs_task",
         "reminders_sched_task",
+        "scheduled_tasks_recurring_question_jobs_task",
+        "scheduled_tasks_recurring_question_sched_task",
         "storage_cleanup_service",
         "study_pack_jobs_task",
         "study_suggestions_jobs_task",

@@ -1,13 +1,18 @@
 import asyncio
 import builtins
 import importlib
+import json
 import os
 from pathlib import Path
 import re
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.testclient import TestClient
+from loguru import logger as loguru_logger
 import pytest
 from starlette.requests import Request
+from starlette.responses import Response
 
 # Keep this module importable even when local/dev env sets ALLOWED_ORIGINS='*'.
 os.environ["ALLOWED_ORIGINS"] = "http://localhost:3000"
@@ -17,12 +22,100 @@ from tldw_Server_API.app.core import config as config_mod
 importlib.reload(config_mod)
 
 from tldw_Server_API.app import main as app_main
+from tldw_Server_API.app.core.Security.drain_gate_middleware import CORS_EXPOSE_HEADERS
+from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
+    GENERATION_MAX_REQUEST_BYTES,
+    standalone_request_validation_response,
+    standalone_response_invalid_response,
+)
 
 app_main = importlib.reload(app_main)
 
 
 def test_main_app_route_guard_passes_for_current_routes() -> None:
     app_main._fail_on_duplicate_route_method_pairs(app_main.app, context="unit-test")
+
+
+def test_main_stack_rejects_oversized_generation_before_llm_budget_json_materialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ import llm_budget_middleware as budget_module
+
+    class _Settings:
+        VIRTUAL_KEYS_ENABLED = True
+        LLM_BUDGET_ENFORCE = True
+        LLM_BUDGET_ENDPOINTS = ["/api/v1/slides/generations"]
+
+    async def _resolve_key(_api_key: str, *, settings=None):
+        del settings
+        return {"id": 77, "user_id": 88}
+
+    async def _key_limits(_key_id: int):
+        return {
+            "is_virtual": True,
+            "llm_allowed_models": ["allowed-model"],
+        }
+
+    materialized = False
+    real_json_loads = json.loads
+    payload = b'{"model":"blocked-model","padding":"' + (b"a" * GENERATION_MAX_REQUEST_BYTES) + b'"}'
+
+    def _observe_json_loads(value, *args, **kwargs):
+        nonlocal materialized
+        if isinstance(value, (bytes, bytearray)) and bytes(value) == payload:
+            materialized = True
+        return real_json_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(
+        budget_module.LLMBudgetMiddleware,
+        "_get_settings_cached",
+        lambda _self: _Settings(),
+    )
+    monkeypatch.setattr(budget_module, "resolve_api_key_by_hash", _resolve_key)
+    monkeypatch.setattr(budget_module, "get_key_limits", _key_limits)
+    monkeypatch.setattr(budget_module.json, "loads", _observe_json_loads)
+    monkeypatch.setattr(app_main.app, "middleware_stack", None)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/slides/generations",
+        "raw_path": b"/api/v1/slides/generations",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(payload)).encode("ascii")),
+            (b"x-api-key", b"task-10-test-key"),
+            (b"origin", b"http://localhost:3000"),
+        ],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+    }
+    events = [{"type": "http.request", "body": payload, "more_body": False}]
+    sent: list[dict[str, object]] = []
+
+    async def _receive() -> dict[str, object]:
+        if events:
+            return events.pop(0)
+        return {"type": "http.disconnect"}
+
+    async def _send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    asyncio.run(app_main.app(scope, _receive, _send))
+
+    response_start = next(message for message in sent if message["type"] == "http.response.start")
+    assert response_start["status"] == 413
+    response_headers = dict(response_start["headers"])
+    assert response_headers[b"access-control-allow-origin"] == b"http://localhost:3000"
+    assert b"x-request-id" in response_headers
+    assert b"x-trace-id" in response_headers
+    assert b"traceparent" in response_headers
+    assert materialized is False
 
 
 def test_config_loads_dotenv_before_module_level_allowed_origins_read() -> None:
@@ -251,6 +344,166 @@ def test_global_unhandled_exception_handler_keeps_cors_for_allowed_origin() -> N
 
     assert response.status_code == 500
     assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    exposed = {item.strip().lower() for item in response.headers["access-control-expose-headers"].split(",")}
+    assert exposed == {item.lower() for item in CORS_EXPOSE_HEADERS}
+
+
+def test_normal_cors_preflight_allows_standalone_mutation_and_negotiation_headers() -> None:
+    with TestClient(app_main.app) as client:
+        response = client.options(
+            "/api/v1/slides/generations",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": (
+                    "Authorization,Content-Type,Idempotency-Key,If-Match," "X-Slides-Accept-Content-Kinds"
+                ),
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    if app_main._cors_allow_credentials:
+        assert response.headers["access-control-allow-credentials"] == "true"
+    else:
+        assert "access-control-allow-credentials" not in response.headers
+    assert "origin" in response.headers["vary"].lower()
+    allowed = {item.strip().lower() for item in response.headers["access-control-allow-headers"].split(",")}
+    assert {"idempotency-key", "if-match", "x-slides-accept-content-kinds"} <= allowed
+
+
+def test_runtime_cors_policy_exposes_download_cache_backoff_and_trace_headers(monkeypatch) -> None:
+    monkeypatch.setattr(app_main, "_cors_allow_credentials", True)
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/slides/presentations/deck/export",
+        "raw_path": b"/api/v1/slides/presentations/deck/export",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"origin", b"http://localhost:3000")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "app": app_main.app,
+    }
+    response = app_main._apply_runtime_cors_headers(Request(scope), Response(status_code=503))
+
+    exposed = {item.strip().lower() for item in response.headers["access-control-expose-headers"].split(",")}
+    assert exposed == {item.lower() for item in CORS_EXPOSE_HEADERS}
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-credentials"] == "true"
+    assert "origin" in response.headers["vary"].lower()
+
+
+def test_runtime_cors_policy_merges_origin_into_existing_vary(monkeypatch) -> None:
+    monkeypatch.setattr(app_main, "_cors_allow_credentials", True)
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/slides/presentations/deck",
+        "raw_path": b"/api/v1/slides/presentations/deck",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"origin", b"http://localhost:3000")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "app": app_main.app,
+    }
+    response = Response(status_code=500, headers={"Vary": "Accept-Encoding"})
+
+    app_main._apply_runtime_cors_headers(Request(scope), response)
+
+    vary = {item.strip().lower() for item in response.headers["vary"].split(",")}
+    assert vary == {"accept-encoding", "origin"}
+
+
+def test_standalone_request_validation_sanitizes_locations_and_never_returns_input() -> None:
+    sentinel = "PRIVATE_SOURCE_5cdda9"
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/slides/generations",
+        "raw_path": b"/api/v1/slides/generations",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "app": app_main.app,
+    }
+    error = RequestValidationError(
+        [
+            {
+                "type": "extra_forbidden",
+                "loc": ("body", sentinel, 999, "prompt", "too-deep"),
+                "msg": sentinel,
+                "input": {"html_document": sentinel},
+                "ctx": {"error": ValueError(sentinel)},
+            }
+        ]
+    )
+
+    response = standalone_request_validation_response(Request(scope), error)
+    body = response.body
+
+    assert response.status_code == 422
+    assert sentinel.encode() not in body
+    assert len(body) < 1024
+    assert json.loads(body)["errors"][0]["location"] == [
+        "body",
+        "unknown_field",
+        "unknown_index",
+        "prompt",
+    ]
+
+
+def test_standalone_response_failure_is_fixed_and_source_free() -> None:
+    sentinel = "PRIVATE_HTML_609e6c"
+
+    response = standalone_response_invalid_response(RuntimeError(sentinel))
+
+    assert response.status_code == 500
+    assert response.body == b'{"detail":"standalone_html_response_invalid"}'
+    assert sentinel.encode() not in response.body
+
+
+def test_standalone_exception_handler_never_logs_or_returns_source() -> None:
+    sentinel = "PRIVATE_HTML_EXCEPTION_70b72c"
+    records: list[str] = []
+
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/slides/presentations/deck-1/html-source",
+        "raw_path": b"/api/v1/slides/presentations/deck-1/html-source",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "app": app_main.app,
+    }
+    sink_id = loguru_logger.add(lambda message: records.append(str(message)))
+    try:
+        response = asyncio.run(
+            app_main._global_unhandled_exception_handler(
+                Request(scope),
+                RuntimeError(sentinel),
+            )
+        )
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert response.body == b'{"detail":"standalone_html_response_invalid"}'
+    assert sentinel not in "".join(records)
 
 
 def test_run_startup_config_validation_logs_warning_on_import_error(monkeypatch) -> None:

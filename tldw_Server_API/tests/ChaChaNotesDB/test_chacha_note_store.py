@@ -2,15 +2,20 @@
 
 import ast
 import inspect
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
     CharactersRAGDB,
+    CharactersRAGDBError,
     ConflictError,
+    InputError,
 )
 from tldw_Server_API.app.core.DB_Management.Sync_DB import _envelope_from_row
 
@@ -63,11 +68,7 @@ def _class_method_names(class_obj: type[object]) -> set[str]:
     tree = ast.parse(source_path.read_text())
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
-            return {
-                item.name
-                for item in node.body
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-            }
+            return {item.name for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))}
     raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
 
 
@@ -100,6 +101,199 @@ def test_note_store_owns_delegated_methods_without_monolith_duplicates(db, monke
     assert db.add_note(title="Delegated Note", content="delegated body") == "note-from-store"
     assert captured["args"] == ()
     assert captured["kwargs"] == {"title": "Delegated Note", "content": "delegated body"}
+
+
+def test_source_note_projection_is_active_bounded_and_explicit(store, db, monkeypatch):
+    note_id = store.add_note(
+        title="abcdef",
+        content="123456789",
+        note_id="source-note",
+    )
+    assert note_id == "source-note"
+
+    queries: list[str] = []
+    original_execute = db.execute_query
+
+    def recording_execute(query, params=None, **kwargs):
+        queries.append(str(query))
+        return original_execute(query, params, **kwargs)
+
+    monkeypatch.setattr(db, "execute_query", recording_execute)
+
+    assert store.get_source_note_projection("source-note", max_chars=5) == {
+        "id": "source-note",
+        "source_text": "# abcd",
+        "source_invalid": False,
+    }
+    normalized_sql = " ".join(queries).lower()
+    assert "select *" not in normalized_sql
+    assert "substr" in normalized_sql
+    assert "deleted =" in normalized_sql
+    assert "payload_json" not in normalized_sql
+
+
+def test_source_note_projection_hides_deleted_note_but_not_deleted_backlink_conversation(
+    store,
+    db,
+):
+    character_id = db.add_character_card({"name": "Source note character"})
+    conversation_id = db.add_conversation(
+        {
+            "character_id": character_id,
+            "title": "Source note conversation",
+        }
+    )
+    note_id = store.add_note(
+        title="Visible note",
+        content="Visible body",
+        note_id="source-note-linked",
+        conversation_id=conversation_id,
+    )
+    assert note_id
+
+    db.execute_query(
+        "UPDATE conversations SET deleted = 1 WHERE id = ?",
+        (conversation_id,),
+        commit=True,
+    )
+    assert store.get_source_note_projection(note_id, max_chars=50) == {
+        "id": note_id,
+        "source_text": "# Visible note\n\nVisible body",
+        "source_invalid": False,
+    }
+
+    db.execute_query(
+        "UPDATE notes SET deleted = 1 WHERE id = ?",
+        (note_id,),
+        commit=True,
+    )
+    assert store.get_source_note_projection(note_id, max_chars=50) is None
+
+
+def test_source_note_projection_accepts_zero_as_sentinel_budget(store, db):
+    populated_id = store.add_note(
+        title="Populated",
+        content="body",
+        note_id="source-note-populated",
+    )
+    empty_id = store.add_note(
+        title="Empty",
+        content="placeholder",
+        note_id="source-note-empty",
+    )
+    db.execute_query(
+        "UPDATE notes SET title = '', content = '' WHERE id = ?",
+        (empty_id,),
+        commit=True,
+    )
+
+    assert store.get_source_note_projection(populated_id, max_chars=0) == {
+        "id": populated_id,
+        "source_text": "#",
+        "source_invalid": False,
+    }
+    assert store.get_source_note_projection(empty_id, max_chars=0) == {
+        "id": empty_id,
+        "source_text": "",
+        "source_invalid": False,
+    }
+
+
+@pytest.mark.parametrize("max_chars", [True, -1, "10"])
+def test_source_note_projection_rejects_invalid_character_budget(store, max_chars):
+    with pytest.raises(InputError):
+        store.get_source_note_projection("note", max_chars=max_chars)
+
+
+def test_postgres_source_note_projection_requires_owner_scope():
+    class _PostgresDb:
+        backend_type = BackendType.POSTGRESQL
+
+        @staticmethod
+        def execute_query(*_args, **_kwargs):
+            raise AssertionError("unscoped PostgreSQL projection must not query")
+
+    with pytest.raises(InputError, match="owner_user_id"):
+        NoteStore(_PostgresDb()).get_source_note_projection("note-1", max_chars=20)
+
+
+def test_source_note_projection_marks_nul_text_invalid(store, db):
+    note_id = store.add_note(
+        title="NUL note",
+        content="valid",
+        note_id="source-note-nul",
+    )
+    db.execute_query(
+        "UPDATE notes SET content = ? WHERE id = ?",
+        ("prefix\0" + ("secret" * 1000), note_id),
+        commit=True,
+    )
+
+    projection = store.get_source_note_projection(note_id, max_chars=20)
+
+    assert projection is not None
+    assert projection["source_invalid"] is True
+
+
+def test_source_note_projection_failure_is_fixed_and_redacted():
+    secret = "PRIVATE_NOTE_FRAGMENT"
+    messages: list[str] = []
+
+    class _FailingDb:
+        backend_type = BackendType.SQLITE
+
+        @staticmethod
+        def execute_query(*_args, **_kwargs):
+            raise CharactersRAGDBError(secret)
+
+    sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
+    try:
+        with pytest.raises(CharactersRAGDBError) as exc_info:
+            NoteStore(_FailingDb()).get_source_note_projection(
+                "note-1",
+                max_chars=20,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert str(exc_info.value) == "Source-note projection failed."
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert secret not in repr(exc_info.value)
+    assert secret not in "\n".join(messages)
+
+
+def test_source_note_projection_redacts_delayed_fetch_failure():
+    secret = "PRIVATE_NOTE_FETCH_FRAGMENT"
+    messages: list[str] = []
+
+    class _FailingCursor:
+        @staticmethod
+        def fetchone():
+            raise sqlite3.OperationalError(f"Could not decode {secret}")
+
+    class _FailingDb:
+        backend_type = BackendType.SQLITE
+
+        @staticmethod
+        def execute_query(*_args, **_kwargs):
+            return _FailingCursor()
+
+    sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
+    try:
+        with pytest.raises(CharactersRAGDBError) as exc_info:
+            NoteStore(_FailingDb()).get_source_note_projection(
+                "note-1",
+                max_chars=20,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert str(exc_info.value) == "Source-note projection failed."
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert secret not in repr(exc_info.value)
+    assert secret not in "\n".join(messages)
 
 
 class TestNoteStoreAdd:

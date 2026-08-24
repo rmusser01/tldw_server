@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.routing import APIRoute
@@ -39,6 +41,17 @@ from tldw_Server_API.app.core.startup_logging import (
 )
 from tldw_Server_API.app.core.Logging.access_log_middleware import (
     redact_access_log_message as _redact_access_log_message,
+)
+from tldw_Server_API.app.core.Security.drain_gate_middleware import (
+    CORS_EXPOSE_HEADERS,
+    CORS_EXPOSE_HEADERS_VALUE,
+    merge_vary_origin,
+)
+from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
+    StandaloneHtmlRequestGuardMiddleware,
+    is_standalone_sensitive_route,
+    standalone_request_validation_response,
+    standalone_response_invalid_response,
 )
 from tldw_Server_API.app.api.v1.router_registry import include_router_idempotent, register_router_specs
 from tldw_Server_API.app.services.app_lifecycle import (
@@ -1925,12 +1938,12 @@ def _apply_runtime_cors_headers(request: Request, response: Any) -> Any:
 
     response.headers.setdefault("Access-Control-Allow-Origin", allow_origin)
     if allow_origin != "*":
-        response.headers.setdefault("Vary", "Origin")
+        merge_vary_origin(response.headers)
     if _cors_allow_credentials:
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
     response.headers.setdefault(
         "Access-Control-Expose-Headers",
-        "X-Request-ID, traceparent, X-Trace-Id"
+        CORS_EXPOSE_HEADERS_VALUE,
     )
     return response
 
@@ -1960,8 +1973,58 @@ def _run_startup_config_validation() -> None:
 
 @app.exception_handler(Exception)
 async def _global_unhandled_exception_handler(request, exc):
+    if is_standalone_sensitive_route(request.method, request.url.path):
+        logger.error(
+            "Standalone Slides response failed",
+            request_id=getattr(request.state, "request_id", None),
+            route="standalone_slides_route",
+            code="standalone_html_response_invalid",
+        )
+        return _apply_runtime_cors_headers(
+            request,
+            standalone_response_invalid_response(),
+        )
     response = await _global_handler(request, exc)
     return _apply_runtime_cors_headers(request, response)
+
+
+@app.exception_handler(RequestValidationError)
+async def _standalone_request_validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+):
+    if is_standalone_sensitive_route(request.method, request.url.path):
+        response = standalone_request_validation_response(request, exc)
+        logger.warning(
+            "Standalone Slides request validation rejected",
+            request_id=getattr(request.state, "request_id", None),
+            route="standalone_slides_route",
+            code="standalone_html_request_invalid",
+            error_count=min(len(exc.errors()), 20),
+        )
+    else:
+        response = await request_validation_exception_handler(request, exc)
+    return _apply_runtime_cors_headers(request, response)
+
+
+@app.exception_handler(ResponseValidationError)
+async def _standalone_response_validation_exception_handler(
+    request: Request,
+    exc: ResponseValidationError,
+):
+    if not is_standalone_sensitive_route(request.method, request.url.path):
+        response = await _global_handler(request, exc)
+        return _apply_runtime_cors_headers(request, response)
+    logger.error(
+        "Standalone Slides response validation failed",
+        request_id=getattr(request.state, "request_id", None),
+        route="standalone_slides_route",
+        code="standalone_html_response_invalid",
+    )
+    return _apply_runtime_cors_headers(
+        request,
+        standalone_response_invalid_response(),
+    )
 
 
 @app.exception_handler(ClientDisconnect)
@@ -2334,6 +2397,17 @@ from tldw_Server_API.app.core.config import (
     should_disable_cors,
 )
 
+# Starlette wraps later middleware around earlier middleware. Register LLM
+# budget first so receive-time admission runs before its JSON body parsing.
+from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
+
+try:
+    app.add_middleware(LLMBudgetMiddleware)
+except _STARTUP_GUARD_EXCEPTIONS as _e:
+    logger.debug(f"Skipping LLMBudgetMiddleware: {_e}")
+
+app.add_middleware(StandaloneHtmlRequestGuardMiddleware)
+
 # FIXME - CORS
 if should_disable_cors():
     logger.warning("CORS middleware disabled via configuration/ENV flag.")
@@ -2399,10 +2473,7 @@ else:
             "allow_origin_regex": _cors_allow_origin_regex,
             "allow_credentials": _cors_allow_credentials,
             "allowed_origins": _cors_allowed_openapi_origins,
-            "expose_headers": (
-                "X-Request-ID, traceparent, X-Trace-Id, "
-                "X-TLDW-TTS-Backend, X-TLDW-TTS-Fallback-Used"
-            ),
+            "expose_headers": CORS_EXPOSE_HEADERS_VALUE,
         }
     except _STARTUP_GUARD_EXCEPTIONS:
         pass
@@ -2414,13 +2485,7 @@ else:
         allow_credentials=_cors_allow_credentials,
         allow_methods=["*"],  # Must include OPTIONS, GET, POST, DELETE etc.
         allow_headers=["*"],
-        expose_headers=[
-            "X-Request-ID",
-            "traceparent",
-            "X-Trace-Id",
-            "X-TLDW-TTS-Backend",
-            "X-TLDW-TTS-Fallback-Used",
-        ],
+        expose_headers=CORS_EXPOSE_HEADERS,
     )
 
     # Ensure OpenAPI schema is consumable across common local origins (helpful when docs are
@@ -2441,10 +2506,10 @@ else:
                 if allow_origin:
                     response.headers.setdefault("Access-Control-Allow-Origin", allow_origin)
                     if allow_origin != "*":
-                        response.headers.setdefault("Vary", "Origin")
+                        merge_vary_origin(response.headers)
                 response.headers.setdefault("Access-Control-Allow-Methods", "GET, OPTIONS")
                 response.headers.setdefault("Access-Control-Allow-Headers", "*")
-                response.headers.setdefault("Access-Control-Expose-Headers", "X-Request-ID, traceparent, X-Trace-Id")
+                response.headers.setdefault("Access-Control-Expose-Headers", CORS_EXPOSE_HEADERS_VALUE)
         except _REQUEST_GUARD_EXCEPTIONS:
             pass
         return response
@@ -2468,7 +2533,6 @@ except _STARTUP_GUARD_EXCEPTIONS as _csrf_e:
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 # Security middleware (headers + request size limit)
-from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
 from tldw_Server_API.app.core.AuthNZ.usage_logging_middleware import UsageLoggingMiddleware
 from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware
 from tldw_Server_API.app.core.Sandbox.middleware import SandboxArtifactTraversalGuardMiddleware
@@ -2666,12 +2730,6 @@ else:
             pass
         return response
 
-
-# Always apply LLM budget middleware (guarded by settings) even in tests so allowlists/budgets are enforced
-try:
-    app.add_middleware(LLMBudgetMiddleware)
-except _STARTUP_GUARD_EXCEPTIONS as _e:
-    logger.debug(f"Skipping LLMBudgetMiddleware: {_e}")
 
 # Request ID context should be available before the drain gate, and the drain gate
 # should reject work before the LLM budget middleware gets a chance to do heavier setup.

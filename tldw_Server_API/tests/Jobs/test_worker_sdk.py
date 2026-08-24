@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from tldw_Server_API.app.core.Jobs import worker_sdk as worker_sdk_module
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -37,6 +38,10 @@ class DummySleep:
         self.calls.append(seconds)
         # Yield control using the original sleep to avoid recursion
         await self._orig_sleep(0)
+
+
+def _slides_jobs_key(character: str) -> str:
+    return "slides:v1:" + character * 64
 
 
 @pytest.mark.asyncio
@@ -916,3 +921,341 @@ async def test_run_handler_cancelled_error_propagates(monkeypatch, tmp_path):
     assert fail_calls == []
     stored = jm.get_job(int(job["id"]))
     assert stored["status"] == "processing"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("terminal_status", "error_code"),
+    [("failed", "slides_render_failed"), ("cancelled", "slides_render_cancelled")],
+)
+async def test_run_terminal_outcome_uses_exact_terminalizer_without_complete_or_generic_fail(
+    monkeypatch,
+    tmp_path,
+    terminal_status,
+    error_code,
+):
+    db_path = tmp_path / f"jobs_wsdk_terminal_{terminal_status}.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("a" if terminal_status == "failed" else "b"),
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(
+            domain="slides",
+            queue="default",
+            worker_id="slides-worker",
+            lease_seconds=5,
+            renew_threshold_seconds=1,
+            renew_jitter_seconds=0,
+        ),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    complete_calls = []
+    fail_calls = []
+    terminal_calls = []
+    original_terminalize = jm.terminalize_job_from_worker
+
+    monkeypatch.setattr(jm, "complete_job", lambda *args, **kwargs: complete_calls.append((args, kwargs)))
+    monkeypatch.setattr(jm, "fail_job", lambda *args, **kwargs: fail_calls.append((args, kwargs)))
+
+    def spy_terminalize(**kwargs):
+        terminal_calls.append(kwargs)
+        return original_terminalize(**kwargs)
+
+    monkeypatch.setattr(jm, "terminalize_job_from_worker", spy_terminalize)
+
+    async def handler(job_row):
+        sdk.stop()
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status=terminal_status,
+            error_code=error_code,
+            message="bounded worker-safe detail",
+        )
+
+    await asyncio.wait_for(sdk.run(handler=handler, job_type="presentation.generate"), timeout=1)
+
+    assert complete_calls == []
+    assert fail_calls == []
+    assert len(terminal_calls) == 1
+    terminal_call = terminal_calls[0]
+    assert terminal_call["job_uuid"] == job["uuid"]
+    assert terminal_call["owner_user_id"] == "owner-1"
+    assert terminal_call["domain"] == "slides"
+    assert terminal_call["queue"] == "default"
+    assert terminal_call["job_type"] == "presentation.generate"
+    stored = jm.get_job(int(job["id"]))
+    assert stored["status"] == terminal_status
+    assert stored["error_code"] == error_code
+    assert stored["error_message"] == "bounded worker-safe detail"
+
+
+@pytest.mark.asyncio
+async def test_terminal_outcome_accepts_exact_already_terminal_race(monkeypatch, tmp_path):
+    db_path = tmp_path / "jobs_wsdk_terminal_race.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("c"),
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(domain="slides", queue="default", worker_id="slides-worker"),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    terminal_calls = 0
+
+    def race_winner(**_kwargs):
+        nonlocal terminal_calls
+        terminal_calls += 1
+        return "ALREADY_TERMINAL"
+
+    monkeypatch.setattr(jm, "terminalize_job_from_worker", race_winner)
+
+    async def handler(_job_row):
+        sdk.stop()
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="slides_render_failed",
+            message="safe",
+        )
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, job_type="presentation.generate"),
+        timeout=1,
+    )
+    assert terminal_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_terminal_outcome_accepts_real_reconciler_cas_winner(monkeypatch, tmp_path):
+    db_path = tmp_path / "jobs_wsdk_reconciler_terminal_race.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("e"),
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(domain="slides", queue="default", worker_id="slides-worker"),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    original_terminalize = jm.terminalize_job_from_worker
+    reconciler_results: list[str] = []
+
+    def reconciler_wins_after_sdk_preread(**kwargs):
+        reconciler_results.append(
+            jm.terminalize_slides_generation_job_from_reconciler(
+                job_uuid=kwargs["job_uuid"],
+                owner_user_id=kwargs["owner_user_id"],
+                expected_status="processing",
+                status="failed",
+                error_code="generation_expired",
+                error_message="Generation input expired.",
+                completion_token="reconciler:expiry:v1",
+                job_id=kwargs["job_id"],
+            )
+        )
+        return original_terminalize(**kwargs)
+
+    monkeypatch.setattr(
+        jm,
+        "terminalize_job_from_worker",
+        reconciler_wins_after_sdk_preread,
+    )
+
+    async def handler(_job_row):
+        sdk.stop()
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="slides_render_failed",
+            message="bounded worker-safe detail",
+        )
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, job_type="presentation.generate"),
+        timeout=1,
+    )
+
+    assert reconciler_results == ["APPLIED"]
+    stored = jm.get_job(int(job["id"]))
+    assert stored["status"] == "failed"
+    assert stored["error_code"] == "generation_expired"
+
+
+@pytest.mark.asyncio
+async def test_terminal_outcome_observes_uuid_authoritative_compressed_archive(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "jobs_wsdk_terminal_archive.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-archive"},
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("d"),
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(domain="slides", queue="default", worker_id="slides-worker"),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    terminal_calls = 0
+    original_terminalize = jm.terminalize_job_from_worker
+
+    def record_terminalize(**kwargs):
+        nonlocal terminal_calls
+        terminal_calls += 1
+        return original_terminalize(**kwargs)
+
+    monkeypatch.setattr(jm, "terminalize_job_from_worker", record_terminalize)
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS", "true")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS_DROP_JSON", "true")
+
+    async def handler(job_row):
+        lease_id = str(job_row["lease_id"])
+        assert jm.fail_job(
+            int(job_row["id"]),
+            error="generic archived winner",
+            retryable=False,
+            worker_id="slides-worker",
+            lease_id=lease_id,
+            completion_token=lease_id,
+            enforce=True,
+            error_code="archived_terminal_winner",
+            error_class="ArchivedTerminalWinner",
+        )
+        connection = jm._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "UPDATE jobs SET completed_at='2000-01-01 00:00:00' WHERE id=?",
+                    (int(job_row["id"]),),
+                )
+        finally:
+            connection.close()
+        assert (
+            jm.prune_jobs(
+                statuses=["failed"],
+                older_than_days=0,
+                domain="slides",
+                queue="default",
+                job_type="presentation.generate",
+            )
+            == 1
+        )
+        connection = jm._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "UPDATE jobs_archive SET id=NULL WHERE uuid=?",
+                    (str(job_row["uuid"]),),
+                )
+        finally:
+            connection.close()
+        sdk.stop()
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="handler_terminal_outcome",
+            message="safe",
+        )
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, job_type="presentation.generate"),
+        timeout=1,
+    )
+    assert terminal_calls == 0
+    archived = jm.resolve_slides_generation_job(
+        job_uuid=str(job["uuid"]),
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("d"),
+    )
+    assert archived is not None
+    assert archived["archived"] is True
+    assert archived["id"] is None
+    assert archived["status"] == "failed"
+    assert archived["payload"] == {"receipt_id": "receipt-archive"}
+
+
+@pytest.mark.asyncio
+async def test_terminal_cas_conflict_raises_dedicated_error_without_numeric_fallback(monkeypatch, tmp_path):
+    db_path = tmp_path / "jobs_wsdk_terminal_conflict.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("e"),
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(domain="slides", queue="default", worker_id="slides-worker"),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    complete_calls = []
+    fail_calls = []
+    monkeypatch.setattr(jm, "complete_job", lambda *args, **kwargs: complete_calls.append((args, kwargs)))
+    monkeypatch.setattr(jm, "fail_job", lambda *args, **kwargs: fail_calls.append((args, kwargs)))
+    monkeypatch.setattr(jm, "terminalize_job_from_worker", lambda **_kwargs: "CONFLICT")
+
+    async def handler(_job_row):
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="slides_render_failed",
+            message="safe",
+        )
+
+    with pytest.raises(worker_sdk_module.WorkerTerminalizationConflict):
+        await asyncio.wait_for(sdk.run(handler=handler, job_type="presentation.generate"), timeout=1)
+
+    assert complete_calls == []
+    assert fail_calls == []
+
+
+@pytest.mark.parametrize("status", ["completed", "queued", "processing", "retry"])
+def test_worker_terminal_outcome_rejects_open_ended_statuses(status):
+    with pytest.raises(ValueError):
+        worker_sdk_module.WorkerTerminalOutcome(
+            status=status,
+            error_code="slides_render_failed",
+            message="safe",
+        )
+
+
+def test_worker_terminal_outcome_rejects_unbounded_or_unsafe_detail():
+    with pytest.raises(ValueError):
+        worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="slides_render_failed",
+            message="x" * 1025,
+        )
+    with pytest.raises(ValueError):
+        worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="bad code with spaces",
+            message="safe",
+        )

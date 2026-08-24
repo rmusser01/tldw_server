@@ -457,10 +457,18 @@ class BackendCursorAdapter:
 class BackendCursorWrapper:
     """Cursor wrapper that routes operations through the configured backend."""
 
-    def __init__(self, db: CharactersRAGDB, connection, backend: DatabaseBackend):
+    def __init__(
+        self,
+        db: CharactersRAGDB,
+        connection,
+        backend: DatabaseBackend,
+        *,
+        log_errors: bool = True,
+    ):
         self._db = db
         self._connection = connection
         self._backend = backend
+        self._log_errors = log_errors
         self._result: QueryResult | None = None
         self._adapter: BackendCursorAdapter | None = None
         self.rowcount: int = -1
@@ -469,10 +477,12 @@ class BackendCursorWrapper:
 
     def execute(self, query: str, params: tuple | list | dict | None = None):
         prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
+        backend_options = {} if self._log_errors else {"log_errors": False}
         self._result = self._backend.execute(
             prepared_query,
             prepared_params,
             connection=self._connection,
+            **backend_options,
         )
         self._adapter = BackendCursorAdapter(self._result)
         self.rowcount = self._result.rowcount
@@ -528,10 +538,15 @@ class BackendConnectionWrapper:
         self._connection = connection
         self._backend = backend
 
-    def cursor(self):
+    def cursor(self, *, log_errors: bool = True):
         if self._backend.backend_type == BackendType.SQLITE:
             return self._connection.cursor()
-        return BackendCursorWrapper(self._db, self._connection, self._backend)
+        return BackendCursorWrapper(
+            self._db,
+            self._connection,
+            self._backend,
+            log_errors=log_errors,
+        )
 
     def execute(self, query: str, params: tuple | list | dict | None = None):
         cursor = self.cursor()
@@ -541,9 +556,9 @@ class BackendConnectionWrapper:
         cursor = self.cursor()
         return cursor.executemany(query, params_list)
 
-    def executescript(self, script: str):
+    def executescript(self, script: str, *, log_errors: bool = True):
         statements = [stmt.strip() for stmt in script.split(';') if stmt.strip()]
-        cursor = self.cursor()
+        cursor = self.cursor(log_errors=log_errors)
         for stmt in statements:
             cursor.execute(stmt)
         return cursor
@@ -7262,6 +7277,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         commit: bool = False,
         script: bool = False,
+        log_params: bool = True,
+        log_errors: bool = True,
     ) -> Any:
         """
         Executes a single SQL query or an entire SQL script.
@@ -7275,6 +7292,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     Defaults to False.
             script: If True, executes the query string as an SQL script using `executescript`.
                     `params` are ignored if `script` is True. Defaults to False.
+            log_params: Whether debug logs may include bounded parameter values.
+                    Sensitive query paths set this to False. Defaults to True.
+            log_errors: Whether driver errors may be logged verbatim. Sensitive
+                    source reads set this to False. Defaults to True.
 
         Returns:
             The sqlite3.Cursor object after execution.
@@ -7290,14 +7311,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 script,
                 self.backend_type.value,
                 query[:300],
-                str(params)[:200],
+                str(params)[:200] if log_params else "[redacted]",
             )
 
             if script:
-                cursor = conn.executescript(query)
+                if self.backend_type == BackendType.SQLITE:
+                    cursor = conn.executescript(query)
+                else:
+                    cursor = conn.executescript(query, log_errors=log_errors)
             else:
                 prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-                cursor = conn.cursor()
+                if self.backend_type == BackendType.SQLITE:
+                    cursor = conn.cursor()
+                else:
+                    cursor = conn.cursor(log_errors=log_errors)
                 cursor.execute(prepared_query, prepared_params or ())
 
             if commit:
@@ -7309,6 +7336,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     else:
                         conn.commit()
                 except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+                    if not log_errors:
+                        logger.error(
+                            'Redacted commit failure after execute_query ({})',
+                            type(exc).__name__,
+                        )
+                        raise CharactersRAGDBError("Database commit failed.") from None
                     logger.error(
                         'Commit failed after execute_query on backend {}: {}',
                         self.backend_type.value,
@@ -7318,6 +7351,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     raise CharactersRAGDBError(f"Database commit failed: {exc}") from exc  # noqa: TRY003
             return cursor  # noqa: TRY300
         except sqlite3.IntegrityError as e:
+            if not log_errors:
+                logger.warning("Redacted SQLite integrity failure ({})", type(e).__name__)
+                raise CharactersRAGDBError("Database constraint violation.") from None
             logger.warning(f"Integrity constraint violation: {query[:300]}... Error: {e}")
             # Distinguish unique constraint from other integrity errors if possible
             if "unique constraint failed" in str(e).lower():
@@ -7325,9 +7361,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(  # noqa: TRY003
                 f"Database constraint violation: {e}") from e  # Broader for other integrity issues
         except sqlite3.Error as e:
+            if not log_errors:
+                logger.error("Redacted SQLite query failure ({})", type(e).__name__)
+                raise CharactersRAGDBError("Query execution failed.") from None
             logger.error(f"Query execution failed: {query[:300]}... Error: {e}", exc_info=True)
             raise CharactersRAGDBError(f"Query execution failed: {e}") from e  # noqa: TRY003
         except BackendDatabaseError as exc:
+            if not log_errors:
+                logger.error("Redacted backend query failure ({})", type(exc).__name__)
+                raise CharactersRAGDBError("Query execution failed.") from None
             msg = str(exc).lower()
             if "duplicate key" in msg or "unique constraint" in msg:
                 raise ConflictError(message=f"Database constraint violation: {exc}") from exc

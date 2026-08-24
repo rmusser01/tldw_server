@@ -81,5 +81,5 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD python -c "import sys, u
 
 ENTRYPOINT ["/usr/local/bin/tldw-app-first-run"]
 
-# Start the server using runtime-expanded env vars so compose overrides take effect.
-CMD ["/bin/sh", "-c", "exec python -m uvicorn tldw_Server_API.app.main:app --host \"$HOST\" --port \"$PORT\" --workers \"$UVICORN_WORKERS\" --log-level \"$LOG_LEVEL\" --proxy-headers"]
+# Start through the pinned receive-time MCP WebSocket guard.
+CMD ["/bin/sh", "-c", "exec python -m tldw_Server_API.scripts.run_server_guarded_mcp --host \"$HOST\" --port \"$PORT\" --workers \"$UVICORN_WORKERS\" --log-level \"$LOG_LEVEL\" --proxy-headers"]

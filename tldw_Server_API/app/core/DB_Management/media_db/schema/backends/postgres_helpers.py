@@ -5,12 +5,6 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from tldw_Server_API.app.core.DB_Management.media_db.errors import SchemaError
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
-    MEDIA_NONCRITICAL_EXCEPTIONS,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.policies import (
-    ensure_postgres_policies,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
     ensure_postgres_document_workspace_schema,
 )
@@ -19,6 +13,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media 
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
     ensure_postgres_fts,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.policies import (
+    ensure_postgres_policies,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migrations import (
     run_postgres_migrations,
@@ -43,8 +40,61 @@ class SupportsPostgresPostCoreStructures(Protocol):
     def _ensure_postgres_claims_extensions(self, conn: Any) -> None: ...
     def _ensure_postgres_email_schema(self, conn: Any) -> None: ...
     def _sync_postgres_sequences(self, conn: Any) -> None: ...
+
     _CURRENT_SCHEMA_VERSION: int
     backend: Any
+
+
+_SAFE_TRANSCRIPT_TEXT_FUNCTION_SQL = """
+CREATE OR REPLACE FUNCTION public.tldw_try_extract_normalized_transcript_text(
+    input_text TEXT
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+IMMUTABLE
+STRICT
+SET search_path = pg_catalog
+AS $function$
+DECLARE
+    parsed JSON;
+    value_type TEXT;
+BEGIN
+    parsed := input_text::JSON;
+    IF json_typeof(parsed) <> 'object' THEN
+        RETURN NULL;
+    END IF;
+    value_type := json_typeof(parsed -> 'text');
+    IF value_type IS NULL OR value_type = 'null' THEN
+        RETURN '';
+    END IF;
+    IF value_type = 'string' THEN
+        RETURN parsed ->> 'text';
+    END IF;
+    IF value_type = 'boolean' THEN
+        IF (parsed ->> 'text')::BOOLEAN THEN
+            RETURN 'True';
+        END IF;
+        RETURN 'False';
+    END IF;
+    RETURN parsed ->> 'text';
+EXCEPTION
+    WHEN data_exception THEN
+        RETURN NULL;
+END;
+$function$;
+"""
+
+
+def _ensure_postgres_safe_transcript_extractor(
+    db: SupportsPostgresPostCoreStructures,
+    conn: Any,
+) -> None:
+    """Install the PG13-compatible non-throwing normalized-text extractor."""
+
+    db.backend.execute(
+        _SAFE_TRANSCRIPT_TEXT_FUNCTION_SQL,
+        connection=conn,
+    )
 
 
 def ensure_postgres_post_core_structures(
@@ -57,6 +107,7 @@ def ensure_postgres_post_core_structures(
     db._ensure_postgres_tts_history(conn)
     db._ensure_postgres_audio_presets(conn)
     db._ensure_postgres_data_tables(conn)
+    _ensure_postgres_safe_transcript_extractor(db, conn)
     ensure_postgres_document_workspace_schema(conn)
     db._ensure_postgres_source_hash_column(conn)
     db._ensure_postgres_claims_extensions(conn)

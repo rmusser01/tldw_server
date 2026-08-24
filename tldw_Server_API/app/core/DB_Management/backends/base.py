@@ -397,7 +397,9 @@ class DatabaseBackend(ABC):
         self,
         query: str,
         params: Optional[Union[tuple, dict]] = None,
-        connection: Optional[Any] = None
+        connection: Optional[Any] = None,
+        *,
+        log_errors: bool = True,
     ) -> QueryResult:
         """
         Execute a query and return results.
@@ -406,6 +408,7 @@ class DatabaseBackend(ABC):
             query: SQL query to execute
             params: Query parameters
             connection: Optional connection to use
+            log_errors: Whether backend errors may include raw driver details
 
         Returns:
             QueryResult object

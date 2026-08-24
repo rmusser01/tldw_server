@@ -403,6 +403,88 @@ class NoteStore:
     # Note retrieval
     # ------------------------------------------------------------------
 
+    def get_source_note_projection(
+        self,
+        note_id: str,
+        *,
+        max_chars: int,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return one bounded formatted active note plus one overflow sentinel."""
+        if not isinstance(note_id, str) or not note_id.strip():
+            raise InputError("note_id cannot be empty.")  # noqa: TRY003
+        if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 0:
+            raise InputError("max_chars must be a non-negative integer.")  # noqa: TRY003
+        if owner_user_id is not None and (not isinstance(owner_user_id, str) or not owner_user_id.strip()):
+            raise InputError("owner_user_id must be a non-empty string.")  # noqa: TRY003
+
+        projected_chars = max_chars + 1
+        is_postgres = self._db.backend_type == BackendType.POSTGRESQL
+        if is_postgres and owner_user_id is None:
+            raise InputError("owner_user_id is required for PostgreSQL source projections.")  # noqa: TRY003
+        deleted_value = False if is_postgres else 0
+        owner_clause = " AND n.client_id = ?" if is_postgres and owner_user_id else ""
+        invalid_expression = (
+            "FALSE"
+            if is_postgres
+            else "(INSTR(COALESCE(n.title, ''), CHAR(0)) > 0 "
+            "OR INSTR(COALESCE(n.content, ''), CHAR(0)) > 0)"
+        )
+        query = f"""
+            SELECT
+                n.id,
+                SUBSTR(
+                    CASE
+                        WHEN n.title IS NOT NULL AND n.title != '' THEN
+                            '# ' || n.title ||
+                            CASE
+                                WHEN n.content IS NOT NULL AND n.content != '' THEN ? || n.content
+                                ELSE ''
+                            END
+                        ELSE COALESCE(n.content, '')
+                    END,
+                    1,
+                    ?
+                ) AS source_text,
+                {invalid_expression} AS source_invalid
+            FROM notes n
+            WHERE n.id = ? AND n.deleted = ?
+              {owner_clause}
+            LIMIT 1
+        """  # nosec B608 - the interpolated clause is fixed by backend type.
+        params: list[Any] = ["\n\n", projected_chars, note_id, deleted_value]
+        if owner_clause:
+            params.append(owner_user_id.strip())
+        failure_type = "UnknownDatabaseError"
+        try:
+            cursor = self._db.execute_query(
+                query,
+                tuple(params),
+                log_params=False,
+                log_errors=False,
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            if isinstance(row, dict):
+                record = dict(row)
+            else:
+                columns = [column[0] for column in cursor.description] if cursor.description else []
+                record = {columns[index]: row[index] for index in range(len(columns))}
+            invalid = record.get("source_invalid")
+            if not isinstance(invalid, (bool, int)) or invalid not in (0, 1):
+                raise CharactersRAGDBError("Invalid source-note validation marker.")
+            record["source_invalid"] = bool(invalid)
+            return record
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            failure_type = type(exc).__name__
+
+        logger.error(
+            "Database error fetching bounded source note ({})",
+            failure_type,
+        )
+        raise CharactersRAGDBError("Source-note projection failed.")
+
     def get_note_by_id(
         self,
         note_id: str,

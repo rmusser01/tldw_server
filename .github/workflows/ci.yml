@@ -1207,6 +1207,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -1231,6 +1232,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -1736,6 +1738,7 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
@@ -2676,6 +2679,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -2700,6 +2704,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -3201,6 +3206,7 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
@@ -4012,6 +4018,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -4036,6 +4043,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -4537,6 +4545,7 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
@@ -5271,6 +5280,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -5295,6 +5305,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -5796,6 +5807,7 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
@@ -6536,6 +6548,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval*.py
@@ -6560,6 +6573,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -7061,6 +7075,7 @@ jobs:
               tldw_Server_API/tests/Resource_Governance
           - name: platform-services-startup
             paths: >-
+              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan

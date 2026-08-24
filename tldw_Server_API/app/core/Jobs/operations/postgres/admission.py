@@ -308,6 +308,8 @@ def create_job_admission(
     max_queued_quota: int,
     submits_per_minute_quota: int,
     counters_enabled: bool,
+    advisory_xact_lock_key: int | None = None,
+    pre_admission_lookup: Callable[[Any], dict[str, Any] | None] | None = None,
 ) -> AdmissionResult:
     """Create or replay a queued job admission inside a Postgres transaction."""
 
@@ -317,6 +319,15 @@ def create_job_admission(
 
     with _read_committed_quota_transaction(conn, enabled=quota_enabled), conn:
         with cursor_factory(conn) as cur:
+            if advisory_xact_lock_key is not None:
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(%s)",
+                    (int(advisory_xact_lock_key),),
+                )
+            if pre_admission_lookup is not None:
+                existing = pre_admission_lookup(cur)
+                if existing is not None:
+                    return AdmissionResult.existing(row=existing)
             if quota_enabled:
                 cur.execute("SELECT pg_advisory_xact_lock(%s)", (_quota_lock_key(command),))
 

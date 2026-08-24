@@ -19,6 +19,7 @@ Modules and Files
 - evals.prompts.md: Evaluation tasks and rubric prompts.
 - ingestion.prompts.md: Ingestion-time analysis prompts (e.g., claims).
 - mcp.prompts.md: MCP tools/system prompts.
+- slides.prompts.md: Standalone HTML presentation generation contract.
 - summarization.prompts.yaml: Summarization system prompt defaults.
 
 Example Loader (future)
@@ -28,3 +29,7 @@ Example Loader (future)
 Editing Tips
 - Keep a changelog at the bottom of each file.
 - If you need environment-specific variants, create files like embeddings.prompts.local.md and reference them in config.
+- Standalone Slides loads `slides.standalone_html_system` strictly with a 128 KiB ceiling. Set
+  `TLDW_PROMPT_FILE_SLIDES__STANDALONE_HTML_SYSTEM` to a reviewed regular UTF-8 file for an
+  override. A configured blank, missing, unreadable, malformed, or oversized override disables
+  standalone generation; it never falls back to the packaged contract.

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
+import threading
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 
 from tldw_Server_API.app.services.lifecycle_worker_specs import (
     ShutdownPhase,
@@ -37,10 +41,86 @@ def _context(
 
 
 def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
-    return {
-        spec.name: spec
-        for spec in startup_pollers.provide_content_jobs_worker_specs()
-    }
+    return {spec.name: spec for spec in startup_pollers.provide_content_jobs_worker_specs()}
+
+
+def _standalone_config(
+    *,
+    feature_enabled: bool = True,
+    egress_enabled: bool = True,
+    allowed_models: tuple[str, ...] = ("model-a",),
+    max_source_chars: int = 100,
+    max_provider_response_bytes: int = 1_000,
+    max_output_tokens: int = 100,
+    revision_fill: str = "a",
+):
+    from tldw_Server_API.app.core.Slides.standalone_html_config import (
+        ResolvedExecutionTarget,
+        ResolvedPrompt,
+        SlidesStandaloneHtmlConfig,
+        StandaloneHtmlInputLimits,
+        StandaloneHtmlOutputLimits,
+        StandaloneHtmlProviderLimits,
+    )
+
+    def _target(model: str) -> ResolvedExecutionTarget:
+        return ResolvedExecutionTarget(
+            provider="openai",
+            model=model,
+            adapter_id="openai_official_chat_v1",
+            endpoint_identity="https://api.openai.com:443/v1/chat/completions",
+        )
+
+    allowed_targets = tuple(_target(model) for model in allowed_models)
+    default_target = _target("model-a")
+    enabled = feature_enabled and egress_enabled and default_target in allowed_targets
+    reason = None
+    if not feature_enabled:
+        reason = "feature_disabled"
+    elif not egress_enabled:
+        reason = "egress_disabled"
+    elif not enabled:
+        reason = "default_model_not_allowed"
+    return SlidesStandaloneHtmlConfig(
+        feature_enabled=feature_enabled,
+        egress_enabled=egress_enabled,
+        enabled=enabled,
+        disabled_reason=reason,
+        target=default_target if enabled else None,
+        prompt=(
+            ResolvedPrompt(
+                text="Build a standalone presentation.",
+                sha256="b" * 64,
+                contract_version="slides.standalone_html.v1",
+                byte_count=32,
+            )
+            if enabled
+            else None
+        ),
+        allowed_targets=allowed_targets,
+        input_limits=StandaloneHtmlInputLimits(
+            max_request_bytes=4_194_304,
+            max_source_chars=max_source_chars,
+            max_source_tokens=50_000,
+            max_audience_chars=500,
+            max_source_identifier_bytes=256,
+            max_note_ids=100,
+            max_rag_query_chars=20_000,
+            max_rag_top_k=100,
+        ),
+        output_limits=StandaloneHtmlOutputLimits(
+            max_provider_response_bytes=max_provider_response_bytes,
+            max_document_bytes=1_048_576,
+        ),
+        provider_limits=StandaloneHtmlProviderLimits(
+            connect_timeout_seconds=10.0,
+            read_timeout_seconds=120.0,
+            overall_timeout_seconds=180.0,
+            max_output_tokens=max_output_tokens,
+        ),
+        generation_config_revision=("sha256:" + revision_fill * 64) if enabled else None,
+        _revision_manifest="test-manifest" if enabled else "",
+    )
 
 
 @pytest.mark.parametrize(
@@ -49,6 +129,7 @@ def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
         "audio_jobs_task",
         "audiobook_jobs_task",
         "presentation_render_jobs_task",
+        "standalone_html_generation_jobs_task",
         "research_workspace_output_jobs_task",
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
@@ -72,7 +153,7 @@ def test_content_jobs_worker_specs_match_legacy_worker_contract(
     assert spec.task_name == spec_name
     assert spec.category == "jobs"
     assert spec.phase is ShutdownPhase.JOB_POLLER_QUIESCE
-    assert spec.timeout_sec == 5.0
+    assert spec.timeout_sec == (15.0 if spec_name == "standalone_html_generation_jobs_task" else 5.0)
     assert spec.strategy is WorkerStrategy.STOP_EVENT_TASK
     assert spec.factory is not None
     assert callable(spec.factory)
@@ -85,6 +166,7 @@ def test_content_jobs_worker_specs_use_expected_names() -> None:
         "audio_jobs_task",
         "audiobook_jobs_task",
         "presentation_render_jobs_task",
+        "standalone_html_generation_jobs_task",
         "research_workspace_output_jobs_task",
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
@@ -109,6 +191,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("audio_jobs_task", "_run_audio_jobs_worker_service"),
         ("audiobook_jobs_task", "_run_audiobook_jobs_worker_service"),
         ("presentation_render_jobs_task", "_run_presentation_render_jobs_worker_service"),
+        ("standalone_html_generation_jobs_task", "_run_standalone_html_generation_jobs_service"),
         ("research_workspace_output_jobs_task", "_run_research_workspace_output_jobs_worker_service"),
         ("media_ingest_jobs_task", "_run_media_ingest_jobs_worker_service"),
         ("media_ingest_heavy_jobs_task", "_run_media_ingest_heavy_jobs_worker_service"),
@@ -127,7 +210,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         monkeypatch.setattr(
             startup_pollers,
             factory_name,
-            lambda stop_event, name=spec_name: calls.append((name, stop_event)) or f"{name}-awaitable",
+            lambda *args, name=spec_name: calls.append((name, args[-1])) or f"{name}-awaitable",
         )
 
     specs = _specs_by_name(startup_pollers)
@@ -140,6 +223,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("audio_jobs_task", "audio_jobs_task-stop"),
         ("audiobook_jobs_task", "audiobook_jobs_task-stop"),
         ("presentation_render_jobs_task", "presentation_render_jobs_task-stop"),
+        ("standalone_html_generation_jobs_task", "standalone_html_generation_jobs_task-stop"),
         ("research_workspace_output_jobs_task", "research_workspace_output_jobs_task-stop"),
         ("media_ingest_jobs_task", "media_ingest_jobs_task-stop"),
         ("media_ingest_heavy_jobs_task", "media_ingest_heavy_jobs_task-stop"),
@@ -211,9 +295,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
             }[spec_name],
             "true",
         )
-        assert specs[spec_name].enabled(context) is (
-            spec_name in media_ingest_explicit_flag_specs
-        )
+        assert specs[spec_name].enabled(context) is (spec_name in media_ingest_explicit_flag_specs)
 
     assert calls == [
         (("audio-jobs",), {}),
@@ -232,6 +314,905 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         (("companion",), {}),
         (("scheduled-tasks-recurring-question",), {"default_stable": False}),
     ]
+
+
+def test_standalone_html_composite_worker_uses_slides_route_without_a_second_flag() -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _route_enabled(*args: object, **kwargs: object) -> bool:
+        calls.append((args, kwargs))
+        return True
+
+    spec = _specs_by_name(startup_pollers)["standalone_html_generation_jobs_task"]
+
+    assert spec.enabled(_context(route_enabled=_route_enabled)) is True
+    assert calls == [(("slides",), {})]
+
+
+def test_standalone_html_live_config_can_only_narrow_boot_authority() -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    boot = _standalone_config(
+        feature_enabled=False,
+        allowed_models=("model-a",),
+        max_source_chars=100,
+        max_provider_response_bytes=1_000,
+        max_output_tokens=100,
+    )
+    broadened_live = _standalone_config(
+        allowed_models=("model-a", "model-b"),
+        max_source_chars=200,
+        max_provider_response_bytes=2_000,
+        max_output_tokens=200,
+    )
+
+    restricted = startup_pollers._restrict_standalone_html_config(
+        boot,
+        broadened_live,
+    )
+
+    assert restricted.feature_enabled is False
+    assert restricted.egress_enabled is True
+    assert [target.model for target in restricted.allowed_targets] == ["model-a"]
+    assert restricted.input_limits.max_source_chars == 100
+    assert restricted.output_limits.max_provider_response_bytes == 1_000
+    assert restricted.provider_limits.max_output_tokens == 100
+
+
+def test_standalone_html_live_default_removal_disables_restricted_snapshot() -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    boot = _standalone_config(allowed_models=("model-a", "model-b"))
+    live = _standalone_config(allowed_models=("model-b",))
+
+    restricted = startup_pollers._restrict_standalone_html_config(boot, live)
+
+    assert restricted.enabled is False
+    assert restricted.disabled_reason == "default_model_not_allowed"
+    assert [target.model for target in restricted.allowed_targets] == ["model-b"]
+
+
+@pytest.mark.asyncio
+async def test_standalone_html_runtime_reloads_only_narrower_generation_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    from tldw_Server_API.app.core import config as config_module
+    from tldw_Server_API.app.core.DB_Management import db_path_utils
+    from tldw_Server_API.app.core.Slides import (
+        standalone_html_config,
+        standalone_html_reconciler,
+        standalone_html_registry,
+    )
+
+    first_config = _standalone_config(
+        allowed_models=("model-a", "model-b"),
+        max_source_chars=200,
+        max_provider_response_bytes=2_000,
+        max_output_tokens=200,
+    )
+    second_config = _standalone_config(
+        egress_enabled=False,
+        allowed_models=("model-a",),
+        max_source_chars=100,
+        max_provider_response_bytes=1_000,
+        max_output_tokens=100,
+    )
+    selected_config = {"value": first_config}
+    refresh_calls = {"count": 0}
+    keyring = SimpleNamespace(configured_current_key_id="key-one")
+    snapshot = SimpleNamespace(
+        current_key_id="key-one",
+        config_epoch="old-epoch",
+        require_generation_ready=lambda: None,
+    )
+
+    class _Registry:
+        def __init__(self, *, store: object, keyring: object) -> None:
+            del store, keyring
+
+        async def snapshot(self):
+            return snapshot
+
+        async def activate_configured_current(self, **_kwargs):
+            return snapshot
+
+    class _Reconciler:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def admission_ready(self) -> bool:
+            return True
+
+    monkeypatch.setattr(startup_pollers, "_standalone_html_jobs_manager", object)
+    monkeypatch.setattr(
+        db_path_utils.DatabasePaths,
+        "resolve_user_db_base_dir",
+        lambda: "/tmp/standalone-html-tests",
+    )
+    monkeypatch.setattr(config_module, "load_comprehensive_config", lambda: {})
+    monkeypatch.setattr(
+        config_module,
+        "refresh_config_cache",
+        lambda: refresh_calls.__setitem__("count", refresh_calls["count"] + 1),
+    )
+    monkeypatch.setattr(
+        standalone_html_config,
+        "load_standalone_html_config",
+        lambda _config, *, availability: selected_config["value"],
+    )
+    monkeypatch.setattr(
+        standalone_html_registry,
+        "StandaloneHtmlHmacKeyring",
+        SimpleNamespace(from_env=lambda: keyring),
+    )
+    monkeypatch.setattr(
+        standalone_html_registry,
+        "JobManagerDigestKeyRegistryStore",
+        lambda _manager: object(),
+    )
+    monkeypatch.setattr(standalone_html_registry, "StandaloneHtmlKeyRegistry", _Registry)
+    monkeypatch.setattr(
+        standalone_html_reconciler,
+        "FencedStandaloneHtmlReconciler",
+        _Reconciler,
+    )
+    runtime = await startup_pollers._build_standalone_html_generation_runtime(_context())
+    selected_config["value"] = second_config
+
+    current = runtime.current_config_loader()
+
+    assert runtime.local_only is False
+    assert current.egress_enabled is False
+    assert [target.model for target in current.allowed_targets] == ["model-a"]
+    assert current.input_limits.max_source_chars == 100
+    assert current.output_limits.max_provider_response_bytes == 1_000
+    assert current.provider_limits.max_output_tokens == 100
+    assert current.generation_config_revision is None
+    assert refresh_calls["count"] == 1
+    assert runtime.config_epoch != snapshot.config_epoch
+    runtime.admission_gate.open = True
+    with pytest.raises(
+        standalone_html_registry.DigestKeyUnavailableError,
+        match="generation digest key unavailable",
+    ):
+        await runtime.digest_snapshot_loader()
+
+
+def test_standalone_html_coordination_generation_defaults_to_legacy_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    monkeypatch.delenv("SLIDES_STANDALONE_COORDINATION_GENERATION", raising=False)
+
+    assert startup_pollers._standalone_html_coordination_generation() == 0
+    assert startup_pollers._standalone_html_coordination_epoch(
+        static_config=_standalone_config(),
+        current_key_id="key-one",
+    ).startswith("sha256:")
+
+
+def test_standalone_html_coordination_epoch_encodes_monotonic_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    monkeypatch.setenv("SLIDES_STANDALONE_COORDINATION_GENERATION", "17")
+
+    assert startup_pollers._standalone_html_coordination_generation() == 17
+    assert startup_pollers._standalone_html_coordination_epoch(
+        static_config=_standalone_config(),
+        current_key_id="key-one",
+    ).startswith("v1:g17:sha256:")
+
+
+def test_standalone_html_coordination_epoch_covers_full_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    monkeypatch.setenv("SLIDES_STANDALONE_COORDINATION_GENERATION", "17")
+    only_default = _standalone_config(
+        allowed_models=("model-a",),
+        revision_fill="c",
+    )
+    with_nondefault = _standalone_config(
+        allowed_models=("model-a", "model-b"),
+        revision_fill="c",
+    )
+
+    assert only_default.generation_config_revision == with_nondefault.generation_config_revision
+    assert startup_pollers._standalone_html_coordination_epoch(
+        static_config=only_default,
+        current_key_id="key-one",
+    ) != startup_pollers._standalone_html_coordination_epoch(
+        static_config=with_nondefault,
+        current_key_id="key-one",
+    )
+
+
+@pytest.mark.parametrize(
+    "configured",
+    [
+        "-1",
+        "+1",
+        "01",
+        " 1",
+        "1 ",
+        "1.0",
+        "not-a-number",
+        "9223372036854775808",
+    ],
+)
+def test_standalone_html_coordination_generation_rejects_noncanonical_values(
+    monkeypatch: pytest.MonkeyPatch,
+    configured: str,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    monkeypatch.setenv("SLIDES_STANDALONE_COORDINATION_GENERATION", configured)
+
+    with pytest.raises(ValueError, match="coordination generation is invalid"):
+        startup_pollers._standalone_html_coordination_generation()
+
+
+@pytest.mark.asyncio
+async def test_standalone_html_composite_starts_handler_only_after_shared_startup_and_releases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    app = FastAPI()
+    stop_event = asyncio.Event()
+    handler_started = asyncio.Event()
+
+    class _Reconciler:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.released = False
+
+        def run_batch(self):
+            self.calls += 1
+            return SimpleNamespace(
+                startup_ready=self.calls >= 2,
+                leader=True,
+                completed_pass=self.calls >= 2,
+                jobs_available=True,
+            )
+
+        def release(self) -> bool:
+            self.released = True
+            return True
+
+    reconciler = _Reconciler()
+    runtime = SimpleNamespace(
+        reconciler=reconciler,
+        local_only=False,
+        job_manager=object(),
+        keyring=object(),
+        digest_snapshot_loader=object(),
+        current_config_loader=object(),
+        validator_available=True,
+        admission_gate=SimpleNamespace(open=False),
+        validation_pool=None,
+    )
+
+    async def _build(_context):
+        return runtime
+
+    async def _handler(_runtime, worker_stop_event):
+        assert _runtime is runtime
+        handler_started.set()
+        await worker_stop_event.wait()
+
+    monkeypatch.setattr(startup_pollers, "_build_standalone_html_generation_runtime", _build)
+    monkeypatch.setattr(startup_pollers, "_run_standalone_html_generation_handler", _handler)
+    monkeypatch.setattr(startup_pollers, "_STANDALONE_RETRY_SECONDS", 0.001)
+    context = WorkerLifecycleContext(
+        app=app,
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+    task = asyncio.create_task(startup_pollers._run_standalone_html_generation_jobs_service(context, stop_event))
+    await asyncio.wait_for(handler_started.wait(), timeout=1)
+
+    assert reconciler.calls >= 2
+    assert app.state.standalone_html_generation_worker_registered is True
+    assert app.state.standalone_html_reconciler_admission_ready is True
+    assert app.state.standalone_html_transport_context is runtime
+
+    stop_event.set()
+    await asyncio.wait_for(task, timeout=1)
+
+    assert reconciler.released is True
+    assert app.state.standalone_html_generation_worker_registered is False
+    assert app.state.standalone_html_reconciler_admission_ready is False
+    assert getattr(app.state, "standalone_html_transport_context", None) is None
+
+
+@pytest.mark.asyncio
+async def test_standalone_html_composite_retries_after_transient_reconciliation_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    app = FastAPI()
+    stop_event = asyncio.Event()
+    handler_started = asyncio.Event()
+
+    class _Reconciler:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_batch(self):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("transient coordination failure")
+            return SimpleNamespace(
+                startup_ready=True,
+                leader=True,
+                completed_pass=True,
+                jobs_available=True,
+            )
+
+        def release(self) -> bool:
+            return True
+
+    reconciler = _Reconciler()
+    runtime = SimpleNamespace(
+        reconciler=reconciler,
+        local_only=False,
+        admission_gate=SimpleNamespace(open=False),
+        validation_pool=None,
+    )
+
+    async def _build(_context):
+        return runtime
+
+    async def _handler(_runtime, worker_stop_event):
+        handler_started.set()
+        await worker_stop_event.wait()
+
+    monkeypatch.setattr(startup_pollers, "_build_standalone_html_generation_runtime", _build)
+    monkeypatch.setattr(startup_pollers, "_run_standalone_html_generation_handler", _handler)
+    monkeypatch.setattr(startup_pollers, "_STANDALONE_RETRY_SECONDS", 0.001)
+    context = WorkerLifecycleContext(
+        app=app,
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+    task = asyncio.create_task(startup_pollers._run_standalone_html_generation_jobs_service(context, stop_event))
+    await asyncio.wait_for(handler_started.wait(), timeout=1)
+
+    assert reconciler.calls >= 2
+    assert runtime.admission_gate.open is True
+
+    stop_event.set()
+    await asyncio.wait_for(task, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_standalone_html_composite_reopens_admission_after_readiness_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    app = FastAPI()
+    stop_event = asyncio.Event()
+    handler_started = asyncio.Event()
+
+    class _Reconciler:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_batch(self):
+            self.calls += 1
+            return SimpleNamespace(
+                startup_ready=self.calls != 2,
+                leader=True,
+                completed_pass=True,
+                jobs_available=True,
+            )
+
+        def release(self) -> bool:
+            return True
+
+    reconciler = _Reconciler()
+    runtime = SimpleNamespace(
+        reconciler=reconciler,
+        local_only=False,
+        admission_gate=SimpleNamespace(open=False),
+        validation_pool=None,
+    )
+
+    async def _build(_context):
+        return runtime
+
+    async def _handler(_runtime, worker_stop_event):
+        handler_started.set()
+        await worker_stop_event.wait()
+
+    monkeypatch.setattr(startup_pollers, "_build_standalone_html_generation_runtime", _build)
+    monkeypatch.setattr(startup_pollers, "_run_standalone_html_generation_handler", _handler)
+    monkeypatch.setattr(startup_pollers, "_STANDALONE_RETRY_SECONDS", 0.001)
+    context = WorkerLifecycleContext(
+        app=app,
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+
+    task = asyncio.create_task(startup_pollers._run_standalone_html_generation_jobs_service(context, stop_event))
+    await asyncio.wait_for(handler_started.wait(), timeout=1)
+    for _ in range(100):
+        if reconciler.calls >= 3:
+            break
+        await asyncio.sleep(0.001)
+
+    assert reconciler.calls >= 3
+    assert runtime.admission_gate.open is True
+    assert app.state.standalone_html_reconciler_admission_ready is True
+
+    stop_event.set()
+    await asyncio.wait_for(task, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_standalone_html_handler_failure_closes_admission_without_poll_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    app = FastAPI()
+    stop_event = asyncio.Event()
+    handler_started = asyncio.Event()
+    fail_handler = asyncio.Event()
+
+    class _Reconciler:
+        def run_batch(self):
+            return SimpleNamespace(
+                startup_ready=True,
+                leader=True,
+                completed_pass=True,
+                jobs_available=True,
+            )
+
+        def release(self) -> bool:
+            return True
+
+    runtime = SimpleNamespace(
+        reconciler=_Reconciler(),
+        local_only=False,
+        admission_gate=SimpleNamespace(open=False),
+        validation_pool=None,
+    )
+
+    async def _build(_context):
+        return runtime
+
+    async def _handler(_runtime, _worker_stop_event):
+        handler_started.set()
+        await fail_handler.wait()
+        raise RuntimeError("handler failed")
+
+    async def _pool(_app):
+        return object()
+
+    monkeypatch.setattr(startup_pollers, "_build_standalone_html_generation_runtime", _build)
+    monkeypatch.setattr(startup_pollers, "_run_standalone_html_generation_handler", _handler)
+    monkeypatch.setattr(startup_pollers, "_get_worker_owned_validation_pool", _pool)
+    monkeypatch.setattr(startup_pollers, "_STANDALONE_RETRY_SECONDS", 60.0)
+    context = WorkerLifecycleContext(
+        app=app,
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+    task = asyncio.create_task(startup_pollers._run_standalone_html_generation_jobs_service(context, stop_event))
+
+    try:
+        await asyncio.wait_for(handler_started.wait(), timeout=1)
+        assert runtime.admission_gate.open is True
+        fail_handler.set()
+        for _ in range(20):
+            if not runtime.admission_gate.open:
+                break
+            await asyncio.sleep(0)
+
+        assert runtime.admission_gate.open is False
+        assert app.state.standalone_html_generation_worker_registered is False
+        assert app.state.standalone_html_reconciler_admission_ready is False
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_standalone_html_local_fallback_retries_full_build_each_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    app = FastAPI()
+    stop_event = asyncio.Event()
+    handler_started = asyncio.Event()
+    build_calls = 0
+
+    class _LocalReconciler:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.released = False
+
+        def run_local_expiry_batch(self):
+            self.calls += 1
+            return SimpleNamespace(
+                local_sweep_state=("progressed" if self.calls < 3 else "completed"),
+            )
+
+        def release(self) -> bool:
+            self.released = True
+            return True
+
+    class _FullReconciler:
+        def run_batch(self):
+            return SimpleNamespace(
+                startup_ready=True,
+                leader=True,
+                completed_pass=True,
+                jobs_available=True,
+            )
+
+        def release(self) -> bool:
+            return True
+
+    local_reconciler = _LocalReconciler()
+    local_runtime = SimpleNamespace(
+        reconciler=local_reconciler,
+        local_only=True,
+        admission_gate=None,
+    )
+    full_runtime = SimpleNamespace(
+        reconciler=_FullReconciler(),
+        local_only=False,
+        admission_gate=SimpleNamespace(open=False),
+        validation_pool=None,
+    )
+
+    async def _build(_context):
+        nonlocal build_calls
+        build_calls += 1
+        return local_runtime if build_calls == 1 else full_runtime
+
+    async def _handler(_runtime, worker_stop_event):
+        handler_started.set()
+        await worker_stop_event.wait()
+
+    async def _pool(_app):
+        return object()
+
+    monkeypatch.setattr(startup_pollers, "_build_standalone_html_generation_runtime", _build)
+    monkeypatch.setattr(startup_pollers, "_run_standalone_html_generation_handler", _handler)
+    monkeypatch.setattr(startup_pollers, "_get_worker_owned_validation_pool", _pool)
+    monkeypatch.setattr(startup_pollers, "_STANDALONE_RETRY_SECONDS", 0.01)
+    context = WorkerLifecycleContext(
+        app=app,
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+    task = asyncio.create_task(startup_pollers._run_standalone_html_generation_jobs_service(context, stop_event))
+
+    try:
+        await asyncio.wait_for(handler_started.wait(), timeout=0.3)
+        assert build_calls == 2
+        assert local_reconciler.calls == 3
+        assert local_reconciler.released is True
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_standalone_html_jobs_outage_drains_local_pages_before_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    app = FastAPI()
+    stop_event = asyncio.Event()
+
+    class _OutageReconciler:
+        def __init__(self) -> None:
+            self.run_calls = 0
+            self.local_calls = 0
+
+        def run_batch(self):
+            self.run_calls += 1
+            return SimpleNamespace(
+                startup_ready=False,
+                leader=True,
+                completed_pass=False,
+                jobs_available=False,
+                local_sweep_state="progressed",
+            )
+
+        def run_local_expiry_batch(self):
+            self.local_calls += 1
+            state = "progressed" if self.local_calls == 1 else "completed"
+            return SimpleNamespace(local_sweep_state=state)
+
+        def release(self) -> bool:
+            return True
+
+    reconciler = _OutageReconciler()
+    runtime = SimpleNamespace(
+        reconciler=reconciler,
+        local_only=False,
+        admission_gate=SimpleNamespace(open=False),
+        validation_pool=None,
+    )
+
+    async def _build(_context):
+        return runtime
+
+    monkeypatch.setattr(startup_pollers, "_build_standalone_html_generation_runtime", _build)
+    monkeypatch.setattr(startup_pollers, "_STANDALONE_RETRY_SECONDS", 60.0)
+    context = WorkerLifecycleContext(
+        app=app,
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+    task = asyncio.create_task(startup_pollers._run_standalone_html_generation_jobs_service(context, stop_event))
+
+    try:
+        for _ in range(60):
+            if reconciler.local_calls >= 2:
+                break
+            await asyncio.sleep(0.005)
+        assert reconciler.run_calls == 1
+        assert reconciler.local_calls == 2
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_standalone_html_cancellation_drains_handler_fence_and_pool_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    app = FastAPI()
+    stop_event = asyncio.Event()
+    handler_started = asyncio.Event()
+    handler_stopping = asyncio.Event()
+    allow_handler_finish = asyncio.Event()
+    events: list[str] = []
+
+    class _Gate:
+        def __init__(self) -> None:
+            self._open = False
+
+        @property
+        def open(self) -> bool:
+            return self._open
+
+        @open.setter
+        def open(self, value: bool) -> None:
+            if self._open and not value:
+                events.append("admission_closed")
+            self._open = value
+
+    class _Reconciler:
+        def run_batch(self):
+            return SimpleNamespace(
+                startup_ready=True,
+                leader=True,
+                completed_pass=True,
+                jobs_available=True,
+            )
+
+        def release(self) -> bool:
+            assert events[-1] == "handler_stopped"
+            events.append("fence_released")
+            return True
+
+    runtime = SimpleNamespace(
+        reconciler=_Reconciler(),
+        local_only=False,
+        admission_gate=_Gate(),
+        validation_pool=None,
+    )
+
+    async def _build(_context):
+        return runtime
+
+    async def _handler(_runtime, worker_stop_event):
+        handler_started.set()
+        await worker_stop_event.wait()
+        events.append("handler_stop_signaled")
+        handler_stopping.set()
+        await allow_handler_finish.wait()
+        events.append("handler_stopped")
+
+    async def _pool(_app):
+        return object()
+
+    async def _close_pool(_app):
+        assert events[-1] == "fence_released"
+        events.append("pool_closed")
+
+    monkeypatch.setattr(startup_pollers, "_build_standalone_html_generation_runtime", _build)
+    monkeypatch.setattr(startup_pollers, "_run_standalone_html_generation_handler", _handler)
+    monkeypatch.setattr(startup_pollers, "_get_worker_owned_validation_pool", _pool)
+    monkeypatch.setattr(startup_pollers, "_close_worker_owned_validation_pool", _close_pool)
+    monkeypatch.setattr(startup_pollers, "_STANDALONE_RETRY_SECONDS", 60.0)
+    context = WorkerLifecycleContext(
+        app=app,
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+    task = asyncio.create_task(startup_pollers._run_standalone_html_generation_jobs_service(context, stop_event))
+
+    try:
+        await asyncio.wait_for(handler_started.wait(), timeout=1)
+        task.cancel()
+        await asyncio.wait_for(handler_stopping.wait(), timeout=0.2)
+        task.cancel()
+        allow_handler_finish.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+    finally:
+        stop_event.set()
+        allow_handler_finish.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert events == [
+        "admission_closed",
+        "handler_stop_signaled",
+        "handler_stopped",
+        "fence_released",
+        "pool_closed",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_call", [1, 2])
+async def test_standalone_html_stop_closes_admission_while_reconciliation_is_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+    blocked_call: int,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    app = FastAPI()
+    stop_event = asyncio.Event()
+    blocked_batch = threading.Event()
+    release_batch = threading.Event()
+    handler_stopped = asyncio.Event()
+    handler_starts = 0
+
+    class _Gate:
+        def __init__(self) -> None:
+            self._open = False
+            self.opened_after_stop = False
+
+        @property
+        def open(self) -> bool:
+            return self._open
+
+        @open.setter
+        def open(self, value: bool) -> None:
+            if value and stop_event.is_set():
+                self.opened_after_stop = True
+            self._open = value
+
+    class _Reconciler:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_batch(self):
+            self.calls += 1
+            if self.calls == blocked_call:
+                blocked_batch.set()
+                release_batch.wait(timeout=5)
+            return SimpleNamespace(
+                startup_ready=True,
+                leader=True,
+                completed_pass=False,
+                jobs_available=True,
+            )
+
+        def release(self) -> bool:
+            return True
+
+    runtime = SimpleNamespace(
+        reconciler=_Reconciler(),
+        local_only=False,
+        admission_gate=_Gate(),
+        validation_pool=None,
+    )
+
+    async def _build(_context):
+        return runtime
+
+    async def _handler(_runtime, worker_stop_event):
+        nonlocal handler_starts
+        handler_starts += 1
+        try:
+            await worker_stop_event.wait()
+        finally:
+            handler_stopped.set()
+
+    async def _pool(_app):
+        return object()
+
+    async def _close_pool(_app):
+        return None
+
+    monkeypatch.setattr(startup_pollers, "_build_standalone_html_generation_runtime", _build)
+    monkeypatch.setattr(startup_pollers, "_run_standalone_html_generation_handler", _handler)
+    monkeypatch.setattr(startup_pollers, "_get_worker_owned_validation_pool", _pool)
+    monkeypatch.setattr(startup_pollers, "_close_worker_owned_validation_pool", _close_pool)
+    monkeypatch.setattr(startup_pollers, "_STANDALONE_RETRY_SECONDS", 0.0)
+    context = WorkerLifecycleContext(
+        app=app,
+        settings={},
+        test_mode=True,
+        route_enabled=lambda *_args, **_kwargs: True,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+    task = asyncio.create_task(
+        startup_pollers._run_standalone_html_generation_jobs_service(
+            context,
+            stop_event,
+        )
+    )
+
+    try:
+        for _ in range(200):
+            if blocked_batch.is_set() and (blocked_call == 1 or runtime.admission_gate.open):
+                break
+            await asyncio.sleep(0.005)
+        assert blocked_batch.is_set()
+        assert runtime.admission_gate.open is (blocked_call == 2)
+        assert handler_starts == (0 if blocked_call == 1 else 1)
+
+        stop_event.set()
+
+        if blocked_call == 2:
+            await asyncio.wait_for(handler_stopped.wait(), timeout=0.2)
+        assert runtime.admission_gate.open is False
+        assert app.state.standalone_html_generation_worker_registered is False
+        assert app.state.standalone_html_reconciler_admission_ready is False
+        assert task.done() is False
+
+        release_batch.set()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=1)
+
+        assert handler_starts == (0 if blocked_call == 1 else 1)
+        assert runtime.admission_gate.open is False
+        assert runtime.admission_gate.opened_after_stop is False
+    finally:
+        stop_event.set()
+        release_batch.set()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=1)
 
 
 @pytest.mark.asyncio
@@ -461,10 +1442,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
         worker_inventory=worker_inventory,
     )
 
-    assert {
-        worker: kwargs["worker_inventory"]
-        for worker, kwargs in captured_kwargs_by_worker.items()
-    } == {
+    assert {worker: kwargs["worker_inventory"] for worker, kwargs in captured_kwargs_by_worker.items()} == {
         "audio": worker_inventory,
         "audiobook": worker_inventory,
         "audio-studio": worker_inventory,
@@ -855,7 +1833,8 @@ async def test_start_audio_jobs_worker_registers_owned_poller_when_enabled(
         app="app",
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=_register_owned_job_poller,
-        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (
+        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs)
+        == (
             "AUDIO_JOBS_WORKER_ENABLED",
             "audio-jobs",
             {},
@@ -914,7 +1893,8 @@ async def test_start_llamacpp_acquisition_jobs_worker_registers_owned_poller_whe
         app="app",
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=_register_owned_job_poller,
-        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (
+        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs)
+        == (
             "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
             "llamacpp-acquisition",
             {},
@@ -971,7 +1951,8 @@ async def test_start_llamacpp_acquisition_jobs_worker_cancels_task_when_registra
         app="app",
         owned_job_pollers=[],
         register_owned_job_poller=_register_owned_job_poller,
-        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (
+        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs)
+        == (
             "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
             "llamacpp-acquisition",
             {},
@@ -1126,9 +2107,7 @@ async def test_start_media_ingest_jobs_workers_preserves_light_handles_when_heav
     )
 
     assert handles == ("media-stop", "media-task", None, None)
-    assert registrations == [
-        {"name": "media_ingest_jobs_task", "task": "media-task", "stop_event": "media-stop"}
-    ]
+    assert registrations == [{"name": "media_ingest_jobs_task", "task": "media-task", "stop_event": "media-stop"}]
 
 
 @pytest.mark.asyncio
@@ -1154,7 +2133,8 @@ async def test_start_companion_reflection_jobs_worker_handles_guard_exception(
         app="app",
         owned_job_pollers=[],
         register_owned_job_poller=lambda *args, **kwargs: None,
-        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (
+        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs)
+        == (
             "COMPANION_REFLECTION_JOBS_WORKER_ENABLED",
             "companion",
             {},
