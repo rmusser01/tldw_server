@@ -73,6 +73,8 @@ const makeMacro = (overrides: Partial<ChatMacroSummary> = {}): ChatMacroSummary 
   digest: "digest-wrapup",
   builtin_version: 1,
   schema_version: 1,
+  validation_status: "valid",
+  validation_error: null,
   ...overrides
 })
 
@@ -164,17 +166,47 @@ describe("ChatMacrosSettings", () => {
     )
   })
 
-  it("opens a blank editor for New macro and routes header imports into that draft without persisting", async () => {
+  it("renders returned catalog validation metadata instead of deriving it", async () => {
+    const invalidMacro = makeMacro({
+      name: "stale_research",
+      command: "stale_research",
+      source: "user",
+      immutable: false,
+      validation_status: "invalid",
+      validation_error: "Output profile is unavailable."
+    })
+    mocks.listChatMacros.mockResolvedValueOnce(macroListResponse([builtinMacro, invalidMacro]))
+
+    render(<ChatMacrosSettings />)
+
+    expect(await screen.findByText("Valid")).toBeInTheDocument()
+    expect(screen.getByText("Invalid")).toHaveAttribute("title", "Output profile is unavailable.")
+  })
+
+  it("imports through the manager input into a fresh draft without persisting and accepts the same file twice", async () => {
     const user = userEvent.setup()
-    const { container } = render(<ChatMacrosSettings />)
+    render(<ChatMacrosSettings />)
 
-    await user.click(await screen.findByRole("button", { name: "New macro" }))
-    expect(screen.getByLabelText("Name")).toHaveValue("")
-    expect(screen.getByLabelText("Command")).toHaveValue("")
+    await user.click(await screen.findByRole("button", { name: "Select /research" }))
+    expect(await screen.findByLabelText("Name")).toHaveValue("research")
 
+    const upload = screen.getByLabelText("Import macro YAML file") as HTMLInputElement
+    const click = vi.spyOn(upload, "click")
     await user.click(screen.getByRole("button", { name: "Import macro" }))
-    const upload = container.querySelector('input[type="file"]') as HTMLInputElement
-    await user.upload(upload, new File(["name: imported"], "imported.yaml", { type: "text/yaml" }))
+    expect(click).toHaveBeenCalledTimes(1)
+
+    const file = new File(["name: imported"], "imported.yaml", { type: "text/yaml" })
+    await user.upload(upload, file)
+
+    expect(await screen.findByLabelText("Macro YAML")).toHaveValue("name: imported")
+    expect(screen.getByLabelText("Name")).toHaveValue("imported")
+    expect(screen.getByLabelText("Name")).not.toHaveAttribute("readonly")
+    expect(mocks.createChatMacro).not.toHaveBeenCalled()
+    expect(mocks.updateChatMacro).not.toHaveBeenCalled()
+
+    await user.type(screen.getByLabelText("Macro YAML"), "\nchanged")
+    await user.click(screen.getByRole("button", { name: "Import macro" }))
+    await user.upload(upload, file)
 
     expect(await screen.findByLabelText("Macro YAML")).toHaveValue("name: imported")
     expect(mocks.createChatMacro).not.toHaveBeenCalled()

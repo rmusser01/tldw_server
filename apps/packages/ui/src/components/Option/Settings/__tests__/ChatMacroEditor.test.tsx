@@ -59,6 +59,8 @@ const makeSummary = (overrides: Partial<ChatMacroSummary> = {}): ChatMacroSummar
   immutable: false,
   digest: "digest",
   schema_version: 1,
+  validation_status: "valid",
+  validation_error: null,
   ...overrides
 })
 
@@ -184,6 +186,25 @@ describe("ChatMacroEditor", () => {
     await user.upload(upload, file)
 
     expect(await screen.findByLabelText("Macro YAML")).toHaveValue("name: imported")
+    expect(mocks.createChatMacro).not.toHaveBeenCalled()
+    expect(mocks.updateChatMacro).not.toHaveBeenCalled()
+  })
+
+  it("applies an external import request as a fresh source draft without persisting", async () => {
+    const { rerender, props } = renderEditor({ selected: makeSummary() })
+
+    await screen.findByLabelText("Macro YAML")
+    rerender(
+      <ChatMacroEditor
+        {...props}
+        selected={null}
+        importSource={{ requestId: 1, raw: "name: imported\ncommand: imported" }}
+      />
+    )
+
+    expect(await screen.findByLabelText("Macro YAML")).toHaveValue("name: imported\ncommand: imported")
+    expect(screen.getByLabelText("Name")).toHaveValue("imported")
+    expect(screen.getByLabelText("Name")).not.toHaveAttribute("readonly")
     expect(mocks.createChatMacro).not.toHaveBeenCalled()
     expect(mocks.updateChatMacro).not.toHaveBeenCalled()
   })

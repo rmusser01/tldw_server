@@ -101,6 +101,8 @@ def test_list_get_and_settings_round_trip(api_client: MacroApiClient):
     assert wrapup["command"] == "wrapup"
     assert wrapup["source"] == "builtin"
     assert wrapup["immutable"] is True
+    assert wrapup["validation_status"] == "valid"
+    assert wrapup["validation_error"] is None
 
     detail = api_client.client.get(f"{PREFIX}/wrapup")
     assert detail.status_code == 200, detail.text

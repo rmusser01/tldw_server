@@ -21,6 +21,8 @@ class ChatMacroSummary(BaseModel):
     digest: str
     builtin_version: int | None = None
     schema_version: int
+    validation_status: Literal["valid"] = "valid"
+    validation_error: str | None = None
 
 
 class ChatMacroListResponse(BaseModel):

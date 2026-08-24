@@ -10,7 +10,11 @@ import {
   type ChatMacroSettings,
   type ChatMacroSummary
 } from "@/services/chat-macros"
-import { ChatMacroEditor } from "./ChatMacroEditor"
+import {
+  ChatMacroEditor,
+  type ChatMacroEditorImportSource
+} from "./ChatMacroEditor"
+import { readMacroImport } from "./chat-macro-editor-utils"
 import { OutputProfileEditor } from "./OutputProfileEditor"
 
 type ActiveTab = "macros" | "profiles"
@@ -35,6 +39,19 @@ const tabClassName = (active: boolean): string =>
 
 const selectionKey = (macro: ChatMacroSummary): string => `${macro.source}:${macro.name}`
 
+const catalogValidation = (macro: ChatMacroSummary): {
+  label: "Valid" | "Invalid" | "Unknown"
+  className: string
+} => {
+  if (macro.validation_status === "valid") {
+    return { label: "Valid", className: "text-success" }
+  }
+  if (macro.validation_status === "invalid") {
+    return { label: "Invalid", className: "text-danger" }
+  }
+  return { label: "Unknown", className: "text-text-muted" }
+}
+
 export const ChatMacrosSettings = () => {
   const [activeTab, setActiveTab] = React.useState<ActiveTab>("macros")
   const [macros, setMacros] = React.useState<ChatMacroSummary[]>([])
@@ -49,8 +66,10 @@ export const ChatMacrosSettings = () => {
   const [cloneName, setCloneName] = React.useState("")
   const [cloneError, setCloneError] = React.useState<string | null>(null)
   const [cloneBusy, setCloneBusy] = React.useState(false)
-  const [importRequest, setImportRequest] = React.useState(0)
-  const editorHostRef = React.useRef<HTMLDivElement>(null)
+  const [importSource, setImportSource] = React.useState<ChatMacroEditorImportSource | null>(null)
+  const [importError, setImportError] = React.useState<string | null>(null)
+  const importInputRef = React.useRef<HTMLInputElement>(null)
+  const importRequestRef = React.useRef(0)
   const mountedRef = React.useRef(false)
   const catalogRequestRef = React.useRef(0)
   const settingsRequestRef = React.useRef(0)
@@ -130,11 +149,6 @@ export const ChatMacrosSettings = () => {
     }
   }, [refreshCatalog, refreshSettings])
 
-  React.useEffect(() => {
-    if (importRequest === 0) return
-    editorHostRef.current?.querySelector<HTMLInputElement>('input[type="file"]')?.click()
-  }, [importRequest])
-
   const selectedMacro = selection?.kind === "macro"
     ? macros.find((macro) => macro.name === selection.name) || null
     : null
@@ -153,12 +167,30 @@ export const ChatMacrosSettings = () => {
     setCloneSource(null)
     setCloneName("")
     setCloneError(null)
+    setImportError(null)
     setSelection({ kind: "new" })
   }, [])
 
   const importMacro = React.useCallback(() => {
-    openNewMacro()
-    setImportRequest((current) => current + 1)
+    setImportError(null)
+    importInputRef.current?.click()
+  }, [])
+
+  const handleImportFile = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (!file) return
+
+    try {
+      const raw = await readMacroImport(file)
+      if (!mountedRef.current) return
+      openNewMacro()
+      setImportSource({ requestId: ++importRequestRef.current, raw })
+    } catch (error) {
+      if (mountedRef.current) {
+        setImportError(error instanceof Error ? error.message : "Unable to import macro YAML.")
+      }
+    }
   }, [openNewMacro])
 
   const toggleMacro = React.useCallback(async (macro: ChatMacroSummary) => {
@@ -247,6 +279,14 @@ export const ChatMacrosSettings = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-testid="chat-macro-header-actions">
+          <input
+            ref={importInputRef}
+            type="file"
+            className="sr-only"
+            accept=".yaml,.yml,text/yaml,text/plain"
+            aria-label="Import macro YAML file"
+            onChange={(event) => void handleImportFile(event)}
+          />
           <button type="button" className={headerButtonClassName} onClick={openNewMacro}>
             <Plus aria-hidden="true" size={16} />
             New macro
@@ -275,6 +315,8 @@ export const ChatMacrosSettings = () => {
           </Tooltip>
         </div>
       </header>
+
+      {importError ? <p className="text-sm font-medium text-danger" role="alert">{importError}</p> : null}
 
       <div className="flex border-b border-border" role="tablist" aria-label="Chat macro settings views">
         <button
@@ -321,6 +363,7 @@ export const ChatMacrosSettings = () => {
             <div className="divide-y divide-border border-y border-border">
               {macros.map((macro) => {
                 const selected = selectedMacro?.name === macro.name
+                const validation = catalogValidation(macro)
                 return (
                   <div
                     key={selectionKey(macro)}
@@ -340,7 +383,9 @@ export const ChatMacrosSettings = () => {
                       <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-text-muted">
                         <span>{macro.source}</span>
                         <span>{macro.enabled ? "Enabled" : "Disabled"}</span>
-                        <span className="text-success">Valid</span>
+                        <span className={validation.className} title={macro.validation_error || undefined}>
+                          {validation.label}
+                        </span>
                       </span>
                     </button>
                     <button
@@ -371,7 +416,7 @@ export const ChatMacrosSettings = () => {
             </div>
           </aside>
 
-          <div ref={editorHostRef} className="min-w-0">
+          <div className="min-w-0">
             {cloneSource ? (
               <section className="mb-4 border-y border-border py-3" aria-labelledby="chat-macro-clone-title">
                 <h2 id="chat-macro-clone-title" className="mb-3 text-sm font-semibold text-text">
@@ -410,6 +455,7 @@ export const ChatMacrosSettings = () => {
               onSaved={handleSaved}
               onDeleted={handleDeleted}
               onCloneRequested={requestClone}
+              importSource={importSource}
             />
           </div>
         </div>
