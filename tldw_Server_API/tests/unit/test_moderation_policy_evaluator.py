@@ -563,6 +563,7 @@ def test_direct_numeric_string_limits_are_coerced_for_evaluation():
     evaluator = PolicyEvaluator()
 
     assert list(evaluator.iter_scan_chunks("xx", limits)) == [(0, 2)]
+    assert evaluator.find_match_span(re.compile("x"), "xx", limits) == (0, 1)
 
     assert (
         evaluator.find_match_span(

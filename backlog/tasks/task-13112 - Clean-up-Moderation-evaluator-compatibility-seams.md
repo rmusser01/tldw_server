@@ -25,7 +25,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 - backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
-updated_date: 2026-08-24 07:00
+updated_date: 2026-08-24 07:25
 ---
 
 ## Description
@@ -93,6 +93,7 @@ Fresh Task 3 evidence:
 
 Stage 3 is complete. Stage 4 independent review and final PR-readiness verification is now in progress. TASK-13112 remains In Progress and is not marked Done.
 Rebase SHA mapping: pre-rebase c601412b7c is d7a5468f6f on the current branch.
+Quality-review correction: the deleted service characterization preserved both numeric-string max_scan_chars="2" geometry and the successful-match boundary, while the direct evaluator replacement retained only geometry plus a long-text no-match. Added the exact direct assertion `evaluator.find_match_span(re.compile("x"), "xx", limits) == (0, 1)` in `test_direct_numeric_string_limits_are_coerced_for_evaluation()`, keeping the existing `[(0, 2)]` geometry and no-match assertions. This is characterization-only coverage: the focused test passed on its first run, confirming existing behavior; no production red phase or production change was expected or needed. Fresh results: changed-test py_compile exit 0; exact node 1 passed, 8 warnings; policy_evaluator + characterization + delegation suites 133 passed, 272 warnings; Black check 1 file unchanged; Ruff check passed; `git diff --check` passed with no output.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
