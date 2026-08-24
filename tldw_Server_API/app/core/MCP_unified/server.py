@@ -7,6 +7,7 @@ Handles WebSocket and HTTP connections with production-ready features.
 import asyncio
 import ipaddress
 import json
+import math
 import os
 import re
 import secrets
@@ -66,6 +67,7 @@ _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS = _MCP_SERVER_NONCRITICAL_EXCEPTIONS
 
 _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*))?\}$")
 _JSONRPC_EXPLICIT_NULL_ID_PREFIX = "__tldw_ws_jsonrpc_explicit_null_id_"
+_DEFERRED_MODULE_SHUTDOWN_WAIT_SECONDS = 15.0
 
 
 class _ModuleShutdownFailure(RuntimeError):
@@ -893,6 +895,75 @@ class MCPServer:
                 )
         if deferred_cancellation is not None:
             raise deferred_cancellation
+
+    async def wait_for_shutdown_completion(
+        self,
+        *,
+        timeout_seconds: float = _DEFERRED_MODULE_SHUTDOWN_WAIT_SECONDS,
+    ) -> bool:
+        """Boundedly wait for any deferred module-registry teardown."""
+
+        if (
+            type(timeout_seconds) not in (int, float)
+            or not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+        ):
+            raise ValueError("timeout_seconds must be a positive finite number")
+
+        task = self._module_shutdown_task
+        if task is None:
+            return self._module_shutdown_complete
+
+        deadline = asyncio.get_running_loop().time() + float(timeout_seconds)
+        deferred_cancellation: asyncio.CancelledError | None = None
+        completed = False
+        while True:
+            if task.done():
+                completed = not task.cancelled()
+                if completed:
+                    try:
+                        task.result()
+                    except asyncio.CancelledError:
+                        completed = False
+                    except Exception as exc:  # noqa: BLE001 - teardown errors stay contained and logged.
+                        logger.debug(
+                            "MCP deferred module shutdown completion failed "
+                            "error_type={error_type}",
+                            error_type=_safe_exception_family(exc),
+                        )
+                        completed = False
+                break
+
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                break
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+            except TimeoutError:
+                break
+            except asyncio.CancelledError as exc:
+                if deferred_cancellation is None:
+                    deferred_cancellation = exc
+            except Exception as exc:  # noqa: BLE001 - teardown errors stay contained and logged.
+                logger.debug(
+                    "MCP deferred module shutdown completion failed "
+                    "error_type={error_type}",
+                    error_type=_safe_exception_family(exc),
+                )
+                completed = False
+                break
+            else:
+                completed = True
+                break
+
+        if not completed and not task.done():
+            logger.warning(
+                "MCP deferred module shutdown wait timed out timeout_seconds={timeout_seconds}",
+                timeout_seconds=float(timeout_seconds),
+            )
+        if deferred_cancellation is not None:
+            raise deferred_cancellation
+        return completed
 
     async def _register_default_modules(self):
         """Register default modules via config/env-driven loader"""

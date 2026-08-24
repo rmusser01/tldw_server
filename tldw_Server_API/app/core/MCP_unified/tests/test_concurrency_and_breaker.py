@@ -254,6 +254,8 @@ def _breaker_module(
     threshold: int = 3,
     recovery_timeout: float = 0.25,
 ) -> FlappyModule:
+    """Build a module backed by the requested circuit-breaker implementation."""
+
     circuit_breaker_factory = None
     if breaker_kind == "injected":
         from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
@@ -274,6 +276,8 @@ def _breaker_module(
 
 
 def _breaker_state_name(module: BaseModule) -> str:
+    """Return a normalized state name from either breaker implementation."""
+
     breaker = module._circuit_breaker
     state = getattr(breaker, "state", None)
     if state is None:
@@ -282,18 +286,24 @@ def _breaker_state_name(module: BaseModule) -> str:
 
 
 def _half_open_calls(module: BaseModule) -> int:
+    """Return the active half-open probe count from either breaker implementation."""
+
     breaker = module._circuit_breaker
     calls = getattr(breaker, "half_open_calls", None)
     return calls if calls is not None else breaker._half_open_in_flight
 
 
 def _current_recovery_timeout(module: BaseModule) -> float:
+    """Return the active recovery timeout from either breaker implementation."""
+
     breaker = module._circuit_breaker
     timeout = getattr(breaker, "current_recovery_timeout", None)
     return timeout if timeout is not None else breaker._current_recovery_timeout
 
 
 def _force_half_open(module: BaseModule) -> None:
+    """Move either breaker implementation into a half-open-ready state."""
+
     breaker = module._circuit_breaker
     force_half_open = getattr(breaker, "force_half_open", None)
     if callable(force_half_open):
@@ -304,6 +314,8 @@ def _force_half_open(module: BaseModule) -> None:
 
 
 async def _raise_runtime_error(message: str = "test failure") -> None:
+    """Raise a runtime error for breaker-accounting tests."""
+
     raise RuntimeError(message)
 
 
@@ -507,7 +519,7 @@ async def test_expected_failure_preserves_cause_traceback_and_visible_chain(
 
 
 class _UnexpectedModuleFailure(Exception):
-    pass
+    """Distinct unexpected failure used to verify exception preservation."""
 
 
 @pytest.mark.parametrize("breaker_kind", ["fallback", "injected"])

@@ -68,7 +68,11 @@ class _BestEffortSpanContext:
             span = self._context_manager.__enter__()
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - telemetry is best effort.
+        except Exception as exc:  # noqa: BLE001 - telemetry is best effort.
+            logger.debug(
+                "MCP telemetry span enter failed",
+                error_type=_safe_exception_family(exc),
+            )
             return _NoopSpan()
         self._entered = True
         return span
@@ -88,7 +92,11 @@ class _BestEffortSpanContext:
                 self._context_manager.__exit__(exc_type, exc, traceback)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - telemetry cannot replace tool outcomes.
+        except Exception as observer_exc:  # noqa: BLE001 - telemetry cannot replace tool outcomes.
+            logger.debug(
+                "MCP telemetry span exit failed",
+                error_type=_safe_exception_family(observer_exc),
+            )
             return False
         return False
 
@@ -104,7 +112,11 @@ def _best_effort_span_context(
         context_manager = telemetry.trace_context(operation_name, attributes)
     except asyncio.CancelledError:
         raise
-    except Exception:  # noqa: BLE001 - telemetry is best effort.
+    except Exception as exc:  # noqa: BLE001 - telemetry is best effort.
+        logger.debug(
+            "MCP telemetry span creation failed",
+            error_type=_safe_exception_family(exc),
+        )
         context_manager = None
     return _BestEffortSpanContext(context_manager)
 
@@ -116,7 +128,11 @@ def _set_span_attribute(span: Any, key: str, value: Any) -> None:
         span.set_attribute(key, value)
     except asyncio.CancelledError:
         raise
-    except Exception:  # noqa: BLE001 - telemetry is best effort.
+    except Exception as exc:  # noqa: BLE001 - telemetry is best effort.
+        logger.debug(
+            "MCP telemetry span attribute failed",
+            error_type=_safe_exception_family(exc),
+        )
         return None
 
 

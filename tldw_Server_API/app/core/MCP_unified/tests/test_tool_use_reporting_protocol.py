@@ -1710,6 +1710,23 @@ async def test_hostile_telemetry_cannot_replace_expected_failure(
     assert module.calls == 1
     assert len(recorder.events) == 1
     assert sentinel not in repr((result, recorder.events, captured))
+    expected_diagnostic = {
+        "create": "MCP telemetry span creation failed",
+        "enter": "MCP telemetry span enter failed",
+        "attribute": "MCP telemetry span attribute failed",
+        "exit": "MCP telemetry span exit failed",
+        "suppress": None,
+    }[phase]
+    if expected_diagnostic is not None:
+        diagnostics = [
+            record
+            for record in captured
+            if record["message"] == expected_diagnostic
+        ]
+        assert diagnostics
+        assert {
+            record["extra"].get("error_type") for record in diagnostics
+        } == {"ExoticObserverError"}
 
 
 @pytest.mark.parametrize("phase", ["create", "enter", "attribute", "exit"])

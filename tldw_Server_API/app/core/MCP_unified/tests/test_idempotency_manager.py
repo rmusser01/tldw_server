@@ -2494,6 +2494,7 @@ async def test_server_defers_single_module_shutdown_until_retained_owner_finishe
     await asyncio.wait_for(callback_started.wait(), timeout=0.5)
     shutdown_one = asyncio.create_task(server.shutdown())
     shutdown_two = asyncio.create_task(server.shutdown())
+    completion_waiter: asyncio.Task[bool] | None = None
 
     try:
         await asyncio.wait_for(
@@ -2508,9 +2509,16 @@ async def test_server_defers_single_module_shutdown_until_retained_owner_finishe
         assert deferred_task.done() is False
         assert manager.has_pending_shutdown_work is True
 
+        completion_waiter = asyncio.create_task(
+            server.wait_for_shutdown_completion(timeout_seconds=0.5)
+        )
+        await asyncio.sleep(0)
+        assert completion_waiter.done() is False
+
         release_callback.set()
         result = await asyncio.wait_for(execution, timeout=0.5)
         await asyncio.wait_for(modules_stopped.wait(), timeout=0.5)
+        assert await asyncio.wait_for(completion_waiter, timeout=0.5) is True
         await asyncio.sleep(0)
 
         assert result.payload is payload
@@ -2537,5 +2545,60 @@ async def test_server_defers_single_module_shutdown_until_retained_owner_finishe
             execution,
             shutdown_one,
             shutdown_two,
+            *([completion_waiter] if completion_waiter is not None else []),
             return_exceptions=True,
         )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_server_shutdown_completion_wait_is_bounded() -> None:
+    server = MCPServer()
+    release = asyncio.Event()
+
+    async def _pending_module_shutdown() -> None:
+        await release.wait()
+
+    module_task = asyncio.create_task(_pending_module_shutdown())
+    server._module_shutdown_task = module_task
+    try:
+        assert (
+            await server.wait_for_shutdown_completion(timeout_seconds=0.01)
+            is False
+        )
+        assert module_task.done() is False
+    finally:
+        release.set()
+        await asyncio.wait_for(module_task, timeout=0.5)
+        server._module_shutdown_task = None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_server_shutdown_completion_wait_defers_cancellation() -> None:
+    server = MCPServer()
+    release = asyncio.Event()
+
+    async def _pending_module_shutdown() -> None:
+        await release.wait()
+
+    module_task = asyncio.create_task(_pending_module_shutdown())
+    server._module_shutdown_task = module_task
+    waiter = asyncio.create_task(
+        server.wait_for_shutdown_completion(timeout_seconds=0.5)
+    )
+    await asyncio.sleep(0)
+    waiter.cancel("original shutdown cancellation")
+    await asyncio.sleep(0)
+
+    try:
+        assert waiter.done() is False
+        release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(waiter, timeout=0.5)
+        assert caught.value.args == ("original shutdown cancellation",)
+        assert module_task.done() is True
+    finally:
+        release.set()
+        await asyncio.gather(module_task, waiter, return_exceptions=True)
+        server._module_shutdown_task = None
