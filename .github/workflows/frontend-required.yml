@@ -190,8 +190,47 @@ jobs:
               git fetch --no-tags --depth=1 origin "$BASE_SHA"
             fi
             git cat-file -e "${BASE_SHA}^{commit}"
-            echo "Running changed-only frontend unit tests from base SHA ${BASE_SHA}"
-            bunx vitest run --changed="${BASE_SHA}"
+            IMPACTED_TEST_LIMIT="500"
+            IMPACTED_TEST_COUNT="$(
+              bunx vitest list --changed="${BASE_SHA}" --filesOnly |
+                wc -l |
+                tr -d '[:space:]'
+            )"
+            if [[ ! "${IMPACTED_TEST_COUNT}" =~ ^[0-9]+$ ]]; then
+              echo "Unable to count dependency-impacted frontend tests."
+              exit 1
+            fi
+
+            if (( IMPACTED_TEST_COUNT > IMPACTED_TEST_LIMIT )); then
+              echo "Dependency impact expanded to ${IMPACTED_TEST_COUNT} tests; running directly changed frontend tests instead."
+              DIRECT_TEST_FILES=()
+              while IFS= read -r repo_file; do
+                case "${repo_file}" in
+                  apps/tldw-frontend/*)
+                    relative_file="${repo_file#apps/tldw-frontend/}"
+                    ;;
+                  apps/packages/ui/*)
+                    relative_file="../packages/ui/${repo_file#apps/packages/ui/}"
+                    ;;
+                  *)
+                    continue
+                    ;;
+                esac
+                if [[ "${relative_file}" =~ (^|/)__tests__/.*\.(test|spec)\.(ts|tsx)$ ]]; then
+                  DIRECT_TEST_FILES+=("${relative_file}")
+                fi
+              done < <(git diff --name-only --diff-filter=ACMR "${BASE_SHA}"...HEAD)
+
+              if (( ${#DIRECT_TEST_FILES[@]} == 0 )); then
+                echo "No directly changed frontend tests were found for a pathological dependency expansion."
+                exit 1
+              fi
+              printf 'Running directly changed frontend test: %s\n' "${DIRECT_TEST_FILES[@]}"
+              bunx vitest run "${DIRECT_TEST_FILES[@]}"
+            else
+              echo "Running ${IMPACTED_TEST_COUNT} dependency-impacted frontend unit tests from base SHA ${BASE_SHA}"
+              bunx vitest run --changed="${BASE_SHA}"
+            fi
           else
             echo "No base SHA found; running full frontend unit suite."
             bun run test:run
