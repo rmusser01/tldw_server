@@ -4729,11 +4729,7 @@ async def update_persona_visual_pack_manifest(
             user_id=user_id,
             manifest=payload.manifest,
             companion_behavior=companion_behavior,
-            expected_version=(
-                int(current["version"])
-                if payload.expected_version is None
-                else payload.expected_version
-            ),
+            expected_version=payload.expected_version,
         )
         assets = await _run_persona_db_call(
             db.list_persona_visual_assets,

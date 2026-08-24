@@ -2514,3 +2514,33 @@ def test_visual_expected_versions_reject_non_integer_json_values(
 
     assert review.status_code == 422, review.text
     assert activation.status_code == 422, activation.text
+
+
+@pytest.mark.parametrize(
+    "version_payload",
+    [
+        {"expected_version": True},
+        {"expected_version": 1.0},
+        {"expected_version": "1"},
+        {"expected_version": None},
+        pytest.param({}, id="omitted"),
+    ],
+)
+def test_manifest_update_requires_an_explicit_strict_version_before_mutation(
+    persona_db: CharactersRAGDB,
+    version_payload: dict[str, object],
+) -> None:
+    """Inactive payload updates reject coercion and omission before touching the pack."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Strict Manifest Version Persona")
+        pack = _create_visual_pack(client, persona_id)
+        payload: dict[str, object] = {"manifest": pack["manifest"], **version_payload}
+        response = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json=payload,
+        )
+        persisted = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+
+    assert response.status_code == 422, response.text
+    assert persisted.status_code == 200, persisted.text
+    assert persisted.json()["version"] == pack["version"]

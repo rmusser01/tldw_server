@@ -262,7 +262,7 @@ class PersonaVisualLibraryUseRequest(BaseModel):
 class PersonaVisualManifestUpdate(BaseModel):
     manifest: dict[str, Any] = Field(default_factory=dict)
     companion_behavior: dict[str, Any] | None = None
-    expected_version: int | None = Field(default=None, ge=1)
+    expected_version: PersonaStrictVersion
 
 
 class PersonaVisualRendererCapabilityResponse(BaseModel):
