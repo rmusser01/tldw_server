@@ -14,7 +14,8 @@ const mocks = vi.hoisted(() => ({
   deleteChatMacro: vi.fn(),
   validateChatMacro: vi.fn(),
   confirmDanger: vi.fn(),
-  downloadBlob: vi.fn()
+  downloadBlob: vi.fn(),
+  clipboardWriteText: vi.fn()
 }))
 
 vi.mock("@/services/chat-macros", () => ({
@@ -120,6 +121,11 @@ const renderEditor = (props: Partial<React.ComponentProps<typeof ChatMacroEditor
 describe("ChatMacroEditor", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: mocks.clipboardWriteText }
+    })
+    mocks.clipboardWriteText.mockResolvedValue(undefined)
     mocks.getChatMacro.mockResolvedValue(success(makeDetail()))
     mocks.validateChatMacro.mockResolvedValue(success({ valid: true, macro: { name: "handoff" } }))
     mocks.createChatMacro.mockResolvedValue(success(makeDetail()))
@@ -167,6 +173,8 @@ describe("ChatMacroEditor", () => {
 
     expect(await screen.findByLabelText("Name")).toHaveValue("research")
     expect(screen.getByLabelText("Name")).toHaveAttribute("readonly")
+    expect(screen.getByLabelText("Command")).toBeDisabled()
+    expect(screen.getByLabelText("Description")).toBeDisabled()
     expect(screen.getByLabelText("Macro YAML")).toHaveValue(rawSource)
     expect(mocks.getChatMacro).toHaveBeenCalledWith("research")
   })
@@ -225,6 +233,27 @@ describe("ChatMacroEditor", () => {
     expect(mocks.downloadBlob).toHaveBeenCalledWith(expect.any(Blob), "research.yaml")
     const [blob] = mocks.downloadBlob.mock.calls[0] as [Blob, string]
     expect(await blob.text()).toBe(rawSource)
+  })
+
+  it("clears a stale copy error after a later copy succeeds", async () => {
+    const user = userEvent.setup()
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: mocks.clipboardWriteText }
+    })
+    mocks.clipboardWriteText
+      .mockRejectedValueOnce(new Error("Clipboard unavailable"))
+      .mockResolvedValueOnce(undefined)
+    renderEditor({ selected: makeSummary() })
+
+    await screen.findByLabelText("Macro YAML")
+    await user.click(screen.getByRole("button", { name: "Copy macro YAML" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to copy YAML.")
+
+    await user.click(screen.getByRole("button", { name: "Copy macro YAML" }))
+
+    expect(await screen.findByRole("status")).toHaveTextContent("YAML copied.")
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
   it("confirms deletion with cancel focus and refreshes only after success", async () => {
@@ -343,6 +372,7 @@ describe("ChatMacroEditor", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Command")).toHaveValue("research"))
     expect(screen.getByLabelText("Command")).not.toHaveAttribute("readonly")
+    expect(screen.getByLabelText("Description")).toBeEnabled()
     await user.clear(screen.getByLabelText("Command"))
     await user.type(screen.getByLabelText("Command"), "handoff")
     await user.click(screen.getByRole("button", { name: "YAML" }))

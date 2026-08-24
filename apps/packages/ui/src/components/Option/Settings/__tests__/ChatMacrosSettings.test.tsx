@@ -213,6 +213,25 @@ describe("ChatMacrosSettings", () => {
     expect(mocks.updateChatMacro).not.toHaveBeenCalled()
   })
 
+  it("does not replay an imported draft after the editor remounts", async () => {
+    const user = userEvent.setup()
+    render(<ChatMacrosSettings />)
+
+    const upload = screen.getByLabelText("Import macro YAML file") as HTMLInputElement
+    await user.upload(
+      upload,
+      new File(["name: imported"], "imported.yaml", { type: "text/yaml" })
+    )
+    const source = await screen.findByLabelText("Macro YAML")
+    await user.type(source, "\nchanged: true")
+
+    await user.click(screen.getByRole("tab", { name: "Output profiles" }))
+    await user.click(screen.getByRole("tab", { name: "Macros" }))
+
+    expect(await screen.findByLabelText("Name")).toHaveValue("")
+    expect(screen.queryByLabelText("Macro YAML")).not.toBeInTheDocument()
+  })
+
   it("loads a selected user macro and exposes only disable and clone actions for a selected built-in", async () => {
     const user = userEvent.setup()
     render(<ChatMacrosSettings />)
@@ -229,6 +248,32 @@ describe("ChatMacrosSettings", () => {
     expect(screen.getByLabelText("Clone macro name")).toHaveClass("bg-surface")
     expect(screen.queryByRole("button", { name: "Save macro" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Delete macro" })).not.toBeInTheDocument()
+  })
+
+  it("preserves the selected dirty draft when toggling another macro refreshes the catalog", async () => {
+    const user = userEvent.setup()
+    mocks.listChatMacros
+      .mockResolvedValueOnce(macroListResponse([builtinMacro, userMacro]))
+      .mockResolvedValueOnce(macroListResponse([
+        { ...builtinMacro, enabled: false },
+        { ...userMacro }
+      ]))
+
+    render(<ChatMacrosSettings />)
+
+    await user.click(await screen.findByRole("button", { name: "Select /research" }))
+    const source = await screen.findByLabelText("Macro YAML")
+    await user.type(source, "\ncustom: dirty")
+    await user.click(screen.getByRole("switch", { name: "Toggle /wrapup" }))
+
+    await waitFor(() => expect(mocks.listChatMacros).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole("button", { name: "Select /research" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect((screen.getByLabelText("Macro YAML") as HTMLTextAreaElement).value).toContain(
+      "custom: dirty"
+    )
   })
 
   it("refreshes the catalog and selects the new clone from the selected built-in", async () => {

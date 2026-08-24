@@ -12,9 +12,10 @@ path at `macros/<name>/MACRO.yaml`. The directory and definition belong to that
 user; a user cannot read, update, or delete another user's macros.
 
 The resource name is immutable after creation. The API route name, storage
-directory, and YAML `name` must agree. Create, update, clone, and validation
-requests reject mismatches rather than trying to rename or reconcile identities.
-Commands remain separately configurable subject to command validation.
+directory, and YAML `name` must agree. Create and update reject identity
+mismatches, while clone generates matching resource and YAML identities.
+Standalone validation validates YAML only because it has no resource identity to
+compare. Commands remain separately configurable subject to command validation.
 
 Command names in v1 are slash-compatible identifiers:
 
