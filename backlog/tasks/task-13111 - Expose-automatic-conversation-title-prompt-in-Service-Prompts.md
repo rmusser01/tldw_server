@@ -1,7 +1,7 @@
 ---
 id: TASK-13111
 title: Expose automatic conversation-title prompt in Service Prompts
-status: Done
+status: In Progress
 created_date: 2026-08-23 21:58
 labels:
 - service-prompts
@@ -28,7 +28,7 @@ modified_files:
 - apps/packages/ui/src/components/Option/Settings/__tests__/ServicePromptsSettings.test.tsx
 - apps/packages/ui/src/assets/locale/en/settings.json
 - apps/packages/ui/src/public/_locales/en/settings.json
-updated_date: 2026-08-23 23:26
+updated_date: 2026-08-24 03:56
 ---
 
 ## Description
@@ -82,6 +82,7 @@ Final cleanup (2026-08-23):
 - Full branch whitespace: `git diff --check 7a536e5d7aa0666cdd7af94b68a4256d315296f7..HEAD` => exit 0.
 - Known baseline/tooling caveats retained: `bun run typecheck` in apps/tldw-frontend has unrelated diagnostics only in untouched scripts/__tests__/skills-certification-{evidence,lifecycle,profile,runner}.test.ts; the original packages/ui `bunx eslint` command cannot discover an ESLint config, so the repository-pinned lint command above is the applicable gate. Existing host Darwin confstr() temporary-directory warnings are benign.
 - Final rationale: one centrally loaded/rendered immutable request-scope-bound title snapshot protects every automatic-title caller while preserving ordinary prompt/model fallback behavior so completed chats remain usable. Settings shows the prompt without duplicating the Chat enablement control.
+PR #2811 follow-up (2026-08-24): reopened for requested rebase onto latest dev and verified review/CI follow-up. Qodo reported two bounded items in generateTitle: add safe failure-stage/type/status context without logging prompt/provider payloads, and honor a pre-aborted caller before the settings read. Changes will follow RED→GREEN and be reverified before the task returns to Done.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
