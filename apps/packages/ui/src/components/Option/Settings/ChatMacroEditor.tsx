@@ -82,10 +82,10 @@ const iconButtonClassName =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
 
 const fieldClassName =
-  "mt-1 h-9 w-full rounded-md border border-border bg-background px-2.5 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+  "mt-1 h-9 w-full rounded-md border border-border bg-surface px-2.5 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
 
 const sourceFieldClassName =
-  "mt-1 min-h-[280px] w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-sm leading-6 text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+  "mt-1 min-h-[280px] w-full resize-y rounded-md border border-border bg-surface px-3 py-2 font-mono text-sm leading-6 text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
 
 export const ChatMacroEditor = ({
   selected,
@@ -557,7 +557,7 @@ export const ChatMacroEditor = ({
                 {label("mergePrompt", "Merge prompt")}
                 <textarea
                   id="chat-macro-editor-merge-prompt"
-                  className="mt-1 min-h-28 w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-1 min-h-28 w-full resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
                   value={draft.merge.prompt}
                   disabled={loading || isBuiltin}
                   onChange={(event) => setDraft((current) => ({
@@ -646,7 +646,7 @@ export const ChatMacroEditor = ({
                       <textarea
                         id={`chat-macro-editor-branch-prompt-${branch.id}`}
                         aria-label={`${label("branchPrompt", "Branch prompt")} ${index + 1}`}
-                        className="mt-1 min-h-24 w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+                        className="mt-1 min-h-24 w-full resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
                         value={branch.prompt}
                         disabled={loading || isBuiltin}
                         onChange={(event) => updateBranch(index, "prompt", event.target.value)}

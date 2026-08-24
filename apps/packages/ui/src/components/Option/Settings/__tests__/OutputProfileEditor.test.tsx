@@ -71,6 +71,12 @@ describe("OutputProfileEditor", () => {
     )
   })
 
+  it("uses the themed surface token for profile fields", () => {
+    renderProfileEditor()
+
+    expect(screen.getByLabelText("Profile")).toHaveClass("bg-surface")
+  })
+
   it("saves ordered sections and custom headings without dropping other settings", async () => {
     const user = userEvent.setup()
     renderProfileEditor()

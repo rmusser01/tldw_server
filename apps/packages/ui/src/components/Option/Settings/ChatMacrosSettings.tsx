@@ -427,7 +427,7 @@ export const ChatMacrosSettings = () => {
                     Clone macro name
                     <input
                       id="chat-macro-clone-name"
-                      className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2.5 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2.5 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
                       value={cloneName}
                       disabled={cloneBusy}
                       onChange={(event) => {
