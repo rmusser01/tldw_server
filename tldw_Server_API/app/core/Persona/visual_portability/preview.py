@@ -9,6 +9,10 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from tldw_Server_API.app.core.Persona.companion_behavior import (
+    CompanionBehaviorValidationError,
+    normalize_companion_behavior,
+)
 from tldw_Server_API.app.core.Persona.visual_import_preview_validators import (
     preview_renderer_import,
 )
@@ -20,10 +24,17 @@ from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
 )
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
+    resolved_visual_state_ids,
     validate_visual_manifest,
 )
 
 from .archive import normalize_member_name, validate_archive_members
+from .codex_pet import (
+    CODEX_PET_ASSET_ID,
+    CODEX_PET_SCHEMA_VERSION,
+    is_codex_pet_archive,
+    load_codex_pet_archive,
+)
 from .constants import (
     ASSET_BYTES_STATUS_MISSING,
     ASSET_BYTES_STATUS_PRESENT,
@@ -32,12 +43,6 @@ from .constants import (
     PERSONA_VISUAL_PACK_SCHEMA_VERSION,
     TRUST_MODE_TRUSTED_RESTORE,
     TRUST_MODE_UNTRUSTED_IMPORT,
-)
-from .codex_pet import (
-    CODEX_PET_ASSET_ID,
-    CODEX_PET_SCHEMA_VERSION,
-    is_codex_pet_archive,
-    load_codex_pet_archive,
 )
 from .fingerprints import canonical_payload_fingerprint, sha256_file, sha256_stream
 
@@ -92,6 +97,7 @@ class PersonaVisualPackImportPreviewer:
                 raise ValueError("malformed_metadata: metadata/pack.json")
             renderer_import_preview: dict[str, Any] | None = None
             resolved_required_states: Mapping[str, str] = {}
+            behavior_state_ids: set[str] = set()
             if _uses_renderer_import_preview(visual_manifest):
                 renderer_import_preview = preview_renderer_import(
                     manifest=visual_manifest,
@@ -120,6 +126,14 @@ class PersonaVisualPackImportPreviewer:
                 except PersonaVisualManifestError as exc:
                     raise ValueError("malformed_visual_manifest") from exc
                 resolved_required_states = manifest_validation.resolved_required_states
+                behavior_state_ids = resolved_visual_state_ids(manifest_validation.manifest)
+            try:
+                pack["companion_behavior"] = normalize_companion_behavior(
+                    pack.get("companion_behavior"),
+                    resolvable_state_ids=behavior_state_ids,
+                )
+            except CompanionBehaviorValidationError as exc:
+                raise ValueError("malformed_companion_behavior") from exc
 
         validation_warnings = _validation_warnings(assets)
         source_persona_id = str(pack.get("source_persona_id") or "")

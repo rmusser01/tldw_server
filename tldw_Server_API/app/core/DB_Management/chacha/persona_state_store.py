@@ -2505,6 +2505,7 @@ class PersonaStateStore:
         user_id: str,
     ) -> dict[str, Any] | None:
         """Return one active-owner pack when only its immutable id is available."""
+        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
         query = """
             SELECT p.*
               FROM persona_visual_packs p
@@ -2513,11 +2514,14 @@ class PersonaStateStore:
                AND pp.user_id = p.user_id
              WHERE p.id = ?
                AND p.user_id = ?
-               AND p.deleted = 0
-               AND pp.deleted = 0
+               AND p.deleted = ?
+               AND pp.deleted = ?
              LIMIT 1
         """
-        cursor = self.execute_query(query, (pack_id, user_id))
+        cursor = self.execute_query(
+            query,
+            (pack_id, user_id, deleted_false, deleted_false),
+        )
         return self._persona_visual_pack_row_to_dict(cursor.fetchone())
 
     def list_persona_visual_packs(

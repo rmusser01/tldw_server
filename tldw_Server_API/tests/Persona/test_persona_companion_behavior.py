@@ -44,6 +44,47 @@ def test_behavior_none_remains_absent_without_inference() -> None:
     assert normalize_companion_behavior(None, resolvable_state_ids={"idle"}) is None
 
 
+def test_behavior_rejects_float_schema_version() -> None:
+    with pytest.raises(CompanionBehaviorValidationError):
+        normalize_companion_behavior(
+            {"schema_version": 1.0, "entries": []},
+            resolvable_state_ids={"idle"},
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("trigger", []),
+        ("trigger", {}),
+        ("category", []),
+        ("category", {}),
+    ],
+)
+def test_behavior_rejects_non_string_enums_with_contract_error(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(CompanionBehaviorValidationError):
+        normalize_companion_behavior(
+            {"schema_version": 1, "entries": [_entry(**{field: value})]},
+            resolvable_state_ids={"ambient.look"},
+        )
+
+
+@pytest.mark.parametrize(
+    "weight",
+    [1 << 100_000, -(1 << 100_000)],
+    ids=["huge-positive-json-integer", "huge-negative-json-integer"],
+)
+def test_behavior_rejects_huge_json_integers_with_contract_error(weight: int) -> None:
+    with pytest.raises(CompanionBehaviorValidationError):
+        normalize_companion_behavior(
+            {"schema_version": 1, "entries": [_entry(suggested_weight=weight)]},
+            resolvable_state_ids={"ambient.look"},
+        )
+
+
 @pytest.mark.parametrize("weight", [-1, 10_001, float("inf"), float("nan"), True])
 def test_behavior_rejects_invalid_weights(weight: object) -> None:
     with pytest.raises(CompanionBehaviorValidationError):

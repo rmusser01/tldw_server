@@ -33,6 +33,9 @@ from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
 from tldw_Server_API.app.core.Persona.visual_portability.fingerprints import (
     build_persona_visual_pack_fingerprint,
 )
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    get_persona_visual_renderer_capability,
+)
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
     resolved_visual_state_ids,
@@ -842,6 +845,33 @@ class PersonaVisualService:
         assets: list[dict[str, Any]],
         user_id: str,
     ) -> str:
+        manifest = pack.get("manifest")
+        row_renderer = str(pack.get("renderer_type") or "")
+        row_version = pack.get("manifest_version")
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("renderer_type") != row_renderer
+            or isinstance(manifest.get("manifest_version"), bool)
+            or not isinstance(manifest.get("manifest_version"), int)
+            or manifest.get("manifest_version") != row_version
+        ):
+            raise PersonaVisualServiceError(
+                "invalid_renderer_contract",
+                "Persona visual pack renderer metadata does not match its manifest.",
+                details={"pack_id": str(pack["id"])},
+            )
+        capability = get_persona_visual_renderer_capability(row_renderer)
+        if (
+            capability is None
+            or row_version not in capability.manifest_versions
+            or not capability.can_validate
+            or not capability.can_activate
+        ):
+            raise PersonaVisualServiceError(
+                "unsupported_renderer",
+                "Persona visual pack renderer cannot be activated.",
+                details={"pack_id": str(pack["id"]), "renderer_type": row_renderer},
+            )
         asset_ids = {str(asset["id"]) for asset in assets}
         dimensions = {
             str(asset["id"]): (int(asset["width"]), int(asset["height"]))
@@ -850,7 +880,7 @@ class PersonaVisualService:
         }
         try:
             manifest_validation = validate_visual_manifest(
-                pack.get("manifest") or {},
+                manifest,
                 available_asset_ids=asset_ids,
                 available_asset_dimensions=dimensions,
                 require_activatable=True,

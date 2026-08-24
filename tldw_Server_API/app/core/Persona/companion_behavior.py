@@ -43,7 +43,7 @@ def normalize_companion_behavior(
     if not isinstance(value, Mapping) or set(value) != {"schema_version", "entries"}:
         raise CompanionBehaviorValidationError("companion behavior must be a strict object")
     schema_version = value.get("schema_version")
-    if isinstance(schema_version, bool) or schema_version != 1:
+    if type(schema_version) is not int or schema_version != 1:
         raise CompanionBehaviorValidationError(
             "unsupported companion behavior schema_version"
         )
@@ -78,12 +78,12 @@ def _normalize_entries(
                 f"companion behavior entry {index} state is invalid"
             )
         trigger = entry.get("trigger")
-        if trigger not in ALLOWED_TRIGGERS:
+        if not isinstance(trigger, str) or trigger not in ALLOWED_TRIGGERS:
             raise CompanionBehaviorValidationError(
                 f"companion behavior entry {index} trigger is invalid"
             )
         category = entry.get("category")
-        if category not in ALLOWED_CATEGORIES:
+        if not isinstance(category, str) or category not in ALLOWED_CATEGORIES:
             raise CompanionBehaviorValidationError(
                 f"companion behavior entry {index} category is invalid"
             )
@@ -174,7 +174,10 @@ def _bounded_number(
 ) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise CompanionBehaviorValidationError(f"{field_name} is invalid")
-    number = float(value)
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise CompanionBehaviorValidationError(f"{field_name} is invalid") from exc
     if not math.isfinite(number) or not minimum <= number <= maximum:
         raise CompanionBehaviorValidationError(f"{field_name} is invalid")
     return number
