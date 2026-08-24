@@ -10,7 +10,13 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import ScheduledTasksDatabase
+from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
+    DefinitionRow,
+    RunRow,
+    ScheduledTasksDatabase,
+)
+
+pytestmark = pytest.mark.unit
 
 
 def _repo(tmp_path, monkeypatch, *, user_id: int = 101) -> ScheduledTasksDatabase:
@@ -100,6 +106,53 @@ def _create_definition(
         created_by=str(owner_id),
         updated_by=str(owner_id),
     )
+
+
+def _create_run(
+    repo: ScheduledTasksDatabase,
+    definition: DefinitionRow,
+    *,
+    owner_id: int = 101,
+    **overrides: Any,
+) -> RunRow:
+    payload = {
+        "owner_id": owner_id,
+        "definition_id": definition.id,
+        "definition_version": definition.version,
+        "trigger_reason": "manual",
+        "status": "queued",
+        "outcome": "none",
+        "scope_snapshot": {"sources": ["media_db"]},
+        "finding_policy_snapshot": {"preset": "balanced_findings"},
+        "rag_request_snapshot": {"query": "What changed?", "sources": ["media_db"]},
+        "run_summary": {"message": "Queued"},
+    }
+    payload.update(overrides)
+    return repo.create_run(**payload)
+
+
+def _set_run_created_at(repo: ScheduledTasksDatabase, *, run_id: str, created_at: str) -> None:
+    with repo._connect() as conn:
+        conn.execute(
+            """
+            UPDATE scheduled_task_runs
+            SET created_at = ?, updated_at = ?, started_at = ?, ended_at = ?
+            WHERE id = ?
+            """,
+            [created_at, created_at, created_at, created_at, run_id],
+        )
+
+
+def _set_result_created_at(repo: ScheduledTasksDatabase, *, result_id: str, created_at: str) -> None:
+    with repo._connect() as conn:
+        conn.execute(
+            """
+            UPDATE scheduled_task_results
+            SET created_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            [created_at, created_at, result_id],
+        )
 
 
 def test_connect_context_manager_closes_connection(tmp_path):
@@ -231,6 +284,693 @@ def test_create_definition_and_audit_roundtrip(tmp_path, monkeypatch):
     assert events[0].after == {"name": definition.name, "version": 1}  # nosec B101
     assert b'{"a":1,"b":2}' in db_bytes  # nosec B101
     assert b'{"b":2,"a":1}' not in db_bytes  # nosec B101
+
+
+def test_definition_extensions_default_to_open_and_findings_only(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+
+    loaded = repo.get_definition(owner_id=101, definition_id=definition.id)
+
+    assert loaded is not None  # nosec B101
+    assert loaded.resolution_state == "open"  # nosec B101
+    assert loaded.resolved_at is None  # nosec B101
+    assert loaded.resolved_by is None  # nosec B101
+    assert loaded.resolved_result_id is None  # nosec B101
+    assert loaded.finding_policy == {"preset": "balanced_findings"}  # nosec B101
+    assert loaded.retention_policy == {"mode": "default"}  # nosec B101
+
+
+def test_run_and_result_storage_is_owner_scoped_and_redacted(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = repo.create_run(
+        owner_id=101,
+        definition_id=definition.id,
+        definition_version=definition.version,
+        trigger_reason="manual",
+        status="queued",
+        outcome="none",
+        scope_snapshot={"sources": ["media_db"]},
+        finding_policy_snapshot={"preset": "balanced_findings"},
+        rag_request_snapshot={"query": "What changed?", "sources": ["media_db"]},
+        run_summary={"message": "Queued"},
+    )
+    result = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="Possible answer found",
+        summary="One relevant source matched.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "medium"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key="rq:def:run:m1",
+        visibility_destination={"home": True, "results": True},
+    )
+
+    owner_runs, owner_run_total = repo.list_runs(owner_id=101, definition_id=definition.id, limit=10, offset=0)
+    other_runs, other_run_total = repo.list_runs(owner_id=202, definition_id=definition.id, limit=10, offset=0)
+    owner_results, owner_result_total = repo.list_results(owner_id=101, definition_id=definition.id, limit=10, offset=0)
+    other_results, other_result_total = repo.list_results(owner_id=202, definition_id=definition.id, limit=10, offset=0)
+
+    assert repo.get_run(owner_id=101, run_id=run.id) == run  # nosec B101
+    assert repo.get_result(owner_id=101, result_id=result.id) == result  # nosec B101
+    assert repo.get_run(owner_id=202, run_id=run.id) is None  # nosec B101
+    assert repo.get_result(owner_id=202, result_id=result.id) is None  # nosec B101
+    assert owner_run_total == 1  # nosec B101
+    assert [row.id for row in owner_runs] == [run.id]  # nosec B101
+    assert other_run_total == 0  # nosec B101
+    assert other_runs == []  # nosec B101
+    assert owner_result_total == 1  # nosec B101
+    assert [row.id for row in owner_results] == [result.id]  # nosec B101
+    assert other_result_total == 0  # nosec B101
+    assert other_results == []  # nosec B101
+    assert b"RAW FULL DOCUMENT" not in _database_bytes(repo)  # nosec B101
+
+
+def test_schema_upgrade_adds_run_result_objects_idempotently(tmp_path):
+    repo = ScheduledTasksDatabase(tmp_path / "legacy-scheduled-tasks.db")
+    repo.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE scheduled_task_definitions (
+                id TEXT PRIMARY KEY,
+                owner_id INTEGER NOT NULL,
+                version INTEGER NOT NULL,
+                family TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                lifecycle TEXT NOT NULL,
+                health TEXT NOT NULL,
+                disabled_lock_kind TEXT NOT NULL DEFAULT 'none',
+                disabled_reason TEXT,
+                schedule_json TEXT NOT NULL,
+                input_json TEXT NOT NULL,
+                visibility_policy TEXT NOT NULL,
+                notification_policy_json TEXT NOT NULL,
+                approval_policy_json TEXT NOT NULL,
+                preview_id TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO scheduled_task_definitions (
+                id, owner_id, version, family, name, description, lifecycle,
+                health, disabled_lock_kind, disabled_reason, schedule_json,
+                input_json, visibility_policy, notification_policy_json,
+                approval_policy_json, preview_id, created_by, updated_by,
+                created_at, updated_at
+            )
+            VALUES (
+                'legacy-definition', 101, 1, 'recurring_question', 'Legacy',
+                NULL, 'configured', 'execution_unavailable', 'none', NULL,
+                '{"cron":"0 9 * * *"}', '{"question":"What changed?"}',
+                'findings_only', '{"channels":[]}', '{"required":false}',
+                'legacy-preview', '101', '101',
+                '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'
+            );
+            """
+        )
+
+    repo.ensure_schema()
+    first_schema_objects = _scheduled_task_schema_objects(repo)
+    repo.ensure_schema()
+    second_schema_objects = _scheduled_task_schema_objects(repo)
+    loaded = repo.get_definition(owner_id=101, definition_id="legacy-definition")
+
+    assert first_schema_objects == second_schema_objects  # nosec B101
+    assert "scheduled_task_runs" in first_schema_objects["tables"]  # nosec B101
+    assert "scheduled_task_results" in first_schema_objects["tables"]  # nosec B101
+    assert "idx_scheduled_task_runs_owner_definition_created" in first_schema_objects["indexes"]  # nosec B101
+    assert "idx_scheduled_task_runs_owner_status" in first_schema_objects["indexes"]  # nosec B101
+    assert "idx_scheduled_task_runs_owner_job" in first_schema_objects["indexes"]  # nosec B101
+    assert "idx_scheduled_task_results_owner_definition_created" in first_schema_objects["indexes"]  # nosec B101
+    assert "idx_scheduled_task_results_owner_review_state" in first_schema_objects["indexes"]  # nosec B101
+    assert "idx_scheduled_task_results_owner_dedupe" in first_schema_objects["indexes"]  # nosec B101
+    assert loaded is not None  # nosec B101
+    assert loaded.resolution_state == "open"  # nosec B101
+    assert loaded.finding_policy == {"preset": "balanced_findings"}  # nosec B101
+    assert loaded.retention_policy == {"mode": "default"}  # nosec B101
+
+
+def test_run_and_result_json_snapshots_are_canonical(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = repo.create_run(
+        owner_id=101,
+        definition_id=definition.id,
+        definition_version=definition.version,
+        trigger_reason="manual",
+        status="queued",
+        outcome="none",
+        scope_snapshot={"z": 1, "a": {"b": 2}},
+        finding_policy_snapshot={"preset": "balanced_findings", "a": 1},
+        rag_request_snapshot={"query": "What changed?", "sources": ["media_db"], "a": 1},
+        run_summary={"z": "last", "a": "first"},
+    )
+    repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="Canonical result",
+        summary="One relevant source matched.",
+        answer={"z": "last", "a": "first"},
+        answer_mode="synthesized",
+        confidence={"z": 2, "a": 1},
+        source_refs=[{"title": "Doc", "source_id": "m1", "snippet": "short redacted"}],
+        dedupe_key="rq:def:canonical:m1",
+        visibility_destination={"results": True, "home": True},
+    )
+    db_bytes = _database_bytes(repo)
+
+    assert b'{"a":{"b":2},"z":1}' in db_bytes  # nosec B101
+    assert b'{"z":1,"a":{"b":2}}' not in db_bytes  # nosec B101
+    assert b'{"a":"first","z":"last"}' in db_bytes  # nosec B101
+    assert b'{"z":"last","a":"first"}' not in db_bytes  # nosec B101
+    assert b'{"home":true,"results":true}' in db_bytes  # nosec B101
+    assert b'{"results":true,"home":true}' not in db_bytes  # nosec B101
+
+
+def test_duplicate_result_dedupe_returns_existing_result(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = repo.create_run(
+        owner_id=101,
+        definition_id=definition.id,
+        definition_version=definition.version,
+        trigger_reason="manual",
+        status="completed",
+        outcome="finding",
+        scope_snapshot={"sources": ["media_db"]},
+        finding_policy_snapshot={"preset": "balanced_findings"},
+        rag_request_snapshot={"query": "What changed?"},
+        run_summary={"message": "Complete"},
+    )
+    first = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="First result",
+        summary="Original summary.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "medium"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key="rq:def:dedupe:m1",
+        visibility_destination={"home": True, "results": True},
+    )
+    duplicate = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="Duplicate result",
+        summary="This should not be inserted.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "high"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key="rq:def:dedupe:m1",
+        visibility_destination={"home": True, "results": True},
+    )
+    results, total = repo.list_results(owner_id=101, definition_id=definition.id, limit=10, offset=0)
+
+    assert duplicate == first  # nosec B101
+    assert total == 1  # nosec B101
+    assert [row.title for row in results] == ["First result"]  # nosec B101
+
+
+def test_create_result_rejects_empty_dedupe_key(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = repo.create_run(
+        owner_id=101,
+        definition_id=definition.id,
+        definition_version=definition.version,
+        trigger_reason="manual",
+        status="completed",
+        outcome="finding",
+        scope_snapshot={"sources": ["media_db"]},
+        finding_policy_snapshot={"preset": "balanced_findings"},
+        rag_request_snapshot={"query": "What changed?"},
+        run_summary={"message": "Complete"},
+    )
+
+    with pytest.raises(ValueError, match="dedupe_key"):
+        repo.create_result(
+            owner_id=101,
+            definition_id=definition.id,
+            run_id=run.id,
+            kind="finding",
+            title="Missing dedupe",
+            summary="Should fail.",
+            answer=None,
+            answer_mode="evidence_only",
+            confidence={"label": "medium"},
+            source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+            dedupe_key=" ",
+            visibility_destination={"home": True, "results": True},
+        )
+
+
+def test_create_result_rejects_raw_source_ref_text(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = _create_run(repo, definition, status="completed", outcome="finding")
+
+    with pytest.raises(ValueError, match="source_refs"):
+        repo.create_result(
+            owner_id=101,
+            definition_id=definition.id,
+            run_id=run.id,
+            kind="finding",
+            title="Raw source",
+            summary="Should fail.",
+            answer=None,
+            answer_mode="evidence_only",
+            confidence={"label": "medium"},
+            source_refs=[{"source_id": "m1", "title": "Doc", "raw_text": "RAW FULL DOCUMENT"}],
+            dedupe_key="rq:def:raw:m1",
+            visibility_destination={"home": True, "results": True},
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "private_payload"),
+    [
+        ("rag_request_snapshot", {"query": "What changed?", "debug": {"raw_rag_debug": {"step": "RAW DEBUG"}}}),
+        ("run_summary", {"message": "Queued", "details": [{"provider_key": "secret-provider-key"}]}),
+    ],
+)
+def test_create_run_rejects_nested_private_payload_keys(tmp_path, monkeypatch, field_name, private_payload):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+
+    with pytest.raises(ValueError, match=field_name):
+        _create_run(repo, definition, **{field_name: private_payload})
+
+    persisted_bytes = _database_bytes(repo)
+    assert b"RAW DEBUG" not in persisted_bytes  # nosec B101
+    assert b"secret-provider-key" not in persisted_bytes  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("field_name", "private_payload", "sentinel"),
+    [
+        ("rag_request_snapshot", {"query": "What changed?", "debug": {"rawText": "RAW DEBUG CAMEL"}}, b"RAW DEBUG CAMEL"),
+        ("run_summary", {"message": "Queued", "usage": {"openai_api_key": "secret-openai-key"}}, b"secret-openai-key"),
+        ("run_summary", {"message": "Queued", "auth": {"access_token": "secret-access-token"}}, b"secret-access-token"),
+    ],
+)
+def test_create_run_rejects_private_payload_key_variants(tmp_path, monkeypatch, field_name, private_payload, sentinel):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+
+    with pytest.raises(ValueError, match=field_name):
+        _create_run(repo, definition, **{field_name: private_payload})
+
+    assert sentinel not in _database_bytes(repo)  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("field_name", "private_payload"),
+    [
+        ("evidence_summary", {"top_sources": [{"raw_source_text": "RAW FULL DOCUMENT"}]}),
+        ("failure_reason", {"code": "worker_failure", "details": {"secret": "do-not-store"}}),
+    ],
+)
+def test_update_run_rejects_nested_private_payload_keys(tmp_path, monkeypatch, field_name, private_payload):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = _create_run(repo, definition)
+
+    with pytest.raises(ValueError, match=field_name):
+        repo.update_run(owner_id=101, run_id=run.id, patch={field_name: private_payload})
+
+    persisted_bytes = _database_bytes(repo)
+    assert b"RAW FULL DOCUMENT" not in persisted_bytes  # nosec B101
+    assert b"do-not-store" not in persisted_bytes  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("field_name", "private_payload"),
+    [
+        ("answer", {"summary": "Answer", "evidence": {"document_text": "RAW ANSWER SOURCE"}}),
+        ("source_refs", [{"source_id": "m1", "metadata": {"raw_document_text": "RAW SOURCE REF"}}]),
+    ],
+)
+def test_create_result_rejects_nested_private_payload_keys(tmp_path, monkeypatch, field_name, private_payload):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = _create_run(repo, definition, status="completed", outcome="finding")
+    payload = {
+        "owner_id": 101,
+        "definition_id": definition.id,
+        "run_id": run.id,
+        "kind": "finding",
+        "title": "Private payload",
+        "summary": "Should fail.",
+        "answer": None,
+        "answer_mode": "evidence_only",
+        "confidence": {"label": "medium"},
+        "source_refs": [{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        "dedupe_key": f"rq:def:private:{field_name}",
+        "visibility_destination": {"home": True, "results": True},
+    }
+    payload[field_name] = private_payload
+
+    with pytest.raises(ValueError, match=field_name):
+        repo.create_result(**payload)
+
+    persisted_bytes = _database_bytes(repo)
+    assert b"RAW ANSWER SOURCE" not in persisted_bytes  # nosec B101
+    assert b"RAW SOURCE REF" not in persisted_bytes  # nosec B101
+
+
+def test_privacy_guard_allows_safe_snippets_source_refs_and_messages(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="finding",
+        rag_request_snapshot={
+            "query": "What changed?",
+            "message": "Use public summaries only.",
+            "sources": ["media_db"],
+        },
+        run_summary={"message": "Completed", "answer": "A safe short answer."},
+        evidence_summary={
+            "top_sources": [
+                {
+                    "source_id": "m1",
+                    "title": "Doc",
+                    "snippet": "short redacted",
+                    "score": 0.87,
+                    "citation_ref": "c1",
+                }
+            ]
+        },
+    )
+
+    result = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="Safe result",
+        summary="A safe result summary.",
+        answer={"message": "Short synthesized answer."},
+        answer_mode="synthesized",
+        confidence={"label": "medium", "score": 0.87},
+        source_refs=[
+            {
+                "source_id": "m1",
+                "title": "Doc",
+                "snippet": "short redacted",
+                "score": 0.87,
+                "citation_ref": "c1",
+            }
+        ],
+        dedupe_key="rq:def:safe:m1",
+        visibility_destination={"home": True, "results": True},
+    )
+
+    assert result.source_refs[0]["snippet"] == "short redacted"  # nosec B101
+    assert result.answer == {"message": "Short synthesized answer."}  # nosec B101
+
+
+def test_result_review_state_and_definition_resolution_roundtrip(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = _create_run(repo, definition, status="completed", outcome="finding")
+    result = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="Answer",
+        summary="This answered the question.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "medium"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key="rq:def:review:m1",
+        visibility_destination={"home": True, "results": True},
+    )
+
+    reviewed = repo.update_result_review_state(
+        owner_id=101,
+        result_id=result.id,
+        review_state="read",
+        reviewed_by="101",
+        review_note="Seen by user",
+    )
+    solved = repo.mark_definition_solved(
+        owner_id=101,
+        definition_id=definition.id,
+        resolved_by="101",
+        resolved_result_id=result.id,
+    )
+    reopened = repo.reopen_definition(
+        owner_id=101,
+        definition_id=definition.id,
+        reopened_by="101",
+    )
+
+    assert reviewed.review_state == "read"  # nosec B101
+    assert reviewed.reviewed_by == "101"  # nosec B101
+    assert reviewed.reviewed_at is not None  # nosec B101
+    assert reviewed.review_note == "Seen by user"  # nosec B101
+    assert solved.resolution_state == "solved"  # nosec B101
+    assert solved.resolved_by == "101"  # nosec B101
+    assert solved.resolved_at is not None  # nosec B101
+    assert solved.resolved_result_id == result.id  # nosec B101
+    assert reopened.resolution_state == "open"  # nosec B101
+    assert reopened.resolved_by is None  # nosec B101
+    assert reopened.resolved_at is None  # nosec B101
+    assert reopened.resolved_result_id is None  # nosec B101
+
+
+def test_definition_resolution_rejects_non_recurring_question_families(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo, family="agent_task", name="Dispatch agent")
+
+    with pytest.raises(ValueError, match="definition_family_mismatch"):
+        repo.mark_definition_solved(
+            owner_id=101,
+            definition_id=definition.id,
+            resolved_by="101",
+        )
+
+    with pytest.raises(ValueError, match="definition_family_mismatch"):
+        repo.reopen_definition(
+            owner_id=101,
+            definition_id=definition.id,
+            reopened_by="101",
+        )
+
+
+def test_prune_run_history_removes_old_no_match_runs_before_surfaced_results(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    old_no_match_at = "2026-01-01T00:00:00+00:00"
+    old_finding_at = "2026-01-02T00:00:00+00:00"
+    recent_no_match_at = "2026-03-01T00:00:00+00:00"
+
+    old_no_match = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="no_match",
+        run_summary={"message": "No match"},
+    )
+    old_finding_run = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="finding",
+        run_summary={"message": "Found answer"},
+    )
+    old_result = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=old_finding_run.id,
+        kind="finding",
+        title="Stored finding",
+        summary="A surfaced result should outlive no-match runs.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "medium"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key="rq:def:retention:result",
+        visibility_destination={"home": True, "results": True},
+    )
+    recent_no_match = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="no_match",
+        run_summary={"message": "Recent no match"},
+    )
+    _set_run_created_at(repo, run_id=old_no_match.id, created_at=old_no_match_at)
+    _set_run_created_at(repo, run_id=old_finding_run.id, created_at=old_finding_at)
+    _set_result_created_at(repo, result_id=old_result.id, created_at=old_finding_at)
+    _set_run_created_at(repo, run_id=recent_no_match.id, created_at=recent_no_match_at)
+    audit = repo.create_audit_event(
+        owner_id=101,
+        definition_id=definition.id,
+        event_type="run.created",
+        actor="101",
+        summary="Audit rows are retained by audit policy.",
+        before=None,
+        after={"run_id": old_no_match.id},
+        idempotency_key=None,
+        request_id=None,
+    )
+
+    pruned = repo.prune_run_history(
+        owner_id=101,
+        definition_id=definition.id,
+        no_match_before="2026-02-01T00:00:00+00:00",
+        result_before="2025-01-01T00:00:00+00:00",
+    )
+
+    assert pruned == {"runs": 1, "results": 0}  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=old_no_match.id) is None  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=old_finding_run.id) is not None  # nosec B101
+    assert repo.get_result(owner_id=101, result_id=old_result.id) is not None  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=recent_no_match.id) is not None  # nosec B101
+    events, total = repo.list_audit_events(owner_id=101, definition_id=definition.id, limit=10, offset=0)
+    assert total == 1  # nosec B101
+    assert events[0].id == audit.id  # nosec B101
+
+
+def test_prune_run_history_removes_old_non_finding_runs_without_results(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    old_at = "2026-01-01T00:00:00+00:00"
+    runs = [
+        _create_run(repo, definition, status="completed", outcome="no_match"),
+        _create_run(repo, definition, status="failed", outcome="degraded"),
+        _create_run(repo, definition, status="cancelled", outcome="none"),
+        _create_run(repo, definition, status="completed", outcome="partial"),
+    ]
+    for run in runs:
+        _set_run_created_at(repo, run_id=run.id, created_at=old_at)
+
+    pruned = repo.prune_run_history(
+        owner_id=101,
+        definition_id=definition.id,
+        no_match_before="2026-02-01T00:00:00+00:00",
+        result_before=None,
+    )
+
+    assert pruned == {"runs": 4, "results": 0}  # nosec B101
+    for run in runs:
+        assert repo.get_run(owner_id=101, run_id=run.id) is None  # nosec B101
+
+
+def test_prune_run_history_preserves_solved_result_unless_dismissed(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    old_result_at = "2026-01-01T00:00:00+00:00"
+    run = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="finding",
+        run_summary={"message": "Found answer"},
+    )
+    result = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="Final answer",
+        summary="This result answered the recurring question.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "high"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key="rq:def:retention:solved",
+        visibility_destination={"home": True, "results": True},
+    )
+    _set_run_created_at(repo, run_id=run.id, created_at=old_result_at)
+    _set_result_created_at(repo, result_id=result.id, created_at=old_result_at)
+    repo.mark_definition_solved(
+        owner_id=101,
+        definition_id=definition.id,
+        resolved_by="101",
+        resolved_result_id=result.id,
+    )
+
+    preserved = repo.prune_run_history(
+        owner_id=101,
+        definition_id=definition.id,
+        no_match_before="2030-01-01T00:00:00+00:00",
+        result_before="2030-01-01T00:00:00+00:00",
+    )
+
+    assert preserved == {"runs": 0, "results": 0}  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=run.id) is not None  # nosec B101
+    assert repo.get_result(owner_id=101, result_id=result.id) is not None  # nosec B101
+
+    repo.update_result_review_state(
+        owner_id=101,
+        result_id=result.id,
+        review_state="dismissed",
+        reviewed_by="101",
+        review_note="No longer relevant",
+    )
+    pruned = repo.prune_run_history(
+        owner_id=101,
+        definition_id=definition.id,
+        no_match_before="2030-01-01T00:00:00+00:00",
+        result_before="2030-01-01T00:00:00+00:00",
+    )
+    updated_definition = repo.get_definition(owner_id=101, definition_id=definition.id)
+
+    assert pruned == {"runs": 1, "results": 1}  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=run.id) is None  # nosec B101
+    assert repo.get_result(owner_id=101, result_id=result.id) is None  # nosec B101
+    assert updated_definition is not None  # nosec B101
+    assert updated_definition.resolution_state == "solved"  # nosec B101
+    assert updated_definition.resolved_result_id is None  # nosec B101
+
+
+def test_run_and_result_response_schemas_expose_stage_1_contracts():
+    from tldw_Server_API.app.api.v1.schemas import scheduled_tasks_automation_schemas as schemas
+
+    required_names = [
+        "ScheduledTaskRunStatus",
+        "ScheduledTaskRunOutcome",
+        "ScheduledTaskRunResponse",
+        "ScheduledTaskRunListResponse",
+        "ScheduledTaskResultResponse",
+        "ScheduledTaskResultListResponse",
+        "ScheduledTaskResultReviewRequest",
+        "ScheduledTaskReviewState",
+        "ScheduledTaskMarkSolvedRequest",
+        "ScheduledTaskReopenRequest",
+    ]
+    missing = [name for name in required_names if not hasattr(schemas, name)]
+
+    assert missing == []  # nosec B101
+
+
+def _scheduled_task_schema_objects(repo: ScheduledTasksDatabase) -> dict[str, set[str]]:
+    return repo.get_schema_overview()
 
 
 def test_update_preview_consumption_sets_consumed_at(tmp_path, monkeypatch):

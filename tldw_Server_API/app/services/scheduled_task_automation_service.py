@@ -25,6 +25,8 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskPreviewCreateRequest,
     ScheduledTaskPreviewListResponse,
     ScheduledTaskPreviewResponse,
+    ScheduledTaskResultResponse,
+    ScheduledTaskRunResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
@@ -34,6 +36,13 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     ScheduledTasksTransaction,
     ScheduledTasksDatabase,
 )
+from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_models import (
+    FINDING_POLICY_PRESETS,
+    GENERATION_MODES,
+    RETENTION_POLICY_MODES,
+)
+from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_scope import normalize_recurring_question_scope
+from tldw_Server_API.app.core.testing import env_flag_enabled
 
 PREVIEW_TTL = timedelta(hours=24)
 IDEMPOTENCY_TTL = timedelta(hours=24)
@@ -111,6 +120,7 @@ def _validate_recurring_question_config(
     errors: list[dict[str, Any]] = []
     warnings: list[str] = []
     name = str(config.get("name") or "").strip()
+    option_config = dict(config.get("config") or {})
     input_config = dict(config.get("input") or {})
     question = str(input_config.get("question") or "").strip()
 
@@ -119,10 +129,60 @@ def _validate_recurring_question_config(
     if not question:
         errors.append(_field_error("input.question", "required", "Question is required."))
 
+    scope, scope_errors, scope_warnings = normalize_recurring_question_scope(option_config.get("scope"))
+    finding_policy = _normalize_finding_policy(option_config.get("finding_policy"), errors)
+    retention_policy = _normalize_retention_policy(option_config.get("retention_policy"), errors)
+    generation_mode = str(option_config.get("generation_mode") or "optional").strip() or "optional"
+    if generation_mode not in GENERATION_MODES:
+        errors.append(
+            _field_error(
+                "config.generation_mode",
+                "unsupported",
+                f"Unsupported generation mode: {generation_mode}",
+            )
+        )
+
     normalized = dict(config)
     normalized["name"] = name
     normalized["input"] = {**input_config, "question": question}
+    normalized["config"] = {
+        **option_config,
+        "scope": scope,
+        "finding_policy": finding_policy,
+        "retention_policy": retention_policy,
+        "generation_mode": generation_mode,
+    }
+    errors.extend(scope_errors)
+    warnings.extend(warning["code"] for warning in scope_warnings)
     return normalized, errors, warnings
+
+
+def _normalize_finding_policy(value: Any, errors: list[dict[str, Any]]) -> dict[str, Any]:
+    policy = dict(value) if isinstance(value, dict) else {}
+    preset = str(policy.get("preset") or "balanced_findings").strip() or "balanced_findings"
+    if preset not in FINDING_POLICY_PRESETS:
+        errors.append(
+            _field_error(
+                "config.finding_policy.preset",
+                "unsupported",
+                f"Unsupported finding policy preset: {preset}",
+            )
+        )
+    return {**policy, "preset": preset}
+
+
+def _normalize_retention_policy(value: Any, errors: list[dict[str, Any]]) -> dict[str, Any]:
+    policy = dict(value) if isinstance(value, dict) else {}
+    mode = str(policy.get("mode") or "default").strip() or "default"
+    if mode not in RETENTION_POLICY_MODES:
+        errors.append(
+            _field_error(
+                "config.retention_policy.mode",
+                "unsupported",
+                f"Unsupported retention policy mode: {mode}",
+            )
+        )
+    return {**policy, "mode": mode}
 
 
 def _validate_agent_task_config(config: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
@@ -201,15 +261,31 @@ class ScheduledTaskAutomationService:
             )
             return actions
 
+        recurring_question_actions = self._recurring_question_actions()
+        recurring_question_actions.update(
+            _execution_actions(
+                "recurring_question has no tool surface; tools are not applicable"
+            )
+        )
         return ScheduledTaskAutomationCapabilitiesResponse(
             items=[
                 ScheduledTaskAutomationCapability(
                     family="recurring_question",
                     family_availability="available",
-                    actions=_execution_actions(
-                        "recurring_question has no tool surface; tools are not applicable"
-                    ),
-                    related_capabilities={"rag": {"status": "not_checked"}},
+                    actions=recurring_question_actions,
+                    related_capabilities={
+                        "rag": {"status": "not_checked"},
+                        "scheduler": {
+                            "status": "enabled"
+                            if env_flag_enabled("SCHEDULED_TASKS_RECURRING_QUESTION_SCHEDULER_ENABLED")
+                            else "disabled",
+                        },
+                        "worker": {
+                            "status": "enabled"
+                            if env_flag_enabled("SCHEDULED_TASKS_RECURRING_QUESTION_WORKER_ENABLED")
+                            else "disabled",
+                        },
+                    },
                 ),
                 ScheduledTaskAutomationCapability(
                     family="agent_task",
@@ -485,7 +561,6 @@ class ScheduledTaskAutomationService:
             ),
         )
 
-
     def run_now(
         self,
         *,
@@ -609,6 +684,75 @@ class ScheduledTaskAutomationService:
             operation=_dispatch,
         )
 
+    def mark_solved(
+        self,
+        *,
+        owner_id: int,
+        actor: str,
+        definition_id: str,
+        resolved_result_id: str | None = None,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+    ) -> ScheduledTaskDefinitionResponse:
+        payload_hash = _canonical_hash(
+            {
+                "definition_id": definition_id,
+                "action": "mark_solved",
+                "resolved_result_id": resolved_result_id,
+            }
+        )
+        return self._with_idempotency(
+            owner_id=owner_id,
+            route="scheduled_task_automation.definition.mark_solved",
+            key=idempotency_key,
+            payload_hash=payload_hash,
+            operation=lambda tx: self._mark_solved_definition(
+                tx=tx,
+                owner_id=owner_id,
+                actor=actor,
+                definition_id=definition_id,
+                resolved_result_id=resolved_result_id,
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+            ),
+        )
+
+    def reopen_definition(
+        self,
+        *,
+        owner_id: int,
+        actor: str,
+        definition_id: str,
+        target_lifecycle: str = "paused",
+        reason: str | None = None,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+    ) -> ScheduledTaskDefinitionResponse:
+        payload_hash = _canonical_hash(
+            {
+                "definition_id": definition_id,
+                "action": "reopen",
+                "target_lifecycle": target_lifecycle,
+                "reason": reason,
+            }
+        )
+        return self._with_idempotency(
+            owner_id=owner_id,
+            route="scheduled_task_automation.definition.reopen",
+            key=idempotency_key,
+            payload_hash=payload_hash,
+            operation=lambda tx: self._reopen_definition(
+                tx=tx,
+                owner_id=owner_id,
+                actor=actor,
+                definition_id=definition_id,
+                target_lifecycle=target_lifecycle,
+                reason=reason,
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+            ),
+        )
+
     def duplicate_definition(
         self,
         *,
@@ -729,6 +873,7 @@ class ScheduledTaskAutomationService:
         if preview.mode != "create" or preview.definition_id is not None:
             raise ScheduledTaskAutomationError("preview_mode_mismatch")
         normalized = preview.normalized_config
+        normalized_config = normalized.get("config", {})
         definition = tx.create_definition(
             owner_id=owner_id,
             family=preview.family,
@@ -744,6 +889,8 @@ class ScheduledTaskAutomationService:
             preview_id=preview.id,
             created_by=actor,
             updated_by=actor,
+            finding_policy=normalized_config.get("finding_policy"),
+            retention_policy=normalized_config.get("retention_policy"),
         )
         response = self._definition_response(definition)
         self._create_audit(
@@ -780,6 +927,7 @@ class ScheduledTaskAutomationService:
         if preview.definition_version != current.version:
             raise ScheduledTaskAutomationError("definition_version_mismatch")
         normalized = preview.normalized_config
+        normalized_config = normalized.get("config", {})
         updated = tx.update_definition(
             owner_id=owner_id,
             definition_id=definition_id,
@@ -794,6 +942,8 @@ class ScheduledTaskAutomationService:
                 "approval_policy": normalized.get("approval_policy", {}),
                 "preview_id": preview.id,
                 "updated_by": actor,
+                "finding_policy": normalized_config.get("finding_policy", current.finding_policy),
+                "retention_policy": normalized_config.get("retention_policy", current.retention_policy),
             },
             expected_version=current.version,
         )
@@ -893,6 +1043,103 @@ class ScheduledTaskAutomationService:
         )
         return response
 
+    def _mark_solved_definition(
+        self,
+        *,
+        tx: ScheduledTasksTransaction,
+        owner_id: int,
+        actor: str,
+        definition_id: str,
+        resolved_result_id: str | None,
+        idempotency_key: str | None,
+        request_id: str | None,
+    ) -> ScheduledTaskDefinitionResponse:
+        current = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
+        if current.lifecycle == "archived":
+            raise ScheduledTaskAutomationError("definition_archived")
+        if current.lifecycle == "disabled":
+            raise ScheduledTaskAutomationError("definition_disabled")
+        if current.resolution_state == "solved":
+            return self._definition_response(current)
+        try:
+            updated = tx.mark_definition_solved(
+                owner_id=owner_id,
+                definition_id=definition_id,
+                resolved_by=actor,
+                resolved_result_id=resolved_result_id,
+            )
+        except KeyError as exc:
+            raise ScheduledTaskAutomationError("result_not_found") from exc
+        except ValueError as exc:
+            if str(exc) == "definition_family_mismatch":
+                raise ScheduledTaskAutomationError("definition_family_mismatch") from exc
+            raise
+        response = self._definition_response(updated)
+        self._create_audit(
+            tx=tx,
+            owner_id=owner_id,
+            definition_id=definition_id,
+            event_type="definition.marked_solved",
+            actor=actor,
+            summary="Marked definition solved",
+            before=self._definition_response(current).model_dump(mode="json"),
+            after=response.model_dump(mode="json"),
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+        )
+        return response
+
+    def _reopen_definition(
+        self,
+        *,
+        tx: ScheduledTasksTransaction,
+        owner_id: int,
+        actor: str,
+        definition_id: str,
+        target_lifecycle: str,
+        reason: str | None,
+        idempotency_key: str | None,
+        request_id: str | None,
+    ) -> ScheduledTaskDefinitionResponse:
+        current = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
+        if current.family != "recurring_question":
+            raise ScheduledTaskAutomationError("definition_family_mismatch")
+        if current.lifecycle == "archived":
+            raise ScheduledTaskAutomationError("definition_archived")
+        if current.lifecycle == "disabled":
+            raise ScheduledTaskAutomationError("definition_disabled")
+        if target_lifecycle not in {"configured", "paused"}:
+            raise ScheduledTaskAutomationError("definition_resolution_transition_invalid")
+        if current.resolution_state != "solved":
+            raise ScheduledTaskAutomationError("definition_resolution_transition_invalid")
+        updated = tx.update_definition(
+            owner_id=owner_id,
+            definition_id=definition_id,
+            patch={
+                "resolution_state": "open",
+                "resolved_at": None,
+                "resolved_by": None,
+                "resolved_result_id": None,
+                "lifecycle": target_lifecycle,
+                "updated_by": actor,
+            },
+            expected_version=current.version,
+        )
+        response = self._definition_response(updated)
+        self._create_audit(
+            tx=tx,
+            owner_id=owner_id,
+            definition_id=definition_id,
+            event_type="definition.reopened",
+            actor=actor,
+            summary="Reopened definition",
+            before=self._definition_response(current).model_dump(mode="json"),
+            after={**response.model_dump(mode="json"), "reason": reason},
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+        )
+        return response
+
     def _duplicate_definition(
         self,
         *,
@@ -960,6 +1207,8 @@ class ScheduledTaskAutomationService:
             updated_by=actor,
             disabled_lock_kind="none",
             disabled_reason=None,
+            finding_policy=source.finding_policy,
+            retention_policy=source.retention_policy,
         )
         response = self._definition_response(created)
         source_response = self._definition_response(source)
@@ -1167,6 +1416,10 @@ class ScheduledTaskAutomationService:
                 return ScheduledTaskDefinitionResponse.model_validate(snapshot)
             if response_ref.get("type") == "run_now":
                 return ScheduledTaskRunNowResponse.model_validate(snapshot)
+            if response_ref.get("type") == "run":
+                return ScheduledTaskRunResponse.model_validate(snapshot)
+            if response_ref.get("type") == "result":
+                return ScheduledTaskResultResponse.model_validate(snapshot)
         if response_ref.get("type") == "preview":
             return self.get_preview(owner_id=owner_id, preview_id=str(response_ref["id"]))
         if response_ref.get("type") == "definition":
@@ -1191,6 +1444,18 @@ class ScheduledTaskAutomationService:
             return {
                 "type": "run_now",
                 "id": response.definition_id,
+                "snapshot": response.model_dump(mode="json"),
+            }
+        if isinstance(response, ScheduledTaskRunResponse):
+            return {
+                "type": "run",
+                "id": response.id,
+                "snapshot": response.model_dump(mode="json"),
+            }
+        if isinstance(response, ScheduledTaskResultResponse):
+            return {
+                "type": "result",
+                "id": response.id,
                 "snapshot": response.model_dump(mode="json"),
             }
         raise TypeError(f"unsupported idempotency response type: {type(response)!r}")
@@ -1252,6 +1517,12 @@ class ScheduledTaskAutomationService:
             created_at=row.created_at,
             updated_at=row.updated_at,
             archived_at=row.updated_at if row.lifecycle == "archived" else None,
+            resolution_state=row.resolution_state,
+            resolved_at=row.resolved_at,
+            resolved_by=row.resolved_by,
+            resolved_result_id=row.resolved_result_id,
+            finding_policy=row.finding_policy,
+            retention_policy=row.retention_policy,
         )
 
     @staticmethod
@@ -1306,3 +1577,34 @@ class ScheduledTaskAutomationService:
                 required_permissions=[TASKS_CONTROL],
             ),
         }
+
+    @classmethod
+    def _recurring_question_actions(cls) -> dict[str, ScheduledTaskActionCapability]:
+        actions = cls._definition_actions()
+        actions.update(
+            {
+                "create_run_manual": ScheduledTaskActionCapability(
+                    status="available",
+                    required_permissions=[TASKS_CONTROL],
+                ),
+                "execute_scheduled": ScheduledTaskActionCapability(
+                    status="available",
+                    required_permissions=[TASKS_CONTROL],
+                ),
+                "read_runs": ScheduledTaskActionCapability(status="available"),
+                "read_results": ScheduledTaskActionCapability(status="available"),
+                "mutate_results": ScheduledTaskActionCapability(
+                    status="available",
+                    required_permissions=[TASKS_CONTROL],
+                ),
+                "mark_solved": ScheduledTaskActionCapability(
+                    status="available",
+                    required_permissions=[TASKS_CONTROL],
+                ),
+                "reopen": ScheduledTaskActionCapability(
+                    status="available",
+                    required_permissions=[TASKS_CONTROL],
+                ),
+            }
+        )
+        return actions

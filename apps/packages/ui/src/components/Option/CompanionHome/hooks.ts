@@ -11,7 +11,11 @@ import {
   type CompanionHomeSurface
 } from "@/services/companion-home"
 import { listNotifications } from "@/services/notifications"
-import { listScheduledTasks } from "@/services/scheduled-tasks-control-plane"
+import {
+  listScheduledTaskResults,
+  listScheduledTasks,
+  type ScheduledTaskResultResponse
+} from "@/services/scheduled-tasks-control-plane"
 import {
   DEFAULT_COMPANION_HOME_LAYOUT,
   loadCompanionHomeLayout,
@@ -21,6 +25,7 @@ import {
 import {
   buildScheduledTaskAutomationHomeItems,
   buildScheduledTaskAutomationHomeItemsFromNotifications,
+  mapScheduledTaskApiResults,
   mergeScheduledTaskAutomationHomeItems,
   projectScheduledTaskResults,
   type ScheduledTaskAutomationHomeItem
@@ -177,6 +182,17 @@ type UseScheduledTaskHomeSignalsResult = {
   refresh: () => void
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const isHomeVisibleScheduledTaskResult = (
+  result: ScheduledTaskResultResponse
+): boolean => {
+  const visibility = result.visibility_destination
+  if (!isRecord(visibility)) return true
+  return visibility.home !== false
+}
+
 export const useScheduledTaskHomeSignals = ({
   enabled
 }: UseScheduledTaskHomeSignalsArgs): UseScheduledTaskHomeSignalsResult => {
@@ -194,19 +210,35 @@ export const useScheduledTaskHomeSignals = ({
     setError(null)
 
     const load = async () => {
-      const [tasksResult, notificationsResult] = await Promise.allSettled([
+      const [tasksResult, notificationsResult, resultsResult] = await Promise.allSettled([
         listScheduledTasks(),
-        listNotifications({ limit: 50 })
+        listNotifications({ limit: 50 }),
+        listScheduledTaskResults({ limit: 50 })
       ])
 
       if (cancelled) {
         return
       }
 
+      const normalizedResultItems =
+        resultsResult.status === "fulfilled"
+          ? buildScheduledTaskAutomationHomeItems(
+              mapScheduledTaskApiResults(
+                resultsResult.value.items.filter(isHomeVisibleScheduledTaskResult),
+                { capabilityMode: "normalized_results_read" }
+              )
+            )
+          : []
+      const projectedResults =
+        tasksResult.status === "fulfilled"
+          ? projectScheduledTaskResults(tasksResult.value?.items ?? [])
+          : []
       const projectedItems =
         tasksResult.status === "fulfilled"
           ? buildScheduledTaskAutomationHomeItems(
-              projectScheduledTaskResults(tasksResult.value?.items ?? [])
+              resultsResult.status === "fulfilled"
+                ? projectedResults.filter((result) => result.owner !== "scheduled_tasks")
+                : projectedResults
             )
           : []
       const notificationItems =
@@ -218,22 +250,26 @@ export const useScheduledTaskHomeSignals = ({
       const nextPartial =
         tasksResult.status === "rejected" ||
         notificationsResult.status === "rejected" ||
+        resultsResult.status === "rejected" ||
         (tasksResult.status === "fulfilled" && Boolean(tasksResult.value?.partial))
 
       let nextError: string | null = null
       if (tasksResult.status === "rejected") {
         nextError =
-          notificationItems.length > 0
+          normalizedResultItems.length > 0 || notificationItems.length > 0
             ? "Some scheduled-task signals could not be loaded."
             : "Automation signals unavailable"
       } else if (notificationsResult.status === "rejected") {
         nextError = "Recent automation notifications could not be loaded."
+      } else if (resultsResult.status === "rejected") {
+        nextError = "Scheduled-task results could not be loaded."
       } else if (tasksResult.value?.partial) {
         nextError = "Some scheduled-task sources are temporarily unavailable."
       }
 
       setItems(
         mergeScheduledTaskAutomationHomeItems([
+          normalizedResultItems,
           projectedItems,
           notificationItems
         ])

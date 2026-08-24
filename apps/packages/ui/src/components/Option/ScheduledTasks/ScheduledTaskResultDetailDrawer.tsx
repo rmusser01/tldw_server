@@ -63,6 +63,65 @@ const renderActionLinks = (result: ScheduledTaskResultItem): React.ReactNode => 
   )
 }
 
+const renderStateBadge = (result: ScheduledTaskResultItem): React.ReactNode => {
+  const badge = (
+    <DesignSystemBadge variant={scheduledTaskResultSeverityToBadgeVariant(result.severity)}>
+      {getScheduledTaskResultStatusLabel(result)}
+    </DesignSystemBadge>
+  )
+
+  if (result.signalKind !== "running") {
+    return badge
+  }
+
+  return <span aria-live="polite">{badge}</span>
+}
+
+const renderAnswerSection = (result: ScheduledTaskResultItem): React.ReactNode => {
+  if (!result.answer) {
+    return null
+  }
+
+  return (
+    <div>
+      <Typography.Title level={5}>Answer</Typography.Title>
+      <Typography.Paragraph style={{ marginBottom: 0 }}>
+        {result.answer}
+      </Typography.Paragraph>
+    </div>
+  )
+}
+
+const renderEvidenceSection = (result: ScheduledTaskResultItem): React.ReactNode => {
+  const sourceRefs = result.sourceRefs ?? []
+  if (sourceRefs.length === 0) {
+    return null
+  }
+
+  return (
+    <div>
+      <Typography.Title level={5}>Evidence</Typography.Title>
+      <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+        {sourceRefs.map((sourceRef, index) => (
+          <div key={`${sourceRef.sourceId ?? sourceRef.citationRef ?? "source"}:${index}`}>
+            <Typography.Text strong>
+              {sourceRef.title ?? sourceRef.sourceId ?? "Source"}
+            </Typography.Text>
+            {sourceRef.snippet ? (
+              <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                {sourceRef.snippet}
+              </Typography.Paragraph>
+            ) : null}
+            {sourceRef.citationRef ? (
+              <Typography.Text type="secondary">{sourceRef.citationRef}</Typography.Text>
+            ) : null}
+          </div>
+        ))}
+      </Space>
+    </div>
+  )
+}
+
 export const ScheduledTaskResultDetailDrawer: React.FC<
   ScheduledTaskResultDetailDrawerProps
 > = ({ open, result, onClose, onReviewResult, onRetryRun }) => {
@@ -88,11 +147,7 @@ export const ScheduledTaskResultDetailDrawer: React.FC<
 
           <Descriptions bordered size="small" column={1}>
             <Descriptions.Item label="State">
-              <DesignSystemBadge
-                variant={scheduledTaskResultSeverityToBadgeVariant(result.severity)}
-              >
-                {getScheduledTaskResultStatusLabel(result)}
-              </DesignSystemBadge>
+              {renderStateBadge(result)}
             </Descriptions.Item>
             <Descriptions.Item label="Owner">{result.ownerLabel}</Descriptions.Item>
             <Descriptions.Item label="Task type">{result.taskTypeLabel}</Descriptions.Item>
@@ -107,6 +162,9 @@ export const ScheduledTaskResultDetailDrawer: React.FC<
               {formatScheduledTaskTimestamp(result.occurredAt, "No run time")}
             </Descriptions.Item>
           </Descriptions>
+
+          {renderAnswerSection(result)}
+          {renderEvidenceSection(result)}
 
           <div>
             <Typography.Title level={5}>Continue in</Typography.Title>

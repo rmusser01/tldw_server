@@ -1,6 +1,10 @@
 import type { CompanionHomeItem } from "@/services/companion-home"
 import type { NotificationItem } from "@/services/notifications"
-import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import type {
+  ScheduledTask,
+  ScheduledTaskResultResponse,
+  ScheduledTaskReviewState
+} from "@/services/scheduled-tasks-control-plane"
 import { BLOCKED_STATE_LABEL } from "@/design-system"
 import type { BadgeVariant } from "@/components/ui/primitives"
 
@@ -68,8 +72,21 @@ export interface ScheduledTaskResultItem {
   domainHref: string | null
   dedupeKey: string
   reviewed: boolean
+  reviewState?: ScheduledTaskReviewState | null
   reviewAvailable: boolean
   retryAvailable: boolean
+  answer?: string | null
+  answerMode?: string | null
+  confidenceLabel?: string | null
+  sourceRefs?: ScheduledTaskResultSourceRef[]
+}
+
+export interface ScheduledTaskResultSourceRef {
+  sourceId: string | null
+  title: string | null
+  snippet: string | null
+  citationRef: string | null
+  score: number | null
 }
 
 export interface ScheduledTaskResultProjectionOptions {
@@ -161,6 +178,20 @@ const MATCHED_RULE_LABEL_KEYS = [
 
 const PRIVATE_VALUE_PATTERN =
   /(authorization\s*:|bearer\s+|api[_-]?key\s*=|access[_-]?token\s*=|token\s*=|client[_-]?secret\s*=|secret\s*=|password\s*=)/i
+
+const PRIVATE_KEY_PARTS = [
+  "api_key",
+  "apikey",
+  "access_token",
+  "token",
+  "secret",
+  "password",
+  "raw_text",
+  "rawtext",
+  "full_text",
+  "document_text",
+  "content"
+] as const
 
 const RESULT_STATUS_TOKENS = [
   "found",
@@ -290,6 +321,42 @@ const sanitizeProvenanceText = (value: unknown): string | null => {
   return trimmed
 }
 
+const isPrivateKey = (key: string): boolean => {
+  const normalized = Array.from(key.toLowerCase())
+    .filter((character) => /[a-z0-9_]/.test(character))
+    .join("")
+  const compact = normalized.replace(/_/g, "")
+
+  return PRIVATE_KEY_PARTS.some((part) => {
+    const compactPart = part.replace(/_/g, "")
+    if (part === "content") {
+      return normalized === part || compact === compactPart
+    }
+    return normalized.includes(part) || compact.includes(compactPart)
+  })
+}
+
+const redactStructuredValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactStructuredValue(item))
+  }
+
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        isPrivateKey(key) ? "[redacted]" : redactStructuredValue(item)
+      ])
+    )
+  }
+
+  if (typeof value === "string" && PRIVATE_VALUE_PATTERN.test(value)) {
+    return "[redacted]"
+  }
+
+  return value
+}
+
 const firstSanitizedText = (
   sourceRef: Record<string, unknown>,
   keys: readonly string[]
@@ -343,6 +410,25 @@ const buildOutputLabel = (
   }
 
   return "Results ready"
+}
+
+const buildApiOutputLabel = (
+  answerMode: string | null,
+  resultKind: string
+): string | null => {
+  if (resultKind === "failure") {
+    return "Failure details"
+  }
+
+  if (answerMode === "synthesized") {
+    return "Synthesized answer"
+  }
+
+  if (answerMode === "evidence_only") {
+    return "Evidence only"
+  }
+
+  return "Finding"
 }
 
 const buildResultSummary = (
@@ -438,6 +524,130 @@ export const scheduledTaskResultSeverityToBadgeVariant = (
 const canMutateResults = (mode: ScheduledTaskResultsCapabilityMode): boolean =>
   mode === "normalized_results_mutation"
 
+const answerToDisplayText = (value: unknown): string | null => {
+  const sanitized = sanitizeProvenanceText(value)
+  if (sanitized) {
+    return sanitized
+  }
+
+  if (!isRecord(value) && !Array.isArray(value)) {
+    return null
+  }
+
+  try {
+    return JSON.stringify(redactStructuredValue(value))
+  } catch {
+    return null
+  }
+}
+
+const numberOrNull = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null
+
+const normalizeApiSourceRefs = (
+  sourceRefs: Record<string, unknown>[]
+): ScheduledTaskResultSourceRef[] =>
+  sourceRefs
+    .filter(isRecord)
+    .map((sourceRef) => ({
+      sourceId: normalizeId(sourceRef["source_id"] ?? sourceRef["id"]),
+      title: sanitizeProvenanceText(sourceRef["title"] ?? sourceRef["source_title"]),
+      snippet: sanitizeProvenanceText(sourceRef["snippet"] ?? sourceRef["excerpt"]),
+      citationRef: sanitizeProvenanceText(
+        sourceRef["citation_ref"] ?? sourceRef["citation"] ?? sourceRef["ref"]
+      ),
+      score: numberOrNull(sourceRef["score"])
+    }))
+
+const firstSourceLabelFromApiResult = (
+  sourceRefs: ScheduledTaskResultSourceRef[]
+): string | null => {
+  for (const sourceRef of sourceRefs) {
+    if (sourceRef.title) return sourceRef.title
+    if (sourceRef.sourceId) return sourceRef.sourceId
+    if (sourceRef.citationRef) return sourceRef.citationRef
+  }
+  return null
+}
+
+export const mapScheduledTaskApiResults = (
+  apiResults: ScheduledTaskResultResponse[],
+  options: ScheduledTaskResultProjectionOptions = {}
+): ScheduledTaskResultItem[] => {
+  const capabilityMode = options.capabilityMode ?? "normalized_results_read"
+  const canMutate = canMutateResults(capabilityMode)
+
+  return apiResults.map((apiResult) => {
+    const signalKind: ScheduledTaskResultSignalKind =
+      apiResult.kind === "failure" ? "failure" : "result"
+    const reviewed = apiResult.review_state !== "unread"
+    const state: ScheduledTaskResultState =
+      signalKind === "failure" ? "failed" : reviewed ? "reviewed" : "new"
+    const severity: ScheduledTaskResultSeverity =
+      signalKind === "failure" ? "error" : "success"
+    const taskId = `automation_definition:${apiResult.definition_id}`
+    const sourceRefs = normalizeApiSourceRefs(apiResult.source_refs ?? [])
+    const sourceLabel = firstSourceLabelFromApiResult(sourceRefs)
+    const confidenceLabel = sanitizeProvenanceText(apiResult.confidence?.["label"])
+    const resultCount = signalKind === "result" ? Math.max(sourceRefs.length, 1) : null
+    const primaryHref = buildScheduledTaskResultHref({
+      resultId: apiResult.id,
+      runId: apiResult.run_id,
+      taskId
+    })
+    const runHref = buildScheduledTaskResultHref({
+      runId: apiResult.run_id,
+      taskId
+    })
+    const dedupeKey =
+      sanitizeProvenanceText(apiResult.dedupe_key) ||
+      buildScheduledTaskResultDedupeKey({
+        signalKind,
+        taskId,
+        runId: apiResult.run_id,
+        resultId: apiResult.id,
+        state,
+        occurredAt: apiResult.created_at ?? null
+      })
+
+    return {
+      id: dedupeKey,
+      capabilityMode,
+      signalKind,
+      state,
+      severity,
+      taskId,
+      taskTitle: apiResult.title,
+      taskTypeLabel: "Recurring question",
+      owner: "scheduled_tasks",
+      ownerLabel: "Scheduled Tasks",
+      resultId: apiResult.id,
+      runId: apiResult.run_id,
+      resultCount,
+      sourceLabel,
+      matchedRuleLabel: confidenceLabel,
+      outputLabel: buildApiOutputLabel(apiResult.answer_mode, apiResult.kind),
+      title: apiResult.title,
+      summary: apiResult.summary,
+      occurredAt: apiResult.created_at ?? apiResult.updated_at ?? null,
+      primaryHref,
+      resultHref: primaryHref,
+      runHref,
+      sourceHref: null,
+      domainHref: primaryHref,
+      dedupeKey,
+      reviewed,
+      reviewState: apiResult.review_state,
+      reviewAvailable: canMutate && signalKind === "result",
+      retryAvailable: false,
+      answer: answerToDisplayText(apiResult.answer),
+      answerMode: apiResult.answer_mode,
+      confidenceLabel,
+      sourceRefs
+    }
+  })
+}
+
 const createResultItem = (
   task: ScheduledTask,
   signalKind: ScheduledTaskResultSignalKind,
@@ -501,6 +711,7 @@ const createResultItem = (
     domainHref,
     dedupeKey,
     reviewed: false,
+    reviewState: null,
     reviewAvailable: canMutateResults(capabilityMode) && signalKind === "result",
     retryAvailable: canMutateResults(capabilityMode) && signalKind === "failure"
   }
@@ -693,6 +904,7 @@ export const buildScheduledTaskAutomationHomeItems = (
   return results
     .filter((result) => result.signalKind === "result" || result.signalKind === "failure")
     .filter((result) => result.state !== "completed_no_results")
+    .filter((result) => result.reviewState !== "dismissed")
     .map((result) => ({
       id: result.id,
       title: result.title,

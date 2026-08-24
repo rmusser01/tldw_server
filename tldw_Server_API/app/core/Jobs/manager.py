@@ -516,6 +516,7 @@ class JobManager:
         "vn_assets": ("generation",),
         "persona_visuals": ("generation",),
         "writing": ("writing-review", "writing-ai"),
+        "scheduled_tasks": ("scheduled-tasks",),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---

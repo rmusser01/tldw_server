@@ -42,6 +42,20 @@ class PromptImprovementError(RuntimeError):
         self.code = code
 
 
+class RecurringQuestionRAGError(Exception):
+    """Expected Recurring Question RAG execution failure."""
+
+    def __init__(self, code: str, *, retryable: bool = False, details: dict[str, Any] | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retryable = retryable
+        self.details = details or {}
+
+
+class RecurringQuestionWorkerRetryableError(Exception):
+    """Raised after durable run state is updated so WorkerSDK can retry the Jobs job."""
+
+
 class NotesOrganizationValidationError(ValueError):
     """Validation failure with a stable Notes organization Sync error code."""
 
