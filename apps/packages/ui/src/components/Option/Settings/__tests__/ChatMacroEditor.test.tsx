@@ -288,6 +288,27 @@ describe("ChatMacroEditor", () => {
     expect(mocks.updateChatMacro).not.toHaveBeenCalled()
   })
 
+  it("keeps the selected name after importing guided YAML and switching to Guided", async () => {
+    const user = userEvent.setup()
+    const { container } = renderEditor({ selected: makeSummary() })
+
+    await screen.findByLabelText("Macro YAML")
+    const upload = container.querySelector('input[type="file"]') as HTMLInputElement
+    await user.upload(
+      upload,
+      new File([createGuidedRaw({ name: "imported", command: "handoff" })], "imported.yaml", {
+        type: "text/yaml"
+      })
+    )
+
+    expect(screen.getByLabelText("Name")).toHaveValue("research")
+
+    await user.click(screen.getByRole("button", { name: "Guided" }))
+
+    expect(screen.getByLabelText("Name")).toHaveValue("research")
+    expect(screen.getByLabelText("Command")).toHaveValue("handoff")
+  })
+
   it("allows an existing user macro command to change in Guided mode", async () => {
     const user = userEvent.setup()
     mocks.getChatMacro.mockResolvedValueOnce(success(makeDetail({ raw: createGuidedRaw() })))
