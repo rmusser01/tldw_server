@@ -6,6 +6,7 @@ import type {
 } from "@/types/persona-visuals"
 
 import {
+  createPersonaCompanionDiagnostic,
   getPrimaryPersonaVisualDiagnostic,
   resolvePersonaVisualDiagnostics
 } from "../personaVisualDiagnostics"
@@ -205,5 +206,24 @@ describe("resolvePersonaVisualDiagnostics", () => {
 
   it("returns no diagnostics for a renderable sprite-frame pack", () => {
     expect(resolvePersonaVisualDiagnostics({ pack: buildPack() })).toEqual([])
+  })
+})
+
+describe("createPersonaCompanionDiagnostic", () => {
+  it("keeps local diagnostics limited to safe identifiers and failure classes", () => {
+    expect(
+      createPersonaCompanionDiagnostic({
+        event: "ambient_skipped",
+        personaId: "persona-1",
+        packId: "file:///Users/alice/private-pack",
+        state: "ambient.look",
+        failureClass: "empty_set"
+      })
+    ).toEqual({
+      event: "ambient_skipped",
+      personaId: "persona-1",
+      state: "ambient.look",
+      failureClass: "empty_set"
+    })
   })
 })
