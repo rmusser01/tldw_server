@@ -3313,7 +3313,7 @@ class TaskStore:
                         "Projection drift ID has changed claims.",
                         entity="tasks",
                         entity_id=drift,
-                    )  # noqa: TRY003
+                    )  # noqa: TRY003 - Stable sanitized conflict text is API-facing.
                 return existing
             task_row = self._fetch_task(
                 task,
@@ -3327,7 +3327,7 @@ class TaskStore:
                     "Projection drift task reference not found.",
                     entity="tasks",
                     entity_id=drift,
-                )  # noqa: TRY003
+                )  # noqa: TRY003 - Stable sanitized conflict text is API-facing.
             self._execute(
                 transaction_conn,
                 """
@@ -3616,7 +3616,7 @@ class TaskStore:
                     "Projection drift changed concurrently.",
                     entity="tasks",
                     entity_id=drift_id,
-                )  # noqa: TRY003
+                )  # noqa: TRY003 - Stable sanitized conflict text is API-facing.
             updated = self._execute(
                 transaction_conn,
                 """
@@ -3641,7 +3641,7 @@ class TaskStore:
                     "Projection drift changed concurrently.",
                     entity="tasks",
                     entity_id=drift_id,
-                )  # noqa: TRY003
+                )  # noqa: TRY003 - Stable sanitized conflict text is API-facing.
             result = self._fetch_task_projection_drift(
                 drift_id,
                 owner_user_id=owner,

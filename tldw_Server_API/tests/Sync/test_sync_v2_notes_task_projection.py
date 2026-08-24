@@ -156,7 +156,7 @@ def test_projection_group_metadata_is_closed_and_privacy_safe() -> None:
         "tldw_Server_API.app.core.Sync.v2.notes_task_coordinator"
     )
 
-    anchor = coordinator._validate_task_projection_group_metadata(  # noqa: SLF001
+    anchor = coordinator._validate_task_projection_group_metadata(  # noqa: SLF001 - Contract test exercises the private boundary directly.
         _projection_metadata()
     )
 
@@ -191,7 +191,7 @@ def test_projection_group_metadata_rejects_malformed_or_extra_fields(
     )
 
     with pytest.raises(ValueError):
-        coordinator._validate_task_projection_group_metadata(  # noqa: SLF001
+        coordinator._validate_task_projection_group_metadata(  # noqa: SLF001 - Contract test exercises the private boundary directly.
             _projection_metadata(**overrides)
         )
 
@@ -230,7 +230,7 @@ def _insert_task_envelope(store: SyncV2Store) -> object:
         status="accepted",
     )
     with store.db.backend.transaction() as connection:
-        return store.db._insert_envelope_in_transaction(  # noqa: SLF001
+        return store.db._insert_envelope_in_transaction(  # noqa: SLF001 - Fixture needs the transactional insertion seam.
             create,
             connection=connection,
         )
@@ -385,7 +385,7 @@ def test_projection_cache_rebuild_requires_marker_group_and_immutable_envelopes(
     )
     with sync_store.db.backend.transaction() as connection:
         for envelope in envelopes:
-            sync_store.db._insert_envelope_in_transaction(  # noqa: SLF001
+            sync_store.db._insert_envelope_in_transaction(  # noqa: SLF001 - Test injects a malformed row below the public API.
                 envelope,
                 connection=connection,
             )

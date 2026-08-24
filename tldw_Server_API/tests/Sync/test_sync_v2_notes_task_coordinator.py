@@ -526,6 +526,68 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(
         client_device = sync_store.get_device(OWNER_ID, device_id)
         assert active_dataset is not None
         assert client_device is not None
+        new_task_id = _uuid(3)
+        new_task_payload = parse_notes_task_v1(
+            {
+                "task_id": new_task_id,
+                "note_id": NOTE_ID,
+                "title": "New client task",
+                "description": None,
+                "status": "open",
+                "completed_at": None,
+                "priority": None,
+                "due_date": None,
+                "estimate": None,
+                "recurrence": None,
+                "assignee_id": None,
+                "tags": [],
+                "custom": {},
+            },
+            owner_user_id=OWNER_ID,
+        )
+        new_task_envelope = SyncEnvelopeCreate(
+            dataset_id=dataset.dataset_id,
+            client_envelope_id="client-task-create-1",
+            domain="notes.task",
+            operation="upsert",
+            object_id=new_task_id,
+            parent_id=NOTE_ID,
+            device_id=device_id,
+            object_revision=1,
+            entity_version=1,
+            payload=new_task_payload.model_dump(mode="json"),
+            payload_hash=notes_task_object_hash(
+                new_task_payload,
+                revision=1,
+                deleted=False,
+            ),
+            created_at_client="2026-08-24T10:01:30+00:00",
+            encryption_metadata={"policy": "server_trusted_v1"},
+        )
+        new_task_plan = service._expand_task_client_push(
+            dataset=active_dataset,
+            device=client_device,
+            envelope=new_task_envelope,
+        )
+        assert [item.domain for item in new_task_plan] == [
+            "notes.task",
+            "notes.task_activity",
+            "notes.note",
+        ]
+        new_task_items = [
+            item
+            for item in parse_note_checklists(
+                note_id=NOTE_ID,
+                note_version=int(new_task_plan[2].object_revision or 0),
+                content=str(new_task_plan[2].payload["content"]),
+            ).items
+            if item.marker is not None and item.marker.task_id == new_task_id
+        ]
+        assert len(new_task_items) == 1
+        assert new_task_items[0].text == "New client task"
+        assert new_task_items[0].marker is not None
+        assert new_task_items[0].marker.revision == 1
+        assert new_task_items[0].marker.object_hash == new_task_envelope.payload_hash
         unrelated_note = note_db.get_note_by_id(NOTE_ID)
         assert unrelated_note is not None
         duplicate_content = (

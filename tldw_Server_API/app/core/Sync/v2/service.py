@@ -2336,7 +2336,10 @@ class SyncV2Service:
         placeholder_plan_hash = "0" * 64
         note_step: SyncEnvelopeCreate | None = None
         projection_anchor: dict[str, object] | None = None
-        if prior_head is not None:
+        from .notes_task_coordinator import _projection_anchor_from_envelope
+
+        projects_new_task = prior_head is None and envelope.operation == "upsert"
+        if projects_new_task or prior_head is not None:
             from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import (
                 parse_note_checklists,
             )
@@ -2348,15 +2351,18 @@ class SyncV2Service:
             from .notes_task_coordinator import (
                 TASK_PROJECTION_ROUTING_KEY,
                 TaskProjectionGroupMetadata,
-                _projection_anchor_from_envelope,
                 append_task_projection_to_note,
                 project_task_payload_into_note,
                 remove_task_projection_from_note,
             )
             from .server_origin import canonical_payload_hash
 
-            base_anchor = _projection_anchor_from_envelope(prior_head)
-            if base_anchor is not None and base_anchor.linked:
+            base_anchor = (
+                _projection_anchor_from_envelope(prior_head)
+                if prior_head is not None
+                else None
+            )
+            if projects_new_task or (base_anchor is not None and base_anchor.linked):
                 note_head = self.store.get_current_head(
                     dataset.dataset_id,
                     "notes.note",
@@ -2370,13 +2376,15 @@ class SyncV2Service:
                     note_version=int(note_head.object_revision),
                     content=str(note_wire.get("content") or ""),
                 ).items
-                if restore_intent:
+                if projects_new_task or restore_intent:
                     marker_base_is_valid = not any(
                         item.marker is not None
                         and item.marker.task_id == after.task_id
                         for item in current_items
                     )
                 else:
+                    if prior_head is None:
+                        raise SyncStoreError("notes_task_projection_base_invalid")
                     expected_marker = TaskMarker(
                         task_id=after.task_id,
                         revision=int(prior_head.object_revision or 0),
@@ -2401,16 +2409,20 @@ class SyncV2Service:
                     "payload": envelope.payload,
                 }
                 if envelope.operation == "tombstone":
+                    if prior_head is None:
+                        raise SyncStoreError("notes_task_projection_base_invalid")
                     note_wire["content"] = remove_task_projection_from_note(
                         **projection_kwargs,
                         base_revision=int(prior_head.object_revision or 0),
                         base_hash=str(prior_head.payload_hash or ""),
                     )
-                elif restore_intent:
+                elif projects_new_task or restore_intent:
                     note_wire["content"] = append_task_projection_to_note(
                         **projection_kwargs,
                     )
                 else:
+                    if prior_head is None:
+                        raise SyncStoreError("notes_task_projection_base_invalid")
                     note_wire["content"] = project_task_payload_into_note(
                         **projection_kwargs,
                         base_revision=int(prior_head.object_revision or 0),
