@@ -581,12 +581,12 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     frontend_unit_script = next(
         step["run"]
         for step in frontend_unit_job["steps"]
-        if step.get("name") == "Run frontend unit tests"
+        if step.get("name") == "Run package-owned frontend unit tests"
     )
     assert 'git cat-file -e "${BASE_SHA}^{commit}"' in frontend_unit_script
     assert 'git fetch --no-tags --depth=1 origin "$BASE_SHA"' in frontend_unit_script
     assert frontend_unit_script.index('git cat-file -e "${BASE_SHA}^{commit}"') < (
-        frontend_unit_script.index('vitest_args=("--changed=${BASE_SHA}"')
+        frontend_unit_script.index('package_vitest_args=("--changed=${BASE_SHA}"')
     )
 
     pre_commit = workflows["pre-commit.yml"][0]
@@ -763,7 +763,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 23
+    assert setup_helper_count == 24
     assert setup_python_cache_count == 1
     assert cache_save_count == 6
     assert cache_restore_count == 6

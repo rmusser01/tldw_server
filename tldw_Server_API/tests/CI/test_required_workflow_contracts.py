@@ -202,9 +202,33 @@ def test_frontend_required_uses_isolated_vitest_shards() -> None:
     if "npm ci" in run_script:
         raise AssertionError("frontend-unit-tests should not use npm ci for Bun workspace dependencies")
 
-    test_step = _get_step(steps, "Run frontend unit tests")
+    test_step = _get_step(steps, "Run package-owned frontend unit tests")
+    assert test_step["working-directory"] == "apps"
     test_run_script = str(test_step.get("run") or "")
-    assert 'bunx vitest run "${vitest_args[@]}"' in test_run_script
+    assert 'local head_package_root="${GITHUB_WORKSPACE}/${package_repo_path}"' in test_run_script
+    assert 'head_command+=("--exclude=${exclude_pattern}")' in test_run_script
+    assert '"${head_command[@]}"' in test_run_script
+    assert 'bunx vitest run "${failed_files[@]}"' in test_run_script
+    assert 'frontend_status=$?' in test_run_script
+    assert 'ui_status=$?' in test_run_script
+    assert 'if (( frontend_status != 0 || ui_status != 0 )); then' in test_run_script
+    assert (
+        'git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA"'
+        in test_run_script
+    )
+    assert 'git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"' in test_run_script
+    assert "bun install --frozen-lockfile" in test_run_script
+    assert 'run_package "frontend" "apps/tldw-frontend" "../packages/ui/**"' in test_run_script
+    assert 'run_package "ui" "apps/packages/ui" ""' in test_run_script
+    assert '"--reporter=default"' in test_run_script
+    assert '"--reporter=json"' in test_run_script
+    assert '"--outputFile.json=${head_report}"' in test_run_script
+    assert 'RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"' in test_run_script
+    assert 'python3 "$RATCHET_SCRIPT" validate-success' in test_run_script
+    assert 'python3 "$RATCHET_SCRIPT" extract' in test_run_script
+    assert 'python3 "$RATCHET_SCRIPT" compare' in test_run_script
+    assert 'if (( head_status == 0 )); then' in test_run_script
+    assert '--changed-files "$CHANGED_FILES_PATH"' in test_run_script
     assert '"--changed=${BASE_SHA}"' in test_run_script
     assert '"--shard=${{ matrix.shard }}/8"' in test_run_script
     assert '"--maxWorkers=1"' in test_run_script
@@ -1324,6 +1348,8 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_context_api.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_job_status.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py",
         }
         auth_db_files = {
@@ -1682,7 +1708,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         claims_files = {
             str(path)
-            for path in Path("tldw_Server_API/tests/Claims").glob("test*.py")
+            for path in Path("tldw_Server_API/tests/Claims").glob("**/test*.py")
         }
         covered_claims_files: dict[str, str] = {}
         for shard_name in claims_shards:

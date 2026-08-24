@@ -18,15 +18,21 @@ def test_frontend_required_bounds_pathological_impact_expansion() -> None:
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     steps = data["jobs"]["frontend-unit-tests"]["steps"]
     unit_step = next(
-        step for step in steps if step.get("name") == "Run frontend unit tests"
+        step
+        for step in steps
+        if step.get("name") == "Run package-owned frontend unit tests"
     )
     script = unit_step["run"]
 
     assert 'IMPACTED_TEST_LIMIT="500"' in script
     assert 'bunx vitest list --changed="${BASE_SHA}" --filesOnly' in script
-    assert 'git diff --name-only --diff-filter=ACMR "${BASE_SHA}"...HEAD' in script
-    assert 'vitest_args=("${DIRECT_TEST_FILES[@]}" "${vitest_args[@]}")' in script
-    assert 'bunx vitest run "${vitest_args[@]}"' in script
+    assert 'git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA"' in script
+    assert "USE_DIRECT_TESTS=1" in script
+    assert (
+        'package_vitest_args=("${direct_test_files[@]}" "${common_vitest_args[@]}")'
+        in script
+    )
+    assert '"${head_command[@]}"' in script
     assert "No directly changed frontend tests were found" in script
 
 
