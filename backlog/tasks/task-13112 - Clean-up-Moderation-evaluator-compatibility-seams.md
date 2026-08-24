@@ -24,7 +24,7 @@ modified_files:
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
 - tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py
 - backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
-updated_date: 2026-08-24 05:28
+updated_date: 2026-08-24 05:40
 ---
 
 ## Description
@@ -45,7 +45,7 @@ Remove repository-unused private ModerationService delegates superseded by Polic
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Inventory candidate private delegates and compatibility tests. 2. Preserve public and dynamic-dispatch contracts with focused tests. 3. Remove only obsolete delegates and update tests. 4. Run focused/full moderation, compilation, and Bandit verification.
+Execute `Docs/superpowers/plans/2026-08-23-moderation-compatibility-seams-cleanup.md` using TDD and subagent-driven development: (1) remove five class/static direct evaluator shims, (2) remove three instance scan shims and duplicate private characterization, (3) run the exact compilation, quality, security, and caller matrix, and (4) complete independent spec/quality review and PR-readiness gates.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -56,6 +56,7 @@ Created isolated worktree `codex/moderation-compatibility-seams` from current `o
 Repository compatibility inventory and the exact eight-method removal set are documented in the design spec. Independent review retained `_evaluate_action_internal()` because it preserves public `evaluate_text()` dispatch, documented the intentional private-surface compatibility risk, made the absence invariant class-local, specified the exact verification matrix, removed a duplicate endpoint gate, and corrected whitespace.
 
 Pre-change verification passed: 318 unit Moderation tests, 89 Guardian tests, 16 Chat tests, 12 selected Workflow tests, and 1 targeted Audio test.
+The revised design is user-approved. The implementation plan was written and self-reviewed against the spec: exact retained pytest nodes collect successfully, compilation precedes test cleanup in both implementation stages, placeholder and whitespace scans are clean, and all eight deletions map to retained direct-evaluator coverage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
