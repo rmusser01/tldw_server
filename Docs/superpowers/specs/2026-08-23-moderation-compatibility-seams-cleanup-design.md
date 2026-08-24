@@ -1,7 +1,7 @@
 # Moderation Compatibility Seams Cleanup Design
 
 **Backlog task:** TASK-13112
-**Status:** Revised after independent review, pending user approval
+**Status:** Approved
 **Base:** `origin/dev` at `2c3589fa09`
 
 ## Purpose
