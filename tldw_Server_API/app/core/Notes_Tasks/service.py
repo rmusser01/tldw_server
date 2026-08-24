@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date
@@ -22,7 +23,9 @@ from tldw_Server_API.app.core.Sync.v2.models import SyncOperation, normalize_syn
 from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
     NotesTaskActivityV1,
     TaskActivitySource,
+    notes_task_object_hash,
     parse_notes_task_activity_v1,
+    parse_notes_task_v1,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import ServerOriginMutationStep
 
@@ -31,6 +34,9 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
         NotesOrganizationCoordinator,
+    )
+    from tldw_Server_API.app.core.Sync.v2.notes_task_coordinator import (
+        NotesTaskCoordinator,
     )
 
 
@@ -224,6 +230,9 @@ class NotesTaskCaptureCallback(Protocol):
         *,
         conn: TaskConnection | None,
     ) -> None: ...
+
+
+NotesTaskCoordinatorResolver = Callable[..., "NotesTaskCoordinator | None"]
 
 
 def _task_activity_metadata(row: dict[str, Any]) -> dict[str, object]:
@@ -426,6 +435,7 @@ def build_task_capture_mutation(
     actor: TaskActor,
     before: dict[str, Any] | None,
     after: dict[str, Any],
+    source_kind: TaskActivitySource = "rest",
 ) -> NotesTaskCaptureMutation:
     """Build one exact, stable task capture input from canonical product rows."""
 
@@ -509,6 +519,7 @@ def build_task_capture_mutation(
         actor=actor,
         before=before,
         after=after,
+        source_kind=source_kind,
     )
     return NotesTaskCaptureMutation(
         owner_user_id=owner,
@@ -549,9 +560,155 @@ class NotesTaskService:
         reconciler: NotesTaskReconciler | None = None,
         *,
         task_capture_callback: NotesTaskCaptureCallback | None = None,
+        task_coordinator_resolver: NotesTaskCoordinatorResolver | None = None,
     ) -> None:
         self._reconciler = reconciler or NotesTaskReconciler()
         self._task_capture_callback = task_capture_callback
+        self._task_coordinator_resolver = task_coordinator_resolver
+
+    def _active_task_coordinator(
+        self,
+        *,
+        scope: TaskStoreScope,
+    ) -> NotesTaskCoordinator | None:
+        """Resolve owner-bound task authority at the public mutation boundary."""
+
+        resolver = self._task_coordinator_resolver
+        if resolver is None:
+            from tldw_Server_API.app.core.Sync.v2.notes_task_coordinator import (
+                resolve_notes_task_coordinator,
+            )
+
+            resolver = resolve_notes_task_coordinator
+        return resolver(
+            user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+        )
+
+    @staticmethod
+    def _task_source(actor: TaskActor) -> tuple[str, TaskActivitySource]:
+        """Return the stable batch and activity provenance for one public write."""
+
+        if actor.tool_name:
+            return "notes.tasks.mcp", "mcp"
+        return "notes.tasks.rest", "rest"
+
+    @staticmethod
+    def _planned_metadata_task(
+        *,
+        db: CharactersRAGDB,
+        task: dict[str, Any],
+        metadata: dict[str, Any],
+        owner_user_id: str,
+        occurred_at: str,
+    ) -> dict[str, Any]:
+        """Build the canonical post-state without mutating product storage."""
+
+        source = db.task_store._sync_bootstrap_task_row(task, owner_user_id)
+        raw_payload = dict(source["sync_payload"])
+        for key in _METADATA_TOKEN_ORDER:
+            raw_payload[key] = metadata.get(key)
+        payload = parse_notes_task_v1(raw_payload, owner_user_id=owner_user_id)
+        revision = int(source["canonical_revision"]) + 1
+        return {
+            **task,
+            "metadata_json": db.task_store._sync_task_metadata(payload),
+            "updated_at": occurred_at,
+            "version": int(task["version"]) + 1,
+            "canonical_revision": revision,
+            "canonical_hash": notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=False,
+            ),
+            "source_diagnostic_code": None,
+            "source_diagnostic_hash": None,
+        }
+
+    def _update_unlinked_metadata_through_sync(
+        self,
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        coordinator: NotesTaskCoordinator,
+        task_id: str,
+        expected_task_version: int,
+        actor: TaskActor,
+        metadata: dict[str, Any] | None,
+        text: str | None,
+        status: str | None,
+        record_only: bool,
+    ) -> dict[str, Any]:
+        """Append an unlinked metadata transition before product materialization."""
+
+        task = self._require_task_version(
+            db,
+            task_id=task_id,
+            expected_task_version=expected_task_version,
+            scope=scope,
+            conn=None,
+        )
+        projection_status = str(task["projection_status"])
+        if projection_status != "unlinked":
+            raise ConflictError(
+                f"Task projection is {projection_status} for task '{task_id}'.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        if not record_only or text is not None or status is not None:
+            raise ConflictError(
+                f"Task projection is unlinked for task '{task_id}'.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        if metadata is None:
+            return task
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        after = self._planned_metadata_task(
+            db=db,
+            task=task,
+            metadata=metadata,
+            owner_user_id=scope.owner_user_id,
+            occurred_at=occurred_at,
+        )
+        source, source_kind = self._task_source(actor)
+        mutation = build_task_capture_mutation(
+            db=db,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            actor=actor,
+            before=task,
+            after=after,
+            source_kind=source_kind,
+        )
+        result = coordinator.capture(
+            coordinator.plan_task_mutation(mutation),
+            source=source,
+        )
+        if not result.fully_applied:
+            raise ConflictError(
+                "Task projection is incomplete.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        updated = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if updated is None:
+            raise ConflictError(
+                "Updated task was not found.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        return updated
 
     def _capture_task_mutation(
         self,
@@ -726,7 +883,7 @@ class NotesTaskService:
         marker = "x" if status == "done" else " "
         line = f"- [{marker}] {self._render_body(text=text.strip(), metadata=metadata)}"
 
-        coordinator = active_coordinator(db, user_id=actor.actor_id)
+        coordinator = active_coordinator(db, user_id=scope.owner_user_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
             note = self._require_note_version(db, note_id=note_id, expected_note_version=expected_note_version)
@@ -799,7 +956,22 @@ class NotesTaskService:
         if metadata is not None:
             self._validate_metadata(metadata)
 
-        coordinator = active_coordinator(db, user_id=actor.actor_id)
+        task_coordinator = self._active_task_coordinator(scope=scope)
+        if task_coordinator is not None:
+            return self._update_unlinked_metadata_through_sync(
+                db=db,
+                scope=scope,
+                coordinator=task_coordinator,
+                task_id=task_id,
+                expected_task_version=expected_task_version,
+                actor=actor,
+                metadata=metadata,
+                text=text,
+                status=status,
+                record_only=record_only,
+            )
+
+        coordinator = active_coordinator(db, user_id=scope.owner_user_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
             if conn is not None:
@@ -976,7 +1148,7 @@ class NotesTaskService:
         scope = resolve_task_compatibility_scope(
             db, authenticated_owner_user_id=owner_user_id or db.client_id
         )
-        coordinator = active_coordinator(db, user_id=actor.actor_id)
+        coordinator = active_coordinator(db, user_id=scope.owner_user_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
             if conn is not None:

@@ -2,19 +2,36 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import unicodedata
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from tldw_Server_API.app.core.Notes_Tasks.models import ParsedChecklistItem
-from tldw_Server_API.app.core.Notes_Tasks.projection_markers import task_marker_hash
+from tldw_Server_API.app.core.Notes_Tasks.projection_markers import (
+    TaskMarker,
+    task_marker_hash,
+)
+
+from .errors import SyncStoreError
+from .models import SyncDataset
+from .mutation_group_validation import SYNC_MUTATION_GROUP_MAX_SIZE
+from .server_origin import canonical_payload_hash
+from .server_origin_batch import (
+    ServerOriginBatchResult,
+    ServerOriginMutationStep,
+    capture_server_origin_mutation_batch,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
+    from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskCaptureMutation
     from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope
+    from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
     from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
 
@@ -70,6 +87,150 @@ class ProjectionCacheRebuildResult:
     reason_code: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class NotesTaskMutationPlan:
+    """One complete deterministic task mutation group ready for atomic append."""
+
+    steps: tuple[ServerOriginMutationStep, ...]
+    idempotency_key: str
+
+
+@dataclass(slots=True)
+class NotesTaskCoordinator:
+    """Build and append complete task/activity/note mutation groups."""
+
+    service: SyncV2Service | None = None
+    user_id: str | None = None
+
+    def plan_task_mutation(
+        self,
+        mutation: NotesTaskCaptureMutation,
+        *,
+        note_step: ServerOriginMutationStep | None = None,
+    ) -> NotesTaskMutationPlan:
+        """Plan one task transition with its activity and optional note projection."""
+
+        if note_step is None:
+            plan = NotesTaskMutationPlan(
+                steps=mutation.steps,
+                idempotency_key=mutation.idempotency_key,
+            )
+            self.validate_plan(plan.steps)
+            return plan
+        planned_note = _canonical_note_step(
+            note_step,
+            identity_parts=(mutation.idempotency_key,),
+        )
+        task_step, activity_step = _bind_projection_anchor(
+            mutation,
+            note_step=planned_note,
+        )
+        plan = NotesTaskMutationPlan(
+            steps=(task_step, activity_step, planned_note),
+            idempotency_key=mutation.idempotency_key,
+        )
+        self.validate_plan(plan.steps)
+        return plan
+
+    def plan_note_reconciliation(
+        self,
+        mutations: Sequence[NotesTaskCaptureMutation],
+        *,
+        note_step: ServerOriginMutationStep,
+        idempotency_key: str,
+    ) -> NotesTaskMutationPlan:
+        """Plan all task transitions plus the note as one bounded atomic group."""
+
+        normalized_key = idempotency_key.strip()
+        if not normalized_key:
+            raise SyncStoreError("notes_task_mutation_group_invalid")
+        mutation_tuple = tuple(mutations)
+        planned_note = _canonical_note_step(
+            note_step,
+            identity_parts=(normalized_key, *(item.idempotency_key for item in mutation_tuple)),
+        )
+        steps: list[ServerOriginMutationStep] = []
+        for mutation in mutation_tuple:
+            steps.extend(_bind_projection_anchor(mutation, note_step=planned_note))
+        steps.append(planned_note)
+        plan = NotesTaskMutationPlan(steps=tuple(steps), idempotency_key=normalized_key)
+        self.validate_plan(plan.steps)
+        return plan
+
+    @staticmethod
+    def validate_plan(steps: Sequence[ServerOriginMutationStep]) -> None:
+        """Validate the closed task/activity pairs and optional final note step."""
+
+        _validate_task_mutation_plan(steps)
+
+    def capture(
+        self,
+        plan: NotesTaskMutationPlan,
+        *,
+        source: str,
+    ) -> ServerOriginBatchResult:
+        """Append and materialize one already-complete mutation plan."""
+
+        self.validate_plan(plan.steps)
+        if self.service is None or not self.user_id:
+            raise SyncStoreError("notes_task_coordinator_not_bound")
+        return capture_server_origin_mutation_batch(
+            service=self.service,
+            user_id=self.user_id,
+            steps=plan.steps,
+            source=source,
+            idempotency_key=plan.idempotency_key,
+            trusted_notes_task_coordinator=True,
+        )
+
+
+def resolve_notes_task_coordinator(
+    *,
+    user_id: str,
+    dataset_id: str,
+) -> NotesTaskCoordinator | None:
+    """Resolve coupled task authority or preserve inactive legacy behavior."""
+
+    from .server_origin import get_active_server_origin_sync_service_for_user
+
+    owner = str(user_id).strip()
+    selected_dataset = str(dataset_id).strip()
+    if not owner or not selected_dataset:
+        raise SyncStoreError("notes_task_sync_scope_invalid")
+    service = get_active_server_origin_sync_service_for_user(owner)
+    if service is None:
+        return None
+    matches = [
+        dataset
+        for dataset in service.store.list_datasets_for_user(owner)
+        if dataset.scope_type == "personal"
+        and dataset.metadata.get("default_personal") is True
+        and dataset.metadata.get("client_family") == "chatbook"
+        and dataset.archived_at is None
+    ]
+    if len(matches) != 1 or matches[0].dataset_id != selected_dataset:
+        raise SyncStoreError("notes_task_sync_scope_conflict")
+    dataset = matches[0]
+    task_domains = {"notes.task", "notes.task_activity"}
+    enrolled = task_domains.intersection(dataset.domains)
+    if not enrolled:
+        return None
+    if enrolled != task_domains:
+        raise SyncStoreError("notes_task_sync_domains_incomplete")
+    _require_task_domains_ready(dataset)
+    return NotesTaskCoordinator(service=service, user_id=owner)
+
+
+def _require_task_domains_ready(dataset: SyncDataset) -> None:
+    """Require the two task domains to share one ready activation state."""
+
+    for readiness_key in ("notes_task_v1", "notes_task_activity_v1"):
+        metadata = dataset.metadata.get(readiness_key)
+        state = metadata.get("state") if isinstance(metadata, Mapping) else None
+        if state != "ready":
+            raise SyncStoreError("notes_task_sync_not_ready")
+
+
 def _validate_task_projection_group_metadata(
     value: Mapping[str, object],
 ) -> TaskProjectionGroupMetadata:
@@ -106,6 +267,152 @@ def _validate_task_projection_group_metadata(
         linked=linked,
         marker_hash=marker_hash,
     )
+
+
+def _task_activity_id(identity: Sequence[object]) -> str:
+    """Derive one stable UUIDv4 from the complete canonical mutation identity."""
+
+    encoded = json.dumps(
+        list(identity),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    digest = hashlib.sha256(encoded).digest()
+    return str(UUID(bytes=digest[:16], version=4))
+
+
+def _canonical_note_step(
+    note_step: ServerOriginMutationStep,
+    *,
+    identity_parts: Sequence[str],
+) -> ServerOriginMutationStep:
+    """Return a note step with a deterministic immutable envelope identity."""
+
+    if note_step.domain != "notes.note" or note_step.operation != "upsert":
+        raise SyncStoreError("notes_task_mutation_group_invalid")
+    envelope_id = note_step.client_envelope_id
+    if envelope_id is None:
+        payload_hash, _ = canonical_payload_hash(dict(note_step.payload))
+        digest = hashlib.sha256(
+            json.dumps(
+                [*identity_parts, note_step.object_id, payload_hash, note_step.object_revision],
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        envelope_id = f"notes-task-note-server-{digest[:32]}"
+    return replace(note_step, client_envelope_id=envelope_id)
+
+
+def _bind_projection_anchor(
+    mutation: NotesTaskCaptureMutation,
+    *,
+    note_step: ServerOriginMutationStep,
+) -> tuple[ServerOriginMutationStep, ServerOriginMutationStep]:
+    """Bind one task/activity pair to its exact task and note envelope evidence."""
+
+    task_step, activity_step = mutation.steps
+    task_envelope_id = task_step.client_envelope_id
+    note_envelope_id = note_step.client_envelope_id
+    if task_envelope_id is None or note_envelope_id is None:
+        raise SyncStoreError("notes_task_mutation_group_invalid")
+    task_revision = mutation.after.get("canonical_revision")
+    task_hash = mutation.after.get("canonical_hash")
+    if type(task_revision) is not int or not isinstance(task_hash, str):
+        raise SyncStoreError("notes_task_mutation_group_invalid")
+    marker = TaskMarker(
+        task_id=task_step.object_id,
+        revision=task_revision,
+        object_hash=task_hash,
+    )
+    note_hash, _ = canonical_payload_hash(dict(note_step.payload))
+    anchor = TaskProjectionGroupMetadata(
+        projection_version=1,
+        task_id=marker.task_id,
+        task_envelope_id=task_envelope_id,
+        task_revision=marker.revision,
+        task_hash=marker.object_hash,
+        note_envelope_id=note_envelope_id,
+        note_hash=note_hash,
+        linked=(
+            mutation.after.get("projection_status") == "live"
+            and not bool(mutation.after.get("deleted"))
+        ),
+        marker_hash=task_marker_hash(marker),
+    )
+    try:
+        routing_value = _validate_task_projection_group_metadata(
+            anchor.as_routing_value()
+        ).as_routing_value()
+    except ValueError as exc:
+        raise SyncStoreError("notes_task_mutation_group_invalid") from exc
+    task_routing = {
+        **dict(task_step.routing_metadata),
+        TASK_PROJECTION_ROUTING_KEY: routing_value,
+    }
+    activity_routing = {
+        **dict(activity_step.routing_metadata),
+        TASK_PROJECTION_ROUTING_KEY: routing_value,
+    }
+    return (
+        replace(task_step, routing_metadata=task_routing),
+        replace(activity_step, routing_metadata=activity_routing),
+    )
+
+
+def _validate_task_mutation_plan(
+    steps: Sequence[ServerOriginMutationStep],
+) -> None:
+    """Reject incomplete, ambiguous, oversized, or cross-parent task plans."""
+
+    plan = tuple(steps)
+    if len(plan) > SYNC_MUTATION_GROUP_MAX_SIZE:
+        raise SyncStoreError("notes_task_mutation_group_limit_exceeded")
+    if len(plan) < 2:
+        raise SyncStoreError("notes_task_mutation_group_invalid")
+    has_note = plan[-1].domain == "notes.note"
+    pair_steps = plan[:-1] if has_note else plan
+    if not pair_steps or len(pair_steps) % 2:
+        raise SyncStoreError("notes_task_mutation_group_invalid")
+    if has_note and (
+        plan[-1].operation != "upsert"
+        or plan[-1].client_envelope_id is None
+        or plan[-1].object_revision is None
+    ):
+        raise SyncStoreError("notes_task_mutation_group_invalid")
+
+    note_ids: set[str] = set()
+    object_keys: set[tuple[str, str]] = set()
+    envelope_ids: set[str] = set()
+    for index in range(0, len(pair_steps), 2):
+        task_step = pair_steps[index]
+        activity_step = pair_steps[index + 1]
+        if (
+            task_step.domain != "notes.task"
+            or activity_step.domain != "notes.task_activity"
+            or task_step.parent_id is None
+            or activity_step.parent_id != task_step.parent_id
+            or task_step.object_revision is None
+            or task_step.client_envelope_id is None
+            or activity_step.object_revision != 1
+            or activity_step.client_envelope_id is None
+            or activity_step.payload.get("task_id") != task_step.object_id
+            or activity_step.payload.get("note_id") != task_step.parent_id
+        ):
+            raise SyncStoreError("notes_task_mutation_group_invalid")
+        note_ids.add(task_step.parent_id)
+        for step in (task_step, activity_step):
+            object_key = (step.domain, step.object_id)
+            if object_key in object_keys or step.client_envelope_id in envelope_ids:
+                raise SyncStoreError("notes_task_mutation_group_invalid")
+            object_keys.add(object_key)
+            envelope_ids.add(step.client_envelope_id)
+    if len(note_ids) != 1:
+        raise SyncStoreError("notes_task_mutation_group_invalid")
+    if has_note:
+        note_step = plan[-1]
+        if note_step.object_id not in note_ids or note_step.client_envelope_id in envelope_ids:
+            raise SyncStoreError("notes_task_mutation_group_invalid")
 
 
 def rebuild_task_projection_cache(
@@ -231,10 +538,12 @@ def _same_projection_group(
     anchor: TaskProjectionGroupMetadata,
 ) -> bool:
     """Return whether both exact envelopes carry the same complete anchor."""
+    raw_note_anchor = note_envelope.routing_metadata.get(TASK_PROJECTION_ROUTING_KEY)
     note_anchor = _projection_anchor_from_envelope(note_envelope)
     return (
-        note_anchor == anchor
+        (raw_note_anchor is None or note_anchor == anchor)
         and note_envelope.client_envelope_id == anchor.note_envelope_id
+        and note_envelope.payload_hash == anchor.note_hash
         and task_envelope.mutation_group_id is not None
         and task_envelope.mutation_group_id == note_envelope.mutation_group_id
         and task_envelope.mutation_step_count == note_envelope.mutation_step_count

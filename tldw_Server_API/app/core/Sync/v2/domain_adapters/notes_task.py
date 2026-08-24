@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from tldw_Server_API.app.core.exceptions import NotesTaskContractError
@@ -74,6 +75,11 @@ class NotesTaskDomainAdapter:
             return _rejected(envelope, "notes_task_payload_invalid")
 
         trusted_bootstrap = _trusted_task_bootstrap(envelope, context)
+        trusted_server_mutation = _trusted_server_task_mutation(
+            envelope,
+            dataset=dataset,
+            context=context,
+        )
         restore_intent = envelope.routing_metadata.get("restore_intent")
         allowed_routing = (
             {
@@ -85,7 +91,18 @@ class NotesTaskDomainAdapter:
                 "server_owner_user_id",
             }
             if trusted_bootstrap
-            else {"restore_intent"}
+            else (
+                {
+                    "source",
+                    "origin",
+                    "server_device_id",
+                    "server_owner_user_id",
+                    "restore_intent",
+                    "task_projection",
+                }
+                if trusted_server_mutation
+                else {"restore_intent"}
+            )
         )
         if set(envelope.routing_metadata) - allowed_routing or restore_intent not in {
             None,
@@ -245,6 +262,49 @@ def _trusted_task_bootstrap(
         and envelope.routing_metadata.get("bootstrap_capture") is True
         and envelope.routing_metadata.get("source") == "notes-task-bootstrap"
         and envelope.routing_metadata.get("origin") == "server"
+    )
+
+
+def _trusted_server_task_mutation(
+    envelope: SyncEnvelopeCreate,
+    *,
+    dataset: SyncDataset,
+    context: SyncAdapterContext | None,
+) -> bool:
+    """Validate closed server provenance and optional projection evidence."""
+
+    routing = envelope.routing_metadata
+    required = {"source", "origin", "server_device_id", "server_owner_user_id"}
+    if not (
+        context is not None
+        and context.trusted_server_origin
+        and required.issubset(routing)
+        and routing.get("origin") == "server"
+        and routing.get("server_device_id") == "server-origin"
+        and routing.get("server_owner_user_id") == dataset.owner_user_id
+        and envelope.device_id == "server-origin"
+        and isinstance(routing.get("source"), str)
+        and 1 <= len(str(routing["source"])) <= 128
+    ):
+        return False
+    projection = routing.get("task_projection")
+    if projection is None:
+        return True
+    if not isinstance(projection, Mapping):
+        return False
+    try:
+        from ..notes_task_coordinator import (  # Local import avoids adapter cycles.
+            _validate_task_projection_group_metadata,
+        )
+
+        anchor = _validate_task_projection_group_metadata(projection)
+    except (ImportError, ValueError):
+        return False
+    return (
+        anchor.task_id == envelope.object_id
+        and anchor.task_envelope_id == envelope.client_envelope_id
+        and anchor.task_revision == envelope.object_revision
+        and anchor.task_hash == envelope.payload_hash
     )
 
 

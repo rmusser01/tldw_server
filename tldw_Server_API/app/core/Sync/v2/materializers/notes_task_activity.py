@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from loguru import logger
@@ -188,11 +189,12 @@ def _parse_envelope(
         and routing.get("origin") == "server"
         and envelope.payload.get("source_kind") == "trusted_bootstrap_v1"
     )
+    trusted_server_routing = _valid_server_routing(envelope)
     if (
         envelope.adapter_version != 1
         or envelope.schema_version != 1
         or envelope.operation not in {"upsert", "tombstone"}
-        or (routing and not trusted_bootstrap_routing)
+        or (routing and not trusted_bootstrap_routing and not trusted_server_routing)
     ):
         raise NotesTaskContractError("notes.task_activity envelope lineage is invalid")
     if envelope.operation == "upsert":
@@ -235,6 +237,49 @@ def _parse_envelope(
     ):
         raise NotesTaskContractError("notes.task_activity tombstone identity is invalid")
     return _ParsedActivityEnvelope(payload=payload, original=original)
+
+
+def _valid_server_routing(envelope: SyncEnvelope) -> bool:
+    """Accept only coordinator-produced server provenance and projection metadata."""
+
+    routing = envelope.routing_metadata
+    base_fields = {
+        "source",
+        "origin",
+        "server_device_id",
+        "server_owner_user_id",
+    }
+    allowed_fields = base_fields | {"task_projection"}
+    if not (
+        set(routing).issubset(allowed_fields)
+        and base_fields.issubset(routing)
+        and routing.get("origin") == "server"
+        and routing.get("server_device_id") == "server-origin"
+        and envelope.device_id == "server-origin"
+        and isinstance(routing.get("server_owner_user_id"), str)
+        and routing.get("server_owner_user_id")
+        and isinstance(routing.get("source"), str)
+        and 1 <= len(str(routing["source"])) <= 128
+        and envelope.payload.get("source_kind") != "client"
+    ):
+        return False
+    projection = routing.get("task_projection")
+    if projection is None:
+        return True
+    if not isinstance(projection, Mapping):
+        return False
+    try:
+        from ..notes_task_coordinator import (  # Local import avoids materializer cycles.
+            _validate_task_projection_group_metadata,
+        )
+
+        anchor = _validate_task_projection_group_metadata(projection)
+    except (ImportError, ValueError):
+        return False
+    return (
+        envelope.payload.get("task_id") == anchor.task_id
+        and envelope.payload.get("note_id") == envelope.parent_id
+    )
 
 
 def _state_conflict(

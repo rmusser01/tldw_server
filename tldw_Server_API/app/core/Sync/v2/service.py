@@ -101,6 +101,7 @@ from .models import (
     SyncRestoreDomainCompleteness,
     client_private_server_frontend_limitation_warning,
     normalize_supported_adapter_versions,
+    normalize_sync_timestamp,
     normalize_sync_v2_requested_domains,
     sync_v2_attachment_ref_v2_is_writable,
     sync_v2_dataset_writable_adapter_versions,
@@ -109,7 +110,14 @@ from .models import (
 )
 from .mutation_group_validation import (
     StoredMutationGroupValidationError,
+    mutation_group_plan_hash,
     validate_stored_mutation_group,
+)
+from .notes_task_contract import (
+    NotesTaskV1Payload,
+    notes_task_activity_object_hash,
+    parse_notes_task_activity_v1,
+    parse_notes_task_v1,
 )
 from .notes_task_readiness import (
     NOTES_TASK_SERVER_METADATA_KEYS,
@@ -162,6 +170,141 @@ def _require_client_device_id(device_id: str) -> None:
 
 def _safe_projection_error_message(exc: Exception) -> str:
     return f"Projection failed: {type(exc).__name__}"
+
+
+def _notes_task_activity_metadata(payload: NotesTaskV1Payload) -> dict[str, object]:
+    """Return the canonical task metadata snapshot used by activity events."""
+
+    wire = payload.model_dump(mode="json")
+    return {
+        key: wire[key]
+        for key in (
+            "description",
+            "priority",
+            "due_date",
+            "estimate",
+            "recurrence",
+            "assignee_id",
+            "tags",
+            "custom",
+        )
+    }
+
+
+def _notes_task_projection_status(head: SyncEnvelope | None) -> str:
+    """Infer the last durable projection state without consulting product cache."""
+
+    if head is None:
+        return "unlinked"
+    raw_anchor = head.routing_metadata.get("task_projection")
+    if isinstance(raw_anchor, Mapping) and raw_anchor.get("linked") is True:
+        return "live"
+    return "unlinked"
+
+
+def _client_task_activity_values(
+    *,
+    before: NotesTaskV1Payload | None,
+    after: NotesTaskV1Payload,
+    operation: SyncOperation,
+    prior_head: SyncEnvelope | None,
+    restore_intent: bool,
+) -> tuple[str, dict[str, object] | None, dict[str, object]]:
+    """Derive the sole canonical lifecycle event for an authenticated task push."""
+
+    after_metadata = _notes_task_activity_metadata(after)
+    if before is None:
+        return (
+            "created",
+            None,
+            {
+                "title": after.title,
+                "status": after.status,
+                "completed_at": after.completed_at,
+                "metadata": after_metadata,
+            },
+        )
+    if operation == "tombstone":
+        return (
+            "deleted",
+            {
+                "deleted": False,
+                "projection_status": _notes_task_projection_status(prior_head),
+            },
+            {"deleted": True, "projection_status": "deleted"},
+        )
+    if restore_intent:
+        return (
+            "restored",
+            {"deleted": True, "projection_status": "deleted"},
+            {"deleted": False, "projection_status": "unlinked"},
+        )
+    if (before.status, after.status) == ("open", "done"):
+        return "completed", {"status": "open"}, {"status": "done"}
+    if (before.status, after.status) == ("done", "open"):
+        return "reopened", {"status": "done"}, {"status": "open"}
+    before_metadata = _notes_task_activity_metadata(before)
+    if before.title != after.title:
+        return (
+            "updated",
+            {"title": before.title, "metadata": before_metadata},
+            {"title": after.title, "metadata": after_metadata},
+        )
+    if before_metadata != after_metadata:
+        return "updated", {"metadata": before_metadata}, {"metadata": after_metadata}
+    raise SyncStoreError("notes_task_transition_has_no_activity")
+
+
+def _notes_task_client_group_id(
+    dataset_id: str,
+    device_id: str,
+    client_envelope_id: str,
+) -> str:
+    """Return the stable group identity controlled by authenticated input."""
+
+    digest = hashlib.sha256(
+        f"{dataset_id}:{device_id}:{client_envelope_id}".encode()
+    ).hexdigest()
+    return f"notes-task-client-group-{digest[:32]}"
+
+
+def _same_client_task_submission(
+    stored: SyncEnvelope,
+    incoming: SyncEnvelopeCreate,
+) -> bool:
+    """Compare only client-controlled task envelope fields for exact replay."""
+
+    fields = (
+        "dataset_id",
+        "client_envelope_id",
+        "domain",
+        "operation",
+        "object_id",
+        "device_id",
+        "client_profile_id",
+        "client_sequence",
+        "base_server_cursor",
+        "base_object_revision",
+        "base_object_hash",
+        "object_revision",
+        "parent_id",
+        "schema_version",
+        "payload",
+        "payload_clear",
+        "payload_ciphertext",
+        "payload_hash",
+        "payload_size_bytes",
+        "created_at_client",
+        "deleted",
+        "encryption_metadata",
+        "stable_key",
+        "dependencies",
+        "routing_metadata",
+        "adapter_version",
+        "base_version",
+        "entity_version",
+    )
+    return all(getattr(stored, field) == getattr(incoming, field) for field in fields)
 
 
 def _key_recovery_metadata_string(
@@ -1886,6 +2029,395 @@ class SyncV2Service:
             dry_run=dry_run,
         )
 
+    def _expand_task_client_push(
+        self,
+        *,
+        dataset: SyncDataset,
+        device: SyncDevice,
+        envelope: SyncEnvelopeCreate,
+    ) -> tuple[SyncEnvelopeCreate, SyncEnvelopeCreate]:
+        """Expand one authenticated task envelope into its closed activity group."""
+
+        if envelope.domain != "notes.task":
+            raise SyncStoreError("notes_task_client_group_invalid")
+        if any(
+            value is not None
+            for value in (
+                envelope.mutation_group_id,
+                envelope.mutation_step,
+                envelope.mutation_step_count,
+                envelope.mutation_plan_hash,
+            )
+        ):
+            raise SyncStoreError("notes_task_client_group_invalid")
+        task_state = dataset.metadata.get("notes_task_v1")
+        activity_state = dataset.metadata.get("notes_task_activity_v1")
+        if (
+            "notes.task_activity" not in dataset.domains
+            or not isinstance(task_state, Mapping)
+            or task_state.get("state") != "ready"
+            or not isinstance(activity_state, Mapping)
+            or activity_state.get("state") != "ready"
+        ):
+            raise SyncStoreError("notes_task_sync_not_ready")
+
+        prior_head: SyncEnvelope | None = None
+        if envelope.base_server_cursor is not None:
+            candidate = self.store.get_envelope_by_server_cursor(
+                envelope.base_server_cursor
+            )
+            if (
+                candidate is None
+                or candidate.dataset_id != dataset.dataset_id
+                or candidate.domain != "notes.task"
+                or candidate.object_id != envelope.object_id
+                or candidate.object_revision != envelope.base_object_revision
+                or candidate.payload_hash != envelope.base_object_hash
+            ):
+                raise SyncStoreError("notes_task_client_base_invalid")
+            prior_head = candidate
+
+        after = parse_notes_task_v1(
+            envelope.payload,
+            owner_user_id=dataset.owner_user_id,
+        )
+        before = (
+            parse_notes_task_v1(
+                prior_head.payload,
+                owner_user_id=dataset.owner_user_id,
+            )
+            if prior_head is not None
+            else None
+        )
+        restore_intent = envelope.routing_metadata.get("restore_intent") is True
+        event_type, old_value, new_value = _client_task_activity_values(
+            before=before,
+            after=after,
+            operation=envelope.operation,
+            prior_head=prior_head,
+            restore_intent=restore_intent,
+        )
+        occurred_at = normalize_sync_timestamp(envelope.created_at_client)
+        if occurred_at is None:
+            raise SyncStoreError("notes_task_client_timestamp_invalid")
+        from .notes_task_coordinator import _task_activity_id
+
+        activity_id = _task_activity_id(
+            (
+                dataset.dataset_id,
+                device.device_id,
+                envelope.client_envelope_id,
+                event_type,
+                envelope.payload_hash,
+            )
+        )
+        activity_payload = parse_notes_task_activity_v1(
+            {
+                "activity_id": activity_id,
+                "note_id": after.note_id,
+                "task_id": after.task_id,
+                "event_type": event_type,
+                "actor_type": "user",
+                "actor_id": dataset.owner_user_id,
+                "source_device_id": device.device_id,
+                "client_occurred_at": occurred_at,
+                "source_kind": "client",
+                "corrects_activity_id": None,
+                "old_value": old_value,
+                "new_value": new_value,
+                "metadata": {},
+            },
+            owner_user_id=dataset.owner_user_id,
+            bound_actor_type="user",
+            bound_actor_id=dataset.owner_user_id,
+            authenticated_device_id=device.device_id,
+            trusted_server_origin=False,
+        )
+        activity_wire = activity_payload.model_dump(mode="json")
+        mutation_group_id = _notes_task_client_group_id(
+            dataset.dataset_id,
+            device.device_id,
+            envelope.client_envelope_id,
+        )
+        placeholder_plan_hash = "0" * 64
+        task_step = replace(
+            envelope,
+            device_id=device.device_id,
+            status="accepted",
+            mutation_group_id=mutation_group_id,
+            mutation_step=0,
+            mutation_step_count=2,
+            mutation_plan_hash=placeholder_plan_hash,
+        )
+        activity_step = SyncEnvelopeCreate(
+            dataset_id=dataset.dataset_id,
+            client_envelope_id=f"notes-task-activity-client-{activity_id.replace('-', '')}",
+            domain="notes.task_activity",
+            operation="upsert",
+            object_id=activity_id,
+            device_id=device.device_id,
+            object_revision=1,
+            entity_version=1,
+            parent_id=after.note_id,
+            schema_version=1,
+            adapter_version=1,
+            payload=activity_wire,
+            payload_hash=notes_task_activity_object_hash(
+                activity_payload,
+                revision=1,
+                deleted=False,
+            ),
+            payload_size_bytes=len(
+                json.dumps(
+                    activity_wire,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ),
+            created_at_client=occurred_at,
+            deleted=False,
+            encryption_metadata=dict(envelope.encryption_metadata),
+            status="accepted",
+            mutation_group_id=mutation_group_id,
+            mutation_step=1,
+            mutation_step_count=2,
+            mutation_plan_hash=placeholder_plan_hash,
+        )
+        plan = (task_step, activity_step)
+        plan_hash = mutation_group_plan_hash(plan)
+        return (
+            replace(task_step, mutation_plan_hash=plan_hash),
+            replace(activity_step, mutation_plan_hash=plan_hash),
+        )
+
+    def _task_client_adapter_context(
+        self,
+        *,
+        dataset: SyncDataset,
+        device: SyncDevice,
+        planned_task: SyncEnvelopeCreate | None = None,
+        derived_activity: bool = False,
+    ) -> SyncAdapterContext:
+        """Build the authenticated overlay used to preflight a task group."""
+
+        def get_head(domain: SyncDomain, object_id: str):
+            if (
+                planned_task is not None
+                and domain == "notes.task"
+                and object_id == planned_task.object_id
+            ):
+                return planned_task
+            return self.store.get_current_head(dataset.dataset_id, domain, object_id)
+
+        return SyncAdapterContext(
+            get_head=get_head,
+            get_authorized_note=lambda note_id: get_head("notes.note", note_id),
+            get_authorized_task=lambda task_id: get_head("notes.task", task_id),
+            list_heads=lambda domain: self._list_current_heads_for_adapter(
+                dataset.dataset_id,
+                domain,
+            ),
+            authenticated_actor_type="user",
+            authenticated_actor_id=dataset.owner_user_id,
+            authenticated_device_id=device.device_id,
+            coordinator_derived_task_activity=derived_activity,
+        )
+
+    def _push_task_client_group(
+        self,
+        *,
+        dataset: SyncDataset,
+        device: SyncDevice,
+        envelope: SyncEnvelopeCreate,
+    ) -> SyncPushResult:
+        """Preflight, atomically append, and fully materialize one task group."""
+
+        group_id = _notes_task_client_group_id(
+            dataset.dataset_id,
+            device.device_id,
+            envelope.client_envelope_id,
+        )
+        inserted = self.store.list_mutation_group(dataset.dataset_id, group_id)
+        if inserted:
+            try:
+                validate_stored_mutation_group(
+                    inserted,
+                    dataset_id=dataset.dataset_id,
+                    mutation_group_id=group_id,
+                )
+            except StoredMutationGroupValidationError:
+                return self._task_client_idempotency_rejection(dataset, envelope)
+            if (
+                len(inserted) != 2
+                or [item.domain for item in inserted]
+                != ["notes.task", "notes.task_activity"]
+                or not _same_client_task_submission(inserted[0], envelope)
+            ):
+                return self._task_client_idempotency_rejection(dataset, envelope)
+        else:
+            try:
+                plan = self._expand_task_client_push(
+                    dataset=dataset,
+                    device=device,
+                    envelope=envelope,
+                )
+            except Exception as exc:  # noqa: BLE001 - contract errors are sanitized.
+                return SyncPushResult(
+                    dataset_id=dataset.dataset_id,
+                    rejected=[
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="notes_task_payload_invalid",
+                            message="notes.task compound mutation validation failed",
+                            retryable=isinstance(exc, SyncMaterializationBusyError),
+                        )
+                    ],
+                )
+
+            task_outcome = self._evaluate_envelope(
+                dataset,
+                plan[0],
+                context=self._task_client_adapter_context(
+                    dataset=dataset,
+                    device=device,
+                ),
+            )
+            if not isinstance(task_outcome, AdapterAccepted):
+                return self._task_client_outcome_result(
+                    dataset=dataset,
+                    envelope=plan[0],
+                    outcome=task_outcome,
+                )
+            activity_outcome = self._evaluate_envelope(
+                dataset,
+                plan[1],
+                context=self._task_client_adapter_context(
+                    dataset=dataset,
+                    device=device,
+                    planned_task=plan[0],
+                    derived_activity=True,
+                ),
+            )
+            if not isinstance(activity_outcome, AdapterAccepted):
+                return self._task_client_outcome_result(
+                    dataset=dataset,
+                    envelope=plan[0],
+                    outcome=activity_outcome,
+                )
+            try:
+                inserted = self.store.insert_envelopes_atomic(plan)
+            except SyncIdempotencyConflictError:
+                return self._task_client_idempotency_rejection(dataset, envelope)
+            except SyncHeadConflictError:
+                outcome = AdapterConflict(
+                    client_envelope_id=envelope.client_envelope_id,
+                    domain="notes.task",
+                    entity_id=envelope.object_id,
+                    conflict_type="stale_base_state",
+                    message="Sync object changed after request preflight",
+                )
+                return self._task_client_outcome_result(
+                    dataset=dataset,
+                    envelope=plan[0],
+                    outcome=outcome,
+                )
+
+        try:
+            from .server_origin_batch import materialize_accepted_mutation_group
+
+            materialized = materialize_accepted_mutation_group(
+                service=self,
+                dataset=dataset,
+                envelopes=inserted,
+            )
+        except Exception:  # noqa: BLE001 - accepted groups remain replayable.
+            return SyncPushResult(
+                dataset_id=dataset.dataset_id,
+                rejected=[
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="sync_projection_failed",
+                        message="Task projection is incomplete; retry the same envelope",
+                        retryable=True,
+                    )
+                ],
+            )
+
+        task = materialized.envelopes[0]
+        accepted = self._push_accepted_from_envelope(task)
+        return SyncPushResult(
+            dataset_id=dataset.dataset_id,
+            accepted=[accepted],
+            next_cursor=str(accepted.server_sequence),
+        )
+
+    @staticmethod
+    def _task_client_idempotency_rejection(
+        dataset: SyncDataset,
+        envelope: SyncEnvelopeCreate,
+    ) -> SyncPushResult:
+        """Return the stable changed-envelope-ID rejection."""
+
+        return SyncPushResult(
+            dataset_id=dataset.dataset_id,
+            rejected=[
+                SyncPushRejected(
+                    client_envelope_id=envelope.client_envelope_id,
+                    error_code="idempotency_conflict",
+                    message="Sync envelope ID was reused with different content",
+                )
+            ],
+        )
+
+    def _task_client_outcome_result(
+        self,
+        *,
+        dataset: SyncDataset,
+        envelope: SyncEnvelopeCreate,
+        outcome: AdapterRejected | AdapterConflict | AdapterDeferred,
+    ) -> SyncPushResult:
+        """Translate one closed preflight outcome to the public push shape."""
+
+        if isinstance(outcome, AdapterConflict):
+            try:
+                conflict = self._store_preflight_conflict(dataset, envelope, outcome)
+            except SyncStoreError:
+                return SyncPushResult(
+                    dataset_id=dataset.dataset_id,
+                    rejected=[
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="sync_projection_busy",
+                            message="Projection is busy; retry later",
+                            retryable=True,
+                        )
+                    ],
+                )
+            return SyncPushResult(dataset_id=dataset.dataset_id, conflicts=[conflict])
+        if isinstance(outcome, AdapterDeferred):
+            return SyncPushResult(
+                dataset_id=dataset.dataset_id,
+                rejected=[
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="adapter_deferred",
+                        message=outcome.message,
+                        retryable=True,
+                    )
+                ],
+            )
+        return SyncPushResult(
+            dataset_id=dataset.dataset_id,
+            rejected=[
+                SyncPushRejected(
+                    client_envelope_id=envelope.client_envelope_id,
+                    error_code=outcome.error_code,
+                    message=outcome.message,
+                    retryable=outcome.retryable,
+                )
+            ],
+        )
+
     def push(
         self,
         *,
@@ -2011,6 +2543,18 @@ class SyncV2Service:
                 )
                 continue
             envelope = replace(envelope, device_id=envelope.device_id or device_id)
+            if envelope.domain == "notes.task":
+                task_result = self._push_task_client_group(
+                    dataset=dataset,
+                    device=device,
+                    envelope=envelope,
+                )
+                accepted.extend(task_result.accepted)
+                rejected.extend(task_result.rejected)
+                conflicts.extend(task_result.conflicts)
+                if stop_on_conflict and task_result.conflicts:
+                    stopped_after_conflict = True
+                continue
             try:
                 existing = self.store.get_existing_envelope_for_idempotency(
                     replace(envelope, status="accepted")

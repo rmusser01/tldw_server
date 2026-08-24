@@ -136,6 +136,7 @@ class SyncAdapterContext:
     authenticated_actor_type: str | None = None
     authenticated_actor_id: object = None
     authenticated_device_id: str | None = None
+    coordinator_derived_task_activity: bool = False
     organization_group_state: str | None = None
     organization_bootstrap_id: str | None = None
     notes_link_bootstrap_id: str | None = None

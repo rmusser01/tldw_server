@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
     notes_task_object_hash,
     parse_notes_task_v1,
 )
+from tldw_Server_API.app.core.Sync.v2.server_origin import SERVER_ORIGIN_DEVICE_ID
 
 pytestmark = pytest.mark.unit
 
@@ -181,6 +182,60 @@ def _context(
         get_head=get_head,
         get_authorized_note=get_authorized_note,
     )
+
+
+def _server_routing(incoming: SyncEnvelopeCreate) -> dict[str, object]:
+    return {
+        "source": "notes.tasks.rest",
+        "origin": "server",
+        "server_device_id": SERVER_ORIGIN_DEVICE_ID,
+        "server_owner_user_id": OWNER_ID,
+        "task_projection": {
+            "projection_version": 1,
+            "task_id": TASK_ID,
+            "task_envelope_id": incoming.client_envelope_id,
+            "task_revision": incoming.object_revision,
+            "task_hash": incoming.payload_hash,
+            "note_envelope_id": "note-envelope-2",
+            "note_hash": "sha256:" + "a" * 64,
+            "linked": True,
+            "marker_hash": "sha256:" + "b" * 64,
+        },
+    }
+
+
+def test_notes_task_adapter_accepts_closed_server_projection_routing_only() -> None:
+    incoming = _incoming()
+    routed = replace(
+        incoming,
+        device_id=SERVER_ORIGIN_DEVICE_ID,
+        routing_metadata=_server_routing(incoming),
+    )
+    trusted_context = replace(_context(), trusted_server_origin=True)
+
+    assert isinstance(
+        _adapter().evaluate_envelope(
+            routed,
+            dataset=_dataset(),
+            context=trusted_context,
+        ),
+        AdapterAccepted,
+    )
+    injected = _adapter().evaluate_envelope(
+        routed,
+        dataset=_dataset(),
+        context=_context(),
+    )
+    malformed = _adapter().evaluate_envelope(
+        replace(
+            routed,
+            routing_metadata={**_server_routing(incoming), "secret": "no"},
+        ),
+        dataset=_dataset(),
+        context=trusted_context,
+    )
+    assert isinstance(injected, AdapterRejected)
+    assert isinstance(malformed, AdapterRejected)
 
 
 def test_notes_task_adapter_accepts_create_exact_update_and_completion_reopen() -> None:
