@@ -181,18 +181,14 @@ async def test_fresh_postgres_initialize_executes_trusted_schema_as_guarded_stat
     await pool.initialize()
 
     assert pool._initialized is True
+    assert not any("CREATE EXTENSION" in sql.upper() for sql in executed)
     assert any("CREATE TABLE IF NOT EXISTS public.users" in sql for sql in executed)
-    extension_index = next(
-        index
-        for index, sql in enumerate(executed)
-        if "CREATE EXTENSION IF NOT EXISTS pgcrypto" in sql
-    )
     users_index = next(
         index
         for index, sql in enumerate(executed)
         if "CREATE TABLE IF NOT EXISTS public.users" in sql
     )
-    assert extension_index < users_index
+    assert "DEFAULT gen_random_uuid()" in executed[users_index]
     assert len(executed) > 1
     assert readiness_connections == [main_pool.connection]
     assert candidate_repair_connections == [main_pool.connection]

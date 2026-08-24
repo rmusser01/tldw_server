@@ -1,8 +1,6 @@
 -- PostgreSQL AuthNZ bootstrap schema (users core table)
 -- This file is consumed by app/core/AuthNZ/database.py during PG startup.
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 CREATE TABLE IF NOT EXISTS public.users (
     id SERIAL PRIMARY KEY,
     uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),

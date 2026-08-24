@@ -20,6 +20,22 @@ from tldw_Server_API.app.core.UserProfiles.transaction_gateway import (
     ProfileUpdateConcurrencyConflict,
 )
 
+pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize(
+    "exception_type",
+    [
+        ProfileDatabaseBusy,
+        ProfileTransactionFailed,
+        ProfileUpdateConcurrencyConflict,
+    ],
+)
+def test_transaction_failures_are_owned_by_core_exception_taxonomy(
+    exception_type: type[Exception],
+) -> None:
+    assert exception_type.__module__ == "tldw_Server_API.app.core.exceptions"
+
 
 class _TransactionContext:
     def __init__(self, pool: _Pool, outcome: Any) -> None:

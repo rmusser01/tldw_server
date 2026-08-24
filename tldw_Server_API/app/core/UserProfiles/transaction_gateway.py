@@ -16,39 +16,18 @@ from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
     AuthnzTransactionPolicy,
     get_authnz_transaction_policy,
 )
+from tldw_Server_API.app.core.exceptions import (
+    ProfileDatabaseBusy,
+    ProfileTransactionError,
+    ProfileTransactionFailed,
+    ProfileUpdateConcurrencyConflict,
+)
 from tldw_Server_API.app.core.UserProfiles.backend import (
     ProfileBackendUnavailable,
     resolve_profile_backend,
 )
 
 T = TypeVar("T")
-
-
-class ProfileTransactionError(RuntimeError):
-    """Base class for sanitized, transport-neutral transaction failures."""
-
-    code = "profile_update_failed"
-    retry_after_seconds: int | None = None
-
-
-class ProfileDatabaseBusy(ProfileTransactionError):
-    code = "database_busy"
-
-    def __init__(self, *, retry_after_seconds: int) -> None:
-        super().__init__("Database is temporarily busy")
-        self.retry_after_seconds = retry_after_seconds
-
-
-class ProfileUpdateConcurrencyConflict(ProfileTransactionError):
-    code = "profile_update_concurrency_conflict"
-
-    def __init__(self) -> None:
-        super().__init__("Profile update conflicted")
-
-
-class ProfileTransactionFailed(ProfileTransactionError):
-    def __init__(self) -> None:
-        super().__init__("Profile update transaction failed")
 
 
 class ProfileTransactionGateway:

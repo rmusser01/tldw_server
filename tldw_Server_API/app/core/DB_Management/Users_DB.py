@@ -179,7 +179,7 @@ class UsersDB:
                 async with self.db_pool.transaction() as conn:
                     is_postgres = getattr(self.db_pool, "pool", None) is not None
                     if is_postgres:
-                        uuid_default = await self._ensure_postgres_uuid_default(conn)
+                        uuid_default = self._postgres_uuid_default()
                         users_ddl = """
                             CREATE TABLE IF NOT EXISTS public.users (
                                 id SERIAL PRIMARY KEY,
@@ -367,26 +367,8 @@ class UsersDB:
                 raise DatabaseError("Failed to create users table") from None
 
     @staticmethod
-    async def _ensure_postgres_uuid_default(conn: Any) -> str:
-        choices = (
-            ("pgcrypto", "CREATE EXTENSION IF NOT EXISTS pgcrypto", "gen_random_uuid()"),
-            (
-                "uuid-ossp",
-                'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"',
-                "uuid_generate_v4()",
-            ),
-        )
-        for extension, statement, default in choices:
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-                return default
-            except _USERS_DB_NONCRITICAL_EXCEPTIONS as exc:
-                logger.bind(
-                    extension=extension,
-                    exception_type=type(exc).__name__,
-                ).warning("PostgreSQL UUID extension unavailable")
-        raise DatabaseError("PostgreSQL UUID extension unavailable")
+    def _postgres_uuid_default() -> str:
+        return "gen_random_uuid()"
 
     @staticmethod
     async def _ensure_profile_candidate_tables(conn: Any, *, is_postgres: bool) -> None:

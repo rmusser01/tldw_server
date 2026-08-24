@@ -33,6 +33,10 @@ class _StubPostgresPool:
         """Record a migration SQL statement without touching a real database."""
         self.executed_sql.append(query)
 
+    async def fetchval(self, query: str, *args: object) -> bool:
+        del query, args
+        return True
+
 
 class _FailingPostgresPool(_StubPostgresPool):
     async def execute(self, query: str, *args: object) -> None:
@@ -45,6 +49,18 @@ class _FailingPermissionSeedPool(_StubPostgresPool):
     async def fetch(self, query: str, *args: object) -> list[object]:
         del query, args
         raise RuntimeError("password=secret-sentinel")
+
+
+class _TimesUsedOnlyRegistrationCodesPool(_StubPostgresPool):
+    async def execute(self, query: str, *args: object) -> None:
+        if "SET times_used = uses" in query:
+            raise RuntimeError('column "uses" does not exist')
+        await super().execute(query, *args)
+
+    async def fetchval(self, query: str, *args: object) -> bool:
+        del args
+        assert "information_schema.columns" in query
+        return False
 
 
 def test_ensure_authnz_core_tables_pg_emits_password_history_ddl(
@@ -92,6 +108,38 @@ def test_ensure_authnz_core_tables_pg_emits_password_history_ddl(
         assert any("ON password_history(user_id, created_at DESC, id DESC)" in sql for sql in pool.executed_sql)
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+async def test_authnz_core_migration_skips_legacy_uses_copy_when_column_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ import pg_migrations_extra
+
+    pool = _TimesUsedOnlyRegistrationCodesPool()
+    monkeypatch.setattr(
+        pg_migrations_extra,
+        "ensure_postgres_profile_version_on_connection",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        pg_migrations_extra,
+        "repair_postgres_profile_candidate_timestamps",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        pg_migrations_extra,
+        "validate_postgres_profile_candidate_schema",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        pg_migrations_extra,
+        "ensure_mcp_prompt_read_permission_pg",
+        AsyncMock(return_value=True),
+    )
+
+    assert await pg_migrations_extra.ensure_authnz_core_tables_pg(pool) is True
+    assert not any("SET times_used = uses" in sql for sql in pool.executed_sql)
 
 
 @pytest.mark.asyncio

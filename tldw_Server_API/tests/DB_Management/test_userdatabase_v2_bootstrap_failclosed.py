@@ -1,4 +1,5 @@
 import builtins
+import inspect
 import io
 from pathlib import Path
 from types import SimpleNamespace
@@ -153,6 +154,22 @@ def test_postgres_embedded_schema_uses_canonical_users_relation():
     )
     assert all("REFERENCES users(" not in sql for sql in users_statements)
     assert all(" ON users" not in sql for sql in users_statements)
+
+
+def test_postgres_user_bootstrap_never_installs_extensions_at_runtime() -> None:
+    statements = UserDatabase._default_schema_statements_postgres()
+    normalization_source = inspect.getsource(UserDatabase._ensure_core_columns)
+    authnz_schema = (
+        Path(__file__).parents[2]
+        / "Databases"
+        / "Postgres"
+        / "Schema"
+        / "postgresql_users.sql"
+    ).read_text(encoding="utf-8")
+
+    assert all("CREATE EXTENSION" not in statement.upper() for statement in statements)
+    assert "CREATE EXTENSION" not in normalization_source.upper()
+    assert "CREATE EXTENSION" not in authnz_schema.upper()
 
 
 def test_postgres_candidate_remediation_uses_public_schema() -> None:

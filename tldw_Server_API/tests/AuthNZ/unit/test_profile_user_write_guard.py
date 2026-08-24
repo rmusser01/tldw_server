@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import copy
-import logging
 import tracemalloc
 from dataclasses import FrozenInstanceError
 from statistics import mean, quantiles
 from time import perf_counter
 
 import pytest
+from sqlglot import logger as sqlglot_logger
 
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     ProfileUserWriteRejected,
@@ -21,6 +21,8 @@ from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _ProfileUserSql,
     _revoke_profile_user_sql,
 )
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(
@@ -270,45 +272,50 @@ def test_ambiguous_or_multi_statement_sql_fails_closed(statement: str) -> None:
 
 
 def test_tokenizer_failure_is_sanitized_without_literal_disclosure(
-    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sentinel = "AUTHNZ_TOKEN_SECRET_SENTINEL_81f6"
+    messages: list[str] = []
 
-    with caplog.at_level(logging.WARNING, logger="sqlglot"):
-        with pytest.raises(ProfileUserWriteRejected) as raised:
-            _guard_sql(
-                f"SELECT '{sentinel}",
-                backend="postgres",
-                connection_identity=object(),
-                operation="execute",
-            )
+    def _capture(message: object, *args: object, **_kwargs: object) -> None:
+        messages.append(" ".join(str(item) for item in (message, *args)))
+
+    monkeypatch.setattr(sqlglot_logger, "warning", _capture)
+    monkeypatch.setattr(sqlglot_logger, "error", _capture)
+    with pytest.raises(ProfileUserWriteRejected) as raised:
+        _guard_sql(
+            f"SELECT '{sentinel}",
+            backend="postgres",
+            connection_identity=object(),
+            operation="execute",
+        )
 
     assert str(raised.value) == "Profile-visible AuthNZ users write rejected"
     assert raised.value.__cause__ is None
-    assert sentinel not in caplog.text
+    assert sentinel not in "\n".join(messages)
 
 
 def test_rejected_unsupported_sql_does_not_log_literal_values(
-    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sentinel = "AUTHNZ_SQL_SECRET_SENTINEL_6e41"
-    sqlglot_logger = logging.getLogger("sqlglot")
-    sqlglot_logger.addHandler(caplog.handler)
+    messages: list[str] = []
 
-    try:
-        with caplog.at_level(logging.WARNING, logger="sqlglot"):
-            with pytest.raises(ProfileUserWriteRejected):
-                _guard_sql(
-                    f"PREPARE profile_write AS UPDATE users SET email = '{sentinel}'",
-                    backend="postgres",
-                    connection_identity=object(),
-                    operation="prepare",
-                )
-    finally:
-        sqlglot_logger.removeHandler(caplog.handler)
+    def _capture(message: object, *args: object, **_kwargs: object) -> None:
+        messages.append(" ".join(str(item) for item in (message, *args)))
 
-    assert any(record.name == "sqlglot" for record in caplog.records)
-    assert sentinel not in caplog.text
+    monkeypatch.setattr(sqlglot_logger, "warning", _capture)
+    monkeypatch.setattr(sqlglot_logger, "error", _capture)
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            f"PREPARE profile_write AS UPDATE users SET email = '{sentinel}'",
+            backend="postgres",
+            connection_identity=object(),
+            operation="prepare",
+        )
+
+    assert messages
+    assert sentinel not in "\n".join(messages)
 
 
 def test_oversized_sql_fails_closed() -> None:

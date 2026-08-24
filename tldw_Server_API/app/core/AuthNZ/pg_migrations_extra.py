@@ -1122,14 +1122,6 @@ _CREATE_AUTHNZ_CORE_TABLES = [
     ("ALTER TABLE registration_codes ADD COLUMN IF NOT EXISTS description TEXT", ()),
     ("ALTER TABLE registration_codes ADD COLUMN IF NOT EXISTS allowed_email_domain TEXT", ()),
     ("ALTER TABLE IF EXISTS org_invites ADD COLUMN IF NOT EXISTS allowed_email_domain TEXT", ()),
-    (
-        """
-        UPDATE registration_codes
-        SET times_used = uses
-        WHERE times_used IS NULL OR times_used = 0
-        """,
-        (),
-    ),
     # RBAC core tables
     (
         """
@@ -2761,6 +2753,20 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
         async with db_pool.transaction() as conn:
             for sql, params in _CREATE_AUTHNZ_CORE_TABLES:
                 await conn.execute(sql, *params)
+            has_legacy_uses = await conn.fetchval(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = 'public' "
+                "AND table_name = 'registration_codes' "
+                "AND column_name = 'uses'"
+                ")"
+            )
+            if has_legacy_uses is True:
+                await conn.execute(
+                    "UPDATE public.registration_codes "
+                    "SET times_used = uses "
+                    "WHERE times_used IS NULL OR times_used = 0"
+                )
             await ensure_postgres_profile_version_on_connection(conn)
             await repair_postgres_profile_candidate_timestamps(conn)
             await validate_postgres_profile_candidate_schema(conn)

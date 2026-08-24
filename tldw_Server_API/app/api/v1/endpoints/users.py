@@ -66,10 +66,10 @@ from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
     ProfileVersionNotFound,
-    VersionedUserWriteGateway,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
+from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import (
@@ -587,20 +587,12 @@ async def update_user_profile(
 
         if request.email and request.email != user_context.get("email"):
             is_pg = await is_postgres_backend()
-            statement = (
-                "UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2"
-                if is_pg
-                else "UPDATE users SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-            )
             try:
-                await VersionedUserWriteGateway(
-                    "postgres" if is_pg else "sqlite"
-                ).execute_update(
+                await update_user_email(
                     db,
+                    backend="postgres" if is_pg else "sqlite",
                     user_id=user_id,
-                    profile_visible_fields=("email",),
-                    statement=statement,
-                    parameters=(request.email.lower(), user_id),
+                    email=request.email.lower(),
                 )
             except ProfileVersionNotFound:
                 raise HTTPException(

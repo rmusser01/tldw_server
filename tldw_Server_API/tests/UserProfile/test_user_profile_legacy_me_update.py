@@ -183,6 +183,51 @@ def test_users_me_update_succeeds_when_row_is_updated(auth_headers, monkeypatch)
     ]
 
 
+def test_users_me_update_delegates_email_write_to_db_management(
+    auth_headers,
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import users as users_endpoints
+
+    calls: list[tuple[object, str, int, str]] = []
+    fake_db = object()
+
+    async def _fake_get_db_transaction():
+        yield fake_db
+
+    async def _fake_resolve_user_context(_principal, *, allow_missing: bool = False):
+        del allow_missing
+        return _active_user_context()
+
+    async def _is_postgres_backend() -> bool:
+        return True
+
+    async def _update_user_email(
+        connection: object,
+        *,
+        backend: str,
+        user_id: int,
+        email: str,
+    ) -> None:
+        calls.append((connection, backend, user_id, email))
+
+    monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
+    monkeypatch.setattr(users_endpoints, "is_postgres_backend", _is_postgres_backend)
+    monkeypatch.setattr(users_endpoints, "update_user_email", _update_user_email)
+    with _dependency_override_scope(
+        {get_db_transaction: _fake_get_db_transaction}
+    ):
+        with TestClient(app) as client:
+            response = client.put(
+                "/api/v1/users/me",
+                headers=auth_headers,
+                json={"email": "UPDATED@EXAMPLE.COM"},
+            )
+
+    assert response.status_code == 200
+    assert calls == [(fake_db, "postgres", 1, "updated@example.com")]
+
+
 @pytest.mark.parametrize(
     "request_json",
     [

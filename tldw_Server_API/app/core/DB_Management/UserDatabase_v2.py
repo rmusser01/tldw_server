@@ -1276,7 +1276,6 @@ class UserDatabase:
     @staticmethod
     def _default_schema_statements_postgres() -> list[str]:
         return [
-            "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
             """
             CREATE TABLE IF NOT EXISTS public.users (
                 id BIGSERIAL PRIMARY KEY,
@@ -1680,8 +1679,6 @@ class UserDatabase:
                     "UPDATE users SET locked_until = NULL WHERE locked_until IS NULL"
                 )
             elif self.backend.backend_type == BackendType.POSTGRESQL:
-                user_step = "pgcrypto extension"
-                self.backend.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
                 user_step = "users.uuid"
                 self.backend.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS uuid UUID")
                 user_step = "users.metadata"

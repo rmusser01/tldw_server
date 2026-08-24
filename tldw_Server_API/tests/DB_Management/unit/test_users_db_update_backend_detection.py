@@ -357,48 +357,10 @@ async def test_create_tables_sanitizes_bootstrap_failure():
     assert secret not in output.getvalue()
 
 
-@pytest.mark.asyncio
-async def test_postgres_uuid_extension_fallback_uses_savepoint_and_matching_default() -> None:
-    class _Savepoint:
-        def __init__(self, connection) -> None:
-            self.connection = connection
+def test_postgres_uuid_default_does_not_install_extensions() -> None:
+    default = UsersDB._postgres_uuid_default()  # noqa: SLF001
 
-        async def __aenter__(self):
-            self.connection.events.append("savepoint-enter")
-            return self
-
-        async def __aexit__(self, exc_type, exc, traceback):
-            del exc, traceback
-            self.connection.events.append(
-                "savepoint-rollback" if exc_type is not None else "savepoint-commit"
-            )
-            return False
-
-    class _Connection:
-        def __init__(self) -> None:
-            self.events: list[str] = []
-
-        def transaction(self):
-            return _Savepoint(self)
-
-        async def execute(self, statement: str) -> str:
-            self.events.append(statement)
-            if "pgcrypto" in statement:
-                raise RuntimeError("extension unavailable")
-            return "CREATE EXTENSION"
-
-    connection = _Connection()
-    default = await UsersDB._ensure_postgres_uuid_default(connection)  # noqa: SLF001
-
-    assert default == "uuid_generate_v4()"
-    assert connection.events == [
-        "savepoint-enter",
-        "CREATE EXTENSION IF NOT EXISTS pgcrypto",
-        "savepoint-rollback",
-        "savepoint-enter",
-        'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"',
-        "savepoint-commit",
-    ]
+    assert default == "gen_random_uuid()"
 
 
 @pytest.mark.parametrize(
