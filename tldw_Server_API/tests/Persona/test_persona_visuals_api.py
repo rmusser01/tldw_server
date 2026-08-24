@@ -2382,7 +2382,7 @@ def test_visual_pack_review_then_activation_requires_current_fingerprint(
 def test_visual_pack_fork_creates_an_inactive_same_persona_revision(
     persona_db: CharactersRAGDB,
 ) -> None:
-    """The nested fork route copies assets and applies edited payload to a new draft."""
+    """The nested fork route copies an immutable active source into a new draft."""
     behavior = {"schema_version": 1, "entries": []}
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Fork Route Persona")
@@ -2393,7 +2393,9 @@ def test_visual_pack_fork_creates_an_inactive_same_persona_revision(
             json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
         )
         assert updated.status_code == 200, updated.text
-        source = updated.json()
+        activated = _review_and_activate(client, persona_id, updated.json())
+        assert activated.status_code == 200, activated.text
+        source = activated.json()
 
         forked = client.post(
             f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/fork",
@@ -2413,6 +2415,51 @@ def test_visual_pack_fork_creates_an_inactive_same_persona_revision(
     assert len(payload["assets"]) == 1
 
 
+@pytest.mark.parametrize("source_status", ["draft", "review", "archived"])
+def test_visual_pack_fork_rejects_editable_source_before_service_access(
+    persona_db: CharactersRAGDB,
+    source_status: str,
+) -> None:
+    """Only immutable active sources reach revision-copy service or file access."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name=f"{source_status.title()} Fork Persona")
+        pack = _create_visual_pack(client, persona_id)
+        if source_status != "draft":
+            updated = persona_db.update_persona_visual_pack_status(
+                pack_id=pack["id"],
+                persona_id=persona_id,
+                user_id="1",
+                status=source_status,
+                expected_version=pack["version"],
+            )
+            assert updated is not None
+            pack = updated
+
+        class RecordingService:
+            called = False
+
+            def fork_pack_revision(self, **_kwargs):
+                self.called = True
+                return {**pack, "assets": []}
+
+        service = RecordingService()
+        fastapi_app.dependency_overrides[
+            persona_ep.get_persona_visual_service
+        ] = lambda: service
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/fork",
+            json={
+                "expected_version": pack["version"],
+                "manifest": pack["manifest"],
+                "companion_behavior": None,
+            },
+        )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "fork_conflict"
+    assert service.called is False
+
+
 def test_visual_pack_fork_rejects_stale_source_without_creating_a_revision(
     persona_db: CharactersRAGDB,
 ) -> None:
@@ -2420,6 +2467,15 @@ def test_visual_pack_fork_rejects_stale_source_without_creating_a_revision(
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Stale Fork Route Persona")
         pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+        activated = _review_and_activate(client, persona_id, updated.json())
+        assert activated.status_code == 200, activated.text
+        source = activated.json()
         before_count = persona_db.execute_query(
             "SELECT COUNT(*) FROM persona_visual_packs WHERE persona_id = ?",
             (persona_id,),
@@ -2428,8 +2484,8 @@ def test_visual_pack_fork_rejects_stale_source_without_creating_a_revision(
         stale = client.post(
             f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/fork",
             json={
-                "expected_version": pack["version"] + 1,
-                "manifest": pack["manifest"],
+                "expected_version": source["version"] + 1,
+                "manifest": source["manifest"],
                 "companion_behavior": None,
             },
         )

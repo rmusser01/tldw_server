@@ -392,6 +392,63 @@ describe("SpriteFrameRenderer", () => {
     expect(assetLoader.acquire).not.toHaveBeenCalled()
   })
 
+  it("releases and clears a presented animated Blob when reduced motion rejects it", async () => {
+    vi.useFakeTimers()
+    const release = vi.fn()
+    const onFailure = vi.fn()
+    const animatedAssets = {
+      "idle-1": buildAsset("idle-1", { mime_type: "image/gif" }),
+      "idle-2": buildAsset("idle-2", { mime_type: "image/gif" })
+    }
+    assetLoader.acquire.mockResolvedValue({
+      url: "blob:animated",
+      mimeType: "image/gif",
+      release
+    })
+    const manifest = baseManifest({
+      animations: {
+        idle: {
+          frames: [
+            { asset_id: "idle-1", duration_ms: 100 },
+            { asset_id: "idle-2", duration_ms: 100 }
+          ]
+        }
+      }
+    })
+    const view = render(
+      <SpriteFrameRenderer
+        manifest={manifest}
+        assets={animatedAssets}
+        requestedState="idle"
+        generation={1}
+        fallbackLabel="Buddy"
+        onFailure={onFailure}
+      />
+    )
+    await act(async () => {})
+    expect(currentFrame()).toHaveAttribute("src", "blob:animated")
+    expect(vi.getTimerCount()).toBe(1)
+
+    view.rerender(
+      <SpriteFrameRenderer
+        manifest={manifest}
+        assets={animatedAssets}
+        requestedState="idle"
+        generation={2}
+        reducedMotion
+        fallbackLabel="Buddy"
+        onFailure={onFailure}
+      />
+    )
+    await act(async () => {})
+
+    expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
+    expect(screen.getByText("Buddy")).toBeInTheDocument()
+    expect(release).toHaveBeenCalledTimes(1)
+    expect(onFailure).toHaveBeenCalledWith("static_asset_unsupported")
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it("keeps the old Blob visible until the new generation is ready and releases stale handles", async () => {
     let resolveSecond: ((handle: { url: string; mimeType: string; release: () => void }) => void) | null = null
     const firstRelease = vi.fn()

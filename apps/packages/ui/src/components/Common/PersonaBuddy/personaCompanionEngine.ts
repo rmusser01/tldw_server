@@ -423,6 +423,13 @@ export const createPersonaCompanionEngine = (
     return "none" as const
   }
 
+  const directInteractionEligible = (semanticState: PersonaVisualStateId) =>
+    semanticState === "idle" &&
+    input.visibility === "visible" &&
+    !input.controlsOpen &&
+    !input.dragging &&
+    (input.surface === "web" || input.surface === "sidepanel")
+
   const nextAmbientInterval = (): number => {
     const range = input.timing.ambientMaxMs - input.timing.ambientMinMs
     return input.timing.ambientMinMs + Math.floor(randomUnit(runtime.random) * range)
@@ -622,6 +629,17 @@ export const createPersonaCompanionEngine = (
   const settle = () => {
     const semanticState = winningSemanticState()
     const suspension = suspensionFor(semanticState)
+    if (currentAction && currentAction.trigger !== "ambient") {
+      notifySnapshot({
+        phase: "action",
+        requestedState: currentAction.entry.state,
+        facing,
+        transientOffsetX,
+        suspension: "none"
+      })
+      scheduleNext()
+      return
+    }
     if (suspension !== "none") {
       ambientDueAt = null
       notifySnapshot({
@@ -698,8 +716,7 @@ export const createPersonaCompanionEngine = (
       if (expireLeases()) advanceGeneration()
       const semantic = winningSemanticState()
       if (
-        semantic !== "idle" ||
-        suspensionFor(semantic) !== "none" ||
+        !directInteractionEligible(semantic) ||
         currentAction
       ) {
         settle()

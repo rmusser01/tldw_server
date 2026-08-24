@@ -987,6 +987,81 @@ describe("createPersonaCompanionEngine", () => {
     expect(fake.activeTimerCount()).toBe(0)
   })
 
+  it("runs an authored Space reaction through the real hook while focus suspends ambient scheduling", () => {
+    const fake = createFakeCompanionRuntime([0])
+    const initialProps = idleInput({
+      mode: "off",
+      focusWithin: true,
+      behavior: {
+        schema_version: 1,
+        entries: [{ state: click, trigger: "click", category: "reaction" }]
+      },
+      availableStates: [click]
+    })
+    const { result, unmount } = renderHook(
+      (input) => usePersonaCompanion({ ...input, runtime: fake.runtime }),
+      { initialProps, wrapper: StrictModeWrapper }
+    )
+
+    act(() => expect(result.current.react("space")).toBe(true))
+
+    expect(result.current.snapshot).toEqual(
+      expect.objectContaining({
+        phase: "action",
+        requestedState: "reaction.click"
+      })
+    )
+    act(() => unmount())
+  })
+
+  it("runs an authored reaction through the real hook in reduced motion", () => {
+    const fake = createFakeCompanionRuntime([0])
+    const initialProps = idleInput({
+      mode: "off",
+      reducedMotion: true,
+      behavior: {
+        schema_version: 1,
+        entries: [{ state: click, trigger: "click", category: "reaction" }]
+      },
+      availableStates: [click]
+    })
+    const { result, unmount } = renderHook(
+      (input) => usePersonaCompanion({ ...input, runtime: fake.runtime }),
+      { initialProps, wrapper: StrictModeWrapper }
+    )
+
+    act(() => expect(result.current.react("click")).toBe(true))
+
+    expect(result.current.snapshot).toEqual(
+      expect.objectContaining({
+        phase: "action",
+        requestedState: "reaction.click"
+      })
+    )
+    act(() => unmount())
+  })
+
+  it.each([
+    ["semantic non-idle", { semanticState: "thinking" }],
+    ["hidden visibility", { visibility: "hidden" }],
+    ["open controls", { controlsOpen: true }],
+    ["an active drag", { dragging: true }]
+  ] as const)("still rejects direct reactions during %s", (_name, patch) => {
+    const fake = createFakeCompanionRuntime([0])
+    const engine = createPersonaCompanionEngine(fake.runtime)
+    engine.update(idleInput({
+      ...patch,
+      mode: "off",
+      behavior: {
+        schema_version: 1,
+        entries: [{ state: click, trigger: "click", category: "reaction" }]
+      },
+      availableStates: [click]
+    }))
+
+    expect(engine.react("click")).toBe(false)
+  })
+
   it("rejects an old renderer callback after the hook recreates its engine", () => {
     const first = createFakeCompanionRuntime([0])
     const second = createFakeCompanionRuntime([0])

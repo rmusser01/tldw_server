@@ -14,15 +14,20 @@ priority: High
 documentation:
 - Docs/superpowers/specs/2026-08-23-persona-ambient-companion-transparent-video-design.md
 - Docs/superpowers/plans/2026-08-23-persona-ambient-companion-stage-1-implementation-plan.md
-updated_date: 2026-08-24 10:41
+updated_date: 2026-08-24 11:18
 modified_files:
 - apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellDock.tsx
 - apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellHost.tsx
 - apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellPopover.tsx
 - apps/packages/ui/src/components/Common/PersonaBuddy/SpriteFrameRenderer.tsx
+- apps/packages/ui/src/components/Common/PersonaBuddy/personaCompanionEngine.ts
 - apps/packages/ui/src/components/Common/PersonaBuddy/personaVisualDiagnostics.ts
 - apps/packages/ui/src/components/Common/PersonaBuddy/personaVisualRenderers.tsx
 - apps/packages/ui/src/components/Common/PersonaBuddy/personaVisualTypes.ts
+- apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx
+- apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.integration.test.tsx
+- apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/SpriteFrameRenderer.test.tsx
+- apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/personaCompanionEngine.test.ts
 - apps/packages/ui/src/components/PersonaGarden/BuddyDraftReviewPanel.tsx
 - apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx
 - apps/packages/ui/src/services/persona-buddy.ts
@@ -34,6 +39,7 @@ modified_files:
 - tldw_Server_API/app/api/v1/schemas/persona.py
 - tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py
 - tldw_Server_API/app/core/Persona/visual_service.py
+- tldw_Server_API/tests/Persona/test_persona_visuals_api.py
 ---
 
 ## Description
@@ -62,6 +68,8 @@ Execute the seven tasks in Docs/superpowers/plans/2026-08-23-persona-ambient-com
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 6 implementation started in isolated worktree on 2026-08-24. Controller rulings #7-#9 apply. First strict-TDD slice covers owner-scoped per-Persona preference GET/clear semantics, stale-before-copy visual revision fork API/service, and typed frontend service helpers before renderer/host/editor integration.
 Task 6 implementation complete in the isolated worktree. Added the single hook-owned ambient engine host integration, authenticated/fenced raster renderer, reduced-motion still path, gesture/keyboard/touch arbitration, quiet chrome, layered optimistic Buddy settings (including per-Persona GET/Use-global clear and 409 recovery), review-before-activate Visual Garden flow, active revision fork API/editor behavior, and typed frontend helpers. Verification: backend Persona API/service suites 125/125; frontend Task 6 aggregate 238/238; touched Task 6 TypeScript diagnostics 0 (51 unrelated project baseline); Bandit 0 findings/0 errors at /tmp/bandit_persona_ambient_task6.json; git diff --check clean. Full ignored report: .superpowers/sdd/2026-08-23-persona-ambient-companion-stage-1-implementation-plan/task-6-report.md.
+Task 6 review round 1 fix work started from commit 3375a3d732. Scope is limited to the seven Important findings in task-6-review-round-1.md; the two Minor findings remain deferred.
+Task 6 review round 1 fixes implemented for all seven Important findings; the two deferred Minor findings remain out of scope. Real-hook integration now proves focused Space, reduced-motion authored PNG reaction, completed drag after drag suspension, and reactive transient resize re-clamping without anchor persistence. Persona preference reads/writes and click/nudge work are Persona/pack/engine-generation fenced; pointercancel discards partial drag; invalid reduced-motion transitions release animated Blobs; and the HTTP fork route admits only immutable active sources before service/file access. Verification: frontend Task 6 aggregate 258/258 across 14 files (real-host suite 4/4), backend aggregate 128/128, touched TS diagnostics 0 with unrelated project baseline remaining, Bandit 0 findings/0 errors at /tmp/bandit_persona_ambient_task6_review1.json, and git diff --check clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

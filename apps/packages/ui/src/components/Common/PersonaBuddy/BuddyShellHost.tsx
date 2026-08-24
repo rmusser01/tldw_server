@@ -205,6 +205,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 }) => {
   const dockRef = React.useRef<HTMLDivElement | null>(null)
   const dragStateRef = React.useRef<DragState | null>(null)
+  const pendingDragReactionRef = React.useRef(false)
   const clickTimerRef = React.useRef<number | null>(null)
   const nudgeTimerRef = React.useRef<number | null>(null)
   const [dragPosition, setDragPosition] = React.useState<PersonaBuddyShellPosition | null>(null)
@@ -216,6 +217,10 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       ? "hidden"
       : "visible"
   )
+  const [viewport, setViewport] = React.useState(() => ({
+    width: typeof window === "undefined" ? 0 : window.innerWidth,
+    height: typeof window === "undefined" ? 0 : window.innerHeight
+  }))
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)")
 
   const positionBucket: PersonaBuddyPositionBucket =
@@ -254,6 +259,15 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 
   React.useEffect(() => {
     const clampPersistedPosition = () => {
+      const nextViewport = {
+        width: window.innerWidth,
+        height: window.innerHeight
+      }
+      setViewport((current) =>
+        current.width === nextViewport.width && current.height === nextViewport.height
+          ? current
+          : nextViewport
+      )
       if (!dockRef.current) {
         return
       }
@@ -263,8 +277,8 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
         position,
         positionBucket,
         {
-          viewportWidth: window.innerWidth,
-          viewportHeight: window.innerHeight,
+          viewportWidth: nextViewport.width,
+          viewportHeight: nextViewport.height,
           shellWidth: rect.width,
           shellHeight: rect.height,
           margin: 16
@@ -300,47 +314,76 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       version: null,
       stored: false
     })
-  const [personaPreferences, setPersonaPreferences] =
-    React.useState<PersonaBuddyOverridePreferences | null>(null)
+  const [personaPreferenceResult, setPersonaPreferenceResult] = React.useState<{
+    personaId: string
+    preferences: PersonaBuddyOverridePreferences
+  } | null>(null)
   const [preferenceReadFailed, setPreferenceReadFailed] = React.useState(true)
   const [ambientPreferenceMessage, setAmbientPreferenceMessage] =
     React.useState<string | null>(null)
+  const preferenceRequestGenerationRef = React.useRef(0)
+  const activePreferencePersonaId = String(
+    resolvedPersona.activePersonaId ?? ""
+  ).trim()
+  const activePreferencePersonaIdRef = React.useRef(activePreferencePersonaId)
+  activePreferencePersonaIdRef.current = activePreferencePersonaId
+  const personaPreferences =
+    personaPreferenceResult?.personaId === activePreferencePersonaId
+      ? personaPreferenceResult.preferences
+      : null
+  const isCurrentPreferenceRequest = React.useCallback(
+    (personaId: string, generation: number) =>
+      activePreferencePersonaIdRef.current === personaId &&
+      preferenceRequestGenerationRef.current === generation,
+    []
+  )
 
-  const refreshAmbientPreferences = React.useCallback(async () => {
-    const personaId = String(resolvedPersona.activePersonaId ?? "").trim()
+  const refreshAmbientPreferences = React.useCallback(async (
+    personaId = activePreferencePersonaId
+  ) => {
+    const generation = ++preferenceRequestGenerationRef.current
     if (!personaId) {
-      setPersonaPreferences(null)
+      setPersonaPreferenceResult(null)
       setPreferenceReadFailed(true)
-      return
+      return false
     }
     try {
       const [globalResult, personaResult] = await Promise.all([
         getBuddyPreferences(),
         getPersonaBuddyPreferences(personaId)
       ])
+      if (!isCurrentPreferenceRequest(personaId, generation)) return false
       setGlobalPreferences(globalResult)
-      setPersonaPreferences(personaResult)
+      setPersonaPreferenceResult({ personaId, preferences: personaResult })
       setPreferenceReadFailed(false)
+      return true
     } catch {
-      setPreferenceReadFailed(true)
+      if (isCurrentPreferenceRequest(personaId, generation)) {
+        setPreferenceReadFailed(true)
+      }
+      return false
     }
-  }, [resolvedPersona.activePersonaId])
+  }, [activePreferencePersonaId, isCurrentPreferenceRequest])
 
   React.useEffect(() => {
+    setPersonaPreferenceResult(null)
     setPreferenceReadFailed(true)
     setAmbientPreferenceMessage(null)
-    void refreshAmbientPreferences()
-  }, [refreshAmbientPreferences])
+    void refreshAmbientPreferences(activePreferencePersonaId)
+  }, [activePreferencePersonaId, refreshAmbientPreferences])
 
   const effectiveAmbientMode = resolveEffectiveAmbientMode({
     persona: personaPreferences?.ambient_mode,
     global: globalPreferences.ambient_mode,
-    readFailed: preferenceReadFailed,
+    readFailed: preferenceReadFailed || personaPreferences === null,
     surface: root
   })
 
   const handleGlobalAmbientModeChange = React.useCallback(
     async (mode: PersonaAmbientMode) => {
+      const personaId = activePreferencePersonaId
+      if (!personaId) return
+      const generation = ++preferenceRequestGenerationRef.current
       const previous = globalPreferences
       setGlobalPreferences({
         ambient_mode: mode,
@@ -349,50 +392,74 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       })
       setAmbientPreferenceMessage(null)
       try {
-        setGlobalPreferences(await updateBuddyPreferences({
+        const updated = await updateBuddyPreferences({
           ambient_mode: mode,
           expected_version: previous.version
-        }))
+        })
+        if (isCurrentPreferenceRequest(personaId, generation)) {
+          setGlobalPreferences(updated)
+        }
       } catch (error) {
+        if (!isCurrentPreferenceRequest(personaId, generation)) return
         if ((error as { status?: number })?.status === 409) {
-          await refreshAmbientPreferences()
-          setAmbientPreferenceMessage("Settings changed elsewhere. Latest values were loaded.")
+          if (await refreshAmbientPreferences(personaId)) {
+            setAmbientPreferenceMessage("Settings changed elsewhere. Latest values were loaded.")
+          }
         } else {
           setGlobalPreferences(previous)
           setAmbientPreferenceMessage("Buddy settings could not be saved.")
         }
       }
     },
-    [globalPreferences, refreshAmbientPreferences]
+    [
+      activePreferencePersonaId,
+      globalPreferences,
+      isCurrentPreferenceRequest,
+      refreshAmbientPreferences
+    ]
   )
 
   const handlePersonaAmbientModeChange = React.useCallback(
     async (mode: PersonaAmbientMode | null) => {
-      const personaId = String(resolvedPersona.activePersonaId ?? "").trim()
+      const personaId = activePreferencePersonaId
       const previous = personaPreferences
       if (!personaId || !previous) return
-      setPersonaPreferences({
-        ambient_mode: mode,
-        version: previous.version,
-        stored: mode !== null
+      const generation = ++preferenceRequestGenerationRef.current
+      setPersonaPreferenceResult({
+        personaId,
+        preferences: {
+          ambient_mode: mode,
+          version: previous.version,
+          stored: mode !== null
+        }
       })
       setAmbientPreferenceMessage(null)
       try {
-        setPersonaPreferences(await updatePersonaBuddyPreferences(personaId, {
+        const updated = await updatePersonaBuddyPreferences(personaId, {
           ambient_mode: mode,
           expected_version: previous.version
-        }))
+        })
+        if (isCurrentPreferenceRequest(personaId, generation)) {
+          setPersonaPreferenceResult({ personaId, preferences: updated })
+        }
       } catch (error) {
+        if (!isCurrentPreferenceRequest(personaId, generation)) return
         if ((error as { status?: number })?.status === 409) {
-          await refreshAmbientPreferences()
-          setAmbientPreferenceMessage("Settings changed elsewhere. Latest values were loaded.")
+          if (await refreshAmbientPreferences(personaId)) {
+            setAmbientPreferenceMessage("Settings changed elsewhere. Latest values were loaded.")
+          }
         } else {
-          setPersonaPreferences(previous)
+          setPersonaPreferenceResult({ personaId, preferences: previous })
           setAmbientPreferenceMessage("Buddy settings could not be saved.")
         }
       }
     },
-    [personaPreferences, refreshAmbientPreferences, resolvedPersona.activePersonaId]
+    [
+      activePreferencePersonaId,
+      isCurrentPreferenceRequest,
+      personaPreferences,
+      refreshAmbientPreferences
+    ]
   )
   const { capabilities } = useServerCapabilities()
   const liveControlEnabled = Boolean(capabilities?.hasPersonaLiveControl)
@@ -547,10 +614,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     mirrorSafeStates: [],
     horizontalBounds: {
       min: 16 - position.x,
-      max:
-        typeof window === "undefined"
-          ? 16 - position.x
-          : Math.max(16 - position.x, window.innerWidth - position.x - 80)
+      max: Math.max(16 - position.x, viewport.width - position.x - 80)
     }
   })
   const {
@@ -558,16 +622,42 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     react: companionReact,
     completeAction: completeCompanionAction
   } = companion
+  const interactionIdentity = `${activePreferencePersonaId}:${visualPack?.id ?? ""}:${
+    visualPack?.revision_number ?? visualPack?.version ?? ""
+  }:${companionSnapshot.generation}:${visualState}:${visibility}:${reducedMotion ? 1 : 0}`
+  const interactionIdentityRef = React.useRef(interactionIdentity)
+  interactionIdentityRef.current = interactionIdentity
+
+  const clearDeferredInteractions = React.useCallback(() => {
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+    }
+    if (nudgeTimerRef.current !== null) {
+      window.clearTimeout(nudgeTimerRef.current)
+      nudgeTimerRef.current = null
+    }
+    setNudgeActive(false)
+  }, [])
+
+  React.useEffect(() => {
+    clearDeferredInteractions()
+  }, [clearDeferredInteractions, interactionIdentity])
 
   const acknowledgeWithoutState = React.useCallback(() => {
-    if (reducedMotion || visualState !== "idle") return
+    if (reducedMotion || visualState !== "idle") {
+      clearDeferredInteractions()
+      return
+    }
+    const scheduledIdentity = interactionIdentityRef.current
     if (nudgeTimerRef.current !== null) window.clearTimeout(nudgeTimerRef.current)
     setNudgeActive(true)
     nudgeTimerRef.current = window.setTimeout(() => {
+      if (interactionIdentityRef.current !== scheduledIdentity) return
       setNudgeActive(false)
       nudgeTimerRef.current = null
     }, BUDDY_NUDGE_DURATION_MS)
-  }, [reducedMotion, visualState])
+  }, [clearDeferredInteractions, reducedMotion, visualState])
 
   const reactToBuddy = React.useCallback(
     (trigger: "click" | "space" | "drag") => {
@@ -583,8 +673,10 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       setOpen(true)
       return
     }
+    const scheduledIdentity = interactionIdentityRef.current
     clickTimerRef.current = window.setTimeout(() => {
       clickTimerRef.current = null
+      if (interactionIdentityRef.current !== scheduledIdentity) return
       reactToBuddy("click")
     }, BUDDY_CLICK_DELAY_MS)
   }, [reactToBuddy, setOpen])
@@ -648,10 +740,14 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       if (!drag || drag.pointerId !== event.pointerId) return
       drag.target.releasePointerCapture?.(drag.pointerId)
       if (drag.dragging) {
-        setPosition(positionBucket, drag.currentPosition)
         setDragPosition(null)
         setIsDragging(false)
-        if (!cancelled) reactToBuddy("drag")
+        if (cancelled) {
+          pendingDragReactionRef.current = false
+        } else {
+          setPosition(positionBucket, drag.currentPosition)
+          pendingDragReactionRef.current = true
+        }
       } else if (!cancelled) {
         scheduleBuddyClick()
       }
@@ -667,7 +763,18 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       window.removeEventListener("pointerup", handlePointerUp)
       window.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [positionBucket, reactToBuddy, scheduleBuddyClick, setPosition])
+  }, [positionBucket, scheduleBuddyClick, setPosition])
+
+  React.useEffect(() => {
+    if (
+      pendingDragReactionRef.current &&
+      !isDragging &&
+      companionSnapshot.suspension !== "drag"
+    ) {
+      pendingDragReactionRef.current = false
+      reactToBuddy("drag")
+    }
+  }, [companionSnapshot.suspension, isDragging, reactToBuddy])
 
   React.useEffect(() => () => {
     if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current)

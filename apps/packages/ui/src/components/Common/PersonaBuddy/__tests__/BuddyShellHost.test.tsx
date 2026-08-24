@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 import {
-  BuddyShellRenderContextProvider
+  BuddyShellRenderContextProvider,
+  useSetBuddyShellRenderContext
 } from "../BuddyShellRenderContext"
 import { PERSONA_BUDDY_SHELL_ENABLED_SETTING } from "@/services/settings/ui-settings"
 import {
@@ -366,6 +367,47 @@ const renderHost = ({
     </MemoryRouter>
   )
 }
+
+const ContextDrivenHost: React.FC<{
+  root: "web" | "sidepanel"
+  context: PersonaBuddyRenderContext
+}> = ({ root, context }) => {
+  const setRenderContext = useSetBuddyShellRenderContext()
+  React.useEffect(() => setRenderContext(context), [context, setRenderContext])
+  return <BuddyShellHost root={root} />
+}
+
+const renderSwitchableHost = (
+  context: PersonaBuddyRenderContext,
+  root: "web" | "sidepanel" = "sidepanel"
+) =>
+  render(
+    <MemoryRouter>
+      <BuddyShellRenderContextProvider>
+        <ContextDrivenHost root={root} context={context} />
+      </BuddyShellRenderContextProvider>
+    </MemoryRouter>
+  )
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
+}
+
+const personaContext = (personaId: string): PersonaBuddyRenderContext => ({
+  surface_id: "persona-garden",
+  surface_active: true,
+  active_persona_id: personaId,
+  position_bucket: "sidepanel-desktop",
+  persona_source: "route-local",
+  buddy_summary: buildBuddySummary(personaId),
+  live_voice_state: "idle"
+})
 
 describe("BuddyShellHost", () => {
   beforeEach(() => {
@@ -1655,6 +1697,131 @@ describe("BuddyShellHost", () => {
     expect(within(personaModes).getByRole("radio", { name: "Off" })).toBeChecked()
   })
 
+  it("ignores a delayed Persona preference read after focus moves to another Persona", async () => {
+    const personaA = deferred<{
+      ambient_mode: "roaming"
+      version: number
+      stored: boolean
+    }>()
+    const personaB = deferred<{
+      ambient_mode: "off"
+      version: number
+      stored: boolean
+    }>()
+    preferenceMocks.getPersonaBuddyPreferences.mockImplementation(
+      (personaId: string) => personaId === "persona-1" ? personaA.promise : personaB.promise
+    )
+
+    const view = renderSwitchableHost(personaContext("persona-1"))
+    await waitFor(() => {
+      expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledWith("persona-1")
+    })
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={personaContext("persona-2")} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    await waitFor(() => {
+      expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledWith("persona-2")
+    })
+    await act(async () => {
+      personaB.resolve({ ambient_mode: "off", version: 7, stored: true })
+      await personaB.promise
+    })
+    await act(async () => {
+      personaA.resolve({ ambient_mode: "roaming", version: 3, stored: true })
+      await personaA.promise
+    })
+
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ personaId: "persona-2", mode: "off" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    expect(
+      within(screen.getByRole("group", { name: "For this Persona" }))
+        .getByRole("radio", { name: "Off" })
+    ).toBeChecked()
+  })
+
+  it.each(["success", "error", "conflict"] as const)(
+    "ignores a delayed Persona A preference write %s after focus moves to Persona B",
+    async (outcome) => {
+      preferenceMocks.getPersonaBuddyPreferences.mockImplementation(
+        async (personaId: string) => personaId === "persona-1"
+          ? { ambient_mode: null, version: 1, stored: false }
+          : { ambient_mode: "off", version: 4, stored: true }
+      )
+      const update = deferred<{
+        ambient_mode: "roaming"
+        version: number
+        stored: boolean
+      }>()
+      preferenceMocks.updatePersonaBuddyPreferences.mockReturnValue(update.promise)
+      const view = renderSwitchableHost(personaContext("persona-1"))
+      fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+      await waitFor(() => {
+        expect(
+          within(screen.getByRole("group", { name: "For this Persona" }))
+            .getByRole("radio", { name: "Use global" })
+        ).toBeChecked()
+      })
+      fireEvent.click(
+        within(screen.getByRole("group", { name: "For this Persona" }))
+          .getByRole("radio", { name: "Roaming" })
+      )
+      await waitFor(() => {
+        expect(preferenceMocks.updatePersonaBuddyPreferences).toHaveBeenCalledWith(
+          "persona-1",
+          { ambient_mode: "roaming", expected_version: 1 }
+        )
+      })
+
+      view.rerender(
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider>
+            <ContextDrivenHost root="sidepanel" context={personaContext("persona-2")} />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      )
+      await waitFor(() => {
+        expect(companionMocks.calls.at(-1)).toEqual(
+          expect.objectContaining({ personaId: "persona-2", mode: "off" })
+        )
+      })
+
+      await act(async () => {
+        if (outcome === "success") {
+          update.resolve({ ambient_mode: "roaming", version: 2, stored: true })
+        } else {
+          update.reject(
+            Object.assign(new Error(outcome), {
+              status: outcome === "conflict" ? 409 : 500
+            })
+          )
+        }
+        try {
+          await update.promise
+        } catch {
+          // The component owns the rejection; the test only releases it.
+        }
+      })
+
+      expect(companionMocks.calls.at(-1)).toEqual(
+        expect.objectContaining({ personaId: "persona-2", mode: "off" })
+      )
+      expect(screen.queryByText("Buddy settings could not be saved.")).not.toBeInTheDocument()
+      expect(
+        screen.queryByText("Settings changed elsewhere. Latest values were loaded.")
+      ).not.toBeInTheDocument()
+      expect(
+        within(screen.getByRole("group", { name: "For this Persona" }))
+          .getByRole("radio", { name: "Off" })
+      ).toBeChecked()
+    }
+  )
+
   it("renders grounded transient movement without persisting it as an anchor", async () => {
     companionMocks.snapshot = {
       ...companionMocks.snapshot,
@@ -1777,6 +1944,150 @@ describe("BuddyShellHost", () => {
     vi.useRealTimers()
   })
 
+  it("drops a deferred click when the focused Persona changes", async () => {
+    const view = renderSwitchableHost(personaContext("persona-1"))
+    const buddy = await screen.findByRole("button", {
+      name: "Toggle buddy for Persona persona-1"
+    })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 21, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(window, { pointerId: 21, clientX: 100, clientY: 100 })
+
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={personaContext("persona-2")} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    act(() => vi.advanceTimersByTime(300))
+
+    expect(companionMocks.react).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("drops a deferred click when the companion engine generation changes", async () => {
+    const context = personaContext("persona-1")
+    const view = renderSwitchableHost(context)
+    const buddy = await screen.findByRole("button", {
+      name: "Toggle buddy for Persona persona-1"
+    })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 22, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(window, { pointerId: 22, clientX: 100, clientY: 100 })
+    companionMocks.snapshot = { ...companionMocks.snapshot, generation: 2 }
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={context} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    act(() => vi.advanceTimersByTime(300))
+
+    expect(companionMocks.react).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("drops a deferred click when the active visual pack changes", async () => {
+    const packA = buildVisualPack("persona-1")
+    const packB = { ...buildVisualPack("persona-1"), id: "pack-2" }
+    visualMocks.listPersonaVisualPacks
+      .mockResolvedValueOnce({ packs: [packA], active_pack: packA })
+      .mockResolvedValue({ packs: [packB], active_pack: packB })
+    renderSwitchableHost(personaContext("persona-1"))
+    const buddy = await screen.findByRole("button", {
+      name: "Toggle buddy for Persona persona-1"
+    })
+    await waitFor(() => {
+      expect(companionMocks.calls.at(-1)).toEqual(
+        expect.objectContaining({ packId: "pack-1" })
+      )
+    })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 24, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(window, { pointerId: 24, clientX: 100, clientY: 100 })
+    await act(async () => {
+      fireEvent(
+        window,
+        new CustomEvent(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, {
+          detail: { personaId: "persona-1", packId: "pack-2" }
+        })
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ packId: "pack-2" })
+    )
+    act(() => vi.advanceTimersByTime(300))
+
+    expect(companionMocks.react).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("removes a fallback nudge immediately on semantic or reduced-motion transitions", async () => {
+    const pack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [pack],
+      active_pack: pack
+    })
+    companionMocks.react.mockReturnValue(false)
+    const idleContext = personaContext("persona-1")
+    const view = renderSwitchableHost(idleContext)
+    const buddy = await screen.findByRole("button", {
+      name: "Toggle buddy for Persona persona-1"
+    })
+    await screen.findByTestId("persona-buddy-visual-wrapper")
+    vi.useFakeTimers()
+    fireEvent.keyDown(buddy, { key: " " })
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(4px)"
+    })
+
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost
+            root="sidepanel"
+            context={{ ...idleContext, visual_state: "thinking" }}
+          />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(0)"
+    })
+
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={idleContext} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    fireEvent.keyDown(buddy, { key: " " })
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(4px)"
+    })
+    mocks.reducedMotion = true
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={idleContext} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(0)"
+    })
+    act(() => vi.advanceTimersByTime(500))
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(0)"
+    })
+    vi.useRealTimers()
+  })
+
   it("persists no drag position before the 8px threshold and stores only the final anchor", async () => {
     const rectSpy = mockDockRect()
     renderHost({
@@ -1802,6 +2113,22 @@ describe("BuddyShellHost", () => {
     expect(usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]).toEqual(initial)
     fireEvent.pointerUp(window, { pointerId: 9, clientX: 92, clientY: 130 })
     expect(usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]).not.toEqual(initial)
+    rectSpy.mockRestore()
+  })
+
+  it("cancels a moved pointer without persisting a partial drag or reacting", async () => {
+    const rectSpy = mockDockRect()
+    renderHost({ root: "sidepanel", context: personaContext("persona-1") })
+    const buddy = await screen.findByRole("button", {
+      name: "Toggle buddy for Persona persona-1"
+    })
+    const initial = usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 23, clientX: 140, clientY: 130 })
+    fireEvent.pointerMove(window, { pointerId: 23, clientX: 92, clientY: 130 })
+    fireEvent.pointerCancel(window, { pointerId: 23, clientX: 92, clientY: 130 })
+
+    expect(usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]).toEqual(initial)
+    expect(companionMocks.react).not.toHaveBeenCalled()
     rectSpy.mockRestore()
   })
 
