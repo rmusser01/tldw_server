@@ -1012,10 +1012,6 @@ test.describe("Packaged extension prompt improvement parity", () => {
         target: "user_message",
         text: draft
       })
-      await expect(
-        page.getByRole("heading", { name: "Review improved prompt" })
-      ).toBeVisible()
-      await page.getByRole("button", { name: "Apply to draft" }).click()
       await expect(input).toHaveValue("Improved user request for {{topic}}.")
       const appliedStatus = page
         .getByTestId("chat-messages")

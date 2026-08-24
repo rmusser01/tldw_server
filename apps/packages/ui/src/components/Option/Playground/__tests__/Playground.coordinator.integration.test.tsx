@@ -122,9 +122,15 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientState
 }))
 
-vi.mock("@/services/tldw-server", () => ({
-  fetchChatModels: vi.fn(async () => [])
-}))
+vi.mock("@/services/tldw-server", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/services/tldw-server")
+  >()
+  return {
+    ...actual,
+    fetchChatModels: vi.fn(async () => [])
+  }
+})
 
 vi.mock("@/db/dexie/helpers", () => ({
   formatToChatHistory: vi.fn(),
