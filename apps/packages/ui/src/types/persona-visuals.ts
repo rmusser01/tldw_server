@@ -245,44 +245,44 @@ export type PersonaCompanionBehavior = {
 
 export interface PersonaVisualAsset {
   id: string
-  pack_id: string
-  persona_id: string
-  asset_role: PersonaVisualAssetRole
-  storage_key: string
+  pack_id?: string
+  persona_id?: string
+  asset_role: PersonaVisualAssetRole | string
+  storage_key?: string
   url: string
-  original_filename: string | null
+  original_filename?: string | null
   mime_type: string
-  byte_size: number
-  checksum_sha256: string
-  width: number | null
-  height: number | null
-  duration_ms: number | null
-  provenance: string
-  created_at: string
-  last_modified: string
-  version: number
+  byte_size?: number
+  checksum_sha256?: string
+  width?: number | null
+  height?: number | null
+  duration_ms?: number | null
+  provenance?: string
+  created_at?: string
+  last_modified?: string
+  version?: number
 }
 
 export interface PersonaVisualPack {
   id: string
   persona_id: string
-  user_id: string
+  user_id?: string
   title: string
   renderer_type: PersonaVisualRendererType
   status: PersonaVisualPackStatus
-  manifest_version: number
+  manifest_version?: number
   manifest: PersonaVisualManifest
-  companion_behavior: PersonaCompanionBehavior | null
-  review: PersonaVisualPackReviewResponse | null
-  parent_pack_id: string | null
-  revision_number: number
-  provenance: string
-  active_at: string | null
-  assets: PersonaVisualAsset[]
+  companion_behavior?: PersonaCompanionBehavior | null
+  review?: PersonaVisualPackReviewResponse | null
+  parent_pack_id?: string | null
+  revision_number?: number
+  provenance?: string
+  active_at?: string | null
+  assets?: PersonaVisualAsset[]
   assets_by_id?: Record<string, PersonaVisualAsset>
-  created_at: string
-  last_modified: string
-  version: number
+  created_at?: string
+  last_modified?: string
+  version?: number
 }
 
 export interface PersonaVisualPackCreate {

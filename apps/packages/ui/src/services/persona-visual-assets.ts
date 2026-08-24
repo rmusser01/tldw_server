@@ -2,11 +2,15 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { PersonaVisualAsset } from "@/types/persona-visuals"
 
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/
 
 type AssetInput = Pick<
   PersonaVisualAsset,
   "id" | "url" | "checksum_sha256" | "byte_size" | "mime_type"
->
+> & {
+  checksum_sha256: string
+  byte_size: number
+}
 
 type AssetEntry = {
   asset: AssetInput
@@ -46,6 +50,9 @@ const assertDeclaredAsset = (asset: AssetInput, maxBytes: number): void => {
     fail("asset_size_mismatch")
   }
   if (asset.byte_size > maxBytes) fail("asset_too_large")
+  if (!SHA256_HEX_PATTERN.test(asset.checksum_sha256)) {
+    fail("asset_checksum_mismatch")
+  }
   if (!Object.hasOwn(SIGNATURES, asset.mime_type)) fail("asset_mime_mismatch")
 }
 
@@ -60,6 +67,12 @@ const signatureMatches = (mimeType: string, bytes: Uint8Array): boolean => {
   const signature = SIGNATURES[mimeType]
   if (!signature || bytes.byteLength < signature.length) return false
   if (!signature.every((value, index) => bytes[index] === value)) return false
+  if (mimeType === "image/gif") {
+    return bytes.byteLength >= 6
+      && bytes[3] === 0x38
+      && (bytes[4] === 0x37 || bytes[4] === 0x39)
+      && bytes[5] === 0x61
+  }
   return mimeType !== "image/webp"
     || bytes.byteLength >= 12
       && bytes[8] === 0x57
@@ -93,6 +106,7 @@ const discardUnretained = (entry: AssetEntry): void => {
     revoke(entry)
     return
   }
+  remove(entry)
   entry.controller.abort()
 }
 
@@ -128,7 +142,11 @@ const load = async (entry: AssetEntry, maxBytes: number): Promise<void> => {
   }
 }
 
-const waitFor = async (entry: AssetEntry, signal?: AbortSignal): Promise<void> => {
+const waitFor = async (
+  entry: AssetEntry,
+  signal: AbortSignal | undefined,
+  releaseWaiter: () => void
+): Promise<void> => {
   if (signal?.aborted) fail("asset_aborted")
   if (!signal) return entry.promise
   await Promise.race([
@@ -136,7 +154,10 @@ const waitFor = async (entry: AssetEntry, signal?: AbortSignal): Promise<void> =
     new Promise<never>((_, reject) => {
       signal.addEventListener(
         "abort",
-        () => reject(new PersonaVisualAssetError("asset_aborted")),
+        () => {
+          releaseWaiter()
+          reject(new PersonaVisualAssetError("asset_aborted"))
+        },
         { once: true }
       )
     })
@@ -175,8 +196,15 @@ export async function acquirePersonaVisualAsset(
   }
 
   entry.waiters += 1
+  let waiting = true
+  const releaseWaiter = () => {
+    if (!waiting) return
+    waiting = false
+    entry.waiters -= 1
+    discardUnretained(entry)
+  }
   try {
-    await waitFor(entry, options.signal)
+    await waitFor(entry, options.signal, releaseWaiter)
     if (!entry.url || entry.cleared || entry.revoked) fail("asset_aborted")
     entry.references += 1
     let released = false
@@ -191,8 +219,7 @@ export async function acquirePersonaVisualAsset(
       }
     }
   } finally {
-    entry.waiters -= 1
-    discardUnretained(entry)
+    releaseWaiter()
   }
 }
 
