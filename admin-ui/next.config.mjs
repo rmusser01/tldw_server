@@ -1,11 +1,10 @@
-import bundleAnalyzer from '@next/bundle-analyzer';
 import { withSentryConfig as configureSentry } from '@sentry/nextjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const withBundleAnalyzer =
   process.env.ANALYZE === 'true'
-    ? bundleAnalyzer({ enabled: true })
+    ? (await import('@next/bundle-analyzer')).default({ enabled: true })
     : (config) => config;
 
 const withSentryConfig = process.env.NEXT_PUBLIC_SENTRY_DSN

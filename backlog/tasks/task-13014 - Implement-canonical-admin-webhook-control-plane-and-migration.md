@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-23 19:57'
+updated_date: '2026-08-24 20:15'
 labels:
   - admin
   - webhooks
@@ -130,6 +130,10 @@ Qodo incremental review at commit 618080c00a resolved five findings and marked t
 2026-08-23 refreshed Qodo agentic review at final head a66e255495 reported three new rule violations, all validated: Next config carries two no-require-imports suppressions; the read-audit failure test couples to the exact logger.warning call despite already proving response/redaction behavior; and redundant asyncio markers coexist with direct classification markers even though asyncio_mode=auto. Remediation will convert the active Next config to ESM, remove the logging implementation-detail assertion while retaining observable API/redaction coverage, remove redundant asyncio markers, and rerun focused plus package-relevant lint/typecheck/build/test gates before another Qodo review.
 
 2026-08-23 refreshed agentic-Qodo remediation frozen as source commit ebbe6d30da. Converted next.config.js to next.config.mjs with static ESM analyzer/Sentry imports and no lint suppressions; updated active docs, Docker comment, and security-header import. Removed the exact mocked logger.warning assertion while preserving successful-response and response-redaction behavior. Audited the complete PR-touched Python test surface and removed all redundant asyncio markers under asyncio_mode=auto while retaining direct unit/integration and postgres markers. Verification: focused 42 passed/6 warnings; expanded non-PostgreSQL matrix 323 passed/24 deselected/134 warnings; Ruff passed; no redundant marker or no-require suppression matches; security-header 3 passed; package lint 0 errors/41 baseline warnings; typecheck passed; Node 20 production build generated 49 pages outside the port-restricted sandbox; analyzer and Sentry branches loaded; git diff --cached --check passed. PostgreSQL behavior was untouched, so prior 24 passed/0 skipped proof remains applicable. Awaiting push, refreshed Qodo confirmation, and GitHub-hosted CI; task remains In Progress.
+
+2026-08-24: Refreshed Qodo review identified one unresolved reliability finding at PR head 90907cd2de: admin-ui/next.config.mjs statically imports the dev-only @next/bundle-analyzer package. Verified the current Docker builder installs all dependencies, but production-only build environments can fail while loading the config even when ANALYZE is disabled. Remediation will add a focused regression prohibiting eager loading and change the analyzer to a guarded dynamic import; then rerun focused tests, lint, typecheck, config branch loads, and production build before push.
+
+2026-08-24 Qodo eager-import remediation verified locally. TDD RED: the focused security-header suite failed 1/4 because next.config.mjs statically imported @next/bundle-analyzer. GREEN after guarded dynamic import: 4/4 passed. Node 20 config loads passed with ANALYZE=false and ANALYZE=true; package lint passed with 0 errors and the existing 41-warning baseline; typecheck passed; targeted ESLint passed; Node 20 production build generated all 49 pages. The first build attempt failed only because the restricted sandbox blocked Turbopack's local worker port; the identical command passed with normal process permissions. git diff --check passed. Awaiting immutable source commit, independent review, push, and refreshed Qodo/CI confirmation.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

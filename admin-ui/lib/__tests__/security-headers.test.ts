@@ -1,8 +1,17 @@
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
 import { describe, it, expect } from 'vitest';
 
 import nextConfig from '../../next.config.mjs';
 
 describe('next.config.mjs security', () => {
+  it('does not eagerly load the optional bundle analyzer', async () => {
+    const source = await readFile(resolve(process.cwd(), 'next.config.mjs'), 'utf8');
+
+    expect(source).not.toMatch(/^\s*import\b[^\n]*['"]@next\/bundle-analyzer['"]/m);
+  });
+
   it('enables standalone output for Docker', () => {
     expect(nextConfig.output).toBe('standalone');
   });
