@@ -2312,6 +2312,93 @@ class TestContentAdaptersErrorHandling:
             ("The model returned prose instead of JSON.", "deterministic_fallback"),
             ("[]", "deterministic_fallback"),
             ("{malformed", "deterministic_fallback"),
+            (json.dumps({"unexpected": "not a Studio payload"}), "deterministic_fallback"),
+            (
+                json.dumps({"sections": [{"bogus": 1}]}),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "invalid-1",
+                                "kind": "provider-only",
+                                "title": "Invalid",
+                                "content": "Not a closed Studio kind.",
+                            }
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "duplicate",
+                                "kind": "notes",
+                                "title": "Notes",
+                                "content": "First",
+                            },
+                            {
+                                "id": "duplicate",
+                                "kind": "summary",
+                                "title": "Summary",
+                                "content": "Second",
+                            },
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "cue-1",
+                                "kind": "cue",
+                                "title": "Cue",
+                                "content": "Cue content cannot replace items.",
+                            }
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "cue-1",
+                                "kind": "cue",
+                                "title": "Cue",
+                                "items": "not-an-array",
+                            }
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "notes-1",
+                                "kind": "notes",
+                                "title": "Notes",
+                                "content": "x" * 65_537,
+                            }
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (json.dumps({"sections": []}), "llm"),
             (
                 json.dumps(
                     {
@@ -2323,6 +2410,28 @@ class TestContentAdaptersErrorHandling:
                                 "content": "Accepted model output.",
                             }
                         ]
+                    }
+                ),
+                "llm",
+            ),
+            (
+                json.dumps(
+                    {
+                        "meta": {
+                            "title": "Provider Study Notes",
+                            "source_note_id": "note-1",
+                            "provider_debug": {"request": "must-not-survive"},
+                        },
+                        "layout": {"provider_layout": True},
+                        "sections": [
+                            {
+                                "id": "notes-1",
+                                "kind": "notes",
+                                "title": "Notes",
+                                "content": "Accepted model output.",
+                            }
+                        ],
+                        "provider_response": {"trace": "must-not-survive"},
                     }
                 ),
                 "llm",
@@ -2358,7 +2467,16 @@ class TestContentAdaptersErrorHandling:
         assert result["source"] == expected_source
         assert isinstance(result["payload"], dict)
         if expected_source == "llm":
-            assert result["payload"]["sections"][0]["content"] == "Accepted model output."
+            assert set(result["payload"]) <= {"meta", "sections"}
+            assert set(result["payload"].get("meta", {})) <= {
+                "title",
+                "source_note_id",
+            }
+            if result["payload"]["sections"]:
+                assert result["payload"]["sections"][0]["content"] == "Accepted model output."
+        else:
+            assert set(result["payload"]["meta"]) == {"title", "source_note_id"}
+            assert set(result["payload"]) == {"meta", "layout", "sections"}
 
     @pytest.mark.asyncio
     async def test_summarize_adapter_sanitizes_backend_errors(self, monkeypatch, base_context, sample_long_text):

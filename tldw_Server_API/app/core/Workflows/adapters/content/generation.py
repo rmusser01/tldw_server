@@ -16,11 +16,15 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    StudioSectionsV1,
+)
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.content._config import (
@@ -84,9 +88,7 @@ def _build_notes_studio_payload(
     return {
         "meta": {
             "source_note_id": source_note_id,
-            "source_title": source_title_text or None,
             "title": note_title,
-            "template_type": template_type,
         },
         "layout": {
             "template_type": template_type,
@@ -114,6 +116,32 @@ def _build_notes_studio_payload(
             },
         ],
     }
+
+
+def _sanitize_notes_studio_llm_payload(payload: object) -> dict[str, Any] | None:
+    """Return only contract-valid LLM sections and supported outer-state aliases."""
+    if not isinstance(payload, Mapping) or "sections" not in payload:
+        return None
+    try:
+        sections = StudioSectionsV1.model_validate(
+            {"sections": payload["sections"]}
+        ).model_dump(mode="json")
+    except (TypeError, ValueError):
+        return None
+
+    sanitized: dict[str, Any] = sections
+    raw_meta = payload.get("meta")
+    if isinstance(raw_meta, Mapping):
+        meta: dict[str, Any] = {}
+        title = raw_meta.get("title")
+        if isinstance(title, str) and title.strip():
+            meta["title"] = title.strip()
+        source_note_id = raw_meta.get("source_note_id")
+        if source_note_id is None or isinstance(source_note_id, str):
+            meta["source_note_id"] = source_note_id
+        if meta:
+            sanitized["meta"] = meta
+    return sanitized
 
 
 def _build_fallback_diagram(content: str, diagram_type: str) -> str:
@@ -810,11 +838,10 @@ async def run_notes_studio_generate_adapter(config: dict[str, Any], context: dic
         if json_match is None:
             return {"payload": fallback_payload, "source": "deterministic_fallback"}
         payload = json.loads(json_match.group())
-        if not isinstance(payload, dict):
+        sanitized_payload = _sanitize_notes_studio_llm_payload(payload)
+        if sanitized_payload is None:
             return {"payload": fallback_payload, "source": "deterministic_fallback"}
-        payload.setdefault("meta", fallback_payload["meta"])
-        payload.setdefault("sections", fallback_payload["sections"])
-        return {"payload": payload, "source": "llm"}
+        return {"payload": sanitized_payload, "source": "llm"}
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.warning("Notes Studio generate fallback engaged")
         return {"payload": fallback_payload, "source": "deterministic_fallback", "warning": "notes_studio_generate_warning"}

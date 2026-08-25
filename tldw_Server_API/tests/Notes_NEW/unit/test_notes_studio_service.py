@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -570,6 +572,159 @@ def test_derive_stamps_the_engine_that_actually_executed(
     )
     provenance = result["studio_document"]["accepted_provenance_json"]
     assert (provenance["provider"], provenance["model"]) == expected
+
+
+@pytest.mark.parametrize(
+    ("response_text", "expected_identity", "expected_content"),
+    (
+        (
+            '{"unexpected":"not a Studio payload"}',
+            ("tldw", "notes-studio-deterministic-v1"),
+            "Accepted excerpt",
+        ),
+        (
+            '{"sections":[{"bogus":1}]}',
+            ("tldw", "notes-studio-deterministic-v1"),
+            "Accepted excerpt",
+        ),
+        (
+            '{"sections":[{"id":"bad","kind":"invalid","title":"Bad","content":"bad"}]}',
+            ("tldw", "notes-studio-deterministic-v1"),
+            "Accepted excerpt",
+        ),
+        (
+            '{"sections":[{"id":"dup","kind":"notes","title":"One","content":"one"},'
+            '{"id":"dup","kind":"summary","title":"Two","content":"two"}]}',
+            ("tldw", "notes-studio-deterministic-v1"),
+            "Accepted excerpt",
+        ),
+        (
+            '{"sections":[{"id":"cue-1","kind":"cue","title":"Cue",'
+            '"content":"wrong authority"}]}',
+            ("tldw", "notes-studio-deterministic-v1"),
+            "Accepted excerpt",
+        ),
+        (
+            '{"sections":[{"id":"cue-1","kind":"cue","title":"Cue",'
+            '"items":"not-an-array"}]}',
+            ("tldw", "notes-studio-deterministic-v1"),
+            "Accepted excerpt",
+        ),
+        (
+            json.dumps(
+                {
+                    "sections": [
+                        {
+                            "id": "notes-1",
+                            "kind": "notes",
+                            "title": "Notes",
+                            "content": "x" * 65_537,
+                        }
+                    ]
+                }
+            ),
+            ("tldw", "notes-studio-deterministic-v1"),
+            "Accepted excerpt",
+        ),
+        ("[]", ("tldw", "notes-studio-deterministic-v1"), "Accepted excerpt"),
+        ("{malformed", ("tldw", "notes-studio-deterministic-v1"), "Accepted excerpt"),
+        (
+            "The model returned prose instead of JSON.",
+            ("tldw", "notes-studio-deterministic-v1"),
+            "Accepted excerpt",
+        ),
+        ('{"sections":[]}', ("openai", "gpt-test"), None),
+        (
+            '{"sections":[{"id":"notes-1","kind":"notes","title":"Notes",'
+            '"content":"Accepted LLM content"}]}',
+            ("openai", "gpt-test"),
+            "Accepted LLM content",
+        ),
+        (
+            '{"meta":{"title":"Provider Study Notes","source_note_id":"source-placeholder",'
+            '"provider_debug":{"secret":"drop"}},"layout":{"provider_layout":true},'
+            '"provider_response":{"trace":"drop"},"sections":[{"id":"notes-1",'
+            '"kind":"notes","title":"Notes","content":"Accepted LLM content"}]}',
+            ("openai", "gpt-test"),
+            "Accepted LLM content",
+        ),
+    ),
+)
+def test_real_generation_adapter_persists_only_valid_llm_sections_with_truthful_identity(
+    studio_db,
+    response_text,
+    expected_identity,
+    expected_content,
+):
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    assert source_note_id is not None
+    service = NotesStudioService(db=db, user_id="notes_studio_unit")
+
+    with patch(
+        "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+        return_value=response_text,
+    ):
+        result = asyncio.run(
+            service.derive_from_excerpt(
+                source_note_id=str(source_note_id),
+                excerpt_text="Accepted excerpt",
+                template_type="lined",
+                handwriting_mode="accented",
+                provider="openai",
+                model="gpt-test",
+            )
+        )
+
+    document = result["studio_document"]
+    provenance = document["accepted_provenance_json"]
+    assert (provenance["provider"], provenance["model"]) == expected_identity
+    assert set(document["payload_json"]["meta"]) == {"title", "source_note_id"}
+    assert document["payload_json"]["meta"]["source_note_id"] == str(source_note_id)
+    assert set(document["payload_json"]) == {"meta", "layout", "sections"}
+    serialized = json.dumps(document["payload_json"], sort_keys=True)
+    assert "provider_debug" not in serialized
+    assert "provider_response" not in serialized
+    assert "provider_layout" not in serialized
+    if expected_content is None:
+        assert document["payload_json"]["sections"] == []
+    else:
+        assert any(
+            section.get("content") == expected_content
+            for section in document["payload_json"]["sections"]
+        )
+
+
+def test_real_generation_adapter_no_provider_fallback_persists_canonical_aliases(
+    studio_db,
+):
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    assert source_note_id is not None
+    service = NotesStudioService(db=db, user_id="notes_studio_unit")
+
+    result = asyncio.run(
+        service.derive_from_excerpt(
+            source_note_id=str(source_note_id),
+            excerpt_text="Accepted excerpt",
+            template_type="cornell",
+            handwriting_mode="accented",
+        )
+    )
+
+    document = result["studio_document"]
+    provenance = document["accepted_provenance_json"]
+    assert (provenance["provider"], provenance["model"]) == (
+        "tldw",
+        "notes-studio-deterministic-v1",
+    )
+    assert set(document["payload_json"]["meta"]) == {"title", "source_note_id"}
+    assert document["payload_json"]["layout"] == {
+        "template_type": "cornell",
+        "handwriting_mode": "accented",
+        "render_version": 1,
+    }
 
 
 @pytest.mark.parametrize(
