@@ -7,6 +7,8 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.exceptions import PersonaBuddyValidationError
+
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -87,7 +89,7 @@ def normalize_persona_buddy_overlay_preferences(
     normalized = dict(overlay_preferences or {})
     ambient_mode = normalized.get("ambient_mode")
     if ambient_mode is not None and ambient_mode not in {"off", "expressive", "roaming"}:
-        raise ValueError("ambient_mode must be off, expressive, or roaming")
+        raise PersonaBuddyValidationError("ambient_mode must be off, expressive, or roaming")
     return normalized
 
 

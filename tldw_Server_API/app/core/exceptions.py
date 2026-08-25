@@ -532,6 +532,14 @@ class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
 
 
+class CompanionBehaviorValidationError(BadRequestError):
+    """Raised when pack-level Persona companion behavior is invalid."""
+
+
+class PersonaBuddyValidationError(BadRequestError):
+    """Raised when Persona Buddy preferences violate the domain contract."""
+
+
 class ChatAPIError(Exception):
     """Base exception for chat API call errors."""
 

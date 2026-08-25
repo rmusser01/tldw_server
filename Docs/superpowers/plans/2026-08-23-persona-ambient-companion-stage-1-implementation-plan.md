@@ -33,25 +33,25 @@
 - Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py`
 - Modify: `tldw_Server_API/app/core/Persona/buddy.py`
-- Create: `tldw_Server_API/tests/DB_Management/test_chacha_migration_v52_persona_companion.py`
-- Create: `tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v52_persona_companion.py`
+- Create: `tldw_Server_API/tests/DB_Management/test_chacha_migration_v62_persona_companion.py`
+- Create: `tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v62_persona_companion.py`
 - Modify: `tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py`
 - Modify: `tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py`
 
 **Interfaces:**
 - Consumes: Existing SQLite/PostgreSQL migration dispatch, `persona_buddies`, `persona_visual_packs`, `persona_visual_assets`, and the one-active-pack transaction.
-- Produces: schema version 52; `persona_visual_packs.companion_behavior_json`; `persona_buddy_preferences`; `persona_visual_pack_reviews`; `get_persona_buddy_preferences(user_id) -> dict[str, Any] | None`; `upsert_persona_buddy_preferences(user_id, ambient_mode, expected_version) -> dict[str, Any]`; `patch_persona_buddy_overlay_preferences(persona_id, user_id, patch, expected_version) -> dict[str, Any]`; `create_persona_visual_pack_review(pack_id, user_id, reviewer_user_id, fingerprint, expected_pack_version) -> dict[str, Any]`; inactive-only `update_persona_visual_pack_payload(pack_id, user_id, manifest, companion_behavior, expected_version) -> dict[str, Any]`; and version/fingerprint-aware `activate_persona_visual_pack(pack_id, persona_id, user_id, expected_version, reviewed_fingerprint) -> dict[str, Any]`.
+- Produces: schema version 62; `persona_visual_packs.companion_behavior_json`; `persona_buddy_preferences`; `persona_visual_pack_reviews`; `get_persona_buddy_preferences(user_id) -> dict[str, Any] | None`; `upsert_persona_buddy_preferences(user_id, ambient_mode, expected_version) -> dict[str, Any]`; `patch_persona_buddy_overlay_preferences(persona_id, user_id, patch, expected_version) -> dict[str, Any]`; `create_persona_visual_pack_review(pack_id, user_id, reviewer_user_id, fingerprint, expected_pack_version) -> dict[str, Any]`; inactive-only `update_persona_visual_pack_payload(pack_id, user_id, manifest, companion_behavior, expected_version) -> dict[str, Any]`; and version/fingerprint-aware `activate_persona_visual_pack(pack_id, persona_id, user_id, expected_version, reviewed_fingerprint) -> dict[str, Any]`.
 
 - [ ] **Step 1: Write the migration tests**
 
 ```python
-def test_v52_adds_companion_tables_and_pack_column(migrated_db):
+def test_v62_adds_companion_tables_and_pack_column(migrated_db):
     assert "companion_behavior_json" in migrated_db.table_columns("persona_visual_packs")
     assert migrated_db.table_exists("persona_buddy_preferences")
     assert migrated_db.table_exists("persona_visual_pack_reviews")
 
 
-def test_v52_preference_mode_constraint_rejects_unknown_mode(migrated_db):
+def test_v62_preference_mode_constraint_rejects_unknown_mode(migrated_db):
     with pytest.raises(Exception):
         migrated_db.execute(
             "INSERT INTO persona_buddy_preferences "
@@ -60,17 +60,17 @@ def test_v52_preference_mode_constraint_rejects_unknown_mode(migrated_db):
         )
 ```
 
-Create equivalent PostgreSQL assertions against the existing v51 migration fixture, including rejected `ambient_mode='chaotic'`, unique `user_id`, and unique `(pack_id, fingerprint)` review constraints.
+Create equivalent PostgreSQL assertions against the existing v61 migration fixture, including rejected `ambient_mode='chaotic'`, unique `user_id`, and unique `(pack_id, fingerprint)` review constraints.
 
 - [ ] **Step 2: Run the migration tests and confirm the red state**
 
-Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/DB_Management/test_chacha_migration_v52_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v52_persona_companion.py -v`
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/DB_Management/test_chacha_migration_v62_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v62_persona_companion.py -v`
 
-Expected: FAIL because schema version 52 and its tables/column are absent.
+Expected: FAIL because schema version 62 and its tables/column are absent.
 
-- [ ] **Step 3: Add migration 51→52 to both database engines**
+- [ ] **Step 3: Add migration 61→62 to both database engines**
 
-Add nullable `companion_behavior_json TEXT` to `persona_visual_packs`. Add a user-owned preference table with `ambient_mode IN ('off','expressive','roaming')`, integer `version >= 1`, and timestamps. Add a review table with pack/user ownership, reviewer identity, 64-character fingerprint, pack version, and timestamps. Register both migrations and set `_CURRENT_SCHEMA_VERSION = 52`.
+Add nullable `companion_behavior_json TEXT` to `persona_visual_packs`. Add a user-owned preference table with `ambient_mode IN ('off','expressive','roaming')`, integer `version >= 1`, and timestamps. Add a review table with pack/user ownership, reviewer identity, 64-character fingerprint, pack version, and timestamps. Register both migrations and set `_CURRENT_SCHEMA_VERSION = 62`.
 
 ```sql
 CREATE TABLE persona_buddy_preferences (
@@ -99,7 +99,7 @@ Use the repository's PostgreSQL timestamp and foreign-key conventions in the Pos
 
 - [ ] **Step 4: Run both migration tests to green**
 
-Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/DB_Management/test_chacha_migration_v52_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v52_persona_companion.py -v`
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/DB_Management/test_chacha_migration_v62_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v62_persona_companion.py -v`
 
 Expected: PASS for SQLite; PostgreSQL PASS when its fixture is available or its established environment skip otherwise.
 
@@ -148,14 +148,14 @@ def normalize_persona_buddy_overlay_preferences(value: Mapping[str, Any] | None)
 
 - [ ] **Step 7: Run the focused database suite**
 
-Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py tldw_Server_API/tests/DB_Management/test_chacha_migration_v52_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v52_persona_companion.py -v`
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py tldw_Server_API/tests/DB_Management/test_chacha_migration_v62_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v62_persona_companion.py -v`
 
 Expected: PASS.
 
 - [ ] **Step 8: Commit the persistence boundary**
 
 ```bash
-git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py tldw_Server_API/app/core/Persona/buddy.py tldw_Server_API/tests/DB_Management/test_chacha_migration_v52_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v52_persona_companion.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py
+git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py tldw_Server_API/app/core/Persona/buddy.py tldw_Server_API/tests/DB_Management/test_chacha_migration_v62_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v62_persona_companion.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py
 git commit -m "feat(persona): persist companion preferences and immutable reviews"
 ```
 
@@ -824,7 +824,7 @@ State that missing behavior means base idle only and technical validation does n
 
 Backend:
 
-`source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_companion_behavior.py tldw_Server_API/tests/Persona/test_persona_buddy_api.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visuals_core.py tldw_Server_API/tests/Persona/test_persona_visual_service.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py tldw_Server_API/tests/DB_Management/test_chacha_migration_v52_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v52_persona_companion.py -v`
+`source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_companion_behavior.py tldw_Server_API/tests/Persona/test_persona_buddy_api.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visuals_core.py tldw_Server_API/tests/Persona/test_persona_visual_service.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py tldw_Server_API/tests/DB_Management/test_chacha_migration_v62_persona_companion.py tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v62_persona_companion.py -v`
 
 Frontend:
 

@@ -124,6 +124,7 @@ def validate_sprite_static_coverage(
 
 
 def _static_asset_id(animation: Mapping[str, Any]) -> str:
+    """Resolve the preferred static asset identifier for an animation."""
     frames = animation.get("frames")
     if not isinstance(frames, list) or not frames:
         return ""

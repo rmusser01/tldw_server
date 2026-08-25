@@ -236,12 +236,10 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
 
   React.useEffect(() => {
     if (structuralError || !frame || !asset) {
-      if (reducedMotion) {
-        requestRef.current += 1
-        handleRef.current?.release()
-        handleRef.current = null
-        setPresented(null)
-      }
+      requestRef.current += 1
+      handleRef.current?.release()
+      handleRef.current = null
+      setPresented(null)
       setLoadError(structuralError)
       const failureKey = structuralError ? `${generation}:${structuralError}` : null
       if (structuralError && reportedFailureRef.current !== failureKey) {

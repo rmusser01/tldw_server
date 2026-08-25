@@ -1,4 +1,3 @@
-import sqlite3
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
@@ -32,21 +31,17 @@ def db_instance(db_path: Path) -> Iterator[CharactersRAGDB]:
     db.close_connection()
 
 
-def test_migration_v39_to_latest_creates_persona_buddies_table(db_path: Path) -> None:
-    seeded = CharactersRAGDB(db_path, "seed-client")
-    seeded.close_connection()
-
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (39, CharactersRAGDB._SCHEMA_NAME),
-        )
-        conn.execute("DROP TABLE IF EXISTS persona_buddies")
-        conn.commit()
-
+def test_migration_v39_to_v40_creates_persona_buddies_table(db_path: Path) -> None:
     migrated = CharactersRAGDB(db_path, "migration-check-client")
     raw_conn = migrated.get_connection()
+    raw_conn.execute(
+        "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
+        (39, CharactersRAGDB._SCHEMA_NAME),
+    )
+    raw_conn.execute("DROP TABLE IF EXISTS persona_buddies")
+
+    migrated._migrate_from_v39_to_v40(raw_conn)
+
     tables = {
         row["name"]
         for row in raw_conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
@@ -65,7 +60,7 @@ def test_migration_v39_to_latest_creates_persona_buddies_table(db_path: Path) ->
 
     fk_targets = {(row["table"], row["from"], row["to"]) for row in foreign_keys}
 
-    assert schema_version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+    assert schema_version == 40
     assert "persona_buddies" in tables
     assert "source_fingerprint" in buddy_columns
     assert "derivation_version" in buddy_columns

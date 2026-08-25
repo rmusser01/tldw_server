@@ -6,6 +6,8 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import CompanionBehaviorValidationError
+
 ALLOWED_TRIGGERS = frozenset({"ambient", "click", "drag"})
 ALLOWED_CATEGORIES = frozenset({"idle_variant", "move", "reaction"})
 MAX_BEHAVIOR_ENTRIES = 128
@@ -26,10 +28,6 @@ _ENTRY_KEYS = frozenset(
 _MOVEMENT_KEYS = frozenset(
     {"direction", "motion_start_ratio", "motion_end_ratio"}
 )
-
-
-class CompanionBehaviorValidationError(ValueError):
-    """Raised when pack-level companion behavior is invalid."""
 
 
 def normalize_companion_behavior(
@@ -60,6 +58,7 @@ def _normalize_entries(
     entries: list[Any],
     resolvable_state_ids: set[str],
 ) -> list[dict[str, Any]]:
+    """Normalize behavior entries and reject invalid or duplicate mappings."""
     normalized: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for index, entry in enumerate(entries):
@@ -133,6 +132,7 @@ def _normalize_entries(
 
 
 def _normalize_movement(value: Any, *, index: int) -> dict[str, Any]:
+    """Normalize one horizontal movement descriptor."""
     if not isinstance(value, Mapping) or set(value) != _MOVEMENT_KEYS:
         raise CompanionBehaviorValidationError(
             f"entries[{index}].movement is invalid"
@@ -171,6 +171,7 @@ def _bounded_number(
     minimum: float,
     maximum: float,
 ) -> float:
+    """Return a finite number inside the inclusive contract bounds."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise CompanionBehaviorValidationError(f"{field_name} is invalid")
     try:

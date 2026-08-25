@@ -314,6 +314,39 @@ describe("SpriteFrameRenderer", () => {
     expect(currentFrame()).toHaveAttribute("src", "blob:idle-1")
   })
 
+  it("releases a presented Blob and falls back when the next state is structurally invalid", async () => {
+    const release = vi.fn()
+    assetLoader.acquire.mockResolvedValue({
+      url: "blob:idle-1",
+      mimeType: "image/png",
+      release
+    })
+    const view = render(
+      <SpriteFrameRenderer
+        manifest={baseManifest()}
+        assets={assets}
+        requestedState="idle"
+        generation={1}
+        fallbackLabel="Buddy"
+      />
+    )
+    await screen.findByTestId("persona-visual-frame")
+
+    view.rerender(
+      <SpriteFrameRenderer
+        manifest={baseManifest()}
+        assets={{}}
+        requestedState="idle"
+        generation={2}
+        fallbackLabel="Buddy"
+      />
+    )
+
+    expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
+    expect(screen.getByText("Buddy")).toBeInTheDocument()
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
   it("reports unsupported regions before trying to render them", () => {
     const onRenderError = vi.fn()
     render(

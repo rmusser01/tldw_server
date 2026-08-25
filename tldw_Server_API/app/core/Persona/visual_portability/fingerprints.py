@@ -101,6 +101,7 @@ def build_persona_visual_pack_fingerprint(
 
 
 def _fingerprint_asset(asset: Mapping[str, Any]) -> dict[str, Any]:
+    """Project immutable asset metadata into the reviewed fingerprint payload."""
     return {
         key: asset.get(key)
         for key in (
