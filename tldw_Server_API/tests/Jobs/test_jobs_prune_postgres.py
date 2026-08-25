@@ -103,6 +103,58 @@ def test_pg_prune_archives_receipt_job_without_global_archive(
     assert replay.job["archived"] is True
 
 
+def test_pg_receipt_replay_remains_available_during_archive_move(
+    monkeypatch,
+    jobs_pg_dsn,
+):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    prune_manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    replay_manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    receipt_job = prune_manager.admit_idempotent_operation(_receipt_command()).job
+    _set_terminal_pg(jobs_pg_dsn, int(receipt_job["id"]), days_old=40)
+
+    archive_verified = threading.Event()
+    release_prune = threading.Event()
+    original_exact = prune_manager._exact_receipt_archive_uuids
+
+    def _block_after_archive_copy(*args, **kwargs):
+        archived_uuids = original_exact(*args, **kwargs)
+        if archived_uuids and not archive_verified.is_set():
+            archive_verified.set()
+            assert release_prune.wait(timeout=10)
+        return archived_uuids
+
+    monkeypatch.setattr(
+        prune_manager,
+        "_exact_receipt_archive_uuids",
+        _block_after_archive_copy,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        prune_future = executor.submit(
+            prune_manager.prune_jobs,
+            statuses=["completed"],
+            older_than_days=30,
+        )
+        assert archive_verified.wait(timeout=10)
+        try:
+            replay = executor.submit(
+                replay_manager.admit_idempotent_operation,
+                _receipt_command(),
+            ).result(timeout=10)
+        finally:
+            release_prune.set()
+        assert prune_future.result(timeout=10) == 1
+
+    assert replay.disposition is IdempotentOperationDisposition.REPLAYED
+    assert replay.job["uuid"] == receipt_job["uuid"]
+    assert replay.job["archived"] is False
+    archived_replay = replay_manager.admit_idempotent_operation(_receipt_command())
+    assert archived_replay.disposition is IdempotentOperationDisposition.REPLAYED
+    assert archived_replay.job["archived"] is True
+
+
 def test_pg_prune_rolls_back_on_ambiguous_receipt(
     monkeypatch,
     jobs_pg_dsn,

@@ -187,6 +187,50 @@ def test_postgres_second_key_converges_or_conflicts_by_fingerprint(
     assert exc_info.value.job_uuid == first.job["uuid"]
 
 
+def test_postgres_active_scope_without_receipt_fails_closed(
+    receipt_manager,
+    jobs_pg_dsn,
+):
+    existing = receipt_manager.create_job(
+        domain="sharing",
+        queue="workspace-clone",
+        job_type="workspace_clone",
+        payload={"schema_version": 1},
+        owner_user_id="recipient-1",
+        batch_group="share:share-1",
+        priority=5,
+        max_retries=0,
+    )
+
+    with pytest.raises(
+        IdempotentOperationUnavailableError,
+        match="one fingerprint",
+    ):
+        receipt_manager.admit_idempotent_operation(_operation_command())
+
+    assert _counts(jobs_pg_dsn) == (1, 0, 1)
+    assert receipt_manager.get_job_by_uuid(existing["uuid"]) is not None
+
+
+def test_postgres_active_scope_with_malformed_receipt_fails_closed(
+    receipt_manager,
+    jobs_pg_dsn,
+):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE job_idempotency_receipts SET job_id = %s",
+            (int(first.job["id"]) + 1000,),
+        )
+
+    with pytest.raises(IdempotentOperationUnavailableError, match="correlation"):
+        receipt_manager.admit_idempotent_operation(
+            _operation_command(key_digest="d" * 64)
+        )
+
+    assert _counts(jobs_pg_dsn) == (1, 1, 1)
+
+
 def test_postgres_receipts_are_owner_isolated(receipt_manager, jobs_pg_dsn):
     first = receipt_manager.admit_idempotent_operation(_operation_command())
     second = receipt_manager.admit_idempotent_operation(

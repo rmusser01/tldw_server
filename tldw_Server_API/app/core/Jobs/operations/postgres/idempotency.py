@@ -37,12 +37,6 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     return dict(row) if row is not None else {}
 
 
-def _row_value(row: Any, name: str, position: int) -> Any:
-    if isinstance(row, dict):
-        return row.get(name)
-    return row[position]
-
-
 def _operation_lock_key(kind: str, command: IdempotentOperationCommand) -> int:
     value = command.key_digest if kind == "key" else command.operation_scope
     material = "\x00".join(
@@ -214,15 +208,6 @@ def _find_active_scope_job(
         WHERE jobs.domain = %s AND jobs.queue = %s AND jobs.job_type = %s
           AND jobs.owner_user_id = %s AND jobs.batch_group = %s
           AND jobs.status IN ('queued', 'processing')
-          AND EXISTS (
-            SELECT 1 FROM job_idempotency_receipts AS receipts
-            WHERE receipts.job_uuid = jobs.uuid AND receipts.job_id = jobs.id
-              AND receipts.domain = jobs.domain
-              AND receipts.queue = jobs.queue
-              AND receipts.job_type = jobs.job_type
-              AND receipts.owner_user_id = jobs.owner_user_id
-              AND receipts.operation_scope = jobs.batch_group
-          )
         ORDER BY jobs.id
         FOR KEY SHARE
         """,
@@ -244,24 +229,32 @@ def _find_active_scope_job(
     job = _row_to_dict(rows[0])
     cur.execute(
         """
-        SELECT DISTINCT request_fingerprint
+        SELECT *
         FROM job_idempotency_receipts
-        WHERE job_uuid = %s AND job_id = %s
-          AND domain = %s AND queue = %s AND job_type = %s
-          AND owner_user_id = %s AND operation_scope = %s
+        WHERE job_uuid = %s OR job_id = %s
+        ORDER BY receipt_id
         """,
         (
             job["uuid"],
             job["id"],
-            command.job.domain,
-            command.job.queue,
-            command.job.job_type,
-            command.job.owner_user_id,
-            command.operation_scope,
         ),
     )
+    receipts = [_row_to_dict(row) for row in cur.fetchall()]
+    if any(
+        receipt.get("job_uuid") != job.get("uuid")
+        or receipt.get("job_id") != job.get("id")
+        or receipt.get("domain") != job.get("domain")
+        or receipt.get("queue") != job.get("queue")
+        or receipt.get("job_type") != job.get("job_type")
+        or receipt.get("owner_user_id") != job.get("owner_user_id")
+        or receipt.get("operation_scope") != job.get("batch_group")
+        for receipt in receipts
+    ):
+        raise IdempotentOperationUnavailableError(
+            "active operation receipt correlation does not match"
+        )
     fingerprints = {
-        str(_row_value(row, "request_fingerprint", 0)) for row in cur.fetchall()
+        str(receipt["request_fingerprint"]) for receipt in receipts
     }
     if len(fingerprints) != 1:
         raise IdempotentOperationUnavailableError(

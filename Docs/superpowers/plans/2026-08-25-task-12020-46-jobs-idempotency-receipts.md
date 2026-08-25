@@ -139,7 +139,7 @@ git commit -m "feat(jobs): define durable idempotency receipt contract"
 
 - [x] **Step 1: Add failing SQLite and PostgreSQL schema assertions**
 
-Assert these columns exist: `receipt_id`, `domain`, `queue`, `job_type`, `owner_user_id`, `key_digest`, `request_fingerprint`, `operation_scope`, `job_uuid`, `job_id`, `created_at`, `expires_at`. Assert a unique index over `(domain, queue, job_type, owner_user_id, key_digest)`, lookup indexes on `job_uuid` and `(operation_scope, owner_user_id, expires_at)`, and no column capable of storing a raw client key.
+Assert these columns exist: `receipt_id`, `domain`, `queue`, `job_type`, `owner_user_id`, `key_digest`, `request_fingerprint`, `operation_scope`, `job_uuid`, `job_id`, `created_at`, `expires_at`. Assert a unique index over `(domain, queue, job_type, owner_user_id, key_digest)`, lookup indexes on `job_uuid`, `job_id`, and `(operation_scope, owner_user_id, expires_at)`, and no column capable of storing a raw client key.
 
 - [x] **Step 2: Run migration tests and verify failure**
 
@@ -372,23 +372,23 @@ git commit -m "fix(jobs): preserve receipt-backed operations through pruning"
 - Consumes: all Task 1-6 deliverables.
 - Produces: a reviewable foundation and exact verification evidence for `TASK-12020.48`.
 
-- [ ] **Step 1: Run the focused Jobs suite**
+- [x] **Step 1: Run the focused Jobs suite**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_migrations_compat_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_prune_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_postgres.py tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py tldw_Server_API/tests/Jobs/test_jobs_prune_postgres.py -v`
 
-- [ ] **Step 2: Run static quality checks**
+- [x] **Step 2: Run static quality checks**
 
 Run: `source .venv/bin/activate && python -m ruff check tldw_Server_API/app/core/Jobs/operations tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/app/core/Jobs/migrations.py tldw_Server_API/app/core/Jobs/pg_migrations.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_postgres.py`
 
 Run: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Jobs/operations tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/app/core/Jobs/migrations.py tldw_Server_API/app/core/Jobs/pg_migrations.py -f json -o /tmp/bandit_task_12020_46.json`
 
-- [ ] **Step 3: Verify CI shard ownership**
+- [x] **Step 3: Verify CI shard ownership**
 
 Run: `source .venv/bin/activate && python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.yml`
 
 If the two new test modules are uncovered, add them to the existing Jobs SQLite/PostgreSQL shard groups and rerun until the guard passes.
 
-- [ ] **Step 4: Run diff checks and inspect the patch**
+- [x] **Step 4: Run diff checks and inspect the patch**
 
 Run: `git diff --check`
 
@@ -396,7 +396,7 @@ Run: `git diff --stat origin/dev...HEAD && git status --short`
 
 Confirm the pre-existing untracked `apps/packages/ui/node_modules` symlink is neither staged nor modified.
 
-- [ ] **Step 5: Update Backlog and commit closeout**
+- [x] **Step 5: Update Backlog and commit closeout**
 
 Record exact test results, PostgreSQL fixture availability, Bandit output path, touched files, and residual risks in `TASK-12020.46`; check acceptance criteria only with evidence.
 

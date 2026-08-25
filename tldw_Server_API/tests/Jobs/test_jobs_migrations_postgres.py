@@ -70,6 +70,9 @@ def test_pg_schema_persists_owner_scoped_idempotency_receipts(jobs_pg_dsn):
             assert "(job_uuid)" in index_definitions[
                 "idx_job_idempotency_receipts_job_uuid"
             ]
+            assert "(job_id)" in index_definitions[
+                "idx_job_idempotency_receipts_job_id"
+            ]
             assert (
                 "(operation_scope, owner_user_id, expires_at)"
                 in index_definitions["idx_job_idempotency_receipts_scope"]

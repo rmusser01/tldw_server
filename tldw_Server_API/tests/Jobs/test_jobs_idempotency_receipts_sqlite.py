@@ -379,6 +379,52 @@ def test_second_key_with_active_scope_and_different_fingerprint_conflicts(
     assert exc_info.value.job_uuid == first.job["uuid"]
 
 
+def test_active_scope_without_authoritative_receipt_fails_closed(receipt_manager):
+    existing = receipt_manager.create_job(
+        domain="sharing",
+        queue="workspace-clone",
+        job_type="workspace_clone",
+        payload={"schema_version": 1},
+        owner_user_id="recipient-1",
+        batch_group="share:share-1",
+        priority=5,
+        max_retries=0,
+    )
+
+    with pytest.raises(
+        contracts.IdempotentOperationUnavailableError,
+        match="one fingerprint",
+    ):
+        receipt_manager.admit_idempotent_operation(_operation_command())
+
+    jobs = receipt_manager.list_jobs(domain="sharing")
+    assert [job["uuid"] for job in jobs] == [existing["uuid"]]
+    assert _receipt_rows(receipt_manager) == []
+
+
+def test_active_scope_with_malformed_receipt_fails_closed(receipt_manager):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    conn = sqlite3.connect(receipt_manager.db_path)
+    try:
+        conn.execute(
+            "UPDATE job_idempotency_receipts SET job_id = ?",
+            (int(first.job["id"]) + 1000,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(
+        contracts.IdempotentOperationUnavailableError,
+        match="correlation",
+    ):
+        receipt_manager.admit_idempotent_operation(
+            _operation_command(key_digest="d" * 64)
+        )
+
+    assert len(receipt_manager.list_jobs(domain="sharing")) == 1
+
+
 def test_receipt_insert_failure_rolls_back_new_job(receipt_manager, monkeypatch):
     from tldw_Server_API.app.core.Jobs.operations.sqlite import idempotency
 

@@ -144,18 +144,11 @@ def _find_active_scope_job(
 ) -> tuple[dict[str, Any], str] | None:
     rows = conn.execute(
         """
-        SELECT DISTINCT jobs.*
+        SELECT jobs.*
         FROM jobs
-        JOIN job_idempotency_receipts AS receipts
-          ON receipts.job_uuid = jobs.uuid AND receipts.job_id = jobs.id
         WHERE jobs.domain = ? AND jobs.queue = ? AND jobs.job_type = ?
           AND jobs.owner_user_id = ? AND jobs.batch_group = ?
           AND jobs.status IN ('queued', 'processing')
-          AND receipts.domain = jobs.domain
-          AND receipts.queue = jobs.queue
-          AND receipts.job_type = jobs.job_type
-          AND receipts.owner_user_id = jobs.owner_user_id
-          AND receipts.operation_scope = jobs.batch_group
         ORDER BY jobs.id
         """,
         (
@@ -173,25 +166,35 @@ def _find_active_scope_job(
             "operation scope resolves to multiple active Jobs"
         )
     job = _row_to_dict(rows[0])
-    fingerprint_rows = conn.execute(
+    receipt_rows = conn.execute(
         """
-        SELECT DISTINCT request_fingerprint
+        SELECT *
         FROM job_idempotency_receipts
-        WHERE job_uuid = ? AND job_id = ?
-          AND domain = ? AND queue = ? AND job_type = ?
-          AND owner_user_id = ? AND operation_scope = ?
+        WHERE job_uuid = ? OR job_id = ?
+        ORDER BY receipt_id
         """,
         (
             job["uuid"],
             job["id"],
-            command.job.domain,
-            command.job.queue,
-            command.job.job_type,
-            command.job.owner_user_id,
-            command.operation_scope,
         ),
     ).fetchall()
-    fingerprints = {str(row[0]) for row in fingerprint_rows}
+    receipts = [_row_to_dict(row) for row in receipt_rows]
+    if any(
+        receipt.get("job_uuid") != job.get("uuid")
+        or receipt.get("job_id") != job.get("id")
+        or receipt.get("domain") != job.get("domain")
+        or receipt.get("queue") != job.get("queue")
+        or receipt.get("job_type") != job.get("job_type")
+        or receipt.get("owner_user_id") != job.get("owner_user_id")
+        or receipt.get("operation_scope") != job.get("batch_group")
+        for receipt in receipts
+    ):
+        raise IdempotentOperationUnavailableError(
+            "active operation receipt correlation does not match"
+        )
+    fingerprints = {
+        str(receipt["request_fingerprint"]) for receipt in receipts
+    }
     if len(fingerprints) != 1:
         raise IdempotentOperationUnavailableError(
             "active operation receipts do not have one fingerprint"

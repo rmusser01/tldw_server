@@ -54,6 +54,7 @@ def test_sqlite_schema_persists_owner_scoped_idempotency_receipts(tmp_path):
             "key_digest",
         )
         assert indexes["idx_job_idempotency_receipts_job_uuid"] == ("job_uuid",)
+        assert indexes["idx_job_idempotency_receipts_job_id"] == ("job_id",)
         assert indexes["idx_job_idempotency_receipts_scope"] == (
             "operation_scope",
             "owner_user_id",

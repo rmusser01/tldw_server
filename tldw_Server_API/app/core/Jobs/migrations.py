@@ -375,6 +375,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_job_idempotency_receipts_owner_key
   );
 CREATE INDEX IF NOT EXISTS idx_job_idempotency_receipts_job_uuid
   ON job_idempotency_receipts(job_uuid);
+CREATE INDEX IF NOT EXISTS idx_job_idempotency_receipts_job_id
+  ON job_idempotency_receipts(job_id);
 CREATE INDEX IF NOT EXISTS idx_job_idempotency_receipts_scope
   ON job_idempotency_receipts(operation_scope, owner_user_id, expires_at);
 
