@@ -28,6 +28,9 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGa
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
     AuthnzOrgsTeamsRepo,
 )
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 
 router = APIRouter(prefix="/provisioning", tags=["admin-provisioning"])
 
@@ -93,7 +96,11 @@ async def provision_tenant(
         is_postgres = getattr(pool, "pool", None) is not None
         backend = "postgres" if is_postgres else "sqlite"
 
-        async with pool.transaction() as conn:
+        async with pool.transaction(
+            acquire_timeout_seconds=(
+                get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+            ),
+        ) as conn:
             # 1. Create user
             # Check for duplicate username
             if is_postgres:

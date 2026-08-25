@@ -34,8 +34,14 @@ class _ObservedPool:
         self.transaction_connections: list[Any] = []
 
     @asynccontextmanager
-    async def transaction(self):
-        async with self._pool.transaction() as conn:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self._pool.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             self.transaction_connections.append(conn)
             yield conn
 

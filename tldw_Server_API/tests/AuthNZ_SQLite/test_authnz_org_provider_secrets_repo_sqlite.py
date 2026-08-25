@@ -118,10 +118,16 @@ class _SQLiteMutationGatePool:
         self.upsert_attempted = upsert_attempted
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
         if self.role == "upsert":
             self.upsert_attempted.set()
-        async with self.delegate.transaction() as conn:
+        async with self.delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             if self.role == "revoke":
                 self.revoke_ready.set()
                 await self.release_revoke.wait()

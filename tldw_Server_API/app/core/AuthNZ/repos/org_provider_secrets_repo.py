@@ -17,6 +17,9 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipWriter,
     validate_membership_write_context,
 )
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     fold_provider_credential_rows,
@@ -425,7 +428,11 @@ class AuthnzOrgProviderSecretsRepo:
         metadata_json = json.dumps(metadata) if metadata is not None else None
         try:
             postgres = getattr(self.db_pool, "pool", None) is not None
-            async with self.db_pool.transaction() as conn:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
                 await self._lock_authorized_active_parent_scope(
                     conn,
                     scope_type=scope_norm,
@@ -564,7 +571,11 @@ class AuthnzOrgProviderSecretsRepo:
         providers = (canonical, *legacy_names)
         postgres = getattr(self.db_pool, "pool", None) is not None
         try:
-            async with self.db_pool.transaction() as conn:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
                 await self._lock_authorized_active_parent_scope(
                     conn,
                     scope_type=scope_norm,
@@ -627,7 +638,11 @@ class AuthnzOrgProviderSecretsRepo:
         scope_norm = _normalize_scope_type(scope_type)
         postgres = getattr(self.db_pool, "pool", None) is not None
         try:
-            async with self.db_pool.transaction() as conn:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
                 await self._lock_authorized_active_parent_scope(
                     conn,
                     scope_type=scope_norm,
@@ -972,7 +987,11 @@ class AuthnzOrgProviderSecretsRepo:
         try:
             provider_norm = canonical_provider_name(provider)
             postgres = getattr(self.db_pool, "pool", None) is not None
-            async with self.db_pool.transaction() as conn:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
                 await self._lock_authorized_active_parent_scope(
                     conn,
                     scope_type=scope_norm,

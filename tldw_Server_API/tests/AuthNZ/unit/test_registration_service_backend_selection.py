@@ -27,7 +27,12 @@ class _PoolStub:
         self._conn = conn
         self.pool = object() if postgres else None
 
-    def transaction(self) -> _Tx:
+    def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ) -> _Tx:
+        del acquire_timeout_seconds
         return _Tx(self._conn)
 
 

@@ -40,7 +40,12 @@ class _SQLitePool:
         self.transaction_connections: list[Any] = []
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[Any]:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ) -> AsyncIterator[Any]:
+        assert acquire_timeout_seconds is not None
         from tldw_Server_API.app.core.AuthNZ.database import (
             _GuardedSQLiteConnection,
         )
