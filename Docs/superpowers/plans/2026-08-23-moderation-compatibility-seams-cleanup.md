@@ -19,9 +19,13 @@
   `83fa300fc1b0e77e81219af2abe5b4ddc2c85069`
 - Task 3 pre-tracking HEAD (historical):
   `83f489876e7828e7e1fbd42cd043f6d6ed95b57d`
-- Final verification base after second rebase: `origin/dev` at
+- Second verification base after second rebase (historical): `origin/dev` at
   `21aed4cc0d1e9e2e2a34fc84307bbd1d3b879871`
-- Task 4 pre-tracking HEAD: `8b51d70c642a3f597ccd5c35726296bbd5ba9529`
+- Task 4 pre-tracking HEAD (historical):
+  `8b51d70c642a3f597ccd5c35726296bbd5ba9529`
+- PR verification base after third rebase: `origin/dev` at
+  `b1d0aed671dcf45bbe4211a9690022c083c99feb`
+- PR pre-tracking HEAD: `d2aa453917b56f14743141062b0febc169c4439b`
 - Worktree: `.worktrees/moderation-compatibility-seams`
 - Branch: `codex/moderation-compatibility-seams`
 
