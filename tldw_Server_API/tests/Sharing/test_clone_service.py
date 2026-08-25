@@ -248,6 +248,37 @@ def test_clone_result_rejects_unbounded_warnings():
         )
 
 
+def test_clone_contract_allows_complete_before_publication_confirmation():
+    result = WorkspaceCloneResult(
+        workspace_id="target",
+        name="Copy",
+        outcome="complete",
+        publication_confirmed=False,
+        counts=CloneCopyCounts.empty(),
+        readiness=CloneRetrievalReadiness("ready", "ready", "needs_indexing"),
+    )
+
+    assert result.publication_confirmed is False
+    with pytest.raises(FrozenInstanceError):
+        result.publication_confirmed = True
+
+
+@pytest.mark.parametrize("publication_confirmed", (False, True))
+def test_clone_contract_allows_partial_with_either_publication_state(
+    publication_confirmed,
+):
+    result = WorkspaceCloneResult(
+        workspace_id="target",
+        name="Copy",
+        outcome="partial",
+        publication_confirmed=publication_confirmed,
+        counts=CloneCopyCounts.empty(),
+        readiness=CloneRetrievalReadiness("ready", "ready", "needs_indexing"),
+    )
+
+    assert result.publication_confirmed is publication_confirmed
+
+
 def _make_service(
     *,
     src_media_items: dict | None = None,

@@ -291,8 +291,6 @@ class WorkspaceCloneResult:
             raise ValueError("outcome must be complete or partial")
         if not isinstance(self.publication_confirmed, bool):
             raise ValueError("publication_confirmed must be a boolean")
-        if self.outcome == "complete" and not self.publication_confirmed:
-            raise ValueError("complete results require publication_confirmed")
         if not isinstance(self.counts, CloneCopyCounts):
             raise TypeError("counts must be CloneCopyCounts")
         if not isinstance(self.readiness, CloneRetrievalReadiness):
