@@ -108,6 +108,10 @@ def _row_sort_key(row: MembershipRowLock) -> tuple[str, int, int]:
     return row.scope_type.value, row.scope_id, row.user_id
 
 
+def _owner_row_sort_key(row: MembershipRowLock) -> tuple[int, int]:
+    return row.user_id, row.scope_id
+
+
 @dataclass(frozen=True, slots=True)
 class ActorMembershipWriteContext:
     """Actor-attributed membership authorization requirements."""
@@ -237,6 +241,20 @@ def _validate_sorted_unique_rows(values: tuple[MembershipRowLock, ...]) -> None:
         raise MembershipWriterContractError()
 
 
+def _validate_sorted_unique_owner_rows(
+    values: tuple[MembershipRowLock, ...],
+) -> None:
+    _require_exact_tuple(values)
+    if any(
+        type(row) is not MembershipRowLock
+        or row.scope_type is not MembershipScopeType.ORGANIZATION
+        for row in values
+    ):
+        raise MembershipWriterContractError()
+    if values != tuple(sorted(set(values), key=_owner_row_sort_key)):
+        raise MembershipWriterContractError()
+
+
 @dataclass(frozen=True, slots=True)
 class MembershipLockSet:
     """Complete canonical lock identities for one membership write."""
@@ -252,7 +270,7 @@ class MembershipLockSet:
         _validate_sorted_unique_ids(self.org_ids)
         _validate_sorted_unique_ids(self.team_ids)
         _validate_sorted_unique_rows(self.membership_rows)
-        _validate_sorted_unique_rows(self.owner_rows)
+        _validate_sorted_unique_owner_rows(self.owner_rows)
         if set(self.membership_rows) & set(self.owner_rows):
             raise MembershipWriterContractError()
         user_ids = set(self.user_ids)
@@ -423,7 +441,7 @@ def _build_membership_lock_set(
         org_ids=tuple(sorted(org_ids)),
         team_ids=tuple(sorted(team_ids)),
         membership_rows=tuple(sorted(membership_rows, key=_row_sort_key)),
-        owner_rows=tuple(sorted(owner_rows, key=_row_sort_key)),
+        owner_rows=tuple(sorted(owner_rows, key=_owner_row_sort_key)),
     )
 
 
