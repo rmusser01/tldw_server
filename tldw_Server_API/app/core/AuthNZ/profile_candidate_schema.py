@@ -6,6 +6,10 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _execute_postgres_membership_timestamp_repair,
+)
+
 PROFILE_CANDIDATE_TABLES = (
     "organizations",
     "teams",
@@ -680,11 +684,17 @@ async def repair_postgres_profile_candidate_timestamps(conn: Any) -> None:
             if fallback_column is not None
             else "CURRENT_TIMESTAMP"
         )
-        await conn.execute(
-            f"UPDATE public.{table_name} SET {source_column} = "  # nosec B608
-            f"COALESCE({source_column}, {fallback}) "
-            f"WHERE {source_column} IS NULL"
-        )
+        if table_name in {"org_members", "team_members"}:
+            await _execute_postgres_membership_timestamp_repair(
+                conn,
+                table_name=table_name,
+            )
+        else:
+            await conn.execute(
+                f"UPDATE public.{table_name} SET {source_column} = "  # nosec B608
+                f"COALESCE({source_column}, {fallback}) "
+                f"WHERE {source_column} IS NULL"
+            )
         await conn.execute(
             f"ALTER TABLE public.{table_name} ALTER COLUMN {source_column} "  # nosec B608
             "SET DEFAULT CURRENT_TIMESTAMP"

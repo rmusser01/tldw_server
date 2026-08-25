@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     MembershipAuthority,
     MembershipAuthorizationError,
+    MembershipWriter,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
@@ -121,6 +122,54 @@ async def test_shared_secret_upsert_reauthorizes_manager_under_total_lock_order(
         if query.startswith("INSERT INTO public.org_provider_secrets")
     )
     assert user_lock < org_lock < membership_lock < insert
+
+
+@pytest.mark.asyncio
+async def test_shared_secret_platform_admin_locks_persisted_authority_before_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _has_platform_admin(*_args, **_kwargs) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        MembershipWriter,
+        "has_persisted_platform_admin",
+        _has_platform_admin,
+    )
+    conn = _AuthorizationConnection()
+    repo = AuthnzOrgProviderSecretsRepo(_AuthorizationPool(conn))  # type: ignore[arg-type]
+
+    await repo.upsert_secret(
+        scope_type="org",
+        scope_id=9,
+        provider="openai",
+        encrypted_blob="encrypted",
+        key_hint=None,
+        metadata=None,
+        updated_at=datetime.now(timezone.utc),
+        authorization_context=ActorMembershipWriteContext(
+            actor_user_id=7,
+            required_authority=MembershipAuthority.PLATFORM_ADMIN,
+        ),
+    )
+
+    org_lock = next(
+        index
+        for index, query in enumerate(conn.queries)
+        if "public.organizations" in query
+    )
+    authority_locks = [
+        index
+        for index, query in enumerate(conn.queries)
+        if "FOR UPDATE OF" in query
+    ]
+    insert = next(
+        index
+        for index, query in enumerate(conn.queries)
+        if query.startswith("INSERT INTO public.org_provider_secrets")
+    )
+    assert len(authority_locks) == 5
+    assert org_lock < authority_locks[0] < authority_locks[-1] < insert
 
 
 @pytest.mark.asyncio

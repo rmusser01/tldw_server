@@ -202,6 +202,9 @@ def test_membership_scope_capability_is_connection_bound_and_consumed_once(
         ("postgres", "COPY public.org_members TO STDOUT"),
         ("postgres", "COPY team_members TO STDOUT"),
         ("postgres", "UPDATE api_keys SET status = $1 WHERE id = $2"),
+        ("postgres", "SAVEPOINT __asyncpg_savepoint_a1__;"),
+        ("postgres", "RELEASE SAVEPOINT __asyncpg_savepoint_a1__;"),
+        ("postgres", "ROLLBACK TO __asyncpg_savepoint_a1__;"),
     ],
 )
 def test_unprotected_concrete_sql_is_returned_unchanged(
@@ -217,6 +220,26 @@ def test_unprotected_concrete_sql_is_returned_unchanged(
         )
         == statement
     )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SAVEPOINT arbitrary_name;",
+        "SAVEPOINT __asyncpg_savepoint_a1__",
+        "SAVEPOINT __asyncpg_savepoint_a1__; DELETE FROM public.org_members;",
+        "RELEASE SAVEPOINT __asyncpg_savepoint_not_hex__;",
+        "ROLLBACK TO __asyncpg_savepoint_a1__; UPDATE public.team_members SET role = 'owner';",
+    ],
+)
+def test_noncanonical_postgres_savepoint_commands_fail_closed(statement: str) -> None:
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement,
+            backend="postgres",
+            connection_identity=object(),
+            operation="execute",
+        )
 
 
 def test_unknown_users_update_column_fails_closed() -> None:

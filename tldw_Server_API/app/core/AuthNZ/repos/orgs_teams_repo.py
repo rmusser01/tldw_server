@@ -81,6 +81,12 @@ class AuthnzOrgsTeamsRepo:
             acquire_timeout_seconds=policy.db_pool_acquire_timeout_seconds,
         )
 
+    def _membership_acquire(self) -> Any:
+        """Acquire a membership discovery connection with the shared bound."""
+
+        policy = get_authnz_transaction_policy()
+        return self.db_pool.acquire(timeout=policy.db_pool_acquire_timeout_seconds)
+
     async def _apply_direct_membership_mutations(
         self,
         *,
@@ -326,7 +332,7 @@ class AuthnzOrgsTeamsRepo:
         """Create an organization and its owner membership atomically."""
 
         operation_time = datetime.now(timezone.utc)
-        async with self.db_pool.transaction() as conn:
+        async with self._membership_transaction() as conn:
             await MembershipWriter(self.db_pool).authorize_organization_creation(
                 conn=conn,
                 context=context,
@@ -363,7 +369,7 @@ class AuthnzOrgsTeamsRepo:
     ) -> dict[str, Any]:
         """Create an ownerless organization after persisted actor authorization."""
 
-        async with self.db_pool.transaction() as conn:
+        async with self._membership_transaction() as conn:
             await MembershipWriter(self.db_pool).authorize_organization_creation(
                 conn=conn,
                 context=context,
@@ -729,7 +735,7 @@ class AuthnzOrgsTeamsRepo:
         try:
             writer = MembershipWriter(self.db_pool)
             for _attempt in range(_SCOPE_DELETION_MAX_ATTEMPTS):
-                async with self.db_pool.acquire() as discovery_conn:
+                async with self._membership_acquire() as discovery_conn:
                     snapshot = await writer.discover_scope_deletion(
                         conn=discovery_conn,
                         scope_type=MembershipScopeType.ORGANIZATION,
@@ -738,7 +744,7 @@ class AuthnzOrgsTeamsRepo:
                 if snapshot is None:
                     return
                 try:
-                    async with self.db_pool.transaction() as conn:
+                    async with self._membership_transaction() as conn:
                         await writer.apply_scope_deletion(
                             conn=conn,
                             context=context,
@@ -808,7 +814,7 @@ class AuthnzOrgsTeamsRepo:
             raise MembershipWriterContractError()
         try:
             operation_time = datetime.now(timezone.utc)
-            async with self.db_pool.transaction() as conn:
+            async with self._membership_transaction() as conn:
                 await MembershipWriter(
                     self.db_pool
                 ).transfer_organization_ownership(
@@ -958,7 +964,7 @@ class AuthnzOrgsTeamsRepo:
         try:
             writer = MembershipWriter(self.db_pool)
             for _attempt in range(_SCOPE_DELETION_MAX_ATTEMPTS):
-                async with self.db_pool.acquire() as discovery_conn:
+                async with self._membership_acquire() as discovery_conn:
                     snapshot = await writer.discover_scope_deletion(
                         conn=discovery_conn,
                         scope_type=MembershipScopeType.TEAM,
@@ -967,7 +973,7 @@ class AuthnzOrgsTeamsRepo:
                 if snapshot is None:
                     return
                 try:
-                    async with self.db_pool.transaction() as conn:
+                    async with self._membership_transaction() as conn:
                         await writer.apply_scope_deletion(
                             conn=conn,
                             context=context,

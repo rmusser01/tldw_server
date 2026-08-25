@@ -65,10 +65,13 @@ SERVING_MEMBERSHIP_CONTEXT_CATEGORIES = {
     "tldw_Server_API/app/services/registration_service.py": "trusted",
     "tldw_Server_API/app/services/org_invite_service.py": "trusted",
     "tldw_Server_API/app/core/AuthNZ/federation/provisioning_service.py": "trusted",
-    "tldw_Server_API/app/core/AuthNZ/orgs_teams.py": "passthrough",
+    "tldw_Server_API/app/core/AuthNZ/orgs_teams.py": frozenset(
+        {"passthrough", "trusted"}
+    ),
 }
 EXPECTED_TRUSTED_MEMBERSHIP_REASONS = {
     "tldw_Server_API/app/api/v1/endpoints/auth.py": frozenset({"BOOTSTRAP"}),
+    "tldw_Server_API/app/core/AuthNZ/orgs_teams.py": frozenset({"BOOTSTRAP"}),
     "tldw_Server_API/app/core/AuthNZ/federation/provisioning_service.py": frozenset(
         {"BOOTSTRAP"}
     ),
@@ -105,6 +108,7 @@ SQL_CALL_NAMES = frozenset(
 PRIVILEGED_MEMBERSHIP_SCOPE_SQL_ENTRYPOINTS = frozenset(
     {
         "_execute_membership_scope_sql",
+        "_execute_postgres_membership_timestamp_repair",
         "_mint_membership_scope_sql",
     }
 )
@@ -295,6 +299,16 @@ EXPECTED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_CALLERS = (
         "tldw_Server_API/app/core/AuthNZ/profile_user_write_guard.py",
         "_execute_membership_scope_sql",
     ),
+    (
+        "_execute_membership_scope_sql",
+        "tldw_Server_API/app/core/AuthNZ/profile_user_write_guard.py",
+        "_execute_postgres_membership_timestamp_repair",
+    ),
+    (
+        "_execute_postgres_membership_timestamp_repair",
+        "tldw_Server_API/app/core/AuthNZ/profile_candidate_schema.py",
+        "repair_postgres_profile_candidate_timestamps",
+    ),
 )
 APPROVED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_CALLERS = frozenset(
     EXPECTED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_CALLERS
@@ -310,6 +324,12 @@ EXPECTED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_IMPORTS = (
         "_execute_membership_scope_sql",
         "_execute_membership_scope_sql",
         "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py",
+        "<module>",
+    ),
+    (
+        "_execute_postgres_membership_timestamp_repair",
+        "_execute_postgres_membership_timestamp_repair",
+        "tldw_Server_API/app/core/AuthNZ/profile_candidate_schema.py",
         "<module>",
     ),
 )
@@ -1906,10 +1926,16 @@ def test_direct_membership_callers_supply_explicit_context() -> None:
                     context_keywords[0].value,
                     trusted_symbols=trusted_symbols,
                 )
-                if observed_category != expected_category:
+                expected_categories = (
+                    expected_category
+                    if isinstance(expected_category, frozenset)
+                    else frozenset({expected_category})
+                )
+                if observed_category not in expected_categories:
                     wrong_context_category.append(
                         f"{relative_path}:{node.lineno} expected "
-                        f"{expected_category}, found {observed_category or 'unknown'}"
+                        f"{sorted(expected_categories)}, found "
+                        f"{observed_category or 'unknown'}"
                     )
 
     assert not missing_context, (

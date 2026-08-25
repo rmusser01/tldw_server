@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from inspect import getattr_static
@@ -24,6 +25,21 @@ _BACKEND_ATTRIBUTE = "_authnz_profile_user_backend"
 _SUPPORTED_BACKENDS = frozenset({"sqlite", "postgres"})
 _MEMBERSHIP_TABLES = frozenset({"org_members", "team_members"})
 _PARENT_SCOPE_TABLES = frozenset({"organizations", "teams"})
+_POSTGRES_MEMBERSHIP_TIMESTAMP_REPAIR_SQL = {
+    "org_members": (
+        "UPDATE public.org_members SET added_at = "
+        "COALESCE(added_at, CURRENT_TIMESTAMP) WHERE added_at IS NULL"
+    ),
+    "team_members": (
+        "UPDATE public.team_members SET added_at = "
+        "COALESCE(added_at, CURRENT_TIMESTAMP) WHERE added_at IS NULL"
+    ),
+}
+_POSTGRES_ASYNCPG_SAVEPOINT_COMMAND_RE = re.compile(
+    r"(?:SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO) "
+    r"__asyncpg_savepoint_[0-9a-f]+__;",
+    re.ASCII,
+)
 _PROFILE_USER_DOMAIN = "profile_users"
 _MEMBERSHIP_SCOPE_DOMAIN = "membership_scope"
 _REJECTED_CREATE_KINDS = frozenset(
@@ -610,6 +626,12 @@ def _classify_sql(query: str, backend: str) -> _SqlClassification:
         'create extension if not exists "uuid-ossp"',
     }:
         return _SqlClassification(False, "trusted_extension_bootstrap", ())
+    if (
+        backend == "postgres"
+        and _POSTGRES_ASYNCPG_SAVEPOINT_COMMAND_RE.fullmatch(query)
+    ):
+        return _SqlClassification(False, "asyncpg_savepoint", ())
+
     # sqlglot treats PostgreSQL VALIDATE CONSTRAINT as an opaque Command.
     if (
         backend == "postgres"
@@ -1214,6 +1236,24 @@ async def _execute_membership_scope_sql(
         return await connection.execute(capability, *parameters)
     finally:
         _revoke_membership_scope_sql(capability)
+
+
+async def _execute_postgres_membership_timestamp_repair(
+    connection: Any,
+    *,
+    table_name: str,
+) -> Any:
+    """Backfill one canonical membership timestamp during schema readiness."""
+    if type(table_name) is not str:
+        raise ProfileUserWriteRejected()
+    query = _POSTGRES_MEMBERSHIP_TIMESTAMP_REPAIR_SQL.get(table_name)
+    if query is None:
+        raise ProfileUserWriteRejected()
+    return await _execute_membership_scope_sql(
+        connection,
+        query,
+        backend="postgres",
+    )
 
 
 def _pragma_name(statement: exp.Pragma) -> str | None:
