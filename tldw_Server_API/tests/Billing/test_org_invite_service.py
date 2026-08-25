@@ -37,6 +37,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     AnchorOwnership,
     TrustedMembershipReason,
@@ -438,6 +442,54 @@ class TestOrgInviteService:
         assert kwargs["team_role"] == "member"
         assert kwargs["team_failure_is_best_effort"] is True
         assert isinstance(kwargs["operation_time"], datetime)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "failure_type",
+        (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
+    )
+    async def test_redeem_invite_preserves_retryable_database_failures(
+        self,
+        failure_type: type[Exception],
+        mock_invites_repo,
+        mock_orgs_repo,
+    ) -> None:
+        class _BusyTransaction:
+            async def __aenter__(self):
+                raise failure_type()
+
+            async def __aexit__(self, *_args):
+                return False
+
+        class _BusyPool:
+            pool = None
+
+            def transaction(self, *, acquire_timeout_seconds=None):
+                assert acquire_timeout_seconds is not None
+                return _BusyTransaction()
+
+        service = OrgInviteService(
+            db_pool=_BusyPool(),
+            invites_repo=mock_invites_repo,
+            orgs_repo=mock_orgs_repo,
+        )
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        mock_invites_repo.get_invite_by_code.return_value = {
+            "id": 1,
+            "org_id": 1,
+            "org_name": "Test Org",
+            "is_active": True,
+            "expires_at": tomorrow,
+            "uses_count": 0,
+            "max_uses": 5,
+            "role_to_grant": "member",
+        }
+        mock_orgs_repo.get_org_member.return_value = None
+
+        with pytest.raises(failure_type):
+            await service.redeem_invite(code="VALIDCODE", user_id=100)
+
+        mock_invites_repo.record_redemption.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_redeem_invite_domain_allowlist_mismatch(self, service, mock_invites_repo, mock_orgs_repo):

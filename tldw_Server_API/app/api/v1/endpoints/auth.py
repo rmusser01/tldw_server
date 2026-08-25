@@ -3902,6 +3902,20 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid registration code."
         ) from e
+    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as e:
+        logger.warning("Registration deferred because the authentication database is busy")
+        log_counter("auth_register_database_busy")
+        log_histogram("auth_register_duration", time.perf_counter() - start_time)
+        _finalize_register_diag(http_request, response)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication database is busy. Please retry shortly.",
+            headers={
+                "Retry-After": str(
+                    get_authnz_transaction_policy().busy_retry_after_seconds
+                ),
+            },
+        ) from e
     except RegistrationError as e:
         logger.error(f"Registration error: {e}")
         log_counter("auth_register_error")

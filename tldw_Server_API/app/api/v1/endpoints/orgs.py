@@ -1113,6 +1113,8 @@ async def accept_org_invite(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc) or "Invalid invite code",
         ) from exc
+    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
+        raise _membership_control_http_exception(exc) from exc
 
     async def _safe_audit_log_invite_accept() -> None:
         try:
