@@ -12,6 +12,13 @@ from tldw_Server_API.app.api.v1.schemas.notes_studio import (
     NoteStudioDocumentResponse,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
+from tldw_Server_API.app.core.Notes.studio_markdown import stable_content_hash
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    diagram_render_hash,
+    notes_studio_document_object_hash,
+    parse_notes_studio_document_v1,
+)
+from tldw_Server_API.app.core.Sync.v2.server_origin import canonical_payload_hash
 
 
 @pytest.fixture
@@ -69,12 +76,12 @@ def test_create_and_fetch_note_studio_document_by_note_id(db: CharactersRAGDB) -
 
     created = db.create_note_studio_document(
         note_id=note_id,
-        payload_json={"meta": {"source_note_id": note_id}, "sections": []},
+        payload_json=_canonical_sections(),
         template_type="lined",
         handwriting_mode="accented",
-        source_note_id=note_id,
-        excerpt_snapshot="beta",
-        excerpt_hash="sha256:demo",
+        source_note_id=None,
+        excerpt_snapshot=None,
+        excerpt_hash=None,
         companion_content_hash="sha256:markdown",
         render_version=1,
     )
@@ -93,19 +100,19 @@ def test_create_and_fetch_note_studio_document_by_note_id(db: CharactersRAGDB) -
     assert studio["note_id"] == note_id  # nosec B101
     assert studio["template_type"] == "lined"  # nosec B101
     assert studio["handwriting_mode"] == "accented"  # nosec B101
-    assert studio["payload_json"]["meta"]["source_note_id"] == note_id  # nosec B101
+    assert studio["payload_json"] == _canonical_sections()  # nosec B101
 
 
 def test_create_note_studio_document_translates_duplicate_to_conflict(db: CharactersRAGDB) -> None:
     note_id = db.add_note(title="Source", content="Alpha beta gamma")
     payload = {
         "note_id": note_id,
-        "payload_json": {"meta": {"source_note_id": note_id}, "sections": []},
+        "payload_json": _canonical_sections(),
         "template_type": "lined",
         "handwriting_mode": "accented",
-        "source_note_id": note_id,
-        "excerpt_snapshot": "beta",
-        "excerpt_hash": "sha256:demo",
+        "source_note_id": None,
+        "excerpt_snapshot": None,
+        "excerpt_hash": None,
         "companion_content_hash": "sha256:markdown",
         "render_version": 1,
     }
@@ -154,20 +161,20 @@ def test_diagram_update_advances_scoped_studio_lineage(db: CharactersRAGDB) -> N
     note_id = db.add_note(title="Source", content="Alpha beta gamma")
     before = db.create_note_studio_document(
         note_id=note_id,
-        payload_json={"meta": {"source_note_id": note_id}, "sections": []},
+        payload_json=_canonical_sections(),
         template_type="lined",
         handwriting_mode="accented",
-        source_note_id=note_id,
-        excerpt_snapshot="beta",
-        excerpt_hash="sha256:excerpt",
+        source_note_id=None,
+        excerpt_snapshot=None,
+        excerpt_hash=None,
         companion_content_hash="sha256:markdown",
         render_version=1,
     )
 
     after = db.update_note_studio_diagram_manifest(
         note_id=note_id,
-        diagram_manifest_json={"diagrams": [{"id": "diagram-1"}]},
-        expected_companion_content_hash="sha256:markdown",
+        diagram_manifest_json=_canonical_diagram("Accepted content", "diagram-1"),
+        expected_companion_content_hash=before["companion_content_hash"],
         expected_render_version=1,
         expected_last_modified=before["last_modified"],
     )
@@ -222,13 +229,13 @@ def test_upsert_note_studio_document_uses_explicit_transaction_connection(db: Ch
     with db.transaction() as conn:
         created = db.upsert_note_studio_document(
             note_id=note_id,
-            payload_json={"meta": {"source_note_id": note_id}, "sections": [{"title": "Intro"}]},
+            payload_json=_canonical_sections("Intro"),
             template_type="lined",
             handwriting_mode="accented",
-            source_note_id=note_id,
-            excerpt_snapshot="beta",
-            excerpt_hash="sha256:demo",
-            diagram_manifest_json={"diagrams": [{"id": "d-1"}]},
+            source_note_id=None,
+            excerpt_snapshot=None,
+            excerpt_hash=None,
+            diagram_manifest_json=_canonical_diagram("Intro", "d-1"),
             companion_content_hash="sha256:markdown",
             render_version=1,
             conn=conn,
@@ -236,29 +243,29 @@ def test_upsert_note_studio_document_uses_explicit_transaction_connection(db: Ch
 
         updated = db.upsert_note_studio_document(
             note_id=note_id,
-            payload_json={"meta": {"source_note_id": note_id}, "sections": [{"title": "Revised"}]},
+            payload_json=_canonical_sections("Revised"),
             template_type="cornell",
             handwriting_mode="off",
-            source_note_id=note_id,
-            excerpt_snapshot="gamma",
-            excerpt_hash="sha256:demo-2",
-            diagram_manifest_json={"diagrams": [{"id": "d-2"}]},
+            source_note_id=None,
+            excerpt_snapshot=None,
+            excerpt_hash=None,
+            diagram_manifest_json=_canonical_diagram("Revised", "d-2"),
             companion_content_hash="sha256:markdown-2",
-            render_version=2,
+            render_version=1,
             conn=conn,
         )
 
     monkeypatch.undo()
 
-    assert created["payload_json"]["sections"][0]["title"] == "Intro"  # nosec B101
-    assert created["diagram_manifest_json"]["diagrams"][0]["id"] == "d-1"  # nosec B101
+    assert created["payload_json"]["sections"][0]["content"] == "Intro"  # nosec B101
+    assert created["diagram_manifest_json"]["diagram"].endswith("d-1")  # nosec B101
     assert updated["template_type"] == "cornell"  # nosec B101
-    assert updated["render_version"] == 2  # nosec B101
+    assert updated["render_version"] == 1  # nosec B101
 
     persisted = db.get_note_studio_document(note_id)
     assert persisted is not None  # nosec B101
-    assert persisted["payload_json"]["sections"][0]["title"] == "Revised"  # nosec B101
-    assert persisted["diagram_manifest_json"]["diagrams"][0]["id"] == "d-2"  # nosec B101
+    assert persisted["payload_json"]["sections"][0]["content"] == "Revised"  # nosec B101
+    assert persisted["diagram_manifest_json"]["diagram"].endswith("d-2")  # nosec B101
 
 
 def test_studio_scope_resolution_occurs_inside_the_write_transaction(
@@ -276,12 +283,12 @@ def test_studio_scope_resolution_occurs_inside_the_write_transaction(
     monkeypatch.setattr(db, "resolve_studio_compatibility_dataset_id", recording_resolver)
     db.create_note_studio_document(
         note_id=note_id,
-        payload_json={"meta": {"source_note_id": note_id}, "sections": []},
+        payload_json=_canonical_sections(),
         template_type="lined",
         handwriting_mode="accented",
-        source_note_id=note_id,
-        excerpt_snapshot="beta",
-        excerpt_hash="sha256:demo",
+        source_note_id=None,
+        excerpt_snapshot=None,
+        excerpt_hash=None,
         companion_content_hash="sha256:markdown",
         render_version=1,
     )
@@ -326,12 +333,12 @@ def test_soft_delete_preserves_sidecar_and_restore_reuses_same_row(db: Character
     note_id = db.add_note(title="Source", content="Alpha beta gamma")
     db.create_note_studio_document(
         note_id=note_id,
-        payload_json={"meta": {"source_note_id": note_id}, "sections": []},
+        payload_json={"sections": []},
         template_type="cornell",
         handwriting_mode="accented",
-        source_note_id=note_id,
-        excerpt_snapshot="beta",
-        excerpt_hash="sha256:demo",
+        source_note_id=None,
+        excerpt_snapshot=None,
+        excerpt_hash=None,
         companion_content_hash="sha256:markdown",
         render_version=1,
     )
@@ -344,26 +351,82 @@ def test_soft_delete_preserves_sidecar_and_restore_reuses_same_row(db: Character
 
     after_delete = db.get_note_studio_document(note_id)
     assert after_delete is not None  # nosec B101
-    assert after_delete == before_delete  # nosec B101
+    assert after_delete["deleted"] == 1  # nosec B101
+    assert after_delete["version"] == before_delete["version"] + 1  # nosec B101
+    assert after_delete["canonical_revision"] == before_delete["canonical_revision"] + 1  # nosec B101
+    assert after_delete["canonical_hash"] != before_delete["canonical_hash"]  # nosec B101
+    for retained in (
+        "payload_json",
+        "note_revision",
+        "note_hash",
+        "accepted_provenance_json",
+    ):
+        assert after_delete[retained] == before_delete[retained]  # nosec B101
 
     restored = db.restore_note(note_id, expected_version=2)
     assert restored is True  # nosec B101
 
     after_restore = db.get_note_studio_document(note_id)
     assert after_restore is not None  # nosec B101
-    assert after_restore == before_delete  # nosec B101
+    assert after_restore["deleted"] == 0  # nosec B101
+    assert after_restore["version"] == after_delete["version"] + 1  # nosec B101
+    assert after_restore["canonical_revision"] == after_delete["canonical_revision"] + 1  # nosec B101
+    assert after_restore["canonical_hash"] != after_delete["canonical_hash"]  # nosec B101
+    for retained in (
+        "payload_json",
+        "note_revision",
+        "note_hash",
+        "accepted_provenance_json",
+    ):
+        assert after_restore[retained] == before_delete[retained]  # nosec B101
+
+
+def test_sync_note_tombstone_and_restore_advance_studio_lifecycle(
+    db: CharactersRAGDB,
+) -> None:
+    note_id = db.add_note(title="Source", content="Alpha beta gamma")
+    db.create_note_studio_document(
+        note_id=note_id,
+        payload_json={"sections": []},
+        template_type="cornell",
+        handwriting_mode="accented",
+        render_version=1,
+    )
+
+    assert db.tombstone_note_from_sync(  # nosec B101
+        note_id=note_id,
+        sync_client_id=str(db.client_id),
+        object_revision=2,
+        object_hash="sha256:" + "0" * 64,
+    )
+    tombstone = db.get_note_studio_document(note_id)
+    assert tombstone is not None and tombstone["deleted"] == 1  # nosec B101
+
+    assert db.upsert_note_from_sync(  # nosec B101
+        note_id=note_id,
+        title="Source",
+        content="Alpha beta gamma",
+        conversation_id=None,
+        message_id=None,
+        sync_client_id=str(db.client_id),
+        object_revision=3,
+        object_hash="sha256:" + "1" * 64,
+    )
+    restored = db.get_note_studio_document(note_id)
+    assert restored is not None and restored["deleted"] == 0  # nosec B101
+    assert restored["canonical_revision"] == tombstone["canonical_revision"] + 1  # nosec B101
 
 
 def test_hard_delete_removes_sidecar(db: CharactersRAGDB) -> None:
     note_id = db.add_note(title="Source", content="Alpha beta gamma")
     db.create_note_studio_document(
         note_id=note_id,
-        payload_json={"meta": {"source_note_id": note_id}, "sections": []},
+        payload_json=_canonical_sections(),
         template_type="grid",
         handwriting_mode="off",
-        source_note_id=note_id,
-        excerpt_snapshot="beta",
-        excerpt_hash="sha256:demo",
+        source_note_id=None,
+        excerpt_snapshot=None,
+        excerpt_hash=None,
         companion_content_hash="sha256:markdown",
         render_version=1,
     )
@@ -384,20 +447,20 @@ def test_stale_state_hashes_are_persisted_and_compared_explicitly(db: Characters
     note_id = db.add_note(title="Source", content="Alpha beta gamma")
     db.create_note_studio_document(
         note_id=note_id,
-        payload_json={"meta": {"source_note_id": note_id}, "sections": []},
+        payload_json=_canonical_sections(),
         template_type="lined",
         handwriting_mode="accented",
-        source_note_id=note_id,
-        excerpt_snapshot="beta",
-        excerpt_hash="sha256:excerpt",
+        source_note_id=None,
+        excerpt_snapshot=None,
+        excerpt_hash=None,
         companion_content_hash="sha256:markdown",
         render_version=1,
     )
 
     studio = db.get_note_studio_document(note_id)
     assert studio is not None  # nosec B101
-    assert studio["excerpt_hash"] == "sha256:excerpt"  # nosec B101
-    assert studio["companion_content_hash"] == "sha256:markdown"  # nosec B101
+    assert studio["excerpt_hash"] is None  # nosec B101
+    assert studio["companion_content_hash"] == stable_content_hash("Alpha beta gamma")  # nosec B101
     assert studio["companion_content_hash"] != "sha256:changed-markdown"  # nosec B101
 
 
@@ -405,12 +468,12 @@ def test_note_fetch_can_include_lightweight_studio_summary(db: CharactersRAGDB) 
     note_id = db.add_note(title="Source", content="Alpha beta gamma")
     db.create_note_studio_document(
         note_id=note_id,
-        payload_json={"meta": {"source_note_id": note_id}, "sections": []},
+        payload_json=_canonical_sections(),
         template_type="grid",
         handwriting_mode="off",
-        source_note_id=note_id,
-        excerpt_snapshot="beta",
-        excerpt_hash="sha256:excerpt",
+        source_note_id=None,
+        excerpt_snapshot=None,
+        excerpt_hash=None,
         companion_content_hash="sha256:markdown",
         render_version=1,
     )
@@ -425,3 +488,177 @@ def test_note_fetch_can_include_lightweight_studio_summary(db: CharactersRAGDB) 
     assert validated.studio is not None  # nosec B101
     assert validated.studio.note_id == note_id  # nosec B101
     assert validated.studio.template_type == "grid"  # nosec B101
+
+
+def _canonical_sections(content: str = "Accepted content") -> dict[str, object]:
+    return {
+        "sections": [
+            {
+                "id": "notes-1",
+                "kind": "notes",
+                "title": "Notes",
+                "content": content,
+            }
+        ]
+    }
+
+
+def _canonical_diagram(content: str, diagram_id: str) -> dict[str, object]:
+    diagram = f"graph TD; A-->{diagram_id}"
+    context = f"Notes\n{content}"
+    return {
+        "diagram_type": "flowchart",
+        "source_section_ids": ["notes-1"],
+        "source_graph": [
+            {
+                "id": "notes-1",
+                "title": "Notes",
+                "kind": "notes",
+                "content": content,
+            }
+        ],
+        "diagram": diagram,
+        "format": "mermaid",
+        "status": "ready",
+        "render_hash": diagram_render_hash(
+            diagram_type="flowchart", context=context, diagram=diagram
+        ),
+    }
+
+
+def test_v61_studio_write_reduces_equal_legacy_aliases_and_rebuilds_all_hashes(
+    db: CharactersRAGDB,
+) -> None:
+    source_id = db.add_note(title="Source", content="Alpha\r\nbeta gamma")
+    note_id = db.add_note(title="Companion", content="# Companion\r\n\r\nAccepted content")
+    assert source_id is not None and note_id is not None
+
+    stored = db.create_note_studio_document(
+        note_id=note_id,
+        payload_json={
+            "meta": {"title": "Companion", "source_note_id": source_id},
+            "layout": {"template_type": "lined", "render_version": 1},
+            **_canonical_sections(),
+        },
+        template_type="lined",
+        handwriting_mode="accented",
+        source_note_id=source_id,
+        excerpt_snapshot="Alpha\r\nbeta",
+        excerpt_hash="sha256:" + "0" * 64,
+        companion_content_hash="sha256:" + "1" * 64,
+        render_version=1,
+    )
+
+    assert stored["payload_json"] == _canonical_sections()  # nosec B101
+    assert stored["excerpt_snapshot"] == "Alpha\nbeta"  # nosec B101
+    assert stored["excerpt_hash"] == stable_content_hash("Alpha\nbeta")  # nosec B101
+    assert stored["companion_content_hash"] == stable_content_hash(
+        "# Companion\n\nAccepted content"
+    )  # nosec B101
+    note_hash, _ = canonical_payload_hash(
+        {
+            "title": "Companion",
+            "content": "# Companion\r\n\r\nAccepted content",
+            "conversation_id": None,
+            "message_id": None,
+        }
+    )
+    assert stored["note_hash"] == note_hash  # nosec B101
+    parsed = parse_notes_studio_document_v1(
+        {
+            "note_id": stored["note_id"],
+            "source_note_id": stored["source_note_id"],
+            "payload_json": stored["payload_json"],
+            "template_type": stored["template_type"],
+            "handwriting_mode": stored["handwriting_mode"],
+            "excerpt_snapshot": stored["excerpt_snapshot"],
+            "excerpt_hash": stored["excerpt_hash"],
+            "diagram_manifest_json": stored["diagram_manifest_json"],
+            "companion_content_hash": stored["companion_content_hash"],
+            "render_version": stored["render_version"],
+            "note_revision": stored["note_revision"],
+            "note_hash": stored["note_hash"],
+            "accepted_provenance": stored["accepted_provenance_json"],
+        },
+        bound_attestation="server",
+        bound_accepted_at=stored["accepted_provenance_json"]["accepted_at"],
+    )
+    assert stored["canonical_hash"] == notes_studio_document_object_hash(
+        parsed,
+        revision=stored["canonical_revision"],
+        deleted=False,
+    )  # nosec B101
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"render_version": 2},
+        {"payload_json": {"meta": {"title": "Wrong"}, **_canonical_sections()}},
+        {"payload_json": {"layout": {"handwriting_mode": "off"}, **_canonical_sections()}},
+        {"excerpt_snapshot": "not in source"},
+        {
+            "diagram_manifest_json": {
+                "canonical_source": [],
+                "source_graph": [{"id": "notes-1"}],
+            }
+        },
+    ],
+)
+def test_v61_studio_write_rejects_noncanonical_or_untruthful_compatibility_input(
+    db: CharactersRAGDB,
+    overrides: dict[str, object],
+) -> None:
+    source_id = db.add_note(title="Source", content="source excerpt")
+    note_id = db.add_note(title="Companion", content="Accepted content")
+    assert source_id is not None and note_id is not None
+    values: dict[str, object] = {
+        "note_id": note_id,
+        "payload_json": _canonical_sections(),
+        "template_type": "lined",
+        "handwriting_mode": "accented",
+        "source_note_id": source_id,
+        "excerpt_snapshot": "source excerpt",
+        "excerpt_hash": stable_content_hash("source excerpt"),
+        "diagram_manifest_json": None,
+        "companion_content_hash": stable_content_hash("Accepted content"),
+        "render_version": 1,
+    }
+    values.update(overrides)
+    with pytest.raises(InputError):
+        db.create_note_studio_document(**values)
+
+
+def test_v61_studio_write_rejects_effective_sync_envelope_over_limit(
+    db: CharactersRAGDB,
+) -> None:
+    note_id = db.add_note(title="Companion", content="Accepted content")
+    assert note_id is not None
+    with pytest.raises(InputError, match="262144"):
+        db.create_note_studio_document(
+            note_id=note_id,
+            payload_json=_canonical_sections("x" * 65_536),
+            template_type="lined",
+            handwriting_mode="accented",
+            source_note_id=None,
+            excerpt_snapshot=None,
+            excerpt_hash=None,
+            diagram_manifest_json={
+                "diagram_type": "flowchart",
+                "source_section_ids": ["notes-1"],
+                "source_graph": [
+                    {
+                        "id": "notes-1",
+                        "title": "Notes",
+                        "kind": "notes",
+                        "content": "x" * 65_536,
+                    }
+                ],
+                "diagram": "y" * 131_072,
+                "format": "mermaid",
+                "status": "ready",
+                "render_hash": "sha256:" + "2" * 64,
+            },
+            companion_content_hash=stable_content_hash("Accepted content"),
+            render_version=1,
+        )

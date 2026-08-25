@@ -129,6 +129,12 @@ def test_derive_creates_derived_note_and_sidecar(studio_db):
         "handwriting_mode": "accented",
         "render_version": 1,
     }
+    assert studio_document["accepted_provenance_json"] == {
+        **studio_document["accepted_provenance_json"],
+        "kind": "derive",
+        "provider": "tldw",
+        "model": "notes-studio-deterministic-v1",
+    }
 
 
 def test_derive_uses_canonical_payload_title_for_note_row_and_markdown(studio_db):
@@ -318,6 +324,9 @@ def test_get_state_detects_markdown_drift_and_regenerate_rebuilds_payload_from_c
             "content": "Bonding changes electron stability.",
         },
     ]
+    assert regenerated["studio_document"]["accepted_provenance_json"]["kind"] == "regenerate"
+    assert regenerated["studio_document"]["accepted_provenance_json"]["provider"] is None
+    assert regenerated["studio_document"]["accepted_provenance_json"]["model"] is None
     persisted_note = db.get_note_by_id(note_id=note_id)
     assert persisted_note is not None
     assert persisted_note["title"] == "Chemistry Refined Study Notes"
@@ -517,6 +526,89 @@ def test_update_diagram_manifest_persists_notebook_diagram_metadata(studio_db):
     assert manifest["cached_svg"].startswith("<svg")
     assert manifest["render_hash"].startswith("sha256:")
     assert manifest["generation_status"] == "ready"
+    assert updated["studio_document"]["accepted_provenance_json"]["kind"] == "diagram"
+    assert updated["studio_document"]["accepted_provenance_json"]["provider"] == "tldw"
+    assert updated["studio_document"]["accepted_provenance_json"]["model"] == "diagram-deterministic-v1"
+
+
+@pytest.mark.parametrize(
+    ("adapter_source", "provider", "model", "expected"),
+    [
+        ("llm", "openai", "gpt-test", ("openai", "gpt-test")),
+        ("deterministic_fallback", "openai", "gpt-test", ("tldw", "notes-studio-deterministic-v1")),
+        (None, "openai", "gpt-test", ("tldw", "notes-studio-deterministic-v1")),
+        ("deterministic_fallback", "openai", None, ("tldw", "notes-studio-deterministic-v1")),
+    ],
+)
+def test_derive_stamps_the_engine_that_actually_executed(
+    studio_db,
+    adapter_source,
+    provider,
+    model,
+    expected,
+):
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    assert source_note_id is not None
+
+    async def adapter(request, context):
+        result = await _test_generation_adapter(request, context)
+        if adapter_source is not None:
+            result["source"] = adapter_source
+        return result
+
+    service = _service(db, generation_adapter=adapter)
+    result = asyncio.run(
+        service.derive_from_excerpt(
+            source_note_id=source_note_id,
+            excerpt_text="Accepted excerpt",
+            template_type="lined",
+            handwriting_mode="accented",
+            provider=provider,
+            model=model,
+        )
+    )
+    provenance = result["studio_document"]["accepted_provenance_json"]
+    assert (provenance["provider"], provenance["model"]) == expected
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected"),
+    [
+        ("openai", "gpt-test", ("openai", "gpt-test")),
+        (None, None, ("tldw", "diagram-deterministic-v1")),
+        ("openai", None, ("tldw", "diagram-deterministic-v1")),
+    ],
+)
+def test_diagram_stamps_actual_or_deterministic_execution_identity(
+    studio_db,
+    provider,
+    model,
+    expected,
+):
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    assert source_note_id is not None
+
+    async def diagram_adapter(_request, _context):
+        return {"diagram": "flowchart TD\nA --> B", "format": "mermaid"}
+
+    service = _service(db, diagram_adapter=diagram_adapter)
+    derived = _derive_note(
+        service,
+        source_note_id=source_note_id,
+        excerpt_text="Accepted excerpt",
+    )
+    result = asyncio.run(
+        service.update_diagram_manifest(
+            note_id=derived["note"]["id"],
+            diagram_type="flowchart",
+            provider=provider,
+            model=model,
+        )
+    )
+    provenance = result["studio_document"]["accepted_provenance_json"]
+    assert (provenance["provider"], provenance["model"]) == expected
 
 
 def test_update_diagram_manifest_rejects_unknown_section_ids(studio_db):
@@ -566,9 +658,10 @@ def test_update_diagram_manifest_rejects_concurrent_sidecar_change(studio_db):
             source_note_id=current_document.get("source_note_id"),
             excerpt_snapshot=current_document.get("excerpt_snapshot"),
             excerpt_hash=current_document.get("excerpt_hash"),
-            diagram_manifest_json={"status": "concurrent"},
+            diagram_manifest_json=None,
             companion_content_hash="sha256:concurrent",
             render_version=int(current_document["render_version"]),
+            provenance_kind="manual",
         )
         return {"diagram": "graph TD; A-->B", "format": "mermaid"}
 
@@ -590,8 +683,8 @@ def test_update_diagram_manifest_rejects_concurrent_sidecar_change(studio_db):
 
     persisted_document = db.get_note_studio_document(result["note"]["id"])
     assert persisted_document is not None
-    assert persisted_document["companion_content_hash"] == "sha256:concurrent"
-    assert persisted_document["diagram_manifest_json"] == {"status": "concurrent"}
+    assert persisted_document["companion_content_hash"] != "sha256:concurrent"
+    assert persisted_document["diagram_manifest_json"] is None
 
 
 @pytest.mark.parametrize(

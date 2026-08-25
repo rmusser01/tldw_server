@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -21,6 +22,17 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     logger,
 )
 from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
+from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    SYNC_ENVELOPE_MAX_BYTES,
+    NotesMoodboardStudioContractError,
+    canonical_json_bytes,
+    diagram_render_hash,
+    notes_studio_document_object_hash,
+    parse_notes_studio_document_tombstone_v1,
+    parse_notes_studio_document_v1,
+    studio_result_hash,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -35,6 +47,11 @@ class NoteStore:
     def _deleted_value(self, deleted: bool) -> bool | int:
         """Return the backend-native value for a soft-delete flag."""
         return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)
+
+    @staticmethod
+    def _normalized_text_hash(value: object) -> str:
+        normalized = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+        return f"sha256:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
 
     @staticmethod
     def _timestamps_equal(actual: object, expected: str) -> bool:
@@ -220,6 +237,11 @@ class NoteStore:
                                 projection=projection,
                                 conn=transaction_conn,
                             )
+                            self._advance_studio_lifecycle(
+                                transaction_conn,
+                                note_id=normalized_note_id,
+                                deleted=False,
+                            )
                             return False
                         raise ConflictError(
                             "Note projection changed after ingestion planning",
@@ -264,6 +286,11 @@ class NoteStore:
                                 projection=projection,
                                 conn=transaction_conn,
                             )
+                            self._advance_studio_lifecycle(
+                                transaction_conn,
+                                note_id=normalized_note_id,
+                                deleted=False,
+                            )
                             return False
                         raise ConflictError(
                             "Note projection changed after ingestion planning",
@@ -275,6 +302,11 @@ class NoteStore:
                     source_version=object_revision,
                     projection=projection,
                     conn=transaction_conn,
+                )
+                self._advance_studio_lifecycle(
+                    transaction_conn,
+                    note_id=normalized_note_id,
+                    deleted=False,
                 )
                 logger.info("Upserted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
@@ -385,6 +417,11 @@ class NoteStore:
                     note_id=normalized_note_id,
                     source_version=object_revision,
                     conn=transaction_conn,
+                )
+                self._advance_studio_lifecycle(
+                    transaction_conn,
+                    note_id=normalized_note_id,
+                    deleted=True,
                 )
                 logger.info("Soft-deleted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
@@ -538,7 +575,7 @@ class NoteStore:
     ) -> dict[str, Any] | None:
         params: tuple[Any, ...] = (note_id,)
         query = "SELECT * FROM note_studio_documents WHERE note_id = ?"
-        if self._db._CURRENT_SCHEMA_VERSION >= 61:
+        if self._db._supports_notes_moodboard_studio_v61():
             owner = str(self._db.client_id)
             dataset = self._db.resolve_studio_compatibility_dataset_id(
                 owner_user_id=owner,
@@ -559,6 +596,215 @@ class NoteStore:
     def get_note_studio_document(self, note_id: str) -> dict[str, Any] | None:
         return self._fetch_note_studio_document_row(note_id)
 
+    @staticmethod
+    def _notes_note_head(note: dict[str, Any]) -> tuple[int, str]:
+        payload = validate_notes_note_upsert_payload(
+            {
+                "title": note.get("title"),
+                "content": note.get("content"),
+                "conversation_id": note.get("conversation_id"),
+                "message_id": note.get("message_id"),
+            }
+        )
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8")
+        payload_hash = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+        return max(1, int(note.get("version") or 1)), payload_hash
+
+    @staticmethod
+    def _normalize_studio_compatibility_payload(
+        payload_json: dict[str, Any],
+        *,
+        note: dict[str, Any],
+        source_note_id: str | None,
+        template_type: str,
+        handwriting_mode: str,
+        render_version: int,
+    ) -> dict[str, Any]:
+        payload = dict(payload_json)
+        meta = payload.pop("meta", None)
+        if meta is not None:
+            if not isinstance(meta, dict) or set(meta) - {"title", "source_note_id"}:
+                raise InputError("Studio payload meta is not a supported compatibility alias.")  # noqa: TRY003
+            expected_meta = {
+                "title": str(note.get("title") or ""),
+                "source_note_id": source_note_id,
+            }
+            if any(meta[key] != expected_meta[key] for key in meta):
+                raise InputError("Studio payload meta conflicts with authoritative outer state.")  # noqa: TRY003
+        layout = payload.pop("layout", None)
+        if layout is not None:
+            if not isinstance(layout, dict) or set(layout) - {
+                "template_type",
+                "handwriting_mode",
+                "render_version",
+            }:
+                raise InputError("Studio payload layout is not a supported compatibility alias.")  # noqa: TRY003
+            expected_layout = {
+                "template_type": template_type,
+                "handwriting_mode": handwriting_mode,
+                "render_version": render_version,
+            }
+            if any(layout[key] != expected_layout[key] for key in layout):
+                raise InputError("Studio payload layout conflicts with authoritative outer state.")  # noqa: TRY003
+        return payload
+
+    @staticmethod
+    def _normalize_studio_manifest(
+        manifest_value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if manifest_value is None:
+            return None
+        manifest = dict(manifest_value)
+        manifest.pop("cached_svg", None)
+        if "canonical_source" in manifest:
+            if manifest["canonical_source"] != manifest.get("source_graph"):
+                raise InputError("Studio diagram canonical_source alias conflicts with source_graph.")  # noqa: TRY003
+            manifest.pop("canonical_source")
+        if "generation_status" in manifest:
+            if manifest["generation_status"] != manifest.get("status"):
+                raise InputError("Studio diagram generation_status alias conflicts with status.")  # noqa: TRY003
+            manifest.pop("generation_status")
+        if {
+            "diagram_type",
+            "source_graph",
+            "diagram",
+        }.issubset(manifest):
+            parts: list[str] = []
+            for source in manifest.get("source_graph") or []:
+                if not isinstance(source, dict):
+                    continue
+                title = str(source.get("title") or "").strip()
+                content = str(source.get("content") or "").strip()
+                if title:
+                    parts.append(title)
+                if content:
+                    parts.append(content)
+            context = "\n".join(parts) or "Notes Studio diagram"
+            manifest["render_hash"] = diagram_render_hash(
+                diagram_type=str(manifest["diagram_type"]),
+                context=context,
+                diagram=str(manifest["diagram"]),
+            )
+        return manifest
+
+    @staticmethod
+    def _studio_document_mapping(document: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "note_id": document["note_id"],
+            "source_note_id": document.get("source_note_id"),
+            "payload_json": document["payload_json"],
+            "template_type": document["template_type"],
+            "handwriting_mode": document["handwriting_mode"],
+            "excerpt_snapshot": document.get("excerpt_snapshot"),
+            "excerpt_hash": document.get("excerpt_hash"),
+            "diagram_manifest_json": document.get("diagram_manifest_json"),
+            "companion_content_hash": document["companion_content_hash"],
+            "render_version": document["render_version"],
+            "note_revision": document["note_revision"],
+            "note_hash": document["note_hash"],
+            "accepted_provenance": document["accepted_provenance_json"],
+        }
+
+    @staticmethod
+    def _studio_envelope_size(
+        payload: dict[str, Any],
+        *,
+        revision: int,
+        deleted: bool,
+        object_hash: str,
+    ) -> int:
+        operation = "tombstone" if deleted else "upsert"
+        return len(
+            canonical_json_bytes(
+                {
+                    "domain": "notes.studio_document",
+                    "schema_version": 1,
+                    "operation": operation,
+                    "object_id": payload["note_id"],
+                    "parent_id": payload["note_id"],
+                    "object_revision": revision,
+                    "payload_hash": object_hash,
+                    "payload": payload,
+                }
+            )
+        )
+
+    def _advance_studio_lifecycle(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        note_id: str,
+        deleted: bool,
+    ) -> None:
+        """Advance only Studio lifecycle lineage while retaining accepted content state."""
+        if not self._db._supports_notes_moodboard_studio_v61():
+            return
+        document = self._fetch_note_studio_document_row(note_id, conn=conn)
+        if document is None or bool(document["deleted"]) == deleted:
+            return
+        revision = int(document["canonical_revision"]) + 1
+        version = int(document["version"]) + 1
+        mapping = self._studio_document_mapping(document)
+        try:
+            parsed = parse_notes_studio_document_tombstone_v1(mapping)
+            canonical_hash = notes_studio_document_object_hash(
+                parsed,
+                revision=revision,
+                deleted=deleted,
+            )
+            if self._studio_envelope_size(
+                parsed.model_dump(mode="json"),
+                revision=revision,
+                deleted=deleted,
+                object_hash=canonical_hash,
+            ) > SYNC_ENVELOPE_MAX_BYTES:
+                raise InputError(
+                    f"Studio canonical Sync envelope exceeds {SYNC_ENVELOPE_MAX_BYTES} bytes."
+                )  # noqa: TRY003
+        except NotesMoodboardStudioContractError as exc:
+            if document.get("source_diagnostic_code") is None:
+                raise ConflictError(
+                    "Studio lifecycle state is not canonical.",
+                    entity="note_studio_documents",
+                    entity_id=note_id,
+                ) from exc  # noqa: TRY003
+            canonical_hash = self._db._note_task_v60_hash(
+                {
+                    "domain": "notes.studio_document.blocked",
+                    "note_id": note_id,
+                    "revision": revision,
+                    "deleted": deleted,
+                    "diagnostic": document.get("source_diagnostic_hash"),
+                }
+            )
+        now = self._db._get_current_utc_timestamp_iso()
+        owner = str(self._db.client_id)
+        dataset = str(document["dataset_id"])
+        cursor = conn.execute(
+            "UPDATE note_studio_documents SET deleted=?,version=?,canonical_revision=?,"
+            "canonical_hash=?,last_modified=? WHERE owner_user_id=? AND dataset_id=? "
+            "AND note_id=? AND version=?",
+            (
+                self._deleted_value(deleted),
+                version,
+                revision,
+                canonical_hash,
+                now,
+                owner,
+                dataset,
+                note_id,
+                document["version"],
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ConflictError(
+                "Studio lifecycle changed concurrently.",
+                entity="note_studio_documents",
+                entity_id=note_id,
+            )  # noqa: TRY003
+
     def _write_note_studio_document(
         self,
         *,
@@ -572,6 +818,9 @@ class NoteStore:
         diagram_manifest_json: dict[str, Any] | None,
         companion_content_hash: str | None,
         render_version: int,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None,
         upsert: bool,
     ) -> dict[str, Any]:
@@ -586,8 +835,8 @@ class NoteStore:
             raise InputError(
                 f"handwriting_mode must be one of {sorted(_SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES)}."
             )  # noqa: TRY003
-        if not isinstance(render_version, int) or render_version < 1:
-            raise InputError("render_version must be an integer >= 1.")  # noqa: TRY003
+        if not isinstance(render_version, int) or render_version != 1:
+            raise InputError("render_version must be exactly 1.")  # noqa: TRY003
 
         payload_json_str = self._serialize_note_studio_json_field(payload_json, "payload_json", required=True)
         diagram_manifest_json_str = self._serialize_note_studio_json_field(
@@ -597,7 +846,7 @@ class NoteStore:
         )
         now = self._db._get_current_utc_timestamp_iso()
 
-        if self._db._CURRENT_SCHEMA_VERSION < 61 and upsert:
+        if not self._db._supports_notes_moodboard_studio_v61() and upsert:
             query = (
                 "INSERT INTO note_studio_documents ("
                 "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
@@ -616,7 +865,7 @@ class NoteStore:
                 "render_version = excluded.render_version, "
                 "last_modified = excluded.last_modified"
             )
-        elif self._db._CURRENT_SCHEMA_VERSION < 61:
+        elif not self._db._supports_notes_moodboard_studio_v61():
             query = (
                 "INSERT INTO note_studio_documents ("
                 "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
@@ -625,7 +874,7 @@ class NoteStore:
                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
 
-        if self._db._CURRENT_SCHEMA_VERSION < 61:
+        if not self._db._supports_notes_moodboard_studio_v61():
             params = (
                 normalized_note_id,
                 payload_json_str,
@@ -657,74 +906,126 @@ class NoteStore:
                         "Note not found.", entity="notes", entity_id=normalized_note_id
                     )  # noqa: TRY003
                 note = dict(note_row)
-                note_revision = max(1, int(note.get("version") or 1))
-                note_hash = self._db._legacy_note_hash_v61(note)
+                note_revision, note_hash = self._notes_note_head(note)
+                normalized_source_id = (
+                    None if source_note_id is None else str(source_note_id).strip()
+                )
                 source_revision = source_hash = None
-                if source_note_id is not None:
+                normalized_excerpt = (
+                    None
+                    if excerpt_snapshot is None
+                    else str(excerpt_snapshot).replace("\r\n", "\n").replace("\r", "\n")
+                )
+                if normalized_source_id is not None:
                     source_row = inner_conn.execute(
                         "SELECT * FROM notes WHERE id=? AND client_id=?",
-                        (source_note_id, owner),
+                        (normalized_source_id, owner),
                     ).fetchone()
                     if source_row is None or bool(source_row["deleted"]):
                         raise ConflictError(
                             "Source note not found or not live.",
                             entity="notes",
-                            entity_id=source_note_id,
+                            entity_id=normalized_source_id,
                         )  # noqa: TRY003
                     source = dict(source_row)
-                    source_revision = max(1, int(source.get("version") or 1))
-                    source_hash = self._db._legacy_note_hash_v61(source)
-                result_hash = self._db._note_task_v60_hash(
-                    {
-                        "payload_json": json.loads(payload_json_str),
-                        "template_type": template_type,
-                        "handwriting_mode": handwriting_mode,
-                        "source_note_id": source_note_id,
-                        "excerpt_snapshot": excerpt_snapshot,
-                        "excerpt_hash": excerpt_hash,
-                        "diagram_manifest_json": (
-                            None if diagram_manifest_json_str is None else json.loads(diagram_manifest_json_str)
-                        ),
-                        "companion_content_hash": companion_content_hash,
-                        "render_version": render_version,
-                        "note_revision": note_revision,
-                        "note_hash": note_hash,
-                    }
+                    source_revision, source_hash = self._notes_note_head(source)
+                    if normalized_excerpt is not None:
+                        normalized_source_content = str(source.get("content") or "").replace(
+                            "\r\n", "\n"
+                        ).replace("\r", "\n")
+                        if normalized_excerpt not in normalized_source_content:
+                            raise InputError(
+                                "Studio excerpt must be present in the live source note."
+                            )  # noqa: TRY003
+                elif normalized_excerpt is not None:
+                    raise InputError("Studio excerpt requires a source note.")  # noqa: TRY003
+
+                normalized_payload = self._normalize_studio_compatibility_payload(
+                    payload_json,
+                    note=note,
+                    source_note_id=normalized_source_id,
+                    template_type=template_type,
+                    handwriting_mode=handwriting_mode,
+                    render_version=render_version,
                 )
-                provenance = self._db._canonical_json_text_v61(
-                    {
-                        "kind": "manual",
-                        "attestation": "server",
-                        "provider": None,
-                        "model": None,
-                        "accepted_at": now,
-                        "source_revision": source_revision,
-                        "source_hash": source_hash,
-                        "result_hash": result_hash,
-                    }
+                normalized_manifest = self._normalize_studio_manifest(diagram_manifest_json)
+                normalized_excerpt_hash = (
+                    None
+                    if normalized_excerpt is None
+                    else self._normalized_text_hash(normalized_excerpt)
                 )
+                normalized_companion_hash = self._normalized_text_hash(note.get("content"))
+                candidate: dict[str, Any] = {
+                    "note_id": normalized_note_id,
+                    "source_note_id": normalized_source_id,
+                    "payload_json": normalized_payload,
+                    "template_type": template_type,
+                    "handwriting_mode": handwriting_mode,
+                    "excerpt_snapshot": normalized_excerpt,
+                    "excerpt_hash": normalized_excerpt_hash,
+                    "diagram_manifest_json": normalized_manifest,
+                    "companion_content_hash": normalized_companion_hash,
+                    "render_version": render_version,
+                    "note_revision": note_revision,
+                    "note_hash": note_hash,
+                }
+                result_hash = studio_result_hash(candidate)
+                candidate["accepted_provenance"] = {
+                    "kind": provenance_kind,
+                    "attestation": "server",
+                    "provider": provenance_provider,
+                    "model": provenance_model,
+                    "accepted_at": now,
+                    "source_revision": source_revision,
+                    "source_hash": source_hash,
+                    "result_hash": result_hash,
+                }
+                try:
+                    parsed = parse_notes_studio_document_v1(
+                        candidate,
+                        bound_attestation="server",
+                        bound_accepted_at=now,
+                    )
+                except NotesMoodboardStudioContractError as exc:
+                    raise InputError("Studio document is not canonical v1 state.") from exc  # noqa: TRY003
                 previous = inner_conn.execute(
-                    "SELECT version,canonical_revision FROM note_studio_documents "
+                    "SELECT * FROM note_studio_documents "
                     "WHERE owner_user_id=? AND dataset_id=? AND note_id=?",
                     (owner, dataset, normalized_note_id),
                 ).fetchone()
                 version = 1 if previous is None else int(previous["version"]) + 1
                 revision = 1 if previous is None else int(previous["canonical_revision"]) + 1
-                canonical_hash = self._db._note_task_v60_hash(
-                    {
-                        "domain": "notes.studio_document",
-                        "note_id": normalized_note_id,
-                        "revision": revision,
-                        "result_hash": result_hash,
-                        "deleted": bool(note.get("deleted")),
-                    }
+                deleted = bool(note.get("deleted"))
+                canonical_hash = notes_studio_document_object_hash(
+                    parsed,
+                    revision=revision,
+                    deleted=deleted,
                 )
+                parsed_payload = parsed.model_dump(mode="json")
+                if self._studio_envelope_size(
+                    parsed_payload,
+                    revision=revision,
+                    deleted=deleted,
+                    object_hash=canonical_hash,
+                ) > SYNC_ENVELOPE_MAX_BYTES:
+                    raise InputError(
+                        f"Studio canonical Sync envelope exceeds {SYNC_ENVELOPE_MAX_BYTES} bytes."
+                    )  # noqa: TRY003
                 return (
-                    owner, dataset, normalized_note_id, payload_json_str, template_type,
-                    handwriting_mode, source_note_id, excerpt_snapshot, excerpt_hash,
-                    diagram_manifest_json_str, companion_content_hash, render_version,
-                    note_revision, note_hash, provenance, now, now,
-                    self._deleted_value(bool(note.get("deleted"))), version, revision,
+                    owner, dataset, normalized_note_id,
+                    self._db._canonical_json_text_v61(parsed_payload["payload_json"]),
+                    template_type, handwriting_mode, normalized_source_id,
+                    parsed_payload["excerpt_snapshot"], parsed_payload["excerpt_hash"],
+                    (
+                        None
+                        if parsed_payload["diagram_manifest_json"] is None
+                        else self._db._canonical_json_text_v61(parsed_payload["diagram_manifest_json"])
+                    ),
+                    parsed_payload["companion_content_hash"], render_version,
+                    note_revision, note_hash,
+                    self._db._canonical_json_text_v61(parsed_payload["accepted_provenance"]),
+                    now, now,
+                    self._deleted_value(deleted), version, revision,
                     canonical_hash, None, None,
                 )
 
@@ -754,7 +1055,11 @@ class NoteStore:
                 )
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
-            write_params = params if self._db._CURRENT_SCHEMA_VERSION < 61 else _scoped_values(inner_conn)
+            write_params = (
+                params
+                if not self._db._supports_notes_moodboard_studio_v61()
+                else _scoped_values(inner_conn)
+            )
             prepared_query, prepared_params = self._db._prepare_backend_statement(query, write_params)
             inner_conn.execute(prepared_query, prepared_params or ())
             document = self._fetch_note_studio_document_row(normalized_note_id, conn=inner_conn)
@@ -803,6 +1108,9 @@ class NoteStore:
         diagram_manifest_json: dict[str, Any] | None = None,
         companion_content_hash: str | None = None,
         render_version: int,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> dict[str, Any]:
         return self._write_note_studio_document(
@@ -816,6 +1124,9 @@ class NoteStore:
             diagram_manifest_json=diagram_manifest_json,
             companion_content_hash=companion_content_hash,
             render_version=render_version,
+            provenance_kind=provenance_kind,
+            provenance_provider=provenance_provider,
+            provenance_model=provenance_model,
             conn=conn,
             upsert=False,
         )
@@ -833,6 +1144,9 @@ class NoteStore:
         diagram_manifest_json: dict[str, Any] | None = None,
         companion_content_hash: str | None = None,
         render_version: int,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> dict[str, Any]:
         return self._write_note_studio_document(
@@ -846,6 +1160,9 @@ class NoteStore:
             diagram_manifest_json=diagram_manifest_json,
             companion_content_hash=companion_content_hash,
             render_version=render_version,
+            provenance_kind=provenance_kind,
+            provenance_provider=provenance_provider,
+            provenance_model=provenance_model,
             conn=conn,
             upsert=True,
         )
@@ -858,6 +1175,9 @@ class NoteStore:
         expected_companion_content_hash: str | None,
         expected_render_version: int | None = None,
         expected_last_modified: Any | None = None,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> dict[str, Any]:
         normalized_note_id = str(note_id).strip()
@@ -892,7 +1212,7 @@ class NoteStore:
         ]
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
-            if self._db._CURRENT_SCHEMA_VERSION >= 61:
+            if self._db._supports_notes_moodboard_studio_v61():
                 owner = str(self._db.client_id)
                 dataset = self._db.resolve_studio_compatibility_dataset_id(
                     owner_user_id=owner,
@@ -957,6 +1277,9 @@ class NoteStore:
                     diagram_manifest_json=diagram_manifest_json,
                     companion_content_hash=current_document.get("companion_content_hash"),
                     render_version=int(current_document["render_version"]),
+                    provenance_kind=provenance_kind,
+                    provenance_provider=provenance_provider,
+                    provenance_model=provenance_model,
                     conn=inner_conn,
                     upsert=True,
                 )
@@ -1476,6 +1799,7 @@ class NoteStore:
                     source_version=next_version_val,
                     conn=conn,
                 )
+                self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
                 logger.info(
                     f"Soft-deleted note ID {note_id} (was v{expected_version}), new version {next_version_val}.")
                 return True
@@ -1518,6 +1842,7 @@ class NoteStore:
                         source_version=cur_ver + 1,
                         conn=conn,
                     )
+                    self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
                 return rc > 0
         except BackendDatabaseError as e:
             raise CharactersRAGDBError(f"Failed to delete note: {e}") from e  # noqa: TRY003
@@ -1604,6 +1929,7 @@ class NoteStore:
                     source_version=next_version_val,
                     conn=conn,
                 )
+                self._advance_studio_lifecycle(conn, note_id=note_id, deleted=False)
                 logger.info(
                     f"Restored note ID {note_id} (was version {expected_version}), new version {next_version_val}.")
                 return True

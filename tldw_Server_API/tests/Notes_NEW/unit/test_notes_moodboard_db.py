@@ -5,7 +5,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     notes_moodboard_note_object_hash,
+    notes_moodboard_object_hash,
     parse_notes_moodboard_note_v1,
+    parse_notes_moodboard_v1,
 )
 
 
@@ -85,6 +87,57 @@ def test_moodboard_crud_roundtrip(moodboard_db: CharactersRAGDB):
     assert int(deleted_row["version"]) == 3
     assert int(deleted_row["canonical_revision"]) == 3
     assert deleted_row["canonical_hash"] != after_update["canonical_hash"]
+
+
+def test_moodboard_update_rebuilds_complete_canonical_state_and_diagnostics(
+    moodboard_db: CharactersRAGDB,
+) -> None:
+    moodboard_id = moodboard_db.add_moodboard(
+        name="Initially blocked",
+        smart_rule={"unknown": "legacy-only"},
+    )
+    assert moodboard_id is not None
+    before = moodboard_db.get_moodboard_by_id(moodboard_id)
+    assert before is not None
+    assert before["source_diagnostic_code"] is not None
+
+    assert moodboard_db.update_moodboard(
+        moodboard_id=moodboard_id,
+        update_data={
+            "name": "Canonical board",
+            "description": "Complete current state",
+            "smart_rule": {
+                "query": "Research",
+                "keyword_tokens": ["Notes"],
+                "collection_sync_ids": [],
+                "sources": ["manual"],
+                "updated": {"after": None, "before": None},
+            },
+            "canvas": {
+                "layout_mode": "freeform",
+                "metadata": {"theme": "paper"},
+            },
+        },
+        expected_version=1,
+    )
+    updated = moodboard_db.get_moodboard_by_id(moodboard_id)
+    assert updated is not None
+    payload = parse_notes_moodboard_v1(
+        {
+            "moodboard_id": updated["sync_id"],
+            "name": updated["name"],
+            "description": updated["description"],
+            "smart_rule": updated["smart_rule"],
+            "canvas": updated["canvas_json"],
+        }
+    )
+    assert updated["source_diagnostic_code"] is None
+    assert updated["source_diagnostic_hash"] is None
+    assert updated["canonical_hash"] == notes_moodboard_object_hash(
+        payload,
+        revision=updated["canonical_revision"],
+        deleted=False,
+    )
 
 
 def test_moodboard_pin_unpin_is_idempotent(moodboard_db: CharactersRAGDB):
