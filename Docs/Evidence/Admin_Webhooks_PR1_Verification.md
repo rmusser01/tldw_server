@@ -6,9 +6,13 @@
   `2ad82ff4bcc7faee3cac127aa31a11733c5eb550`
 - Final reviewed test-only source commit:
   `ca304f4b00536593a70844db268a7baa14886d7f`
+- Final exact-base CI-ratchet source commit:
+  `a53fe714f9610c6b908504381838409a039051ba`
 - Rebased onto: `origin/dev` at
   `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
-- Final verification timestamp: `2026-08-25T02:34:32Z`
+- Ratchet comparison base: `origin/dev` at
+  `b1d0aed671dcf45bbe4211a9690022c083c99feb`
+- Final verification timestamp: `2026-08-25T06:00:09Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -18,9 +22,9 @@
 
 The tested application source commit includes the control plane, dual-backend
 persistence, legacy importer, key rotation, route selector, admin UI, runbooks,
-and all runtime gate fixes described below. The later source commit changes only
-the analyzer configuration test structure in response to Qodo review. This
-evidence file is a documentation-only follow-up to those immutable source trees.
+and all runtime gate fixes described below. Later immutable commits contain the
+analyzer testability remediation and the exact-base CI ratchet described below.
+This evidence file is a documentation-only follow-up to those source trees.
 
 ## Result Summary
 
@@ -31,6 +35,7 @@ evidence file is a documentation-only follow-up to those immutable source trees.
 | PostgreSQL-required matrix | PASS at final-rebase source: 24 passed, 0 skipped |
 | Direct pytest marker policy | PASS |
 | CI shard coverage guard | PASS: 0 newly uncovered test files |
+| Canonical webhook full-suite ownership | PASS: dedicated shard in all five matrices |
 | Admin Webhooks non-PostgreSQL matrix | PASS: 301 passed |
 | Chat persistence ordering regression | PASS: exact failing E2E plus 4-test surrounding set |
 | Ruff | PASS |
@@ -44,7 +49,7 @@ evidence file is a documentation-only follow-up to those immutable source trees.
 | Production admin UI build | PASS |
 | Chromium control-plane journey | PASS: 1 passed |
 | UI persistence/console sink scan | PASS |
-| Package-wide admin UI tests | KNOWN UPSTREAM BASELINE: final source 42 failed, 710 passed; base 47 failed, 653 passed |
+| Package-wide admin UI tests | RATCHET PASS: 41 inherited failures, 0 regressions; synthetic regression rejected |
 | Package-wide admin UI lint | PASS: 0 errors, 41 unchanged warnings |
 | Two-project real-backend Playwright | KNOWN UPSTREAM RUNNER FAILURE: Next 16 `.next/dev` lock collision before tests |
 
@@ -301,12 +306,14 @@ source commit `575616ed8b`. The changes are limited to CI scheduling, a
 cross-platform chat timestamp normalization defect, a time-dependent test
 fixture, and the three package lint errors described in the original evidence.
 
-The Admin Webhooks directory is now assigned to the existing
-`admin-watchlists-webhooks` shard in all five duplicated workflow matrices.
+The Admin Webhooks directory is assigned to the dedicated
+`admin-webhooks-canonical` shard in all five duplicated workflow matrices.
+The legacy `admin-watchlists-webhooks` shard remains restricted to
+`tldw_Server_API/tests/Admin/test_admin_w*.py`.
 The repository guard passed:
 
 ```text
-[shard-coverage] shards=774 test_files=4298 ignored=4 baseline=130 new_uncovered=0
+[shard-coverage] shards=783 test_files=4413 ignored=4 baseline=130 new_uncovered=0
 ```
 
 The chat regression was established with a red/green cycle. At the unmodified
@@ -581,7 +588,79 @@ The two unrelated untracked watchlist templates remained excluded. The Qodo
 thread must be resolved and the review rerun against the pushed head before
 review closure.
 
+## Exact-Base Admin UI CI Ratchet
+
+GitHub Actions run `32801997622` passed every other required check reported on
+PR #2806. Its only failure was `frontend-required`, where the package-wide
+admin UI Vitest command ended at 41 failed and 713 passed tests across 17
+failed files. The 16 focused webhook page tests, package lint, typecheck,
+frontend unit shards, backend/security checks, CodeQL, and the reported E2E
+smoke and onboarding/UX checks passed in that hosted run.
+
+Source commit `a53fe714f9610c6b908504381838409a039051ba` replaces the
+unbounded aggregate failure with a fail-closed exact-base ratchet. The workflow
+now:
+
+1. installs head dependencies with the frozen lockfile and runs the complete
+   head suite with both human-readable and JSON reporters;
+2. accepts a clean run only after validating the success report;
+3. for assertion failures only, extracts the failed files from the validated
+   head report and creates a detached worktree at the exact admitted or PR
+   base SHA;
+4. installs that base with its frozen lockfile and replays only the failed head
+   files, with replay paths prefixed by `./` so filenames cannot become CLI
+   options;
+5. permits only identical assertion identities in unchanged test files and
+   rejects malformed reports, collection/import/setup failures, unexpected
+   process exits, changed failing tests, or assertions absent from the base.
+
+The exact comparison used Node 20.19.5, Bun 1.3.2, and current base
+`b1d0aed671dcf45bbe4211a9690022c083c99feb`:
+
+```text
+full head:                 41 failed, 713 passed, 17 failed files
+full exact base:           48 failed, 652 passed, 18 failed files
+first base subset replay:  42 failed,  88 passed, 17 failed files, exit 1
+final base subset replay:  41 failed,  89 passed, 17 failed files, exit 1
+ratchet comparison:        inherited=41 regressions=0, exit 0
+synthetic changed test:    inherited=39 regressions=2, exit 1
+```
+
+The one-test variation between base subset replays is an inherited timing
+fluctuation. It does not weaken the comparison: every head failure had to match
+an exact base assertion identity, while extra base failures are irrelevant.
+The synthetic run marked `admin-ui/lib/navigation.test.ts` as changed and
+proved that the same failing assertions are blocking when their test file is
+part of the PR.
+
+TDD and structural verification:
+
+```text
+old aggregate workflow contract:          RED
+dedicated canonical shard contract:       RED before ownership correction
+final ratchet/shard contracts:             2 passed
+ratchet helper suite:                     10 passed
+focused contract/helper matrix:           13 passed
+embedded Bash syntax:                     PASS
+direct webhook pytest marker policy:      PASS
+shard coverage:                           783 shards, 0 newly uncovered files
+Ruff and git diff --check:                 PASS
+admin package lint:                       PASS, 0 errors, 41 baseline warnings
+admin package typecheck:                  PASS
+admin production build:                   PASS, 49/49 pages
+```
+
+The complete local `tests/CI` collection finished with 225 passed and two
+failures. Both reproduce unchanged on the exact base: the stale
+`ui-watchlists-extension-e2e.yml` route manifest and a PostgreSQL schema test
+that rejects the valid `public.users` qualification. They are documented as
+current-base defects and were not folded into this already broad webhook PR.
+
 ## Upstream Admin UI Baselines
+
+The measurements below are historical pre-ratchet evidence. The authoritative
+current comparison and acceptance policy are recorded in the preceding
+section.
 
 `bun run test` is not green on the exact PR base. An isolated detached worktree
 at `d736368d17` using a clean frozen install, Node 20.19.5, and Bun 1.3.2
@@ -634,15 +713,20 @@ multi-server structure exists at the exact PR base. The PR's Playwright change
 only prevents unrelated mocked invocations from starting these real-backend
 servers. No process remained after the failed attempt.
 
-The package test and real-backend runner failures are not represented as
-passing gates. They remain explicit upstream debt pending Linux CI and a
-separate remediation decision; the focused tests, typecheck, production build,
-and webhook browser journey establish the scoped PR behavior.
+These historical package failures are not represented as a clean suite; they
+are now governed by the exact-base ratchet above. The real-backend runner issue
+remains explicit upstream debt pending a separate remediation decision. The
+focused tests, typecheck, production build, and webhook browser journey
+establish the scoped PR behavior.
 
 ## Final Safety Checks
 
 - `git diff --check`: PASS at tested source commit
-  `2ad82ff4bcc7faee3cac127aa31a11733c5eb550`.
+  `a53fe714f9610c6b908504381838409a039051ba`.
+- Exact-base admin UI comparison: PASS with 41 inherited failures and 0
+  regressions; synthetic changed-test comparison rejected 2 regressions.
+- Canonical Admin Webhooks tests have a dedicated shard in all five full-suite
+  matrices; shard coverage reports 0 newly uncovered files.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,
