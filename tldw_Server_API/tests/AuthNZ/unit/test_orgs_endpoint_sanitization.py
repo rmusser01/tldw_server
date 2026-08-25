@@ -744,6 +744,63 @@ async def test_accept_invite_audit_failure_log_is_sanitized(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_type",
+    (
+        pytest.param("lock", id="database-lock"),
+        pytest.param("pool", id="pool-exhausted"),
+        pytest.param("timeout", id="timeout"),
+    ),
+)
+async def test_accept_invite_busy_database_returns_retryable_503(
+    monkeypatch,
+    failure_type: str,
+):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OrgInviteAcceptRequest
+    from tldw_Server_API.app.core.AuthNZ.exceptions import (
+        ConnectionPoolExhaustedError,
+        DatabaseLockError,
+    )
+    from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+        get_authnz_transaction_policy,
+    )
+
+    failures = {
+        "lock": DatabaseLockError(),
+        "pool": ConnectionPoolExhaustedError(),
+        "timeout": TimeoutError(),
+    }
+
+    class _RegistrationService:
+        async def accept_org_invite_code(self, **_kwargs):
+            raise failures[failure_type]
+
+    with pytest.raises(HTTPException) as exc_info:
+        await orgs.accept_org_invite(
+            body=OrgInviteAcceptRequest(code="secret-code"),
+            http_request=_request(
+                path="/api/v1/orgs/invites/accept",
+                method="POST",
+            ),
+            principal=SimpleNamespace(user_id=7),
+            registration_service=_RegistrationService(),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == (
+        "Authentication database is busy. Please retry shortly."
+    )
+    assert exc_info.value.headers == {
+        "Retry-After": str(
+            get_authnz_transaction_policy().busy_retry_after_seconds
+        ),
+    }
+
+
+@pytest.mark.asyncio
 async def test_redeem_invite_audit_failure_log_is_sanitized(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import org_invites
     from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OrgInviteRedeemRequest
@@ -792,3 +849,70 @@ async def test_redeem_invite_audit_failure_log_is_sanitized(monkeypatch):
     assert logger_stub.debugs == ["Org invite audit failed"]
     assert "org invite redeem audit exploded" not in str(logger_stub.debugs)
     assert "/private/org-audit.db" not in str(logger_stub.debugs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_type",
+    (
+        pytest.param("lock", id="database-lock"),
+        pytest.param("pool", id="pool-exhausted"),
+        pytest.param("timeout", id="timeout"),
+    ),
+)
+async def test_redeem_invite_busy_database_returns_retryable_503(
+    monkeypatch,
+    failure_type: str,
+):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints import org_invites
+    from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OrgInviteRedeemRequest
+    from tldw_Server_API.app.core.AuthNZ.exceptions import (
+        ConnectionPoolExhaustedError,
+        DatabaseLockError,
+    )
+    from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+        get_authnz_transaction_policy,
+    )
+
+    failures = {
+        "lock": DatabaseLockError(),
+        "pool": ConnectionPoolExhaustedError(),
+        "timeout": TimeoutError(),
+    }
+
+    class _InviteService:
+        async def redeem_invite(self, **_kwargs):
+            raise failures[failure_type]
+
+    async def _fake_get_invite_service():
+        return _InviteService()
+
+    async def _fake_fetch_active_user_by_id(_db, _user_id):
+        return {"email": "user@example.test"}
+
+    monkeypatch.setattr(org_invites, "get_invite_service", _fake_get_invite_service)
+    monkeypatch.setattr(
+        org_invites,
+        "fetch_active_user_by_id",
+        _fake_fetch_active_user_by_id,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await org_invites.redeem_invite(
+            body=OrgInviteRedeemRequest(code="secret-code-123"),
+            request=_request(path="/api/v1/invites/redeem", method="POST"),
+            principal=SimpleNamespace(user_id=7),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == (
+        "Authentication database is busy. Please retry shortly."
+    )
+    assert exc_info.value.headers == {
+        "Retry-After": str(
+            get_authnz_transaction_policy().busy_retry_after_seconds
+        ),
+    }

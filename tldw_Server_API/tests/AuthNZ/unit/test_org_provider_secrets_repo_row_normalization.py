@@ -130,6 +130,37 @@ async def test_shared_secret_upsert_reauthorizes_manager_under_total_lock_order(
 
 
 @pytest.mark.asyncio
+async def test_authorize_scope_write_revalidates_without_reading_secret_rows() -> None:
+    conn = _AuthorizationConnection()
+    repo = AuthnzOrgProviderSecretsRepo(_AuthorizationPool(conn))  # type: ignore[arg-type]
+
+    await repo.authorize_scope_write(
+        scope_type="org",
+        scope_id=9,
+        authorization_context=ActorMembershipWriteContext(
+            actor_user_id=7,
+            required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
+        ),
+    )
+
+    user_lock = next(
+        index for index, query in enumerate(conn.queries) if "public.users" in query
+    )
+    org_lock = next(
+        index
+        for index, query in enumerate(conn.queries)
+        if "public.organizations" in query
+    )
+    membership_lock = next(
+        index
+        for index, query in enumerate(conn.queries)
+        if "public.org_members" in query
+    )
+    assert user_lock < org_lock < membership_lock
+    assert not any("public.org_provider_secrets" in query for query in conn.queries)
+
+
+@pytest.mark.asyncio
 async def test_shared_secret_platform_admin_locks_persisted_authority_before_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
