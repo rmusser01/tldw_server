@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from tldw_Server_API.app.core.exceptions import NotesTaskContractError
@@ -49,19 +50,47 @@ class NotesTaskActivityDomainAdapter:
         ):
             return _rejected(envelope, "notes_task_activity_payload_invalid")
         trusted_bootstrap = _trusted_activity_bootstrap(envelope, context)
-        allowed_routing = (
-            {
-                "bootstrap_capture",
-                "bootstrap_id",
-                "source",
-                "origin",
-                "server_device_id",
-                "server_owner_user_id",
-            }
-            if trusted_bootstrap
-            else set()
+        trusted_server_mutation = _trusted_server_activity_mutation(
+            envelope,
+            dataset=dataset,
+            context=context,
         )
-        if set(envelope.routing_metadata) != allowed_routing:
+        coordinator_derived = bool(
+            context is not None and context.coordinator_derived_task_activity
+        )
+        routing_fields = set(envelope.routing_metadata)
+        bootstrap_routing = {
+            "bootstrap_capture",
+            "bootstrap_id",
+            "source",
+            "origin",
+            "server_device_id",
+            "server_owner_user_id",
+        }
+        server_routing = {
+            "source",
+            "origin",
+            "server_device_id",
+            "server_owner_user_id",
+        }
+        valid_routing_shape = (
+            routing_fields == bootstrap_routing
+            if trusted_bootstrap
+            else (
+                frozenset(routing_fields)
+                in {
+                    frozenset(server_routing),
+                    frozenset(server_routing | {"task_projection"}),
+                }
+                if trusted_server_mutation
+                else (
+                    routing_fields in (set(), {"task_projection"})
+                    if coordinator_derived
+                    else not routing_fields
+                )
+            )
+        )
+        if not valid_routing_shape:
             return _rejected(envelope, "notes_task_activity_payload_invalid")
 
         head = _get_head(envelope, context)
@@ -144,12 +173,27 @@ class NotesTaskActivityDomainAdapter:
             context=context,
             note_id=note_id,
             task_id=task_id,
+            allow_deleted_task=(
+                (trusted_server_mutation or coordinator_derived)
+                and isinstance(payload, NotesTaskActivityV1)
+                and payload.event_type == "deleted"
+            ),
         )
         if parent_outcome is not None:
             return parent_outcome
 
         if isinstance(payload, NotesTaskActivityV1):
-            if not context.trusted_server_origin and payload.event_type != "corrected":
+            coordinator_derived = coordinator_derived and payload.source_kind == "client"
+            if coordinator_derived and routing_fields and not _valid_coordinator_projection(
+                envelope,
+                task_id=payload.task_id,
+            ):
+                return _rejected(envelope, "notes_task_activity_payload_invalid")
+            if (
+                not context.trusted_server_origin
+                and not coordinator_derived
+                and payload.event_type != "corrected"
+            ):
                 return _rejected(envelope, "notes_task_activity_origin_invalid")
             if payload.corrects_activity_id is not None:
                 target = _lookup_head(context, payload.corrects_activity_id)
@@ -222,6 +266,7 @@ def _authorize_parents(
     context: SyncAdapterContext,
     note_id: str,
     task_id: str | None,
+    allow_deleted_task: bool = False,
 ) -> SyncAdapterOutcome | None:
     """Authorize the required note and optional same-note live task."""
 
@@ -244,9 +289,28 @@ def _authorize_parents(
         or task.payload.get("note_id") != note_id
     ):
         return _parent_deferred(envelope)
-    if _is_deleted(task):
+    if _is_deleted(task) and not allow_deleted_task:
         return _conflict(envelope, "notes_task_activity_parent_conflict")
     return None
+
+
+def _valid_coordinator_projection(
+    envelope: SyncEnvelopeCreate,
+    *,
+    task_id: str | None,
+) -> bool:
+    """Validate client-derived projection evidence without trusting client routing."""
+
+    projection = envelope.routing_metadata.get("task_projection")
+    if not isinstance(projection, Mapping) or task_id is None:
+        return False
+    try:
+        from ..notes_task_coordinator import _validate_task_projection_group_metadata
+
+        anchor = _validate_task_projection_group_metadata(projection)
+    except (ImportError, ValueError):
+        return False
+    return anchor.task_id == task_id
 
 
 def _same_activity_scope(
@@ -285,6 +349,47 @@ def _trusted_activity_bootstrap(
         and envelope.routing_metadata.get("source")
         == "notes-task-activity-bootstrap"
         and envelope.routing_metadata.get("origin") == "server"
+    )
+
+
+def _trusted_server_activity_mutation(
+    envelope: SyncEnvelopeCreate,
+    *,
+    dataset: SyncDataset,
+    context: SyncAdapterContext | None,
+) -> bool:
+    """Validate closed server provenance and optional task projection anchor."""
+
+    routing = envelope.routing_metadata
+    required = {"source", "origin", "server_device_id", "server_owner_user_id"}
+    if not (
+        context is not None
+        and context.trusted_server_origin
+        and required.issubset(routing)
+        and routing.get("origin") == "server"
+        and routing.get("server_device_id") == "server-origin"
+        and routing.get("server_owner_user_id") == dataset.owner_user_id
+        and envelope.device_id == "server-origin"
+        and isinstance(routing.get("source"), str)
+        and 1 <= len(str(routing["source"])) <= 128
+    ):
+        return False
+    projection = routing.get("task_projection")
+    if projection is None:
+        return True
+    if not isinstance(projection, Mapping):
+        return False
+    try:
+        from ..notes_task_coordinator import (  # Local import avoids adapter cycles.
+            _validate_task_projection_group_metadata,
+        )
+
+        anchor = _validate_task_projection_group_metadata(projection)
+    except (ImportError, ValueError):
+        return False
+    return (
+        envelope.payload.get("task_id") == anchor.task_id
+        and envelope.parent_id == envelope.payload.get("note_id")
     )
 
 

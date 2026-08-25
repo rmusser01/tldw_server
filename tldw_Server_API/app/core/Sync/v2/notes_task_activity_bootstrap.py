@@ -7,6 +7,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import (
     NotesTaskActivitySourceChanged,
@@ -26,6 +27,7 @@ from .notes_task_contract import (
 from .server_origin_batch import (
     ServerOriginMutationStep,
     capture_server_origin_mutation_batch,
+    is_trusted_notes_task_coordinator_envelope,
 )
 from .service import SyncV2Service
 
@@ -156,10 +158,10 @@ class NotesTaskActivityBootstrapper:
                 or _optional_string(
                     _readiness(current).get("source_cursor")
                 ) != source.cursor
-                or not _sync_bootstrap_matches_source(
-                    service,
-                    current.dataset_id,
+                or not self._sync_heads_match_source(
+                    service=service,
                     owner=owner,
+                    dataset_id=current.dataset_id,
                     bootstrap_id=bootstrap_id,
                     source=source,
                 )
@@ -196,6 +198,12 @@ class NotesTaskActivityBootstrapper:
             }:
                 raise
             return _block(service, current, reason="notes_task_activity_source_invalid")
+
+    @property
+    def note_db(self) -> CharactersRAGDB:
+        """Return the product database whose activity log is being bootstrapped."""
+
+        return self._db
 
     def _ensure_bootstrapping(
         self,
@@ -349,6 +357,28 @@ class NotesTaskActivityBootstrapper:
             envelope = service.store.get_envelope_by_server_cursor(
                 int(row["sync_server_cursor"])
             )
+            selected_dataset = service.store.get_dataset(
+                dataset_id,
+                owner_user_id=owner,
+            )
+            bootstrap_capture = bool(
+                envelope is not None
+                and envelope.routing_metadata.get("bootstrap_id") == bootstrap_id
+            )
+            trusted_capture = bool(
+                envelope is not None
+                and (
+                    bootstrap_capture
+                    or (
+                        selected_dataset is not None
+                        and is_trusted_notes_task_coordinator_envelope(
+                            service=service,
+                            dataset=selected_dataset,
+                            envelope=envelope,
+                        )
+                    )
+                )
+            )
             if (
                 envelope is None
                 or envelope.dataset_id != dataset_id
@@ -357,7 +387,7 @@ class NotesTaskActivityBootstrapper:
                 or envelope.parent_id != row.get("note_id")
                 or envelope.operation != "upsert"
                 or envelope.object_revision != 1
-                or envelope.routing_metadata.get("bootstrap_id") != bootstrap_id
+                or not trusted_capture
                 or envelope.apply_status != "applied"
             ):
                 raise NotesTaskActivitySourceChanged
@@ -370,7 +400,10 @@ class NotesTaskActivityBootstrapper:
             if (
                 envelope.payload_hash != canonical_hash
                 or row.get("sync_object_hash") != canonical_hash
-                or envelope.created_at_client != row.get("created_at")
+                or (
+                    bootstrap_capture
+                    and envelope.created_at_client != row.get("created_at")
+                )
                 or not self._tasks.verify_sync_task_activity_postcondition(
                     owner_user_id=owner,
                     dataset_id=dataset_id,
@@ -389,6 +422,99 @@ class NotesTaskActivityBootstrapper:
             payload=payload,
         )
 
+    def _sync_heads_match_source(
+        self,
+        *,
+        service: SyncV2Service,
+        owner: str,
+        dataset_id: str,
+        bootstrap_id: str,
+        source: _SourceSummary,
+    ) -> bool:
+        """Rescan and match every source row to its exact applied current head."""
+
+        after_created_at: str | None = None
+        after_activity_id: str | None = None
+        cursor: str | None = None
+        count = 0
+        fingerprint = _EMPTY_FINGERPRINT
+        while True:
+            page = self._tasks.page_legacy_events_for_sync_bootstrap(
+                owner_user_id=owner,
+                dataset_id=dataset_id,
+                after_created_at=after_created_at,
+                after_activity_id=after_activity_id,
+                limit=self.PAGE_LIMIT,
+            )
+            for row in page:
+                item = self._source_row(
+                    service=service,
+                    owner=owner,
+                    dataset_id=dataset_id,
+                    bootstrap_id=bootstrap_id,
+                    row=row,
+                )
+                head = service.store.get_current_head(
+                    dataset_id,
+                    "notes.task_activity",
+                    item.activity_id,
+                )
+                if head is None or not _activity_head_matches_source(head, item):
+                    return False
+                count += 1
+                cursor = item.cursor
+                fingerprint = _activity_bootstrap_fingerprint(
+                    fingerprint,
+                    item.cursor,
+                    item.canonical_hash,
+                )
+                after_created_at, after_activity_id = _split_cursor(item.cursor)
+            if len(page) < self.PAGE_LIMIT:
+                break
+        bootstrap_head_count = 0
+        coordinator_head_count = 0
+        selected_dataset = service.store.get_dataset(
+            dataset_id,
+            owner_user_id=owner,
+        )
+        if selected_dataset is None:
+            return False
+        offset = 0
+        while True:
+            heads = service.store.list_current_heads(
+                dataset_id,
+                "notes.task_activity",
+                limit=500,
+                offset=offset,
+            )
+            for head in heads:
+                if head.routing_metadata.get("bootstrap_id") == bootstrap_id:
+                    bootstrap_head_count += 1
+                    continue
+                if not is_trusted_notes_task_coordinator_envelope(
+                    service=service,
+                    dataset=selected_dataset,
+                    envelope=head,
+                ) or not _coordinator_activity_head_matches_product(
+                    tasks=self._tasks,
+                    owner=owner,
+                    dataset_id=dataset_id,
+                    envelope=head,
+                ):
+                    return False
+                coordinator_head_count += 1
+            if len(heads) < 500:
+                break
+            offset += len(heads)
+        return bool(
+            bootstrap_head_count == count
+            and bootstrap_head_count + coordinator_head_count
+            == _count_current_activity_heads(service, dataset_id)
+            and count == source.count
+            and cursor == source.cursor
+            and fingerprint == source.fingerprint
+        )
+
     def _capture_row(
         self,
         *,
@@ -398,6 +524,17 @@ class NotesTaskActivityBootstrapper:
         source: _SourceRow,
     ) -> None:
         """Capture and adopt one source-verified legacy event."""
+
+        current_head = service.store.get_current_head(
+            dataset.dataset_id,
+            "notes.task_activity",
+            source.activity_id,
+        )
+        if current_head is not None and _activity_head_matches_source(
+            current_head,
+            source,
+        ):
+            return
 
         step = ServerOriginMutationStep(
             domain="notes.task_activity",
@@ -485,6 +622,85 @@ class _SourceSummary:
     fingerprint: str
 
 
+def _activity_head_matches_source(
+    envelope: SyncEnvelope,
+    source: _SourceRow,
+) -> bool:
+    """Return whether an applied immutable head exactly matches one source event."""
+
+    return bool(
+        envelope.status == "accepted"
+        and envelope.apply_status == "applied"
+        and envelope.operation == "upsert"
+        and envelope.object_id == source.activity_id
+        and envelope.parent_id == source.note_id
+        and envelope.object_revision == 1
+        and envelope.payload_hash == source.canonical_hash
+        and envelope.created_at_client == source.payload.client_occurred_at
+        and dict(envelope.payload) == source.payload.model_dump(mode="json")
+    )
+
+
+def _coordinator_activity_head_matches_product(
+    *,
+    tasks: TaskStore,
+    owner: str,
+    dataset_id: str,
+    envelope: SyncEnvelope,
+) -> bool:
+    """Verify one captured coordinator activity against its exact product row."""
+
+    if envelope.server_cursor is None:
+        return False
+    try:
+        payload = _parse_bootstrap_payload(envelope, owner)
+        canonical_hash = notes_task_activity_object_hash(
+            payload,
+            revision=1,
+            deleted=False,
+        )
+        return bool(
+            _activity_head_matches_source(
+                envelope,
+                _SourceRow(
+                    activity_id=payload.activity_id,
+                    note_id=payload.note_id,
+                    cursor=f"{payload.client_occurred_at}|{payload.activity_id}",
+                    canonical_hash=canonical_hash,
+                    payload=payload,
+                ),
+            )
+            and tasks.verify_sync_task_activity_postcondition(
+                owner_user_id=owner,
+                dataset_id=dataset_id,
+                payload=payload,
+                sync_revision=1,
+                sync_object_hash=canonical_hash,
+                sync_server_cursor=envelope.server_cursor,
+            )
+        )
+    except Exception:  # noqa: BLE001 - readiness verification is total and fail-closed.
+        return False
+
+
+def _count_current_activity_heads(service: SyncV2Service, dataset_id: str) -> int:
+    """Count current activity heads with bounded pages for exact set accounting."""
+
+    count = 0
+    offset = 0
+    while True:
+        page = service.store.list_current_heads(
+            dataset_id,
+            "notes.task_activity",
+            limit=500,
+            offset=offset,
+        )
+        count += len(page)
+        if len(page) < 500:
+            return count
+        offset += len(page)
+
+
 def legacy_task_event_to_activity(
     row: Mapping[str, object],
     *,
@@ -534,78 +750,6 @@ def _parse_bootstrap_payload(envelope: SyncEnvelope, owner: str) -> NotesTaskAct
         bound_actor_id=envelope.payload.get("actor_id"),
         authenticated_device_id=None,
         trusted_server_origin=True,
-    )
-
-
-def _sync_bootstrap_matches_source(
-    service: SyncV2Service,
-    dataset_id: str,
-    *,
-    owner: str,
-    bootstrap_id: str,
-    source: _SourceSummary,
-) -> bool:
-    """Stream-verify exact ordered envelope identity against the source summary."""
-
-    cursor = 0
-    found_count = 0
-    found_cursor: str | None = None
-    found_fingerprint = _EMPTY_FINGERPRINT
-    while True:
-        page = service.store.list_envelopes_after(
-            dataset_id,
-            cursor,
-            limit=500,
-            domains=["notes.task_activity"],
-            status="accepted",
-        )
-        for envelope in page:
-            if envelope.server_cursor is None:
-                return False
-            cursor = envelope.server_cursor
-            if (
-                envelope.routing_metadata.get("bootstrap_id") != bootstrap_id
-                or envelope.apply_status != "applied"
-                or envelope.operation != "upsert"
-                or envelope.object_revision != 1
-                or envelope.deleted
-            ):
-                return False
-            try:
-                payload = _parse_bootstrap_payload(envelope, owner)
-                canonical_hash = notes_task_activity_object_hash(
-                    payload,
-                    revision=1,
-                    deleted=False,
-                )
-            except Exception:  # noqa: BLE001 - verification is total and fail-closed.
-                return False
-            found_cursor = f"{payload.client_occurred_at}|{payload.activity_id}"
-            if (
-                envelope.object_id != payload.activity_id
-                or envelope.parent_id != payload.note_id
-                or envelope.created_at_client != payload.client_occurred_at
-                or envelope.payload_hash != canonical_hash
-                or envelope.client_envelope_id
-                != _activity_bootstrap_envelope_id(
-                    bootstrap_id,
-                    payload.activity_id,
-                    canonical_hash,
-                )
-            ):
-                return False
-            found_count += 1
-            found_fingerprint = _activity_bootstrap_fingerprint(
-                found_fingerprint,
-                found_cursor,
-                canonical_hash,
-            )
-        if len(page) < 500:
-            break
-    return (
-        found_count == source.count
-        and found_cursor == source.cursor
-        and found_fingerprint == source.fingerprint
     )
 
 

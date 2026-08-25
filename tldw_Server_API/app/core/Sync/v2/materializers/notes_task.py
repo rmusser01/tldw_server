@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from loguru import logger
@@ -97,13 +98,23 @@ class NotesTaskMaterializer:
                     "canonical_hash": envelope.payload_hash or "",
                     "conn": conn,
                 }
-                if current_state is None:
+                if current_state is None and not _has_prebootstrap_product_base(
+                    envelope
+                ):
                     task_store.apply_sync_task_create(**common)
                 else:
                     transition = {
                         **common,
-                        "base_revision": current_state.object_revision,
-                        "base_hash": current_state.object_hash,
+                        "base_revision": (
+                            current_state.object_revision
+                            if current_state is not None
+                            else int(envelope.base_object_revision or 0)
+                        ),
+                        "base_hash": (
+                            current_state.object_hash
+                            if current_state is not None
+                            else str(envelope.base_object_hash or "")
+                        ),
                     }
                     if envelope.operation == "tombstone":
                         task_store.apply_sync_task_tombstone(**transition)
@@ -111,6 +122,22 @@ class NotesTaskMaterializer:
                         task_store.apply_sync_task_restore(**transition)
                     else:
                         task_store.apply_sync_task_upsert(**transition)
+                projection = envelope.routing_metadata.get("task_projection")
+                if (
+                    envelope.operation == "upsert"
+                    and isinstance(projection, Mapping)
+                    and type(projection.get("linked")) is bool
+                ):
+                    task_store.apply_sync_task_projection_status(
+                        owner_user_id=str(self.note_db.client_id),
+                        dataset_id=envelope.dataset_id,
+                        task_id=envelope.object_id,
+                        note_id=str(envelope.parent_id),
+                        projection_status=(
+                            "live" if projection["linked"] else "unlinked"
+                        ),
+                        conn=conn,
+                    )
             return _record_applied(envelope, store)
         except ConflictError:
             return _mark_conflict(
@@ -167,6 +194,9 @@ def _expected_projection_status(envelope: SyncEnvelope) -> str | None:
 
     if envelope.operation == "tombstone":
         return "deleted"
+    projection = envelope.routing_metadata.get("task_projection")
+    if isinstance(projection, Mapping) and type(projection.get("linked")) is bool:
+        return "live" if projection["linked"] else "unlinked"
     if envelope.object_revision == 1 or envelope.routing_metadata.get("restore_intent") is True:
         return "unlinked"
     return None
@@ -187,6 +217,8 @@ def _state_conflict(
         )
     )
     if current_state is None:
+        if _has_prebootstrap_product_base(envelope):
+            return None
         if has_base or envelope.routing_metadata.get("restore_intent") is True:
             return _conflict_result("missing_server_object")
         return None
@@ -202,6 +234,18 @@ def _state_conflict(
     elif envelope.routing_metadata.get("restore_intent") is True:
         return _conflict_result("restore_target_not_deleted")
     return None
+
+
+def _has_prebootstrap_product_base(envelope: SyncEnvelope) -> bool:
+    """Return whether routing carries a complete pre-Sync product base."""
+
+    return bool(
+        envelope.base_server_cursor is None
+        and envelope.base_object_revision is not None
+        and envelope.base_object_hash is not None
+        and envelope.routing_metadata.get("product_transition_base") is True
+        and envelope.object_revision == envelope.base_object_revision + 1
+    )
 
 
 def _record_applied(

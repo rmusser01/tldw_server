@@ -8,13 +8,74 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
 from tldw_Server_API.app.core.Notes_Tasks.models import TaskActor
+from tldw_Server_API.app.core.Notes_Tasks.projection_markers import render_task_marker
+from tldw_Server_API.app.core.Notes_Tasks.reconciler import (
+    classify_managed_projection,
+)
 from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService
 
 pytestmark = pytest.mark.unit
 
 TASK_OWNER_USER_ID = "task_reconciler_test"
 TASK_DATASET_ID = "local-unbound"
+_MANAGED_TASK_ID = "11111111-1111-4111-8111-11111111111a"
+_MANAGED_BASE_HASH = "sha256:" + "a" * 64
+_MANAGED_CURRENT_HASH = "sha256:" + "b" * 64
+
+
+def _managed_item(*, title: str = "Alpha", checked: bool = False):
+    marker = render_task_marker(
+        _MANAGED_TASK_ID,
+        revision=3,
+        object_hash=_MANAGED_BASE_HASH,
+    )
+    check = "x" if checked else " "
+    return parse_note_checklists(
+        note_id="managed-note",
+        note_version=4,
+        content=f"- [{check}] {title} @priority(high) {marker}\n",
+    ).items[0]
+
+
+@pytest.mark.parametrize(
+    ("current_revision", "current_hash", "current_title", "note_title", "expected"),
+    [
+        (3, _MANAGED_BASE_HASH, "Alpha", "Alpha", "no_change"),
+        (4, _MANAGED_CURRENT_HASH, "Task edit", "Alpha", "task_to_note"),
+        (3, _MANAGED_BASE_HASH, "Alpha", "Note edit", "note_to_task"),
+        (4, _MANAGED_CURRENT_HASH, "Same edit", "Same edit", "same_result"),
+        (4, _MANAGED_CURRENT_HASH, "Task edit", "Note edit", "drift"),
+    ],
+)
+def test_managed_projection_three_way_matrix(
+    current_revision: int,
+    current_hash: str,
+    current_title: str,
+    note_title: str,
+    expected: str,
+) -> None:
+    anchor_payload = {
+        "title": "Alpha",
+        "status": "open",
+        "priority": "high",
+        "due_date": None,
+        "estimate": None,
+    }
+    current_payload = {**anchor_payload, "title": current_title}
+
+    decision = classify_managed_projection(
+        item=_managed_item(title=note_title),
+        anchor_revision=3,
+        anchor_hash=_MANAGED_BASE_HASH,
+        anchor_payload=anchor_payload,
+        current_revision=current_revision,
+        current_hash=current_hash,
+        current_payload=current_payload,
+    )
+
+    assert decision == expected
 
 
 @pytest.fixture()

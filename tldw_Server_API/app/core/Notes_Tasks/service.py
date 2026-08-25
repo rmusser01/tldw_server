@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 from uuid import UUID
@@ -17,12 +18,18 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
 )
 from tldw_Server_API.app.core.Notes_Tasks.markdown_parser import parse_note_checklists
 from tldw_Server_API.app.core.Notes_Tasks.models import ParsedChecklistItem, ReconciliationResult, TaskActor
-from tldw_Server_API.app.core.Notes_Tasks.reconciler import NotesTaskReconciler
+from tldw_Server_API.app.core.Notes_Tasks.projection_markers import render_task_marker
+from tldw_Server_API.app.core.Notes_Tasks.reconciler import (
+    NotesTaskReconciler,
+    classify_managed_projection,
+)
 from tldw_Server_API.app.core.Sync.v2.models import SyncOperation, normalize_sync_timestamp
 from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
     NotesTaskActivityV1,
     TaskActivitySource,
+    notes_task_object_hash,
     parse_notes_task_activity_v1,
+    parse_notes_task_v1,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import ServerOriginMutationStep
 
@@ -31,6 +38,9 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
         NotesOrganizationCoordinator,
+    )
+    from tldw_Server_API.app.core.Sync.v2.notes_task_coordinator import (
+        NotesTaskCoordinator,
     )
 
 
@@ -224,6 +234,9 @@ class NotesTaskCaptureCallback(Protocol):
         *,
         conn: TaskConnection | None,
     ) -> None: ...
+
+
+NotesTaskCoordinatorResolver = Callable[..., "NotesTaskCoordinator | None"]
 
 
 def _task_activity_metadata(row: dict[str, Any]) -> dict[str, object]:
@@ -426,6 +439,7 @@ def build_task_capture_mutation(
     actor: TaskActor,
     before: dict[str, Any] | None,
     after: dict[str, Any],
+    source_kind: TaskActivitySource = "rest",
 ) -> NotesTaskCaptureMutation:
     """Build one exact, stable task capture input from canonical product rows."""
 
@@ -492,15 +506,22 @@ def build_task_capture_mutation(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+    routing_metadata: dict[str, object] = {}
+    if restore_intent:
+        routing_metadata["restore_intent"] = True
+    if base_revision is not None:
+        routing_metadata["product_transition_base"] = True
     step = ServerOriginMutationStep(
         domain="notes.task",
         operation=operation,
         object_id=task_id,
         parent_id=note_id,
         payload=dict(after_row["sync_payload"]),
-        routing_metadata={"restore_intent": True} if restore_intent else {},
+        routing_metadata=routing_metadata,
         client_envelope_id=f"notes-task-server-{identity_hash[:32]}",
         object_revision=revision,
+        base_object_revision=base_revision,
+        base_object_hash=base_hash,
     )
     activity = build_task_activity_capture(
         db=db,
@@ -509,6 +530,7 @@ def build_task_capture_mutation(
         actor=actor,
         before=before,
         after=after,
+        source_kind=source_kind,
     )
     return NotesTaskCaptureMutation(
         owner_user_id=owner,
@@ -549,9 +571,715 @@ class NotesTaskService:
         reconciler: NotesTaskReconciler | None = None,
         *,
         task_capture_callback: NotesTaskCaptureCallback | None = None,
+        task_coordinator_resolver: NotesTaskCoordinatorResolver | None = None,
     ) -> None:
         self._reconciler = reconciler or NotesTaskReconciler()
         self._task_capture_callback = task_capture_callback
+        self._task_coordinator_resolver = task_coordinator_resolver
+
+    def _active_task_coordinator(
+        self,
+        *,
+        scope: TaskStoreScope,
+    ) -> NotesTaskCoordinator | None:
+        """Resolve owner-bound task authority at the public mutation boundary."""
+
+        resolver = self._task_coordinator_resolver
+        if resolver is None:
+            from tldw_Server_API.app.core.Sync.v2.notes_task_coordinator import (
+                resolve_notes_task_coordinator,
+            )
+
+            resolver = resolve_notes_task_coordinator
+        return resolver(
+            user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+        )
+
+    @staticmethod
+    def _task_source(actor: TaskActor) -> tuple[str, TaskActivitySource]:
+        """Return the stable batch and activity provenance for one public write."""
+
+        if actor.tool_name:
+            return "notes.tasks.mcp", "mcp"
+        return "notes.tasks.rest", "rest"
+
+    @staticmethod
+    def _planned_metadata_task(
+        *,
+        db: CharactersRAGDB,
+        task: dict[str, Any],
+        metadata: dict[str, Any],
+        owner_user_id: str,
+        occurred_at: str,
+    ) -> dict[str, Any]:
+        """Build the canonical post-state without mutating product storage."""
+
+        source = db.task_store._sync_bootstrap_task_row(task, owner_user_id)
+        raw_payload = dict(source["sync_payload"])
+        for key in _METADATA_TOKEN_ORDER:
+            raw_payload[key] = metadata.get(key)
+        payload = parse_notes_task_v1(raw_payload, owner_user_id=owner_user_id)
+        revision = int(source["canonical_revision"]) + 1
+        return {
+            **task,
+            "metadata_json": db.task_store._sync_task_metadata(payload),
+            "updated_at": occurred_at,
+            "version": int(task["version"]) + 1,
+            "canonical_revision": revision,
+            "canonical_hash": notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=False,
+            ),
+            "source_diagnostic_code": None,
+            "source_diagnostic_hash": None,
+        }
+
+    @staticmethod
+    def _planned_projected_task(
+        *,
+        db: CharactersRAGDB,
+        task: dict[str, Any],
+        owner_user_id: str,
+        occurred_at: str,
+        text: str | None,
+        status: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Build a projected task post-state without touching product storage."""
+
+        source = db.task_store._sync_bootstrap_task_row(task, owner_user_id)
+        raw_payload = dict(source["sync_payload"])
+        if text is not None:
+            raw_payload["title"] = text.strip()
+        if status is not None:
+            raw_payload["status"] = status
+            if status == "done" and source["sync_payload"]["status"] != "done":
+                raw_payload["completed_at"] = occurred_at
+            elif status == "open":
+                raw_payload["completed_at"] = None
+        if metadata is not None:
+            for key in _METADATA_TOKEN_ORDER:
+                raw_payload[key] = metadata.get(key)
+        payload = parse_notes_task_v1(raw_payload, owner_user_id=owner_user_id)
+        revision = int(source["canonical_revision"]) + 1
+        return {
+            **task,
+            "text": payload.title,
+            "status": payload.status,
+            "metadata_json": db.task_store._sync_task_metadata(payload),
+            "completed_at": payload.completed_at,
+            "updated_at": occurred_at,
+            "version": int(task["version"]) + 1,
+            "canonical_revision": revision,
+            "canonical_hash": notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=False,
+            ),
+            "source_diagnostic_code": None,
+            "source_diagnostic_hash": None,
+        }
+
+    @staticmethod
+    def _note_projection_step(
+        *,
+        coordinator: NotesTaskCoordinator,
+        note: dict[str, Any],
+        content: str,
+    ) -> ServerOriginMutationStep:
+        """Build the next note envelope against its exact Sync head."""
+
+        if coordinator.dataset_id is None:
+            raise ConflictError(
+                "Task coordinator dataset is unavailable.",
+                entity="notes",
+                entity_id=str(note["id"]),
+            )
+        head = coordinator.service.store.get_current_head(
+            coordinator.dataset_id,
+            "notes.note",
+            str(note["id"]),
+        )
+        if head is None or head.object_revision is None:
+            raise ConflictError(
+                "Task note has no synchronized base.",
+                entity="notes",
+                entity_id=str(note["id"]),
+            )
+        return ServerOriginMutationStep(
+            domain="notes.note",
+            operation="upsert",
+            object_id=str(note["id"]),
+            payload={
+                "title": str(note.get("title") or ""),
+                "content": content,
+                "conversation_id": note.get("conversation_id"),
+                "message_id": note.get("message_id"),
+            },
+            object_revision=int(head.object_revision) + 1,
+        )
+
+    def _create_task_through_sync(
+        self,
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        coordinator: NotesTaskCoordinator,
+        note_id: str,
+        text: str,
+        status: str,
+        metadata: dict[str, Any],
+        expected_note_version: int,
+        actor: TaskActor,
+    ) -> dict[str, Any]:
+        """Append and materialize one projected task creation group."""
+
+        note = self._require_note_version(
+            db,
+            note_id=note_id,
+            expected_note_version=expected_note_version,
+        )
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=note_id,
+            )
+        identity_hash = hashlib.sha256(
+            json.dumps(
+                [
+                    scope.owner_user_id,
+                    scope.dataset_id,
+                    note_id,
+                    expected_note_version,
+                    text.strip(),
+                    status,
+                    metadata,
+                    actor.actor_type,
+                    actor.actor_id,
+                    actor.tool_name,
+                ],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        task_id = str(UUID(bytes=bytes.fromhex(identity_hash[:32]), version=4))
+        payload = parse_notes_task_v1(
+            {
+                "task_id": task_id,
+                "note_id": note_id,
+                "title": text.strip(),
+                "description": None,
+                "status": status,
+                "completed_at": occurred_at if status == "done" else None,
+                "priority": metadata.get("priority"),
+                "due_date": metadata.get("due_date"),
+                "estimate": metadata.get("estimate"),
+                "recurrence": None,
+                "assignee_id": None,
+                "tags": [],
+                "custom": {},
+            },
+            owner_user_id=scope.owner_user_id,
+        )
+        canonical_hash = notes_task_object_hash(
+            payload,
+            revision=1,
+            deleted=False,
+        )
+        after = {
+            "owner_user_id": scope.owner_user_id,
+            "dataset_id": scope.dataset_id,
+            "id": task_id,
+            "note_id": note_id,
+            "text": payload.title,
+            "status": payload.status,
+            "metadata_json": db.task_store._sync_task_metadata(payload),
+            "projection_status": "live",
+            "deleted": False,
+            "created_at": occurred_at,
+            "updated_at": occurred_at,
+            "completed_at": payload.completed_at,
+            "client_id": db.client_id,
+            "version": 1,
+            "canonical_revision": 1,
+            "canonical_hash": canonical_hash,
+            "source_diagnostic_code": None,
+            "source_diagnostic_hash": None,
+        }
+        marker = "x" if status == "done" else " "
+        line = f"- [{marker}] {self._render_body(text=payload.title, metadata=metadata)}"
+        line += " " + render_task_marker(
+            task_id,
+            revision=1,
+            object_hash=canonical_hash,
+        )
+        note_step = self._note_projection_step(
+            coordinator=coordinator,
+            note=note,
+            content=self._append_checklist_line(str(note.get("content") or ""), line),
+        )
+        source, source_kind = self._task_source(actor)
+        mutation = build_task_capture_mutation(
+            db=db,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            actor=actor,
+            before=None,
+            after=after,
+            source_kind=source_kind,
+        )
+        result = coordinator.capture(
+            coordinator.plan_task_mutation(mutation, note_step=note_step),
+            source=source,
+        )
+        if not result.fully_applied:
+            raise ConflictError(
+                "Task projection is incomplete.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        updated_note = self._require_note(db, note_id)
+        matches = [
+            item
+            for item in parse_note_checklists(
+                note_id=note_id,
+                note_version=int(updated_note["version"]),
+                content=str(updated_note.get("content") or ""),
+            ).items
+            if item.marker is not None and item.marker.task_id == task_id
+        ]
+        if len(matches) != 1:
+            raise ConflictError(
+                "Created task projection is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        item = matches[0]
+        db.set_task_projection(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+            note_id=note_id,
+            note_version=int(updated_note["version"]),
+            line_number=item.locator.line_number,
+            start_offset=item.locator.start_offset,
+            end_offset=item.locator.end_offset,
+            normalized_text_hash=item.locator.normalized_text_hash,
+            occurrence_index=item.locator.occurrence_index,
+            block_fingerprint=item.locator.block_fingerprint,
+            raw_line=item.raw_line,
+            has_child_content=item.has_child_content,
+        )
+        created = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if created is None:
+            raise ConflictError(
+                "Created task was not found.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        return created
+
+    def _update_projected_task_through_sync(
+        self,
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        coordinator: NotesTaskCoordinator,
+        task: dict[str, Any],
+        expected_note_version: int | None,
+        actor: TaskActor,
+        text: str | None,
+        status: str | None,
+        metadata: dict[str, Any] | None,
+        record_only: bool,
+    ) -> dict[str, Any]:
+        """Append a task/activity/note update before projecting product state."""
+
+        task_id = str(task["id"])
+        if record_only:
+            raise ConflictError(
+                f"Task '{task_id}' is projected into a note and cannot be updated record-only.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        if expected_note_version is None:
+            raise InputError("expected_note_version is required for projected task updates.")
+        projection = self._require_projection(
+            db,
+            task_id=task_id,
+            scope=scope,
+            conn=None,
+        )
+        note = self._require_note_version(
+            db,
+            note_id=str(task["note_id"]),
+            expected_note_version=expected_note_version,
+        )
+        self._require_projection_version(projection, expected_note_version, task_id)
+        parsed_item = self._find_projected_item(
+            note_id=str(note["id"]),
+            note_version=int(note["version"]),
+            content=str(note.get("content") or ""),
+            projection=projection,
+            task_id=task_id,
+        )
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        after = self._planned_projected_task(
+            db=db,
+            task=task,
+            owner_user_id=scope.owner_user_id,
+            occurred_at=occurred_at,
+            text=text,
+            status=status,
+            metadata=metadata,
+        )
+        new_line = self._rewrite_line(
+            raw_line=parsed_item.raw_line,
+            checked=str(after["status"]) == "done",
+            text=str(after["text"]),
+            metadata={
+                key: after["metadata_json"].get(key)
+                for key in _METADATA_TOKEN_ORDER
+                if after["metadata_json"].get(key) is not None
+            },
+            preserve_existing_body=False,
+        )
+        new_line += " " + render_task_marker(
+            task_id,
+            revision=int(after["canonical_revision"]),
+            object_hash=str(after["canonical_hash"]),
+        )
+        new_content = self._replace_projection_line(
+            content=str(note.get("content") or ""),
+            projection=projection,
+            new_line=new_line,
+        )
+        source, source_kind = self._task_source(actor)
+        mutation = build_task_capture_mutation(
+            db=db,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            actor=actor,
+            before=task,
+            after=after,
+            source_kind=source_kind,
+        )
+        note_step = self._note_projection_step(
+            coordinator=coordinator,
+            note=note,
+            content=new_content,
+        )
+        result = coordinator.capture(
+            coordinator.plan_task_mutation(mutation, note_step=note_step),
+            source=source,
+        )
+        if not result.fully_applied:
+            raise ConflictError(
+                "Task projection is incomplete.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        updated_note = self._require_note(db, str(note["id"]))
+        updated_matches = [
+            item
+            for item in parse_note_checklists(
+            note_id=str(note["id"]),
+            note_version=int(updated_note["version"]),
+            content=str(updated_note.get("content") or ""),
+            ).items
+            if item.marker is not None and item.marker.task_id == task_id
+        ]
+        if len(updated_matches) != 1:
+            raise ConflictError(
+                "Updated task projection is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        updated_item = updated_matches[0]
+        db.set_task_projection(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+            note_id=str(note["id"]),
+            note_version=int(updated_note["version"]),
+            line_number=updated_item.locator.line_number,
+            start_offset=updated_item.locator.start_offset,
+            end_offset=updated_item.locator.end_offset,
+            normalized_text_hash=updated_item.locator.normalized_text_hash,
+            occurrence_index=updated_item.locator.occurrence_index,
+            block_fingerprint=updated_item.locator.block_fingerprint,
+            raw_line=updated_item.raw_line,
+            has_child_content=updated_item.has_child_content,
+        )
+        updated = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if updated is None:
+            raise ConflictError(
+                "Updated task was not found.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        return updated
+
+    def _delete_task_through_sync(
+        self,
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        coordinator: NotesTaskCoordinator,
+        task_id: str,
+        expected_task_version: int,
+        expected_note_version: int | None,
+        record_only: bool,
+        actor: TaskActor,
+    ) -> dict[str, Any]:
+        """Append a complete task deletion before product materialization."""
+
+        task = self._require_task_version(
+            db,
+            task_id=task_id,
+            expected_task_version=expected_task_version,
+            scope=scope,
+            conn=None,
+        )
+        projection_status = str(task["projection_status"])
+        if projection_status == "ambiguous":
+            raise ConflictError(
+                f"Task projection is ambiguous for task '{task_id}'.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        note_step: ServerOriginMutationStep | None = None
+        if projection_status == "unlinked":
+            if not record_only:
+                raise ConflictError(
+                    f"Task projection is unlinked for task '{task_id}'. Record-only delete mode is required.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )
+        elif projection_status == "live":
+            if record_only:
+                raise ConflictError(
+                    f"Task '{task_id}' is projected into a note and cannot be deleted record-only.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )
+            if expected_note_version is None:
+                raise InputError(
+                    "expected_note_version is required for projected task deletion."
+                )
+            projection = self._require_projection(
+                db,
+                task_id=task_id,
+                scope=scope,
+                conn=None,
+            )
+            note = self._require_note_version(
+                db,
+                note_id=str(task["note_id"]),
+                expected_note_version=expected_note_version,
+            )
+            self._require_projection_version(
+                projection,
+                expected_note_version,
+                task_id,
+            )
+            parsed_item = self._find_projected_item(
+                note_id=str(note["id"]),
+                note_version=int(note["version"]),
+                content=str(note.get("content") or ""),
+                projection=projection,
+                task_id=task_id,
+            )
+            if parsed_item.has_child_content:
+                raise ConflictError(
+                    f"Task '{task_id}' has nested child content and cannot be deleted by default.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )
+            new_content = self._delete_projection_line(
+                str(note.get("content") or ""),
+                projection,
+            )
+            if not new_content:
+                new_content = "\n"
+            note_step = self._note_projection_step(
+                coordinator=coordinator,
+                note=note,
+                content=new_content,
+            )
+        else:
+            raise ConflictError(
+                f"Task projection is {projection_status} for task '{task_id}'.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        source_row = db.task_store._sync_bootstrap_task_row(
+            task,
+            scope.owner_user_id,
+        )
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        revision = int(source_row["canonical_revision"]) + 1
+        payload = parse_notes_task_v1(
+            source_row["sync_payload"],
+            owner_user_id=scope.owner_user_id,
+        )
+        after = {
+            **task,
+            "deleted": True,
+            "projection_status": "deleted",
+            "updated_at": occurred_at,
+            "version": int(task["version"]) + 1,
+            "canonical_revision": revision,
+            "canonical_hash": notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=True,
+            ),
+            "source_diagnostic_code": None,
+            "source_diagnostic_hash": None,
+        }
+        source, source_kind = self._task_source(actor)
+        mutation = build_task_capture_mutation(
+            db=db,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            actor=actor,
+            before=task,
+            after=after,
+            source_kind=source_kind,
+        )
+        result = coordinator.capture(
+            coordinator.plan_task_mutation(mutation, note_step=note_step),
+            source=source,
+        )
+        if not result.fully_applied:
+            raise ConflictError(
+                "Task projection is incomplete.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        deleted = db.task_store.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+            include_deleted=True,
+        )
+        if deleted is None or not bool(deleted["deleted"]):
+            raise ConflictError(
+                "Deleted task was not found.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        return deleted
+
+    def _update_unlinked_metadata_through_sync(
+        self,
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        coordinator: NotesTaskCoordinator,
+        task_id: str,
+        expected_task_version: int,
+        actor: TaskActor,
+        metadata: dict[str, Any] | None,
+        text: str | None,
+        status: str | None,
+        record_only: bool,
+    ) -> dict[str, Any]:
+        """Append an unlinked metadata transition before product materialization."""
+
+        task = self._require_task_version(
+            db,
+            task_id=task_id,
+            expected_task_version=expected_task_version,
+            scope=scope,
+            conn=None,
+        )
+        projection_status = str(task["projection_status"])
+        if projection_status != "unlinked":
+            raise ConflictError(
+                f"Task projection is {projection_status} for task '{task_id}'.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        if not record_only or text is not None or status is not None:
+            raise ConflictError(
+                f"Task projection is unlinked for task '{task_id}'.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        if metadata is None:
+            return task
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        after = self._planned_metadata_task(
+            db=db,
+            task=task,
+            metadata=metadata,
+            owner_user_id=scope.owner_user_id,
+            occurred_at=occurred_at,
+        )
+        source, source_kind = self._task_source(actor)
+        mutation = build_task_capture_mutation(
+            db=db,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            actor=actor,
+            before=task,
+            after=after,
+            source_kind=source_kind,
+        )
+        result = coordinator.capture(
+            coordinator.plan_task_mutation(mutation),
+            source=source,
+        )
+        if not result.fully_applied:
+            raise ConflictError(
+                "Task projection is incomplete.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        updated = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if updated is None:
+            raise ConflictError(
+                "Updated task was not found.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        return updated
 
     def _capture_task_mutation(
         self,
@@ -585,6 +1313,1103 @@ class NotesTaskService:
             tool_name="notes.tasks.reconciliation",
         )
 
+    @staticmethod
+    def _projection_line_for_payload(
+        *,
+        item: ParsedChecklistItem,
+        task_id: str,
+        revision: int,
+        object_hash: str,
+        payload: Any,
+    ) -> str:
+        """Render one canonical managed line while preserving its list indentation."""
+
+        metadata = {
+            key: getattr(payload, key)
+            for key in _METADATA_TOKEN_ORDER
+            if getattr(payload, key) is not None
+        }
+        parsed_line = _parse_checklist_line(item.raw_line)
+        if parsed_line is None:
+            raise ConflictError(
+                "Task projection line is no longer a checklist item.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        checked = "x" if payload.status == "done" else " "
+        body = NotesTaskService._render_body(
+            text=payload.title,
+            metadata=metadata,
+        )
+        return (
+            f"{parsed_line.indent}{parsed_line.bullet}{parsed_line.space}"
+            f"[{checked}] {body} "
+            + render_task_marker(
+                task_id,
+                revision=revision,
+                object_hash=object_hash,
+            )
+        )
+
+    @staticmethod
+    def _apply_line_replacements(
+        content: str,
+        replacements: list[tuple[int, int, str]],
+    ) -> str:
+        """Apply already-validated line rewrites from the end of the note."""
+
+        updated = content
+        for start, end, line in sorted(replacements, reverse=True):
+            updated = f"{updated[:start]}{line}{updated[end:]}"
+        return updated
+
+    @staticmethod
+    def _projection_candidate_without_marker(
+        *,
+        items: list[ParsedChecklistItem],
+        projection: dict[str, Any],
+        claimed_offsets: set[int] | None = None,
+    ) -> ParsedChecklistItem | None:
+        """Locate one review-only markerless candidate from disposable hints."""
+
+        claimed = claimed_offsets if claimed_offsets is not None else set()
+        candidates = [
+            item
+            for item in items
+            if item.marker is None and item.locator.start_offset not in claimed
+        ]
+        exact_text = [
+            item
+            for item in candidates
+            if item.locator.normalized_text_hash
+            == projection["normalized_text_hash"]
+            and item.locator.occurrence_index == projection["occurrence_index"]
+        ]
+        if len(exact_text) == 1:
+            return exact_text[0]
+        same_line = [
+            item
+            for item in candidates
+            if item.locator.line_number == projection["line_number"]
+        ]
+        if len(same_line) == 1:
+            return same_line[0]
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
+
+    @staticmethod
+    def _projection_drift_resolution_identity(
+        *,
+        drift_id: str,
+        action: str,
+    ) -> tuple[str, str]:
+        """Return the reserved source and key for one drift resolution."""
+
+        source = (
+            "notes.tasks.reconciliation"
+            if action == "keep_task"
+            else "notes.tasks.repair"
+        )
+        return source, f"notes-task-drift-{drift_id}-{action}"
+
+    @staticmethod
+    def _resume_applied_projection_drift_resolution(
+        *,
+        coordinator: NotesTaskCoordinator,
+        dataset_id: str,
+        note_id: str,
+        task_id: str,
+        action: str,
+        source: str,
+        idempotency_key: str,
+        expected_task_claim: tuple[int | None, str | None],
+    ) -> bool:
+        """Repair an exact resolution group committed before drift CAS."""
+
+        from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+            resume_server_origin_mutation_group,
+            server_origin_mutation_batch_group_id,
+        )
+
+        group_id = server_origin_mutation_batch_group_id(
+            dataset_id=dataset_id,
+            source=source,
+            idempotency_key=idempotency_key,
+        )
+        if not coordinator.service.store.list_mutation_group(dataset_id, group_id):
+            return False
+        result = resume_server_origin_mutation_group(
+            service=coordinator.service,
+            dataset_id=dataset_id,
+            mutation_group_id=group_id,
+        )
+        if not result.fully_applied:
+            return False
+        domains = [envelope.domain for envelope in result.envelopes]
+        expected_domains = (
+            ["notes.note"]
+            if action == "keep_task"
+            else ["notes.task", "notes.task_activity", "notes.note"]
+        )
+        if domains != expected_domains:
+            return False
+        note_members = [
+            envelope
+            for envelope in result.envelopes
+            if envelope.domain == "notes.note" and envelope.object_id == note_id
+        ]
+        task_members = [
+            envelope
+            for envelope in result.envelopes
+            if envelope.domain == "notes.task" and envelope.object_id == task_id
+        ]
+        if len(note_members) != 1 or len(task_members) != (0 if action == "keep_task" else 1):
+            return False
+        note_head = coordinator.service.store.get_current_head(
+            dataset_id,
+            "notes.note",
+            note_id,
+        )
+        task_head = coordinator.service.store.get_current_head(
+            dataset_id,
+            "notes.task",
+            task_id,
+        )
+        note_member = note_members[0]
+        if (
+            note_head is None
+            or note_head.server_cursor != note_member.server_cursor
+            or note_head.payload_hash != note_member.payload_hash
+        ):
+            return False
+        current_task_claim = (
+            (task_head.server_cursor, task_head.payload_hash)
+            if task_head is not None
+            else (None, None)
+        )
+        if action == "keep_task":
+            return current_task_claim == expected_task_claim
+        task_member = task_members[0]
+        return current_task_claim == (
+            task_member.server_cursor,
+            task_member.payload_hash,
+        )
+
+    def _complete_projection_drift_resolution(
+        self,
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        note_id: str,
+        task_id: str,
+        drift_id: str,
+        action: str,
+        expected_note_head_cursor: int | None,
+        expected_note_head_hash: str | None,
+        expected_task_head_cursor: int | None,
+        expected_task_head_hash: str | None,
+    ) -> dict[str, Any]:
+        """Close one drift and refresh its disposable projection cache."""
+
+        resolved = db.task_store.compare_and_set_task_projection_drift(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            note_id=note_id,
+            task_id=task_id,
+            drift_id=drift_id,
+            expected_note_head_cursor=expected_note_head_cursor,
+            expected_note_head_hash=expected_note_head_hash,
+            expected_task_head_cursor=expected_task_head_cursor,
+            expected_task_head_hash=expected_task_head_hash,
+            status="resolved",
+        )
+        if action == "unlink":
+            return resolved
+        final_note = self._require_note(db, note_id)
+        final_matches = [
+            item
+            for item in parse_note_checklists(
+                note_id=note_id,
+                note_version=int(final_note["version"]),
+                content=str(final_note.get("content") or ""),
+            ).items
+            if item.marker is not None and item.marker.task_id == task_id
+        ]
+        if len(final_matches) == 1:
+            final_item = final_matches[0]
+            db.set_task_projection(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                task_id=task_id,
+                note_id=note_id,
+                note_version=int(final_note["version"]),
+                line_number=final_item.locator.line_number,
+                start_offset=final_item.locator.start_offset,
+                end_offset=final_item.locator.end_offset,
+                normalized_text_hash=final_item.locator.normalized_text_hash,
+                occurrence_index=final_item.locator.occurrence_index,
+                block_fingerprint=final_item.locator.block_fingerprint,
+                raw_line=final_item.raw_line,
+                has_child_content=final_item.has_child_content,
+            )
+        return resolved
+
+    @staticmethod
+    def _record_projection_drift(
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        coordinator: NotesTaskCoordinator,
+        note_id: str,
+        task_id: str,
+        marker_revision: int,
+        marker_hash: str,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        """Persist one deterministic privacy-safe projection drift claim."""
+
+        note_head = coordinator.service.store.get_current_head(
+            scope.dataset_id,
+            "notes.note",
+            note_id,
+        )
+        task_head = coordinator.service.store.get_current_head(
+            scope.dataset_id,
+            "notes.task",
+            task_id,
+        )
+        note_claim = (
+            (note_head.server_cursor, note_head.payload_hash)
+            if note_head is not None
+            else (None, None)
+        )
+        task_claim = (
+            (task_head.server_cursor, task_head.payload_hash)
+            if task_head is not None
+            else (None, None)
+        )
+        identity = hashlib.sha256(
+            json.dumps(
+                [
+                    scope.owner_user_id,
+                    scope.dataset_id,
+                    note_id,
+                    task_id,
+                    marker_revision,
+                    marker_hash,
+                    *note_claim,
+                    *task_claim,
+                    reason_code,
+                ],
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).digest()
+        drift_id = str(UUID(bytes=identity[:16], version=4))
+        return db.task_store.create_task_projection_drift(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            drift_id=drift_id,
+            note_id=note_id,
+            task_id=task_id,
+            marker_base_revision=marker_revision,
+            marker_base_hash=marker_hash,
+            note_head_cursor=note_claim[0],
+            note_head_hash=note_claim[1],
+            task_head_cursor=task_claim[0],
+            task_head_hash=task_claim[1],
+            reason_code=reason_code,
+        )
+
+    def _reconcile_managed_note_through_sync(
+        self,
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        coordinator: NotesTaskCoordinator,
+        note_id: str,
+        note_version: int,
+        content: str,
+        actor: TaskActor,
+    ) -> ReconciliationResult:
+        """Converge only marker-authorized checklist projections through Sync."""
+
+        from tldw_Server_API.app.core.Sync.v2.notes_task_coordinator import (
+            _projection_anchor_from_envelope,
+            _same_projection_group,
+        )
+
+        note = self._require_note_version(
+            db,
+            note_id=note_id,
+            expected_note_version=note_version,
+        )
+        if str(note.get("content") or "") != content:
+            raise ConflictError(
+                "Note content changed before task reconciliation.",
+                entity="notes",
+                entity_id=note_id,
+            )
+        parsed = parse_note_checklists(
+            note_id=note_id,
+            note_version=note_version,
+            content=content,
+        )
+        marker_counts: dict[str, int] = {}
+        for item in parsed.items:
+            if item.marker is not None:
+                marker_counts[item.marker.task_id] = (
+                    marker_counts.get(item.marker.task_id, 0) + 1
+                )
+
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=note_id,
+            )
+        mutations: list[NotesTaskCaptureMutation] = []
+        replacements: list[tuple[int, int, str]] = []
+        matched_task_ids: set[str] = set()
+        updated_task_ids: list[str] = []
+        unlinked_task_ids: list[str] = []
+        drift_count = 0
+        claimed_markerless_offsets: set[int] = set()
+
+        for item in parsed.items:
+            marker = item.marker
+            if marker is None:
+                continue
+            task_id = marker.task_id
+            matched_task_ids.add(task_id)
+            task = db.task_store.get_task(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                task_id=task_id,
+                include_deleted=True,
+            )
+            reason_code: str | None = None
+            historical = None
+            anchor = None
+            if marker_counts[task_id] != 1:
+                reason_code = "duplicate_marker"
+            elif (
+                task is None
+                or bool(task["deleted"])
+                or str(task["note_id"]) != note_id
+                or str(task["projection_status"]) != "live"
+            ):
+                reason_code = "marker_scope_mismatch"
+            else:
+                historical = coordinator.service.store.get_historical_task_envelope(
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
+                    task_id=task_id,
+                    object_revision=marker.revision,
+                    object_hash=marker.object_hash,
+                )
+                anchor = (
+                    _projection_anchor_from_envelope(historical)
+                    if historical is not None
+                    else None
+                )
+                anchor_note = (
+                    coordinator.service.store.get_projection_note_envelope(
+                        owner_user_id=scope.owner_user_id,
+                        dataset_id=scope.dataset_id,
+                        note_id=note_id,
+                        envelope_id=anchor.note_envelope_id,
+                        object_hash=anchor.note_hash,
+                    )
+                    if anchor is not None
+                    else None
+                )
+                if historical is None or anchor is None or anchor_note is None:
+                    reason_code = "base_unavailable"
+                elif (
+                    not anchor.linked
+                    or historical.parent_id != note_id
+                    or not _same_projection_group(historical, anchor_note, anchor)
+                ):
+                    reason_code = "marker_scope_mismatch"
+            if reason_code is not None:
+                if task is not None and str(task.get("note_id")) == note_id:
+                    self._record_projection_drift(
+                        db=db,
+                        scope=scope,
+                        coordinator=coordinator,
+                        note_id=note_id,
+                        task_id=task_id,
+                        marker_revision=marker.revision,
+                        marker_hash=marker.object_hash,
+                        reason_code=reason_code,
+                    )
+                    drift_count += 1
+                continue
+
+            if task is None or historical is None:
+                raise ConflictError(
+                    "Task projection classification state is incomplete.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )
+            current = db.task_store._sync_bootstrap_task_row(
+                task,
+                scope.owner_user_id,
+            )
+            decision = classify_managed_projection(
+                item=item,
+                anchor_revision=marker.revision,
+                anchor_hash=marker.object_hash,
+                anchor_payload=historical.payload,
+                current_revision=int(current["canonical_revision"]),
+                current_hash=str(current["canonical_hash"]),
+                current_payload=current["sync_payload"],
+            )
+            if decision == "drift":
+                self._record_projection_drift(
+                    db=db,
+                    scope=scope,
+                    coordinator=coordinator,
+                    note_id=note_id,
+                    task_id=task_id,
+                    marker_revision=marker.revision,
+                    marker_hash=marker.object_hash,
+                    reason_code="both_changed",
+                )
+                drift_count += 1
+                continue
+            if decision == "no_change":
+                continue
+            if decision == "note_to_task":
+                after = self._planned_projected_task(
+                    db=db,
+                    task=task,
+                    owner_user_id=scope.owner_user_id,
+                    occurred_at=occurred_at,
+                    text=item.text,
+                    status="done" if item.checked else "open",
+                    metadata=item.metadata,
+                )
+                mutation = build_task_capture_mutation(
+                    db=db,
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
+                    actor=actor,
+                    before=task,
+                    after=after,
+                    source_kind="markdown_reconciliation",
+                )
+                mutations.append(mutation)
+                updated_task_ids.append(task_id)
+                payload = parse_notes_task_v1(
+                    db.task_store._sync_bootstrap_task_row(
+                        after,
+                        scope.owner_user_id,
+                    )["sync_payload"],
+                    owner_user_id=scope.owner_user_id,
+                )
+                revision = int(after["canonical_revision"])
+                object_hash = str(after["canonical_hash"])
+            else:
+                payload = parse_notes_task_v1(
+                    current["sync_payload"],
+                    owner_user_id=scope.owner_user_id,
+                )
+                revision = int(current["canonical_revision"])
+                object_hash = str(current["canonical_hash"])
+            replacements.append(
+                (
+                    item.locator.start_offset,
+                    item.locator.end_offset,
+                    self._projection_line_for_payload(
+                        item=item,
+                        task_id=task_id,
+                        revision=revision,
+                        object_hash=object_hash,
+                        payload=payload,
+                    ),
+                )
+            )
+
+        live_pairs = db.task_store.list_live_projected_tasks(
+            note_id=note_id,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+        )
+        for pair in live_pairs:
+            task = pair["task"]
+            projection = pair["projection"]
+            task_id = str(task["id"])
+            if task_id in matched_task_ids:
+                continue
+            possible_line = self._projection_candidate_without_marker(
+                items=parsed.items,
+                projection=projection,
+                claimed_offsets=claimed_markerless_offsets,
+            )
+            old_item = parse_note_checklists(
+                note_id=note_id,
+                note_version=int(projection["note_version"]),
+                content=str(projection["raw_line"]),
+            ).items
+            old_marker = old_item[0].marker if old_item else None
+            if possible_line is not None and old_marker is not None:
+                claimed_markerless_offsets.add(possible_line.locator.start_offset)
+                self._record_projection_drift(
+                    db=db,
+                    scope=scope,
+                    coordinator=coordinator,
+                    note_id=note_id,
+                    task_id=task_id,
+                    marker_revision=old_marker.revision,
+                    marker_hash=old_marker.object_hash,
+                    reason_code=(
+                        possible_line.marker_reason_code or "missing_marker_base"
+                    ),
+                )
+                drift_count += 1
+                continue
+            source_row = db.task_store._sync_bootstrap_task_row(
+                task,
+                scope.owner_user_id,
+            )
+            revision = int(source_row["canonical_revision"]) + 1
+            payload = parse_notes_task_v1(
+                source_row["sync_payload"],
+                owner_user_id=scope.owner_user_id,
+            )
+            after = {
+                **task,
+                "projection_status": "unlinked",
+                "updated_at": occurred_at,
+                "version": int(task["version"]) + 1,
+                "canonical_revision": revision,
+                "canonical_hash": notes_task_object_hash(
+                    payload,
+                    revision=revision,
+                    deleted=False,
+                ),
+                "source_diagnostic_code": None,
+                "source_diagnostic_hash": None,
+            }
+            mutations.append(
+                build_task_capture_mutation(
+                    db=db,
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
+                    actor=actor,
+                    before=task,
+                    after=after,
+                    source_kind="markdown_reconciliation",
+                )
+            )
+            unlinked_task_ids.append(task_id)
+
+        new_content = self._apply_line_replacements(content, replacements)
+        if mutations:
+            note_step = self._note_projection_step(
+                coordinator=coordinator,
+                note=note,
+                content=new_content or "\n",
+            )
+            reconciliation_key = hashlib.sha256(
+                json.dumps(
+                    [
+                        note_id,
+                        note_version,
+                        *(mutation.idempotency_key for mutation in mutations),
+                        hashlib.sha256(new_content.encode("utf-8")).hexdigest(),
+                    ],
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            result = coordinator.capture(
+                coordinator.plan_note_reconciliation(
+                    mutations,
+                    note_step=note_step,
+                    idempotency_key=f"notes-task-reconcile-{reconciliation_key}",
+                ),
+                source="notes.tasks.reconciliation",
+            )
+            if not result.fully_applied:
+                raise ConflictError(
+                    "Task reconciliation is incomplete.",
+                    entity="notes",
+                    entity_id=note_id,
+                )
+        elif new_content != content:
+            note_step = self._note_projection_step(
+                coordinator=coordinator,
+                note=note,
+                content=new_content or "\n",
+            )
+            result = coordinator.capture_note_projection(
+                note_step,
+                idempotency_key=(
+                    "notes-task-note-reconcile-"
+                    + hashlib.sha256(
+                        json.dumps(
+                            [note_id, note_version, new_content],
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest()
+                ),
+            )
+            if not result.fully_applied:
+                raise ConflictError(
+                    "Task note projection is incomplete.",
+                    entity="notes",
+                    entity_id=note_id,
+                )
+
+        final_note = self._require_note(db, note_id)
+        final_parsed = parse_note_checklists(
+            note_id=note_id,
+            note_version=int(final_note["version"]),
+            content=str(final_note.get("content") or ""),
+        )
+        final_matched: list[str] = []
+        for item in final_parsed.items:
+            if item.marker is None:
+                continue
+            task = db.get_task(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                task_id=item.marker.task_id,
+            )
+            if (
+                task is None
+                or str(task["note_id"]) != note_id
+                or str(task["projection_status"]) != "live"
+                or int(task["canonical_revision"]) != item.marker.revision
+                or str(task["canonical_hash"]) != item.marker.object_hash
+            ):
+                continue
+            db.set_task_projection(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                task_id=str(task["id"]),
+                note_id=note_id,
+                note_version=int(final_note["version"]),
+                line_number=item.locator.line_number,
+                start_offset=item.locator.start_offset,
+                end_offset=item.locator.end_offset,
+                normalized_text_hash=item.locator.normalized_text_hash,
+                occurrence_index=item.locator.occurrence_index,
+                block_fingerprint=item.locator.block_fingerprint,
+                raw_line=item.raw_line,
+                has_child_content=item.has_child_content,
+            )
+            final_matched.append(str(task["id"]))
+
+        parser_warnings = sum(len(item.warnings) for item in final_parsed.items)
+        warning_count = parser_warnings + drift_count
+        db.set_reconciliation_state(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            note_id=note_id,
+            note_version=int(final_note["version"]),
+            status="clean" if warning_count == 0 else "warnings",
+            item_count=len(final_parsed.items),
+            warning_count=warning_count,
+        )
+        return ReconciliationResult(
+            note_id=note_id,
+            note_version=int(final_note["version"]),
+            parsed_count=len(final_parsed.items),
+            updated_count=len(updated_task_ids),
+            unlinked_count=len(unlinked_task_ids),
+            matched_task_ids=final_matched,
+            unlinked_task_ids=unlinked_task_ids,
+            warning_count=warning_count,
+        )
+
+    def resolve_projection_drift(
+        self,
+        *,
+        db: CharactersRAGDB,
+        note_id: str,
+        task_id: str,
+        drift_id: str,
+        action: str,
+        expected_lifecycle_revision: int,
+        expected_note_head_cursor: int | None,
+        expected_note_head_hash: str | None,
+        expected_task_head_cursor: int | None,
+        expected_task_head_hash: str | None,
+        actor: TaskActor,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve one exact open projection drift after validating every claim."""
+
+        from tldw_Server_API.app.core.Sync.v2.notes_task_coordinator import (
+            _projection_anchor_from_envelope,
+            _same_projection_group,
+        )
+
+        if action not in {"keep_task", "accept_markdown", "unlink", "dismiss"}:
+            raise InputError("Unsupported projection drift resolution action.")
+        if expected_lifecycle_revision != 1:
+            raise ConflictError(
+                "Projection drift changed concurrently.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        scope = resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=owner_user_id or db.client_id,
+        )
+        coordinator = self._active_task_coordinator(scope=scope)
+        if coordinator is None:
+            raise ConflictError(
+                "Task Sync is not active for projection drift resolution.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        drift = db.task_store.get_task_projection_drift(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            note_id=note_id,
+            task_id=task_id,
+            drift_id=drift_id,
+        )
+        expected_note = (expected_note_head_cursor, expected_note_head_hash)
+        expected_task = (expected_task_head_cursor, expected_task_head_hash)
+        if (
+            drift is None
+            or drift["status"] != "open"
+            or (drift["note_head_cursor"], drift["note_head_hash"])
+            != expected_note
+            or (drift["task_head_cursor"], drift["task_head_hash"])
+            != expected_task
+        ):
+            raise ConflictError(
+                "Projection drift changed concurrently.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        resolution_source, resolution_key = self._projection_drift_resolution_identity(
+            drift_id=drift_id,
+            action=action,
+        )
+        note_head = coordinator.service.store.get_current_head(
+            scope.dataset_id,
+            "notes.note",
+            note_id,
+        )
+        task_head = coordinator.service.store.get_current_head(
+            scope.dataset_id,
+            "notes.task",
+            task_id,
+        )
+        current_note_claim = (
+            (note_head.server_cursor, note_head.payload_hash)
+            if note_head is not None
+            else (None, None)
+        )
+        current_task_claim = (
+            (task_head.server_cursor, task_head.payload_hash)
+            if task_head is not None
+            else (None, None)
+        )
+        if action != "dismiss" and self._resume_applied_projection_drift_resolution(
+            coordinator=coordinator,
+            dataset_id=scope.dataset_id,
+            note_id=note_id,
+            task_id=task_id,
+            action=action,
+            source=resolution_source,
+            idempotency_key=resolution_key,
+            expected_task_claim=expected_task,
+        ):
+            return self._complete_projection_drift_resolution(
+                db=db,
+                scope=scope,
+                note_id=note_id,
+                task_id=task_id,
+                drift_id=drift_id,
+                action=action,
+                expected_note_head_cursor=expected_note_head_cursor,
+                expected_note_head_hash=expected_note_head_hash,
+                expected_task_head_cursor=expected_task_head_cursor,
+                expected_task_head_hash=expected_task_head_hash,
+            )
+        if current_note_claim != expected_note or current_task_claim != expected_task:
+            raise ConflictError(
+                "Projection drift heads changed concurrently.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        base_envelope = coordinator.service.store.get_historical_task_envelope(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+            object_revision=int(drift["marker_base_revision"]),
+            object_hash=str(drift["marker_base_hash"]),
+        )
+        anchor = (
+            _projection_anchor_from_envelope(base_envelope)
+            if base_envelope is not None
+            else None
+        )
+        anchor_note = (
+            coordinator.service.store.get_projection_note_envelope(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                note_id=note_id,
+                envelope_id=anchor.note_envelope_id,
+                object_hash=anchor.note_hash,
+            )
+            if anchor is not None
+            else None
+        )
+        if (
+            base_envelope is None
+            or anchor is None
+            or anchor_note is None
+            or not _same_projection_group(base_envelope, anchor_note, anchor)
+        ):
+            raise ConflictError(
+                "Projection drift anchor is unavailable.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        if action == "dismiss":
+            return db.task_store.compare_and_set_task_projection_drift(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                note_id=note_id,
+                task_id=task_id,
+                drift_id=drift_id,
+                expected_note_head_cursor=expected_note_head_cursor,
+                expected_note_head_hash=expected_note_head_hash,
+                expected_task_head_cursor=expected_task_head_cursor,
+                expected_task_head_hash=expected_task_head_hash,
+                status="dismissed",
+            )
+
+        note = self._require_note(db, note_id)
+        task = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if task is None or str(task["note_id"]) != note_id:
+            raise ConflictError(
+                "Projection drift task is unavailable.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        parsed = parse_note_checklists(
+            note_id=note_id,
+            note_version=int(note["version"]),
+            content=str(note.get("content") or ""),
+        )
+        base_matches = [
+            item
+            for item in parsed.items
+            if item.marker is not None
+            and item.marker.task_id == task_id
+            and item.marker.revision == int(drift["marker_base_revision"])
+            and item.marker.object_hash == str(drift["marker_base_hash"])
+        ]
+        if not base_matches and drift["reason_code"] in {
+            "missing_marker_base",
+            "malformed_marker",
+            "duplicate_marker",
+        }:
+            projection = db.task_store.get_task_projection(
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                task_id=task_id,
+            )
+            candidate = (
+                self._projection_candidate_without_marker(
+                    items=parsed.items,
+                    projection=projection,
+                )
+                if projection is not None
+                else None
+            )
+            if candidate is not None:
+                base_matches = [candidate]
+        if len(base_matches) != 1:
+            raise ConflictError(
+                "Projection drift Markdown claim changed concurrently.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        item = base_matches[0]
+        content = str(note.get("content") or "")
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        if action == "keep_task":
+            source_row = db.task_store._sync_bootstrap_task_row(
+                task,
+                scope.owner_user_id,
+            )
+            payload = parse_notes_task_v1(
+                source_row["sync_payload"],
+                owner_user_id=scope.owner_user_id,
+            )
+            new_line = self._projection_line_for_payload(
+                item=item,
+                task_id=task_id,
+                revision=int(source_row["canonical_revision"]),
+                object_hash=str(source_row["canonical_hash"]),
+                payload=payload,
+            )
+            note_step = self._note_projection_step(
+                coordinator=coordinator,
+                note=note,
+                content=self._replace_projection_line(
+                    content=content,
+                    projection={
+                        "start_offset": item.locator.start_offset,
+                        "end_offset": item.locator.end_offset,
+                    },
+                    new_line=new_line,
+                ),
+            )
+            capture = coordinator.capture_note_projection(
+                note_step,
+                idempotency_key=resolution_key,
+                source=resolution_source,
+            )
+        else:
+            source_row = db.task_store._sync_bootstrap_task_row(
+                task,
+                scope.owner_user_id,
+            )
+            if action == "accept_markdown":
+                after = self._planned_projected_task(
+                    db=db,
+                    task=task,
+                    owner_user_id=scope.owner_user_id,
+                    occurred_at=occurred_at,
+                    text=item.text,
+                    status="done" if item.checked else "open",
+                    metadata=item.metadata,
+                )
+                after_payload = parse_notes_task_v1(
+                    db.task_store._sync_bootstrap_task_row(
+                        after,
+                        scope.owner_user_id,
+                    )["sync_payload"],
+                    owner_user_id=scope.owner_user_id,
+                )
+                new_line = self._projection_line_for_payload(
+                    item=item,
+                    task_id=task_id,
+                    revision=int(after["canonical_revision"]),
+                    object_hash=str(after["canonical_hash"]),
+                    payload=after_payload,
+                )
+            else:
+                revision = int(source_row["canonical_revision"]) + 1
+                payload = parse_notes_task_v1(
+                    source_row["sync_payload"],
+                    owner_user_id=scope.owner_user_id,
+                )
+                after = {
+                    **task,
+                    "projection_status": "unlinked",
+                    "updated_at": occurred_at,
+                    "version": int(task["version"]) + 1,
+                    "canonical_revision": revision,
+                    "canonical_hash": notes_task_object_hash(
+                        payload,
+                        revision=revision,
+                        deleted=False,
+                    ),
+                    "source_diagnostic_code": None,
+                    "source_diagnostic_hash": None,
+                }
+                if item.marker is not None:
+                    marker_text = render_task_marker(
+                        task_id,
+                        revision=int(drift["marker_base_revision"]),
+                        object_hash=str(drift["marker_base_hash"]),
+                    )
+                    new_line = item.raw_line.removesuffix(f" {marker_text}")
+                else:
+                    new_line = self._rewrite_line(
+                        raw_line=item.raw_line,
+                        checked=item.checked,
+                        text=item.text,
+                        metadata=item.metadata,
+                        preserve_existing_body=False,
+                    )
+            mutation = build_task_capture_mutation(
+                db=db,
+                owner_user_id=scope.owner_user_id,
+                dataset_id=scope.dataset_id,
+                actor=actor,
+                before=task,
+                after=after,
+                source_kind="repair",
+            )
+            note_step = self._note_projection_step(
+                coordinator=coordinator,
+                note=note,
+                content=self._replace_projection_line(
+                    content=content,
+                    projection={
+                        "start_offset": item.locator.start_offset,
+                        "end_offset": item.locator.end_offset,
+                    },
+                    new_line=new_line,
+                ),
+            )
+            plan = replace(
+                coordinator.plan_task_mutation(mutation, note_step=note_step),
+                idempotency_key=resolution_key,
+            )
+            capture = coordinator.capture(
+                plan,
+                source=resolution_source,
+            )
+        if not capture.fully_applied:
+            raise ConflictError(
+                "Projection drift resolution is incomplete.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        if not self._resume_applied_projection_drift_resolution(
+            coordinator=coordinator,
+            dataset_id=scope.dataset_id,
+            note_id=note_id,
+            task_id=task_id,
+            action=action,
+            source=resolution_source,
+            idempotency_key=resolution_key,
+            expected_task_claim=expected_task,
+        ):
+            raise ConflictError(
+                "Projection drift heads changed concurrently.",
+                entity="tasks",
+                entity_id=drift_id,
+            )
+        return self._complete_projection_drift_resolution(
+            db=db,
+            scope=scope,
+            note_id=note_id,
+            task_id=task_id,
+            drift_id=drift_id,
+            action=action,
+            expected_note_head_cursor=expected_note_head_cursor,
+            expected_note_head_hash=expected_note_head_hash,
+            expected_task_head_cursor=expected_task_head_cursor,
+            expected_task_head_hash=expected_task_head_hash,
+        )
+
     def reconcile_note(
         self,
         *,
@@ -599,6 +2424,17 @@ class NotesTaskService:
             db,
             authenticated_owner_user_id=owner_user_id or db.client_id,
         )
+        task_coordinator = self._active_task_coordinator(scope=scope)
+        if task_coordinator is not None:
+            return self._reconcile_managed_note_through_sync(
+                db=db,
+                scope=scope,
+                coordinator=task_coordinator,
+                note_id=note_id,
+                note_version=note_version,
+                content=content,
+                actor=actor,
+            )
         return self._reconciler.reconcile_note(
             db=db,
             note_id=note_id,
@@ -723,10 +2559,23 @@ class NotesTaskService:
         self._validate_task_text(text)
         self._validate_task_status(status)
         self._validate_metadata(metadata)
+        task_coordinator = self._active_task_coordinator(scope=scope)
+        if task_coordinator is not None:
+            return self._create_task_through_sync(
+                db=db,
+                scope=scope,
+                coordinator=task_coordinator,
+                note_id=note_id,
+                text=text,
+                status=status,
+                metadata=metadata,
+                expected_note_version=expected_note_version,
+                actor=actor,
+            )
         marker = "x" if status == "done" else " "
         line = f"- [{marker}] {self._render_body(text=text.strip(), metadata=metadata)}"
 
-        coordinator = active_coordinator(db, user_id=actor.actor_id)
+        coordinator = active_coordinator(db, user_id=scope.owner_user_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
             note = self._require_note_version(db, note_id=note_id, expected_note_version=expected_note_version)
@@ -775,6 +2624,405 @@ class NotesTaskService:
             )
             return task
 
+    @staticmethod
+    def _task_projection_line(
+        *,
+        task: dict[str, Any],
+    ) -> str:
+        """Render one canonical top-level line for an explicit link operation."""
+
+        marker = "x" if str(task["status"]) == "done" else " "
+        metadata = dict(task.get("metadata_json") or {})
+        body = NotesTaskService._render_body(
+            text=str(task["text"]),
+            metadata={
+                key: metadata[key]
+                for key in _METADATA_TOKEN_ORDER
+                if metadata.get(key) is not None
+            },
+        )
+        return (
+            f"- [{marker}] {body} "
+            + render_task_marker(
+                str(task["id"]),
+                revision=int(task["canonical_revision"]),
+                object_hash=str(task["canonical_hash"]),
+            )
+        )
+
+    @staticmethod
+    def _cache_materialized_task_projection(
+        *,
+        db: CharactersRAGDB,
+        scope: TaskStoreScope,
+        task_id: str,
+    ) -> None:
+        """Refresh the disposable locator cache after a linked group applies."""
+
+        task = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if task is None or task["projection_status"] != "live":
+            raise ConflictError(
+                "Linked task product state is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        note = db.get_note_by_id(str(task["note_id"]))
+        if note is None:
+            raise ConflictError(
+                "Linked task note is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        matches = [
+            item
+            for item in parse_note_checklists(
+                note_id=str(note["id"]),
+                note_version=int(note["version"]),
+                content=str(note.get("content") or ""),
+            ).items
+            if item.marker is not None and item.marker.task_id == task_id
+        ]
+        if len(matches) != 1:
+            raise ConflictError(
+                "Linked task marker is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        item = matches[0]
+        db.set_task_projection(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+            note_id=str(note["id"]),
+            note_version=int(note["version"]),
+            line_number=item.locator.line_number,
+            start_offset=item.locator.start_offset,
+            end_offset=item.locator.end_offset,
+            normalized_text_hash=item.locator.normalized_text_hash,
+            occurrence_index=item.locator.occurrence_index,
+            block_fingerprint=item.locator.block_fingerprint,
+            raw_line=item.raw_line,
+            has_child_content=item.has_child_content,
+        )
+
+    def restore_task(
+        self,
+        *,
+        db: CharactersRAGDB,
+        task_id: str,
+        expected_task_version: int,
+        expected_note_version: int,
+        expected_base_server_cursor: int,
+        expected_base_revision: int,
+        expected_base_hash: str,
+        actor: TaskActor,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Restore one exact task tombstone and its verified former projection."""
+
+        scope = resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=owner_user_id or db.client_id,
+        )
+        coordinator = self._active_task_coordinator(scope=scope)
+        if coordinator is None or coordinator.service is None:
+            raise ConflictError(
+                "Task restore requires active synchronized task authority.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        task = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+            include_deleted=True,
+        )
+        if (
+            task is None
+            or not bool(task["deleted"])
+            or int(task["version"]) != expected_task_version
+        ):
+            raise ConflictError(
+                "Task tombstone changed concurrently.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        task_head = coordinator.service.store.get_current_head(
+            scope.dataset_id,
+            "notes.task",
+            task_id,
+        )
+        if (
+            task_head is None
+            or task_head.operation != "tombstone"
+            or task_head.server_cursor != expected_base_server_cursor
+            or task_head.object_revision != expected_base_revision
+            or task_head.payload_hash != expected_base_hash
+            or int(task["canonical_revision"]) != expected_base_revision
+            or str(task["canonical_hash"]) != expected_base_hash
+        ):
+            raise ConflictError(
+                "Task restore requires the exact current tombstone base.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        note = self._require_note_version(
+            db,
+            note_id=str(task["note_id"]),
+            expected_note_version=expected_note_version,
+        )
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        source_row = db.task_store._sync_bootstrap_task_row(
+            task,
+            scope.owner_user_id,
+        )
+        payload = parse_notes_task_v1(
+            source_row["sync_payload"],
+            owner_user_id=scope.owner_user_id,
+        )
+        revision = expected_base_revision + 1
+        from tldw_Server_API.app.core.Sync.v2.notes_task_coordinator import (
+            _projection_anchor_from_envelope,
+        )
+
+        prior_anchor = _projection_anchor_from_envelope(task_head)
+        restore_linked = prior_anchor is not None and prior_anchor.linked
+        after = {
+            **task,
+            "deleted": False,
+            "projection_status": "live" if restore_linked else "unlinked",
+            "updated_at": occurred_at,
+            "version": int(task["version"]) + 1,
+            "canonical_revision": revision,
+            "canonical_hash": notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=False,
+            ),
+            "source_diagnostic_code": None,
+            "source_diagnostic_hash": None,
+        }
+        note_step = None
+        if restore_linked:
+            note_head = coordinator.service.store.get_current_head(
+                scope.dataset_id,
+                "notes.note",
+                str(note["id"]),
+            )
+            if (
+                prior_anchor is None
+                or note_head is None
+                or note_head.client_envelope_id != prior_anchor.note_envelope_id
+                or note_head.payload_hash != prior_anchor.note_hash
+            ):
+                raise ConflictError(
+                    "Task restore note base is unavailable.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )
+            note_content = str(note.get("content") or "")
+            if any(
+                item.marker is not None and item.marker.task_id == task_id
+                for item in parse_note_checklists(
+                    note_id=str(note["id"]),
+                    note_version=int(note["version"]),
+                    content=note_content,
+                ).items
+            ):
+                raise ConflictError(
+                    "Task restore marker already exists.",
+                    entity="tasks",
+                    entity_id=task_id,
+                )
+            note_step = self._note_projection_step(
+                coordinator=coordinator,
+                note=note,
+                content=self._append_checklist_line(
+                    note_content,
+                    self._task_projection_line(task=after),
+                ),
+            )
+        source, source_kind = self._task_source(actor)
+        mutation = build_task_capture_mutation(
+            db=db,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            actor=actor,
+            before=task,
+            after=after,
+            source_kind=source_kind,
+        )
+        result = coordinator.capture(
+            coordinator.plan_task_mutation(mutation, note_step=note_step),
+            source=source,
+        )
+        if not result.fully_applied:
+            raise ConflictError(
+                "Task restore projection is incomplete.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        if restore_linked:
+            self._cache_materialized_task_projection(
+                db=db,
+                scope=scope,
+                task_id=task_id,
+            )
+        restored = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if restored is None:
+            raise ConflictError(
+                "Restored task was not found.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        return restored
+
+    def relink_task(
+        self,
+        *,
+        db: CharactersRAGDB,
+        task_id: str,
+        note_id: str,
+        expected_task_version: int,
+        expected_note_version: int,
+        actor: TaskActor,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Relink one unlinked task to its immutable authorized parent note."""
+
+        scope = resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=owner_user_id or db.client_id,
+        )
+        coordinator = self._active_task_coordinator(scope=scope)
+        if coordinator is None or coordinator.service is None:
+            raise ConflictError(
+                "Task relink requires active synchronized task authority.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        task = self._require_task_version(
+            db,
+            task_id=task_id,
+            expected_task_version=expected_task_version,
+            scope=scope,
+            conn=None,
+        )
+        if task["projection_status"] != "unlinked" or str(task["note_id"]) != note_id:
+            raise ConflictError(
+                "Task relink destination is not its authorized parent note.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        note = self._require_note_version(
+            db,
+            note_id=note_id,
+            expected_note_version=expected_note_version,
+        )
+        content = str(note.get("content") or "")
+        if any(
+            item.marker is not None and item.marker.task_id == task_id
+            for item in parse_note_checklists(
+                note_id=note_id,
+                note_version=int(note["version"]),
+                content=content,
+            ).items
+        ):
+            raise ConflictError(
+                "Task relink marker already exists.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        occurred_at = normalize_sync_timestamp(coordinator.service.clock())
+        if occurred_at is None:
+            raise ConflictError(
+                "Task mutation timestamp is unavailable.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        source_row = db.task_store._sync_bootstrap_task_row(
+            task,
+            scope.owner_user_id,
+        )
+        payload = parse_notes_task_v1(
+            source_row["sync_payload"],
+            owner_user_id=scope.owner_user_id,
+        )
+        revision = int(task["canonical_revision"]) + 1
+        after = {
+            **task,
+            "projection_status": "live",
+            "updated_at": occurred_at,
+            "version": int(task["version"]) + 1,
+            "canonical_revision": revision,
+            "canonical_hash": notes_task_object_hash(
+                payload,
+                revision=revision,
+                deleted=False,
+            ),
+            "source_diagnostic_code": None,
+            "source_diagnostic_hash": None,
+        }
+        note_step = self._note_projection_step(
+            coordinator=coordinator,
+            note=note,
+            content=self._append_checklist_line(
+                content,
+                self._task_projection_line(task=after),
+            ),
+        )
+        source, source_kind = self._task_source(actor)
+        mutation = build_task_capture_mutation(
+            db=db,
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            actor=actor,
+            before=task,
+            after=after,
+            source_kind=source_kind,
+        )
+        result = coordinator.capture(
+            coordinator.plan_task_mutation(mutation, note_step=note_step),
+            source=source,
+        )
+        if not result.fully_applied:
+            raise ConflictError(
+                "Task relink projection is incomplete.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        self._cache_materialized_task_projection(
+            db=db,
+            scope=scope,
+            task_id=task_id,
+        )
+        relinked = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
+        if relinked is None:
+            raise ConflictError(
+                "Relinked task was not found.",
+                entity="tasks",
+                entity_id=task_id,
+            )
+        return relinked
+
     def update_task(
         self,
         *,
@@ -799,7 +3047,42 @@ class NotesTaskService:
         if metadata is not None:
             self._validate_metadata(metadata)
 
-        coordinator = active_coordinator(db, user_id=actor.actor_id)
+        task_coordinator = self._active_task_coordinator(scope=scope)
+        if task_coordinator is not None:
+            task = self._require_task_version(
+                db,
+                task_id=task_id,
+                expected_task_version=expected_task_version,
+                scope=scope,
+                conn=None,
+            )
+            if str(task["projection_status"]) == "live":
+                return self._update_projected_task_through_sync(
+                    db=db,
+                    scope=scope,
+                    coordinator=task_coordinator,
+                    task=task,
+                    expected_note_version=expected_note_version,
+                    actor=actor,
+                    text=text,
+                    status=status,
+                    metadata=metadata,
+                    record_only=record_only,
+                )
+            return self._update_unlinked_metadata_through_sync(
+                db=db,
+                scope=scope,
+                coordinator=task_coordinator,
+                task_id=task_id,
+                expected_task_version=expected_task_version,
+                actor=actor,
+                metadata=metadata,
+                text=text,
+                status=status,
+                record_only=record_only,
+            )
+
+        coordinator = active_coordinator(db, user_id=scope.owner_user_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
             if conn is not None:
@@ -976,7 +3259,19 @@ class NotesTaskService:
         scope = resolve_task_compatibility_scope(
             db, authenticated_owner_user_id=owner_user_id or db.client_id
         )
-        coordinator = active_coordinator(db, user_id=actor.actor_id)
+        task_coordinator = self._active_task_coordinator(scope=scope)
+        if task_coordinator is not None:
+            return self._delete_task_through_sync(
+                db=db,
+                scope=scope,
+                coordinator=task_coordinator,
+                task_id=task_id,
+                expected_task_version=expected_task_version,
+                expected_note_version=expected_note_version,
+                record_only=record_only,
+                actor=actor,
+            )
+        coordinator = active_coordinator(db, user_id=scope.owner_user_id)
         transaction = db.transaction() if coordinator is None else nullcontext(None)
         with transaction as conn:
             if conn is not None:

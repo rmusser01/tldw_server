@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
     parse_notes_task_activity_tombstone_v1,
     parse_notes_task_activity_v1,
 )
+from tldw_Server_API.app.core.Sync.v2.server_origin import SERVER_ORIGIN_DEVICE_ID
 
 pytestmark = pytest.mark.unit
 
@@ -323,6 +324,53 @@ def _context(
         authenticated_actor_id=OWNER_ID,
         authenticated_device_id=None if trusted else DEVICE_ID,
     )
+
+
+def test_activity_adapter_accepts_closed_server_projection_routing_only() -> None:
+    incoming = _incoming_create(event_type="created", trusted=True)
+    routing = {
+        "source": "notes.tasks.mcp",
+        "origin": "server",
+        "server_device_id": SERVER_ORIGIN_DEVICE_ID,
+        "server_owner_user_id": OWNER_ID,
+        "task_projection": {
+            "projection_version": 1,
+            "task_id": TASK_ID,
+            "task_envelope_id": "task-envelope-1",
+            "task_revision": 1,
+            "task_hash": "sha256:" + "a" * 64,
+            "note_envelope_id": "note-envelope-1",
+            "note_hash": "sha256:" + "b" * 64,
+            "linked": True,
+            "marker_hash": "sha256:" + "c" * 64,
+        },
+    }
+    routed = replace(
+        incoming,
+        device_id=SERVER_ORIGIN_DEVICE_ID,
+        routing_metadata=routing,
+    )
+
+    assert isinstance(
+        _adapter().evaluate_envelope(
+            routed,
+            dataset=_dataset(),
+            context=_context(trusted=True),
+        ),
+        AdapterAccepted,
+    )
+    injected = _adapter().evaluate_envelope(
+        routed,
+        dataset=_dataset(),
+        context=_context(),
+    )
+    malformed = _adapter().evaluate_envelope(
+        replace(routed, routing_metadata={**routing, "markdown": "secret"}),
+        dataset=_dataset(),
+        context=_context(trusted=True),
+    )
+    assert isinstance(injected, AdapterRejected)
+    assert isinstance(malformed, AdapterRejected)
 
 
 @pytest.mark.parametrize("task_id", [TASK_ID, None])

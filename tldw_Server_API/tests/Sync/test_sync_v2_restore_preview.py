@@ -524,6 +524,101 @@ def _ordered_restore_heads(
     return order_restore_envelopes(expanded)
 
 
+def _notes_task_restore_envelope(
+    *,
+    domain: str,
+    object_id: str,
+    note_id: str,
+    cursor: int,
+    task_id: str | None = None,
+    operation: str = "upsert",
+) -> SyncEnvelope:
+    payload: dict[str, Any] = {"note_id": note_id}
+    if domain == "notes.task":
+        payload.update({"task_id": object_id, "title": "Restore task"})
+    else:
+        payload.update(
+            {
+                "activity_id": object_id,
+                "task_id": task_id,
+                "event_type": "updated",
+            }
+        )
+    return _stored_envelope(
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id=f"restore-{domain}-{cursor}",
+            domain=domain,  # type: ignore[arg-type]
+            operation=operation,  # type: ignore[arg-type]
+            object_id=object_id,
+            parent_id=note_id,
+            device_id="server-origin",
+            object_revision=1,
+            payload=payload,
+            payload_hash=f"sha256:restore-{cursor}",
+            created_at_client=_clock(),
+            deleted=operation == "tombstone",
+            status="accepted",
+            apply_status="applied",
+        ),
+        cursor,
+    )
+
+
+def test_notes_task_restore_orders_parent_note_then_task_then_activity() -> None:
+    note_id = "11111111-1111-4111-8111-111111111111"
+    task_id = "22222222-2222-4222-8222-222222222222"
+    note = _stored_envelope(
+        _note_envelope(
+            object_id=note_id,
+            client_envelope_id="restore-task-parent-note",
+        ),
+        3,
+    )
+    task = _notes_task_restore_envelope(
+        domain="notes.task",
+        object_id=task_id,
+        note_id=note_id,
+        cursor=2,
+    )
+    activity = _notes_task_restore_envelope(
+        domain="notes.task_activity",
+        object_id="33333333-3333-4333-8333-333333333333",
+        task_id=task_id,
+        note_id=note_id,
+        cursor=1,
+    )
+
+    ordered = order_restore_envelopes([activity, task, note])
+
+    assert [item.domain for item in ordered] == [
+        "notes.note",
+        "notes.task",
+        "notes.task_activity",
+    ]
+
+
+def test_notes_task_restore_requires_live_parent_but_tombstone_does_not() -> None:
+    note_id = "11111111-1111-4111-8111-111111111111"
+    live = _notes_task_restore_envelope(
+        domain="notes.task",
+        object_id="22222222-2222-4222-8222-222222222222",
+        note_id=note_id,
+        cursor=1,
+    )
+    tombstone = _notes_task_restore_envelope(
+        domain="notes.task",
+        object_id="22222222-2222-4222-8222-222222222222",
+        note_id=note_id,
+        cursor=2,
+        operation="tombstone",
+    )
+
+    with pytest.raises(RestorePlanningError, match="dependency is missing"):
+        order_restore_envelopes([live])
+    assert order_restore_envelopes([tombstone]) == [tombstone]
+
+
 def test_notes_link_restore_preview_orders_live_group_after_both_note_providers(
     sync_service: SyncV2Service,
     client: TestClient,

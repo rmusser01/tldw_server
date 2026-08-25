@@ -163,7 +163,12 @@ def test_task_capture_builder_is_stable_and_marks_restore_intent(
     assert first == second
     assert first.operation == "upsert"
     assert first.restore_intent is True
-    assert first.step.routing_metadata == {"restore_intent": True}
+    assert first.step.routing_metadata == {
+        "restore_intent": True,
+        "product_transition_base": True,
+    }
+    assert first.step.base_object_revision == first.base_revision
+    assert first.step.base_object_hash == first.base_hash
     assert first.base_revision == deleted["canonical_revision"]
     assert first.base_hash == deleted["canonical_hash"]
     assert first.step.object_revision == next_revision

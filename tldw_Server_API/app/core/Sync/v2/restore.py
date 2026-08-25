@@ -11,11 +11,13 @@ from typing import cast
 from .models import NOTES_ORGANIZATION_DOMAINS, SyncDomain, SyncEnvelope
 
 WHOLE_OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
-    {"notes.note", "chat.conversation"}
+    {"notes.note", "notes.task", "chat.conversation"}
 )
 OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
     {
         "notes.note",
+        "notes.task",
+        "notes.task_activity",
         "chat.conversation",
         "chat.message",
         "source_cache.entry",
@@ -251,6 +253,25 @@ def _restore_dependencies(envelope: SyncEnvelope) -> list[tuple[SyncDomain, str]
                 ("notes.folder", str(payload.get("folder_sync_id"))),
             ]
         )
+    elif envelope.domain == "notes.task":
+        note_id = payload.get("note_id")
+        if not isinstance(note_id, str) or not note_id:
+            raise RestorePlanningError("notes.task restore dependency is invalid")
+        dependencies.append(("notes.note", note_id))
+    elif envelope.domain == "notes.task_activity":
+        note_id = payload.get("note_id")
+        task_id = payload.get("task_id")
+        if not isinstance(note_id, str) or not note_id:
+            raise RestorePlanningError(
+                "notes.task_activity restore dependency is invalid"
+            )
+        dependencies.append(("notes.note", note_id))
+        if task_id is not None:
+            if not isinstance(task_id, str) or not task_id:
+                raise RestorePlanningError(
+                    "notes.task_activity restore dependency is invalid"
+                )
+            dependencies.append(("notes.task", task_id))
     elif envelope.domain == "attachment.ref" and envelope.adapter_version == 2:
         parent_id = payload.get("parent_object_id")
         if not isinstance(parent_id, str) or not parent_id:

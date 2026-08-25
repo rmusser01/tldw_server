@@ -40,12 +40,13 @@ def _add_note(db: CharactersRAGDB, *, title: str, content: str) -> dict[str, Any
 
 
 def test_projected_mutations_lock_task_scope_before_reading_task_or_note_rows() -> None:
-    """Keep projected note writes in the same authority-first order as dataset bind."""
+    """Keep direct product writes in the same authority-first order as dataset bind."""
     for method in (NotesTaskService.update_task, NotesTaskService.delete_task):
         source = inspect.getsource(method)
-        fence = source.index("lock_authorized_write_scope")
-        assert fence < source.index("_require_task_version")
-        assert fence < source.index("_write_note_content")
+        direct_write_path = source[source.index("coordinator = active_coordinator") :]
+        fence = direct_write_path.index("lock_authorized_write_scope")
+        assert fence < direct_write_path.index("_require_task_version")
+        assert fence < direct_write_path.index("_write_note_content")
 
 
 def test_create_task_for_note_rejects_invalid_status_without_rewriting_note(db: CharactersRAGDB) -> None:

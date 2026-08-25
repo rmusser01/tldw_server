@@ -100,6 +100,8 @@ def test_every_task_graph_write_checks_the_private_scope_authority() -> None:
         "mark_task_activity_read",
         "mark_task_activity_dismissed",
         "set_reconciliation_state",
+        "create_task_projection_drift",
+        "compare_and_set_task_projection_drift",
     ):
         source = inspect.getsource(getattr(TaskStore, method_name))
         assert "_require_authorized_write_scope" in source, method_name
@@ -200,6 +202,10 @@ def test_canonical_task_store_methods_are_keyword_only_scope_first() -> None:
         "get_task_activity_read_state",
         "get_reconciliation_state",
         "set_reconciliation_state",
+        "create_task_projection_drift",
+        "get_task_projection_drift",
+        "list_task_projection_drifts",
+        "compare_and_set_task_projection_drift",
         "candidate_notes_for_task_discovery",
         "count_candidate_notes_for_task_discovery",
     )
@@ -348,6 +354,183 @@ def _force_projection_note_drift(db: CharactersRAGDB, task_id: str, note_id: str
         conn.execute(
             "UPDATE task_note_projections SET note_id = ? WHERE task_id = ?",
             (note_id, task_id),
+        )
+
+
+def _create_projection_drift(
+    db: CharactersRAGDB,
+    note_id: str,
+    task_id: str,
+    *,
+    drift_id: str = "drift-1",
+    reason_code: str = "both_changed",
+) -> dict:
+    return db.create_task_projection_drift(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
+        drift_id=drift_id,
+        note_id=note_id,
+        task_id=task_id,
+        marker_base_revision=1,
+        marker_base_hash="sha256:" + "a" * 64,
+        note_head_cursor=11,
+        note_head_hash="sha256:" + "b" * 64,
+        task_head_cursor=12,
+        task_head_hash="sha256:" + "c" * 64,
+        reason_code=reason_code,
+    )
+
+
+def test_projection_drift_create_is_scoped_privacy_safe_and_idempotent(
+    db: CharactersRAGDB,
+) -> None:
+    note_id = _create_note(db)
+    task = _create_task(db, note_id)
+
+    created = _create_projection_drift(db, note_id, task["id"])
+    replayed = _create_projection_drift(db, note_id, task["id"])
+
+    assert replayed == created  # nosec B101
+    assert created["status"] == "open"  # nosec B101
+    assert set(created) == {  # nosec B101
+        "owner_user_id",
+        "dataset_id",
+        "id",
+        "note_id",
+        "task_id",
+        "marker_base_revision",
+        "marker_base_hash",
+        "note_head_cursor",
+        "note_head_hash",
+        "task_head_cursor",
+        "task_head_hash",
+        "reason_code",
+        "status",
+        "created_at",
+        "updated_at",
+        "resolved_at",
+    }
+    assert db.get_task_projection_drift(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
+        note_id=note_id,
+        task_id=task["id"],
+        drift_id="drift-1",
+    ) == created
+    assert db.get_task_projection_drift(
+        owner_user_id="other-owner",
+        dataset_id=LOCAL_UNBOUND,
+        note_id=note_id,
+        task_id=task["id"],
+        drift_id="drift-1",
+    ) is None
+
+
+def test_projection_drift_stable_id_rejects_changed_claims(
+    db: CharactersRAGDB,
+) -> None:
+    note_id = _create_note(db)
+    task = _create_task(db, note_id)
+    _create_projection_drift(db, note_id, task["id"])
+
+    with pytest.raises(ConflictError, match="changed claims"):
+        db.create_task_projection_drift(
+            owner_user_id=db.client_id,
+            dataset_id=LOCAL_UNBOUND,
+            drift_id="drift-1",
+            note_id=note_id,
+            task_id=task["id"],
+            marker_base_revision=1,
+            marker_base_hash="sha256:" + "a" * 64,
+            note_head_cursor=99,
+            note_head_hash="sha256:" + "d" * 64,
+            task_head_cursor=12,
+            task_head_hash="sha256:" + "c" * 64,
+            reason_code="both_changed",
+        )
+
+
+def test_projection_drift_page_is_bounded_and_scope_filtered(
+    db: CharactersRAGDB,
+) -> None:
+    note_id = _create_note(db)
+    task = _create_task(db, note_id)
+    for index in range(3):
+        _create_projection_drift(
+            db,
+            note_id,
+            task["id"],
+            drift_id=f"drift-{index}",
+        )
+
+    page = db.list_task_projection_drifts(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
+        note_id=note_id,
+        task_id=task["id"],
+        status="open",
+        limit=2,
+        offset=1,
+    )
+
+    assert [row["id"] for row in page] == ["drift-1", "drift-0"]  # nosec B101
+    assert db.list_task_projection_drifts(
+        owner_user_id=db.client_id,
+        dataset_id="other-dataset",
+        note_id=note_id,
+        task_id=task["id"],
+        status="open",
+    ) == []
+
+
+def test_projection_drift_resolution_requires_exact_current_claims(
+    db: CharactersRAGDB,
+) -> None:
+    note_id = _create_note(db)
+    task = _create_task(db, note_id)
+    _create_projection_drift(db, note_id, task["id"])
+
+    with pytest.raises(ConflictError, match="changed concurrently"):
+        db.compare_and_set_task_projection_drift(
+            owner_user_id=db.client_id,
+            dataset_id=LOCAL_UNBOUND,
+            note_id=note_id,
+            task_id=task["id"],
+            drift_id="drift-1",
+            expected_note_head_cursor=11,
+            expected_note_head_hash="sha256:" + "b" * 64,
+            expected_task_head_cursor=99,
+            expected_task_head_hash="sha256:" + "d" * 64,
+            status="resolved",
+        )
+
+    resolved = db.compare_and_set_task_projection_drift(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
+        note_id=note_id,
+        task_id=task["id"],
+        drift_id="drift-1",
+        expected_note_head_cursor=11,
+        expected_note_head_hash="sha256:" + "b" * 64,
+        expected_task_head_cursor=12,
+        expected_task_head_hash="sha256:" + "c" * 64,
+        status="resolved",
+    )
+
+    assert resolved["status"] == "resolved"  # nosec B101
+    assert resolved["resolved_at"] is not None  # nosec B101
+    with pytest.raises(ConflictError, match="changed concurrently"):
+        db.compare_and_set_task_projection_drift(
+            owner_user_id=db.client_id,
+            dataset_id=LOCAL_UNBOUND,
+            note_id=note_id,
+            task_id=task["id"],
+            drift_id="drift-1",
+            expected_note_head_cursor=11,
+            expected_note_head_hash="sha256:" + "b" * 64,
+            expected_task_head_cursor=12,
+            expected_task_head_hash="sha256:" + "c" * 64,
+            status="dismissed",
         )
 
 
