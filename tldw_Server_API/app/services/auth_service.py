@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import re
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -126,6 +128,45 @@ def _versioned_user_gateway(db: Any) -> VersionedUserWriteGateway:
     return VersionedUserWriteGateway(backend)
 
 
+@contextlib.asynccontextmanager
+async def _managed_profile_write_transaction(
+    db: Any,
+    *,
+    backend: str,
+) -> AsyncIterator[None]:
+    """Make a managed compound write atomic unless its caller already did."""
+    if _profile_user_backend(db) is None:
+        yield
+        return
+    if inspect.getattr_static(db, "transaction", None) is None:
+        yield
+        return
+
+    if backend == "sqlite":
+        if inspect.getattr_static(db, "in_transaction", None) is None:
+            yield
+            return
+        in_transaction = db.in_transaction
+    else:
+        if inspect.getattr_static(db, "is_in_transaction", None) is None:
+            yield
+            return
+        is_in_transaction = db.is_in_transaction
+        in_transaction = is_in_transaction()
+
+    if type(in_transaction) is not bool:
+        raise TypeError("Managed connection returned an invalid transaction state")
+    if in_transaction:
+        yield
+        return
+
+    transaction = db.transaction
+    if not callable(transaction):
+        raise TypeError("Managed connection transaction factory is not callable")
+    async with transaction():
+        yield
+
+
 def _normalize_datetime_for_backend(value: datetime, *, backend: str) -> datetime:
     if backend != "postgres":
         return value
@@ -176,13 +217,17 @@ async def update_user_last_login(db, user_id: int, now: datetime | None = None) 
             if gateway.backend == "postgres"
             else "UPDATE users SET last_login = ? WHERE id = ?"
         )
-        await gateway.execute_update(
+        async with _managed_profile_write_transaction(
             db,
-            user_id=user_id,
-            profile_visible_fields=("last_login",),
-            statement=statement,
-            parameters=(now, user_id),
-        )
+            backend=gateway.backend,
+        ):
+            await gateway.execute_update(
+                db,
+                user_id=user_id,
+                profile_visible_fields=("last_login",),
+                statement=statement,
+                parameters=(now, user_id),
+            )
         await _maybe_commit(db)
     except Exception as e:
         logger.error(f"auth_service.update_user_last_login failed for user {user_id}: {e}")

@@ -88,6 +88,7 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  # noqa: E402
     build_chacha_rls_sql,
+    build_shared_workspace_chat_rls_sql,
     build_source_review_rls_sql,
     build_web_clipper_rls_sql,
     build_workspace_source_saved_view_rls_sql,
@@ -679,8 +680,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 60  # Schema v60 scopes the Notes task graph by owner and dataset
-    _POSTGRES_SCHEMA_VERSION = 60
+    _CURRENT_SCHEMA_VERSION = 61  # Schema v61 persists recipient shared-chat threads and receipts
+    _POSTGRES_SCHEMA_VERSION = 61
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -6553,6 +6554,154 @@ UPDATE db_schema_version
    AND version < 53;
 """
 
+    _MIGRATION_SQL_V60_TO_V61 = """
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS shared_workspace_chat_threads (
+  recipient_user_id TEXT NOT NULL CHECK(length(trim(recipient_user_id)) > 0),
+  share_id INTEGER NOT NULL CHECK(share_id > 0),
+  conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  workspace_id TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (recipient_user_id, share_id),
+  UNIQUE (recipient_user_id, share_id, conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS shared_workspace_chat_requests (
+  recipient_user_id TEXT NOT NULL CHECK(length(trim(recipient_user_id)) > 0),
+  share_id INTEGER NOT NULL CHECK(share_id > 0),
+  request_id TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('in_progress','retryable','completed','conflicted')),
+  lease_epoch INTEGER NOT NULL DEFAULT 1 CHECK(lease_epoch >= 1),
+  lease_token TEXT,
+  lease_expires_at DATETIME,
+  source_mode TEXT CHECK(source_mode IN ('all','include')),
+  source_ids_json TEXT,
+  source_snapshot_hash TEXT,
+  provider TEXT,
+  model TEXT,
+  user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  assistant_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME,
+  PRIMARY KEY (recipient_user_id, share_id, request_id),
+  FOREIGN KEY (recipient_user_id, share_id, conversation_id)
+    REFERENCES shared_workspace_chat_threads(recipient_user_id, share_id, conversation_id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_threads_conversation
+  ON shared_workspace_chat_threads(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_status_lease
+  ON shared_workspace_chat_requests(status, lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_status_updated
+  ON shared_workspace_chat_requests(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_share_updated
+  ON shared_workspace_chat_requests(share_id, updated_at);
+
+UPDATE db_schema_version
+   SET version = 61
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 60;
+"""
+
+    _MIGRATION_SQL_V60_TO_V61_POSTGRES = """
+CREATE TABLE IF NOT EXISTS shared_workspace_chat_threads (
+  recipient_user_id TEXT NOT NULL CHECK(char_length(btrim(recipient_user_id)) > 0),
+  share_id BIGINT NOT NULL CHECK(share_id > 0),
+  conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  workspace_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (recipient_user_id, share_id),
+  UNIQUE (recipient_user_id, share_id, conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS shared_workspace_chat_requests (
+  recipient_user_id TEXT NOT NULL CHECK(char_length(btrim(recipient_user_id)) > 0),
+  share_id BIGINT NOT NULL CHECK(share_id > 0),
+  request_id TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('in_progress','retryable','completed','conflicted')),
+  lease_epoch INTEGER NOT NULL DEFAULT 1 CHECK(lease_epoch >= 1),
+  lease_token TEXT,
+  lease_expires_at TIMESTAMPTZ,
+  source_mode TEXT CHECK(source_mode IN ('all','include')),
+  source_ids_json TEXT,
+  source_snapshot_hash TEXT,
+  provider TEXT,
+  model TEXT,
+  user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  assistant_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMPTZ,
+  PRIMARY KEY (recipient_user_id, share_id, request_id),
+  FOREIGN KEY (recipient_user_id, share_id, conversation_id)
+    REFERENCES shared_workspace_chat_threads(recipient_user_id, share_id, conversation_id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_threads_conversation
+  ON shared_workspace_chat_threads(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_status_lease
+  ON shared_workspace_chat_requests(status, lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_status_updated
+  ON shared_workspace_chat_requests(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_share_updated
+  ON shared_workspace_chat_requests(share_id, updated_at);
+"""
+
+    _SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL = """
+DO $shared_workspace_chat_v61_verify$
+BEGIN
+  IF (
+    SELECT count(*)
+      FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+     WHERE namespace.nspname = current_schema()
+       AND relation.relname IN (
+         'shared_workspace_chat_threads',
+         'shared_workspace_chat_requests'
+       )
+       AND relation.relrowsecurity
+       AND relation.relforcerowsecurity
+  ) <> 2 THEN
+    RAISE EXCEPTION 'Shared workspace chat v61 relations require forced RLS';
+  END IF;
+
+  IF (
+    SELECT count(*)
+      FROM pg_policies
+     WHERE schemaname = current_schema()
+       AND (tablename, policyname) IN (
+         (
+           'shared_workspace_chat_threads',
+           'shared_workspace_chat_threads_tenant_isolation'
+         ),
+         (
+           'shared_workspace_chat_requests',
+           'shared_workspace_chat_requests_tenant_isolation'
+         )
+       )
+       AND qual IS NOT NULL
+       AND with_check IS NOT NULL
+  ) <> 2 THEN
+    RAISE EXCEPTION 'Shared workspace chat v61 policy catalog is incomplete';
+  END IF;
+END;
+$shared_workspace_chat_v61_verify$;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -6685,6 +6834,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store import (
+            SharedWorkspaceChatStore,
+        )
         from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
 
         self.character_store = CharacterStore(self)
@@ -6697,6 +6849,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
+        self.shared_workspace_chat_store = SharedWorkspaceChatStore(self)
 
         if self.backend_type != BackendType.SQLITE:
             self.is_memory_db = False
@@ -7615,6 +7768,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (57, "_migrate_from_v57_to_v58"),
             (58, "_migrate_from_v58_to_v59"),
             (59, "_migrate_from_v59_to_v60_sqlite"),
+            (60, "_migrate_from_v60_to_v61_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -12033,6 +12187,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if cursor.rowcount != 1 or self._get_db_version(conn) != 60:
             raise SchemaError("Notes task v60 migration failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v60_to_v61_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add recipient-owned shared workspace chat threads and receipts."""
+        if self._get_db_version(conn) != 60:
+            raise SchemaError("Shared workspace chat v61 migration requires schema version 60.")  # noqa: TRY003
+        try:
+            conn.executescript(self._MIGRATION_SQL_V60_TO_V61)
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Shared workspace chat v61 SQLite migration failed: {exc}") from exc
+        if self._get_db_version(conn) != 61:
+            raise SchemaError("Shared workspace chat v61 SQLite version verification failed.")  # noqa: TRY003
+
     def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""
 
@@ -13266,6 +13431,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         if version_cursor.rowcount != 1 or self._get_schema_version_postgres(conn) != 60:
             raise SchemaError("Notes task v60 PostgreSQL migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v60_to_v61_postgres(self, conn: Any) -> None:
+        """Add recipient-owned shared chat state with verified forced RLS."""
+        if self._get_schema_version_postgres(conn) != 60:
+            raise SchemaError("Shared workspace chat v61 migration requires schema version 60.")  # noqa: TRY003
+        migration_script = "\n".join(
+            (
+                self._MIGRATION_SQL_V60_TO_V61_POSTGRES,
+                *build_shared_workspace_chat_rls_sql(),
+                self._SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL,
+            )
+        )
+        self._apply_postgres_migration_script(
+            migration_script,
+            conn,
+            expected_version=61,
+        )
+        if self._get_schema_version_postgres(conn) != 61:
+            raise SchemaError("Shared workspace chat v61 PostgreSQL version verification failed.")  # noqa: TRY003
 
     def _notes_graph_schema_postgres(self, conn: Any) -> None:
         """Create owner-scoped graph projections and direct-write invalidation."""
@@ -15907,7 +16091,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = 0
                         current_initial_version = 0
                     else:
-                        if target_version == 60:
+                        if target_version >= 60:
                             self._verify_note_task_schema_sqlite(conn)
                         logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
                         # Ensure helpful indexes that may have been introduced post-creation
@@ -16155,6 +16339,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 60 and current_db_version == 59:
                         self._migrate_from_v59_to_v60_sqlite(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 61 and current_db_version == 60:
+                        self._migrate_from_v60_to_v61_sqlite(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -16585,6 +16772,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 60 and current_db_version == 59:
                     self._migrate_from_v59_to_v60_sqlite(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 61 and current_db_version == 60:
+                    self._migrate_from_v60_to_v61_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
@@ -16603,7 +16793,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if final_version_check != target_version:
                     raise SchemaError(  # noqa: TRY003, TRY301
                         f"Schema migration process completed, but final DB version is {final_version_check}, expected {target_version}. Manual check required.")
-                if final_version_check == 60:
+                if final_version_check >= 60:
                     self._verify_note_task_schema_sqlite(conn)
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
@@ -20334,7 +20524,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
             if current_version == 59:
                 self._verify_note_attachment_schema_postgres(conn)
-            elif current_version == 60:
+            elif current_version >= 60:
                 self._verify_note_attachment_schema_postgres(conn)
                 self._verify_note_task_schema_postgres(conn)
 
@@ -20541,6 +20731,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 60:
                 self._migrate_from_v59_to_v60_postgres(conn)
                 current_version = 60
+            if current_version < 61:
+                self._migrate_from_v60_to_v61_postgres(conn)
+                current_version = 61
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003

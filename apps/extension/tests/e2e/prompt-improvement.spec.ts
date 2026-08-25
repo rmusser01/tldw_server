@@ -80,6 +80,10 @@ const LIMITS = {
 
 type CapabilityMode = "supported" | "false" | "404" | "offline"
 
+type PromptMockOptions = {
+  failFirstImprovement?: boolean
+}
+
 type RecordedRequest = {
   method: string
   url: string
@@ -117,7 +121,8 @@ const parseBody = (body: string): Record<string, unknown> | null => {
 }
 
 const startPromptMockServer = async (
-  capabilityMode: CapabilityMode = "supported"
+  capabilityMode: CapabilityMode = "supported",
+  options: PromptMockOptions = {}
 ): Promise<PromptMockServer> => {
   const requests: RecordedRequest[] = []
   const deferredResolvers: Array<() => void> = []
@@ -208,7 +213,7 @@ const startPromptMockServer = async (
     if (url === "/api/v1/prompts/improve" && method === "POST") {
       const payload = parseBody(body) || {}
       const text = String(payload.text || "")
-      if (text.includes("[PROVIDER_FAILURE]")) {
+      if (options.failFirstImprovement) {
         providerFailureAttempts += 1
         if (providerFailureAttempts === 1) {
           return sendJson(503, {
@@ -327,7 +332,15 @@ const ensureChatInput = async (page: Page) => {
   ) {
     await startButton.first().click()
   }
-  const input = page.getByTestId("chat-input")
+  const input = page
+    .getByTestId("chat-input")
+    .or(
+      page.getByRole("textbox", {
+        name: /^(Message|Message input)$/i
+      })
+    )
+    .filter({ visible: true })
+  await expect(input).toHaveCount(1, { timeout: 20_000 })
   await expect(input).toBeVisible({ timeout: 20_000 })
   await expect(input).toBeEditable()
   return input
@@ -960,8 +973,10 @@ test.describe("Packaged extension prompt improvement parity", () => {
 
   test("structured provider failure preserves the draft and Retry succeeds with a new operation", async () => {
     test.setTimeout(120_000)
-    const mock = await startPromptMockServer()
-    const draft = "[PROVIDER_FAILURE] Keep this draft intact."
+    const mock = await startPromptMockServer("supported", {
+      failFirstImprovement: true
+    })
+    const draft = "Keep this {{topic}} draft intact."
     let context: BrowserContext | null = null
     try {
       const launched = await launchChatSurface(mock, "sidepanel")
@@ -997,14 +1012,15 @@ test.describe("Packaged extension prompt improvement parity", () => {
         target: "user_message",
         text: draft
       })
-      await expect(
-        page.getByRole("heading", { name: "Review improved prompt" })
-      ).toBeVisible()
-      await page.getByRole("button", { name: "Apply to draft" }).click()
       await expect(input).toHaveValue("Improved user request for {{topic}}.")
+      const appliedStatus = page
+        .getByTestId("chat-messages")
+        .getByRole("status")
+        .filter({ hasText: "Improvement applied." })
+      await expect(appliedStatus).toBeVisible()
       await expect(
-        page
-          .locator("#tldw-portal-root")
+        appliedStatus
+          .locator("..")
           .getByRole("button", { name: "Undo improvement" })
       ).toBeVisible()
     } finally {

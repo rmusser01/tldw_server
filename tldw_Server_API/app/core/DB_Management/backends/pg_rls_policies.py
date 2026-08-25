@@ -321,6 +321,97 @@ def build_web_clipper_rls_sql() -> list[str]:
     ]
 
 
+def build_shared_workspace_chat_rls_sql() -> list[str]:
+    """Build guarded recipient policies for shared workspace chat state."""
+
+    thread_owner = """
+        shared_workspace_chat_threads.recipient_user_id =
+          current_setting('app.current_user_id', true)
+        AND EXISTS (
+          SELECT 1 FROM conversations AS conversation
+          WHERE conversation.id = shared_workspace_chat_threads.conversation_id
+            AND conversation.client_id = current_setting('app.current_user_id', true)
+            AND conversation.client_id = shared_workspace_chat_threads.recipient_user_id
+            AND conversation.deleted = false
+        )
+    """.strip()
+    request_owner = """
+        shared_workspace_chat_requests.recipient_user_id =
+          current_setting('app.current_user_id', true)
+        AND EXISTS (
+          SELECT 1 FROM shared_workspace_chat_threads AS thread
+          WHERE thread.recipient_user_id = shared_workspace_chat_requests.recipient_user_id
+            AND thread.share_id = shared_workspace_chat_requests.share_id
+            AND thread.conversation_id = shared_workspace_chat_requests.conversation_id
+        )
+        AND EXISTS (
+          SELECT 1 FROM conversations AS conversation
+          WHERE conversation.id = shared_workspace_chat_requests.conversation_id
+            AND conversation.client_id = current_setting('app.current_user_id', true)
+            AND conversation.client_id = shared_workspace_chat_requests.recipient_user_id
+            AND conversation.deleted = false
+        )
+        AND (
+          shared_workspace_chat_requests.user_message_id IS NULL
+          OR EXISTS (
+            SELECT 1 FROM messages AS user_message
+            WHERE user_message.id = shared_workspace_chat_requests.user_message_id
+              AND user_message.conversation_id = shared_workspace_chat_requests.conversation_id
+              AND user_message.client_id = current_setting('app.current_user_id', true)
+              AND user_message.client_id = shared_workspace_chat_requests.recipient_user_id
+          )
+        )
+        AND (
+          shared_workspace_chat_requests.assistant_message_id IS NULL
+          OR EXISTS (
+            SELECT 1 FROM messages AS assistant_message
+            WHERE assistant_message.id = shared_workspace_chat_requests.assistant_message_id
+              AND assistant_message.conversation_id = shared_workspace_chat_requests.conversation_id
+              AND assistant_message.client_id = current_setting('app.current_user_id', true)
+              AND assistant_message.client_id = shared_workspace_chat_requests.recipient_user_id
+          )
+        )
+    """.strip()
+    return [
+        f"""
+        DO $shared_workspace_chat_threads_rls$
+        BEGIN
+          IF to_regclass('shared_workspace_chat_threads') IS NULL THEN
+            RETURN;
+          END IF;
+          EXECUTE 'ALTER TABLE IF EXISTS shared_workspace_chat_threads ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE IF EXISTS shared_workspace_chat_threads FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS shared_workspace_chat_threads_tenant_isolation ON shared_workspace_chat_threads';
+          EXECUTE $thread_policy$
+            CREATE POLICY shared_workspace_chat_threads_tenant_isolation
+              ON shared_workspace_chat_threads
+              USING ({thread_owner})
+              WITH CHECK ({thread_owner})
+          $thread_policy$;
+        END;
+        $shared_workspace_chat_threads_rls$;
+        """.strip(),
+        f"""
+        DO $shared_workspace_chat_requests_rls$
+        BEGIN
+          IF to_regclass('shared_workspace_chat_requests') IS NULL THEN
+            RETURN;
+          END IF;
+          EXECUTE 'ALTER TABLE IF EXISTS shared_workspace_chat_requests ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE IF EXISTS shared_workspace_chat_requests FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS shared_workspace_chat_requests_tenant_isolation ON shared_workspace_chat_requests';
+          EXECUTE $request_policy$
+            CREATE POLICY shared_workspace_chat_requests_tenant_isolation
+              ON shared_workspace_chat_requests
+              USING ({request_owner})
+              WITH CHECK ({request_owner})
+          $request_policy$;
+        END;
+        $shared_workspace_chat_requests_rls$;
+        """.strip(),
+    ]
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
@@ -642,6 +733,7 @@ def build_chacha_rls_sql() -> list[str]:
     )
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
+    stmts.extend(build_shared_workspace_chat_rls_sql())
     return stmts
 
 

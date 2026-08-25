@@ -56,6 +56,7 @@ import {
   servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch
 } from "@/services/tldw/service-prompt-scope-error"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 const ERROR_LOG_THROTTLE_MS = 15_000
 const RATE_LIMIT_LOG_THROTTLE_MS = 60_000
@@ -462,7 +463,7 @@ export interface BgRequestInit<
   expectedStatuses?: number[]
   sanitizeRagProviderError?: boolean
   servicePromptConfig?: ServicePromptTargetConfig
-  configSnapshot?: unknown
+  configSnapshot?: TldwConfig | null
 }
 
 const resolveCurrentServicePromptConfig = async (
@@ -530,6 +531,60 @@ const rateLimitedGetResults = new Map<
 >()
 const DEFAULT_RATE_LIMIT_GET_COOLDOWN_MS = 2_000
 const MAX_RATE_LIMIT_GET_COOLDOWN_MS = 60_000
+
+const normalizeGetScopeServer = (value: string): string | null => {
+  try {
+    const parsed = new URL(String(value || "").trim())
+    if (!/^https?:$/.test(parsed.protocol)) return null
+    return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${parsed.pathname.replace(/\/+$/, "")}`
+  } catch {
+    return null
+  }
+}
+
+type DirectConfigSnapshot = Awaited<ReturnType<typeof resolveDirectConfig>>
+
+interface DirectRequestContext {
+  config: DirectConfigSnapshot
+  scope: string
+  storage: DirectRuntimeStorage
+}
+
+const snapshotDirectConfig = (
+  config: DirectConfigSnapshot
+): DirectConfigSnapshot => (config ? Object.freeze({ ...config }) : null)
+
+const resolveDirectGetRequestContext = async (
+  noAuthExplicit: boolean
+): Promise<DirectRequestContext | null> => {
+  const storage = createSafeStorage({ area: "local" })
+  const config = snapshotDirectConfig(await resolveDirectConfig(storage))
+  if (!config) return null
+  const server = normalizeGetScopeServer(config.serverUrl)
+  if (!server) return null
+  if (noAuthExplicit) {
+    return {
+      config,
+      scope: `${server}:auth:no-auth`,
+      storage
+    }
+  }
+  if (config.authSource === "cookie-session") return null
+  const authMode = String(config?.authMode || "unknown")
+    .trim()
+    .toLowerCase()
+  const org = config?.orgId == null ? "none" : String(config.orgId)
+  const principal = deriveScopedUserId({
+    accessToken: config.accessToken,
+    authMode: config.authMode
+  })
+  if (principal === "user:anonymous") return null
+  return {
+    config,
+    scope: `${server}:auth:${authMode}:org:${org}:${principal}`,
+    storage
+  }
+}
 
 const isRateLimitedResult = (value: unknown): boolean => {
   const status = extractHttpStatus(value)
@@ -776,9 +831,10 @@ const refreshAuthDirect = async (
 const createDirectRuntime = (
   storage: DirectRuntimeStorage,
   servicePromptConfig?: ServicePromptTargetConfig,
-  configSnapshot?: unknown
+  initialConfig?: DirectConfigSnapshot
 ) => {
   let originalConfig: TldwConfig | undefined
+  let hasInitialConfig = typeof initialConfig !== "undefined"
   return {
     ...(servicePromptConfig ? { useRuntimeAuthOverride: false } : {}),
     getConfig: servicePromptConfig
@@ -790,9 +846,13 @@ const createDirectRuntime = (
           originalConfig ??= current
           return current
         }
-      : configSnapshot !== undefined
-        ? () => Promise.resolve(configSnapshot)
-        : () => resolveDirectConfig(storage),
+      : () => {
+          if (hasInitialConfig) {
+            hasInitialConfig = false
+            return Promise.resolve(initialConfig || null)
+          }
+          return resolveDirectConfig(storage)
+        },
     refreshAuth: async () => {
       await refreshAuthDirect(
         storage,
@@ -809,41 +869,45 @@ export async function bgRequest<
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(init: BgRequestInit<P, M>): Promise<T> {
   const method = String(init.method || "GET").toUpperCase()
+  const hasRuntimeMessage =
+    !init.preferDirect &&
+    Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
   const coalescable =
     method === "GET" &&
     !init.body &&
+    (!init.headers || Object.keys(init.headers).length === 0) &&
     !init.abortSignal &&
     !init.responseType &&
-    !init.preferDirect &&
     !init.suppressBackendUnavailableEvent &&
     !init.sanitizeRagProviderError &&
     !init.servicePromptConfig &&
-    !init.expectedStatuses?.length &&
-    init.configSnapshot === undefined
+    init.configSnapshot === undefined &&
+    !hasRuntimeMessage
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
   }
-  // Header keys are case-insensitive and object key order is not meaningful, so
-  // normalize (lowercase + sort) for a stable key. Keep timeoutMs in the key so
-  // GETs with different timeouts are not merged, and preserve the distinction
-  // between "noAuth omitted" and "noAuth: false" (bgRequestImpl uses
-  // hasOwnProperty(noAuth) to decide cross-origin auth suppression).
-  const initHeaders = init.headers as Record<string, string> | undefined
-  const normalizedHeaders = initHeaders
-    ? Object.keys(initHeaders)
-        .sort()
-        .reduce<Record<string, string>>((acc, headerKey) => {
-          acc[headerKey.toLowerCase()] = initHeaders[headerKey]
-          return acc
-        }, {})
-    : null
+  const directContext = await resolveDirectGetRequestContext(
+    Object.prototype.hasOwnProperty.call(init, "noAuth") && init.noAuth === true
+  )
+  if (!directContext) {
+    return bgRequestImpl<T, P, M>(init)
+  }
+  // Keep timeoutMs in the key so GETs with different timeouts are not merged,
+  // and preserve the distinction between "noAuth omitted" and "noAuth: false"
+  // (bgRequestImpl uses hasOwnProperty(noAuth) to decide cross-origin auth
+  // suppression). Requests with caller headers are excluded above so secret
+  // header values can never enter this module-level key.
+  const expectedStatuses = Array.from(
+    normalizeExpectedStatuses(init.expectedStatuses)
+  ).sort((left, right) => left - right)
   const key = JSON.stringify({
+    scope: directContext.scope,
     p: String(init.path),
-    h: normalizedHeaders,
     noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")
       ? Boolean(init.noAuth)
       : "__unset__",
     returnResponse: Boolean(init.returnResponse),
+    expectedStatuses,
     suppressBackendUnavailableEvent: Boolean(
       init.suppressBackendUnavailableEvent
     ),
@@ -871,7 +935,7 @@ export async function bgRequest<
       value
     })
   }
-  const promise = bgRequestImpl<T, P, M>(init)
+  const promise = bgRequestImpl<T, P, M>(init, directContext)
     .then(
       (value) => {
         rememberRateLimit(value, false)
@@ -897,7 +961,10 @@ async function bgRequestImpl<
   T = any,
   P extends PathOrUrl = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
->(init: BgRequestInit<P, M>): Promise<T> {
+>(
+  init: BgRequestInit<P, M>,
+  directContext?: DirectRequestContext
+): Promise<T> {
   const {
     path: rawPath,
     method = 'GET' as UpperLower<M>,
@@ -930,8 +997,11 @@ async function bgRequestImpl<
   const noAuthExplicit = Object.prototype.hasOwnProperty.call(init, "noAuth")
   let resolvedNoAuth = noAuthExplicit ? noAuth : (noAuth || isAbsoluteUrl)
   if (!noAuthExplicit && isAbsoluteUrl) {
-    const storage = createSafeStorage({ area: "local" })
-    const cfg = servicePromptConfig ?? await resolveDirectConfig(storage)
+    const storage =
+      directContext?.storage || createSafeStorage({ area: "local" })
+    const cfg = directContext
+      ? directContext.config
+      : servicePromptConfig ?? await resolveDirectConfig(storage)
     const sameOriginAbsolute = isSameOriginAbsoluteUrlForConfiguredServer(
       String(path),
       cfg as unknown as Record<string, unknown>
@@ -1156,6 +1226,7 @@ async function bgRequestImpl<
     return (returnResponse ? fallback : fallback.data) as T
   }
   const hasRuntimeMessage =
+    !directContext &&
     !preferDirect &&
     Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
   const methodIsSafeFallback = isSafeFallbackMethod(method)
@@ -1322,7 +1393,8 @@ async function bgRequestImpl<
   }
 
   // Fallback: direct fetch (web/dev context)
-  const storage = createSafeStorage({ area: "local" })
+  const storage =
+    directContext?.storage || createSafeStorage({ area: "local" })
   if (servicePromptConfig) {
     await resolveCurrentServicePromptConfig(storage, servicePromptConfig)
   }
@@ -1337,7 +1409,11 @@ async function bgRequestImpl<
       abortSignal,
       responseType
     },
-    createDirectRuntime(storage, servicePromptConfig, configSnapshot)
+    createDirectRuntime(
+      storage,
+      servicePromptConfig,
+      directContext ? directContext.config : configSnapshot
+    )
   )
   if (!resp?.ok) {
     const failure = await handleFailedResponse(resp, "direct")

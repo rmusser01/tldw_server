@@ -866,27 +866,27 @@ class RegistrationService:
                 # PostgreSQL
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (
-                        user_id, action, target_type, target_id,
-                        success, details
+                    INSERT INTO audit_logs (
+                        user_id, action, resource_type, resource_id,
+                        status, details
                     )
                     VALUES ($1, $2, $3, $4, $5, $6)
                     """,
                     user_id, 'user_registered', 'user', user_id,
-                    True, json.dumps(details)
+                    'success', json.dumps(details)
                 )
             else:
                 # SQLite
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (
-                        user_id, action, target_type, target_id,
-                        success, details
+                    INSERT INTO audit_logs (
+                        user_id, action, resource_type, resource_id,
+                        status, details
                     )
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (user_id, 'user_registered', 'user', user_id,
-                     1, json.dumps(details))
+                     'success', json.dumps(details))
                 )
         except Exception as e:
             logger.error(f"Failed to log registration: {e}")

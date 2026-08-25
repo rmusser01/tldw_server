@@ -88,10 +88,288 @@ jobs:
           mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
 
+  frontend-unit-tests:
+    name: frontend-unit-tests (${{ matrix.shard }}/8)
+    runs-on: ubuntu-latest
+    needs: [changes, admission]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.tldw_frontend_changed == 'true'
+      )
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+      SKIP_WXT_PREPARE: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: bun install --frozen-lockfile
+
+      - name: Run package-owned frontend unit tests
+        working-directory: apps
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "workflow_run" ]]; then
+            BASE_SHA="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+          fi
+
+          if [[ -z "${BASE_SHA:-}" || "${BASE_SHA:-}" == "0000000000000000000000000000000000000000" ]]; then
+            BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+
+          if [[ -z "${BASE_SHA:-}" ]]; then
+            echo "No base SHA is available for the frontend failure ratchet." >&2
+            exit 1
+          fi
+
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            if ! git fetch --no-tags --depth=1 origin "$BASE_SHA"; then
+              echo "Unable to fetch frontend ratchet base ${BASE_SHA}." >&2
+              exit 1
+            fi
+          fi
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "Frontend ratchet base is not a commit: ${BASE_SHA}." >&2
+            exit 1
+          fi
+
+          HEAD_SHA="$(git rev-parse HEAD)"
+          CHANGED_FILES_PATH="${RUNNER_TEMP}/frontend-unit-changed-files-${{ matrix.shard }}.txt"
+          if ! git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"; then
+            echo "Unable to identify files changed from ${BASE_SHA} to ${HEAD_SHA}." >&2
+            exit 1
+          fi
+
+          BASE_WORKTREE="${RUNNER_TEMP}/frontend-unit-base-${{ matrix.shard }}"
+          BASE_READY=0
+          RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"
+
+          common_vitest_args=(
+            "--shard=${{ matrix.shard }}/8"
+            "--maxWorkers=1"
+            "--testTimeout=15000"
+            "--passWithNoTests"
+          )
+
+          IMPACTED_TEST_LIMIT="500"
+          IMPACTED_TEST_LIST="${RUNNER_TEMP}/frontend-unit-impacted-tests-${{ matrix.shard }}.txt"
+          if ! (
+            cd "${GITHUB_WORKSPACE}/apps/tldw-frontend" &&
+            bunx vitest list --changed="${BASE_SHA}" --filesOnly
+          ) > "$IMPACTED_TEST_LIST"; then
+            echo "Unable to list dependency-impacted frontend tests." >&2
+            exit 1
+          fi
+          IMPACTED_TEST_COUNT="$(wc -l < "$IMPACTED_TEST_LIST" | tr -d '[:space:]')"
+          if [[ ! "${IMPACTED_TEST_COUNT}" =~ ^[0-9]+$ ]]; then
+            echo "Unable to count dependency-impacted frontend tests." >&2
+            exit 1
+          fi
+
+          USE_DIRECT_TESTS=0
+          if (( IMPACTED_TEST_COUNT > IMPACTED_TEST_LIMIT )); then
+            USE_DIRECT_TESTS=1
+            DIRECT_TEST_COUNT=0
+            while IFS= read -r repo_file; do
+              case "$repo_file" in
+                apps/tldw-frontend/*|apps/packages/ui/*)
+                  if [[ "$repo_file" =~ (^|/).+\.(test|spec)\.(ts|tsx)$ ]]; then
+                    ((DIRECT_TEST_COUNT += 1))
+                  fi
+                  ;;
+              esac
+            done < "$CHANGED_FILES_PATH"
+            if (( DIRECT_TEST_COUNT == 0 )); then
+              echo "No directly changed frontend tests were found for a pathological dependency expansion." >&2
+              exit 1
+            fi
+            echo "Dependency impact expanded to ${IMPACTED_TEST_COUNT} tests; sharding ${DIRECT_TEST_COUNT} directly changed frontend tests instead."
+          else
+            echo "Sharding ${IMPACTED_TEST_COUNT} dependency-impacted frontend tests from ${BASE_SHA}."
+          fi
+
+          ensure_base_worktree() {
+            if (( BASE_READY == 1 )); then
+              return 0
+            fi
+            if [[ -e "$BASE_WORKTREE" ]]; then
+              echo "Refusing to reuse unexpected base worktree path: ${BASE_WORKTREE}." >&2
+              return 1
+            fi
+            if ! git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"; then
+              echo "Unable to create exact-base worktree for ${BASE_SHA}." >&2
+              return 1
+            fi
+            if ! (
+              cd "$BASE_WORKTREE/apps" &&
+              bun install --frozen-lockfile
+            ); then
+              echo "Unable to install exact-base frontend dependencies." >&2
+              return 1
+            fi
+            BASE_READY=1
+          }
+
+          run_package() {
+            local label="$1"
+            local package_repo_path="$2"
+            local exclude_pattern="$3"
+            local head_package_root="${GITHUB_WORKSPACE}/${package_repo_path}"
+            local base_package_root="${BASE_WORKTREE}/${package_repo_path}"
+            local head_report="${RUNNER_TEMP}/${label}-head-${{ matrix.shard }}.json"
+            local base_report="${RUNNER_TEMP}/${label}-base-${{ matrix.shard }}.json"
+            local failed_files_path="${RUNNER_TEMP}/${label}-failed-files-${{ matrix.shard }}.txt"
+            local head_status=0
+            local base_status=0
+            local relative_file=""
+            local -a head_command=(bunx vitest run)
+            local -a package_vitest_args=()
+            local -a direct_test_files=()
+            local -a failed_files=()
+
+            if (( USE_DIRECT_TESTS == 1 )); then
+              while IFS= read -r repo_file; do
+                case "${label}:${repo_file}" in
+                  frontend:apps/tldw-frontend/*)
+                    relative_file="${repo_file#apps/tldw-frontend/}"
+                    ;;
+                  ui:apps/packages/ui/*)
+                    relative_file="${repo_file#apps/packages/ui/}"
+                    ;;
+                  *)
+                    continue
+                    ;;
+                esac
+                if [[ "$relative_file" =~ (^|/).+\.(test|spec)\.(ts|tsx)$ ]]; then
+                  direct_test_files+=("$relative_file")
+                fi
+              done < "$CHANGED_FILES_PATH"
+
+              if (( ${#direct_test_files[@]} == 0 )); then
+                echo "No directly changed ${label} tests are assigned to this ratchet run."
+                return 0
+              fi
+              package_vitest_args=("${direct_test_files[@]}" "${common_vitest_args[@]}")
+            else
+              package_vitest_args=("--changed=${BASE_SHA}" "${common_vitest_args[@]}")
+            fi
+
+            if [[ -n "$exclude_pattern" ]]; then
+              head_command+=("--exclude=${exclude_pattern}")
+            fi
+            head_command+=(
+              "${package_vitest_args[@]}"
+              "--reporter=default"
+              "--reporter=json"
+              "--outputFile.json=${head_report}"
+            )
+
+            echo "Running ${label} changed tests from ${BASE_SHA}, shard ${{ matrix.shard }}/8"
+            (
+              cd "$head_package_root" &&
+              "${head_command[@]}"
+            ) || head_status=$?
+
+            if (( head_status == 0 )); then
+              python3 "$RATCHET_SCRIPT" validate-success \
+                --report "$head_report" \
+                --package-root "$head_package_root"
+              return $?
+            fi
+
+            echo "${label} failed on the PR head; replaying only its failed test files at ${BASE_SHA}."
+            if ! python3 "$RATCHET_SCRIPT" extract \
+              --report "$head_report" \
+              --package-root "$head_package_root" \
+              --output "$failed_files_path"; then
+              return 1
+            fi
+            if ! ensure_base_worktree; then
+              return 1
+            fi
+
+            while IFS= read -r test_file; do
+              if [[ -n "$test_file" ]]; then
+                failed_files+=("$test_file")
+              fi
+            done < "$failed_files_path"
+            if (( ${#failed_files[@]} == 0 )); then
+              echo "${label} produced no failed test files for exact-base replay." >&2
+              return 1
+            fi
+
+            (
+              cd "$base_package_root" &&
+              bunx vitest run "${failed_files[@]}" \
+                --maxWorkers=1 \
+                --testTimeout=15000 \
+                --passWithNoTests \
+                "--reporter=default" \
+                "--reporter=json" \
+                "--outputFile.json=${base_report}"
+            ) || base_status=$?
+            echo "${label} exact-base replay exited with status ${base_status}."
+
+            python3 "$RATCHET_SCRIPT" compare \
+              --head-report "$head_report" \
+              --base-report "$base_report" \
+              --head-package-root "$head_package_root" \
+              --base-package-root "$base_package_root" \
+              --package-repo-path "$package_repo_path" \
+              --changed-files "$CHANGED_FILES_PATH"
+          }
+
+          frontend_status=0
+          run_package "frontend" "apps/tldw-frontend" "../packages/ui/**" || frontend_status=$?
+
+          ui_status=0
+          run_package "ui" "apps/packages/ui" "" || ui_status=$?
+
+          if (( frontend_status != 0 || ui_status != 0 )); then
+            echo "Package-owned Vitest failures: frontend=${frontend_status}, ui=${ui_status}" >&2
+            exit 1
+          fi
+
   frontend-required:
     name: frontend-required
     runs-on: ubuntu-latest
-    needs: [changes, admission]
+    needs: [changes, admission, frontend-unit-tests]
     if: >-
       always() && !cancelled() &&
       (
@@ -115,6 +393,22 @@ jobs:
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
       SKIP_WXT_PREPARE: '1'
     steps:
+      - name: Require frontend unit shard success
+        shell: bash
+        env:
+          TLDW_FRONTEND_CHANGED: ${{ needs.changes.outputs.tldw_frontend_changed }}
+          UNIT_SHARDS_RESULT: ${{ needs.frontend-unit-tests.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$TLDW_FRONTEND_CHANGED" == "true" && "$UNIT_SHARDS_RESULT" == "success" ]]; then
+            exit 0
+          fi
+          if [[ "$TLDW_FRONTEND_CHANGED" == "false" && "$UNIT_SHARDS_RESULT" == "skipped" ]]; then
+            exit 0
+          fi
+          echo "Unexpected frontend unit shard result: tldw_frontend_changed=${TLDW_FRONTEND_CHANGED}, result=${UNIT_SHARDS_RESULT}" >&2
+          exit 1
+
       - name: No-op pass (frontend unchanged)
         if: needs.changes.outputs.frontend_changed != 'true'
         run: echo "No frontend paths changed; frontend-required passed by policy."
@@ -167,74 +461,6 @@ jobs:
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bun run lint
-
-      - name: Run frontend unit tests
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
-        working-directory: apps/tldw-frontend
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "workflow_run" ]]; then
-            BASE_SHA="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}"
-          else
-            BASE_SHA="${{ github.event.before }}"
-          fi
-
-          if [[ -z "${BASE_SHA:-}" || "${BASE_SHA:-}" == "0000000000000000000000000000000000000000" ]]; then
-            BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
-          fi
-
-          if [[ -n "${BASE_SHA:-}" ]]; then
-            if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "$BASE_SHA"
-            fi
-            git cat-file -e "${BASE_SHA}^{commit}"
-            IMPACTED_TEST_LIMIT="500"
-            IMPACTED_TEST_COUNT="$(
-              bunx vitest list --changed="${BASE_SHA}" --filesOnly |
-                wc -l |
-                tr -d '[:space:]'
-            )"
-            if [[ ! "${IMPACTED_TEST_COUNT}" =~ ^[0-9]+$ ]]; then
-              echo "Unable to count dependency-impacted frontend tests."
-              exit 1
-            fi
-
-            if (( IMPACTED_TEST_COUNT > IMPACTED_TEST_LIMIT )); then
-              echo "Dependency impact expanded to ${IMPACTED_TEST_COUNT} tests; running directly changed frontend tests instead."
-              DIRECT_TEST_FILES=()
-              while IFS= read -r repo_file; do
-                case "${repo_file}" in
-                  apps/tldw-frontend/*)
-                    relative_file="${repo_file#apps/tldw-frontend/}"
-                    ;;
-                  apps/packages/ui/*)
-                    relative_file="../packages/ui/${repo_file#apps/packages/ui/}"
-                    ;;
-                  *)
-                    continue
-                    ;;
-                esac
-                if [[ "${relative_file}" =~ (^|/)__tests__/.*\.(test|spec)\.(ts|tsx)$ ]]; then
-                  DIRECT_TEST_FILES+=("${relative_file}")
-                fi
-              done < <(git diff --name-only --diff-filter=ACMR "${BASE_SHA}"...HEAD)
-
-              if (( ${#DIRECT_TEST_FILES[@]} == 0 )); then
-                echo "No directly changed frontend tests were found for a pathological dependency expansion."
-                exit 1
-              fi
-              printf 'Running directly changed frontend test: %s\n' "${DIRECT_TEST_FILES[@]}"
-              bunx vitest run "${DIRECT_TEST_FILES[@]}"
-            else
-              echo "Running ${IMPACTED_TEST_COUNT} dependency-impacted frontend unit tests from base SHA ${BASE_SHA}"
-              bunx vitest run --changed="${BASE_SHA}"
-            fi
-          else
-            echo "No base SHA found; running full frontend unit suite."
-            bun run test:run
-          fi
 
       - name: Frontend coverage summary (report-only)
         if: needs.changes.outputs.tldw_frontend_changed == 'true'

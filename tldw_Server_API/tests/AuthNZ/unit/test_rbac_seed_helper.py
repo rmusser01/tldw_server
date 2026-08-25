@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -198,7 +197,8 @@ def _create_version_089_rbac_database(db_path: Path) -> None:
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
-                role TEXT NOT NULL
+                role TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE roles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -276,7 +276,7 @@ def _migrate_version_089_database(db_path: Path) -> None:
 
     manager = MigrationManager(db_path)
     migrations = get_authnz_migrations()
-    assert migrations[-1].version == 90
+    assert migrations[-1].version == 93
     for migration in migrations:
         manager.add_migration(migration)
 

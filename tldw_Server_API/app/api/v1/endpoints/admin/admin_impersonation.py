@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 
 router = APIRouter(prefix="/impersonate", tags=["admin-impersonation"])
 
@@ -56,39 +57,21 @@ async def create_impersonation_token(
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
         pool = await get_db_pool()
-
-        # Verify the target user exists
-        async with pool.acquire() as conn:
-            cur = await conn.execute(
-                "SELECT id, username, is_active FROM users WHERE id = ?",
-                (user_id,),
-            )
-            row = await cur.fetchone()
-
-        if not row:
+        target_user = await AuthnzUsersRepo(pool).get_user_by_id(user_id)
+        if not target_user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"User {user_id} not found",
             )
 
-        target_user_id = row[0]
-        target_username = row[1]
-        target_is_active = row[2]
-
-        if not target_is_active:
+        target_user_id = int(target_user["id"])
+        target_username = str(target_user["username"])
+        if not bool(target_user.get("is_active")):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"User {user_id} is not active",
             )
-
-        # Determine the target user's role
-        async with pool.acquire() as conn:
-            cur = await conn.execute(
-                "SELECT role FROM user_roles WHERE user_id = ? LIMIT 1",
-                (user_id,),
-            )
-            role_row = await cur.fetchone()
-        target_role = role_row[0] if role_row else "user"
+        target_role = str(target_user.get("role") or "user")
 
         # Generate a short-lived access token with impersonation claim
         from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service

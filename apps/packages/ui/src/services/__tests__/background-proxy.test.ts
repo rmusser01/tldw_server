@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 
 const mocks = vi.hoisted(() => ({
+  runtimeId: "test-extension" as string | null,
   sendMessage: vi.fn(),
   connect: vi.fn(),
   tldwRequest: vi.fn(),
@@ -15,7 +16,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
-      id: "test-extension",
+      get id() {
+        return mocks.runtimeId
+      },
       sendMessage: (...args: unknown[]) =>
         (mocks.sendMessage as (...args: unknown[]) => unknown)(...args),
       connect: (...args: unknown[]) =>
@@ -60,6 +63,7 @@ describe("background proxy fallback safety", () => {
   beforeEach(() => {
     vi.resetModules()
     vi.useRealTimers()
+    mocks.runtimeId = "test-extension"
     mocks.sendMessage.mockReset()
     mocks.connect.mockReset()
     mocks.tldwRequest.mockReset()
@@ -3664,14 +3668,413 @@ describe("background proxy fallback safety", () => {
 })
 
 describe("background proxy GET coalescing", () => {
+  const ownerToken = "a.eyJzdWIiOiJvd25lciJ9.z"
+  const memberToken = "a.eyJzdWIiOiJtZW1iZXIifQ.z"
+
   beforeEach(() => {
     vi.resetModules()
+    mocks.runtimeId = null
     mocks.sendMessage.mockReset()
     mocks.tldwRequest.mockReset()
     mocks.storageGet.mockReset()
     mocks.storageSet.mockReset()
-    mocks.storageGet.mockResolvedValue(null)
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig"
+        ? {
+            accessToken: ownerToken,
+            authMode: "multi-user",
+            serverUrl: "https://server.example.test"
+          }
+        : null
+    )
     mocks.storageSet.mockResolvedValue(undefined)
+  })
+
+  it("uses one immutable direct config snapshot for both reuse scope and execution", async () => {
+    mocks.runtimeId = null
+    const firstConfig = {
+      serverUrl: "https://snapshot-a.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    const laterConfig = {
+      serverUrl: "https://snapshot-b.example.test",
+      authMode: "multi-user",
+      accessToken: memberToken
+    }
+    let configReads = 0
+    mocks.storageGet.mockImplementation(async (key) => {
+      if (key !== "tldwConfig") return null
+      configReads += 1
+      return configReads === 1 ? firstConfig : laterConfig
+    })
+    mocks.tldwRequest.mockImplementation(
+      async (
+        _payload: unknown,
+        runtime: { getConfig: () => Promise<Record<string, unknown>> }
+      ) => ({
+        ok: true,
+        status: 200,
+        data: await runtime.getConfig()
+      })
+    )
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ).resolves.toMatchObject({
+      serverUrl: firstConfig.serverUrl,
+      accessToken: ownerToken
+    })
+  })
+
+  it("does not coalesce requests owned by extension runtime messaging", async () => {
+    mocks.runtimeId = "test-extension"
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { via: "runtime" }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    {
+      label: "missing config",
+      config: null
+    },
+    {
+      label: "anonymous multi-user config",
+      config: {
+        serverUrl: "https://server.example.test",
+        authMode: "multi-user"
+      }
+    },
+    {
+      label: "cookie-session config",
+      config: {
+        serverUrl: "https://server.example.test",
+        authMode: "multi-user",
+        authSource: "cookie-session",
+        accessToken: ownerToken
+      }
+    }
+  ])("does not coalesce $label requests", async ({ config }) => {
+    mocks.runtimeId = null
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? config : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("allows an explicitly noAuth direct request to coalesce without a principal", async () => {
+    mocks.runtimeId = null
+    const anonymousConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user"
+    }
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? anonymousConfig : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/health", method: "GET", noAuth: true }),
+      bgRequest({ path: "/api/v1/health", method: "GET", noAuth: true })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("coalesces identical requests that use the same direct snapshot", async () => {
+    mocks.runtimeId = null
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses refreshed credentials without reusing the old principal's in-flight result", async () => {
+    mocks.runtimeId = null
+    let refreshRotation: unknown = null
+    const storedConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken,
+      refreshToken: "owner-refresh"
+    }
+    mocks.storageGet.mockImplementation(async (key) => {
+      if (key === "tldwConfig") return storedConfig
+      if (key === "tldwRefreshRotation") return refreshRotation
+      return null
+    })
+    mocks.storageSet.mockImplementation(async (key, value) => {
+      if (key === "tldwRefreshRotation") refreshRotation = value
+    })
+    let releaseFirst: () => void = () => {}
+    const firstPending = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let firstRefreshed: () => void = () => {}
+    const refreshed = new Promise<void>((resolve) => {
+      firstRefreshed = resolve
+    })
+    let profileCalls = 0
+    mocks.tldwRequest.mockImplementation(async (
+      payload: { path: string },
+      runtime: {
+        getConfig: () => Promise<Record<string, unknown>>
+        refreshAuth: () => Promise<void>
+      }
+    ) => {
+      if (payload.path === "/api/v1/auth/refresh") {
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            access_token: memberToken,
+            refresh_token: "member-refresh"
+          }
+        }
+      }
+      profileCalls += 1
+      const initialConfig = await runtime.getConfig()
+      if (profileCalls === 1) {
+        await runtime.refreshAuth()
+        const refreshedConfig = await runtime.getConfig()
+        firstRefreshed()
+        await firstPending
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            initialToken: initialConfig.accessToken,
+            refreshedToken: refreshedConfig.accessToken
+          }
+        }
+      }
+      return {
+        ok: true,
+        status: 200,
+        data: { initialToken: initialConfig.accessToken }
+      }
+    })
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    await refreshed
+    const second = bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    await vi.waitFor(() => expect(profileCalls).toBe(2))
+    releaseFirst()
+
+    await expect(first).resolves.toEqual({
+      initialToken: ownerToken,
+      refreshedToken: memberToken
+    })
+    await expect(second).resolves.toEqual({ initialToken: memberToken })
+  })
+
+  it("does not put raw token material into the direct reuse key", async () => {
+    mocks.runtimeId = null
+    const firstToken = `${ownerToken}.first-secret-material`
+    const secondToken = `${ownerToken}.second-secret-material`
+    const firstConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: firstToken
+    }
+    const secondConfig = { ...firstConfig, accessToken: secondToken }
+    mocks.storageGet
+      .mockResolvedValueOnce(firstConfig)
+      .mockResolvedValueOnce(secondConfig)
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not build a reuse key from caller-provided secret header values", async () => {
+    mocks.runtimeId = null
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+    const headers = { Authorization: "Bearer header-secret-material" }
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", headers }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", headers })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("partitions concurrent identical GETs by resolved server", async () => {
+    const firstConfig = {
+      serverUrl: "https://server-a.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    const secondConfig = {
+      ...firstConfig,
+      serverUrl: "https://server-b.example.test"
+    }
+    mocks.storageGet
+      .mockResolvedValueOnce(firstConfig)
+      .mockResolvedValueOnce(secondConfig)
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+    const second = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+
+    await Promise.all([first, second])
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("partitions concurrent identical GETs by resolved principal", async () => {
+    const firstConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    const secondConfig = { ...firstConfig, accessToken: memberToken }
+    mocks.storageGet
+      .mockResolvedValueOnce(firstConfig)
+      .mockResolvedValueOnce(secondConfig)
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+    const second = bgRequest({
+      path: "/api/v1/config/providers",
+      method: "GET"
+    })
+
+    await Promise.all([first, second])
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps same-scope GET coalescing after resolving configuration", async () => {
+    const currentConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? currentConfig : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [409, 404, 404]
+      }),
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [404, 409]
+      })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not reuse a principal's 429 cooldown for another principal", async () => {
+    let currentConfig = {
+      serverUrl: "https://server.example.test",
+      authMode: "multi-user",
+      accessToken: ownerToken
+    }
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwConfig" ? currentConfig : null
+    )
+    mocks.tldwRequest
+      .mockResolvedValueOnce({ ok: false, status: 429, error: "rate_limited" })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { principal: "member" }
+      })
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    ).rejects.toMatchObject({ status: 429 })
+    currentConfig = { ...currentConfig, accessToken: memberToken }
+
+    await expect(
+      bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    ).resolves.toEqual({ principal: "member" })
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 
   it("coalesces concurrent identical GETs into a single underlying request", async () => {
@@ -3679,7 +4082,7 @@ describe("background proxy GET coalescing", () => {
     const pending = new Promise((resolve) => {
       resolveSend = resolve
     })
-    mocks.sendMessage.mockReturnValue(pending)
+    mocks.tldwRequest.mockReturnValue(pending)
 
     const { bgRequest } = await importProxy()
 
@@ -3693,12 +4096,12 @@ describe("background proxy GET coalescing", () => {
     await b1
 
     // Identical pair shares one underlying call; the different path makes its own.
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
     expect(ra1).toBe(ra2)
   })
 
   it("coalesces serialized returnResponse GETs", async () => {
-    mocks.sendMessage.mockResolvedValue({
+    mocks.tldwRequest.mockResolvedValue({
       ok: true,
       status: 200,
       data: [{ id: "persona-1" }]
@@ -3718,12 +4121,96 @@ describe("background proxy GET coalescing", () => {
       })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
     expect(first).toBe(second)
   })
 
+  it("coalesces equivalent normalized expected-status contracts", async () => {
+    let resolveSend: (value: unknown) => void = () => {}
+    mocks.tldwRequest.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSend = resolve
+      })
+    )
+    const { bgRequest } = await importProxy()
+
+    const first = bgRequest({
+      path: "/api/v1/chats/chat-1/settings",
+      method: "GET",
+      expectedStatuses: [409, 404, 404]
+    })
+    const second = bgRequest({
+      path: "/api/v1/chats/chat-1/settings",
+      method: "GET",
+      expectedStatuses: [404, 409]
+    })
+    resolveSend({ ok: true, status: 200, data: { settings: {} } })
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    expect(firstResult).toBe(secondResult)
+  })
+
+  it("does not coalesce different expected-status contracts", async () => {
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { settings: {} }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [404]
+      }),
+      bgRequest({
+        path: "/api/v1/chats/chat-1/settings",
+        method: "GET",
+        expectedStatuses: [404, 409]
+      })
+    ])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("coalesces expected-status errors without changing rejection behavior", async () => {
+    let resolveSend: (value: unknown) => void = () => {}
+    mocks.tldwRequest.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSend = resolve
+      })
+    )
+    const { bgRequest } = await importProxy()
+    const init = {
+      path: "/api/v1/chats/chat-1/settings" as const,
+      method: "GET" as const,
+      expectedStatuses: [404]
+    }
+
+    const first = bgRequest(init)
+    const second = bgRequest(init)
+    resolveSend({ ok: false, status: 404, error: "Chat settings not found" })
+
+    const results = await Promise.allSettled([first, second])
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    expect(results).toEqual([
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ status: 404 })
+      }),
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ status: 404 })
+      })
+    ])
+  })
+
   it("does not coalesce returnResponse GETs with data-only GETs", async () => {
-    mocks.sendMessage.mockResolvedValue({
+    mocks.tldwRequest.mockResolvedValue({
       ok: true,
       status: 200,
       data: { ok: true }
@@ -3739,11 +4226,11 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 
   it("reuses a recent rate-limited GET failure instead of bursting", async () => {
-    mocks.sendMessage.mockResolvedValue({
+    mocks.tldwRequest.mockResolvedValue({
       ok: false,
       status: 429,
       error: "rate_limited"
@@ -3757,11 +4244,11 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
     ).rejects.toMatchObject({ status: 429 })
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
   })
 
   it("does not coalesce POST requests", async () => {
-    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     const { bgRequest } = await importProxy()
 
     await Promise.all([
@@ -3769,11 +4256,11 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "/api/v1/users/me/profile", method: "POST", body: { a: 1 } })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 
   it("does not coalesce GETs with different timeoutMs", async () => {
-    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     const { bgRequest } = await importProxy()
 
     await Promise.all([
@@ -3781,11 +4268,11 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "/api/v1/config/providers", method: "GET", timeoutMs: 30000 })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 
   it("does not coalesce absolute-URL GETs that differ only by noAuth omitted vs false", async () => {
-    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     const { bgRequest } = await importProxy()
 
     await Promise.all([
@@ -3793,6 +4280,6 @@ describe("background proxy GET coalescing", () => {
       bgRequest({ path: "https://api.example.com/api/v1/health", method: "GET", noAuth: false })
     ])
 
-    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 })

@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import builtins
 import inspect
-from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -134,6 +133,69 @@ async def test_shared_with_me_workspace_name_preload_log_is_sanitized(
 
     assert response.total == 1
     fake_logger.debug.assert_called_once_with("Skipping shared workspace name preload")
+
+
+@pytest.mark.asyncio
+async def test_shared_with_me_uses_authoritative_active_share_listing(
+    test_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    events: list[str] = []
+
+    class _Repo:
+        async def list_active_shares_for_user(self, user_id: int):
+            events.append(f"list:{user_id}")
+            return [
+                {
+                    "id": 44,
+                    "workspace_id": "authoritative-workspace",
+                    "owner_user_id": 2,
+                    "access_level": "view_chat",
+                    "allow_clone": False,
+                    "created_at": "2026-08-20T18:00:00+00:00",
+                }
+            ]
+
+        async def list_shares_for_scope(self, *_args, **_kwargs):
+            raise AssertionError("claim-loop discovery must not be used")
+
+    class _OwnerDb:
+        def get_workspace(self, workspace_id: str):
+            events.append(f"workspace:{workspace_id}")
+            return {"name": "Authoritative workspace"}
+
+    async def _owner_db(owner_user_id: int):
+        events.append(f"owner-db:{owner_user_id}")
+        return _OwnerDb()
+
+    monkeypatch.setattr(sharing, "_get_repo", lambda: _Repo())
+    monkeypatch.setattr(chacha_deps, "get_chacha_db_for_owner", _owner_db)
+
+    response = await sharing.shared_with_me(user=test_user)
+
+    assert response.model_dump(mode="json") == {
+        "items": [
+            {
+                "share_id": 44,
+                "workspace_id": "authoritative-workspace",
+                "workspace_name": "Authoritative workspace",
+                "owner_user_id": 2,
+                "owner_username": None,
+                "access_level": "view_chat",
+                "allow_clone": False,
+                "shared_at": "2026-08-20T18:00:00+00:00",
+            }
+        ],
+        "total": 1,
+    }
+    assert events == [
+        "list:1",
+        "owner-db:2",
+        "workspace:authoritative-workspace",
+    ]
 
 
 @pytest.mark.asyncio
@@ -608,62 +670,109 @@ class TestSharedWithMe:
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
 
-    def test_get_shared_workspace(self, client, mock_repo):
+    def test_get_shared_workspace(self, client, mock_repo, monkeypatch):
         create = client.post("/api/v1/sharing/workspaces/ws-view/share", json={
             "share_scope_type": "team",
             "share_scope_id": 10,
         })
         share_id = create.json()["id"]
+
+        class _AccessService:
+            async def resolve(self, *, share_id: int, recipient_user_id: int):
+                return SimpleNamespace(
+                    share_id=share_id,
+                    workspace_id="ws-view",
+                    owner_user_id=2,
+                    recipient_user_id=recipient_user_id,
+                    access_level="view_chat",
+                    allow_clone=False,
+                    owner_display_name="Workspace owner",
+                    shared_at="2026-08-21T12:00:00+00:00",
+                    workspace={"name": "Shared workspace", "description": ""},
+                    policy_actions={
+                        "inspect_sources": {"allowed": True, "reason_code": None},
+                        "ask_grounded_questions": {"allowed": True, "reason_code": None},
+                        "add_sources": {
+                            "allowed": False,
+                            "reason_code": "shared_write_not_available",
+                        },
+                        "edit_workspace": {
+                            "allowed": False,
+                            "reason_code": "shared_write_not_available",
+                        },
+                        "clone_workspace": {
+                            "allowed": False,
+                            "reason_code": "clone_deferred",
+                        },
+                    },
+                )
+
+        async def _sources(_context):
+            return []
+
+        async def _projection(_context, _sources):
+            return {
+                "sources": [],
+                "summary": {"total": 0, "queryable": 0, "processing": 0, "failed": 0},
+                "partial_errors": [],
+            }
+
+        async def _history(_context, *, before, limit):
+            assert before is None
+            assert limit == 30
+            raise RuntimeError("empty test history")
+
+        client.app.dependency_overrides[
+            sharing_endpoints.get_shared_workspace_access_service
+        ] = lambda: _AccessService()
+        monkeypatch.setattr(sharing_endpoints, "_load_recipient_workspace_sources", _sources)
+        monkeypatch.setattr(sharing_endpoints, "_project_recipient_source_status", _projection)
+        monkeypatch.setattr(sharing_endpoints, "_load_recipient_chat_history", _history)
         resp = client.get(f"/api/v1/sharing/shared-with-me/{share_id}/workspace")
-        assert resp.status_code == 200
-
-    def test_get_shared_workspace_media_releases_owner_session(self, client, mock_repo):
-        create = client.post("/api/v1/sharing/workspaces/ws-media/share", json={
-            "share_scope_type": "team",
-            "share_scope_id": 10,
-        })
-        share_id = create.json()["id"]
-        events: list[str] = []
-
-        class _FakeChaCha:
-            def list_workspace_sources(self, workspace_id: str):
-                assert workspace_id == "ws-media"
-                return [{"media_id": 123}]
-
-        class _FakeMediaDb:
-            def get_media_by_id(self, media_id: int):
-                assert media_id == 123
-                return {
-                    "id": 123,
-                    "title": "Shared Item",
-                    "url": "https://example.com/shared",
-                    "type": "article",
-                    "content": "shared content",
-                    "author": "author",
-                    "ingestion_date": "2025-01-01T00:00:00",
-                }
-
-        @contextmanager
-        def _managed_media_db_for_owner(owner_user_id: int):
-            assert owner_user_id == 1
-            events.append("enter")
-            try:
-                yield _FakeMediaDb()
-            finally:
-                events.append("exit")
-
-        with patch(
-            "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_owner",
-            return_value=_FakeChaCha(),
-        ), patch(
-            "tldw_Server_API.app.api.v1.API_Deps.DB_Deps.managed_media_db_for_owner",
-            _managed_media_db_for_owner,
-        ):
-            resp = client.get(f"/api/v1/sharing/shared-with-me/{share_id}/media/123")
 
         assert resp.status_code == 200
-        assert resp.json()["id"] == 123
-        assert events == ["enter", "exit"]
+        data = resp.json()
+        assert data["sources"]["items"] == []
+        assert data["allowed_actions"]["inspect_sources"]["allowed"] is True
+        assert "owner_user_id" not in str(data)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/sharing/shared-with-me/12/media",
+            "/api/v1/sharing/shared-with-me/12/media/99",
+            "/api/v1/sharing/shared-with-me/12/full-media",
+            "/api/v1/sharing/shared-with-me/12/full-media/99",
+        ],
+    )
+    def test_removed_recipient_media_routes_are_plain_404s(
+        self,
+        client,
+        mock_repo,
+        path,
+    ):
+        response = client.get(path, follow_redirects=False)
+
+        assert response.status_code == 404
+        assert "location" not in response.headers
+
+    def test_recipient_openapi_has_no_owner_media_operation(self, client, mock_repo):
+        schema = client.get("/openapi.json").json()
+        removed_paths = {
+            "/api/v1/sharing/shared-with-me/{share_id}/media",
+            "/api/v1/sharing/shared-with-me/{share_id}/media/{media_id}",
+            "/api/v1/sharing/shared-with-me/{share_id}/full-media",
+            "/api/v1/sharing/shared-with-me/{share_id}/full-media/{media_id}",
+        }
+
+        assert removed_paths.isdisjoint(schema["paths"])
+        assert all(
+            "SharedMediaResponse" not in operation.get("operationId", "")
+            for path_item in schema["paths"].values()
+            for method, operation in path_item.items()
+            if method in {"get", "post", "put", "patch", "delete"}
+        )
+        assert "SharedMediaResponse" not in schema["components"]["schemas"]
 
 
 class TestClone:
@@ -735,23 +844,21 @@ class TestShareTokens:
         self,
         client,
         mock_repo,
-        monkeypatch,
     ):
         calls: list[tuple[str, int]] = []
 
         async def _record_workspace_ownership(workspace_id: str, user: User):
             calls.append((workspace_id, user.id))
 
-        monkeypatch.setattr(
+        with patch.object(
             sharing_endpoints,
             "_verify_workspace_ownership",
             _record_workspace_ownership,
-        )
-
-        resp = client.post("/api/v1/sharing/tokens", json={
-            "resource_type": "workspace",
-            "resource_id": "ws-owned",
-        })
+        ):
+            resp = client.post("/api/v1/sharing/tokens", json={
+                "resource_type": "workspace",
+                "resource_id": "ws-owned",
+            })
 
         assert resp.status_code == 200
         assert calls == [("ws-owned", 1)]
@@ -793,17 +900,20 @@ class TestShareTokens:
         assert data["resource_type"] == "prototype_workspace"
         assert data["resource_id"] == "pws-1"
 
-    def test_create_prototype_workspace_token_requires_owner(self, client, mock_repo, monkeypatch):
+    def test_create_prototype_workspace_token_requires_owner(self, client, mock_repo):
         class _ForeignPrototypeRepo:
             async def get_workspace(self, prototype_workspace_id: str):
                 return {"id": prototype_workspace_id, "owner_user_id": 2}
 
-        monkeypatch.setattr(sharing_endpoints, "_get_prototype_repo", lambda: _ForeignPrototypeRepo())
-
-        resp = client.post("/api/v1/sharing/tokens", json={
-            "resource_type": "prototype_workspace",
-            "resource_id": "pws-foreign",
-        })
+        with patch.object(
+            sharing_endpoints,
+            "_get_prototype_repo",
+            return_value=_ForeignPrototypeRepo(),
+        ):
+            resp = client.post("/api/v1/sharing/tokens", json={
+                "resource_type": "prototype_workspace",
+                "resource_id": "pws-foreign",
+            })
 
         assert resp.status_code == 404
 

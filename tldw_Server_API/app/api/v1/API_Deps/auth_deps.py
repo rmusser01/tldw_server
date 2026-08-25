@@ -388,6 +388,22 @@ def _activate_scope_context(
             exc,
         )
 
+
+async def get_login_db_connection() -> AsyncGenerator[Any, None]:
+    """Yield a statement-autocommit connection for the login lifecycle.
+
+    Login's lockout and session services use separate database connections. A
+    SQLite ``BEGIN IMMEDIATE`` around the whole request would block those
+    security checks against the same database, while a normal deferred
+    connection could retain a rehash write lock. SQLite therefore uses a true
+    autocommit connection; asyncpg statements are already autocommit outside an
+    explicit transaction.
+    """
+    db_pool = await get_db_pool()
+    async with db_pool.acquire_statement_autocommit() as conn:
+        yield conn
+
+
 async def get_db_transaction() -> AsyncGenerator[Any, None]:
     """Get database connection in transaction mode.
 
@@ -1584,7 +1600,10 @@ async def require_expected_user(
     )
 
 
-def require_permissions(*permissions: str) -> Callable[[AuthPrincipal], Awaitable[AuthPrincipal]]:
+def require_permissions(
+    *permissions: str,
+    detail: Any | None = None,
+) -> Callable[[AuthPrincipal], Awaitable[AuthPrincipal]]:
     """
     Dependency factory that enforces required permission claims on the principal.
 
@@ -1607,7 +1626,11 @@ def require_permissions(*permissions: str) -> Callable[[AuthPrincipal], Awaitabl
                 logger.debug("require_permissions denied principal; missing={}", missing)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: missing {', '.join(missing)}",
+                detail=(
+                    detail
+                    if detail is not None
+                    else f"Permission denied: missing {', '.join(missing)}"
+                ),
             )
         return principal
 
@@ -2283,10 +2306,19 @@ async def enforce_rbac_rate_limit(
         )
 
 
-def rbac_rate_limit(resource: str):
+def rbac_rate_limit(resource: str, *, detail: Any | None = None):
     """Factory returning an enforcing RBAC resource-rate dependency."""
     async def _dep(request: Request, db_pool: DatabasePool = Depends(get_db_pool)):
-        await enforce_rbac_rate_limit(request, resource, db_pool)
+        try:
+            await enforce_rbac_rate_limit(request, resource, db_pool)
+        except HTTPException as exc:
+            if detail is None or exc.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
+                raise
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=detail,
+                headers=exc.headers,
+            ) from exc
     try:
         _dep._tldw_rate_limit_resource = resource
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:

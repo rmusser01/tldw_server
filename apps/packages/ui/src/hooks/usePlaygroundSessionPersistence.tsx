@@ -36,6 +36,11 @@ import {
 
 const DEBOUNCE_MS = 1000
 
+export type PlaygroundSessionRestoreOutcome =
+  | "restored"
+  | "not-restored"
+  | "cancelled"
+
 /**
  * Hook to persist and restore playground session state.
  *
@@ -515,12 +520,20 @@ export function usePlaygroundSessionPersistence() {
   }, [])
 
   // Restore session from persisted state
-  const restoreSession = useCallback(async (): Promise<boolean> => {
+  const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    const restoreRevision =
+      usePlaygroundSessionStore.getState().restoreRevision
+    const isCurrentRestore = () =>
+      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
     const scopeKey = await resolveCurrentScopeKey()
+    if (!isCurrentRestore()) {
+      initialRestoreSettledRef.current = true
+      return "cancelled"
+    }
     if (!isSessionValid(scopeKey)) {
       clearSession()
       initialRestoreSettledRef.current = true
-      return false
+      return "not-restored"
     }
 
     const savedHistoryId = sessionStore.historyId
@@ -536,7 +549,8 @@ export function usePlaygroundSessionPersistence() {
       sessionStore.trackedAssistantAvatarUrl ?? null
     const savedQueue = sessionStore.queuedMessages ?? []
     if (!savedHistoryId && !savedServerChatId && savedQueue.length === 0) {
-      return false
+      initialRestoreSettledRef.current = true
+      return "not-restored"
     }
 
     isRestoringRef.current = true
@@ -545,10 +559,11 @@ export function usePlaygroundSessionPersistence() {
       if (savedHistoryId) {
         // Restore messages from Dexie
         const chatData = await getFullChatData(savedHistoryId)
+        if (!isCurrentRestore()) return "cancelled"
         if (!chatData) {
           // History was deleted, clear session
           clearSession()
-          return false
+          return "not-restored"
         }
 
         // Restore messages and history
@@ -560,6 +575,7 @@ export function usePlaygroundSessionPersistence() {
         const lastUsedPrompt = (chatData.historyInfo as any)?.last_used_prompt
         if (lastUsedPrompt?.prompt_id) {
           const prompt = await getPromptById(lastUsedPrompt.prompt_id)
+          if (!isCurrentRestore()) return "cancelled"
           if (prompt) {
             setSelectedSystemPrompt(lastUsedPrompt.prompt_id)
             setSystemPrompt(prompt.content)
@@ -581,7 +597,10 @@ export function usePlaygroundSessionPersistence() {
           savedTrackedAssistantSelection &&
           getAssistantSelectionMode(savedTrackedAssistantSelection) === "tracked"
         ) {
-          await setSelectedAssistant(savedTrackedAssistantSelection)
+          await setSelectedAssistant(savedTrackedAssistantSelection, {
+            isCurrent: isCurrentRestore
+          })
+          if (!isCurrentRestore()) return "cancelled"
         } else if (savedTrackedAssistantKind && savedTrackedAssistantId) {
           const reconstructedSelection = normalizeAssistantSelection({
             kind: savedTrackedAssistantKind,
@@ -595,7 +614,10 @@ export function usePlaygroundSessionPersistence() {
             }
           })
           if (reconstructedSelection) {
-            await setSelectedAssistant(reconstructedSelection)
+            await setSelectedAssistant(reconstructedSelection, {
+              isCurrent: isCurrentRestore
+            })
+            if (!isCurrentRestore()) return "cancelled"
           }
         }
         if (savedTrackedAssistantKind && savedTrackedAssistantId) {
@@ -634,11 +656,11 @@ export function usePlaygroundSessionPersistence() {
       setRagEnableCitations(sessionStore.ragEnableCitations)
       setQueuedMessages(restoreQueuedRequests(savedQueue))
 
-      return true
+      return "restored"
     } catch (error) {
       console.warn("Failed to restore session:", error)
       clearSession()
-      return false
+      return "not-restored"
     } finally {
       isRestoringRef.current = false
       initialRestoreSettledRef.current = true

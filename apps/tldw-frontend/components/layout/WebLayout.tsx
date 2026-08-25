@@ -152,6 +152,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     !hideHeader &&
     !hideSidebar &&
     !isMobileViewport;
+  const headerSidebarCollapsed = showChatSidebar
+    ? isMobileViewport
+      ? !sidebarOpen
+      : chatSidebarCollapsed
+    : !sidebarOpen;
   const stickyChatLayoutActive = isChatScreen && stickyChatInput;
   const useInlineBackendUnavailableAlert =
     /^\/settings(\/|$)/.test(location.pathname);
@@ -256,7 +261,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   };
 
   React.useEffect(() => {
-    if (isMobileViewport && !showChatSidebar) return;
+    if (!showChatSidebar) return;
     if (!isMobileViewport && sidebarOpen) {
       setSidebarOpen(false);
     }
@@ -434,9 +439,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
               >
                 <Header
                   onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                  sidebarCollapsed={
-                    showChatSidebar && isMobileViewport ? !sidebarOpen : chatSidebarCollapsed
-                  }
+                  sidebarCollapsed={headerSidebarCollapsed}
                   notificationCount={notificationCount}
                   notificationState={notificationState}
                   onRetryNotifications={retryNotifications}

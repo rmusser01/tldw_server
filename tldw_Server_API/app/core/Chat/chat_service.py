@@ -2042,6 +2042,39 @@ def resolve_provider_and_model(
     return metrics_provider, metrics_model, selected_provider, selected_model, debug_info
 
 
+def resolve_model_context_window(provider: str, model: str) -> Any:
+    """Return server-owned context metadata without probing provider tokenizers."""
+
+    normalized_provider = str(provider or "").strip().lower()
+    normalized_model = str(model or "").strip()
+    if not normalized_provider or not normalized_model:
+        return None
+    try:
+        from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+            get_llm_provider_override,
+        )
+
+        override = get_llm_provider_override(normalized_provider)
+        config = getattr(override, "config", None)
+        if isinstance(config, dict):
+            model_windows = config.get("model_context_windows")
+            if isinstance(model_windows, dict) and normalized_model in model_windows:
+                return model_windows[normalized_model]
+            if "context_window" in config:
+                return config["context_window"]
+    except Exception:  # noqa: BLE001 - metadata failure falls back conservatively.
+        logger.debug("Chat context-window override metadata unavailable")
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.llm_providers import (
+            get_model_metadata,
+        )
+
+        metadata = get_model_metadata(normalized_provider, normalized_model)
+        return metadata.get("context_window") if isinstance(metadata, dict) else None
+    except Exception:  # noqa: BLE001 - metadata failure falls back conservatively.
+        return None
+
+
 def resolve_provider_api_key(
     provider: str,
     *,

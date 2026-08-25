@@ -800,6 +800,44 @@ class _GuardedSQLiteConnection:
     def in_transaction(self) -> bool:
         return self._connection.in_transaction
 
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[_GuardedSQLiteConnection]:
+        """Run a short atomic unit on this managed connection."""
+        if self.in_transaction:
+            yield self
+            return
+
+        await self._connection.execute("BEGIN IMMEDIATE")
+        failure: BaseException | None = None
+        try:
+            yield self
+        except BaseException as exc:  # noqa: BLE001 - rollback must cover cancellation
+            failure = exc
+
+        if failure is None:
+            try:
+                await await_cancellation_safe_cleanup(self._connection.commit())
+            except BaseException as exc:  # noqa: BLE001 - rollback after commit failure
+                failure = exc
+
+        if failure is not None and self.in_transaction:
+            try:
+                await await_cancellation_safe_cleanup(self._connection.rollback())
+            except BaseException as cleanup_exc:  # noqa: BLE001 - preserve failure order
+                failure, should_log = select_transaction_cleanup_failure(
+                    failure,
+                    cleanup_exc,
+                )
+                if should_log:
+                    logger.bind(
+                        backend="sqlite",
+                        operation="rollback",
+                        error_type=type(cleanup_exc).__name__,
+                    ).error("SQLite managed-connection rollback failed")
+
+        if failure is not None:
+            raise failure
+
     @property
     def total_changes(self) -> int:
         return self._connection.total_changes
@@ -1397,6 +1435,37 @@ class DatabasePool:
                 if isinstance(failure, Exception):
                     raise failure
                 raise failure from None
+
+    @asynccontextmanager
+    async def acquire_statement_autocommit(self, *, timeout: float | None = None):
+        """Acquire a connection whose standalone writes commit per statement.
+
+        Asyncpg already runs statements outside an explicit transaction in
+        autocommit mode. SQLite needs ``isolation_level=None`` so login-time
+        password and timestamp writes cannot retain a lock while session and
+        audit services use their own connections.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        if self.pool is not None:
+            async with self.acquire(timeout=timeout) as conn:
+                yield conn
+            return
+
+        conn = None
+        try:
+            conn = await aiosqlite.connect(
+                self.db_path,
+                uri=self._sqlite_uri,
+                isolation_level=None,
+            )
+            await configure_sqlite_connection_async(conn)
+            conn.row_factory = aiosqlite.Row
+            yield _GuardedSQLiteConnection(conn)
+        finally:
+            if conn:
+                await conn.close()
 
     async def execute(self, query: str, *args) -> Any:
         """Execute a query without returning results"""

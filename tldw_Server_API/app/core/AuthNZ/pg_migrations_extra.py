@@ -11,7 +11,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import asyncpg
 from loguru import logger
+
+from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import (
+    apply_postgres_sharing_schema,
+    postgres_sharing_schema_issues,
+)
 
 from .database import DatabasePool, get_db_pool
 from .exceptions import DatabaseError as AuthNZDatabaseError
@@ -2784,6 +2790,40 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
         "(audit_logs, sessions, registration_codes, RBAC, orgs/teams)"
     )
     return True
+
+
+async def ensure_sharing_tables_pg(pool: DatabasePool | None = None) -> bool:
+    """Ensure canonical sharing tables exist on PostgreSQL backends."""
+    try:
+        db_pool = pool or await get_db_pool()
+        if getattr(db_pool, "pool", None) is None:
+            return False
+        await apply_postgres_sharing_schema(db_pool)
+        issues = await postgres_sharing_schema_issues(db_pool)
+        if issues:
+            logger.warning(
+                "PostgreSQL sharing schema contract mismatch: {}",
+                "; ".join(issues),
+            )
+            return False
+        logger.info("Ensured PostgreSQL sharing tables (idempotent)")
+        return True
+    except (
+        AuthNZDatabaseError,
+        asyncpg.PostgresError,
+        asyncpg.InterfaceError,
+        asyncpg.InternalClientError,
+    ) as exc:
+        logger.warning(f"Failed to ensure PostgreSQL sharing tables: {exc}")
+        return False
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(f"Failed to ensure PostgreSQL sharing tables: {exc}")
+        return False
+
+
+async def sharing_schema_issues_pg(pool: DatabasePool) -> list[str]:
+    """Return PostgreSQL sharing schema contract violations."""
+    return await postgres_sharing_schema_issues(pool)
 
 
 def _parse_json_payload_pg(raw: Any) -> dict[str, Any]:

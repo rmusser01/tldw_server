@@ -126,6 +126,7 @@ jobs:
         with:
           python-version: '3.10'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           extras: dev
       - name: Run governed preflight final gate
         run: |
@@ -982,7 +983,6 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
-              tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
@@ -994,6 +994,8 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -1750,7 +1752,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
-              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py
@@ -2457,6 +2458,10 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -2466,6 +2471,8 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -2990,6 +2997,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -3014,6 +3023,8 @@ jobs:
           - name: product-claims-service
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
               tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py
@@ -3218,7 +3229,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
-              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py
@@ -3796,6 +3806,10 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -3805,6 +3819,8 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -4329,6 +4345,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -4353,6 +4371,8 @@ jobs:
           - name: product-claims-service
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
               tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py
@@ -4557,7 +4577,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
-              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py
@@ -5058,6 +5077,10 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -5067,6 +5090,8 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -5591,6 +5616,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -5615,6 +5642,8 @@ jobs:
           - name: product-claims-service
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
               tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py
@@ -5819,7 +5848,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
-              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py
@@ -6326,6 +6354,10 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
@@ -6335,6 +6367,8 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_job_status.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
@@ -6859,6 +6893,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
+              tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
@@ -6883,6 +6919,8 @@ jobs:
           - name: product-claims-service
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_api.py
+              tldw_Server_API/tests/Claims/test_claims_analytics_exports_worker_e2e.py
               tldw_Server_API/tests/Claims/test_claims_jobs_*.py
               tldw_Server_API/tests/Claims/test_claims_runtime_config.py
               tldw_Server_API/tests/Claims/test_claims_service_*.py
@@ -7087,7 +7125,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_admin_*.py
               tldw_Server_API/tests/Services/test_app_*.py
-              tldw_Server_API/tests/Services/test_chat_*.py
               tldw_Server_API/tests/Services/test_claims_*.py
               tldw_Server_API/tests/Services/test_compatibility_*.py
               tldw_Server_API/tests/Services/test_connectors_*.py

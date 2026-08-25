@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import AsyncIterator
 
 import aiosqlite
 import pytest
@@ -76,13 +76,14 @@ def _initialize_auth_db(db_path: Path) -> None:
                 user_id INTEGER NOT NULL,
                 password_hash TEXT NOT NULL
             );
-            CREATE TABLE audit_log (
+            CREATE TABLE audit_logs (
                 user_id INTEGER,
                 action TEXT,
-                target_type TEXT,
-                target_id INTEGER,
-                success INTEGER,
-                details TEXT
+                resource_type TEXT,
+                resource_id INTEGER,
+                status TEXT,
+                details TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE registration_codes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,6 +142,23 @@ def _role_memberships(db_path: Path, username: str) -> list[str]:
     return [str(row[0]) for row in rows]
 
 
+def _registration_audit(db_path: Path, username: str) -> tuple[str, str, str] | None:
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT a.resource_type, u.username, a.status
+            FROM audit_logs a
+            JOIN users u ON u.id = a.resource_id
+            WHERE a.action = 'user_registered'
+              AND json_extract(a.details, '$.username') = ?
+            """,
+            (username,),
+        ).fetchone()
+    if row is None:
+        return None
+    return str(row[0]), str(row[1]), str(row[2])
+
+
 @pytest.mark.asyncio
 async def test_default_registration_persists_canonical_role_before_return(tmp_path: Path) -> None:
     service, db_path = _make_service(tmp_path)
@@ -153,6 +171,11 @@ async def test_default_registration_persists_canonical_role_before_return(tmp_pa
 
     assert payload["role"] == "user"
     assert _role_memberships(db_path, "default-user") == ["user"]
+    assert _registration_audit(db_path, "default-user") == (
+        "user",
+        "default-user",
+        "success",
+    )
 
 
 @pytest.mark.asyncio

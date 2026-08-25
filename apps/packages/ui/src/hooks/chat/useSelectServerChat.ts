@@ -4,6 +4,7 @@ import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState"
 import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { cleanupAntOverlays } from "@/utils/cleanup-ant-overlays"
 import { normalizeConversationState } from "@/utils/conversation-state"
 import { updatePageTitle } from "@/utils/update-page-title"
@@ -87,6 +88,7 @@ export const useSelectServerChat = () => {
 
   return React.useCallback(
     (chat: ServerChatSummary) => {
+      usePlaygroundSessionStore.getState().cancelPendingRestore()
       if (typeof window !== "undefined") {
         Modal.destroyAll()
         cleanupAntOverlays()

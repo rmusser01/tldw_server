@@ -143,6 +143,7 @@ export function NotificationLifecycleProvider({
   const unsubscribeRef = React.useRef<(() => void) | null>(null)
   const pollTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
   const requestAbortRef = React.useRef<AbortController | null>(null)
+  const effectSetupSeenRef = React.useRef(false)
 
   const stopWork = React.useCallback(() => {
     streamOpenRef.current = false
@@ -356,8 +357,17 @@ export function NotificationLifecycleProvider({
   }, [applyFailure, enabled, pollIntervalMs, scopeKey, stopWork, updateCurrent])
 
   React.useEffect(() => {
-    void startWork()
+    let cancelled = false
+    if (effectSetupSeenRef.current) {
+      void startWork()
+    } else {
+      effectSetupSeenRef.current = true
+      queueMicrotask(() => {
+        if (!cancelled) void startWork()
+      })
+    }
     return () => {
+      cancelled = true
       generationRef.current += 1
       stopWork()
     }

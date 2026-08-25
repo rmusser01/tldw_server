@@ -84,7 +84,9 @@ def test_sqlite_v52_to_v53_preserves_existing_group_column_and_is_rerunnable(tmp
     assert {"group_id", "group_prompt"} <= columns
 
 
-def test_postgres_initializer_routes_v52_through_v53_script(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_postgres_initializer_routes_historical_v52_through_v53_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class _ReachedV53Error(Exception):
         pass
 

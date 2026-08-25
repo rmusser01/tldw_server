@@ -300,7 +300,7 @@ export function PromptAssistComposerAction({
         onClose={closeDrawer}
         afterOpenChange={handleDrawerAfterOpenChange}
         focusable={{ focusTriggerAfterClose: false }}
-        width={narrow ? "100%" : 480}
+        size={narrow ? "100%" : 480}
         title={t("common:promptAssist.region", "Prompt improvement")}>
         <div onKeyDown={(event) => event.stopPropagation()}>{panel}</div>
       </Drawer>

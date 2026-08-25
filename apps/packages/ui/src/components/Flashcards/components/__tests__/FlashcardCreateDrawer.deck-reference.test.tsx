@@ -255,6 +255,11 @@ describe("FlashcardCreateDrawer deck reference section", () => {
       selector: ".ant-select-item-option-content"
     })
     fireEvent.click(deckOptions[deckOptions.length - 1] as HTMLElement)
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(deckName, { selector: ".ant-select-content-value" }).length
+      ).toBeGreaterThan(0)
+    })
   }
 
   const expandReferenceSection = async () => {

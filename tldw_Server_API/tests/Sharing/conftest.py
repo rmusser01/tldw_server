@@ -7,6 +7,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_001_create_users_table,
+    migration_016_create_orgs_teams,
     migration_077_create_sharing_tables,
     migration_087_expand_share_tokens_resource_type_for_prototypes,
 )
@@ -51,6 +52,16 @@ def sharing_db():
     conn.execute(
         "INSERT INTO users (id, username, email, password_hash) VALUES (2, 'bob', 'bob@test.com', 'hash')"
     )
+    conn.commit()
+    migration_016_create_orgs_teams(conn)
+    conn.execute(
+        "INSERT INTO organizations (id, name, slug, owner_user_id) VALUES (5, 'Test org', 'test-org', 2)"
+    )
+    conn.execute(
+        "INSERT INTO teams (id, org_id, name, slug) VALUES (10, 5, 'Test team', 'test-team')"
+    )
+    conn.execute("INSERT INTO org_members (org_id, user_id, status) VALUES (5, 1, 'active')")
+    conn.execute("INSERT INTO team_members (team_id, user_id, status) VALUES (10, 1, 'active')")
     conn.commit()
     migration_077_create_sharing_tables(conn)
     migration_087_expand_share_tokens_resource_type_for_prototypes(conn)

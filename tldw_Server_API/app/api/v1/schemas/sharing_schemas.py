@@ -215,33 +215,3 @@ class AuditLogResponse(BaseModel):
     @model_validator(mode="after")
     def _default_pagination_aliases(self):
         return default_offset_pagination_aliases(self)
-
-
-# ── Proxy responses for shared-with-me ──
-
-class SharedWorkspaceSourceResponse(BaseModel):
-    id: str
-    workspace_id: str
-    media_id: int | None = None
-    title: str = ""
-    source_type: str = "media"
-    url: str | None = None
-    position: int = 0
-    added_at: str | None = None
-
-
-class SharedMediaResponse(BaseModel):
-    id: int
-    title: str = ""
-    url: str | None = None
-    media_type: str | None = None
-    content: str | None = None
-    author: str | None = None
-    ingestion_date: str | None = None
-
-
-class SharedChatRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=10000, description="Chat query")
-    model: str | None = Field(None, description="LLM model override")
-    api_name: str | None = Field(None, description="LLM provider override")
-    system_message: str | None = Field(None, description="System message override")
