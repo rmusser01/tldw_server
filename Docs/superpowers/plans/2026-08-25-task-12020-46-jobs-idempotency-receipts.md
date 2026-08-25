@@ -253,31 +253,31 @@ git commit -m "feat(jobs): admit receipt-backed operations atomically on sqlite"
 - Consumes: the same command and result contracts as SQLite.
 - Produces: identical outcomes through the same `JobManager` method.
 
-- [ ] **Step 1: Port the behavior matrix as PostgreSQL tests**
+- [x] **Step 1: Port the behavior matrix as PostgreSQL tests**
 
 Use the canonical `jobs_pg_dsn` fixture. Add exact replay, key mismatch, same-scope convergence, conflicting-scope request, rollback, and owner-isolation tests.
 
-- [ ] **Step 2: Add a PostgreSQL concurrency test**
+- [x] **Step 2: Add a PostgreSQL concurrency test**
 
 Start independent connections behind a barrier. Assert the transaction-scoped advisory lock yields one Job UUID and deterministic alias receipts without deadlocks or leaked transactions.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_postgres.py -v`
 
 Expected: FAIL because PostgreSQL dispatch is not implemented.
 
-- [ ] **Step 4: Implement advisory-locked admission**
+- [x] **Step 4: Implement advisory-locked admission**
 
-The backend function signature mirrors SQLite and additionally receives `cursor_factory` and `advisory_xact_lock_key`. Acquire `pg_advisory_xact_lock` before receipt/scope reads, use `FOR KEY SHARE` for existing Job validation, and insert the Job/event/receipt in one connection transaction. Map unique violations only after reading and validating the winning receipt; propagate other database errors through the Jobs manager's existing backend error boundary.
+The backend function signature mirrors SQLite and additionally receives `cursor_factory`. Acquire sorted transaction-scoped advisory locks for both the owner-scoped key and owner-scoped operation scope before receipt/scope reads; one lock cannot protect both uniqueness dimensions. Use `FOR KEY SHARE` for existing Job validation, and insert the Job/event/receipt in one connection transaction. The sorted dual-lock protocol serializes same-key/different-scope and different-key/same-scope contenders without deadlocks; propagate unrelated database errors through the Jobs manager's existing backend error boundary.
 
-- [ ] **Step 5: Run parity and existing PostgreSQL admission tests**
+- [x] **Step 5: Run parity and existing PostgreSQL admission tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_postgres.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_scope_postgres.py tldw_Server_API/tests/Jobs/test_jobs_pg_single_update_acquire_toggle.py -v`
 
 Expected: PASS or canonical fixture skip.
 
-- [ ] **Step 6: Commit PostgreSQL parity**
+- [x] **Step 6: Commit PostgreSQL parity**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations/postgres/idempotency.py tldw_Server_API/app/core/Jobs/operations/postgres/__init__.py tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_postgres.py

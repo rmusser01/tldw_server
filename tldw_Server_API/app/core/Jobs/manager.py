@@ -81,10 +81,12 @@ from .operations.contracts import (
     RenewLeaseCommand,
 )
 from .operations.postgres import acquire_job as _postgres_acquire_job
+from .operations.postgres import admit_idempotent_operation as _postgres_admit_idempotent_operation
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
 from .operations.postgres import release_job as _postgres_release_job
 from .operations.postgres import renew_lease as _postgres_renew_lease
 from .operations.postgres import renew_leases_batch as _postgres_renew_leases_batch
+from .operations.postgres import replay_idempotent_operation as _postgres_replay_idempotent_operation
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idempotent_operation
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
@@ -3086,14 +3088,20 @@ class JobManager:
         """Atomically admit or replay one owner-scoped user operation."""
 
         job = command.job
-        if self.backend == "sqlite":
-            replay_conn = self._connect()
-            try:
+        replay_conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                replay = _postgres_replay_idempotent_operation(
+                    replay_conn,
+                    self._pg_cursor,
+                    command,
+                )
+            else:
                 replay = _sqlite_replay_idempotent_operation(replay_conn, command)
-            finally:
-                replay_conn.close()
-            if replay is not None:
-                return replay
+        finally:
+            replay_conn.close()
+        if replay is not None:
+            return replay
 
         allowed_queues = self._get_allowed_queues(job.domain)
         if job.queue not in allowed_queues:
@@ -3178,32 +3186,37 @@ class JobManager:
             job = replace(job, payload=payload)
         command = replace(command, job=job)
 
-        if self.backend == "postgres":
-            raise NotImplementedError(
-                "PostgreSQL durable idempotent admission is not implemented"
-            )
-
         conn = self._connect()
         try:
-            result = _sqlite_admit_idempotent_operation(
-                conn,
-                command=command,
-                uuid_value=str(_uuid.uuid4()),
-                now=now,
-                max_queued_quota=self._quota_get(
+            admission_kwargs = {
+                "command": command,
+                "uuid_value": str(_uuid.uuid4()),
+                "now": now,
+                "max_queued_quota": self._quota_get(
                     "JOBS_QUOTA_MAX_QUEUED",
                     job.domain,
                     job.owner_user_id,
                 ),
-                submits_per_minute_quota=self._quota_get(
+                "submits_per_minute_quota": self._quota_get(
                     "JOBS_QUOTA_SUBMITS_PER_MIN",
                     job.domain,
                     job.owner_user_id,
                 ),
-                counters_enabled=JobManager._is_truthy(
+                "counters_enabled": JobManager._is_truthy(
                     os.getenv("JOBS_COUNTERS_ENABLED", "")
                 ),
-            )
+            }
+            if self.backend == "postgres":
+                result = _postgres_admit_idempotent_operation(
+                    conn,
+                    self._pg_cursor,
+                    **admission_kwargs,
+                )
+            else:
+                result = _sqlite_admit_idempotent_operation(
+                    conn,
+                    **admission_kwargs,
+                )
         finally:
             conn.close()
 
