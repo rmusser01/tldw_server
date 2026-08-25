@@ -209,23 +209,31 @@ class AuthnzOrgsTeamsRepo:
     ) -> dict[str, Any]:
         """Create and return an organization without owning the transaction."""
 
-        import json
+        await self._raise_for_duplicate_organization_on_connection(
+            conn,
+            name=name,
+            slug=slug,
+        )
+        return await self._insert_organization_on_connection(
+            conn,
+            name=name,
+            owner_user_id=owner_user_id,
+            slug=slug,
+            metadata=metadata,
+        )
+
+    async def _insert_organization_on_connection(
+        self,
+        conn: Any,
+        *,
+        name: str,
+        owner_user_id: int | None,
+        slug: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Insert one prevalidated organization on the caller transaction."""
 
         if self._is_postgres(conn):
-            if slug is not None and slug != "":
-                exists_slug = await conn.fetchrow(
-                    "SELECT 1 FROM public.organizations "
-                    "WHERE LOWER(slug) = LOWER($1)",
-                    slug,
-                )
-                if exists_slug:
-                    raise DuplicateOrganizationError("slug", str(slug))
-            exists_name = await conn.fetchrow(
-                "SELECT 1 FROM public.organizations WHERE LOWER(name) = LOWER($1)",
-                name,
-            )
-            if exists_name:
-                raise DuplicateOrganizationError("name", str(name))
             row = await conn.fetchrow(
                 """
                 INSERT INTO public.organizations
@@ -246,19 +254,8 @@ class AuthnzOrgsTeamsRepo:
                     result[field] = value.isoformat()
             return result
 
-        if slug is not None and slug != "":
-            cur_chk = await conn.execute(
-                "SELECT 1 FROM organizations WHERE LOWER(slug) = LOWER(?)",
-                (slug,),
-            )
-            if await cur_chk.fetchone():
-                raise DuplicateOrganizationError("slug", str(slug))
-        cur_chk = await conn.execute(
-            "SELECT 1 FROM organizations WHERE LOWER(name) = LOWER(?)",
-            (name,),
-        )
-        if await cur_chk.fetchone():
-            raise DuplicateOrganizationError("name", str(name))
+        import json
+
         cur = await conn.execute(
             "INSERT INTO organizations (name, slug, owner_user_id, metadata) "
             "VALUES (?, ?, ?, ?)",
@@ -288,6 +285,46 @@ class AuthnzOrgsTeamsRepo:
             "created_at": row[5],
             "updated_at": row[6],
         }
+
+    async def _raise_for_duplicate_organization_on_connection(
+        self,
+        conn: Any,
+        *,
+        name: str,
+        slug: str | None,
+    ) -> None:
+        """Preserve legacy slug-before-name duplicate precedence."""
+
+        if self._is_postgres(conn):
+            if slug is not None and slug != "":
+                exists_slug = await conn.fetchrow(
+                    "SELECT 1 FROM public.organizations "
+                    "WHERE LOWER(slug) = LOWER($1)",
+                    slug,
+                )
+                if exists_slug:
+                    raise DuplicateOrganizationError("slug", str(slug))
+            exists_name = await conn.fetchrow(
+                "SELECT 1 FROM public.organizations WHERE LOWER(name) = LOWER($1)",
+                name,
+            )
+            if exists_name:
+                raise DuplicateOrganizationError("name", str(name))
+            return
+
+        if slug is not None and slug != "":
+            cur_chk = await conn.execute(
+                "SELECT 1 FROM organizations WHERE LOWER(slug) = LOWER(?)",
+                (slug,),
+            )
+            if await cur_chk.fetchone():
+                raise DuplicateOrganizationError("slug", str(slug))
+        cur_chk = await conn.execute(
+            "SELECT 1 FROM organizations WHERE LOWER(name) = LOWER(?)",
+            (name,),
+        )
+        if await cur_chk.fetchone():
+            raise DuplicateOrganizationError("name", str(name))
 
     async def create_organization(
         self,
@@ -333,12 +370,17 @@ class AuthnzOrgsTeamsRepo:
 
         operation_time = datetime.now(timezone.utc)
         async with self._membership_transaction() as conn:
+            await self._raise_for_duplicate_organization_on_connection(
+                conn,
+                name=name,
+                slug=slug,
+            )
             await MembershipWriter(self.db_pool).authorize_organization_creation(
                 conn=conn,
                 context=context,
                 owner_user_id=owner_user_id,
             )
-            organization = await self._create_organization_on_connection(
+            organization = await self._insert_organization_on_connection(
                 conn,
                 name=name,
                 owner_user_id=owner_user_id,

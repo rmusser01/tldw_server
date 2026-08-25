@@ -82,7 +82,12 @@ async def create_organization(
                 metadata=metadata,
             )
         except MembershipTargetNotFound:
-            raise TransactionError("Create organization") from None
+            backend = (
+                "PostgreSQL"
+                if getattr(getattr(repo, "db_pool", None), "pool", None) is not None
+                else "SQLite"
+            )
+            raise TransactionError(f"{backend} transaction") from None
     return await repo.create_organization(
         name=name,
         owner_user_id=owner_user_id,
