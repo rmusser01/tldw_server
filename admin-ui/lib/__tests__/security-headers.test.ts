@@ -10,22 +10,21 @@ import { describe, it, expect } from 'vitest';
 import nextConfig from '../../next.config.mjs';
 
 const execFileAsync = promisify(execFile);
+const configUrl = pathToFileURL(resolve(process.cwd(), 'next.config.mjs')).href;
 
-describe('next.config.mjs security', () => {
-  it('loads the optional bundle analyzer only when analysis is enabled', async () => {
-    const tempDirectory = await mkdtemp(join(tmpdir(), 'tldw-admin-next-config-'));
-    const analyzerUrl = pathToFileURL(join(tempDirectory, 'bundle-analyzer.mjs')).href;
-    const loaderUrl = pathToFileURL(join(tempDirectory, 'loader.mjs')).href;
-    const configUrl = pathToFileURL(resolve(process.cwd(), 'next.config.mjs')).href;
+async function runConfigWithAnalyzerLoader(analyze: string, mode: string, script: string) {
+  const tempDirectory = await mkdtemp(join(tmpdir(), 'tldw-admin-next-config-'));
+  const analyzerUrl = pathToFileURL(join(tempDirectory, 'bundle-analyzer.mjs')).href;
+  const loaderUrl = pathToFileURL(join(tempDirectory, 'loader.mjs')).href;
 
-    try {
-      await writeFile(
-        new URL(analyzerUrl),
-        'export default ({ enabled }) => (config) => ({ ...config, testAnalyzerEnabled: enabled });\n'
-      );
-      await writeFile(
-        new URL(loaderUrl),
-        `const analyzerUrl = ${JSON.stringify(analyzerUrl)};
+  try {
+    await writeFile(
+      new URL(analyzerUrl),
+      'export default ({ enabled }) => (config) => ({ ...config, testAnalyzerEnabled: enabled });\n'
+    );
+    await writeFile(
+      new URL(loaderUrl),
+      `const analyzerUrl = ${JSON.stringify(analyzerUrl)};
 export async function resolve(specifier, context, nextResolve) {
   if (specifier === '@next/bundle-analyzer') {
     if (process.env.TEST_ANALYZER_MODE === 'block') {
@@ -36,34 +35,42 @@ export async function resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context);
 }
 `
-      );
+    );
 
-      const runConfig = (analyze: string, mode: string, script: string) =>
-        execFileAsync(
-          process.execPath,
-          ['--experimental-loader', loaderUrl, '--input-type=module', '--eval', script],
-          {
-            cwd: process.cwd(),
-            env: {
-              ...process.env,
-              ANALYZE: analyze,
-              NEXT_PUBLIC_SENTRY_DSN: '',
-              TEST_ANALYZER_MODE: mode,
-            },
-          }
-        );
+    await execFileAsync(
+      process.execPath,
+      ['--experimental-loader', loaderUrl, '--input-type=module', '--eval', script],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          ANALYZE: analyze,
+          NEXT_PUBLIC_SENTRY_DSN: '',
+          TEST_ANALYZER_MODE: mode,
+        },
+      }
+    );
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+}
 
-      await runConfig('false', 'block', `await import(${JSON.stringify(configUrl)});`);
+describe('next.config.mjs security', () => {
+  it('does not load the optional bundle analyzer when analysis is disabled', async () => {
+    await runConfigWithAnalyzerLoader(
+      'false',
+      'block',
+      `await import(${JSON.stringify(configUrl)});`
+    );
+  });
 
-      await runConfig(
-        'true',
-        'stub',
-        `const config = (await import(${JSON.stringify(configUrl)})).default;
+  it('loads the optional bundle analyzer when analysis is enabled', async () => {
+    await runConfigWithAnalyzerLoader(
+      'true',
+      'stub',
+      `const config = (await import(${JSON.stringify(configUrl)})).default;
 if (config.testAnalyzerEnabled !== true) throw new Error('analyzer wrapper was not applied');`
-      );
-    } finally {
-      await rm(tempDirectory, { recursive: true, force: true });
-    }
+    );
   });
 
   it('enables standalone output for Docker', () => {
