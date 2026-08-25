@@ -80,7 +80,12 @@ class _AuthorizationPool:
         self.conn = conn
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        assert acquire_timeout_seconds is not None
         yield self.conn
 
 
@@ -375,7 +380,12 @@ class _PostgresQualificationPool:
         self.connection = _PostgresQualificationConnection(self.queries)
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        assert acquire_timeout_seconds is not None
         yield self.connection
 
     async def fetchall(self, query: str, *_args):

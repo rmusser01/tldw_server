@@ -56,6 +56,7 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
     DuplicateOrganizationError,
     DuplicateTeamError,
     InvalidRegistrationCodeError,
@@ -74,6 +75,9 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 from tldw_Server_API.app.core.Billing.subscription_service import get_subscription_service
 from tldw_Server_API.app.services.admin_budgets_service import (
     list_org_budgets as svc_list_org_budgets,
@@ -95,10 +99,12 @@ router = APIRouter(
 )
 
 _MEMBERSHIP_CONTROL_ERRORS = (
+    ConnectionPoolExhaustedError,
     MembershipAuthorizationError,
     MembershipPreflightChanged,
     MembershipScopeNotFound,
     MembershipTargetNotFound,
+    TimeoutError,
 )
 
 
@@ -124,11 +130,23 @@ def _membership_context(
 def _membership_control_http_exception(
     exc: (
         MembershipAuthorizationError
+        | ConnectionPoolExhaustedError
         | MembershipPreflightChanged
         | MembershipScopeNotFound
         | MembershipTargetNotFound
+        | TimeoutError
     ),
 ) -> HTTPException:
+    if isinstance(exc, (ConnectionPoolExhaustedError, TimeoutError)):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Membership service is busy; retry the request",
+            headers={
+                "Retry-After": str(
+                    get_authnz_transaction_policy().busy_retry_after_seconds
+                ),
+            },
+        )
     if isinstance(exc, MembershipAuthorizationError):
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

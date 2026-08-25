@@ -42,6 +42,9 @@ from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
@@ -313,7 +316,11 @@ class RegistrationService:
         code_info: Optional[dict[str, Any]] = None
 
         try:
-            async with self.db_pool.transaction() as conn:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
                 # Check for duplicate username/email
                 if self._is_postgres_backend():
                     # PostgreSQL
@@ -590,7 +597,11 @@ class RegistrationService:
         if not self.db_pool:
             await self.initialize()
 
-        async with self.db_pool.transaction() as conn:
+        async with self.db_pool.transaction(
+            acquire_timeout_seconds=(
+                get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+            ),
+        ) as conn:
             user_email = None
             if self._is_postgres_backend():
                 user_row = await conn.fetchrow("SELECT email FROM users WHERE id = $1", user_id)

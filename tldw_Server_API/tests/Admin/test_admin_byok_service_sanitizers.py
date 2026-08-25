@@ -7,6 +7,7 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     SharedProviderKeyTestRequest,
     SharedProviderKeyUpsertRequest,
 )
+from tldw_Server_API.app.core.AuthNZ.membership_writer import MembershipAuthority
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
@@ -648,7 +649,70 @@ async def test_upsert_shared_key_canonicalizes_registered_alias(monkeypatch):
     )
 
     assert captured["provider"] == "openai"
+    assert captured["authorization_context"].actor_user_id == 7
+    assert (
+        captured["authorization_context"].required_authority
+        is MembershipAuthority.PLATFORM_ADMIN
+    )
     assert response.provider == "openai"
+
+
+@pytest.mark.asyncio
+async def test_delete_shared_key_supplies_platform_admin_authorization_context(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    class CapturingRepo:
+        async def delete_secret(self, *_args, **kwargs):
+            captured.update(kwargs)
+            return True
+
+    async def get_shared_repo():
+        return CapturingRepo()
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+
+    await service.delete_shared_key(_principal(), "org", 42, "openai")
+
+    assert captured["authorization_context"].actor_user_id == 7
+    assert (
+        captured["authorization_context"].required_authority
+        is MembershipAuthority.PLATFORM_ADMIN
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_shared_key_preserves_invalid_actor_as_forbidden(
+    monkeypatch,
+) -> None:
+    class UnusedRepo:
+        async def delete_secret(self, *_args, **_kwargs):
+            pytest.fail("storage must not run for an invalid actor")
+
+    async def get_shared_repo():
+        return UnusedRepo()
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+
+    invalid_principal = AuthPrincipal(
+        kind="user",
+        user_id=0,
+        roles=["admin"],
+        permissions=["*"],
+        is_admin=True,
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await service.delete_shared_key(
+            invalid_principal,
+            "org",
+            42,
+            "openai",
+        )
+
+    assert exc_info.value.status_code == 403
 
 
 @pytest.mark.asyncio

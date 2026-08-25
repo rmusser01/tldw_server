@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+import asyncpg
 import pytest
 from fastapi import HTTPException
 
@@ -10,20 +11,28 @@ from tldw_Server_API.app.api.v1.endpoints.admin.admin_tenant_provisioning import
     TenantProvisionRequest,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    VersionedUserWriteGateway,
+)
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.tests.helpers.authnz_seed import unmanaged_authnz_pg_connection
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 
-def _principal() -> AuthPrincipal:
+def _principal(user_id: int = 1) -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
-        user_id=1,
+        user_id=user_id,
         username="admin",
         roles=["admin"],
         is_admin=True,
     )
+
+
+async def _execute_intentionally_invalid_candidate_ddl(conn, statement: str) -> None:
+    """Bypass the users firewall only to construct invalid candidate metadata."""
+    await asyncpg.Connection.execute(conn, statement)
 
 
 @pytest.mark.asyncio
@@ -46,6 +55,33 @@ async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
         lambda: type("PasswordService", (), {"hash_password": lambda _self, _value: "hash"})(),
     )
 
+    async with test_db_pool.transaction() as conn:
+        actor_result = await VersionedUserWriteGateway("postgres").insert_user(
+            conn,
+            values={
+                "uuid": str(uuid.uuid4()),
+                "username": f"admin_{suffix}",
+                "email": f"admin_{suffix}@example.com",
+                "password_hash": "hash",
+                "role": "admin",
+                "is_active": True,
+                "is_verified": True,
+            },
+        )
+        permission_id = await conn.fetchval(
+            "INSERT INTO public.permissions (name, description, category) "
+            "VALUES ('system.configure', 'Configure system', 'system') "
+            "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id"
+        )
+        actor_user_id = actor_result.affected_user_ids[0]
+        await conn.execute(
+            "INSERT INTO public.user_permissions (user_id, permission_id, granted) "
+            "VALUES ($1, $2, TRUE) "
+            "ON CONFLICT (user_id, permission_id) DO UPDATE SET granted = TRUE",
+            actor_user_id,
+            permission_id,
+        )
+
     result = await admin_tenant_provisioning.provision_tenant(
         TenantProvisionRequest(
             username=f"tenant_{suffix}",
@@ -53,7 +89,7 @@ async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
             password="securepass123",
             org_name=org_name,
         ),
-        _principal(),
+        _principal(actor_user_id),
     )
     assert result.user_id > 0
     assert result.org_id > 0
@@ -67,7 +103,7 @@ async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
                 password="securepass123",
                 org_name=org_name,
             ),
-            _principal(),
+            _principal(actor_user_id),
         )
 
     assert raised.value.status_code == 500
