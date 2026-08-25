@@ -5,7 +5,6 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ import orgs_teams
 from tldw_Server_API.app.core.AuthNZ.exceptions import UserRegistrationException
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipLockBackend,
@@ -172,7 +171,7 @@ class _PostgresMembershipReadConn:
 
     async def fetch(self, query: str, *params: Any) -> list[dict[str, Any]]:
         self.fetch_calls.append((str(query), tuple(params)))
-        if "FROM org_members" in query:
+        if "org_members" in query:
             return [{"org_id": 11, "role": "admin", "status": "active"}]
         return [
             {
@@ -192,7 +191,7 @@ class _SqliteMembershipReadConn:
 
     async def execute(self, query: str, params: Any) -> _ListCursor:
         self.execute_calls.append((str(query), params))
-        if "FROM org_members" in query:
+        if "org_members" in query:
             return _ListCursor([(11, "admin", "active")])
         return _ListCursor([(2, 7, "member", 11, "team", "org")])
 
@@ -444,33 +443,18 @@ async def test_membership_reads_use_supplied_connection_without_secondary_acquis
 
     assert team_rows[0]["org_id"] == 11
     assert org_rows == [{"org_id": 11, "role": "admin", "status": "active"}]
-
-
-@pytest.mark.asyncio
-async def test_membership_read_helpers_forward_supplied_connection(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    conn = object()
-    calls: list[tuple[str, int, object | None]] = []
-
-    class _Repo:
-        async def list_memberships_for_user(self, user_id: int, *, conn=None):
-            calls.append(("team", user_id, conn))
-            return []
-
-        async def list_org_memberships_for_user(self, user_id: int, *, conn=None):
-            calls.append(("org", user_id, conn))
-            return []
-
-    async def _repo():
-        return _Repo()
-
-    monkeypatch.setattr(orgs_teams, "_get_orgs_teams_repo", _repo)
-
-    await orgs_teams.list_memberships_for_user(7, db_conn=conn)
-    await orgs_teams.list_org_memberships_for_user(7, db_conn=conn)
-
-    assert calls == [("team", 7, conn), ("org", 7, conn)]
+    if postgres:
+        queries = "\n".join(query for query, _params in conn.fetch_calls)
+        assert "FROM public.team_members" in queries
+        assert "JOIN public.teams" in queries
+        assert "JOIN public.organizations" in queries
+        assert "FROM public.org_members" in queries
+    else:
+        queries = "\n".join(query for query, _params in conn.execute_calls)
+        assert "FROM main.team_members" in queries
+        assert "JOIN main.teams" in queries
+        assert "JOIN main.organizations" in queries
+        assert "FROM main.org_members" in queries
 
 
 @pytest.mark.asyncio

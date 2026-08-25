@@ -158,9 +158,16 @@ async def test_postgres_writer_uses_public_relations_under_shadow_search_path(
         )
         await conn.execute(f'SET LOCAL search_path TO "{schema}", public')
 
-        default_team_id = await AuthnzOrgsTeamsRepo(
-            test_db_pool
-        )._get_or_create_default_team_id(  # noqa: SLF001
+        repo = AuthnzOrgsTeamsRepo(test_db_pool)
+        org_memberships = await repo.list_org_memberships_for_user(
+            ids["first_id"],
+            conn=conn,
+        )
+        team_memberships = await repo.list_memberships_for_user(
+            ids["first_id"],
+            conn=conn,
+        )
+        default_team_id = await repo._get_or_create_default_team_id(  # noqa: SLF001
             conn,
             ids["org_id"],
             create=False,
@@ -189,6 +196,13 @@ async def test_postgres_writer_uses_public_relations_under_shadow_search_path(
         )
 
         assert default_team_id == ids["default_team_id"]
+        assert org_memberships == [
+            {"org_id": ids["org_id"], "role": "member", "status": "active"}
+        ]
+        assert {row["team_id"] for row in team_memberships} == {
+            ids["default_team_id"],
+            ids["team_id"],
+        }
         assert result.affected_user_ids == (ids["first_id"], ids["second_id"])
         assert await conn.fetchval(
             "SELECT role FROM public.org_members WHERE org_id = $1 AND user_id = $2",
