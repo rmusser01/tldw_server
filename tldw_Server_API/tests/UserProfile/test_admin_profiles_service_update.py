@@ -239,6 +239,7 @@ def test_bulk_membership_update_locks_actor_and_target_canonically(
     expected_lock_order: tuple[int, ...],
 ) -> None:
     events: list[tuple[object, ...]] = []
+    transaction_acquire_timeouts: list[float | None] = []
     transaction_conn = object()
 
     class _Transaction:
@@ -249,7 +250,8 @@ def test_bulk_membership_update_locks_actor_and_target_canonically(
             return False
 
     class _Pool:
-        def transaction(self):
+        def transaction(self, *, acquire_timeout_seconds=None):
+            transaction_acquire_timeouts.append(acquire_timeout_seconds)
             return _Transaction()
 
     class _ProfileService:
@@ -312,6 +314,12 @@ def test_bulk_membership_update_locks_actor_and_target_canonically(
         _allow_scope,
     )
     monkeypatch.setattr(admin_profiles_service, "get_db_pool", _pool)
+    monkeypatch.setattr(
+        admin_profiles_service,
+        "get_authnz_transaction_policy",
+        lambda: SimpleNamespace(db_pool_acquire_timeout_seconds=13.0),
+        raising=False,
+    )
     monkeypatch.setattr(admin_profiles_service, "UserProfileService", _ProfileService)
     monkeypatch.setattr(admin_profiles_service, "UserProfileUpdateService", _UpdateService)
     monkeypatch.setattr(admin_profiles_service, "ProfileBulkCommandService", _BulkCommandService)
@@ -349,6 +357,7 @@ def test_bulk_membership_update_locks_actor_and_target_canonically(
         ("apply", transaction_conn),
     ]
     assert not any(event[0] == "version" and event[3] is True for event in events)
+    assert transaction_acquire_timeouts == [13.0]
 
 
 def test_bulk_nonmembership_update_preserves_target_only_authoritative_lock(
@@ -366,7 +375,7 @@ def test_bulk_nonmembership_update_preserves_target_only_authoritative_lock(
             return False
 
     class _Pool:
-        def transaction(self):
+        def transaction(self, *, acquire_timeout_seconds=None):
             return _Transaction()
 
     class _ProfileService:

@@ -385,8 +385,10 @@ async def test_membership_updates_use_caller_transaction_and_one_outer_touch(
     floor_two = datetime(2026, 7, 26, 12, 1, tzinfo=timezone.utc)
     writer_calls: list[dict[str, object]] = []
     final_touches: list[tuple[object, int, datetime]] = []
+    membership_context_connections: list[object | None] = []
 
     async def _membership_context(*_args, **_kwargs):
+        membership_context_connections.append(_kwargs.get("db_conn"))
         return update_service_module._MembershipContext(  # noqa: SLF001
             target_org_roles={11: "member"},
             target_team_roles={22: "member"},
@@ -492,6 +494,7 @@ async def test_membership_updates_use_caller_transaction_and_one_outer_touch(
 
     assert result.applied == ["memberships.orgs.role", "memberships.teams.role"]
     assert result.skipped == []
+    assert membership_context_connections == [db_conn]
     assert len(writer_calls) == 1
     assert writer_calls[0]["conn"] is db_conn
     assert (
@@ -510,6 +513,51 @@ async def test_membership_updates_use_caller_transaction_and_one_outer_touch(
         (MembershipScopeType.TEAM, 22),
     ]
     assert final_touches == [(db_conn, 7, floor_two)]
+
+
+@pytest.mark.asyncio
+async def test_membership_context_forwards_owned_connection_to_all_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_conn = object()
+    calls: list[tuple[str, int, object | None]] = []
+
+    async def _org_memberships(user_id: int, *, db_conn=None):
+        calls.append(("org", user_id, db_conn))
+        return [{"org_id": 11, "role": "admin", "status": "active"}]
+
+    async def _team_memberships(user_id: int, *, db_conn=None):
+        calls.append(("team", user_id, db_conn))
+        return [{"team_id": 22, "org_id": 11, "role": "lead"}]
+
+    monkeypatch.setattr(
+        update_service_module,
+        "list_org_memberships_for_user",
+        _org_memberships,
+    )
+    monkeypatch.setattr(
+        update_service_module,
+        "list_memberships_for_user",
+        _team_memberships,
+    )
+
+    context = await update_service_module.UserProfileUpdateService(
+        db_pool=object(),
+    )._build_membership_context(  # noqa: SLF001
+        user_id=7,
+        scope=update_service_module.ProfileUpdateScope(actor_user_id=9),
+        is_platform_admin=False,
+        db_conn=db_conn,
+    )
+
+    assert calls == [
+        ("org", 7, db_conn),
+        ("team", 7, db_conn),
+        ("org", 9, db_conn),
+        ("team", 9, db_conn),
+    ]
+    assert context.target_org_roles == {11: "admin"}
+    assert context.actor_team_roles == {22: "lead"}
 
 
 @pytest.mark.asyncio
