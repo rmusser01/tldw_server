@@ -9,7 +9,11 @@ from typing import Any, get_type_hints
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ import orgs_teams as orgs_teams_facade
-from tldw_Server_API.app.core.AuthNZ.exceptions import RollbackSignal, UserRegistrationException
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    RollbackSignal,
+    TransactionError,
+    UserRegistrationException,
+)
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     AnchorOwnership,
@@ -20,6 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipPreflightChanged,
     MembershipScopeDeletionSnapshot,
     MembershipScopeType,
+    MembershipTargetNotFound,
     MembershipUserVersionFloor,
     MembershipWriter,
     MembershipWriterContractError,
@@ -725,6 +730,31 @@ async def test_legacy_organization_facade_routes_owner_through_bootstrap_writer(
     assert observed["context"] == TrustedMembershipWriteContext(
         trusted_reason=TrustedMembershipReason.BOOTSTRAP,
     )
+
+
+@pytest.mark.asyncio
+async def test_legacy_organization_facade_preserves_missing_owner_transaction_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Repo:
+        async def create_organization_with_owner_membership(
+            self,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            raise MembershipTargetNotFound()
+
+    async def _repo() -> _Repo:
+        return _Repo()
+
+    monkeypatch.setattr(orgs_teams_facade, "_get_orgs_teams_repo", _repo)
+
+    with pytest.raises(TransactionError) as exc_info:
+        await orgs_teams_facade.create_organization(
+            name="Missing owner",
+            owner_user_id=999,
+        )
+
+    assert exc_info.value.__cause__ is None
 
 
 @pytest.mark.asyncio

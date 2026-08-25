@@ -388,7 +388,12 @@ class TestOrgInviteService:
                 self.transaction_count = 0
 
             @asynccontextmanager
-            async def transaction(self):
+            async def transaction(
+                self,
+                *,
+                acquire_timeout_seconds: float | None = None,
+            ):
+                assert acquire_timeout_seconds is not None
                 self.transaction_count += 1
                 yield transaction_conn
 

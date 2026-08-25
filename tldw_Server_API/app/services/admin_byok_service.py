@@ -32,6 +32,10 @@ from tldw_Server_API.app.core.AuthNZ.byok_testing import (
     test_provider_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
@@ -105,6 +109,20 @@ def require_byok_enabled() -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="BYOK is disabled in this deployment",
         )
+
+
+def _platform_admin_membership_context(
+    principal: AuthPrincipal,
+) -> ActorMembershipWriteContext:
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage shared BYOK keys",
+        )
+    return ActorMembershipWriteContext(
+        actor_user_id=principal.user_id,
+        required_authority=MembershipAuthority.PLATFORM_ADMIN,
+    )
 
 
 def normalize_credential_fields(
@@ -229,6 +247,7 @@ async def upsert_shared_key(
     payload: SharedProviderKeyUpsertRequest,
 ) -> SharedProviderKeyResponse:
     require_byok_enabled()
+    authorization_context = _platform_admin_membership_context(principal)
     provider_norm = canonical_provider_name(payload.provider)
     if not is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
@@ -287,6 +306,7 @@ async def upsert_shared_key(
             updated_at=now,
             created_by=principal.user_id,
             updated_by=principal.user_id,
+            authorization_context=authorization_context,
         )
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(
@@ -426,6 +446,7 @@ async def delete_shared_key(
     provider: str,
 ) -> None:
     require_byok_enabled()
+    authorization_context = _platform_admin_membership_context(principal)
     repo = await get_shared_byok_repo()
     provider_norm = canonical_provider_name(provider)
     try:
@@ -434,6 +455,7 @@ async def delete_shared_key(
             scope_id,
             provider_norm,
             revoked_by=principal.user_id,
+            authorization_context=authorization_context,
         )
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc

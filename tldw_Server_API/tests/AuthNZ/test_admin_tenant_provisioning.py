@@ -24,6 +24,9 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipTargetNotFound,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 
 
 class _LoggerStub:
@@ -165,7 +168,11 @@ class TestProvisionEndpointUnit:
         assert result.username == "tenant_user"
         assert result.org_name == "TenantOrg"
         assert result.role == "owner"
-        mock_pool.transaction.assert_called_once_with()
+        mock_pool.transaction.assert_called_once_with(
+            acquire_timeout_seconds=(
+                get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+            ),
+        )
         creation_writer.authorize_organization_creation.assert_awaited_once()
         repo.provision_org_membership_on_connection.assert_awaited_once()
 
@@ -227,7 +234,11 @@ class TestProvisionEndpointUnit:
         assert result.org_id == 10
         gateway_type.assert_called_once_with("postgres")
         assert gateway.insert_user.await_args.kwargs["values"]["is_active"] is True
-        pool.transaction.assert_called_once_with()
+        pool.transaction.assert_called_once_with(
+            acquire_timeout_seconds=(
+                get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+            ),
+        )
         assert conn.fetchrow.await_args_list[0].args[0].count("$1") == 1
         assert "RETURNING id" in conn.fetchrow.await_args_list[1].args[0]
         creation_writer.authorize_organization_creation.assert_awaited_once()
@@ -462,7 +473,11 @@ class TestProvisionEndpointUnit:
                 )
 
         assert exc_info.value.status_code == 500
-        pool.transaction.assert_called_once_with()
+        pool.transaction.assert_called_once_with(
+            acquire_timeout_seconds=(
+                get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+            ),
+        )
         assert conn.__aexit__.await_args.args[0] is RuntimeError
         creation_writer.authorize_organization_creation.assert_awaited_once()
         repo.provision_org_membership_on_connection.assert_awaited_once()

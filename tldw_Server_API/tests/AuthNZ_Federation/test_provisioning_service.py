@@ -134,7 +134,12 @@ async def test_apply_mapped_grants_ignores_memberships_with_missing_ids(
             self.conn = object()
 
         @asynccontextmanager
-        async def transaction(self):
+        async def transaction(
+            self,
+            *,
+            acquire_timeout_seconds: float | None = None,
+        ):
+            assert acquire_timeout_seconds is not None
             self.transaction_count += 1
             yield self.conn
 
@@ -181,7 +186,12 @@ async def test_federated_org_grant_uses_bootstrap_writer_on_caller_transaction(
             self.conn = object()
 
         @asynccontextmanager
-        async def transaction(self):
+        async def transaction(
+            self,
+            *,
+            acquire_timeout_seconds: float | None = None,
+        ):
+            assert acquire_timeout_seconds is not None
             self.transaction_count += 1
             yield self.conn
 

@@ -85,6 +85,28 @@ EXPECTED_TRUSTED_MEMBERSHIP_REASONS = {
         {"REGISTRATION"}
     ),
 }
+BOUNDED_TASK8_TRANSACTION_FUNCTIONS = {
+    "tldw_Server_API/app/services/registration_service.py": frozenset(
+        {"register_user", "accept_org_invite_code"}
+    ),
+    "tldw_Server_API/app/services/org_invite_service.py": frozenset(
+        {"redeem_invite"}
+    ),
+    "tldw_Server_API/app/core/AuthNZ/federation/provisioning_service.py": frozenset(
+        {"apply_mapped_grants"}
+    ),
+    "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py": frozenset(
+        {"provision_tenant"}
+    ),
+    "tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py": frozenset(
+        {
+            "upsert_secret",
+            "fetch_secret_for_manager",
+            "list_secrets_for_manager",
+            "delete_secret",
+        }
+    ),
+}
 ACTOR_MEMBERSHIP_CONTEXT_FACTORIES = frozenset(
     {"_membership_context", "_membership_write_context"}
 )
@@ -1986,6 +2008,44 @@ def test_runtime_trusted_membership_reasons_are_exact_and_path_owned() -> None:
             observed[_relative_path(path)] = reasons
 
     assert observed == EXPECTED_TRUSTED_MEMBERSHIP_REASONS
+
+
+def test_task8_transaction_owners_supply_shared_acquisition_bound() -> None:
+    missing: list[str] = []
+    for relative_path, function_names in BOUNDED_TASK8_TRANSACTION_FUNCTIONS.items():
+        path = REPO_ROOT / relative_path
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found_functions: set[str] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                continue
+            if node.name not in function_names:
+                continue
+            found_functions.add(node.name)
+            if not any(
+                isinstance(candidate, ast.Call)
+                and _call_name(candidate) == "get_authnz_transaction_policy"
+                for candidate in ast.walk(node)
+            ):
+                missing.append(f"{relative_path}:{node.lineno} missing shared policy")
+            for call in (
+                candidate
+                for candidate in ast.walk(node)
+                if isinstance(candidate, ast.Call)
+                and _call_name(candidate) == "transaction"
+            ):
+                if not any(
+                    keyword.arg == "acquire_timeout_seconds"
+                    for keyword in call.keywords
+                ):
+                    missing.append(f"{relative_path}:{call.lineno}")
+        for name in sorted(function_names - found_functions):
+            missing.append(f"{relative_path}:missing function {name}")
+
+    assert not missing, (
+        "Task 8 transaction owners must use the shared acquisition bound:\n  "
+        + "\n  ".join(missing)
+    )
 
 
 def test_task8_membership_paths_do_not_import_work_package3_pipeline() -> None:
