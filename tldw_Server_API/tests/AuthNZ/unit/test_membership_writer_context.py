@@ -34,6 +34,10 @@ class _IntSubclass(int):
     pass
 
 
+class _StrSubclass(str):
+    pass
+
+
 class _SecretValue:
     def __repr__(self) -> str:
         return "submitted-secret"
@@ -222,8 +226,70 @@ def test_mutations_validate_closed_kind_and_role_shape() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "scope_type",
+    [MembershipScopeType.ORGANIZATION, MembershipScopeType.TEAM],
+)
+@pytest.mark.parametrize(
+    "kind",
+    [MembershipMutationKind.ADD, MembershipMutationKind.UPDATE_ROLE],
+)
+@pytest.mark.parametrize(
+    "role",
+    [
+        pytest.param("submitted-secret", id="unknown"),
+        pytest.param(" \t\n", id="whitespace-only"),
+        pytest.param("Owner", id="owner-case-variant"),
+        pytest.param("ADMIN", id="admin-case-variant"),
+        pytest.param("Lead", id="lead-case-variant"),
+        pytest.param("MEMBER", id="member-case-variant"),
+        pytest.param("member" * 100, id="overlength"),
+        pytest.param(_StrSubclass("member"), id="exact-str-required"),
+    ],
+)
+def test_role_bearing_mutations_reject_noncanonical_roles(
+    scope_type,
+    kind,
+    role,
+) -> None:
+    _assert_sanitized_contract_error(
+        lambda: MembershipMutation(
+            scope_type=scope_type,
+            scope_id=1,
+            user_id=2,
+            kind=kind,
+            role=role,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "scope_type",
+    [MembershipScopeType.ORGANIZATION, MembershipScopeType.TEAM],
+)
+@pytest.mark.parametrize(
+    "kind",
+    [MembershipMutationKind.ADD, MembershipMutationKind.UPDATE_ROLE],
+)
+@pytest.mark.parametrize("role", ["owner", "admin", "lead", "member"])
+def test_role_bearing_mutations_accept_each_canonical_role(
+    scope_type,
+    kind,
+    role,
+) -> None:
+    mutation = MembershipMutation(
+        scope_type=scope_type,
+        scope_id=1,
+        user_id=2,
+        kind=kind,
+        role=role,
+    )
+
+    assert mutation.role == role
+
+
 def test_mutation_role_is_hidden_from_direct_and_plan_repr() -> None:
-    role = "distinctive-role-value-for-repr-privacy"
+    role = "owner"
     mutation = MembershipMutation(
         scope_type=MembershipScopeType.ORGANIZATION,
         scope_id=23,
@@ -247,7 +313,7 @@ def test_mutation_role_is_hidden_from_direct_and_plan_repr() -> None:
     )
 
     for rendered in (repr(mutation), repr(plan)):
-        assert role not in rendered
+        assert f"role={role!r}" not in rendered
         assert "scope_id=23" in rendered
         assert "user_id=47" in rendered
         assert "MembershipMutationKind.UPDATE_ROLE" in rendered
