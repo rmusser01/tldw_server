@@ -8,7 +8,9 @@ from pydantic import ValidationError
 
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     JS_SAFE_INTEGER_MAX,
+    MoodboardCanvasV1,
     NotesMoodboardStudioContractError,
+    NotesMoodboardV1,
     StudioDiagramManifestV1,
     canonical_json_bytes,
     diagram_render_hash,
@@ -255,6 +257,70 @@ def test_timestamps_reject_non_rfc3339_forms_and_excess_fractional_precision(
 
     with pytest.raises(NotesMoodboardStudioContractError, match="RFC 3339"):
         parse_notes_moodboard_v1(payload)
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "9999-12-31T23:59:59-23:59",
+        "0001-01-01T00:00:00+23:59",
+    ],
+)
+def test_timestamp_utc_conversion_overflow_is_a_contract_error(
+    timestamp: str,
+) -> None:
+    payload = valid_moodboard_payload()
+    smart_rule = deepcopy(payload["smart_rule"])
+    assert isinstance(smart_rule, dict)
+    smart_rule["updated"] = {"after": timestamp, "before": None}
+    payload["smart_rule"] = smart_rule
+
+    with pytest.raises(NotesMoodboardStudioContractError, match="RFC 3339"):
+        parse_notes_moodboard_v1(payload)
+
+
+@pytest.mark.parametrize(
+    ("timestamp", "expected"),
+    [
+        ("9999-12-30T23:59:59-23:59", "9999-12-31T23:58:59Z"),
+        ("0001-01-02T00:00:00+23:59", "0001-01-01T00:01:00Z"),
+    ],
+)
+def test_timestamp_near_utc_conversion_boundaries_normalizes(
+    timestamp: str,
+    expected: str,
+) -> None:
+    payload = valid_moodboard_payload()
+    smart_rule = deepcopy(payload["smart_rule"])
+    assert isinstance(smart_rule, dict)
+    smart_rule["updated"] = {"after": timestamp, "before": None}
+    payload["smart_rule"] = smart_rule
+
+    parsed = parse_notes_moodboard_v1(payload)
+
+    assert parsed.smart_rule is not None
+    assert parsed.smart_rule.updated.after == expected
+
+
+@pytest.mark.parametrize(
+    "bound_accepted_at",
+    [
+        "9999-12-31T23:59:59-23:59",
+        "0001-01-01T00:00:00+23:59",
+    ],
+)
+def test_server_bound_acceptance_time_overflow_is_a_contract_error(
+    bound_accepted_at: str,
+) -> None:
+    with pytest.raises(
+        NotesMoodboardStudioContractError,
+        match="server-bound acceptance time",
+    ):
+        parse_notes_studio_document_v1(
+            valid_studio_payload(),
+            bound_attestation="server",
+            bound_accepted_at=bound_accepted_at,
+        )
 
 
 @pytest.mark.parametrize(
@@ -631,6 +697,37 @@ def test_extension_credential_grammar_normalizes_all_key_styles_recursively(
 @pytest.mark.parametrize("surface", ["canvas", "display"])
 @pytest.mark.parametrize("position", ["direct", "nested", "list"])
 @pytest.mark.parametrize(
+    "reserved_key",
+    [
+        "openai_api_key",
+        "openai.api.key",
+        "openai-api-key",
+        "OpenaiApiKey",
+        "anthropicApiKey",
+        "anthropic.api.key",
+        "anthropic-api-key",
+        "AnthropicApiKey",
+        "xApiKey",
+        "x.api.key",
+        "x-api-key",
+        "XApiKey",
+        "apiKeyLabel",
+        "api.key.label",
+    ],
+)
+def test_extension_credential_grammar_rejects_token_aligned_subsequences(
+    surface: str,
+    position: str,
+    reserved_key: str,
+) -> None:
+    extension = _extension_at_position(reserved_key, position)
+    with pytest.raises(NotesMoodboardStudioContractError, match="credential"):
+        _parse_extension_surface(surface, extension)
+
+
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+@pytest.mark.parametrize("position", ["direct", "nested", "list"])
+@pytest.mark.parametrize(
     "parts",
     [("access", "key", "id")],
     ids=["access+key+id"],
@@ -980,8 +1077,198 @@ def test_models_and_recursive_extensions_are_frozen_and_hash_stable() -> None:
     assert notes_moodboard_object_hash(parsed, revision=1, deleted=False) == before
 
 
+@pytest.mark.parametrize(
+    "entry_point",
+    [
+        "parse",
+        "tombstone",
+        "canonical_json",
+        "object_hash",
+        "legacy_hash",
+        "legacy_source",
+    ],
+)
+def test_moodboard_public_helpers_revalidate_model_copy_instances(
+    entry_point: str,
+) -> None:
+    parsed = parse_notes_moodboard_v1(valid_moodboard_payload())
+    forged = parsed.model_copy(update={"name": ""})
+
+    with pytest.raises(NotesMoodboardStudioContractError):
+        if entry_point == "parse":
+            parse_notes_moodboard_v1(forged)
+        elif entry_point == "tombstone":
+            parse_notes_moodboard_tombstone_v1(forged)
+        elif entry_point == "canonical_json":
+            canonical_json_bytes(forged)
+        elif entry_point == "object_hash":
+            notes_moodboard_object_hash(forged, revision=1, deleted=False)
+        elif entry_point == "legacy_hash":
+            legacy_diagnostic_hash(forged)
+        else:
+            legacy_source_diagnostic("forged_moodboard", forged)
+
+
+@pytest.mark.parametrize(
+    "entry_point",
+    ["parse", "tombstone", "canonical_json", "placement_id", "object_hash"],
+)
+def test_placement_public_helpers_revalidate_model_copy_instances(
+    entry_point: str,
+) -> None:
+    parsed = parse_notes_moodboard_note_v1(valid_placement_payload())
+    forged = parsed.model_copy(update={"width": 0})
+
+    with pytest.raises(NotesMoodboardStudioContractError):
+        if entry_point == "parse":
+            parse_notes_moodboard_note_v1(forged)
+        elif entry_point == "tombstone":
+            parse_notes_moodboard_note_tombstone_v1(forged)
+        elif entry_point == "canonical_json":
+            canonical_json_bytes(forged)
+        elif entry_point == "placement_id":
+            placement_object_id(forged)
+        else:
+            notes_moodboard_note_object_hash(forged, revision=1, deleted=False)
+
+
+@pytest.mark.parametrize(
+    "entry_point",
+    ["parse", "tombstone", "canonical_json", "result_hash", "object_hash"],
+)
+def test_studio_public_helpers_revalidate_model_copy_instances(
+    entry_point: str,
+) -> None:
+    parsed = parse_studio(valid_studio_payload())
+    forged = parsed.model_copy(update={"template_type": "evil"})
+
+    with pytest.raises(NotesMoodboardStudioContractError):
+        if entry_point == "parse":
+            parse_notes_studio_document_v1(
+                forged,
+                bound_attestation="server",
+                bound_accepted_at=ACCEPTED_AT,
+            )
+        elif entry_point == "tombstone":
+            parse_notes_studio_document_tombstone_v1(forged)
+        elif entry_point == "canonical_json":
+            canonical_json_bytes(forged)
+        elif entry_point == "result_hash":
+            studio_result_hash(forged)
+        else:
+            notes_studio_document_object_hash(forged, revision=1, deleted=False)
+
+
+@pytest.mark.parametrize("entry_point", ["parse", "tombstone", "canonical_json", "hash"])
+def test_nested_model_construct_instances_are_revalidated(
+    entry_point: str,
+) -> None:
+    forged_canvas = MoodboardCanvasV1.model_construct(
+        layout_mode="evil",
+        metadata={"api_key": "NESTED-CONSTRUCT-SECRET"},
+    )
+    payload = valid_moodboard_payload(canvas=forged_canvas)
+
+    with pytest.raises(NotesMoodboardStudioContractError):
+        if entry_point == "parse":
+            parse_notes_moodboard_v1(payload)
+        elif entry_point == "tombstone":
+            parse_notes_moodboard_tombstone_v1(payload)
+        else:
+            parsed = parse_notes_moodboard_v1(valid_moodboard_payload())
+            forged = parsed.model_copy(update={"canvas": forged_canvas})
+            if entry_point == "canonical_json":
+                canonical_json_bytes(forged)
+            else:
+                notes_moodboard_object_hash(forged, revision=1, deleted=False)
+
+
+class _ForgedMoodboardSubclass(NotesMoodboardV1):
+    pass
+
+
+@pytest.mark.parametrize("entry_point", ["parse", "canonical_json", "hash"])
+def test_contract_subclasses_are_revalidated_as_the_declared_base_model(
+    entry_point: str,
+) -> None:
+    parsed = parse_notes_moodboard_v1(valid_moodboard_payload())
+    forged = _ForgedMoodboardSubclass.model_construct(
+        moodboard_id=parsed.moodboard_id,
+        name="",
+        description=parsed.description,
+        smart_rule=parsed.smart_rule,
+        canvas=parsed.canvas,
+    )
+
+    with pytest.raises(NotesMoodboardStudioContractError):
+        if entry_point == "parse":
+            parse_notes_moodboard_v1(forged)
+        elif entry_point == "canonical_json":
+            canonical_json_bytes(forged)
+        else:
+            notes_moodboard_object_hash(forged, revision=1, deleted=False)
+
+
+@pytest.mark.parametrize(
+    ("payload", "private_fragments", "safe_context"),
+    [
+        (
+            valid_moodboard_payload(
+                canvas={
+                    "layout_mode": "freeform",
+                    "metadata": {"api_key": "EXTENSION-SECRET-91F7C2"},
+                }
+            ),
+            ("EXTENSION-SECRET-91F7C2", "api_key"),
+            "metadata",
+        ),
+        (
+            valid_moodboard_payload(
+                submitted_secret_blob="EXTRA-FIELD-SECRET-62A3D8"
+            ),
+            ("submitted_secret_blob", "EXTRA-FIELD-SECRET-62A3D8"),
+            "extra inputs",
+        ),
+        (
+            valid_moodboard_payload(
+                name="PRIVATE-CONTENT-PREFIX-8A17" + "x" * 4_000
+            ),
+            ("PRIVATE-CONTENT-PREFIX-8A17", "x" * 256),
+            "name",
+        ),
+        (
+            valid_moodboard_payload(
+                canvas={
+                    "layout_mode": "PRIVATE-LAYOUT-VALUE-44B2",
+                    "metadata": {},
+                }
+            ),
+            ("PRIVATE-LAYOUT-VALUE-44B2",),
+            "layout_mode",
+        ),
+    ],
+)
+def test_contract_validation_errors_are_bounded_and_privacy_safe(
+    payload: dict[str, object],
+    private_fragments: tuple[str, ...],
+    safe_context: str,
+) -> None:
+    with pytest.raises(NotesMoodboardStudioContractError) as caught:
+        parse_notes_moodboard_v1(payload)
+
+    diagnostic = str(caught.value)
+    assert safe_context in diagnostic
+    assert len(diagnostic) <= 1_024
+    for fragment in private_fragments:
+        assert fragment not in diagnostic
+
+
 def test_legacy_diagnostics_are_bounded_and_do_not_expose_source_content() -> None:
-    source = {"title": "sensitive note title", "token": "secret-value"}
+    source = {
+        "title": "sensitive note title",
+        "token": "secret-value",
+        "content": "PRIVATE-LEGACY-CONTENT-77D4" + "x" * 10_000,
+    }
     digest = legacy_diagnostic_hash(source)
     diagnostic = legacy_source_diagnostic("legacy_studio_shape_invalid", source)
 
@@ -992,6 +1279,8 @@ def test_legacy_diagnostics_are_bounded_and_do_not_expose_source_content() -> No
     }
     assert "sensitive" not in repr(diagnostic)
     assert "secret-value" not in repr(diagnostic)
+    assert "PRIVATE-LEGACY-CONTENT-77D4" not in repr(diagnostic)
+    assert len(repr(diagnostic)) <= 256
     with pytest.raises(NotesMoodboardStudioContractError, match="at most 64"):
         legacy_source_diagnostic("x" * 65, source)
     with pytest.raises(NotesMoodboardStudioContractError, match="262144 bytes"):

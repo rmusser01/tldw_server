@@ -263,7 +263,9 @@ class _FrozenJsonList(list[Any]):
 class MoodboardUpdatedBoundsV1(BaseModel):
     """Inclusive normalized modification-time bounds for one smart rule."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     after: StrictStr | None
     before: StrictStr | None
@@ -286,7 +288,9 @@ class MoodboardUpdatedBoundsV1(BaseModel):
 class MoodboardSmartRuleV1(BaseModel):
     """Portable canonical smart-match rule; matching results remain derived."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     query: StrictStr | None = Field(max_length=2_000)
     keyword_tokens: tuple[StrictStr, ...]
@@ -329,7 +333,9 @@ class MoodboardSmartRuleV1(BaseModel):
 class MoodboardCanvasV1(BaseModel):
     """Canonical board canvas settings without replica-local view state."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     layout_mode: Literal["masonry", "freeform"]
     metadata: dict[str, Any]
@@ -349,7 +355,9 @@ class MoodboardCanvasV1(BaseModel):
 class NotesMoodboardV1(BaseModel):
     """Complete canonical whole-object payload for ``notes.moodboard`` v1."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     moodboard_id: StrictStr
     name: StrictStr = Field(min_length=1, max_length=255)
@@ -366,7 +374,9 @@ class NotesMoodboardV1(BaseModel):
 class NotesMoodboardNoteV1(BaseModel):
     """Complete canonical placement payload for ``notes.moodboard_note`` v1."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     moodboard_id: StrictStr
     note_id: StrictStr
@@ -397,7 +407,9 @@ class NotesMoodboardNoteV1(BaseModel):
 class StudioCueSectionV1(BaseModel):
     """One canonical cue section."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     id: StrictStr = Field(min_length=1, max_length=128)
     kind: Literal["cue"]
@@ -413,7 +425,9 @@ class StudioCueSectionV1(BaseModel):
 class StudioContentSectionV1(BaseModel):
     """One canonical notes or summary section."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     id: StrictStr = Field(min_length=1, max_length=128)
     kind: Literal["notes", "summary"]
@@ -437,7 +451,9 @@ StudioSectionV1 = Annotated[
 class StudioSectionsV1(BaseModel):
     """Closed sections-only canonical Studio render state."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     sections: tuple[StudioSectionV1, ...]
 
@@ -460,7 +476,9 @@ class StudioSectionsV1(BaseModel):
 class StudioDiagramSourceV1(BaseModel):
     """Closed canonical diagram-source projection for one selected section."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     id: StrictStr = Field(min_length=1, max_length=128)
     title: StrictStr = Field(min_length=1, max_length=500)
@@ -471,7 +489,9 @@ class StudioDiagramSourceV1(BaseModel):
 class StudioDiagramManifestV1(BaseModel):
     """Closed accepted diagram state; rendered caches are deliberately absent."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     diagram_type: DiagramType
     source_section_ids: tuple[StrictStr, ...]
@@ -513,7 +533,9 @@ class StudioDiagramManifestV1(BaseModel):
 class StudioAcceptedProvenanceV1(BaseModel):
     """Closed accepted-transition facts; prompts and raw provider output are absent."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     kind: ProvenanceKind
     attestation: Attestation
@@ -561,7 +583,9 @@ class StudioAcceptedProvenanceV1(BaseModel):
 class NotesStudioDocumentV1(BaseModel):
     """Complete accepted whole-object payload for ``notes.studio_document`` v1."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, revalidate_instances="always"
+    )
 
     note_id: StrictStr
     source_note_id: StrictStr | None
@@ -657,12 +681,59 @@ class NotesStudioDocumentV1(BaseModel):
 
 ContractModel = TypeVar("ContractModel", bound=BaseModel)
 
+_CONTRACT_MODEL_TYPES: tuple[type[BaseModel], ...] = (
+    MoodboardUpdatedBoundsV1,
+    MoodboardSmartRuleV1,
+    MoodboardCanvasV1,
+    NotesMoodboardV1,
+    NotesMoodboardNoteV1,
+    StudioCueSectionV1,
+    StudioContentSectionV1,
+    StudioSectionsV1,
+    StudioDiagramSourceV1,
+    StudioDiagramManifestV1,
+    StudioAcceptedProvenanceV1,
+    NotesStudioDocumentV1,
+)
+_SAFE_VALIDATION_LOCATIONS = frozenset(
+    field_name
+    for model in _CONTRACT_MODEL_TYPES
+    for field_name in model.model_fields
+)
+_SAFE_VALIDATION_MESSAGES = {
+    "extra_forbidden": "extra inputs are not permitted",
+    "literal_error": "value must match an allowed literal",
+    "union_tag_invalid": "union tag invalid",
+    "union_tag_not_found": "union tag not found",
+}
+_SAFE_VALIDATION_MESSAGE_TYPES = frozenset(
+    {
+        "bool_type",
+        "dict_type",
+        "greater_than_equal",
+        "int_type",
+        "less_than_equal",
+        "list_type",
+        "missing",
+        "string_too_long",
+        "string_too_short",
+        "string_type",
+        "string_unicode",
+        "too_long",
+        "too_short",
+        "tuple_type",
+        "value_error",
+    }
+)
+_VALIDATION_ERROR_MAX_DETAILS = 8
+_VALIDATION_ERROR_MAX_LENGTH = 1_024
+
 
 def canonical_json_bytes(value: object) -> bytes:
     """Serialize one canonical JSON value as compact sorted UTF-8 bytes."""
 
     if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
+        value = _validated_contract_model_dump(value, "canonical JSON model")
     try:
         _validate_canonical_json(value, "value")
         return json.dumps(
@@ -729,7 +800,13 @@ def parse_notes_studio_document_v1(
         raise NotesMoodboardStudioContractError(
             "Studio provenance does not match the server-bound attestation"
         )
-    normalized_accepted_at = _normalize_timestamp(bound_accepted_at)
+    try:
+        normalized_accepted_at = _normalize_timestamp(bound_accepted_at)
+    except (ValueError, OverflowError) as exc:
+        raise NotesMoodboardStudioContractError(
+            "Studio server-bound acceptance time must be an RFC 3339 value "
+            "with a timezone"
+        ) from exc
     if parsed.accepted_provenance.accepted_at != normalized_accepted_at:
         raise NotesMoodboardStudioContractError(
             "Studio provenance does not match the server-bound acceptance time"
@@ -753,8 +830,9 @@ def placement_object_id(
     """Return the deterministic namespaced identity for one placement pair."""
 
     if isinstance(payload, NotesMoodboardNoteV1):
-        moodboard_id = payload.moodboard_id
-        note_id = payload.note_id
+        parsed = parse_notes_moodboard_note_v1(payload)
+        moodboard_id = parsed.moodboard_id
+        note_id = parsed.note_id
     elif isinstance(payload, Mapping):
         moodboard_id = _canonical_uuid4(payload.get("moodboard_id"))
         note_id = _canonical_uuid4(payload.get("note_id"))
@@ -777,11 +855,13 @@ def notes_moodboard_object_hash(
 ) -> str:
     """Hash exact moodboard identity, payload, revision, adapter, and lifecycle."""
 
-    _validate_hash_inputs(payload, NotesMoodboardV1, revision, deleted, "notes.moodboard")
+    parsed = _validate_hash_inputs(
+        payload, NotesMoodboardV1, revision, deleted, "notes.moodboard"
+    )
     return _object_hash(
         domain="notes.moodboard",
-        identity={"moodboard_id": payload.moodboard_id},
-        payload=payload,
+        identity={"moodboard_id": parsed.moodboard_id},
+        payload=parsed,
         revision=revision,
         deleted=deleted,
     )
@@ -795,17 +875,17 @@ def notes_moodboard_note_object_hash(
 ) -> str:
     """Hash exact placement identity, payload, revision, adapter, and lifecycle."""
 
-    _validate_hash_inputs(
+    parsed = _validate_hash_inputs(
         payload, NotesMoodboardNoteV1, revision, deleted, "notes.moodboard_note"
     )
     return _object_hash(
         domain="notes.moodboard_note",
         identity={
-            "moodboard_id": payload.moodboard_id,
-            "note_id": payload.note_id,
-            "placement_id": placement_object_id(payload),
+            "moodboard_id": parsed.moodboard_id,
+            "note_id": parsed.note_id,
+            "placement_id": placement_object_id(parsed),
         },
-        payload=payload,
+        payload=parsed,
         revision=revision,
         deleted=deleted,
     )
@@ -819,13 +899,13 @@ def notes_studio_document_object_hash(
 ) -> str:
     """Hash exact Studio identity, payload, revision, adapter, and lifecycle."""
 
-    _validate_hash_inputs(
+    parsed = _validate_hash_inputs(
         payload, NotesStudioDocumentV1, revision, deleted, "notes.studio_document"
     )
     return _object_hash(
         domain="notes.studio_document",
-        identity={"note_id": payload.note_id},
-        payload=payload,
+        identity={"note_id": parsed.note_id},
+        payload=parsed,
         revision=revision,
         deleted=deleted,
     )
@@ -837,6 +917,12 @@ def studio_result_hash(
     """Hash accepted Studio content-bearing state without recursive provenance."""
 
     try:
+        if isinstance(payload, NotesStudioDocumentV1):
+            payload = _parse_model(
+                NotesStudioDocumentV1,
+                payload,
+                "Studio result hash payload",
+            )
         return _sha256(_studio_result_semantic(payload))
     except NotesMoodboardStudioContractError:
         raise
@@ -898,20 +984,70 @@ def _parse_model(
     payload: Mapping[str, object] | ContractModel,
     label: str,
 ) -> ContractModel:
-    if isinstance(payload, model):
-        return payload
-    if not isinstance(payload, Mapping):
+    if not isinstance(payload, (Mapping, model)):
         raise NotesMoodboardStudioContractError(f"{label} must be an object")
     try:
-        return model.model_validate(dict(payload))
+        return model.model_validate(payload)
     except ValidationError as exc:
-        message = str(exc).replace(
-            "Extra inputs are not permitted", "extra inputs are not permitted"
-        )
-        message = message.replace("union_tag_invalid", "union tag invalid")
-        raise NotesMoodboardStudioContractError(f"{label}: {message}") from exc
+        raise NotesMoodboardStudioContractError(
+            _safe_validation_error(label, exc)
+        ) from exc
     except NotesMoodboardStudioContractError:
         raise
+
+
+def _safe_validation_error(label: str, exc: ValidationError) -> str:
+    details: list[str] = []
+    for error in exc.errors(include_input=False, include_url=False):
+        error_type = error.get("type")
+        if not isinstance(error_type, str):
+            error_type = "validation_error"
+        message = _SAFE_VALIDATION_MESSAGES.get(error_type)
+        if message is None and error_type in _SAFE_VALIDATION_MESSAGE_TYPES:
+            raw_message = error.get("msg")
+            if isinstance(raw_message, str):
+                message = raw_message.removeprefix("Value error, ")
+        if message is None:
+            message = "invalid value"
+
+        raw_location = error.get("loc")
+        location_parts: list[str] = []
+        if isinstance(raw_location, tuple):
+            for part in raw_location:
+                if isinstance(part, str) and part in _SAFE_VALIDATION_LOCATIONS:
+                    location_parts.append(part)
+                elif isinstance(part, int):
+                    location_parts.append("item")
+        location = ".".join(location_parts)
+        detail = f"{location}: {message}" if location else message
+        if detail not in details:
+            details.append(detail)
+        if len(details) == _VALIDATION_ERROR_MAX_DETAILS:
+            break
+
+    body = "; ".join(details) if details else "validation failed"
+    return f"{label}: {body}"[:_VALIDATION_ERROR_MAX_LENGTH]
+
+
+def _validated_contract_model_dump(value: BaseModel, label: str) -> dict[str, Any]:
+    for model in _CONTRACT_MODEL_TYPES:
+        if isinstance(value, model):
+            validated = _parse_model(model, value, label)
+            return validated.model_dump(mode="json")
+    return value.model_dump(mode="json")
+
+
+def _validated_contract_primitives(value: object, label: str) -> object:
+    if isinstance(value, BaseModel):
+        return _validated_contract_model_dump(value, label)
+    if isinstance(value, Mapping):
+        return {
+            key: _validated_contract_primitives(item, label)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_validated_contract_primitives(item, label) for item in value]
+    return value
 
 
 def _object_hash(
@@ -936,15 +1072,16 @@ def _object_hash(
 
 def _validate_hash_inputs(
     payload: object,
-    model: type[BaseModel],
+    model: type[ContractModel],
     revision: object,
     deleted: object,
     domain: str,
-) -> None:
+) -> ContractModel:
     if not isinstance(payload, model):
         raise NotesMoodboardStudioContractError(
             f"{domain} hash requires a parsed v1 payload"
         )
+    parsed = _parse_model(model, payload, f"{domain} hash payload")
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
         raise NotesMoodboardStudioContractError(
             f"{domain} revision must be a positive integer"
@@ -955,6 +1092,7 @@ def _validate_hash_inputs(
         raise NotesMoodboardStudioContractError(
             f"{domain} deleted flag must be a strict boolean"
         )
+    return parsed
 
 
 def _studio_result_semantic(
@@ -963,7 +1101,12 @@ def _studio_result_semantic(
     if isinstance(payload, NotesStudioDocumentV1):
         values = payload.model_dump(mode="json")
     elif isinstance(payload, Mapping):
-        values = dict(payload)
+        values = cast(
+            dict[str, object],
+            _validated_contract_primitives(
+                dict(payload), "Studio result hash nested model"
+            ),
+        )
     else:
         raise NotesMoodboardStudioContractError(
             "Studio result hash requires a payload object"
@@ -1207,8 +1350,13 @@ def _contains_credential_concept(tokens: tuple[str, ...]) -> bool:
         tokens, _EXACT_CREDENTIAL_EXTENSION_CONCEPTS
     ):
         return True
-    candidates = (*tokens, "".join(tokens))
-    return any(_is_full_credential_compound(candidate) for candidate in candidates)
+    for start in range(len(tokens)):
+        candidate = ""
+        for token in tokens[start:]:
+            candidate += token
+            if _is_full_credential_compound(candidate):
+                return True
+    return False
 
 
 def _is_full_credential_compound(candidate: str) -> bool:
@@ -1354,12 +1502,17 @@ def _normalize_timestamp(value: object) -> str:
         parsed = datetime.fromisoformat(
             value[:-1] + "+00:00" if value.endswith("Z") else value
         )
-    except ValueError as exc:
-        raise ValueError("timestamp must be an RFC 3339 value with a timezone") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("timestamp must be an RFC 3339 value with a timezone")
-    utc = parsed.astimezone(timezone.utc)
-    base = utc.strftime("%Y-%m-%dT%H:%M:%S")
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError
+        utc = parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError(
+            "timestamp must be an RFC 3339 value with a timezone"
+        ) from exc
+    base = (
+        f"{utc.year:04d}-{utc.month:02d}-{utc.day:02d}"
+        f"T{utc.hour:02d}:{utc.minute:02d}:{utc.second:02d}"
+    )
     if utc.microsecond:
         base += "." + f"{utc.microsecond:06d}".rstrip("0")
     return base + "Z"
