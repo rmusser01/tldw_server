@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-25 02:21'
+updated_date: '2026-08-25 02:35'
 labels:
   - admin
   - webhooks
@@ -152,6 +152,8 @@ Qodo incremental review at commit 618080c00a resolved five findings and marked t
 2026-08-24 refreshed Qodo review is confirmed against pushed head 8b00250005: 0 bugs, 0 rule violations, and no unresolved GitHub review threads. The PR remains merge-conflicted against advanced dev, so normal pull_request CI cannot run at this head; complete hosted CI remains assigned to the final post-PR-2808 rebase. This closure record will be held locally and included with that rebase to avoid another documentation-only CI restart.
 
 2026-08-24 final post-PR-2808 rebase reconciliation: rebased all 32 PR commits onto origin/dev 9ee0b5a16dca9f5cf6372a3dd2798b84075501fc. Preserved current-dev migrations 091-093 and renumbered the canonical webhook SQLite migration to 094; combined the PostgreSQL startup readiness ensures; regenerated and drift-checked the OpenAPI fingerprint (2039 paths, 3031 schemas, sha256 41d99488f7bb295e7c20d6c05085f788e54619c1079fbbf8053522c7dde949a9); and reconciled direct pytest markers with current startup tests. Current dev's managed transaction boundary now preserves only closed-code sanitized WebhookError, WebhookRepositoryError, and LegacyImportError subclasses via TransactionPassthroughError while ordinary RuntimeError values remain translated to generic SQLite/PostgreSQL TransactionError messages. PostgreSQL destructive fixture DDL now uses a plain connection to the ephemeral test database because the current users-write firewall intentionally rejects managed DROP/TRUNCATE statements. RED evidence: first current-base matrix 18 failed/442 passed/24 skipped; first reachable PostgreSQL run 6 failed/4 passed/14 errors. Final source commit 2ad82ff4bcc7faee3cac127aa31a11733c5eb550 passed 114/114 affected transaction tests, 460/460 complete non-PostgreSQL tests, 24/24 required PostgreSQL tests with zero skips on PostgreSQL 18.6, direct-marker policy, OpenAPI drift, focused Ruff, Bandit, focused repository/startup mypy, and git diff --check. Full details: Docs/Evidence/Admin_Webhooks_PR1_Verification.md. Task remains In Progress pending guarded push, exact-head GitHub CI, and refreshed Qodo review.
+
+2026-08-24 exact-head Qodo thread remediation: review-thread audit on post-rebase head 43ea3bb955 found one unresolved testability finding in admin-ui/lib/__tests__/security-headers.test.ts. The finding was validated because one Vitest case combined ANALYZE=false and ANALYZE=true. Test-only source commit ca304f4b00536593a70844db268a7baa14886d7f extracts the isolated loader harness and splits the two modes into independent tests without changing production behavior. Verification: focused analyzer/security-header suite 5 passed; targeted ESLint passed; admin-ui package typecheck passed; package lint passed with 0 errors and the unchanged 41-warning baseline; git diff --check passed. Evidence updated in Docs/Evidence/Admin_Webhooks_PR1_Verification.md. Awaiting push, exact-head hosted CI, refreshed Qodo completion, and review-thread resolution; task remains In Progress.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

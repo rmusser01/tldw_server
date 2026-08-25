@@ -2,10 +2,13 @@
 
 ## Verification Identity
 
-- Tested source commit: `2ad82ff4bcc7faee3cac127aa31a11733c5eb550`
+- Tested application source commit:
+  `2ad82ff4bcc7faee3cac127aa31a11733c5eb550`
+- Final reviewed test-only source commit:
+  `ca304f4b00536593a70844db268a7baa14886d7f`
 - Rebased onto: `origin/dev` at
   `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
-- Final verification timestamp: `2026-08-25T02:19:52Z`
+- Final verification timestamp: `2026-08-25T02:34:32Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -13,10 +16,11 @@
 - Next.js: 16.2.2
 - PostgreSQL: 18.6 (`postgres:18`, Debian 18.6-1.pgdg13+2)
 
-The tested source commit includes the control plane, dual-backend persistence,
-legacy importer, key rotation, route selector, admin UI, runbooks, and all gate
-fixes described below. This evidence file is a documentation-only follow-up to
-that immutable source tree.
+The tested application source commit includes the control plane, dual-backend
+persistence, legacy importer, key rotation, route selector, admin UI, runbooks,
+and all runtime gate fixes described below. The later source commit changes only
+the analyzer configuration test structure in response to Qodo review. This
+evidence file is a documentation-only follow-up to those immutable source trees.
 
 ## Result Summary
 
@@ -34,6 +38,7 @@ that immutable source tree.
 | Bandit | PASS |
 | Backend sensitive-log scans | PASS |
 | Focused admin UI matrix | PASS: 77 passed |
+| Qodo analyzer testability remediation | PASS: 5 passed; package typecheck and lint passed |
 | TypeScript typecheck | PASS |
 | Changed-file ESLint | PASS |
 | Production admin UI build | PASS |
@@ -546,9 +551,35 @@ mypy debt. These were not rewritten in this already broad PR. The focused
 changed modules and all runtime provider matrices above are green.
 
 The prior Qodo result at pre-rebase head `8b00250005` reported zero bugs and
-zero rule violations. A refreshed Qodo review and complete GitHub-hosted CI run
-against the new exact head remain mandatory after push; this local evidence
-does not substitute for those gates.
+zero rule violations. The first refreshed post-rebase review had not completed,
+but a GitHub review-thread audit exposed one unresolved testability finding in
+the analyzer configuration regression. That finding is remediated and verified
+below. A new Qodo review and complete GitHub-hosted CI run against the pushed
+exact head remain mandatory; this local evidence does not substitute for those
+gates.
+
+## Exact-Head Qodo Testability Remediation
+
+Qodo reported that the analyzer configuration regression combined the disabled
+and enabled branches in one Vitest case. The finding was valid: although the
+isolated child-process harness covered both branches correctly, a failure did
+not identify which mode had regressed.
+
+Test-only source commit `ca304f4b00536593a70844db268a7baa14886d7f`
+extracts the temporary loader setup into a shared helper and gives each branch
+an independent test. No production file or application behavior changed.
+
+```text
+security-header/analyzer tests:             5 passed
+targeted ESLint:                            PASS
+admin-ui package typecheck:                 PASS
+admin-ui package lint:                      PASS (0 errors, 41 baseline warnings)
+git diff --check:                           PASS
+```
+
+The two unrelated untracked watchlist templates remained excluded. The Qodo
+thread must be resolved and the review rerun against the pushed head before
+review closure.
 
 ## Upstream Admin UI Baselines
 
