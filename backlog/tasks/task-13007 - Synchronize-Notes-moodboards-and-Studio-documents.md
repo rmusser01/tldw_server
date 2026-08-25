@@ -56,7 +56,7 @@ Reason: The work changes persistent schema tenant scope sync authority lifecycle
 <!-- SECTION:NOTES:BEGIN -->
 Approved design decomposed into TASK-13007.1 through TASK-13007.4. Existing Chatbook reference paths are stale and will be replaced by the server-local authoritative spec and ADR-040.
 
-The approved design was written to Docs/superpowers/specs/2026-08-24-notes-moodboard-studio-sync-design.md with proposed ADR-040. Independent spec review is the next gate; no implementation has started.
+The approved interactive design was written to Docs/superpowers/specs/2026-08-24-notes-moodboard-studio-sync-design.md with proposed ADR-040. Independent review found portable-time, client compound-push, task-boundary, smart-match portability, closed Studio schema, encryption-policy, source-note authorization, and lifecycle-binding gaps. The spec, ADR, and child acceptance criteria were revised; independent re-review approved the result with no blocker, high, or medium findings. Requester approval of the reviewed written spec is the next gate. No implementation has started.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

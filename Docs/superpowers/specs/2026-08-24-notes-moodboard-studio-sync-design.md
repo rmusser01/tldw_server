@@ -1,6 +1,6 @@
 # Notes Moodboard and Studio Sync Design
 
-**Status:** Proposed; interactive design approved, written-spec review pending  
+**Status:** Proposed; independently reviewed, requester approval pending
 **Date:** 2026-08-24  
 **Task:** `TASK-13007`  
 **Delivery tasks:** `TASK-13007.1` through `TASK-13007.4`  
@@ -116,6 +116,18 @@ complete and immutable, later projection is blocked, and idempotent repair resum
 at the first unapplied step. API success therefore means every step was applied,
 not merely that the canonical plan was appended.
 
+The existing `notes.note` payload does not carry a portable modification time and
+ordinary note projection currently falls back to a replica-local clock. That is
+insufficient for a convergent smart rule with an `updated` predicate. TASK-13007.2
+therefore standardizes server-bound `canonical_modified_at` routing metadata for
+every accepted `notes.note` envelope. Clients cannot choose or override it. New
+accepted mutations use the server acceptance time; trusted legacy bootstrap uses
+the strictly normalized source `last_modified`; old accepted envelopes without the
+field use their immutable `received_at_server` value. The complete mutation plan
+and exact-retry check cover the chosen value, and every note materializer projects
+it instead of a local clock. Readiness remains blocked until existing note heads
+and product rows have been verified or repaired to that portable value.
+
 ## Authority and identity
 
 ### Product authority
@@ -155,6 +167,14 @@ and envelope `parent_id` all bind to the same canonical note UUID. An optional
 `source_note_id` identifies the source of a derived document; it does not change
 the Studio object's identity.
 
+New or changed Studio state with `source_note_id` requires a known live source note
+in the same owner and dataset scope. An existing valid reference remains retained
+if that source is later tombstoned and becomes usable again on restore; new
+derivation from a tombstoned source is rejected. Unknown and cross-scope references
+use the same non-enumerating error. Legacy unknown, ambiguous, or cross-scope
+references receive a bounded diagnostic and block readiness rather than being
+discarded or guessed.
+
 ### Ownership and dataset scope
 
 Ownership is server-bound and excluded from canonical user payloads. Product rows
@@ -169,11 +189,30 @@ is not considered a scope-consistency constraint.
 
 ## Canonical v1 payloads
 
-Outer domain contracts are strict and reject unknown fields. Nested Studio
-`payload_json`, diagram metadata, canvas metadata, and display metadata are
-intentionally extensible bounded canonical JSON. Their validators reject excessive
-depth, unsafe keys, invalid UTF-8, non-finite numbers, unsupported render versions,
-and values that exceed the configured envelope limit.
+Outer domain contracts are strict and reject unknown fields. Canvas and placement
+display metadata are bounded canonical JSON extension maps with explicitly allowed
+scalar/list/object value types. Studio state is stricter: `payload_json`, diagram
+manifest, and provenance use closed schemas versioned by `render_version`; unknown
+fields are rejected recursively.
+
+Studio `payload_json` v1 permits exactly `sections`; each section permits bounded
+`id`, `kind`, `title`, and exactly `items` for `cue` or `content` for
+`notes`/`summary`. Note title is injected from the current or planned `notes.note`
+authority when rendering. Source note, template, handwriting mode, and render
+version are injected from their outer Studio fields. Nested `meta` and `layout`
+cannot become competing authorities.
+
+The diagram manifest permits only the documented diagram type, selected section
+IDs, closed canonical source graph, diagram text, format, status, render hash, and
+a server-produced sanitized cache. Client caches are rejected or deterministically
+rebuilt. Provider output is first reduced to these accepted product schemas; raw
+provider dictionaries are never copied into canonical state. Legacy unknown fields
+are diagnosed and block readiness instead of being silently retained or dropped.
+
+All nested validators also reject excessive depth/counts, invalid UTF-8,
+non-finite numbers, unsupported versions, secret-pattern fields, and values beyond
+the configured envelope limit. The closed shape, rather than key-name heuristics
+alone, enforces the transient/secret boundary.
 
 ### `notes.moodboard`
 
@@ -237,7 +276,7 @@ manual and smart uses the explicit placement payload and reports membership sour
 {
   "note_id": "canonical-note-uuid-v4",
   "source_note_id": null,
-  "payload_json": {},
+  "payload_json": {"sections": []},
   "template_type": "lined",
   "handwriting_mode": "accented",
   "excerpt_snapshot": null,
@@ -261,16 +300,21 @@ manual and smart uses the explicit placement payload and reports membership sour
 ```
 
 `note_revision` and `note_hash` bind the sidecar to the accepted `notes.note` head.
-They do not duplicate the note title or Markdown body. A note-plus-Studio group
-binds to the planned new note revision/hash. A sidecar-only change binds to the
-currently applied note head.
+They do not duplicate the note title or Markdown body. An accepted save that changes
+both objects binds to the planned new note revision/hash. A sidecar-only change
+binds to the currently applied note head. Note lifecycle delete/restore groups are
+the deliberate exception: they preserve the complete prior Studio payload and its
+binding until a later accepted Studio save.
 
 Server AI provenance is stamped from the provider and model actually executed.
 Client-origin AI provenance is marked `client_declared` and is bound to the
 authenticated device by server routing metadata; it cannot claim server
-attestation. Legacy rows use `trusted_bootstrap_v1`. Manual changes carry null
-provider/model values. Restore preserves the prior accepted provenance rather than
-claiming that restore generated the content.
+attestation. Server-attested `accepted_at` is server-stamped. A client-declared
+timestamp is strictly normalized but remains explicitly untrusted; the immutable
+server receipt time is recorded separately in routing metadata. Legacy rows use
+`trusted_bootstrap_v1`. Manual changes carry null provider/model values. Restore
+preserves the prior accepted provenance rather than claiming that restore generated
+the content.
 
 No provenance object may contain prompts, authorization values, credentials,
 tokens, raw unaccepted output, or arbitrary request metadata.
@@ -312,6 +356,16 @@ and soft-delete behavior, and adds:
 - bounded source diagnostic fields when legacy conversion is not canonical
 
 Scoped uniqueness is enforced for `(owner_user_id, dataset_id, sync_id)`.
+
+### Supporting note projection
+
+`notes` stores or exposes the server-bound `canonical_modified_at` used by portable
+updated rules plus versioned NFC/casefold search projections for title/content.
+Keyword and conversation-source authorities receive the equivalent versioned
+normalized comparison values where they do not already have them. These are
+derived query projections, not new canonical user fields. Materialization updates
+them transactionally with their product authority; migration/backfill is bounded,
+resumable on PostgreSQL, and verified before moodboard readiness.
 
 ### Placements
 
@@ -366,6 +420,28 @@ with a source filter requires compatible `chat.conversation` state and verified
 conversation references. If that dependency is absent, enrollment blocks with a
 stable privacy-safe reason instead of claiming convergent smart results.
 
+Smart matching v1 is backend-independent. Its compatibility identifier is
+`nfc-casefold-ucd-<runtime-unicode-data-version>-v1`, so NFC/casefold behavior and
+the exact Unicode Character Database version are one readiness contract. Text is
+normalized with that algorithm before storage or comparison. `query` is a literal
+substring of normalized title or content; keyword tokens are literal substrings of
+normalized keyword values and match with OR semantics; sources are exact normalized
+source values; collection IDs match membership in any listed collection; and
+non-empty filter categories combine with AND semantics. `%`, `_`, and other SQL
+metacharacters have no special meaning. Updated bounds are inclusive RFC 3339 UTC
+comparisons against the server-bound `canonical_modified_at` described above. No
+rule evaluation relies on backend `LOWER`, locale collation, or wildcard `LIKE`
+behavior.
+
+Candidate discovery uses owner/dataset-scoped relationship, source, modified-time,
+and note-ID indexes with bounded keyset pages. Literal Unicode matching is applied
+to the stored portable normalized values in application code. Enrollment records
+the complete compatibility identifier; a server or device with a different Unicode
+data version cannot advertise the moodboard pair as writable. Cross-runtime
+conformance vectors cover normalization and casefold edge cases. SQLite/PostgreSQL
+Unicode, wildcard, timestamp-boundary, collection, keyword, and source parity is a
+required activation matrix.
+
 Known tombstoned collection identities may remain in a rule and produce no match.
 Unknown or cross-scope identities are invalid. Smart results may temporarily differ
 while their synchronized dependencies are still applying, but the moodboard pair
@@ -396,7 +472,29 @@ never performed first with best-effort capture afterward.
 ### Client-origin mutations
 
 Client pushes use the same domain contracts and product materializers. Exact base
-lineage is authoritative. Public push results retain existing Sync semantics:
+lineage is authoritative. A sidecar-only Studio envelope is accepted normally. A
+client change that also changes note title/content is submitted as one Studio
+compound command: its strictly validated routing intent contains the complete
+`notes.note` operation, payload, base revision/hash, and lifecycle intent. This
+command is not appended as canonical state. The server validates the complete
+overlay and deterministically expands it into primitive `notes.note` then
+`notes.studio_document` envelopes, analogously to the existing task expansion.
+
+The synthesized group lookup identity is stable for dataset, authenticated device,
+and client envelope identity. Its stored plan hash is compared separately: exact
+replay returns the prior outcome and changed intent under the same lookup identity
+conflicts. Append is all-or-none, group fields remain response-only, and clients
+cannot inject group IDs, step numbers, server timestamps, or attested provenance.
+A separate note envelope that overlaps the same compound command in one push is
+rejected as ambiguous.
+
+In TASK-13007.4, a client `notes.note` tombstone or explicit restore for a note that
+has a retained Studio sidecar is likewise treated as a lifecycle command and
+expanded server-side into the ordered note-plus-Studio group. A normal note upsert
+outside Studio remains a singleton and may intentionally make an existing Studio
+binding stale.
+
+Public push results retain existing Sync semantics:
 
 - contract failures appear in `rejected[]` with stable error codes;
 - dependencies that can be satisfied by ordering are retryable rejections;
@@ -405,8 +503,8 @@ lineage is authoritative. Public push results retain existing Sync semantics:
 
 ### Moodboard lifecycle
 
-- Create allocates or deterministically derives a moodboard UUID from a supplied
-  idempotency key.
+- Create allocates one random UUIDv4 and binds it to the accepted idempotency
+  record; replay returns that stored identity rather than deriving a non-v4 UUID.
 - Update changes the whole canonical board under exact base lineage.
 - Delete creates a whole-object moodboard tombstone.
 - Restore requires explicit restore intent and the exact tombstoned base.
@@ -447,6 +545,13 @@ Note delete and restore use the same ordering when a Studio sidecar exists. The
 adapter evaluates the complete group overlay, so the child step can validate the
 planned parent lifecycle. If delete projection stops after the note step, the
 deleted parent safely hides the retained sidecar until repair resumes.
+
+Delete and restore do not rewrite the Studio payload's prior `note_revision` or
+`note_hash`. The Studio tombstone and restored upsert preserve the complete last
+accepted sidecar payload and provenance, including any pre-existing stale binding.
+Only a later accepted Studio save rebinds the document to the then-current or
+planned note head. A retained stale binding is valid review state, not malformed
+bootstrap state, and is surfaced through the existing Studio staleness boundary.
 
 Standalone Studio deletion is not introduced in v1. A Studio tombstone is valid
 only as the Studio step of the corresponding note lifecycle group.
@@ -490,10 +595,15 @@ The existing hybrid note-list ordering remains compatible. Internal bootstrap an
 Sync scans do not reuse public offset pagination as canonical progress.
 
 Studio persistence routes gain an expected Studio or note revision as appropriate.
-Create-like mutations accept the repository-standard optional `Idempotency-Key`.
-When Sync is inactive, missing new concurrency metadata preserves legacy behavior.
-When capture is active, a mutation without the required base fails before product
-state changes.
+When capture is active, server-generated creates such as moodboard creation and
+derive-style Studio note creation require the repository-standard
+`Idempotency-Key`; a missing key fails before UUID allocation, append, provider
+execution, or product state change. Identity-stable create-like mutations such as
+pinning one deterministic placement may omit the key and rely on exact identity
+and base semantics, while supplying a key opts into exact response replay. When
+Sync is inactive, missing new concurrency or idempotency metadata preserves legacy
+behavior. Every active update/delete/restore still requires its exact revision and
+hash precondition.
 
 REST failures use stable safe mappings:
 
@@ -501,6 +611,7 @@ REST failures use stable safe mappings:
   group, or review-required state;
 - `413` for canonical payloads beyond the active Sync envelope limit;
 - `422` for malformed identity, layout, canonical payload, or provenance; and
+- `428` for a missing required idempotency or revision/hash precondition; and
 - `503` when a durable plan cannot fully project or required components are
   unhealthy/unavailable.
 
@@ -548,6 +659,9 @@ migration rather than guessing.
   ambiguous references produce bounded source diagnostics and block readiness.
 - Studio sidecars begin at revision 1 with `trusted_bootstrap_v1` provenance,
   stored modification time, and a verified accepted-result hash.
+- Legacy Studio nested title, source, and layout fields are removed only after
+  exact comparison with the authoritative note and outer sidecar fields; a mismatch
+  receives a diagnostic and blocks readiness instead of choosing either value.
 - A sidecar whose parent note is already deleted bootstraps as tombstoned.
 
 Malformed JSON, unsupported render state, invalid timestamps, duplicate portable
@@ -571,6 +685,8 @@ keyset cursor, count, and fingerprint. Retry resumes from that cursor.
 
 Before source scanning:
 
+- enrollment is limited to the Chatbook default-personal dataset with the
+  server-materializable `server_trusted_v1` encryption policy;
 - moodboard and placement capture enable together;
 - Studio capture enables independently;
 - external device writes remain disabled; and
@@ -596,6 +712,8 @@ the domain blocked; it never marks stale state ready.
 The moodboard pair is writable only when:
 
 - `notes.note` and the Notes organization group are ready;
+- the dataset uses the supported default-personal `server_trusted_v1` policy and
+  all note heads have portable `canonical_modified_at` projection state;
 - both moodboard domains are enrolled at supported adapter versions;
 - source-filtered boards have verified compatible `chat.conversation` dependency
   state;
@@ -607,8 +725,10 @@ The moodboard pair is writable only when:
 Studio is writable independently only when:
 
 - `notes.note` is ready;
+- the dataset uses the supported default-personal `server_trusted_v1` policy;
 - Studio is enrolled at a supported adapter version;
-- Studio bootstrap and note-binding verification are complete;
+- Studio bootstrap, parent binding, and same-scope source-note verification are
+  complete;
 - singleton and note-plus-Studio capture and repair are healthy; and
 - no malformed source, oversized object, or projection blocker remains.
 
@@ -698,6 +818,8 @@ These restrictions are part of the operator documentation and activation tests.
 - implement dormant adapters, materializers, coordinator, capture, repair, and
   bootstrap for the coupled pair;
 - add portable smart-rule translation and missing collection-filter behavior;
+- standardize portable note modification time and backend-independent smart-match
+  evaluation;
 - add canvas/placement REST compatibility surfaces, restore, concurrency, and
   idempotency;
 - prove smart-match exclusion and retained-child lifecycle; and
@@ -708,13 +830,14 @@ These restrictions are part of the operator documentation and activation tests.
 - implement the dormant Studio adapter, materializer, provenance validation,
   capture, repair, and bootstrap;
 - bind Studio state to exact note heads;
-- capture only accepted persisted manual/derive/regenerate/diagram results;
+- implement server-origin and client-origin accepted-save group synthesis and
+  capture accepted persisted manual/derive/regenerate/diagram results;
 - reject oversized and transient/secret-bearing state; and
 - keep Studio absent from public capabilities.
 
-### `TASK-13007.4` — Compound integration and activation
+### `TASK-13007.4` — Lifecycle integration and activation
 
-- implement note-plus-Studio delete/restore and accepted-save groups;
+- implement note-plus-Studio delete/restore lifecycle groups;
 - complete enrollment, capture flags, readiness, and capability advertisement;
 - gate hard delete and document post-activation rollback;
 - prove two-client convergence, crash repair, conflicts, and pagination on SQLite
@@ -738,7 +861,8 @@ before each commit and completion claim.
   forced RLS, and policy drift;
 - legacy owner proof, local-unbound binding, malformed JSON, invalid identities,
   duplicate IDs, and oversized diagnostics;
-- strict contract, canonicalization, tombstone, hash, and readiness matrices;
+- strict closed Studio contracts, canonicalization, tombstone, hash,
+  `server_trusted_v1`, and readiness matrices;
 - runtime Studio helper compatibility; and
 - proof that no public capability exposes the domains.
 
@@ -748,7 +872,8 @@ before each commit and completion claim.
   retry, stale base, deleted parent, and cross-scope matrices;
 - deterministic relationship identity and integer layout bounds;
 - smart-rule normalization, collection translation/filtering, keyword and
-  conversation-source dependencies, and smart-match exclusion;
+  conversation-source dependencies, portable note time, exact Unicode-data-version
+  compatibility/conformance vectors, backend parity, and smart-match exclusion;
 - bodyless legacy pin compatibility, placement patch, unpin tombstone, and restore;
 - interrupted/resumed bootstrap, source drift, projection split repair, pull, ack,
   and bounded keyset scans; and
@@ -757,11 +882,16 @@ before each commit and completion claim.
 ### `TASK-13007.3`
 
 - Studio strict outer payload and versioned nested JSON validation;
+- legacy nested-title/source/layout equality, canonical removal, and mismatch
+  blockers;
 - note-head binding, stale note, exact retry, changed retry, tombstone, restore,
   and cross-scope matrices;
+- same-scope live source-note acceptance plus retained tombstoned-source behavior;
 - server-attested versus client-declared versus legacy provenance;
 - accepted manual/derive/regenerate/diagram capture and proof that previews,
   failures, prompts, and credentials are excluded;
+- client compound-command synthesis, overlap rejection, exact replay, changed
+  intent, and all-or-none append;
 - payload-limit preflight and readiness blocking;
 - interrupted/resumed bootstrap and product/Sync split repair; and
 - SQLite plus live PostgreSQL RLS and bounded plan evidence.
@@ -806,5 +936,11 @@ skip.
 - Whole-object tombstones retain payload for deterministic restore.
 - Moodboard pair activation is coupled; Studio activation is independent.
 - Product projection is ordered and repairable, not distributed-transaction atomic.
+- Client note-plus-Studio changes are server-expanded compound commands; clients do
+  not supply mutation-group metadata.
+- Updated smart rules use server-bound portable note time and versioned
+  backend-independent matching semantics with an exact Unicode-data-version gate.
+- Studio structured state uses closed render-versioned schemas without nested
+  title, source, or layout authorities.
+- Enrollment is limited to default-personal `server_trusted_v1` datasets.
 - No Sync chunking is added for oversized Studio objects.
-

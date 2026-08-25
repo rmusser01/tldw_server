@@ -31,11 +31,29 @@ Canonical smart rules use portable collection identities; local integer IDs are
 translated at the product boundary. A smart-only match never creates a placement
 envelope.
 
+Derived matching uses a versioned backend-independent algorithm: Unicode
+NFC/casefold literal matching whose compatibility ID includes the runtime's exact
+Unicode data version, exact normalized sources, portable collection membership,
+and inclusive UTC bounds. Updated rules use server-bound `canonical_modified_at`
+metadata projected identically for every accepted `notes.note` envelope;
+replica-local clocks and backend `LOWER`/`LIKE` semantics are not authoritative.
+
 The Notes row remains authoritative for title and Markdown content. The Studio
 sidecar remains authoritative for structured render state. A save that changes
 both is recorded as a complete ordered ADR-034 mutation group with `notes.note`
 first and `notes.studio_document` second. The Studio payload binds to the exact
 accepted note revision and hash instead of duplicating note title or content.
+
+Client note-plus-Studio changes arrive as one closed Studio compound command. The
+server validates its complete note intent and deterministically expands it into the
+same two primitive envelopes with all-or-none append. Mutation-group fields remain
+server-owned and response-only. Dataset/device/client-envelope identity locates an
+existing group; its separately stored plan hash distinguishes exact replay from
+changed-intent conflict.
+
+Client note tombstone/restore commands are also server-expanded with the retained
+Studio lifecycle step when one exists. Ordinary note upserts remain independent and
+may legitimately make a Studio binding stale.
 
 Only accepted persisted Studio state synchronizes. Generation requests, prompts,
 previews, failures, credentials, and raw unaccepted model responses remain
@@ -43,11 +61,23 @@ operations. Accepted provenance distinguishes server-attested execution,
 client-declared execution, manual changes, and trusted legacy bootstrap without
 carrying secret-bearing request values.
 
+Studio structured payload, diagram manifest, and provenance are closed schemas
+versioned by render version. Nested structured payload contains sections only;
+rendering injects title from `notes.note` and source/layout values from the outer
+Studio authority. Provider dictionaries and arbitrary metadata are reduced to
+those accepted product shapes before capture. `source_note_id` must be a known live
+same-owner/same-dataset note when new state is accepted; an already valid reference
+may remain retained if its source is later tombstoned.
+
 All three domains use whole-object canonical lineage, exact base comparison,
 complete payload tombstones, and explicit restore intent. Complete tombstones
 preserve board configuration, placement layout, and Studio sidecar state for
 deterministic restore. Tombstone does not imply physical erasure from append-only
 Sync history.
+
+Note lifecycle delete/restore preserves the Studio payload's previous note binding
+and provenance, including legitimate stale state. Only an accepted Studio save
+rebinds the sidecar to the current or planned note head.
 
 Legacy product rows migrate first into proven owner scope and reserved
 `local-unbound` dataset scope. Explicit enrollment binds the complete owner graph
@@ -65,6 +95,10 @@ readiness and advertisement are independent but require `notes.note`. The three
 domains remain absent from public supported and writable capabilities until their
 storage, capture, bootstrap, repair, security, dependency, and live-PostgreSQL
 predicates pass.
+
+Enrollment is limited to the Chatbook default-personal, server-materializable
+`server_trusted_v1` encryption policy. Opaque client-only policies cannot advertise
+these server-inspected product domains.
 
 Server-origin mutations append a complete canonical plan before product
 materialization. Product projection is ordered, resumable, and idempotent but not a
@@ -133,11 +167,18 @@ paths require an authorized retention-aware workflow.
 Smart matching remains local and requires its input domains to be ready. Collection
 filters must translate portable IDs and the currently accepted-but-ignored
 collection filter must be implemented. Source-filtered boards require compatible
-conversation state.
+conversation state. Notes and related authorities also need portable normalized
+query projections and a server-bound modification time so SQLite and PostgreSQL
+evaluate the same rule identically. Runtimes with different Unicode data versions
+cannot claim the same smart-match compatibility or writable moodboard readiness.
 
 Studio operations must distinguish accepted persistence from generation. Provider
 and model provenance is trustworthy only when server-attested; client claims stay
-explicitly labeled.
+explicitly labeled. Existing arbitrary Studio metadata must be reduced to the
+closed accepted schema or diagnosed as a readiness blocker. Client compound saves
+require deterministic server expansion before Studio can activate. Legacy nested
+title/source/layout values are removed only when they exactly match their external
+authorities; mismatches block readiness.
 
 Fresh and upgrade migrations become more substantial: they must prove ownership,
 preserve local-unbound compatibility, canonicalize legacy rows, consolidate Studio
@@ -148,6 +189,10 @@ The default Sync envelope size becomes a user-visible activation constraint for
 large Studio state. Active writes fail before product mutation and oversized
 legacy rows block readiness until repaired or reduced.
 
+Server-generated creates require an idempotency key once capture is active, while
+inactive compatibility routes retain their prior permissive behavior. Missing
+active preconditions fail before provider work, identifier allocation, append, or
+product mutation.
+
 Operational rollback is simple while the domains are dormant and constrained after
 activation. Documentation and deployment tests must make that boundary explicit.
-
