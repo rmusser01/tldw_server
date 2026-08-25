@@ -8,6 +8,10 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any
 
+from tldw_Server_API.app.core.Jobs.migrations import (
+    SLIDES_ARCHIVE_EXACT_FIELDS,
+    normalize_slides_archive_projection,
+)
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     IdempotentOperationAdmission,
     IdempotentOperationCommand,
@@ -52,20 +56,72 @@ def _find_exact_receipt(
     return _row_to_dict(row) or None
 
 
+def get_job_or_archived_by_uuid(
+    conn: sqlite3.Connection,
+    job_uuid: str,
+    *,
+    domain: str | None = None,
+    owner_user_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Read one UUID from active/archive storage in a single DB snapshot."""
+
+    if not isinstance(job_uuid, str) or not job_uuid.strip() or len(job_uuid) > 200:
+        raise ValueError("job_uuid must be a non-empty string of at most 200 characters")
+
+    clauses = ["uuid = ?"]
+    filter_values: list[Any] = [job_uuid]
+    if domain is not None:
+        clauses.append("domain = ?")
+        filter_values.append(domain)
+    if owner_user_id is not None:
+        clauses.append("owner_user_id = ?")
+        filter_values.append(owner_user_id)
+    where_sql = " AND ".join(clauses)
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    rows = conn.execute(
+        f"""
+        SELECT {projection}, NULL AS payload_compressed,
+               NULL AS result_compressed, 0 AS archived
+        FROM jobs
+        WHERE {where_sql}
+        UNION ALL
+        SELECT {projection}, payload_compressed,
+               result_compressed, 1 AS archived
+        FROM jobs_archive
+        WHERE {where_sql}
+        """,  # nosec B608
+        (*filter_values, *filter_values),
+    ).fetchall()
+    if len(rows) > 1:
+        raise IdempotentOperationUnavailableError(
+            "job UUID does not resolve to exactly one Job"
+        )
+    if not rows:
+        return None
+    job = normalize_slides_archive_projection(rows[0])
+    job["archived"] = bool(job.get("archived"))
+    return job
+
+
 def _resolve_receipt_job(
     conn: sqlite3.Connection,
     receipt: dict[str, Any],
 ) -> dict[str, Any]:
-    rows = conn.execute(
-        "SELECT * FROM jobs WHERE uuid = ? OR id = ? ORDER BY id",
-        (receipt["job_uuid"], receipt["job_id"]),
-    ).fetchall()
-    unique_rows = {int(row["id"]): _row_to_dict(row) for row in rows}
-    if len(unique_rows) != 1:
-        raise IdempotentOperationUnavailableError(
-            "receipt does not resolve to exactly one active Job"
+    try:
+        job = get_job_or_archived_by_uuid(
+            conn,
+            receipt.get("job_uuid"),
+            domain=receipt.get("domain"),
+            owner_user_id=receipt.get("owner_user_id"),
         )
-    job = next(iter(unique_rows.values()))
+    except ValueError as exc:
+        raise IdempotentOperationUnavailableError(
+            "receipt contains an invalid Job UUID"
+        ) from exc
+    if job is None:
+        raise IdempotentOperationUnavailableError(
+            "receipt does not resolve to exactly one Job"
+        )
     valid = (
         job.get("uuid") == receipt.get("job_uuid")
         and job.get("id") == receipt.get("job_id")
@@ -77,7 +133,7 @@ def _resolve_receipt_job(
     )
     if not valid:
         raise IdempotentOperationUnavailableError(
-            "receipt and active Job correlation do not match"
+            "receipt and Job correlation do not match"
         )
     return job
 

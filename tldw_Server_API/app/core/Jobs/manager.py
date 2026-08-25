@@ -83,6 +83,9 @@ from .operations.contracts import (
 from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import admit_idempotent_operation as _postgres_admit_idempotent_operation
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
+from .operations.postgres import (
+    get_job_or_archived_by_uuid as _postgres_get_job_or_archived_by_uuid,
+)
 from .operations.postgres import release_job as _postgres_release_job
 from .operations.postgres import renew_lease as _postgres_renew_lease
 from .operations.postgres import renew_leases_batch as _postgres_renew_leases_batch
@@ -90,6 +93,9 @@ from .operations.postgres import replay_idempotent_operation as _postgres_replay
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idempotent_operation
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
+from .operations.sqlite import (
+    get_job_or_archived_by_uuid as _sqlite_get_job_or_archived_by_uuid,
+)
 from .operations.sqlite import release_job as _sqlite_release_job
 from .operations.sqlite import renew_lease as _sqlite_renew_lease
 from .operations.sqlite import renew_leases_batch as _sqlite_renew_leases_batch
@@ -3932,6 +3938,47 @@ class JobManager:
                 except _JOB_NONCRITICAL_EXCEPTIONS:
                     pass
                 return d
+        finally:
+            conn.close()
+
+    def get_job_or_archived_by_uuid(
+        self,
+        job_uuid: str,
+        *,
+        domain: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch exactly one scoped Job by UUID across active/archive storage.
+
+        The backend performs one union query so a concurrent transactional
+        archive move cannot create a false missing result. Duplicate authority
+        across the two stores fails closed.
+        """
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with self._pg_cursor(conn) as cur:
+                    job = _postgres_get_job_or_archived_by_uuid(
+                        cur,
+                        job_uuid,
+                        domain=domain,
+                        owner_user_id=owner_user_id,
+                    )
+            else:
+                job = _sqlite_get_job_or_archived_by_uuid(
+                    conn,
+                    job_uuid,
+                    domain=domain,
+                    owner_user_id=owner_user_id,
+                )
+            if job is None:
+                return None
+            if job.get("archived"):
+                return self._normalize_archived_job_row(job)
+            normalized = self._normalize_active_job_row(job)
+            normalized["archived"] = False
+            return normalized
         finally:
             conn.close()
 

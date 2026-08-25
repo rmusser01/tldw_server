@@ -297,27 +297,27 @@ git commit -m "feat(jobs): add postgres receipt admission parity"
 - Consumes: immutable Job UUID plus optional domain and owner constraints.
 - Produces: `JobManager.get_job_or_archived_by_uuid(job_uuid: str, *, domain: str | None = None, owner_user_id: str | None = None) -> dict[str, Any] | None`.
 
-- [ ] **Step 1: Write failing active/archive/corruption tests**
+- [x] **Step 1: Write failing active/archive/corruption tests**
 
 Assert active and archived rows normalize identically except `archived`; moving a Job during lookup cannot return a false missing result; duplicate UUIDs across active/archive, a malformed UUID, receipt owner mismatch, or receipt Job ID/UUID mismatch raises `IdempotentOperationUnavailableError`.
 
-- [ ] **Step 2: Run the tests and verify failure**
+- [x] **Step 2: Run the tests and verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_postgres.py -k 'archive or corrupt or uuid' -v`
 
-- [ ] **Step 3: Implement one consistent read per backend**
+- [x] **Step 3: Implement one consistent read per backend**
 
 Use one connection and one transaction snapshot. Query active and archive candidates by UUID with owner/domain filters, normalize payload/result through existing helpers, require zero or exactly one candidate, and set `archived`. Do not compose `get_job_by_uuid()` and `get_job_or_archived()`, because those methods open separate connections and retain the archival race gap.
 
-- [ ] **Step 4: Use the consistent lookup for receipt replay**
+- [x] **Step 4: Use the consistent lookup for receipt replay**
 
 Receipt replay validates `job_uuid`, `job_id`, domain, queue, type, and owner against the resolved Job. A missing or ambiguous match is unavailable, not a new admission.
 
-- [ ] **Step 5: Run focused replay tests**
+- [x] **Step 5: Run focused replay tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_postgres.py -v`
 
-- [ ] **Step 6: Commit consistent replay**
+- [x] **Step 6: Commit consistent replay**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_postgres.py

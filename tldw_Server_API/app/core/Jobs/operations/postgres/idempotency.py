@@ -10,6 +10,10 @@ from contextlib import AbstractContextManager
 from datetime import datetime, timedelta
 from typing import Any
 
+from tldw_Server_API.app.core.Jobs.migrations import (
+    SLIDES_ARCHIVE_EXACT_FIELDS,
+    normalize_slides_archive_projection,
+)
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     IdempotentOperationAdmission,
     IdempotentOperationCommand,
@@ -86,18 +90,70 @@ def _find_exact_receipt(cur: Any, command: IdempotentOperationCommand):
     return _row_to_dict(cur.fetchone()) or None
 
 
-def _resolve_receipt_job(cur: Any, receipt: dict[str, Any]) -> dict[str, Any]:
+def get_job_or_archived_by_uuid(
+    cur: Any,
+    job_uuid: str,
+    *,
+    domain: str | None = None,
+    owner_user_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Read one UUID from active/archive storage in a single DB snapshot."""
+
+    if not isinstance(job_uuid, str) or not job_uuid.strip() or len(job_uuid) > 200:
+        raise ValueError("job_uuid must be a non-empty string of at most 200 characters")
+
+    clauses = ["uuid = %s"]
+    filter_values: list[Any] = [job_uuid]
+    if domain is not None:
+        clauses.append("domain = %s")
+        filter_values.append(domain)
+    if owner_user_id is not None:
+        clauses.append("owner_user_id = %s")
+        filter_values.append(owner_user_id)
+    where_sql = " AND ".join(clauses)
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
     cur.execute(
-        "SELECT * FROM jobs WHERE uuid = %s OR id = %s ORDER BY id FOR KEY SHARE",
-        (receipt["job_uuid"], receipt["job_id"]),
+        f"""
+        SELECT {projection}, NULL AS payload_compressed,
+               NULL AS result_compressed, FALSE AS archived
+        FROM jobs
+        WHERE {where_sql}
+        UNION ALL
+        SELECT {projection}, payload_compressed,
+               result_compressed, TRUE AS archived
+        FROM jobs_archive
+        WHERE {where_sql}
+        """,  # nosec B608
+        (*filter_values, *filter_values),
     )
     rows = cur.fetchall()
-    unique_rows = {int(row["id"]): _row_to_dict(row) for row in rows}
-    if len(unique_rows) != 1:
+    if len(rows) > 1:
         raise IdempotentOperationUnavailableError(
-            "receipt does not resolve to exactly one active Job"
+            "job UUID does not resolve to exactly one Job"
         )
-    job = next(iter(unique_rows.values()))
+    if not rows:
+        return None
+    job = normalize_slides_archive_projection(rows[0])
+    job["archived"] = bool(job.get("archived"))
+    return job
+
+
+def _resolve_receipt_job(cur: Any, receipt: dict[str, Any]) -> dict[str, Any]:
+    try:
+        job = get_job_or_archived_by_uuid(
+            cur,
+            receipt.get("job_uuid"),
+            domain=receipt.get("domain"),
+            owner_user_id=receipt.get("owner_user_id"),
+        )
+    except ValueError as exc:
+        raise IdempotentOperationUnavailableError(
+            "receipt contains an invalid Job UUID"
+        ) from exc
+    if job is None:
+        raise IdempotentOperationUnavailableError(
+            "receipt does not resolve to exactly one Job"
+        )
     valid = (
         job.get("uuid") == receipt.get("job_uuid")
         and job.get("id") == receipt.get("job_id")
@@ -109,7 +165,7 @@ def _resolve_receipt_job(cur: Any, receipt: dict[str, Any]) -> dict[str, Any]:
     )
     if not valid:
         raise IdempotentOperationUnavailableError(
-            "receipt and active Job correlation do not match"
+            "receipt and Job correlation do not match"
         )
     return job
 

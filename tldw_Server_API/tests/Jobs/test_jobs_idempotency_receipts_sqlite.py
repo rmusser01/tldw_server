@@ -10,6 +10,7 @@ from threading import Barrier
 import pytest
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.migrations import SLIDES_ARCHIVE_EXACT_FIELDS
 from tldw_Server_API.app.core.Jobs.operations import contracts
 
 pytestmark = pytest.mark.unit
@@ -186,6 +187,22 @@ def _table_count(manager: JobManager, table: str) -> int:
         conn.close()
 
 
+def _archive_job(manager: JobManager, job_uuid: str, *, retain_active: bool = False):
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    conn = sqlite3.connect(manager.db_path)
+    try:
+        with conn:
+            conn.execute(
+                f"INSERT INTO jobs_archive ({projection}) "  # nosec B608
+                f"SELECT {projection} FROM jobs WHERE uuid = ?",  # nosec B608
+                (job_uuid,),
+            )
+            if not retain_active:
+                conn.execute("DELETE FROM jobs WHERE uuid = ?", (job_uuid,))
+    finally:
+        conn.close()
+
+
 def test_first_request_atomically_creates_job_and_receipt(receipt_manager):
     result = receipt_manager.admit_idempotent_operation(_operation_command())
 
@@ -233,6 +250,79 @@ def test_exact_replay_does_not_require_a_new_retention_window(receipt_manager):
 
     assert replay.disposition is contracts.IdempotentOperationDisposition.REPLAYED
     assert replay.job["uuid"] == first.job["uuid"]
+
+
+def test_uuid_lookup_normalizes_active_and_archived_job(receipt_manager):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+
+    active = receipt_manager.get_job_or_archived_by_uuid(
+        first.job["uuid"],
+        domain="sharing",
+        owner_user_id="recipient-1",
+    )
+    _archive_job(receipt_manager, first.job["uuid"])
+    archived = receipt_manager.get_job_or_archived_by_uuid(
+        first.job["uuid"],
+        domain="sharing",
+        owner_user_id="recipient-1",
+    )
+
+    assert active is not None
+    assert archived is not None
+    assert active["archived"] is False
+    assert archived["archived"] is True
+    assert {key: value for key, value in active.items() if key != "archived"} == {
+        key: value for key, value in archived.items() if key != "archived"
+    }
+    assert active["payload"] == archived["payload"] == {"schema_version": 1}
+    assert active["result"] == archived["result"]
+    assert active["uuid"] == archived["uuid"] == first.job["uuid"]
+
+
+def test_exact_replay_survives_job_archival(receipt_manager):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    _archive_job(receipt_manager, first.job["uuid"])
+
+    replay = receipt_manager.admit_idempotent_operation(_operation_command())
+
+    assert replay.disposition is contracts.IdempotentOperationDisposition.REPLAYED
+    assert replay.job["uuid"] == first.job["uuid"]
+    assert replay.job["archived"] is True
+
+
+def test_uuid_lookup_rejects_duplicate_active_and_archived_authority(receipt_manager):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    _archive_job(receipt_manager, first.job["uuid"], retain_active=True)
+
+    with pytest.raises(
+        contracts.IdempotentOperationUnavailableError,
+        match="exactly one Job",
+    ):
+        receipt_manager.get_job_or_archived_by_uuid(first.job["uuid"])
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    (("job_uuid", "not-a-job-uuid"), ("job_id", 999_999)),
+)
+def test_corrupt_receipt_correlation_fails_closed(
+    receipt_manager,
+    column,
+    value,
+):
+    receipt_manager.admit_idempotent_operation(_operation_command())
+    conn = sqlite3.connect(receipt_manager.db_path)
+    try:
+        conn.execute(
+            f"UPDATE job_idempotency_receipts SET {column} = ?",  # nosec B608
+            (value,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(contracts.IdempotentOperationUnavailableError):
+        receipt_manager.admit_idempotent_operation(_operation_command())
 
 
 def test_same_key_is_isolated_between_owners(receipt_manager):
@@ -327,7 +417,7 @@ def test_missing_receipt_job_fails_closed_without_replacement(receipt_manager):
 
     with pytest.raises(
         contracts.IdempotentOperationUnavailableError,
-        match="exactly one active Job",
+        match="exactly one Job",
     ):
         receipt_manager.admit_idempotent_operation(_operation_command())
 
