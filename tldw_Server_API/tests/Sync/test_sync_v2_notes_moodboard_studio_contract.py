@@ -489,84 +489,183 @@ def test_extension_surfaces_reject_semantic_aliases_recursively(
             )
 
 
-@pytest.mark.parametrize("surface", ["canvas", "display"])
-@pytest.mark.parametrize("nested", [False, True], ids=["direct", "nested"])
-@pytest.mark.parametrize(
-    "reserved_alias",
-    [
-        "client_secret",
-        "clientSecret",
-        "clientsecret",
-        "auth_token",
-        "authToken",
-        "authtoken",
-        "bearer_token",
-        "bearerToken",
-        "bearertoken",
-        "oauth_token",
-        "oauthToken",
-        "oauthtoken",
-        "id_token",
-        "idToken",
-        "idtoken",
-        "session_token",
-        "sessionToken",
-        "sessiontoken",
-        "access_key",
-        "accessKey",
-        "accesskey",
-        "access_key_id",
-        "accessKeyId",
-        "accesskeyid",
-        "secret_key",
-        "secretKey",
-        "secretkey",
-        "api_token",
-        "apiToken",
-        "apitoken",
-        "client_key",
-        "clientKey",
-        "clientkey",
-        "identity_token",
-        "identityToken",
-        "identitytoken",
-        "signing_key",
-        "signingKey",
-        "signingkey",
-        "encryption_key",
-        "encryptionKey",
-        "encryptionkey",
-        "passphrase",
-        "Passphrase",
-        "PASSPHRASE",
-    ],
+_REVIEWER_COMPACT_CREDENTIAL_KEYS = (
+    "apisecret",
+    "oauthclientsecret",
+    "identitykey",
+    "signingsecret",
+    "encryptionsecret",
+    "encryptionpassphrase",
+    "privatekeypassphrase",
+    "clienttoken",
+    "apicredential",
 )
-def test_extension_surfaces_reject_credential_compound_aliases_recursively(
-    surface: str,
-    nested: bool,
-    reserved_alias: str,
-) -> None:
-    reserved_value = {reserved_alias: "must remain server-bound"}
-    extension = {"nested": reserved_value} if nested else reserved_value
 
-    with pytest.raises(NotesMoodboardStudioContractError, match="cannot contain"):
-        if surface == "canvas":
-            parse_notes_moodboard_v1(
-                valid_moodboard_payload(
-                    canvas={"layout_mode": "masonry", "metadata": extension}
-                )
+_CREDENTIAL_GRAMMAR_CASES = (
+    ("api", "secret"),
+    ("oauth", "client", "secret"),
+    ("identity", "key"),
+    ("signing", "secret"),
+    ("encryption", "secret"),
+    ("encryption", "passphrase"),
+    ("private", "key", "passphrase"),
+    ("client", "token"),
+    ("api", "credential"),
+    ("client", "secret"),
+    ("auth", "token"),
+    ("bearer", "token"),
+    ("oauth", "token"),
+    ("id", "token"),
+    ("session", "token"),
+    ("access", "key"),
+    ("secret", "key"),
+    ("api", "token"),
+    ("client", "key"),
+    ("identity", "token"),
+    ("signing", "key"),
+    ("encryption", "key"),
+    ("refresh", "token"),
+    ("authorization", "token"),
+    ("public", "key"),
+    ("api", "credentials"),
+    ("client", "password"),
+    ("api", "authorization"),
+)
+
+_CREDENTIAL_KEY_STYLES = (
+    "snake",
+    "kebab",
+    "dotted",
+    "camel",
+    "pascal",
+    "acronym",
+    "compact",
+)
+
+_CREDENTIAL_ACRONYM_CASE = {"api": "API", "oauth": "OAuth", "id": "ID"}
+
+_EXACT_CREDENTIAL_KEYS = (
+    "auth",
+    "authorization",
+    "bearer",
+    "credential",
+    "credentials",
+    "password",
+    "passphrase",
+    "secret",
+    "token",
+)
+
+
+def _credential_key_variant(parts: tuple[str, ...], style: str) -> str:
+    if style == "snake":
+        return "_".join(parts)
+    if style == "kebab":
+        return "-".join(parts)
+    if style == "dotted":
+        return ".".join(parts)
+    if style == "camel":
+        return parts[0] + "".join(part.title() for part in parts[1:])
+    if style == "pascal":
+        return "".join(part.title() for part in parts)
+    if style == "acronym":
+        return "".join(
+            _CREDENTIAL_ACRONYM_CASE.get(part, part.title()) for part in parts
+        )
+    if style == "compact":
+        return "".join(parts)
+    raise AssertionError(f"unknown credential key style: {style}")
+
+
+def _extension_at_position(key: str, position: str) -> dict[str, object]:
+    reserved = {key: "must remain server-bound"}
+    if position == "direct":
+        return reserved
+    if position == "nested":
+        return {"nested": reserved}
+    if position == "list":
+        return {"items": [reserved]}
+    raise AssertionError(f"unknown extension position: {position}")
+
+
+def _parse_extension_surface(surface: str, extension: dict[str, object]) -> None:
+    if surface == "canvas":
+        parse_notes_moodboard_v1(
+            valid_moodboard_payload(
+                canvas={"layout_mode": "masonry", "metadata": extension}
             )
-        else:
-            parse_notes_moodboard_note_v1(
-                valid_placement_payload(display=extension)
-            )
+        )
+        return
+    parse_notes_moodboard_note_v1(valid_placement_payload(display=extension))
 
 
 @pytest.mark.parametrize("surface", ["canvas", "display"])
-@pytest.mark.parametrize("nested", [False, True], ids=["direct", "nested"])
+@pytest.mark.parametrize("reserved_key", _REVIEWER_COMPACT_CREDENTIAL_KEYS)
+def test_extension_credential_grammar_rejects_reviewer_compact_examples(
+    surface: str,
+    reserved_key: str,
+) -> None:
+    with pytest.raises(NotesMoodboardStudioContractError, match="credential"):
+        _parse_extension_surface(surface, {reserved_key: "server-bound"})
+
+
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+@pytest.mark.parametrize("position", ["direct", "nested", "list"])
+@pytest.mark.parametrize(
+    "parts",
+    _CREDENTIAL_GRAMMAR_CASES,
+    ids=lambda parts: "+".join(parts),
+)
+def test_extension_credential_grammar_normalizes_all_key_styles_recursively(
+    surface: str,
+    position: str,
+    parts: tuple[str, ...],
+) -> None:
+    for style in _CREDENTIAL_KEY_STYLES:
+        reserved_key = _credential_key_variant(parts, style)
+        extension = _extension_at_position(reserved_key, position)
+        with pytest.raises(NotesMoodboardStudioContractError, match="cannot contain"):
+            _parse_extension_surface(surface, extension)
+
+
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+@pytest.mark.parametrize("position", ["direct", "nested", "list"])
+@pytest.mark.parametrize(
+    "parts",
+    [("access", "key", "id")],
+    ids=["access+key+id"],
+)
+def test_extension_classifier_retains_exact_structured_credential_concepts(
+    surface: str,
+    position: str,
+    parts: tuple[str, ...],
+) -> None:
+    for style in _CREDENTIAL_KEY_STYLES:
+        reserved_key = _credential_key_variant(parts, style)
+        extension = _extension_at_position(reserved_key, position)
+        with pytest.raises(NotesMoodboardStudioContractError, match="credential"):
+            _parse_extension_surface(surface, extension)
+
+
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+@pytest.mark.parametrize("position", ["direct", "nested", "list"])
+@pytest.mark.parametrize("reserved_key", _EXACT_CREDENTIAL_KEYS)
+def test_extension_classifier_retains_exact_single_credential_concepts(
+    surface: str,
+    position: str,
+    reserved_key: str,
+) -> None:
+    for alias in (reserved_key, reserved_key.title(), reserved_key.upper()):
+        extension = _extension_at_position(alias, position)
+        with pytest.raises(NotesMoodboardStudioContractError, match="credential"):
+            _parse_extension_surface(surface, extension)
+
+
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+@pytest.mark.parametrize("position", ["direct", "nested", "list"])
 def test_extension_classifier_uses_exact_concepts_not_substrings(
     surface: str,
-    nested: bool,
+    position: str,
 ) -> None:
     allowed = {
         "ownership": "shared",
@@ -575,8 +674,17 @@ def test_extension_classifier_uses_exact_concepts_not_substrings(
         "accessibility": "high-contrast",
         "authentication": "delegated",
         "acme.theme": "midnight",
+        "apisecretary": "assistant",
+        "clienttokenizer": "portable",
+        "encryptionaccessibility": "high-contrast",
+        "oauthauthentication": "delegated",
     }
-    extension = {"nested": allowed} if nested else allowed
+    if position == "direct":
+        extension: dict[str, object] = allowed
+    elif position == "nested":
+        extension = {"nested": allowed}
+    else:
+        extension = {"items": [allowed]}
 
     if surface == "canvas":
         parsed = parse_notes_moodboard_v1(

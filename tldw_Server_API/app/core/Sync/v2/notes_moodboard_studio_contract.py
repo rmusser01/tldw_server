@@ -27,7 +27,10 @@ JS_SAFE_INTEGER_MAX = 9_007_199_254_740_991
 JS_SAFE_INTEGER_MIN = -JS_SAFE_INTEGER_MAX
 SYNC_ENVELOPE_MAX_BYTES = 262_144
 
-_SAFE_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_EXTENSION_KEY_MAX_LENGTH = 64
+_SAFE_KEY_RE = re.compile(
+    rf"[A-Za-z0-9_.-]{{1,{_EXTENSION_KEY_MAX_LENGTH}}}"
+)
 _EXTENSION_WORD_RE = re.compile(
     r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[0-9]+"
 )
@@ -81,37 +84,49 @@ _LIFECYCLE_EXTENSION_CONCEPTS = frozenset(
         "tombstone",
     }
 )
-_CREDENTIAL_EXTENSION_CONCEPTS = frozenset(
+_EXACT_CREDENTIAL_EXTENSION_CONCEPTS = frozenset(
     {
-        "access_key",
         "access_key_id",
-        "access_token",
-        "api_key",
-        "api_token",
         "auth",
-        "auth_token",
         "authorization",
         "bearer",
-        "bearer_token",
-        "client_key",
-        "client_secret",
         "credential",
         "credentials",
-        "encryption_key",
-        "id_token",
-        "identity_token",
-        "oauth_token",
         "passphrase",
         "password",
-        "private_key",
-        "refresh_token",
         "secret",
-        "secret_key",
-        "session_token",
-        "signing_key",
         "token",
     }
 )
+_CREDENTIAL_QUALIFIERS = (
+    "api",
+    "oauth",
+    "client",
+    "identity",
+    "id",
+    "access",
+    "refresh",
+    "auth",
+    "authorization",
+    "bearer",
+    "session",
+    "private",
+    "public",
+    "secret",
+    "signing",
+    "encryption",
+)
+_CREDENTIAL_TERMINALS = (
+    "key",
+    "token",
+    "secret",
+    "credential",
+    "credentials",
+    "password",
+    "passphrase",
+    "authorization",
+)
+_CREDENTIAL_GRAMMAR_MAX_STATES = 2 * (_EXTENSION_KEY_MAX_LENGTH + 1)
 _TRANSIENT_EXTENSION_CONCEPTS = frozenset(
     {
         "current_selection",
@@ -1090,7 +1105,8 @@ def _validate_extension_value(
         for key, item in value.items():
             if not isinstance(key, str) or _SAFE_KEY_RE.fullmatch(key) is None:
                 raise ValueError(
-                    f"{label} keys must use 1 to 64 safe ASCII characters"
+                    f"{label} keys must use 1 to {_EXTENSION_KEY_MAX_LENGTH} "
+                    "safe ASCII characters"
                 )
             _validate_extension_key(key, label)
             count += 1
@@ -1143,7 +1159,7 @@ def _validate_extension_key(key: str, label: str) -> None:
         raise ValueError(f"{label} cannot contain reserved authority or identity keys")
     if _contains_extension_concept(tokens, _LIFECYCLE_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain reserved lifecycle keys")
-    if _contains_extension_concept(tokens, _CREDENTIAL_EXTENSION_CONCEPTS):
+    if _contains_credential_concept(tokens):
         raise ValueError(f"{label} cannot contain credential keys")
     if _contains_extension_concept(tokens, _TRANSIENT_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain transient UI or operation keys")
@@ -1184,6 +1200,34 @@ def _contains_extension_concept(
                 if len(candidate) >= len(target):
                     break
     return False
+
+
+def _contains_credential_concept(tokens: tuple[str, ...]) -> bool:
+    if _contains_extension_concept(
+        tokens, _EXACT_CREDENTIAL_EXTENSION_CONCEPTS
+    ):
+        return True
+    candidates = (*tokens, "".join(tokens))
+    return any(_is_full_credential_compound(candidate) for candidate in candidates)
+
+
+def _is_full_credential_compound(candidate: str) -> bool:
+    state_slots = 2 * (len(candidate) + 1)
+    if not candidate or state_slots > _CREDENTIAL_GRAMMAR_MAX_STATES:
+        return False
+
+    qualifier_states = [False] * (len(candidate) + 1)
+    terminal_states = [False] * (len(candidate) + 1)
+    for offset in range(len(candidate)):
+        if offset == 0 or qualifier_states[offset]:
+            for qualifier in _CREDENTIAL_QUALIFIERS:
+                if candidate.startswith(qualifier, offset):
+                    qualifier_states[offset + len(qualifier)] = True
+        if qualifier_states[offset] or terminal_states[offset]:
+            for terminal in _CREDENTIAL_TERMINALS:
+                if candidate.startswith(terminal, offset):
+                    terminal_states[offset + len(terminal)] = True
+    return terminal_states[-1]
 
 
 def _validate_canonical_json(value: object, label: str) -> None:
