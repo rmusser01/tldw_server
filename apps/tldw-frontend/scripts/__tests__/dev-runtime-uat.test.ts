@@ -253,7 +253,7 @@ describe("development runtime UAT lifecycle", () => {
     idleCheckIntervalMs: 30_000,
   }
   const baseEnv = {
-    NODE_ENV: "test",
+    NODE_ENV: "test" as const,
     PATH: "/usr/bin",
     TLDW_E2E_ALLOW_OFFLINE: "0",
     TLDW_E2E_SERVER_URL: "http://127.0.0.1:18180",
