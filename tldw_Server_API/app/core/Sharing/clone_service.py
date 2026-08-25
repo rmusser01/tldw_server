@@ -469,21 +469,16 @@ class CloneService:
         if reservation.get("deleted") in (True, 1):
             return False
 
-        expected_fields = (
-            (("system_operation_id", "operation_id"), request.operation_id),
-            (
-                ("system_request_fingerprint", "request_fingerprint"),
-                request.request_fingerprint,
-            ),
-            (("name",), request.name),
-            (("description",), description),
-            (("workspace_profile", "profile"), workspace_profile),
-        )
+        expected_fields = {
+            "system_operation_id": request.operation_id,
+            "system_request_fingerprint": request.request_fingerprint,
+            "name": request.name,
+            "description": description,
+            "workspace_profile": workspace_profile,
+        }
         return all(
-            reservation.get(field_name) == expected
-            for field_names, expected in expected_fields
-            for field_name in field_names
-            if field_name in reservation
+            field_name in reservation and reservation[field_name] == expected
+            for field_name, expected in expected_fields.items()
         )
 
     @staticmethod

@@ -334,6 +334,24 @@ def _media_snapshot(media_id: int, *, chunks: bool = True) -> MediaCloneSnapshot
     )
 
 
+def _canonical_reservation_row(
+    *,
+    state: str = "staged",
+    description: str | None = "Source description",
+    workspace_profile: str = "research",
+) -> dict[str, object]:
+    return {
+        "id": "target-ws",
+        "system_operation_state": state,
+        "system_operation_id": "operation-1",
+        "system_request_fingerprint": "fingerprint-1",
+        "name": "Workspace Copy",
+        "description": description,
+        "workspace_profile": workspace_profile,
+        "deleted": 0,
+    }
+
+
 def _make_service(
     snapshot: WorkspaceCloneSnapshot | None = None,
     *,
@@ -351,10 +369,10 @@ def _make_service(
     source_media.read_media_clone_snapshots.side_effect = lambda media_ids: {
         media_id: media_snapshots[media_id] for media_id in media_ids
     }
-    target_chacha.reserve_clone_target.return_value = {
-        "id": "target-ws",
-        "system_operation_state": "staged",
-    }
+    target_chacha.reserve_clone_target.return_value = _canonical_reservation_row(
+        description=snapshot.workspace.get("description"),
+        workspace_profile=snapshot.workspace.get("workspace_profile") or "research",
+    )
 
     def add_source(workspace_id: str, data: dict) -> dict:
         return {
@@ -499,7 +517,10 @@ def test_clone_reads_stable_unique_snapshots_before_deterministic_reservation():
 
     def reserve(**kwargs):
         events.append(("reserve", kwargs["workspace_id"]))
-        return {"id": kwargs["workspace_id"], "system_operation_state": "staged"}
+        return _canonical_reservation_row(
+            description="Keep this description",
+            workspace_profile="analysis",
+        )
 
     target_chacha.reserve_clone_target.side_effect = reserve
 
@@ -1228,15 +1249,9 @@ def test_same_operation_different_fingerprint_conflict_preserves_existing_target
 def test_exact_publication_pending_reservation_exits_without_cleanup_or_copy():
     progress: list[tuple[str, float]] = []
     service, _, _, target_chacha, target_media = _make_service()
-    target_chacha.reserve_clone_target.return_value = {
-        "id": "target-ws",
-        "system_operation_state": "publication_pending",
-        "system_operation_id": "operation-1",
-        "system_request_fingerprint": "fingerprint-1",
-        "name": "Workspace Copy",
-        "description": "Source description",
-        "workspace_profile": "research",
-    }
+    target_chacha.reserve_clone_target.return_value = _canonical_reservation_row(
+        state="publication_pending"
+    )
 
     with pytest.raises(Exception) as exc_info:
         service.clone_workspace(
@@ -1278,16 +1293,80 @@ def test_mismatched_returned_reservation_fields_preserve_ambiguous_target(
     wrong_value,
 ):
     service, _, _, target_chacha, target_media = _make_service()
-    reservation = {
-        "id": "target-ws",
-        "system_operation_state": "staged",
-        "system_operation_id": "operation-1",
-        "system_request_fingerprint": "fingerprint-1",
-        "name": "Workspace Copy",
-        "description": "Source description",
-        "workspace_profile": "research",
-    }
+    reservation = _canonical_reservation_row()
     reservation[field_name] = wrong_value
+    target_chacha.reserve_clone_target.return_value = reservation
+
+    with pytest.raises(Exception) as exc_info:
+        service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    _assert_persistence_error(
+        exc_info.value,
+        code="clone_validation_failed",
+        cleanup_state="pending",
+    )
+    target_media.insert_operation_owned_clone_media.assert_not_called()
+    target_media.delete_operation_owned_clone_media.assert_not_called()
+    target_chacha.add_workspace_source.assert_not_called()
+    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.discard_clone_target.assert_not_called()
+
+
+@pytest.mark.parametrize("state", ("staged", "publication_pending"))
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "system_operation_id",
+        "system_request_fingerprint",
+        "name",
+        "description",
+        "workspace_profile",
+    ),
+)
+def test_reservation_requires_every_canonical_ownership_field(field_name, state):
+    snapshot = _workspace_snapshot(
+        sources=[{"id": "source-1", "media_id": 7, "source_type": "media"}]
+    )
+    service, _, _, target_chacha, target_media = _make_service(
+        snapshot,
+        media_snapshots={7: _media_snapshot(7)},
+    )
+    reservation = _canonical_reservation_row(state=state)
+    del reservation[field_name]
+    target_chacha.reserve_clone_target.return_value = reservation
+
+    with pytest.raises(Exception) as exc_info:
+        service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    _assert_persistence_error(
+        exc_info.value,
+        code="clone_validation_failed",
+        cleanup_state="pending",
+    )
+    target_media.insert_operation_owned_clone_media.assert_not_called()
+    target_media.delete_operation_owned_clone_media.assert_not_called()
+    target_chacha.add_workspace_source.assert_not_called()
+    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.discard_clone_target.assert_not_called()
+
+
+@pytest.mark.parametrize("state", ("staged", "publication_pending"))
+def test_reservation_requires_description_field_when_expected_value_is_none(state):
+    snapshot = _workspace_snapshot(
+        workspace={
+            "id": "source-ws",
+            "name": "Source Workspace",
+            "description": None,
+            "workspace_profile": "research",
+        },
+        sources=[{"id": "source-1", "media_id": 7, "source_type": "media"}],
+    )
+    service, _, _, target_chacha, target_media = _make_service(
+        snapshot,
+        media_snapshots={7: _media_snapshot(7)},
+    )
+    reservation = _canonical_reservation_row(state=state, description=None)
+    del reservation["description"]
     target_chacha.reserve_clone_target.return_value = reservation
 
     with pytest.raises(Exception) as exc_info:
