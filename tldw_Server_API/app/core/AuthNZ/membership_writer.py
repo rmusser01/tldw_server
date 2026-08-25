@@ -139,6 +139,7 @@ class MembershipLockPhase(_ClosedMembershipEnum):
     TEAM_ROWS = "team_rows"
     MEMBERSHIP_ROWS = "membership_rows"
     OWNER_ROWS = "owner_rows"
+    AUTHORITY_ROWS = "authority_rows"
 
 
 def _require_positive_id(value: object) -> None:
@@ -744,6 +745,35 @@ _TEAM_MEMBERSHIP_LOCK_SQL = (
     "SELECT user_id FROM public.team_members "
     "WHERE team_id = $1 AND user_id = $2 FOR UPDATE"
 )
+_ROLE_AUTHORITY_LOCK_SQL = (
+    "SELECT r.id FROM public.roles r WHERE EXISTS ("
+    "SELECT 1 FROM public.user_roles ur "
+    "WHERE ur.user_id = $1 AND ur.role_id = r.id) "
+    "ORDER BY r.id FOR UPDATE OF r"
+)
+_PERMISSION_AUTHORITY_LOCK_SQL = (
+    "SELECT p.id FROM public.permissions p WHERE EXISTS ("
+    "SELECT 1 FROM public.role_permissions rp "
+    "JOIN public.user_roles ur ON ur.role_id = rp.role_id "
+    "WHERE ur.user_id = $1 AND rp.permission_id = p.id) OR EXISTS ("
+    "SELECT 1 FROM public.user_permissions up "
+    "WHERE up.user_id = $1 AND up.permission_id = p.id) "
+    "ORDER BY p.id FOR UPDATE OF p"
+)
+_USER_ROLE_AUTHORITY_LOCK_SQL = (
+    "SELECT ur.role_id FROM public.user_roles ur WHERE ur.user_id = $1 "
+    "ORDER BY ur.role_id FOR UPDATE OF ur"
+)
+_ROLE_PERMISSION_AUTHORITY_LOCK_SQL = (
+    "SELECT rp.role_id, rp.permission_id FROM public.role_permissions rp "
+    "WHERE EXISTS (SELECT 1 FROM public.user_roles ur "
+    "WHERE ur.user_id = $1 AND ur.role_id = rp.role_id) "
+    "ORDER BY rp.role_id, rp.permission_id FOR UPDATE OF rp"
+)
+_USER_PERMISSION_AUTHORITY_LOCK_SQL = (
+    "SELECT up.permission_id FROM public.user_permissions up "
+    "WHERE up.user_id = $1 ORDER BY up.permission_id FOR UPDATE OF up"
+)
 _ACTIVE_MEMBERSHIP_SQL = "LOWER(COALESCE(status, '')) = 'active'"
 
 
@@ -811,6 +841,24 @@ def plan_membership_lock_statements(
         _membership_statement(row, MembershipLockPhase.OWNER_ROWS)
         for row in lock_set.owner_rows
     )
+    if (
+        type(plan.context) is ActorMembershipWriteContext
+        and plan.context.required_authority is MembershipAuthority.PLATFORM_ADMIN
+    ):
+        statements.extend(
+            MembershipLockStatement(
+                phase=MembershipLockPhase.AUTHORITY_ROWS,
+                sql=sql,
+                parameters=(plan.context.actor_user_id,),
+            )
+            for sql in (
+                _ROLE_AUTHORITY_LOCK_SQL,
+                _PERMISSION_AUTHORITY_LOCK_SQL,
+                _USER_ROLE_AUTHORITY_LOCK_SQL,
+                _ROLE_PERMISSION_AUTHORITY_LOCK_SQL,
+                _USER_PERMISSION_AUTHORITY_LOCK_SQL,
+            )
+        )
     return tuple(statements)
 
 
@@ -1031,7 +1079,10 @@ class MembershipWriter:
             plan,
             backend=self._backend,
         ):
-            await conn.fetchrow(statement.sql, *statement.parameters)
+            if statement.phase is MembershipLockPhase.AUTHORITY_ROWS:
+                await conn.fetch(statement.sql, *statement.parameters)
+            else:
+                await conn.fetchrow(statement.sql, *statement.parameters)
 
     async def _recheck_preflight(
         self,
@@ -1153,21 +1204,18 @@ class MembershipWriter:
         """Resolve active global RBAC authority on the supplied connection."""
 
         if self._backend is MembershipLockBackend.POSTGRESQL:
-            # The writer already holds the actor's users row. That row serializes
-            # absent user-role/direct-grant inserts through their FK key locks;
-            # the role locks below do the same for absent role-permission inserts.
             user_role_rows = await conn.fetch(
                 "SELECT ur.role_id, "
                 "(ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP) AS active "
                 "FROM public.user_roles ur WHERE ur.user_id = $1 "
-                "ORDER BY ur.role_id FOR UPDATE OF ur",
+                "ORDER BY ur.role_id",
                 user_id,
             )
             role_rows = await conn.fetch(
                 "SELECT r.id, r.name FROM public.roles r "
                 "WHERE EXISTS (SELECT 1 FROM public.user_roles ur "
                 "WHERE ur.user_id = $1 AND ur.role_id = r.id) "
-                "ORDER BY r.id FOR UPDATE OF r",
+                "ORDER BY r.id",
                 user_id,
             )
             role_permission_rows = await conn.fetch(
@@ -1175,7 +1223,7 @@ class MembershipWriter:
                 "FROM public.role_permissions rp "
                 "WHERE EXISTS (SELECT 1 FROM public.user_roles ur "
                 "WHERE ur.user_id = $1 AND ur.role_id = rp.role_id) "
-                "ORDER BY rp.role_id, rp.permission_id FOR UPDATE OF rp",
+                "ORDER BY rp.role_id, rp.permission_id",
                 user_id,
             )
             permission_rows = await conn.fetch(
@@ -1185,14 +1233,14 @@ class MembershipWriter:
                 "WHERE ur.user_id = $1 AND rp.permission_id = p.id) OR "
                 "EXISTS (SELECT 1 FROM public.user_permissions up "
                 "WHERE up.user_id = $1 AND up.permission_id = p.id) "
-                "ORDER BY p.id FOR UPDATE OF p",
+                "ORDER BY p.id",
                 user_id,
             )
             direct_rows = await conn.fetch(
                 "SELECT up.permission_id, up.granted, "
                 "(up.expires_at IS NULL OR up.expires_at > CURRENT_TIMESTAMP) AS active "
                 "FROM public.user_permissions up WHERE up.user_id = $1 "
-                "ORDER BY up.permission_id FOR UPDATE OF up",
+                "ORDER BY up.permission_id",
                 user_id,
             )
 

@@ -1000,6 +1000,46 @@ def test_postgresql_statements_use_canonical_public_relations() -> None:
     )
 
 
+def test_platform_authority_locks_are_parent_before_child_rows() -> None:
+    _, mutations, preflight = _complex_inputs()
+    actor = ActorMembershipWriteContext(
+        actor_user_id=4,
+        required_authority=MembershipAuthority.PLATFORM_ADMIN,
+    )
+    plan = plan_membership_write(
+        context=actor,
+        mutations=mutations,
+        preflight=preflight,
+    )
+
+    statements = plan_membership_lock_statements(
+        plan,
+        backend=MembershipLockBackend.POSTGRESQL,
+    )
+    authority_sql = [
+        item.sql
+        for item in statements
+        if item.phase is MembershipLockPhase.AUTHORITY_ROWS
+    ]
+
+    assert [
+        "roles" if sql.startswith("SELECT r.id") else
+        "permissions" if sql.startswith("SELECT p.id") else
+        "user_roles" if sql.startswith("SELECT ur.role_id") else
+        "role_permissions" if sql.startswith("SELECT rp.role_id") else
+        "user_permissions"
+        for sql in authority_sql
+    ] == [
+        "roles",
+        "permissions",
+        "user_roles",
+        "role_permissions",
+        "user_permissions",
+    ]
+    assert all(sql.startswith("SELECT") and "public." in sql for sql in authority_sql)
+    assert all("FOR UPDATE OF" in sql for sql in authority_sql)
+
+
 def test_sqlite_computes_the_same_lock_set_without_row_lock_sql() -> None:
     actor, mutations, preflight = _complex_inputs()
     plan = plan_membership_write(

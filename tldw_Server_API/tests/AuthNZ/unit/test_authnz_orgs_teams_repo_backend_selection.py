@@ -36,8 +36,14 @@ class _PoolStub:
     def __init__(self, conn: Any, *, postgres: bool) -> None:
         self._conn = conn
         self.pool = object() if postgres else None
+        self.transaction_acquire_timeouts: list[float | None] = []
 
-    def transaction(self) -> _Tx:
+    def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ) -> _Tx:
+        self.transaction_acquire_timeouts.append(acquire_timeout_seconds)
         return _Tx(self._conn)
 
 
@@ -301,7 +307,8 @@ async def test_add_team_member_postgres_delegates_with_postgres_writer(
     monkeypatch: pytest.MonkeyPatch,
 ):
     conn = _PostgresConnWithSqliteTrap()
-    repo = AuthnzOrgsTeamsRepo(db_pool=_PoolStub(conn, postgres=True))
+    pool = _PoolStub(conn, postgres=True)
+    repo = AuthnzOrgsTeamsRepo(db_pool=pool)
     observed: list[tuple[Any, MembershipLockBackend]] = []
 
     async def _apply(writer, **kwargs):
@@ -326,6 +333,7 @@ async def test_add_team_member_postgres_delegates_with_postgres_writer(
     assert row["team_id"] == 2
     assert row["org_id"] == 11
     assert observed == [(conn, MembershipLockBackend.POSTGRESQL)]
+    assert pool.transaction_acquire_timeouts == [5.0]
 
 
 @pytest.mark.asyncio
