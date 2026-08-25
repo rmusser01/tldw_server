@@ -7,7 +7,15 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     SharedProviderKeyTestRequest,
     SharedProviderKeyUpsertRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.membership_writer import MembershipAuthority
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipScopeNotFound,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
@@ -713,6 +721,92 @@ async def test_delete_shared_key_preserves_invalid_actor_as_forbidden(
         )
 
     assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_type", "expected_status", "expected_detail"),
+    (
+        (
+            MembershipAuthorizationError,
+            403,
+            "Not authorized to manage shared BYOK keys",
+        ),
+        (MembershipScopeNotFound, 404, "Shared BYOK scope not found"),
+        (
+            DatabaseLockError,
+            503,
+            "Authentication database is busy. Please retry shortly.",
+        ),
+        (
+            ConnectionPoolExhaustedError,
+            503,
+            "Authentication database is busy. Please retry shortly.",
+        ),
+        (
+            TimeoutError,
+            503,
+            "Authentication database is busy. Please retry shortly.",
+        ),
+    ),
+)
+async def test_shared_key_mutations_preserve_bounded_control_failures(
+    monkeypatch,
+    failure_type: type[Exception],
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    class FailingRepo:
+        async def upsert_secret(self, **_kwargs):
+            raise failure_type()
+
+        async def delete_secret(self, *_args, **_kwargs):
+            raise failure_type()
+
+    async def get_shared_repo():
+        return FailingRepo()
+
+    async def pass_provider_test(**_kwargs):
+        return "gpt-test"
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+    monkeypatch.setattr(service, "normalize_credential_fields", lambda *_args: {})
+    monkeypatch.setattr(service, "test_provider_credentials", pass_provider_test)
+    monkeypatch.setattr(
+        service,
+        "encrypt_byok_payload",
+        lambda _payload: {"ciphertext": "sealed"},
+    )
+    monkeypatch.setattr(service, "dumps_envelope", lambda _envelope: "sealed")
+
+    operations = (
+        lambda: service.upsert_shared_key(
+            _principal(),
+            SharedProviderKeyUpsertRequest(
+                scope_type="org",
+                scope_id=42,
+                provider="openai",
+                api_key="sk-test",
+            ),
+        ),
+        lambda: service.delete_shared_key(_principal(), "org", 42, "openai"),
+    )
+    for operation in operations:
+        with pytest.raises(HTTPException) as exc_info:
+            await operation()
+        assert exc_info.value.status_code == expected_status
+        assert exc_info.value.detail == expected_detail
+        if expected_status == 503:
+            from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+                get_authnz_transaction_policy,
+            )
+
+            assert exc_info.value.headers == {
+                "Retry-After": str(
+                    get_authnz_transaction_policy().busy_retry_after_seconds
+                ),
+            }
 
 
 @pytest.mark.asyncio

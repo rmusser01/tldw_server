@@ -57,6 +57,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, A
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
+    DatabaseLockError,
     DuplicateOrganizationError,
     DuplicateTeamError,
     InvalidRegistrationCodeError,
@@ -100,6 +101,7 @@ router = APIRouter(
 
 _MEMBERSHIP_CONTROL_ERRORS = (
     ConnectionPoolExhaustedError,
+    DatabaseLockError,
     MembershipAuthorizationError,
     MembershipPreflightChanged,
     MembershipScopeNotFound,
@@ -131,16 +133,20 @@ def _membership_control_http_exception(
     exc: (
         MembershipAuthorizationError
         | ConnectionPoolExhaustedError
+        | DatabaseLockError
         | MembershipPreflightChanged
         | MembershipScopeNotFound
         | MembershipTargetNotFound
         | TimeoutError
     ),
 ) -> HTTPException:
-    if isinstance(exc, (ConnectionPoolExhaustedError, TimeoutError)):
+    if isinstance(
+        exc,
+        (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
+    ):
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Membership service is busy; retry the request",
+            detail="Authentication database is busy. Please retry shortly.",
             headers={
                 "Retry-After": str(
                     get_authnz_transaction_policy().busy_retry_after_seconds

@@ -32,9 +32,15 @@ from tldw_Server_API.app.core.AuthNZ.byok_testing import (
     test_provider_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipScopeNotFound,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
@@ -42,6 +48,9 @@ from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
 )
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
+)
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
 )
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
@@ -122,6 +131,45 @@ def _platform_admin_membership_context(
     return ActorMembershipWriteContext(
         actor_user_id=principal.user_id,
         required_authority=MembershipAuthority.PLATFORM_ADMIN,
+    )
+
+
+_SHARED_KEY_CONTROL_ERRORS = (
+    MembershipAuthorizationError,
+    MembershipScopeNotFound,
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+    TimeoutError,
+)
+
+
+def _shared_key_control_http_exception(
+    exc: (
+        MembershipAuthorizationError
+        | MembershipScopeNotFound
+        | ConnectionPoolExhaustedError
+        | DatabaseLockError
+        | TimeoutError
+    ),
+) -> HTTPException:
+    if isinstance(exc, MembershipAuthorizationError):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage shared BYOK keys",
+        )
+    if isinstance(exc, MembershipScopeNotFound):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shared BYOK scope not found",
+        )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Authentication database is busy. Please retry shortly.",
+        headers={
+            "Retry-After": str(
+                get_authnz_transaction_policy().busy_retry_after_seconds
+            ),
+        },
     )
 
 
@@ -313,6 +361,8 @@ async def upsert_shared_key(
             status_code=409,
             detail="Conflicting provider credential aliases",
         ) from exc
+    except _SHARED_KEY_CONTROL_ERRORS as exc:
+        raise _shared_key_control_http_exception(exc) from exc
     except Exception as exc:
         logger.error("Failed to store shared BYOK key")
         raise HTTPException(status_code=500, detail="Failed to store shared BYOK key") from exc
@@ -459,6 +509,8 @@ async def delete_shared_key(
         )
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
+    except _SHARED_KEY_CONTROL_ERRORS as exc:
+        raise _shared_key_control_http_exception(exc) from exc
     except Exception as exc:
         logger.error("Failed to delete shared BYOK key")
         raise HTTPException(status_code=500, detail="Failed to delete shared BYOK key") from exc

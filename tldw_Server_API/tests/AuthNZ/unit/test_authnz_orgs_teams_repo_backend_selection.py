@@ -10,6 +10,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ import orgs_teams as orgs_teams_facade
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    DuplicateOrganizationError,
     RollbackSignal,
     TransactionError,
     UserRegistrationException,
@@ -733,10 +734,24 @@ async def test_legacy_organization_facade_routes_owner_through_bootstrap_writer(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("postgres", "expected_message"),
+    (
+        (False, "Transaction failed during: SQLite transaction"),
+        (True, "Transaction failed during: PostgreSQL transaction"),
+    ),
+)
 async def test_legacy_organization_facade_preserves_missing_owner_transaction_error(
     monkeypatch: pytest.MonkeyPatch,
+    postgres: bool,
+    expected_message: str,
 ) -> None:
+    class _Pool:
+        pool = object() if postgres else None
+
     class _Repo:
+        db_pool = _Pool()
+
         async def create_organization_with_owner_membership(
             self,
             **_kwargs: Any,
@@ -755,6 +770,42 @@ async def test_legacy_organization_facade_preserves_missing_owner_transaction_er
         )
 
     assert exc_info.value.__cause__ is None
+    assert str(exc_info.value) == expected_message
+
+
+@pytest.mark.asyncio
+async def test_owner_organization_creation_preserves_duplicate_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DuplicateNameConn(_SqliteConnWithPgTrap):
+        async def execute(self, query: str, params: Any) -> _Cursor:
+            if "lower(name) = lower(?)" in query.lower():
+                return _Cursor((1,))
+            return await super().execute(query, params)
+
+    authorized = False
+
+    async def authorize(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal authorized
+        authorized = True
+
+    monkeypatch.setattr(
+        MembershipWriter,
+        "authorize_organization_creation",
+        authorize,
+    )
+    repo = AuthnzOrgsTeamsRepo(
+        db_pool=_PoolStub(_DuplicateNameConn(), postgres=False)
+    )
+
+    with pytest.raises(DuplicateOrganizationError):
+        await repo.create_organization_with_owner_membership(
+            name="Existing",
+            owner_user_id=999,
+            context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+        )
+
+    assert not authorized
 
 
 @pytest.mark.asyncio
@@ -777,10 +828,15 @@ async def test_create_organization_with_owner_membership_reuses_one_transaction(
         events.append("authorize")
         observed["authorize_args"] = (self, conn, context, owner_user_id)
 
-    async def _create(active_conn, **kwargs):
-        events.append("create")
-        observed["create_conn"] = active_conn
-        observed["create_kwargs"] = kwargs
+    async def _check_duplicate(active_conn, **kwargs):
+        events.append("duplicate")
+        observed["duplicate_conn"] = active_conn
+        observed["duplicate_kwargs"] = kwargs
+
+    async def _insert(active_conn, **kwargs):
+        events.append("insert")
+        observed["insert_conn"] = active_conn
+        observed["insert_kwargs"] = kwargs
         return {"id": 11, "name": kwargs["name"], "owner_user_id": 7}
 
     async def _provision(**kwargs):
@@ -793,7 +849,12 @@ async def test_create_organization_with_owner_membership_reuses_one_transaction(
         _authorize,
         raising=False,
     )
-    monkeypatch.setattr(repo, "_create_organization_on_connection", _create)
+    monkeypatch.setattr(
+        repo,
+        "_raise_for_duplicate_organization_on_connection",
+        _check_duplicate,
+    )
+    monkeypatch.setattr(repo, "_insert_organization_on_connection", _insert)
     monkeypatch.setattr(repo, "provision_org_membership_on_connection", _provision)
 
     organization = await repo.create_organization_with_owner_membership(
@@ -803,11 +864,12 @@ async def test_create_organization_with_owner_membership_reuses_one_transaction(
     )
 
     assert organization["id"] == 11
-    assert events == ["authorize", "create", "provision"]
+    assert events == ["duplicate", "authorize", "insert", "provision"]
     assert observed["authorize_args"][1] is conn
     assert observed["authorize_args"][2] is _BOOTSTRAP_MEMBERSHIP_CONTEXT
     assert observed["authorize_args"][3] == 7
-    assert observed["create_conn"] is conn
+    assert observed["duplicate_conn"] is conn
+    assert observed["insert_conn"] is conn
     assert observed["provision_kwargs"]["conn"] is conn
     assert observed["provision_kwargs"]["org_role"] == "owner"
     assert pool.transaction_acquire_timeouts == [5.0]
