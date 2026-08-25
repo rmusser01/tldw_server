@@ -323,6 +323,11 @@ EXPECTED_EXCLUDED_WRITES = (
         "migration_025_team_members_added_at",
         "UPDATE team_members",
     ),
+    ExpectedWrite(
+        "tldw_Server_API/app/core/AuthNZ/migrations.py",
+        "migration_093_harmonize_users_write_columns",
+        "UPDATE users (uuid)",
+    ),
 )
 
 
