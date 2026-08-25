@@ -5,6 +5,7 @@ import io
 import uuid
 from copy import deepcopy
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -15,17 +16,30 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     normalize_output_storage_filename,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
+from tldw_Server_API.app.core.Persona.companion_behavior import (
+    CompanionBehaviorValidationError,
+    normalize_companion_behavior,
+)
 from tldw_Server_API.app.core.Persona.visual_asset_constraints import (
     ALLOWED_VISUAL_MIME_TYPES,
     MAX_VISUAL_IMAGE_DIMENSION,
+    MAX_VISUAL_RASTER_FRAMES,
     VISUAL_MIME_EXTENSIONS,
 )
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
     collect_visual_manifest_asset_ids,
     remap_visual_manifest_assets,
 )
+from tldw_Server_API.app.core.Persona.visual_portability.fingerprints import (
+    build_persona_visual_pack_fingerprint,
+)
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    get_persona_visual_renderer_capability,
+)
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
+    resolved_visual_state_ids,
+    validate_sprite_static_coverage,
     validate_visual_manifest,
 )
 
@@ -159,6 +173,8 @@ class PersonaVisualService:
         persona_id: str,
         user_id: str,
         pack_id: str,
+        expected_version: int,
+        reviewed_fingerprint: str,
     ) -> dict[str, Any]:
         pack = self._db.get_persona_visual_pack(
             pack_id=pack_id,
@@ -171,43 +187,180 @@ class PersonaVisualService:
                 "Persona visual pack not found for user.",
                 details={"pack_id": pack_id},
             )
+        if int(pack["version"]) != int(expected_version):
+            raise PersonaVisualServiceError(
+                "activation_conflict",
+                "Persona visual pack version changed before activation.",
+                details={"pack_id": pack_id},
+            )
         assets = self._db.list_persona_visual_assets(
             pack_id=pack_id,
             persona_id=persona_id,
             user_id=user_id,
         )
-        asset_ids = {str(asset["id"]) for asset in assets}
-        asset_dimensions = {
-            str(asset["id"]): (int(asset["width"]), int(asset["height"]))
-            for asset in assets
-            if asset.get("width") is not None and asset.get("height") is not None
-        }
-        try:
-            validation = validate_visual_manifest(
-                pack.get("manifest") or {},
-                available_asset_ids=asset_ids,
-                available_asset_dimensions=asset_dimensions,
-                require_activatable=True,
-            )
-        except PersonaVisualManifestError as exc:
+        fingerprint = self._validate_and_fingerprint(pack=pack, assets=assets, user_id=user_id)
+        if fingerprint != str(reviewed_fingerprint or ""):
             raise PersonaVisualServiceError(
-                "invalid_manifest",
-                str(exc),
+                "stale_review",
+                "Persona visual pack review no longer matches the pack payload.",
                 details={"pack_id": pack_id},
-            ) from exc
-
-        self._db.update_persona_visual_pack_manifest(
-            pack_id=pack_id,
-            persona_id=persona_id,
-            user_id=user_id,
-            manifest=validation.manifest,
-            expected_version=int(pack["version"]),
-        )
+            )
         return self._db.activate_persona_visual_pack(
             persona_id=persona_id,
             user_id=user_id,
             pack_id=pack_id,
+            expected_version=int(expected_version),
+            reviewed_fingerprint=fingerprint,
         )
+
+    def review_pack(
+        self,
+        *,
+        pack_id: str,
+        user_id: str,
+        reviewer_user_id: str,
+        expected_version: int,
+    ) -> dict[str, Any]:
+        """Validate an inactive pack and bind a review to its exact fingerprint."""
+        pack = self._db.get_persona_visual_pack_for_user(pack_id=pack_id, user_id=user_id)
+        if not pack:
+            raise PersonaVisualServiceError(
+                "pack_not_found",
+                "Persona visual pack not found for user.",
+                details={"pack_id": pack_id},
+            )
+        if int(pack["version"]) != int(expected_version):
+            raise PersonaVisualServiceError(
+                "review_conflict",
+                "Persona visual pack version changed before review.",
+                details={"pack_id": pack_id},
+            )
+        assets = self._db.list_persona_visual_assets(
+            pack_id=pack_id,
+            persona_id=str(pack["persona_id"]),
+            user_id=user_id,
+        )
+        fingerprint = self._validate_and_fingerprint(pack=pack, assets=assets, user_id=user_id)
+        return self._db.create_persona_visual_pack_review(
+            pack_id=pack_id,
+            user_id=user_id,
+            reviewer_user_id=reviewer_user_id,
+            fingerprint=fingerprint,
+            expected_pack_version=int(expected_version),
+        )
+
+    def fork_pack_revision(
+        self,
+        *,
+        pack_id: str,
+        user_id: str,
+        expected_version: int,
+        manifest: dict[str, Any],
+        companion_behavior: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Copy a pack and its assets into a new editable inactive revision."""
+        source = self._db.get_persona_visual_pack_for_user(pack_id=pack_id, user_id=user_id)
+        if not source:
+            raise PersonaVisualServiceError(
+                "pack_not_found",
+                "Persona visual pack not found for user.",
+                details={"pack_id": pack_id},
+            )
+        if int(source["version"]) != int(expected_version):
+            raise PersonaVisualServiceError(
+                "fork_conflict",
+                "Persona visual pack version changed before the revision fork.",
+                details={"pack_id": pack_id},
+            )
+        persona_id = str(source["persona_id"])
+        source_assets = self._db.list_persona_visual_assets(
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        target = self._db.create_persona_visual_pack(
+            persona_id=persona_id,
+            user_id=user_id,
+            title=str(source["title"]),
+            renderer_type=str(source["renderer_type"]),
+            status="failed",
+            parent_pack_id=pack_id,
+            revision_number=int(source.get("revision_number") or 1) + 1,
+            provenance=str(source.get("provenance") or "uploaded"),
+            manifest={
+                "manifest_version": 1,
+                "renderer_type": str(source["renderer_type"]),
+                "states": {},
+                "animations": {},
+            },
+        )
+        copied_paths: list[Path] = []
+        try:
+            asset_id_map: dict[str, str] = {}
+            copied_assets: list[dict[str, Any]] = []
+            for source_asset in source_assets:
+                source_path = self._asset_storage_path(
+                    user_id=user_id,
+                    storage_key=str(source_asset.get("storage_key") or ""),
+                )
+                copied = self.create_asset_from_upload(
+                    persona_id=persona_id,
+                    user_id=user_id,
+                    pack_id=str(target["id"]),
+                    content=source_path.read_bytes(),
+                    mime_type=str(source_asset.get("mime_type") or ""),
+                    original_filename=source_asset.get("original_filename"),
+                    asset_role=str(source_asset.get("asset_role") or "frame"),
+                    provenance=str(source_asset.get("provenance") or "uploaded"),
+                )
+                copied_paths.append(Path(str(copied["storage_path"])))
+                asset_id_map[str(source_asset["id"])] = str(copied["id"])
+                copied_assets.append(copied)
+            remapped_manifest = remap_visual_manifest_assets(deepcopy(manifest), asset_id_map)
+            validation = validate_visual_manifest(
+                remapped_manifest,
+                available_asset_ids={str(asset["id"]) for asset in copied_assets},
+                available_asset_dimensions={
+                    str(asset["id"]): (int(asset["width"]), int(asset["height"]))
+                    for asset in copied_assets
+                    if asset.get("width") is not None and asset.get("height") is not None
+                },
+                require_activatable=False,
+            )
+            behavior = normalize_companion_behavior(
+                companion_behavior,
+                resolvable_state_ids=resolved_visual_state_ids(validation.manifest),
+            )
+            updated = self._db.update_persona_visual_pack_payload(
+                pack_id=str(target["id"]),
+                user_id=user_id,
+                manifest=validation.manifest,
+                companion_behavior=behavior,
+                expected_version=int(target["version"]),
+            )
+            finalized = self._db.update_persona_visual_pack_status(
+                pack_id=str(target["id"]),
+                persona_id=persona_id,
+                user_id=user_id,
+                status="draft",
+                expected_version=int(updated["version"]),
+            )
+        except Exception:
+            self._db.soft_delete_persona_visual_pack_with_assets(
+                pack_id=str(target["id"]),
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            for path in copied_paths:
+                path.unlink(missing_ok=True)
+            raise
+        finalized["assets"] = self._db.list_persona_visual_assets(
+            pack_id=str(target["id"]), persona_id=persona_id, user_id=user_id
+        )
+        finalized["assets_by_id"] = {
+            str(asset["id"]): asset for asset in finalized["assets"]
+        }
+        return finalized
 
     def deactivate_pack(
         self,
@@ -310,6 +463,7 @@ class PersonaVisualService:
             parent_pack_id=pack_id,
             parent_persona_id=source_persona_id,
             provenance="mixed",
+            companion_behavior=deepcopy(source_pack.get("companion_behavior")),
             manifest={
                 "manifest_version": 1,
                 "renderer_type": renderer_type,
@@ -645,30 +799,192 @@ class PersonaVisualService:
 
     @staticmethod
     def _validate_image_bytes(content: bytes, *, mime_type: str) -> tuple[int, int]:
+        width, height, detected_mime, _frame_count = PersonaVisualService._probe_image_bytes(
+            content
+        )
+        if detected_mime != mime_type:
+            raise PersonaVisualServiceError(
+                "mime_mismatch",
+                f"Persona visual upload MIME mismatch: expected {mime_type}, detected {detected_mime}.",
+            )
+        return width, height
+
+    @staticmethod
+    def _probe_image_bytes(content: bytes) -> tuple[int, int, str, int]:
+        """Decode bounded raster metadata from protected bytes."""
         if not content:
             raise PersonaVisualServiceError("invalid_image", "Persona visual upload is empty.")
         try:
             with Image.open(io.BytesIO(content)) as image:
                 width, height = image.size
-                detected_mime = Image.MIME.get(image.format or "")
+                detected_mime = str(Image.MIME.get(image.format or "") or "").lower()
+                frame_count = int(getattr(image, "n_frames", 1) or 1)
+                if frame_count > MAX_VISUAL_RASTER_FRAMES:
+                    raise PersonaVisualServiceError(
+                        "too_many_image_frames",
+                        f"Persona visual raster may contain at most {MAX_VISUAL_RASTER_FRAMES} frames.",
+                    )
                 image.verify()
+        except PersonaVisualServiceError:
+            raise
         except _IMAGE_VALIDATION_ERRORS as exc:
             raise PersonaVisualServiceError(
                 "invalid_image",
                 "Persona visual upload is not a valid raster image.",
             ) from exc
 
-        if detected_mime and detected_mime.lower() != mime_type:
+        if detected_mime not in ALLOWED_VISUAL_MIME_TYPES:
             raise PersonaVisualServiceError(
-                "mime_mismatch",
-                f"Persona visual upload MIME mismatch: expected {mime_type}, detected {detected_mime.lower()}.",
+                "unsupported_mime_type",
+                f"Unsupported persona visual MIME type: {detected_mime}",
             )
         if width > MAX_VISUAL_IMAGE_DIMENSION or height > MAX_VISUAL_IMAGE_DIMENSION:
             raise PersonaVisualServiceError(
                 "image_too_large",
                 f"Persona visual image dimensions must be <= {MAX_VISUAL_IMAGE_DIMENSION}.",
             )
-        return int(width), int(height)
+        return int(width), int(height), detected_mime, frame_count
+
+    def _validate_and_fingerprint(
+        self,
+        *,
+        pack: dict[str, Any],
+        assets: list[dict[str, Any]],
+        user_id: str,
+    ) -> str:
+        manifest = pack.get("manifest")
+        row_renderer = str(pack.get("renderer_type") or "")
+        row_version = pack.get("manifest_version")
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("renderer_type") != row_renderer
+            or isinstance(manifest.get("manifest_version"), bool)
+            or not isinstance(manifest.get("manifest_version"), int)
+            or manifest.get("manifest_version") != row_version
+        ):
+            raise PersonaVisualServiceError(
+                "invalid_renderer_contract",
+                "Persona visual pack renderer metadata does not match its manifest.",
+                details={"pack_id": str(pack["id"])},
+            )
+        capability = get_persona_visual_renderer_capability(row_renderer)
+        if (
+            capability is None
+            or row_version not in capability.manifest_versions
+            or not capability.can_validate
+            or not capability.can_activate
+        ):
+            raise PersonaVisualServiceError(
+                "unsupported_renderer",
+                "Persona visual pack renderer cannot be activated.",
+                details={"pack_id": str(pack["id"]), "renderer_type": row_renderer},
+            )
+        asset_ids = {str(asset["id"]) for asset in assets}
+        dimensions = {
+            str(asset["id"]): (int(asset["width"]), int(asset["height"]))
+            for asset in assets
+            if asset.get("width") is not None and asset.get("height") is not None
+        }
+        try:
+            manifest_validation = validate_visual_manifest(
+                manifest,
+                available_asset_ids=asset_ids,
+                available_asset_dimensions=dimensions,
+                require_activatable=True,
+            )
+        except PersonaVisualManifestError as exc:
+            raise PersonaVisualServiceError(
+                "invalid_manifest", str(exc), details={"pack_id": str(pack["id"])}
+            ) from exc
+        try:
+            behavior = normalize_companion_behavior(
+                pack.get("companion_behavior"),
+                resolvable_state_ids=resolved_visual_state_ids(manifest_validation.manifest),
+            )
+        except CompanionBehaviorValidationError as exc:
+            raise PersonaVisualServiceError(
+                "invalid_companion_behavior",
+                str(exc),
+                details={"pack_id": str(pack["id"])},
+            ) from exc
+
+        reachable_ids = collect_visual_manifest_asset_ids(manifest_validation.manifest)
+        assets_by_id = {str(asset["id"]): asset for asset in assets}
+        missing = sorted(reachable_ids - set(assets_by_id))
+        if missing:
+            raise PersonaVisualServiceError(
+                "invalid_manifest",
+                "Persona visual manifest references missing pack assets.",
+                details={"pack_id": str(pack["id"]), "asset_ids": missing},
+            )
+        reachable_assets = [assets_by_id[asset_id] for asset_id in sorted(reachable_ids)]
+        enriched = self._probe_reachable_assets(reachable_assets, user_id=user_id)
+        static_validation = validate_sprite_static_coverage(
+            manifest_validation.manifest,
+            enriched,
+        )
+        if not static_validation.is_valid:
+            raise PersonaVisualServiceError(
+                "invalid_static_coverage",
+                "Persona visual pack lacks one-frame PNG coverage for every built-in state.",
+                details={"pack_id": str(pack["id"]), "errors": list(static_validation.errors)},
+            )
+        normalized_pack = {
+            **pack,
+            "manifest": manifest_validation.manifest,
+            "manifest_version": manifest_validation.manifest["manifest_version"],
+            "companion_behavior": behavior,
+        }
+        return build_persona_visual_pack_fingerprint(normalized_pack, reachable_assets)
+
+    def _probe_reachable_assets(
+        self,
+        assets: list[dict[str, Any]],
+        *,
+        user_id: str,
+    ) -> tuple[MappingProxyType[str, Any], ...]:
+        enriched: list[MappingProxyType[str, Any]] = []
+        for asset in assets:
+            path = self._asset_storage_path(
+                user_id=user_id,
+                storage_key=str(asset.get("storage_key") or ""),
+            )
+            if not path.is_file():
+                raise PersonaVisualServiceError(
+                    "source_asset_missing",
+                    "Persona visual source asset file is missing.",
+                    details={"asset_id": str(asset["id"])},
+                )
+            if path.stat().st_size > MAX_VISUAL_UPLOAD_BYTES:
+                raise PersonaVisualServiceError(
+                    "upload_too_large",
+                    f"Persona visual asset exceeds {MAX_VISUAL_UPLOAD_BYTES} bytes.",
+                    details={"asset_id": str(asset["id"])},
+                )
+            content = path.read_bytes()
+            if len(content) > MAX_VISUAL_UPLOAD_BYTES:
+                raise PersonaVisualServiceError(
+                    "upload_too_large",
+                    f"Persona visual asset exceeds {MAX_VISUAL_UPLOAD_BYTES} bytes.",
+                    details={"asset_id": str(asset["id"])},
+                )
+            if hashlib.sha256(content).hexdigest() != str(asset.get("checksum_sha256") or ""):
+                raise PersonaVisualServiceError(
+                    "asset_checksum_mismatch",
+                    "Persona visual asset checksum does not match protected bytes.",
+                    details={"asset_id": str(asset["id"])},
+                )
+            _width, _height, detected_mime, frame_count = self._probe_image_bytes(content)
+            enriched.append(
+                MappingProxyType(
+                    {
+                        **asset,
+                        "detected_mime_type": detected_mime,
+                        "decoded_frame_count": frame_count,
+                    }
+                )
+            )
+        return tuple(enriched)
 
     @staticmethod
     def _safe_storage_component(value: str, *, prefix: str) -> str:

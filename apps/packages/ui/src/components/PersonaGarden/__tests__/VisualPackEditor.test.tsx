@@ -2823,7 +2823,7 @@ describe("VisualPackEditor", () => {
 
   it("blocks activation when required states are missing, then saves, activates, and deactivates", async () => {
     const calls: string[] = []
-    let pack = {
+    let pack: any = {
       id: "pack-1",
       persona_id: "persona-1",
       title: "Incomplete pack",
@@ -2873,9 +2873,33 @@ describe("VisualPackEditor", () => {
         return okResponse(pack)
       }
       if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/reviews" &&
+        method === "POST"
+      ) {
+        const body = parseJsonBody(init?.body)
+        pack = {
+          ...pack,
+          review: {
+            id: "review-1",
+            pack_id: "pack-1",
+            user_id: "user-1",
+            reviewer_user_id: "user-1",
+            fingerprint: "a".repeat(64),
+            pack_version: body.expected_version,
+            reviewed_at: "2026-08-24T00:00:00Z",
+            created_at: "2026-08-24T00:00:00Z"
+          }
+        }
+        return okResponse(pack)
+      }
+      if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/activate" &&
         method === "POST"
       ) {
+        expect(parseJsonBody(init?.body)).toEqual({
+          expected_version: 2,
+          reviewed_fingerprint: "a".repeat(64)
+        })
         pack = { ...pack, status: "active" }
         return okResponse(pack)
       }
@@ -2932,6 +2956,15 @@ describe("VisualPackEditor", () => {
       expect(screen.queryByTestId("persona-visual-validation-errors")).not.toBeInTheDocument()
     )
 
+    expect(screen.getByTestId("persona-visual-activate-button")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("persona-visual-review-button"))
+    await waitFor(() =>
+      expect(calls).toContain(
+        "POST /api/v1/persona/profiles/persona-1/visual-packs/pack-1/reviews"
+      )
+    )
+    expect(screen.getByTestId("persona-visual-shared-still-warning")).toBeInTheDocument()
+    expect(screen.getByTestId("persona-visual-activate-button")).not.toBeDisabled()
     fireEvent.click(screen.getByTestId("persona-visual-activate-button"))
     await waitFor(() =>
       expect(calls).toContain(
@@ -2950,6 +2983,79 @@ describe("VisualPackEditor", () => {
     expect(await screen.findByTestId("buddy-guided-builder")).toHaveTextContent(
       "review"
     )
+  })
+
+  it("forks an active pack revision before saving edited manifest data", async () => {
+    const calls: Array<{ path: string; method: string; body: any }> = []
+    const activePack = makeVisualPack({
+      id: "pack-active",
+      persona_id: "persona-1",
+      title: "Active Buddy",
+      status: "active"
+    })
+    const forkedPack = {
+      ...activePack,
+      id: "pack-fork",
+      status: "draft",
+      parent_pack_id: "pack-active",
+      revision_number: 2,
+      version: 2,
+      review: null
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push({ path, method, body: parseJsonBody(init?.body) })
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [activePack], active_pack: activePack })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-active/fork" &&
+        method === "POST"
+      ) {
+        return okResponse(forkedPack)
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent("active")
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-save-manifest"))
+
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          path: "/api/v1/persona/profiles/persona-1/visual-packs/pack-active/fork",
+          method: "POST",
+          body: expect.objectContaining({ expected_version: 3 })
+        })
+      )
+    )
+    expect(await screen.findByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
+    expect(calls.some((call) => call.path.endsWith("/manifest") && call.method === "PATCH")).toBe(false)
   })
 
   it("ignores stale activation after switching personas", async () => {

@@ -42,6 +42,10 @@ def _valid_manifest(asset_id: str) -> dict[str, object]:
             "thinking": {"animation_id": "idle"},
             "speaking": {"animation_id": "idle"},
             "error": {"animation_id": "idle"},
+            "approval_needed": {"animation_id": "idle"},
+            "offline": {"animation_id": "idle"},
+            "tool_running": {"animation_id": "idle"},
+            "wake_armed": {"animation_id": "idle"},
         },
         "animations": {
             "idle": {
@@ -237,6 +241,22 @@ def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
     return response.json()
 
 
+def _review_and_activate(client: TestClient, persona_id: str, pack: dict) -> object:
+    """Activate a valid revision through the required explicit review contract."""
+    review = client.post(
+        f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+        json={"expected_version": pack["version"]},
+    )
+    assert review.status_code == 200, review.text
+    return client.post(
+        f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+        json={
+            "expected_version": pack["version"],
+            "reviewed_fingerprint": review.json()["review"]["fingerprint"],
+        },
+    )
+
+
 class FakeJobManager:
     def __init__(self) -> None:
         self.created: list[dict] = []
@@ -313,9 +333,7 @@ def test_create_list_and_activate_visual_pack(persona_db: CharactersRAGDB) -> No
         )
         assert manifest_response.status_code == 200, manifest_response.text
 
-        activated = client.post(
-            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
-        )
+        activated = _review_and_activate(client, persona_id, manifest_response.json())
         assert activated.status_code == 200, activated.text
         assert activated.json()["status"] == "active"
 
@@ -443,9 +461,7 @@ def test_copy_visual_starter_pack_creates_draft_without_activation(
         )
         assert manifest_response.status_code == 200, manifest_response.text
         active_pack = manifest_response.json()
-        activated = client.post(
-            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{active_pack['id']}/activate"
-        )
+        activated = _review_and_activate(client, persona_id, active_pack)
         assert activated.status_code == 200, activated.text
 
         response = client.post(
@@ -561,13 +577,9 @@ def test_visual_library_use_creates_target_draft_without_activation(persona_db: 
         )
         assert target_manifest_response.status_code == 200, target_manifest_response.text
         target_pack = target_manifest_response.json()
-        source_active = client.post(
-            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/activate"
-        )
+        source_active = _review_and_activate(client, source_persona_id, source_pack)
         assert source_active.status_code == 200, source_active.text
-        target_active = client.post(
-            f"/api/v1/persona/profiles/{target_persona_id}/visual-packs/{target_pack['id']}/activate"
-        )
+        target_active = _review_and_activate(client, target_persona_id, target_pack)
         assert target_active.status_code == 200, target_active.text
         saved = client.post(
             f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/library",
@@ -761,7 +773,8 @@ def test_activation_rejects_manifest_without_required_states(persona_db: Charact
         pack = _create_visual_pack(client, persona_id)
 
         response = client.post(
-            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={"expected_version": pack["version"], "reviewed_fingerprint": "a" * 64},
         )
 
         assert response.status_code == 400
@@ -791,12 +804,12 @@ def test_draft_manifest_update_accepts_future_renderer_but_activation_rejects_it
         assert draft_response.json()["manifest"]["renderer_type"] == "live2d"
 
         activate_response = client.post(
-            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={"expected_version": draft_response.json()["version"], "reviewed_fingerprint": "a" * 64},
         )
 
         assert activate_response.status_code == 400
-        assert activate_response.json()["detail"]["code"] == "invalid_manifest"
-        assert "unsupported renderer_type" in activate_response.json()["detail"]["message"]
+        assert activate_response.json()["detail"]["code"] == "invalid_renderer_contract"
 
 
 def test_other_user_cannot_access_pack(persona_db: CharactersRAGDB) -> None:
@@ -810,6 +823,44 @@ def test_other_user_cannot_access_pack(persona_db: CharactersRAGDB) -> None:
         )
 
     assert response.status_code == 404
+
+
+def test_visual_asset_content_enforces_owner_and_nested_path_boundaries(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Protected raster bytes must remain scoped to their owner and nested route."""
+    expected_bytes = _png_bytes()
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Asset Owner Persona")
+        other_persona_id = _create_persona(client, name="Other Path Persona")
+        pack = _create_visual_pack(client, persona_id)
+        other_pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        content_path = (
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+            f"/assets/{asset['id']}/content"
+        )
+
+        owned = client.get(content_path)
+        wrong_persona = client.get(
+            f"/api/v1/persona/profiles/{other_persona_id}/visual-packs/{pack['id']}"
+            f"/assets/{asset['id']}/content"
+        )
+        wrong_pack = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{other_pack['id']}"
+            f"/assets/{asset['id']}/content"
+        )
+
+    with _client_for_user(2, persona_db) as other_client:
+        wrong_owner = other_client.get(content_path)
+
+    assert owned.status_code == 200, owned.text
+    assert owned.content == expected_bytes
+    assert owned.headers["content-type"] == "image/png"
+    assert owned.headers["cache-control"] == "private, max-age=3600"
+    assert wrong_persona.status_code == 404
+    assert wrong_pack.status_code == 404
+    assert wrong_owner.status_code == 404
 
 
 def test_accept_and_reject_generated_candidates(persona_db: CharactersRAGDB) -> None:
@@ -2282,13 +2333,12 @@ def test_deactivate_visual_pack_reverts_to_derived_buddy(persona_db: CharactersR
         persona_id = _create_persona(client, name="Deactivate Visual API Persona")
         pack = _create_visual_pack(client, persona_id)
         asset = _upload_png(client, persona_id, pack["id"])
-        client.patch(
+        updated = client.patch(
             f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
             json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
         )
-        activated = client.post(
-            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
-        )
+        assert updated.status_code == 200, updated.text
+        activated = _review_and_activate(client, persona_id, updated.json())
         assert activated.status_code == 200, activated.text
 
         deactivated = client.post(f"/api/v1/persona/profiles/{persona_id}/visual-packs/deactivate")
@@ -2296,3 +2346,458 @@ def test_deactivate_visual_pack_reverts_to_derived_buddy(persona_db: CharactersR
         assert deactivated.status_code == 200, deactivated.text
         assert deactivated.json() == {"status": "deactivated", "persona_id": persona_id}
         assert persona_db.get_active_persona_visual_pack(persona_id=persona_id, user_id="1") is None
+
+
+def test_visual_pack_companion_behavior_round_trips_without_response_mutation(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Pack payload behavior is exposed exactly as persisted on inactive revisions."""
+    behavior = {
+        "schema_version": 1,
+        "entries": [{"state": "ambient.look", "trigger": "ambient", "category": "idle_variant"}],
+    }
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Behavior Round Trip Persona")
+        created = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs",
+            json={
+                "title": "Behavior Pack",
+                "manifest": {"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
+                "companion_behavior": behavior,
+            },
+        )
+        assert created.status_code == 201, created.text
+        pack = created.json()
+        assert pack["companion_behavior"] == behavior
+
+        updated_behavior = {"schema_version": 1, "entries": []}
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={
+                "manifest": pack["manifest"],
+                "companion_behavior": updated_behavior,
+                "expected_version": pack["version"],
+            },
+        )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["companion_behavior"] == updated_behavior
+    assert updated.json()["version"] == pack["version"] + 1
+
+
+def test_visual_pack_review_then_activation_requires_current_fingerprint(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Only the current authenticated review can activate an immutable pack revision."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Reviewed Activation Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+        current = updated.json()
+
+        review = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": current["version"]},
+        )
+        assert review.status_code == 200, review.text
+        review_payload = review.json()
+        fingerprint = review_payload["review"]["fingerprint"]
+
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={"expected_version": current["version"], "reviewed_fingerprint": fingerprint},
+        )
+
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["status"] == "active"
+
+
+def test_visual_pack_fork_creates_an_inactive_same_persona_revision(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """The nested fork route copies an immutable archived source into a new draft."""
+    behavior = {"schema_version": 1, "entries": []}
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Fork Route Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+        activated = _review_and_activate(client, persona_id, updated.json())
+        assert activated.status_code == 200, activated.text
+        deactivated = client.post(f"/api/v1/persona/profiles/{persona_id}/visual-packs/deactivate")
+        assert deactivated.status_code == 200, deactivated.text
+        source = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+        ).json()
+
+        forked = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/fork",
+            json={
+                "expected_version": source["version"],
+                "manifest": source["manifest"],
+                "companion_behavior": behavior,
+            },
+        )
+
+    assert forked.status_code == 200, forked.text
+    payload = forked.json()
+    assert payload["persona_id"] == persona_id
+    assert payload["parent_pack_id"] == pack["id"]
+    assert payload["status"] == "draft"
+    assert payload["companion_behavior"] == behavior
+    assert len(payload["assets"]) == 1
+
+
+@pytest.mark.parametrize("source_status", ["draft", "review"])
+def test_visual_pack_fork_rejects_editable_source_before_service_access(
+    persona_db: CharactersRAGDB,
+    source_status: str,
+) -> None:
+    """Only immutable active sources reach revision-copy service or file access."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name=f"{source_status.title()} Fork Persona")
+        pack = _create_visual_pack(client, persona_id)
+        if source_status != "draft":
+            updated = persona_db.update_persona_visual_pack_status(
+                pack_id=pack["id"],
+                persona_id=persona_id,
+                user_id="1",
+                status=source_status,
+                expected_version=pack["version"],
+            )
+            assert updated is not None
+            pack = updated
+
+        class RecordingService:
+            called = False
+
+            def fork_pack_revision(self, **_kwargs):
+                self.called = True
+                return {**pack, "assets": []}
+
+        service = RecordingService()
+        fastapi_app.dependency_overrides[
+            persona_ep.get_persona_visual_service
+        ] = lambda: service
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/fork",
+            json={
+                "expected_version": pack["version"],
+                "manifest": pack["manifest"],
+                "companion_behavior": None,
+            },
+        )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "fork_conflict"
+    assert service.called is False
+
+
+def test_visual_pack_fork_rejects_stale_source_without_creating_a_revision(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """The HTTP fork contract reports 409 before a stale source can be copied."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Stale Fork Route Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+        activated = _review_and_activate(client, persona_id, updated.json())
+        assert activated.status_code == 200, activated.text
+        source = activated.json()
+        before_count = persona_db.execute_query(
+            "SELECT COUNT(*) FROM persona_visual_packs WHERE persona_id = ?",
+            (persona_id,),
+        ).fetchone()[0]
+
+        stale = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/fork",
+            json={
+                "expected_version": source["version"] + 1,
+                "manifest": source["manifest"],
+                "companion_behavior": None,
+            },
+        )
+
+    after_count = persona_db.execute_query(
+        "SELECT COUNT(*) FROM persona_visual_packs WHERE persona_id = ?",
+        (persona_id,),
+    ).fetchone()[0]
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "fork_conflict"
+    assert after_count == before_count
+
+
+def test_visual_pack_activation_rejects_stale_review_conflict(persona_db: CharactersRAGDB) -> None:
+    """A review fingerprint cannot activate a payload revised after that review."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Stale Review Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+        reviewed = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": updated.json()["version"]},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        fingerprint = reviewed.json()["review"]["fingerprint"]
+
+        revised = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": updated.json()["version"]},
+        )
+        assert revised.status_code == 200, revised.text
+
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={"expected_version": revised.json()["version"], "reviewed_fingerprint": fingerprint},
+        )
+
+    assert activated.status_code == 409, activated.text
+
+
+def test_review_path_persona_mismatch_returns_404_without_creating_review(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """A nested review route must never mutate a same-user pack from another Persona."""
+    with _client_for_user(1, persona_db) as client:
+        path_persona_id = _create_persona(client, name="Review Path Persona")
+        pack_persona_id = _create_persona(client, name="Review Pack Persona")
+        pack = _create_visual_pack(client, pack_persona_id)
+        asset = _upload_png(client, pack_persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{pack_persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{path_persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": updated.json()["version"]},
+        )
+
+    assert response.status_code == 404, response.text
+    review_count = persona_db.execute_query(
+        "SELECT COUNT(*) FROM persona_visual_pack_reviews WHERE pack_id = ?",
+        (pack["id"],),
+    ).fetchone()[0]
+    assert review_count == 0
+
+
+def test_review_hydrates_get_list_and_activation_responses_but_not_revised_payload(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Responses expose only the review that authorizes their current persisted payload."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Hydrated Review Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert updated.status_code == 200, updated.text
+        review = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": updated.json()["version"]},
+        )
+        assert review.status_code == 200, review.text
+        fingerprint = review.json()["review"]["fingerprint"]
+
+        fetched = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+        listed = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs")
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={"expected_version": updated.json()["version"], "reviewed_fingerprint": fingerprint},
+        )
+        active_fetched = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+        active_listed = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs")
+
+        assert fetched.status_code == 200, fetched.text
+        assert fetched.json()["review"]["fingerprint"] == fingerprint
+        assert listed.status_code == 200, listed.text
+        assert listed.json()[0]["review"]["fingerprint"] == fingerprint
+        assert activated.status_code == 200, activated.text
+        assert activated.json()["review"]["fingerprint"] == fingerprint
+        assert active_fetched.status_code == 200, active_fetched.text
+        assert active_fetched.json()["review"]["fingerprint"] == fingerprint
+        assert active_listed.status_code == 200, active_listed.text
+        assert active_listed.json()[0]["review"]["fingerprint"] == fingerprint
+
+        deactivated = client.post(f"/api/v1/persona/profiles/{persona_id}/visual-packs/deactivate")
+        assert deactivated.status_code == 200, deactivated.text
+        sealed = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+        assert sealed.status_code == 200, sealed.text
+        assert sealed.json()["review"]["fingerprint"] == fingerprint
+        revised = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": sealed.json()["version"]},
+        )
+
+    assert revised.status_code == 400, revised.text
+    assert revised.json()["detail"] == "archived visual pack payload is immutable"
+
+
+def test_review_and_activation_reject_explicit_null_movement_without_rewriting_raw_payload(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Review and activation share the presence-aware behavior boundary."""
+    behavior = {
+        "schema_version": 1,
+        "entries": [{
+            "state": "idle",
+            "trigger": "ambient",
+            "category": "idle_variant",
+            "movement": None,
+        }],
+    }
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Null Movement Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={
+                "manifest": _valid_manifest(asset["id"]),
+                "companion_behavior": behavior,
+                "expected_version": pack["version"],
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        review = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": updated.json()["version"]},
+        )
+        activation = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={
+                "expected_version": updated.json()["version"],
+                "reviewed_fingerprint": "a" * 64,
+            },
+        )
+        persisted = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+        )
+
+    assert review.status_code == 400, review.text
+    assert activation.status_code == 400, activation.text
+    assert review.json()["detail"]["code"] == "invalid_companion_behavior"
+    assert activation.json()["detail"]["code"] == "invalid_companion_behavior"
+    assert persisted.json()["companion_behavior"] == behavior
+
+
+def test_valid_move_behavior_round_trips_through_review_fingerprint_and_activation(
+    persona_db: CharactersRAGDB,
+) -> None:
+    """Stored movement and the reviewed fingerprint describe the same valid behavior."""
+    behavior = {
+        "schema_version": 1,
+        "entries": [{
+            "state": "idle",
+            "trigger": "ambient",
+            "category": "move",
+            "movement": {
+                "direction": "horizontal",
+                "motion_start_ratio": 0.25,
+                "motion_end_ratio": 0.75,
+            },
+        }],
+    }
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Valid Movement Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={
+                "manifest": _valid_manifest(asset["id"]),
+                "companion_behavior": behavior,
+                "expected_version": pack["version"],
+            },
+        )
+        review = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": updated.json()["version"]},
+        )
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={
+                "expected_version": updated.json()["version"],
+                "reviewed_fingerprint": review.json()["review"]["fingerprint"],
+            },
+        )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["companion_behavior"] == behavior
+    assert review.status_code == 200, review.text
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["companion_behavior"] == behavior
+
+
+@pytest.mark.parametrize("invalid_version", [True, 1.0, "1"])
+def test_visual_expected_versions_reject_non_integer_json_values(
+    persona_db: CharactersRAGDB,
+    invalid_version: object,
+) -> None:
+    """Review and activation version fields keep a strict JSON-integer boundary."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Strict Visual Version Persona")
+        pack = _create_visual_pack(client, persona_id)
+        review = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/reviews",
+            json={"expected_version": invalid_version},
+        )
+        activation = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate",
+            json={"expected_version": invalid_version, "reviewed_fingerprint": "a" * 64},
+        )
+
+    assert review.status_code == 422, review.text
+    assert activation.status_code == 422, activation.text
+
+
+@pytest.mark.parametrize(
+    "version_payload",
+    [
+        {"expected_version": True},
+        {"expected_version": 1.0},
+        {"expected_version": "1"},
+        {"expected_version": None},
+        pytest.param({}, id="omitted"),
+    ],
+)
+def test_manifest_update_requires_an_explicit_strict_version_before_mutation(
+    persona_db: CharactersRAGDB,
+    version_payload: dict[str, object],
+) -> None:
+    """Inactive payload updates reject coercion and omission before touching the pack."""
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Strict Manifest Version Persona")
+        pack = _create_visual_pack(client, persona_id)
+        payload: dict[str, object] = {"manifest": pack["manifest"], **version_payload}
+        response = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json=payload,
+        )
+        persisted = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}")
+
+    assert response.status_code == 422, response.text
+    assert persisted.status_code == 200, persisted.text
+    assert persisted.json()["version"] == pack["version"]

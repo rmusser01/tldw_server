@@ -680,8 +680,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 61  # Schema v61 persists recipient shared-chat threads and receipts
-    _POSTGRES_SCHEMA_VERSION = 61
+    _CURRENT_SCHEMA_VERSION = 62  # Schema v62 adds Persona companion persistence
+    _POSTGRES_SCHEMA_VERSION = 62
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -802,6 +802,7 @@ class CharactersRAGDB:
     _SQLITE_SCHEMA_TABLE_INFO_STATEMENTS: dict[str, str] = {
         "persona_profiles": "PRAGMA table_info('persona_profiles')",
         "persona_memory_entries": "PRAGMA table_info('persona_memory_entries')",
+        "persona_visual_packs": "PRAGMA table_info('persona_visual_packs')",
         "persona_visual_candidates": "PRAGMA table_info('persona_visual_candidates')",
         "quiz_questions": "PRAGMA table_info('quiz_questions')",
         "keywords": "PRAGMA table_info('keywords')",
@@ -6702,6 +6703,74 @@ END;
 $shared_workspace_chat_v61_verify$;
 """
 
+    _MIGRATION_SQL_V61_TO_V62 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 62 — Persona companion persistence (2026-08-23)
+───────────────────────────────────────────────────────────────*/
+ALTER TABLE persona_visual_packs ADD COLUMN companion_behavior_json TEXT;
+
+CREATE TABLE IF NOT EXISTS persona_buddy_preferences (
+  user_id      TEXT PRIMARY KEY,
+  ambient_mode TEXT NOT NULL CHECK(ambient_mode IN ('off', 'expressive', 'roaming')),
+  version      INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS persona_visual_pack_reviews (
+  id               TEXT PRIMARY KEY,
+  pack_id          TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  user_id          TEXT NOT NULL,
+  reviewer_user_id TEXT NOT NULL,
+  fingerprint      TEXT NOT NULL CHECK(length(fingerprint) = 64),
+  pack_version     INTEGER NOT NULL CHECK(pack_version >= 1),
+  reviewed_at      TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  UNIQUE(pack_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_persona_visual_pack_reviews_pack
+  ON persona_visual_pack_reviews(pack_id, user_id, reviewed_at);
+
+UPDATE db_schema_version
+   SET version = 62
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 61;
+"""
+
+    _MIGRATION_SQL_V61_TO_V62_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 62 — Persona companion persistence (2026-08-23) [Postgres]
+───────────────────────────────────────────────────────────────*/
+ALTER TABLE persona_visual_packs ADD COLUMN IF NOT EXISTS companion_behavior_json TEXT;
+
+CREATE TABLE IF NOT EXISTS persona_buddy_preferences (
+  user_id      TEXT PRIMARY KEY,
+  ambient_mode TEXT NOT NULL CHECK(ambient_mode IN ('off', 'expressive', 'roaming')),
+  version      INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+  created_at   TIMESTAMP NOT NULL,
+  updated_at   TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS persona_visual_pack_reviews (
+  id               TEXT PRIMARY KEY,
+  pack_id          TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  user_id          TEXT NOT NULL,
+  reviewer_user_id TEXT NOT NULL,
+  fingerprint      TEXT NOT NULL CHECK(length(fingerprint) = 64),
+  pack_version     INTEGER NOT NULL CHECK(pack_version >= 1),
+  reviewed_at      TIMESTAMP NOT NULL,
+  created_at       TIMESTAMP NOT NULL,
+  UNIQUE(pack_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_persona_visual_pack_reviews_pack
+  ON persona_visual_pack_reviews(pack_id, user_id, reviewed_at);
+
+UPDATE db_schema_version
+   SET version = 62
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 61;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -7769,6 +7838,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (58, "_migrate_from_v58_to_v59"),
             (59, "_migrate_from_v59_to_v60_sqlite"),
             (60, "_migrate_from_v60_to_v61_sqlite"),
+            (61, "_migrate_from_v61_to_v62_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -12198,6 +12268,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_db_version(conn) != 61:
             raise SchemaError("Shared workspace chat v61 SQLite version verification failed.")  # noqa: TRY003
 
+    def _migrate_from_v61_to_v62_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add Persona companion preferences, behavior metadata, and review records."""
+        if self._get_db_version(conn) != 61:
+            raise SchemaError("Persona companion v62 migration requires schema version 61.")  # noqa: TRY003
+        migration_sql = self._MIGRATION_SQL_V61_TO_V62
+        if "companion_behavior_json" in self._sqlite_column_names(conn, "persona_visual_packs"):
+            migration_sql = migration_sql.replace(
+                "ALTER TABLE persona_visual_packs ADD COLUMN companion_behavior_json TEXT;\n\n",
+                "",
+            )
+        try:
+            conn.executescript(migration_sql)
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Persona companion v62 SQLite migration failed: {exc}") from exc
+        if self._get_db_version(conn) != 62:
+            raise SchemaError("Persona companion v62 SQLite version verification failed.")  # noqa: TRY003
+
     def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""
 
@@ -13450,6 +13537,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         if self._get_schema_version_postgres(conn) != 61:
             raise SchemaError("Shared workspace chat v61 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v61_to_v62_postgres(self, conn: Any) -> None:
+        """Add Persona companion preferences, behavior metadata, and review records."""
+        if self._get_schema_version_postgres(conn) != 61:
+            raise SchemaError("Persona companion v62 migration requires schema version 61.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V61_TO_V62_POSTGRES,
+            conn,
+            expected_version=62,
+        )
+        if self._get_schema_version_postgres(conn) != 62:
+            raise SchemaError("Persona companion v62 PostgreSQL version verification failed.")  # noqa: TRY003
 
     def _notes_graph_schema_postgres(self, conn: Any) -> None:
         """Create owner-scoped graph projections and direct-write invalidation."""
@@ -16343,6 +16442,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 61 and current_db_version == 60:
                         self._migrate_from_v60_to_v61_sqlite(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 62 and current_db_version == 61:
+                        self._migrate_from_v61_to_v62_sqlite(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -16774,6 +16876,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 61 and current_db_version == 60:
                     self._migrate_from_v60_to_v61_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 62 and current_db_version == 61:
+                    self._migrate_from_v61_to_v62_sqlite(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -20734,6 +20839,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 61:
                 self._migrate_from_v60_to_v61_postgres(conn)
                 current_version = 61
+            if target_version >= 62 and current_version < 62:
+                self._migrate_from_v61_to_v62_postgres(conn)
+                current_version = 62
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -37645,10 +37753,18 @@ for _persona_state_store_method in (
     "get_persona_buddy",
     "list_persona_buddies",
     "upsert_persona_buddy",
+    "get_persona_buddy_preferences",
+    "upsert_persona_buddy_preferences",
+    "patch_persona_buddy_overlay_preferences",
     "create_persona_visual_pack",
+    "get_persona_visual_pack_for_user",
     "get_persona_visual_pack",
     "list_persona_visual_packs",
     "get_active_persona_visual_pack",
+    "create_persona_visual_pack_review",
+    "get_persona_visual_pack_current_review",
+    "list_persona_visual_pack_current_reviews",
+    "update_persona_visual_pack_payload",
     "activate_persona_visual_pack",
     "deactivate_persona_visual_pack",
     "update_persona_visual_pack_manifest",

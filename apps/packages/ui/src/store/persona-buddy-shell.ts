@@ -20,10 +20,12 @@ type PersonaBuddyShellPositions = Record<
 
 type PersonaBuddyShellStoreState = {
   isOpen: boolean
+  firstUseHintDismissed: boolean
   positions: PersonaBuddyShellPositions
   setOpen: (open: boolean) => void
   toggleOpen: () => void
   resetSessionState: () => void
+  dismissFirstUseHint: () => void
   setPosition: (
     bucket: PersonaBuddyPositionBucket,
     position: PersonaBuddyShellPosition
@@ -146,10 +148,12 @@ export const usePersonaBuddyShellStore =
     persist(
       (set, get) => ({
         isOpen: false,
+        firstUseHintDismissed: false,
         positions: normalizePersonaBuddyShellPositions(undefined),
         setOpen: (open) => set({ isOpen: open }),
         toggleOpen: () => set({ isOpen: !get().isOpen }),
         resetSessionState: () => set({ isOpen: false }),
+        dismissFirstUseHint: () => set({ firstUseHintDismissed: true }),
         setPosition: (bucket, position) =>
           set((state) => ({
             positions: {
@@ -179,7 +183,8 @@ export const usePersonaBuddyShellStore =
           typeof window !== "undefined" ? localStorage : createMemoryStorage()
         ),
         partialize: (state) => ({
-          positions: state.positions
+          positions: state.positions,
+          firstUseHintDismissed: state.firstUseHintDismissed
         })
       }
     )

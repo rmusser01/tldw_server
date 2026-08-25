@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
     collect_visual_manifest_asset_ids,
 )
+from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
 from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
     PersonaVisualStarterCatalogError,
     PersonaVisualStarterCatalogService,
@@ -150,6 +151,22 @@ def _valid_recipe_payload() -> dict[str, object]:
     }
 
 
+def _static_manifest(asset_id: str) -> dict[str, object]:
+    states = {
+        state: {"animation_id": "still"}
+        for state in (
+            "idle", "wake_armed", "listening", "thinking", "speaking",
+            "tool_running", "approval_needed", "error", "offline",
+        )
+    }
+    return {
+        "manifest_version": 1,
+        "renderer_type": "sprite_frames",
+        "states": states,
+        "animations": {"still": {"frames": [{"asset_id": asset_id}], "preview_frame": 0}},
+    }
+
+
 @pytest.fixture()
 def db_instance(tmp_path: Path) -> Iterator[CharactersRAGDB]:
     db = CharactersRAGDB(
@@ -227,6 +244,15 @@ def test_get_starter_pack_returns_isolated_manifest_preview(
     assert second["manifest"]["states"]["idle"]["animation_id"] == "idle-loop"
     assert "mutated" not in second["expected_asset_groups"]
     assert "mutated" not in second["production_recipe"]["animation_outputs"]
+
+
+def test_bundled_raster_starters_declare_explicit_resolvable_behavior() -> None:
+    for starter in DEFAULT_PERSONA_VISUAL_STARTER_PACKS:
+        assert starter.companion_behavior["schema_version"] == 1
+        assert all(
+            entry["state"] in starter.manifest["states"]
+            for entry in starter.companion_behavior["entries"]
+        )
 
 
 @pytest.mark.parametrize(
@@ -617,10 +643,34 @@ def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
         title="Existing active visual",
         status="draft",
     )
-    db_instance.activate_persona_visual_pack(
+    visual_service = PersonaVisualService(db_instance)
+    active_asset = visual_service.create_asset_from_upload(
         persona_id=persona_id,
         user_id=user_id,
         pack_id=active_pack["id"],
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="active.png",
+    )
+    active_pack = db_instance.update_persona_visual_pack_manifest(
+        pack_id=active_pack["id"],
+        persona_id=persona_id,
+        user_id=user_id,
+        manifest=_static_manifest(active_asset["id"]),
+        expected_version=active_pack["version"],
+    )
+    active_review = visual_service.review_pack(
+        pack_id=active_pack["id"],
+        user_id=user_id,
+        reviewer_user_id=user_id,
+        expected_version=active_pack["version"],
+    )
+    visual_service.activate_pack(
+        persona_id=persona_id,
+        user_id=user_id,
+        pack_id=active_pack["id"],
+        expected_version=active_pack["version"],
+        reviewed_fingerprint=active_review["fingerprint"],
     )
     service = PersonaVisualStarterCatalogService(db_instance)
 
@@ -636,6 +686,7 @@ def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
     assert copied["title"] == "Search Lens Basic"
     assert copied["provenance"] == "imported"
     assert copied["active_at"] is None
+    assert copied["companion_behavior"] == {"schema_version": 1, "entries": []}
     assert (
         db_instance.get_active_persona_visual_pack(
             persona_id=persona_id,

@@ -6,6 +6,14 @@ import type {
 
 import { getAssetsById, normalizeFrames } from "./personaVisualAssets"
 import { getPersonaVisualRenderer } from "./personaVisualRenderers"
+import type { PersonaVisualRenderError } from "./personaVisualTypes"
+
+export {
+  createPersonaCompanionDiagnostic,
+  type PersonaCompanionDiagnosticEvent,
+  type PersonaCompanionDiagnosticName,
+  type PersonaCompanionFailureClass
+} from "./personaCompanionDiagnostics"
 
 export type PersonaVisualDiagnosticCode =
   | "load_failed"
@@ -13,9 +21,7 @@ export type PersonaVisualDiagnosticCode =
   | "unsupported_renderer"
   | "missing_manifest"
   | "missing_assets"
-  | "missing_animation"
-  | "missing_asset"
-  | "unsupported_region"
+  | PersonaVisualRenderError
 
 export type PersonaVisualDiagnosticSeverity = "info" | "warning" | "error"
 
@@ -194,6 +200,28 @@ export const resolvePersonaVisualDiagnostics = ({
         "warning",
         "Visual frame region is unsupported",
         "Buddy fell back because this frame uses an unsupported sprite region."
+      )
+    ]
+  }
+
+  if (renderError === "asset_load_failed") {
+    return [
+      createDiagnostic(
+        "asset_load_failed",
+        "error",
+        "Visual asset did not load",
+        "The protected visual asset could not be loaded. Open Visuals to review or replace it."
+      )
+    ]
+  }
+
+  if (renderError === "static_asset_unsupported") {
+    return [
+      createDiagnostic(
+        "static_asset_unsupported",
+        "error",
+        "Reduced-motion still is unavailable",
+        "This state needs a PNG still before it can render with reduced motion."
       )
     ]
   }

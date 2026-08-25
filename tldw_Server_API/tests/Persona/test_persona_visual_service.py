@@ -1,17 +1,17 @@
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from PIL import Image
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_service import (
     MAX_VISUAL_UPLOAD_BYTES,
     PersonaVisualService,
     PersonaVisualServiceError,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -22,13 +22,34 @@ def _png_bytes(width: int = 1, height: int = 1) -> bytes:
     return buffer.getvalue()
 
 
+def _animated_bytes(image_format: str) -> bytes:
+    frames = [
+        Image.new("RGBA", (1, 1), (255, 0, 0, 255)),
+        Image.new("RGBA", (1, 1), (0, 0, 255, 255)),
+    ]
+    buffer = BytesIO()
+    frames[0].save(
+        buffer,
+        format=image_format,
+        save_all=True,
+        append_images=frames[1:],
+        duration=100,
+        loop=0,
+    )
+    return buffer.getvalue()
+
+
 def _valid_manifest(asset_id: str) -> dict[str, object]:
     states = {
         "idle": {"animation_id": "idle"},
+        "wake_armed": {"animation_id": "idle"},
         "listening": {"animation_id": "idle"},
         "thinking": {"animation_id": "idle"},
         "speaking": {"animation_id": "idle"},
+        "tool_running": {"animation_id": "idle"},
+        "approval_needed": {"animation_id": "idle"},
         "error": {"animation_id": "idle"},
+        "offline": {"animation_id": "idle"},
     }
     return {
         "manifest_version": 1,
@@ -83,6 +104,28 @@ def _create_pack(db: CharactersRAGDB, *, user_id: str = "user-1", title: str = "
     return persona_id, pack
 
 
+def _review_and_activate(
+    service: PersonaVisualService,
+    *,
+    persona_id: str,
+    pack: dict,
+    user_id: str = "user-1",
+) -> dict:
+    review = service.review_pack(
+        pack_id=str(pack["id"]),
+        user_id=user_id,
+        reviewer_user_id=user_id,
+        expected_version=int(pack["version"]),
+    )
+    return service.activate_pack(
+        persona_id=persona_id,
+        user_id=user_id,
+        pack_id=str(pack["id"]),
+        expected_version=int(pack["version"]),
+        reviewed_fingerprint=str(review["fingerprint"]),
+    )
+
+
 def test_db_allows_explicit_cross_persona_parent_for_duplicate_path(db_instance: CharactersRAGDB) -> None:
     user_id = "user-1"
     source_persona_id = db_instance.create_persona_profile({"user_id": user_id, "name": "Source"})
@@ -91,6 +134,14 @@ def test_db_allows_explicit_cross_persona_parent_for_duplicate_path(db_instance:
         persona_id=source_persona_id,
         user_id=user_id,
         title="Source Pack",
+        companion_behavior={
+            "schema_version": 1,
+            "entries": [{
+                "state": "idle",
+                "trigger": "ambient",
+                "category": "idle_variant",
+            }],
+        },
     )
 
     target_pack = db_instance.create_persona_visual_pack(
@@ -120,10 +171,14 @@ def _manifest_with_all_reference_shapes(asset_a: str, asset_b: str) -> dict[str,
         "renderer_type": "sprite_frames",
         "states": {
             "idle": {"animation_id": "idle"},
+            "wake_armed": {"animation_id": "idle"},
             "listening": {"animation_id": "idle"},
             "thinking": {"animation_id": "idle"},
             "speaking": {"animation_id": "idle"},
+            "tool_running": {"animation_id": "idle"},
+            "approval_needed": {"animation_id": "idle"},
             "error": {"animation_id": "idle"},
+            "offline": {"animation_id": "idle"},
         },
         "animations": {
             "idle": {
@@ -197,22 +252,30 @@ def test_duplicate_pack_to_persona_preserves_all_pack_assets_and_remaps_manifest
         manifest=_manifest_with_all_reference_shapes(asset_a["id"], asset_b["id"]),
         expected_version=source_pack["version"],
     )
-    db_instance.activate_persona_visual_pack(
-        persona_id=source_persona_id,
-        user_id=user_id,
-        pack_id=updated_source["id"],
-    )
     target_active = db_instance.create_persona_visual_pack(
         persona_id=target_persona_id,
         user_id=user_id,
         title="Existing Target Active",
         status="draft",
     )
-    db_instance.activate_persona_visual_pack(
+    target_asset = service.create_asset_from_upload(
         persona_id=target_persona_id,
         user_id=user_id,
         pack_id=target_active["id"],
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="target.png",
+        asset_role="frame",
     )
+    target_active = db_instance.update_persona_visual_pack_manifest(
+        pack_id=target_active["id"],
+        persona_id=target_persona_id,
+        user_id=user_id,
+        manifest=_valid_manifest(target_asset["id"]),
+        expected_version=target_active["version"],
+    )
+    _review_and_activate(service, persona_id=source_persona_id, pack=updated_source)
+    _review_and_activate(service, persona_id=target_persona_id, pack=target_active)
 
     duplicated = service.duplicate_pack_to_persona(
         source_persona_id=source_persona_id,
@@ -225,6 +288,7 @@ def test_duplicate_pack_to_persona_preserves_all_pack_assets_and_remaps_manifest
     assert duplicated["status"] == "draft"
     assert duplicated["persona_id"] == target_persona_id
     assert duplicated["parent_pack_id"] == source_pack["id"]
+    assert duplicated["companion_behavior"] == source_pack["companion_behavior"]
     copied_assets = db_instance.list_persona_visual_assets(
         pack_id=duplicated["id"],
         persona_id=target_persona_id,
@@ -641,10 +705,70 @@ def test_service_activation_rejects_invalid_manifest(
     )
 
     with pytest.raises(PersonaVisualServiceError) as exc_info:
-        service.activate_pack(persona_id=persona_id, user_id="user-1", pack_id=pack["id"])
+        service.review_pack(
+            pack_id=pack["id"],
+            user_id="user-1",
+            reviewer_user_id="user-1",
+            expected_version=2,
+        )
 
     assert exc_info.value.code == "invalid_manifest"
     assert db_instance.get_active_persona_visual_pack(persona_id=persona_id, user_id="user-1") is None
+
+
+def test_live2d_pack_row_cannot_review_or_activate_sprite_manifest(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Mismatched Renderer Persona"}
+    )
+    pack = db_instance.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        title="Mismatched Renderer Pack",
+        renderer_type="live2d",
+    )
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=str(pack["id"]),
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="still.png",
+    )
+    pack = db_instance.update_persona_visual_pack_payload(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        manifest=_valid_manifest(str(asset["id"])),
+        companion_behavior=None,
+        expected_version=int(pack["version"]),
+    )
+
+    with pytest.raises(PersonaVisualServiceError) as review_error:
+        service.review_pack(
+            pack_id=str(pack["id"]),
+            user_id="user-1",
+            reviewer_user_id="user-1",
+            expected_version=int(pack["version"]),
+        )
+    with pytest.raises(PersonaVisualServiceError) as activation_error:
+        service.activate_pack(
+            persona_id=persona_id,
+            user_id="user-1",
+            pack_id=str(pack["id"]),
+            expected_version=int(pack["version"]),
+            reviewed_fingerprint="0" * 64,
+        )
+
+    assert review_error.value.code == "invalid_renderer_contract"
+    assert activation_error.value.code == "invalid_renderer_contract"
+    assert db_instance.get_active_persona_visual_pack(
+        persona_id=persona_id, user_id="user-1"
+    ) is None
 
 
 def test_service_activation_archives_previous_active_pack(
@@ -697,8 +821,14 @@ def test_service_activation_archives_previous_active_pack(
         manifest=_valid_manifest(second_asset["id"]),
     )
 
-    service.activate_pack(persona_id=persona_id, user_id="user-1", pack_id=first["id"])
-    service.activate_pack(persona_id=persona_id, user_id="user-1", pack_id=second["id"])
+    first = db_instance.get_persona_visual_pack(
+        pack_id=first["id"], persona_id=persona_id, user_id="user-1"
+    )
+    second = db_instance.get_persona_visual_pack(
+        pack_id=second["id"], persona_id=persona_id, user_id="user-1"
+    )
+    _review_and_activate(service, persona_id=persona_id, pack=first)
+    _review_and_activate(service, persona_id=persona_id, pack=second)
 
     active = db_instance.get_active_persona_visual_pack(persona_id=persona_id, user_id="user-1")
     packs = db_instance.list_persona_visual_packs(persona_id=persona_id, user_id="user-1")
@@ -733,7 +863,10 @@ def test_service_deactivate_reverts_to_derived_buddy(
         manifest=_valid_manifest(asset["id"]),
     )
 
-    service.activate_pack(persona_id=persona_id, user_id="user-1", pack_id=pack["id"])
+    pack = db_instance.get_persona_visual_pack(
+        pack_id=pack["id"], persona_id=persona_id, user_id="user-1"
+    )
+    _review_and_activate(service, persona_id=persona_id, pack=pack)
     service.deactivate_pack(persona_id=persona_id, user_id="user-1")
 
     assert db_instance.get_active_persona_visual_pack(persona_id=persona_id, user_id="user-1") is None
@@ -744,3 +877,391 @@ def test_service_deactivate_reverts_to_derived_buddy(
     )
     assert archived is not None
     assert archived["status"] == "archived"
+
+
+def test_deactivated_revision_remains_sealed_and_reactivates_unchanged(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An activated revision stays immutable after archive but remains reusable."""
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id, pack = _create_pack(db_instance)
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=str(pack["id"]),
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="still.png",
+    )
+    pack = db_instance.update_persona_visual_pack_payload(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        manifest=_valid_manifest(str(asset["id"])),
+        companion_behavior={"schema_version": 1, "entries": []},
+        expected_version=int(pack["version"]),
+    )
+    review = service.review_pack(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        expected_version=int(pack["version"]),
+    )
+    service.activate_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=str(pack["id"]),
+        expected_version=int(pack["version"]),
+        reviewed_fingerprint=str(review["fingerprint"]),
+    )
+    service.deactivate_pack(persona_id=persona_id, user_id="user-1")
+    archived = db_instance.get_persona_visual_pack(
+        pack_id=str(pack["id"]), persona_id=persona_id, user_id="user-1"
+    )
+    assert archived is not None
+
+    with pytest.raises(InputError, match="immutable"):
+        db_instance.update_persona_visual_pack_payload(
+            pack_id=str(pack["id"]),
+            user_id="user-1",
+            manifest=archived["manifest"],
+            companion_behavior=None,
+            expected_version=int(archived["version"]),
+        )
+    with pytest.raises(InputError, match="immutable"):
+        service.create_asset_from_upload(
+            persona_id=persona_id,
+            user_id="user-1",
+            pack_id=str(pack["id"]),
+            content=_png_bytes(),
+            mime_type="image/png",
+            original_filename="new.png",
+        )
+    with pytest.raises(InputError, match="immutable"):
+        db_instance.update_persona_visual_pack_status(
+            pack_id=str(pack["id"]),
+            persona_id=persona_id,
+            user_id="user-1",
+            status="draft",
+            expected_version=int(archived["version"]),
+        )
+    with pytest.raises(InputError, match="immutable"):
+        db_instance.soft_delete_persona_visual_pack_with_assets(
+            pack_id=str(pack["id"]),
+            persona_id=persona_id,
+            user_id="user-1",
+            expected_version=int(archived["version"]),
+        )
+
+    with pytest.raises(PersonaVisualServiceError) as stale_error:
+        service.activate_pack(
+            persona_id=persona_id,
+            user_id="user-1",
+            pack_id=str(pack["id"]),
+            expected_version=int(archived["version"]) - 1,
+            reviewed_fingerprint=str(review["fingerprint"]),
+        )
+    reactivated = service.activate_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=str(pack["id"]),
+        expected_version=int(archived["version"]),
+        reviewed_fingerprint=str(review["fingerprint"]),
+    )
+
+    assert stale_error.value.code == "activation_conflict"
+    assert reactivated["status"] == "active"
+    assert reactivated["manifest"] == archived["manifest"]
+    assert reactivated["companion_behavior"] == archived["companion_behavior"]
+
+
+def test_review_validates_without_mutating_payload_and_activation_writes_no_normalized_payload(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id, pack = _create_pack(db_instance)
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=pack["id"],
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="still.png",
+    )
+    stored = db_instance.update_persona_visual_pack_payload(
+        pack_id=pack["id"],
+        user_id="user-1",
+        manifest=_valid_manifest(asset["id"]),
+        companion_behavior={"schema_version": 1, "entries": []},
+        expected_version=pack["version"],
+    )
+    payload_before = (stored["manifest"], stored["companion_behavior"], stored["version"])
+
+    review = service.review_pack(
+        pack_id=pack["id"],
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        expected_version=stored["version"],
+    )
+    after_review = db_instance.get_persona_visual_pack(
+        pack_id=pack["id"], persona_id=persona_id, user_id="user-1"
+    )
+    active = service.activate_pack(
+        pack_id=pack["id"],
+        persona_id=persona_id,
+        user_id="user-1",
+        expected_version=stored["version"],
+        reviewed_fingerprint=review["fingerprint"],
+    )
+
+    assert (after_review["manifest"], after_review["companion_behavior"], after_review["version"]) == payload_before
+    assert active["manifest"] == payload_before[0]
+    assert active["companion_behavior"] == payload_before[1]
+    assert active["version"] == payload_before[2] + 1
+
+
+def test_behavior_changes_invalidate_review_and_fork_copies_assets(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id, pack = _create_pack(db_instance)
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=pack["id"],
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="still.png",
+    )
+    pack = db_instance.update_persona_visual_pack_manifest(
+        pack_id=pack["id"],
+        persona_id=persona_id,
+        user_id="user-1",
+        manifest=_valid_manifest(asset["id"]),
+        expected_version=pack["version"],
+    )
+    old_review = service.review_pack(
+        pack_id=pack["id"],
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        expected_version=pack["version"],
+    )
+
+    fork = service.fork_pack_revision(
+        pack_id=pack["id"],
+        user_id="user-1",
+        expected_version=pack["version"],
+        manifest=pack["manifest"],
+        companion_behavior={"schema_version": 1, "entries": []},
+    )
+    new_review = service.review_pack(
+        pack_id=fork["id"],
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        expected_version=fork["version"],
+    )
+
+    assert fork["status"] == "draft"
+    assert fork["parent_pack_id"] == pack["id"]
+    assert fork["revision_number"] == pack["revision_number"] + 1
+    assert fork["companion_behavior"] == {"schema_version": 1, "entries": []}
+    assert new_review["fingerprint"] != old_review["fingerprint"]
+    assert {asset["checksum_sha256"] for asset in fork["assets"]} == {asset["checksum_sha256"]}
+
+
+def test_fork_rejects_stale_source_before_listing_or_copying_assets(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale revision fork must fail before any source asset work begins."""
+    _persona_id, pack = _create_pack(db_instance)
+    list_assets = Mock(side_effect=AssertionError("assets must not be listed for a stale source"))
+    monkeypatch.setattr(db_instance, "list_persona_visual_assets", list_assets)
+
+    with pytest.raises(PersonaVisualServiceError) as exc_info:
+        service.fork_pack_revision(
+            pack_id=pack["id"],
+            user_id="user-1",
+            expected_version=pack["version"] + 1,
+            manifest=pack["manifest"],
+            companion_behavior=None,
+        )
+
+    assert exc_info.value.code == "fork_conflict"
+    list_assets.assert_not_called()
+
+
+def test_activation_rejects_stale_review_fingerprint(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id, pack = _create_pack(db_instance)
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=pack["id"],
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="still.png",
+    )
+    pack = db_instance.update_persona_visual_pack_manifest(
+        pack_id=pack["id"], persona_id=persona_id, user_id="user-1",
+        manifest=_valid_manifest(asset["id"]), expected_version=pack["version"],
+    )
+    review = service.review_pack(
+        pack_id=pack["id"], user_id="user-1", reviewer_user_id="user-1",
+        expected_version=pack["version"],
+    )
+
+    with pytest.raises(PersonaVisualServiceError) as exc_info:
+        service.activate_pack(
+            pack_id=pack["id"], persona_id=persona_id, user_id="user-1",
+            expected_version=pack["version"], reviewed_fingerprint="0" * 64,
+        )
+
+    assert exc_info.value.code == "stale_review"
+    assert review["fingerprint"] != "0" * 64
+
+
+def test_real_review_cannot_activate_after_inactive_payload_version_changes(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id, pack = _create_pack(db_instance)
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=str(pack["id"]),
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="still.png",
+    )
+    pack = db_instance.update_persona_visual_pack_payload(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        manifest=_valid_manifest(str(asset["id"])),
+        companion_behavior=None,
+        expected_version=int(pack["version"]),
+    )
+    review = service.review_pack(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        expected_version=int(pack["version"]),
+    )
+    changed = db_instance.update_persona_visual_pack_payload(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        manifest=pack["manifest"],
+        companion_behavior={"schema_version": 1, "entries": []},
+        expected_version=int(pack["version"]),
+    )
+
+    with pytest.raises(PersonaVisualServiceError) as exc_info:
+        service.activate_pack(
+            persona_id=persona_id,
+            user_id="user-1",
+            pack_id=str(pack["id"]),
+            expected_version=int(changed["version"]),
+            reviewed_fingerprint=str(review["fingerprint"]),
+        )
+
+    assert changed["version"] == review["pack_version"] + 1
+    assert exc_info.value.code == "stale_review"
+    assert db_instance.get_active_persona_visual_pack(
+        persona_id=persona_id, user_id="user-1"
+    ) is None
+
+
+def test_activation_reprobes_protected_bytes_after_successful_review(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id, pack = _create_pack(db_instance)
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id,
+        user_id="user-1",
+        pack_id=str(pack["id"]),
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="still.png",
+    )
+    pack = db_instance.update_persona_visual_pack_payload(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        manifest=_valid_manifest(str(asset["id"])),
+        companion_behavior=None,
+        expected_version=int(pack["version"]),
+    )
+    review = service.review_pack(
+        pack_id=str(pack["id"]),
+        user_id="user-1",
+        reviewer_user_id="user-1",
+        expected_version=int(pack["version"]),
+    )
+    Path(str(asset["storage_path"])).write_bytes(_animated_bytes("GIF"))
+
+    with pytest.raises(PersonaVisualServiceError) as exc_info:
+        service.activate_pack(
+            persona_id=persona_id,
+            user_id="user-1",
+            pack_id=str(pack["id"]),
+            expected_version=int(review["pack_version"]),
+            reviewed_fingerprint=str(review["fingerprint"]),
+        )
+
+    assert exc_info.value.code == "asset_checksum_mismatch"
+    assert db_instance.get_active_persona_visual_pack(
+        persona_id=persona_id, user_id="user-1"
+    ) is None
+
+
+@pytest.mark.parametrize(
+    ("image_format", "mime_type"),
+    [("GIF", "image/gif"), ("WEBP", "image/webp")],
+)
+def test_review_rejects_animated_raster_bytes_for_static_coverage(
+    service: PersonaVisualService,
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    image_format: str,
+    mime_type: str,
+) -> None:
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id, pack = _create_pack(db_instance)
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id, user_id="user-1", pack_id=pack["id"],
+        content=_animated_bytes(image_format), mime_type=mime_type,
+        original_filename=f"animated.{image_format.lower()}",
+    )
+    pack = db_instance.update_persona_visual_pack_manifest(
+        pack_id=pack["id"], persona_id=persona_id, user_id="user-1",
+        manifest=_valid_manifest(asset["id"]), expected_version=pack["version"],
+    )
+
+    with pytest.raises(PersonaVisualServiceError) as exc_info:
+        service.review_pack(
+            pack_id=pack["id"], user_id="user-1", reviewer_user_id="user-1",
+            expected_version=pack["version"],
+        )
+
+    assert exc_info.value.code == "invalid_static_coverage"

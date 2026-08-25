@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -8,7 +9,6 @@ from typing import Any
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     get_persona_visual_renderer_capability,
 )
-
 
 VISUAL_STATE_IDS = {
     "idle",
@@ -80,6 +80,63 @@ class PersonaVisualManifestError(ValueError):
 class PersonaVisualManifestValidation:
     manifest: dict[str, Any]
     resolved_required_states: dict[str, str]
+
+
+@dataclass(frozen=True)
+class PersonaVisualValidationResult:
+    """Pure validation outcome for activation-only visual requirements."""
+
+    is_valid: bool
+    errors: tuple[dict[str, str], ...] = ()
+
+
+def validate_sprite_static_coverage(
+    manifest: Mapping[str, Any],
+    assets: Sequence[Mapping[str, Any]],
+) -> PersonaVisualValidationResult:
+    """Validate deterministic one-frame PNG coverage for all built-in states."""
+    manifest_value = dict(manifest)
+    manifest_value["states"] = manifest.get("states", {})
+    manifest_value["animations"] = manifest.get("animations", {})
+    manifest_value["fallbacks"] = manifest.get("fallbacks", {})
+    assets_by_id = {str(asset.get("id") or ""): asset for asset in assets}
+    errors: list[dict[str, str]] = []
+    for state in sorted(VISUAL_STATE_IDS):
+        animation_id = _resolve_state(state, manifest_value)
+        if not animation_id:
+            errors.append({"code": "static_state_unresolved", "state": state})
+            continue
+        animation = manifest_value["animations"].get(animation_id)
+        if not isinstance(animation, Mapping):
+            errors.append({"code": "static_state_unresolved", "state": state})
+            continue
+        asset_id = _static_asset_id(animation)
+        asset = assets_by_id.get(asset_id)
+        if (
+            asset is None
+            or asset.get("detected_mime_type") != "image/png"
+            or asset.get("decoded_frame_count") != 1
+        ):
+            errors.append(
+                {"code": "static_asset_invalid", "state": state, "asset_id": asset_id}
+            )
+    return PersonaVisualValidationResult(is_valid=not errors, errors=tuple(errors))
+
+
+def _static_asset_id(animation: Mapping[str, Any]) -> str:
+    """Resolve the preferred static asset identifier for an animation."""
+    frames = animation.get("frames")
+    if not isinstance(frames, list) or not frames:
+        return ""
+    preview_frame = animation.get("preview_frame")
+    if isinstance(preview_frame, int) and not isinstance(preview_frame, bool):
+        if 0 <= preview_frame < len(frames) and isinstance(frames[preview_frame], Mapping):
+            return str(frames[preview_frame].get("asset_id") or "")
+    preview_asset_id = animation.get("preview_asset_id")
+    if isinstance(preview_asset_id, str) and preview_asset_id:
+        return preview_asset_id
+    first = frames[0]
+    return str(first.get("asset_id") or "") if isinstance(first, Mapping) else ""
 
 
 def validate_visual_manifest(
@@ -439,6 +496,19 @@ def _allowed_visual_state_ids(manifest: dict[str, Any]) -> set[str]:
     return VISUAL_STATE_IDS | manifest.get("state_catalog", {}).keys()
 
 
+def resolved_visual_state_ids(manifest: Mapping[str, Any]) -> set[str]:
+    """Return built-in and declared custom states that resolve to animations."""
+    manifest_value = dict(manifest)
+    manifest_value["states"] = manifest.get("states", {})
+    manifest_value["animations"] = manifest.get("animations", {})
+    manifest_value["fallbacks"] = manifest.get("fallbacks", {})
+    return {
+        state
+        for state in _allowed_visual_state_ids(manifest_value)
+        if _resolve_state(state, manifest_value)
+    }
+
+
 def _custom_state_id_error(state_id: Any) -> str | None:
     """Return a specific custom state ID validation error, or None if valid."""
     if not isinstance(state_id, str):
@@ -603,6 +673,9 @@ __all__ = [
     "VISUAL_STATE_IDS",
     "PersonaVisualManifestError",
     "PersonaVisualManifestValidation",
+    "PersonaVisualValidationResult",
     "custom_visual_state_id_error",
+    "resolved_visual_state_ids",
+    "validate_sprite_static_coverage",
     "validate_visual_manifest",
 ]

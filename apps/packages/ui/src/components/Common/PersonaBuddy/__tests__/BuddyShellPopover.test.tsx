@@ -56,6 +56,15 @@ describe("BuddyShellPopover", () => {
     vi.clearAllMocks()
   })
 
+  it("offers a named standard close action", () => {
+    const onClose = vi.fn()
+    renderPopover({ onClose })
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Buddy controls" }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it("opens a compact popover with start stop and composer controls", () => {
     renderPopover({
       liveControl: {

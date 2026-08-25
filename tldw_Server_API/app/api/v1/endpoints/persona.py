@@ -30,6 +30,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.persona import (
+    PersonaBuddyPreferencesOverrideResponse,
+    PersonaBuddyPreferencesOverrideUpdate,
+    PersonaBuddyPreferencesResponse,
+    PersonaBuddyPreferencesUpdate,
     PersonaBuddyResponse,
     PersonaCommandDryRunRequest,
     PersonaCommandDryRunResponse,
@@ -103,11 +107,14 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualLibraryUpdateRequest,
     PersonaVisualLibraryUseRequest,
     PersonaVisualManifestUpdate,
+    PersonaVisualPackActivateRequest,
     PersonaVisualPackExportRequest,
     PersonaVisualPackExportResponse,
+    PersonaVisualPackForkRequest,
     PersonaVisualPackCreate,
     PersonaVisualPackDuplicateRequest,
     PersonaVisualPackResponse,
+    PersonaVisualPackReviewRequest,
     PersonaVisualPortabilityJobResponse,
     PersonaVisualRendererCapabilitiesResponse,
     PersonaVisualRendererCapabilityResponse,
@@ -2278,6 +2285,12 @@ def _persona_visual_pack_to_response(
         status=str(pack.get("status") or "draft"),
         manifest_version=int(pack.get("manifest_version") or 1),
         manifest=pack.get("manifest") if isinstance(pack.get("manifest"), dict) else {},
+        companion_behavior=(
+            pack.get("companion_behavior")
+            if isinstance(pack.get("companion_behavior"), dict)
+            else None
+        ),
+        review=pack.get("review") if isinstance(pack.get("review"), dict) else None,
         parent_pack_id=pack.get("parent_pack_id"),
         revision_number=int(pack.get("revision_number") or 1),
         provenance=str(pack.get("provenance") or "uploaded"),
@@ -2402,7 +2415,15 @@ def _persona_visual_service_error_to_http(exc: PersonaVisualServiceError) -> HTT
         status_code = status.HTTP_403_FORBIDDEN
     elif exc.code in {"upload_too_large"}:
         status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
-    elif exc.code in {"source_asset_missing", "source_asset_checksum_mismatch", "candidate_status_conflict"}:
+    elif exc.code in {
+        "source_asset_missing",
+        "source_asset_checksum_mismatch",
+        "candidate_status_conflict",
+        "activation_conflict",
+        "review_conflict",
+        "stale_review",
+        "fork_conflict",
+    }:
         status_code = status.HTTP_409_CONFLICT
     return HTTPException(
         status_code=status_code,
@@ -4064,6 +4085,155 @@ async def get_persona_buddy(
 
 
 @router.get(
+    "/buddy/preferences",
+    response_model=PersonaBuddyPreferencesResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_buddy_preferences(
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaBuddyPreferencesResponse:
+    """Return the authenticated user's global companion preference or its safe default."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        preferences = await _run_persona_db_call(db.get_persona_buddy_preferences, user_id=user_id)
+        if preferences is None:
+            return PersonaBuddyPreferencesResponse(
+                ambient_mode="expressive",
+                version=None,
+                stored=False,
+            )
+        return PersonaBuddyPreferencesResponse(
+            ambient_mode=str(preferences["ambient_mode"]),
+            version=int(preferences["version"]),
+            stored=True,
+        )
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona buddy preferences") from exc
+
+
+@router.patch(
+    "/buddy/preferences",
+    response_model=PersonaBuddyPreferencesResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def update_persona_buddy_preferences(
+    payload: PersonaBuddyPreferencesUpdate,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaBuddyPreferencesResponse:
+    """Version-check and persist the authenticated user's global companion preference."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        preferences = await _run_persona_db_call(
+            db.upsert_persona_buddy_preferences,
+            user_id=user_id,
+            ambient_mode=payload.ambient_mode,
+            expected_version=payload.expected_version,
+        )
+        return PersonaBuddyPreferencesResponse(
+            ambient_mode=str(preferences["ambient_mode"]),
+            version=int(preferences["version"]),
+            stored=True,
+        )
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="update persona buddy preferences") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/buddy/preferences",
+    response_model=PersonaBuddyPreferencesOverrideResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_buddy_override_preferences(
+    persona_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaBuddyPreferencesOverrideResponse:
+    """Return the current user's per-Persona ambient overlay preference."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        profile = await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        buddy = await _run_persona_db_call(
+            ensure_persona_buddy_for_profile,
+            db,
+            profile,
+        )
+        overlay_preferences = buddy.get("overlay_preferences") or {}
+        ambient_mode = overlay_preferences.get("ambient_mode")
+        return PersonaBuddyPreferencesOverrideResponse(
+            ambient_mode=str(ambient_mode) if ambient_mode is not None else None,
+            version=int(buddy["version"]),
+            stored=ambient_mode is not None,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona buddy override preferences") from exc
+
+
+@router.patch(
+    "/profiles/{persona_id}/buddy/preferences",
+    response_model=PersonaBuddyPreferencesOverrideResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def update_persona_buddy_override_preferences(
+    persona_id: str,
+    payload: PersonaBuddyPreferencesOverrideUpdate,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaBuddyPreferencesOverrideResponse:
+    """Patch only a current user's per-Persona ambient-mode overlay preference."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        buddy = await _run_persona_db_call(
+            db.patch_persona_buddy_overlay_preferences,
+            persona_id=persona_id,
+            user_id=user_id,
+            patch={"ambient_mode": payload.ambient_mode},
+            expected_version=payload.expected_version,
+        )
+        overlay_preferences = buddy.get("overlay_preferences") or {}
+        ambient_mode = overlay_preferences.get("ambient_mode")
+        return PersonaBuddyPreferencesOverrideResponse(
+            ambient_mode=str(ambient_mode) if ambient_mode is not None else None,
+            version=int(buddy["version"]),
+            stored=ambient_mode is not None,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="update persona buddy override preferences") from exc
+
+
+@router.get(
     "/visual-renderers",
     response_model=PersonaVisualRendererCapabilitiesResponse,
     tags=["persona"],
@@ -4409,6 +4579,11 @@ async def list_persona_visual_packs(
             persona_id=persona_id,
             user_id=user_id,
         )
+        reviews = await _run_persona_db_call(
+            db.list_persona_visual_pack_current_reviews,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
         responses: list[PersonaVisualPackResponse] = []
         for pack in packs:
             pack_id = str(pack.get("id") or "")
@@ -4418,6 +4593,7 @@ async def list_persona_visual_packs(
                 persona_id=persona_id,
                 user_id=user_id,
             )
+            pack["review"] = reviews.get(pack_id)
             responses.append(_persona_visual_pack_to_response(pack, assets=assets))
         return responses
     except HTTPException:
@@ -4456,6 +4632,7 @@ async def create_persona_visual_pack(
             user_id=user_id,
             title=payload.title,
             manifest=payload.manifest,
+            companion_behavior=payload.companion_behavior,
         )
         return _persona_visual_pack_to_response(pack, assets=[])
     except HTTPException:
@@ -4540,6 +4717,12 @@ async def get_persona_visual_pack(
             persona_id=persona_id,
             user_id=user_id,
         )
+        pack["review"] = await _run_persona_db_call(
+            db.get_persona_visual_pack_current_review,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
         return _persona_visual_pack_to_response(pack, assets=assets)
     except HTTPException:
         raise
@@ -4572,16 +4755,27 @@ async def update_persona_visual_pack_manifest(
             user_id=user_id,
             include_deleted=False,
         )
-        pack = await _run_persona_db_call(
-            db.update_persona_visual_pack_manifest,
+        current = await _run_persona_db_call(
+            db.get_persona_visual_pack,
             pack_id=pack_id,
             persona_id=persona_id,
             user_id=user_id,
+        )
+        if current is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        companion_behavior = (
+            payload.companion_behavior
+            if "companion_behavior" in payload.model_fields_set
+            else current.get("companion_behavior")
+        )
+        pack = await _run_persona_db_call(
+            db.update_persona_visual_pack_payload,
+            pack_id=pack_id,
+            user_id=user_id,
             manifest=payload.manifest,
+            companion_behavior=companion_behavior,
             expected_version=payload.expected_version,
         )
-        if pack is None:
-            raise HTTPException(status_code=404, detail="Persona visual pack not found")
         assets = await _run_persona_db_call(
             db.list_persona_visual_assets,
             pack_id=pack_id,
@@ -4728,6 +4922,131 @@ async def get_persona_visual_asset_content(
 
 
 @router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/reviews",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def review_persona_visual_pack(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualPackReviewRequest,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualPackResponse:
+    """Validate and record the authenticated user's review of an inactive pack revision."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        review = await _run_persona_db_call(
+            visual_service.review_pack,
+            pack_id=pack_id,
+            user_id=user_id,
+            reviewer_user_id=user_id,
+            expected_version=payload.expected_version,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        assets = await _run_persona_db_call(
+            db.list_persona_visual_assets,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        pack["review"] = review
+        return _persona_visual_pack_to_response(pack, assets=assets)
+    except HTTPException:
+        raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="review persona visual pack") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/fork",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def fork_persona_visual_pack_revision(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualPackForkRequest,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualPackResponse:
+    """Fork an owned pack revision after validating the source version."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        if str(pack.get("status") or "") not in {"active", "archived"}:
+            raise PersonaVisualServiceError(
+                "fork_conflict",
+                "Only a sealed visual pack can be forked.",
+                details={"pack_id": pack_id, "status": pack.get("status")},
+            )
+        forked = await _run_persona_db_call(
+            visual_service.fork_pack_revision,
+            pack_id=pack_id,
+            user_id=user_id,
+            expected_version=payload.expected_version,
+            manifest=payload.manifest,
+            companion_behavior=payload.companion_behavior,
+        )
+        return _persona_visual_pack_to_response(
+            forked,
+            assets=list(forked.get("assets") or []),
+        )
+    except HTTPException:
+        raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="fork persona visual pack revision") from exc
+
+
+@router.post(
     "/profiles/{persona_id}/visual-packs/{pack_id}/activate",
     response_model=PersonaVisualPackResponse,
     tags=["persona"],
@@ -4737,6 +5056,7 @@ async def get_persona_visual_asset_content(
 async def activate_persona_visual_pack(
     persona_id: str,
     pack_id: str,
+    payload: PersonaVisualPackActivateRequest,
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     visual_service: PersonaVisualService = Depends(get_persona_visual_service),
@@ -4757,8 +5077,16 @@ async def activate_persona_visual_pack(
             persona_id=persona_id,
             user_id=user_id,
             pack_id=pack_id,
+            expected_version=payload.expected_version,
+            reviewed_fingerprint=payload.reviewed_fingerprint,
         )
         assets = list(active.get("assets") or [])
+        active["review"] = await _run_persona_db_call(
+            db.get_persona_visual_pack_current_review,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
         return _persona_visual_pack_to_response(active, assets=assets)
     except HTTPException:
         raise

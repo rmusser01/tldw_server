@@ -22,10 +22,22 @@ const baseManifest: PersonaVisualManifest = {
 const makePack = (overrides: Partial<PersonaVisualPack>): PersonaVisualPack => ({
   id: "pack-1",
   persona_id: "persona-1",
+  user_id: "user-1",
   title: "Visual pack",
   renderer_type: "sprite_frames",
   status: "draft",
+  manifest_version: 1,
   manifest: baseManifest,
+  companion_behavior: null,
+  review: null,
+  parent_pack_id: null,
+  revision_number: 1,
+  provenance: "uploaded",
+  active_at: null,
+  assets: [],
+  created_at: "2026-08-23T00:00:00Z",
+  last_modified: "2026-08-23T00:00:00Z",
+  version: 1,
   ...overrides
 })
 
