@@ -1,6 +1,6 @@
 # WebUI Live-Backend UAT Remediation Design
 
-**Status:** Proposed for implementation
+**Status:** Revised after pre-implementation review
 
 **Date:** 2026-08-25
 
@@ -35,6 +35,9 @@ isolated single-user backend, and offline fallback disabled.
   first-run UI, and possible product defects.
 - The default webpack development server reached approximately 63 GB RSS and
   497% CPU, then stopped serving pages while backend health remained 200.
+- The Turbopack comparison remained responsive, but reached approximately
+  11 GB RSS after the same broad compilation/UAT workload. That is useful
+  comparative evidence, not proof that Turbopack is free of excessive growth.
 - Route transitions produced status-0 `Failed to fetch` request diagnostics and
   backend-unavailable UX while the backend remained healthy.
 
@@ -54,8 +57,9 @@ remain in scope.
    deterministic readiness outcome when no usable model exists.
 5. Remove the Settings console warning and align Settings wayfinding coverage
    with the current information architecture.
-6. Make the real-server workflow suite an honest release gate rather than a
-   collection of stale selectors and hidden provider assumptions.
+6. Replace the real-server workflow suite with the smallest honest release
+   gate that preserves its unique coverage, instead of retaining stale or
+   duplicated scenarios by default.
 7. Restore deterministic Kanban route-error recovery coverage.
 8. Run the full Tier-1, Tier-2, and Tier-3 inventories against a real backend,
    remediate newly confirmed defects, and rerun until the remaining outcomes
@@ -97,23 +101,36 @@ same affected contract, and same verification boundary.
 
 ### 1. Development runtime
 
-`bun run dev` will use Turbopack, the runtime that remained responsive during
-the UAT. `bun run dev:webpack` remains available as an explicit compatibility
-fallback. Tests and developer documentation will name which runtime is the
-default and explain that the red bottom-left number is the Next.js development
-tools indicator, not an application error counter.
+The implementation will not choose a default bundler solely from the first
+UAT comparison. It will run the same clean-worktree route compilation,
+navigation-churn, warm-idle, and health probes against webpack and Turbopack.
+The harness records initial, post-compilation, and post-idle RSS/CPU plus HTTP
+responsiveness for the actual Next server process.
 
-The change will not suppress HMR messages in application error filters. The
-runtime decision is the containment for the observed webpack HMR and memory
-failure. A sustained traversal must record elapsed time, responsiveness, RSS,
-and CPU for the actual Next server process. Because development compilers cache
-compiled routes, memory need not return to its startup value; the acceptance
-boundary is that growth remains bounded enough for the route/tier workload and
-the server continues to answer requests.
+A candidate default passes when it:
 
-If Turbopack reproduces a deterministic cache panic on the clean worktree, the
-task must stop after three evidence-backed attempts and revisit the runtime
-choice. It must not silently fall back to webpack and call the issue fixed.
+- completes the complete route traversal without an empty response or hung
+  navigation;
+- stays responsive during a 20-minute warm idle and a second critical-route
+  traversal;
+- remains below 16 GB RSS for this workload; and
+- grows by no more than 2 GB during the warm-idle interval after route
+  compilation has completed.
+
+These limits are UAT guardrails for the observed machine and workload, not a
+general production memory SLA. If exactly one bundler passes, `bun run dev`
+uses it and the other remains an explicitly named compatibility command. If
+neither passes, the task does not relabel either one stable; it must contain the
+failure with an explicit UAT runtime/profile or bounded restart strategy and
+record the unresolved upstream/runtime limitation.
+
+Tests and developer documentation will name the evidence-backed default and
+explain that the red bottom-left number is the Next.js development-tools
+indicator, not an application error counter. The change will not broadly
+suppress HMR messages in application error filters.
+
+Three failed attempts to establish a qualifying runtime trigger the required
+architecture review rather than a fourth bundler/configuration guess.
 
 ### 2. Backend-unavailable event corroboration
 
@@ -142,13 +159,14 @@ hook therefore receives an explicit readiness input in addition to
 `workspaceId`. It does not list, mutate, or reconcile views until the parent
 workspace is known to exist on the server.
 
-The existing workspace reconciliation/upsert remains the owner of server
-creation. On success it publishes readiness for the active workspace identity;
-on workspace changes, readiness resets before child-resource effects can run.
-Existing server workspaces become ready after successful reconciliation and
-then load views normally. A failed parent reconciliation exposes the existing
-workspace sync/recovery state and does not translate into a misleading saved-
-view 404.
+The existing workspace upsert remains the owner of server creation. Successful
+upsert publishes a narrow `workspaceExists` readiness state for the active
+workspace identity; saved views do not wait for unrelated source/context
+projection work. On workspace changes, existence readiness resets before child-
+resource effects can run. Existing server workspaces become ready after the
+upsert confirms existence and then load views normally. A failed parent upsert
+exposes the existing workspace sync/recovery state and does not translate into
+a misleading saved-view 404.
 
 All asynchronous results remain guarded by workspace identity and generation,
 so a late response for a previous workspace cannot mark the new workspace
@@ -168,6 +186,10 @@ documented panel, but global navigation, page heading, tabs, form labels,
 buttons, and editor fields may not obscure one another. The regression asserts
 geometry and interaction, not a screenshot hash.
 
+The focused reproduction must first prove the overlap on the clean current
+bundle without a first-run tour or stale test artifact. If it does not, this
+task corrects the audit/test setup rather than introducing speculative CSS.
+
 ### 5. Character and persona chat continuity
 
 This task begins with request and persistence tracing for the three failing
@@ -186,8 +208,12 @@ assertions. A confirmed identity/session defect is fixed at the first boundary
 that drops the canonical identifier. Tests cover real observable persistence;
 mock call-count assertions alone are insufficient.
 
-No-provider environments must terminate quickly with an explicit reason.
-Configured local providers may satisfy the live conversation requirement.
+The isolated UAT environment will configure the repository's deterministic
+OpenAI-compatible mock model service through the real backend for generation
+wiring and persistence tests. This validates the WebUI-to-backend-to-provider
+path without claiming model-quality coverage. An independently available local
+provider may be tested additionally, but is not required for determinism.
+No-provider environments must still terminate quickly with an explicit reason.
 
 ### 6. Settings form and wayfinding
 
@@ -202,7 +228,11 @@ promoting the section label to a second page-level heading.
 
 ### 7. Real-server workflow gate
 
-The legacy suite will be updated to current user-observable contracts:
+Before editing the legacy 17 cases, the task maps every scenario to maintained
+Tier-1–3 or dedicated real-server coverage. Redundant cases are deleted rather
+than repaired. Unique critical behaviors are moved into the maintained tier or
+retained in a smaller dedicated live gate. The resulting gate uses current
+user-observable contracts:
 
 - dismiss or complete intentional first-run tours through a shared helper;
 - use current roles, labels, placeholders, and stable test IDs;
@@ -217,14 +247,16 @@ a concrete readiness reason. Non-provider-dependent CRUD/navigation cases may
 not skip merely because generation is unavailable.
 
 The gate will not use `test.skip()` after partial mutation or catch assertions
-to manufacture a pass. Each justified skip is counted and reported.
+to manufacture a pass. Each justified skip is counted and reported. Success is
+measured by preserved behavior coverage, not by preserving the number 17.
 
 ### 8. Kanban route-error recovery
 
-The existing all-pages forced-error mechanism will be traced from fixture to
-route boundary. Kanban will adopt the same test-only contract as a working
-route. The signal must be inert in non-test builds and must not create a
-production query parameter that crashes the page.
+The existing generic all-pages forced-error mechanism will be traced from
+fixture to route boundary. The preferred fix is to register Kanban with that
+shared mechanism or its intended route boundary, not to add a Kanban-specific
+production hook. The signal must be inert in non-test builds and must not
+create a production query parameter that crashes the page.
 
 Under the signal, the route throws inside the intended error boundary and
 renders accessible recovery controls. Clearing the signal and invoking recovery
@@ -239,6 +271,8 @@ recovery, not implementation-specific source text.
 - Start an isolated backend using the repository virtual environment and
   disposable database paths/configuration.
 - Start the WebUI with the supported default development runtime.
+- Start the deterministic local OpenAI-compatible test service and configure it
+  through the real backend for generation-dependent scenarios.
 - Set `TLDW_E2E_ALLOW_OFFLINE=0` and explicit backend/WebUI URLs.
 - Use a dedicated single-user API key that is not a real secret.
 - Record backend health before each project and after any frontend failure.
@@ -250,6 +284,12 @@ recovery, not implementation-specific source text.
 Before execution, `playwright test --list` records exact Tier-1, Tier-2, and
 Tier-3 denominators. All listed scenarios run; grep-selected subsets do not
 qualify as a full tier pass.
+
+The inventory also records every scenario that intercepts or mocks an API
+request. Such a scenario still counts toward complete tier execution, but is
+reported as UI/contract coverage rather than live-backend evidence. Critical
+behaviors represented only by mocks receive a focused live-backend counterpart
+when the isolated backend supports the capability.
 
 ### Failure classification
 
@@ -285,11 +325,23 @@ For each confirmed defect:
 After three failed implementation attempts for one issue, stop and revisit the
 architecture with the user instead of stacking a fourth speculative fix.
 
+### Baseline synchronization
+
+The branch remains pinned while an individual red-green task is in progress.
+After the initial child fixes and before the final Tier-1–3 certification, it
+is synchronized with the then-current `origin/dev`. Conflicts are resolved
+without discarding either workstream, focused tests are rerun, and the final
+full-tier results record the exact synchronized commit. This avoids claiming
+latest-dev certification against a stale long-running branch.
+
 ### Exit criteria
 
 The Tier-1–3 loop exits only when:
 
-- all three complete inventories have executed against the live backend;
+- all three complete inventories have executed with the isolated live backend
+  and deterministic model service available and offline fallback disabled;
+- mocked/intercepted scenarios are identified and are not misreported as live
+  backend coverage;
 - all product and gate-drift defects discovered in the run are fixed and their
   affected complete tiers have been rerun;
 - remaining skips are limited to documented optional capabilities or evidenced
@@ -315,6 +367,7 @@ Focused gates include:
 - all-pages Kanban forced-error coverage;
 - complete Tier-1, Tier-2, and Tier-3 projects;
 - the exhaustive route sweep and dedicated Research/Chat real-server suites;
+- the development-runtime memory/responsiveness harness with recorded samples;
 - frontend typecheck and lint for touched scope; and
 - Bandit for any touched Python scope, or an explicit frontend-only skip note.
 
