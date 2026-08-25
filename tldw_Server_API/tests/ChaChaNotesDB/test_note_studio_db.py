@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime
 
 import pytest
@@ -81,8 +80,13 @@ def test_create_and_fetch_note_studio_document_by_note_id(db: CharactersRAGDB) -
     )
 
     assert created["note_id"] == note_id  # nosec B101
+    assert created["owner_user_id"] == db.client_id  # nosec B101
+    assert created["dataset_id"] == "local-unbound"  # nosec B101
     assert created["template_type"] == "lined"  # nosec B101
     assert created["handwriting_mode"] == "accented"  # nosec B101
+    assert created["version"] == 1  # nosec B101
+    assert created["canonical_revision"] == 1  # nosec B101
+    assert created["canonical_hash"].startswith("sha256:")  # nosec B101
 
     studio = db.get_note_studio_document(note_id)
     assert studio is not None  # nosec B101
@@ -125,6 +129,54 @@ def test_create_note_studio_document_translates_missing_note_to_conflict(db: Cha
             companion_content_hash="sha256:markdown",
             render_version=1,
         )
+
+
+def test_note_studio_write_requires_a_live_owned_source_note(db: CharactersRAGDB) -> None:
+    note_id = db.add_note(title="Companion", content="Rendered")
+    source_note_id = db.add_note(title="Source", content="Original")
+
+    assert db.soft_delete_note(source_note_id, expected_version=1) is True  # nosec B101
+    with pytest.raises(ConflictError, match="Source note not found or not live"):
+        db.create_note_studio_document(
+            note_id=note_id,
+            payload_json={"meta": {"source_note_id": source_note_id}, "sections": []},
+            template_type="lined",
+            handwriting_mode="accented",
+            source_note_id=source_note_id,
+            excerpt_snapshot="Original",
+            excerpt_hash="sha256:demo",
+            companion_content_hash="sha256:markdown",
+            render_version=1,
+        )
+
+
+def test_diagram_update_advances_scoped_studio_lineage(db: CharactersRAGDB) -> None:
+    note_id = db.add_note(title="Source", content="Alpha beta gamma")
+    before = db.create_note_studio_document(
+        note_id=note_id,
+        payload_json={"meta": {"source_note_id": note_id}, "sections": []},
+        template_type="lined",
+        handwriting_mode="accented",
+        source_note_id=note_id,
+        excerpt_snapshot="beta",
+        excerpt_hash="sha256:excerpt",
+        companion_content_hash="sha256:markdown",
+        render_version=1,
+    )
+
+    after = db.update_note_studio_diagram_manifest(
+        note_id=note_id,
+        diagram_manifest_json={"diagrams": [{"id": "diagram-1"}]},
+        expected_companion_content_hash="sha256:markdown",
+        expected_render_version=1,
+        expected_last_modified=before["last_modified"],
+    )
+
+    assert after["owner_user_id"] == db.client_id  # nosec B101
+    assert after["dataset_id"] == "local-unbound"  # nosec B101
+    assert after["version"] == before["version"] + 1  # nosec B101
+    assert after["canonical_revision"] == before["canonical_revision"] + 1  # nosec B101
+    assert after["canonical_hash"] != before["canonical_hash"]  # nosec B101
 
 
 def test_note_studio_document_rejects_non_dict_json_shapes(db: CharactersRAGDB) -> None:
@@ -207,6 +259,35 @@ def test_upsert_note_studio_document_uses_explicit_transaction_connection(db: Ch
     assert persisted is not None  # nosec B101
     assert persisted["payload_json"]["sections"][0]["title"] == "Revised"  # nosec B101
     assert persisted["diagram_manifest_json"]["diagrams"][0]["id"] == "d-2"  # nosec B101
+
+
+def test_studio_scope_resolution_occurs_inside_the_write_transaction(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_id = db.add_note(title="Source", content="Alpha beta gamma")
+    original = db.resolve_studio_compatibility_dataset_id
+    seen_connections: list[object | None] = []
+
+    def recording_resolver(*, owner_user_id: str, conn=None):
+        seen_connections.append(conn)
+        return original(owner_user_id=owner_user_id, conn=conn)
+
+    monkeypatch.setattr(db, "resolve_studio_compatibility_dataset_id", recording_resolver)
+    db.create_note_studio_document(
+        note_id=note_id,
+        payload_json={"meta": {"source_note_id": note_id}, "sections": []},
+        template_type="lined",
+        handwriting_mode="accented",
+        source_note_id=note_id,
+        excerpt_snapshot="beta",
+        excerpt_hash="sha256:demo",
+        companion_content_hash="sha256:markdown",
+        render_version=1,
+    )
+
+    assert seen_connections  # nosec B101
+    assert all(conn is not None for conn in seen_connections)  # nosec B101
 
 
 def test_add_and_update_note_accept_explicit_transaction_connection(

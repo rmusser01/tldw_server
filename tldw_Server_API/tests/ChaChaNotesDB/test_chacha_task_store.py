@@ -63,7 +63,8 @@ def test_compatibility_resolver_is_one_indexed_authority_lookup() -> None:
     source = inspect.getsource(TaskStore.resolve_task_compatibility_dataset_id)
 
     assert "note_task_scope_authority" in source
-    assert "SELECT owner_user_id,dataset_id" in source
+    assert "SELECT dataset_id FROM note_task_scope_authority" in source
+    assert "task_graph_bound = 1" in source
     for forbidden in (
         "ACCESS EXCLUSIVE",
         "ROW LEVEL SECURITY",
@@ -121,6 +122,12 @@ def test_empty_bind_persists_immutable_authority_and_guards_writes(
     assert db.resolve_task_compatibility_dataset_id(
         owner_user_id=db.client_id
     ) == "dataset-a"
+    authority = db.execute_query(
+        "SELECT task_graph_bound,moodboard_graph_bound,studio_graph_bound "
+        "FROM note_task_scope_authority WHERE owner_user_id=?",
+        (db.client_id,),
+    ).fetchone()
+    assert tuple(authority) == (1, 0, 0)  # nosec B101
     assert db.bind_local_task_graph_to_dataset(
         owner_user_id=db.client_id,
         target_dataset_id="dataset-a",

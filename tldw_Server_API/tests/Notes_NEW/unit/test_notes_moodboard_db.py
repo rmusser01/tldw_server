@@ -1,9 +1,11 @@
-import sqlite3
-
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    notes_moodboard_note_object_hash,
+    parse_notes_moodboard_note_v1,
 )
 
 
@@ -32,8 +34,8 @@ def test_moodboard_schema_tables_exist_after_init(moodboard_db: CharactersRAGDB)
         row["name"]
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()
     }
-    assert "idx_moodboard_notes_board" in indexes
-    assert "idx_moodboard_notes_note" in indexes
+    assert "idx_moodboard_notes_scope_board_page" in indexes
+    assert "idx_moodboard_notes_scope_note" in indexes
 
 
 def test_moodboard_crud_roundtrip(moodboard_db: CharactersRAGDB):
@@ -49,6 +51,11 @@ def test_moodboard_crud_roundtrip(moodboard_db: CharactersRAGDB):
     assert created["name"] == "Visual Research"
     assert created["smart_rule"]["query"] == "camera"
     assert created["version"] == 1
+    assert created["owner_user_id"] == moodboard_db.client_id
+    assert created["dataset_id"] == "local-unbound"
+    assert created["canonical_revision"] == 1
+    assert created["canonical_hash"].startswith("sha256:")
+    assert created["canvas_json"] == {"layout_mode": "masonry", "metadata": {}}
 
     listing = moodboard_db.list_moodboards(limit=20, offset=0)
     assert any(int(item["id"]) == int(moodboard_id) for item in listing)
@@ -64,6 +71,8 @@ def test_moodboard_crud_roundtrip(moodboard_db: CharactersRAGDB):
     assert after_update is not None
     assert after_update["name"] == "Visual Research Updated"
     assert int(after_update["version"]) == 2
+    assert int(after_update["canonical_revision"]) == 2
+    assert after_update["canonical_hash"] != created["canonical_hash"]
 
     deleted = moodboard_db.delete_moodboard(moodboard_id=moodboard_id, expected_version=int(after_update["version"]))
     assert deleted is True
@@ -73,6 +82,9 @@ def test_moodboard_crud_roundtrip(moodboard_db: CharactersRAGDB):
     deleted_row = next((row for row in deleted_view if int(row["id"]) == int(moodboard_id)), None)
     assert deleted_row is not None
     assert bool(deleted_row["deleted"]) is True
+    assert int(deleted_row["version"]) == 3
+    assert int(deleted_row["canonical_revision"]) == 3
+    assert deleted_row["canonical_hash"] != after_update["canonical_hash"]
 
 
 def test_moodboard_pin_unpin_is_idempotent(moodboard_db: CharactersRAGDB):
@@ -86,6 +98,19 @@ def test_moodboard_pin_unpin_is_idempotent(moodboard_db: CharactersRAGDB):
     assert first_pin is True
     assert second_pin is False
 
+    placement = moodboard_db.execute_query(
+        "SELECT owner_user_id,dataset_id,deleted,canonical_revision,canonical_hash "
+        "FROM moodboard_notes WHERE moodboard_id=? AND note_id=?",
+        (moodboard_id, note_id),
+    ).fetchone()
+    assert tuple(placement[:4]) == (
+        moodboard_db.client_id,
+        "local-unbound",
+        0,
+        1,
+    )
+    assert placement["canonical_hash"].startswith("sha256:")
+
     rows = moodboard_db.list_moodboard_notes(moodboard_id=moodboard_id, limit=20, offset=0)
     assert len(rows) == 1
     assert rows[0]["id"] == note_id
@@ -95,6 +120,49 @@ def test_moodboard_pin_unpin_is_idempotent(moodboard_db: CharactersRAGDB):
     second_unpin = moodboard_db.unlink_note_from_moodboard(moodboard_id=moodboard_id, note_id=note_id)
     assert first_unpin is True
     assert second_unpin is False
+    tombstone = moodboard_db.execute_query(
+        "SELECT deleted FROM moodboard_notes WHERE moodboard_id=? AND note_id=?",
+        (moodboard_id, note_id),
+    ).fetchone()
+    assert tombstone["deleted"] == 1
+
+
+def test_moodboard_repin_hash_keeps_the_persisted_placement_layout(
+    moodboard_db: CharactersRAGDB,
+) -> None:
+    first_note_id = moodboard_db.add_note(title="First", content="content")
+    second_note_id = moodboard_db.add_note(title="Second", content="content")
+    moodboard_id = moodboard_db.add_moodboard(name="Ordered pins")
+    assert first_note_id and second_note_id and moodboard_id is not None
+    assert moodboard_db.link_note_to_moodboard(moodboard_id, first_note_id) is True
+    assert moodboard_db.link_note_to_moodboard(moodboard_id, second_note_id) is True
+    assert moodboard_db.unlink_note_from_moodboard(moodboard_id, second_note_id) is True
+    assert moodboard_db.link_note_to_moodboard(moodboard_id, second_note_id) is True
+
+    board = moodboard_db.get_moodboard_by_id(moodboard_id)
+    placement = moodboard_db.execute_query(
+        "SELECT * FROM moodboard_notes WHERE moodboard_id=? AND note_id=?",
+        (moodboard_id, second_note_id),
+    ).fetchone()
+    assert board is not None and placement is not None
+    payload = parse_notes_moodboard_note_v1(
+        {
+            "moodboard_id": board["sync_id"],
+            "note_id": second_note_id,
+            "x": placement["x"],
+            "y": placement["y"],
+            "width": placement["width"],
+            "height": placement["height"],
+            "order_index": placement["order_index"],
+            "display": {},
+        }
+    )
+    assert placement["order_index"] == 1
+    assert placement["canonical_hash"] == notes_moodboard_note_object_hash(
+        payload,
+        revision=placement["canonical_revision"],
+        deleted=False,
+    )
 
 
 def test_moodboard_manual_and_smart_union_sources(moodboard_db: CharactersRAGDB):

@@ -56,9 +56,10 @@ def client_with_notes_studio_db(tmp_path, monkeypatch):
 
     service_cls = notes_endpoint.NotesStudioService
 
-    def _service_factory(*, db):
+    def _service_factory(*, db, user_id):
         return service_cls(
             db=db,
+            user_id=user_id,
             generation_adapter=_test_generation_adapter,
             diagram_adapter=_test_diagram_adapter,
         )

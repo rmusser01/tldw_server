@@ -536,13 +536,25 @@ class NoteStore:
         *,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> dict[str, Any] | None:
+        params: tuple[Any, ...] = (note_id,)
         query = "SELECT * FROM note_studio_documents WHERE note_id = ?"
+        if self._db._CURRENT_SCHEMA_VERSION >= 61:
+            owner = str(self._db.client_id)
+            dataset = self._db.resolve_studio_compatibility_dataset_id(
+                owner_user_id=owner,
+                conn=conn,
+            )
+            query += " AND owner_user_id=? AND dataset_id=?"
+            params = (note_id, owner, dataset)
         if conn is None:
-            cursor = self._db.execute_query(query, (note_id,))
+            cursor = self._db.execute_query(query, params)
         else:
-            cursor = conn.execute(query, (note_id,))
+            cursor = conn.execute(query, params)
         row = cursor.fetchone()
-        return self._db._deserialize_row_fields(row, ["payload_json", "diagram_manifest_json"]) if row else None
+        return self._db._deserialize_row_fields(
+            row,
+            ["payload_json", "diagram_manifest_json", "accepted_provenance_json"],
+        ) if row else None
 
     def get_note_studio_document(self, note_id: str) -> dict[str, Any] | None:
         return self._fetch_note_studio_document_row(note_id)
@@ -585,7 +597,7 @@ class NoteStore:
         )
         now = self._db._get_current_utc_timestamp_iso()
 
-        if upsert:
+        if self._db._CURRENT_SCHEMA_VERSION < 61 and upsert:
             query = (
                 "INSERT INTO note_studio_documents ("
                 "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
@@ -604,7 +616,7 @@ class NoteStore:
                 "render_version = excluded.render_version, "
                 "last_modified = excluded.last_modified"
             )
-        else:
+        elif self._db._CURRENT_SCHEMA_VERSION < 61:
             query = (
                 "INSERT INTO note_studio_documents ("
                 "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
@@ -613,23 +625,137 @@ class NoteStore:
                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
 
-        params = (
-            normalized_note_id,
-            payload_json_str,
-            template_type,
-            handwriting_mode,
-            source_note_id,
-            excerpt_snapshot,
-            excerpt_hash,
-            diagram_manifest_json_str,
-            companion_content_hash,
-            render_version,
-            now,
-            now,
-        )
+        if self._db._CURRENT_SCHEMA_VERSION < 61:
+            params = (
+                normalized_note_id,
+                payload_json_str,
+                template_type,
+                handwriting_mode,
+                source_note_id,
+                excerpt_snapshot,
+                excerpt_hash,
+                diagram_manifest_json_str,
+                companion_content_hash,
+                render_version,
+                now,
+                now,
+            )
+        else:
+            owner = str(self._db.client_id)
+
+            def _scoped_values(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> tuple[Any, ...]:
+                dataset = self._db.resolve_studio_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=inner_conn,
+                )
+                note_row = inner_conn.execute(
+                    "SELECT * FROM notes WHERE id=? AND client_id=?",
+                    (normalized_note_id, owner),
+                ).fetchone()
+                if note_row is None:
+                    raise ConflictError(
+                        "Note not found.", entity="notes", entity_id=normalized_note_id
+                    )  # noqa: TRY003
+                note = dict(note_row)
+                note_revision = max(1, int(note.get("version") or 1))
+                note_hash = self._db._legacy_note_hash_v61(note)
+                source_revision = source_hash = None
+                if source_note_id is not None:
+                    source_row = inner_conn.execute(
+                        "SELECT * FROM notes WHERE id=? AND client_id=?",
+                        (source_note_id, owner),
+                    ).fetchone()
+                    if source_row is None or bool(source_row["deleted"]):
+                        raise ConflictError(
+                            "Source note not found or not live.",
+                            entity="notes",
+                            entity_id=source_note_id,
+                        )  # noqa: TRY003
+                    source = dict(source_row)
+                    source_revision = max(1, int(source.get("version") or 1))
+                    source_hash = self._db._legacy_note_hash_v61(source)
+                result_hash = self._db._note_task_v60_hash(
+                    {
+                        "payload_json": json.loads(payload_json_str),
+                        "template_type": template_type,
+                        "handwriting_mode": handwriting_mode,
+                        "source_note_id": source_note_id,
+                        "excerpt_snapshot": excerpt_snapshot,
+                        "excerpt_hash": excerpt_hash,
+                        "diagram_manifest_json": (
+                            None if diagram_manifest_json_str is None else json.loads(diagram_manifest_json_str)
+                        ),
+                        "companion_content_hash": companion_content_hash,
+                        "render_version": render_version,
+                        "note_revision": note_revision,
+                        "note_hash": note_hash,
+                    }
+                )
+                provenance = self._db._canonical_json_text_v61(
+                    {
+                        "kind": "manual",
+                        "attestation": "server",
+                        "provider": None,
+                        "model": None,
+                        "accepted_at": now,
+                        "source_revision": source_revision,
+                        "source_hash": source_hash,
+                        "result_hash": result_hash,
+                    }
+                )
+                previous = inner_conn.execute(
+                    "SELECT version,canonical_revision FROM note_studio_documents "
+                    "WHERE owner_user_id=? AND dataset_id=? AND note_id=?",
+                    (owner, dataset, normalized_note_id),
+                ).fetchone()
+                version = 1 if previous is None else int(previous["version"]) + 1
+                revision = 1 if previous is None else int(previous["canonical_revision"]) + 1
+                canonical_hash = self._db._note_task_v60_hash(
+                    {
+                        "domain": "notes.studio_document",
+                        "note_id": normalized_note_id,
+                        "revision": revision,
+                        "result_hash": result_hash,
+                        "deleted": bool(note.get("deleted")),
+                    }
+                )
+                return (
+                    owner, dataset, normalized_note_id, payload_json_str, template_type,
+                    handwriting_mode, source_note_id, excerpt_snapshot, excerpt_hash,
+                    diagram_manifest_json_str, companion_content_hash, render_version,
+                    note_revision, note_hash, provenance, now, now,
+                    self._deleted_value(bool(note.get("deleted"))), version, revision,
+                    canonical_hash, None, None,
+                )
+
+            query = (
+                "INSERT INTO note_studio_documents("
+                "owner_user_id,dataset_id,note_id,payload_json,template_type,handwriting_mode,"
+                "source_note_id,excerpt_snapshot,excerpt_hash,diagram_manifest_json,"
+                "companion_content_hash,render_version,note_revision,note_hash,"
+                "accepted_provenance_json,created_at,last_modified,deleted,version,"
+                "canonical_revision,canonical_hash,source_diagnostic_code,source_diagnostic_hash"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            )
+            if upsert:
+                query += (
+                    " ON CONFLICT(owner_user_id,dataset_id,note_id) DO UPDATE SET "
+                    "payload_json=excluded.payload_json,template_type=excluded.template_type,"
+                    "handwriting_mode=excluded.handwriting_mode,source_note_id=excluded.source_note_id,"
+                    "excerpt_snapshot=excluded.excerpt_snapshot,excerpt_hash=excluded.excerpt_hash,"
+                    "diagram_manifest_json=excluded.diagram_manifest_json,"
+                    "companion_content_hash=excluded.companion_content_hash,render_version=excluded.render_version,"
+                    "note_revision=excluded.note_revision,note_hash=excluded.note_hash,"
+                    "accepted_provenance_json=excluded.accepted_provenance_json,"
+                    "last_modified=excluded.last_modified,deleted=excluded.deleted,version=excluded.version,"
+                    "canonical_revision=excluded.canonical_revision,canonical_hash=excluded.canonical_hash,"
+                    "source_diagnostic_code=excluded.source_diagnostic_code,"
+                    "source_diagnostic_hash=excluded.source_diagnostic_hash"
+                )
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
-            prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
+            write_params = params if self._db._CURRENT_SCHEMA_VERSION < 61 else _scoped_values(inner_conn)
+            prepared_query, prepared_params = self._db._prepare_backend_statement(query, write_params)
             inner_conn.execute(prepared_query, prepared_params or ())
             document = self._fetch_note_studio_document_row(normalized_note_id, conn=inner_conn)
             if not document:
@@ -766,6 +892,75 @@ class NoteStore:
         ]
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            if self._db._CURRENT_SCHEMA_VERSION >= 61:
+                owner = str(self._db.client_id)
+                dataset = self._db.resolve_studio_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=inner_conn,
+                )
+                guard_query = (
+                    "SELECT 1 FROM note_studio_documents "
+                    "WHERE note_id=? AND owner_user_id=? AND dataset_id=? "
+                    "AND ((? IS NULL AND companion_content_hash IS NULL) OR companion_content_hash=?) "
+                    "AND (? IS NULL OR render_version=?) "
+                    "AND (? IS NULL OR last_modified=?)"
+                )
+                guard_params = (
+                    normalized_note_id,
+                    owner,
+                    dataset,
+                    expected_companion_content_hash,
+                    expected_companion_content_hash,
+                    expected_render_version,
+                    expected_render_version,
+                    expected_last_modified,
+                    expected_last_modified,
+                )
+                prepared_guard, prepared_guard_params = self._db._prepare_backend_statement(
+                    guard_query,
+                    guard_params,
+                )
+                if inner_conn.execute(prepared_guard, prepared_guard_params or ()).fetchone() is None:
+                    current_document = self._fetch_note_studio_document_row(
+                        normalized_note_id,
+                        conn=inner_conn,
+                    )
+                    if not current_document:
+                        raise ConflictError(
+                            "Note studio document not found.",
+                            entity="note_studio_documents",
+                            entity_id=normalized_note_id,
+                        )  # noqa: TRY003
+                    raise ConflictError(
+                        f"Note studio document for note ID '{normalized_note_id}' changed concurrently.",
+                        entity="note_studio_documents",
+                        entity_id=normalized_note_id,
+                    )  # noqa: TRY003
+                current_document = self._fetch_note_studio_document_row(
+                    normalized_note_id,
+                    conn=inner_conn,
+                )
+                if not current_document:
+                    raise ConflictError(
+                        "Note studio document not found.",
+                        entity="note_studio_documents",
+                        entity_id=normalized_note_id,
+                    )  # noqa: TRY003
+                return self._write_note_studio_document(
+                    note_id=normalized_note_id,
+                    payload_json=current_document["payload_json"],
+                    template_type=current_document["template_type"],
+                    handwriting_mode=current_document["handwriting_mode"],
+                    source_note_id=current_document.get("source_note_id"),
+                    excerpt_snapshot=current_document.get("excerpt_snapshot"),
+                    excerpt_hash=current_document.get("excerpt_hash"),
+                    diagram_manifest_json=diagram_manifest_json,
+                    companion_content_hash=current_document.get("companion_content_hash"),
+                    render_version=int(current_document["render_version"]),
+                    conn=inner_conn,
+                    upsert=True,
+                )
+
             prepared_query, prepared_params = self._db._prepare_backend_statement(query, tuple(params))
             cursor = inner_conn.execute(prepared_query, prepared_params or ())
             if cursor.rowcount == 0:

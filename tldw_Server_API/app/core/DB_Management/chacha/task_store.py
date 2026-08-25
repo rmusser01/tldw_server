@@ -133,8 +133,8 @@ class TaskStore:
                 "LOCK TABLE note_task_scope_authority IN SHARE MODE",
             )
         rows = self._read(
-            "SELECT owner_user_id,dataset_id FROM note_task_scope_authority "
-            "WHERE owner_user_id = ? LIMIT 2",
+            "SELECT dataset_id FROM note_task_scope_authority "
+            "WHERE owner_user_id = ? AND task_graph_bound = 1",
             (owner_user_id,),
             conn=conn,
         ).fetchall()
@@ -147,11 +147,9 @@ class TaskStore:
                 entity="tasks",
                 entity_id=owner_user_id,
             )  # noqa: TRY003
-        row_owner = str(rows[0]["owner_user_id"]).strip()
         authority_dataset = str(rows[0]["dataset_id"]).strip()
         if (
             len(rows) != 1
-            or row_owner != owner_user_id
             or not authority_dataset
             or authority_dataset == self._LOCAL_UNBOUND
             or dataset_id != authority_dataset
@@ -3781,8 +3779,8 @@ class TaskStore:
             )  # noqa: TRY003
 
         rows = self._read(
-            "SELECT owner_user_id,dataset_id FROM note_task_scope_authority "
-            "WHERE owner_user_id = ? LIMIT 2",
+            "SELECT dataset_id FROM note_task_scope_authority "
+            "WHERE owner_user_id = ? AND task_graph_bound = 1",
             (owner,),
             conn=conn,
         ).fetchall()
@@ -3794,9 +3792,8 @@ class TaskStore:
                 entity="tasks",
                 entity_id=owner,
             )  # noqa: TRY003
-        row_owner = str(rows[0]["owner_user_id"]).strip()
         dataset = str(rows[0]["dataset_id"]).strip()
-        if row_owner != owner or not dataset or dataset == self._LOCAL_UNBOUND:
+        if not dataset or dataset == self._LOCAL_UNBOUND:
             raise ConflictError(
                 "Task compatibility scope is inconsistent.",
                 entity="tasks",
@@ -4010,7 +4007,8 @@ class TaskStore:
             authority_lock = " FOR UPDATE" if postgres else ""
             authority_rows = self._read(
                 # authority_lock is a fixed backend suffix, never caller input.
-                "SELECT owner_user_id,dataset_id FROM note_task_scope_authority "
+                "SELECT owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound "
+                "FROM note_task_scope_authority "
                 f"WHERE owner_user_id = ?{authority_lock}",  # nosec B608
                 (owner,),
                 conn=transaction_conn,
@@ -4022,9 +4020,11 @@ class TaskStore:
                     entity_id=target,
                 )  # noqa: TRY003
             authority_dataset = None
+            task_graph_bound = False
             if authority_rows:
                 authority_owner = str(authority_rows[0]["owner_user_id"]).strip()
                 authority_dataset = str(authority_rows[0]["dataset_id"]).strip()
+                task_graph_bound = bool(authority_rows[0]["task_graph_bound"])
                 if (
                     authority_owner != owner
                     or not authority_dataset
@@ -4035,7 +4035,7 @@ class TaskStore:
                         entity="tasks",
                         entity_id=target,
                     )  # noqa: TRY003
-                if authority_dataset != target:
+                if task_graph_bound and authority_dataset != target:
                     raise ConflictError(
                         "Task dataset binding is immutable.",
                         entity="tasks",
@@ -4047,7 +4047,7 @@ class TaskStore:
             target_snapshot = _snapshot(transaction_conn, target)
             source_counts = _counts(source_snapshot)
             target_counts = _counts(target_snapshot)
-            if authority_dataset == target:
+            if task_graph_bound and authority_dataset == target:
                 if graph_datasets - {target} or any(source_counts.values()):
                     raise ConflictError(
                         "Task dataset binding authority conflicts with graph scope.",
@@ -4067,11 +4067,27 @@ class TaskStore:
                     "Task dataset binding target collision.", entity="tasks", entity_id=target
                 )  # noqa: TRY003
             if not any(source_counts.values()):
-                self._execute(
-                    transaction_conn,
-                    "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
-                    (owner, target),
-                )
+                if authority_dataset is None:
+                    self._execute(
+                        transaction_conn,
+                        "INSERT INTO note_task_scope_authority("
+                        "owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound"
+                        ") VALUES (?,?,1,0,0)",
+                        (owner, target),
+                    )
+                elif authority_dataset == target:
+                    self._execute(
+                        transaction_conn,
+                        "UPDATE note_task_scope_authority SET task_graph_bound=1 "
+                        "WHERE owner_user_id=? AND dataset_id=? AND task_graph_bound=0",
+                        (owner, target),
+                    )
+                else:
+                    raise ConflictError(
+                        "Task dataset binding is immutable.",
+                        entity="tasks",
+                        entity_id=target,
+                    )  # noqa: TRY003
                 _finish_postgres(transaction_conn)
                 return source_counts
             _prove_parents(transaction_conn)
@@ -4103,11 +4119,27 @@ class TaskStore:
                     entity="tasks",
                     entity_id=target,
                 )  # noqa: TRY003
-            self._execute(
-                transaction_conn,
-                "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
-                (owner, target),
-            )
+            if authority_dataset is None:
+                self._execute(
+                    transaction_conn,
+                    "INSERT INTO note_task_scope_authority("
+                    "owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound"
+                    ") VALUES (?,?,1,0,0)",
+                    (owner, target),
+                )
+            elif authority_dataset == target:
+                self._execute(
+                    transaction_conn,
+                    "UPDATE note_task_scope_authority SET task_graph_bound=1 "
+                    "WHERE owner_user_id=? AND dataset_id=? AND task_graph_bound=0",
+                    (owner, target),
+                )
+            else:
+                raise ConflictError(
+                    "Task dataset binding is immutable.",
+                    entity="tasks",
+                    entity_id=target,
+                )  # noqa: TRY003
             _finish_postgres(transaction_conn)
             return _counts(rebound)
 
