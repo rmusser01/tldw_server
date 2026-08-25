@@ -11,19 +11,21 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     DefinitionRow,
     ScheduledTasksDatabase,
 )
+from tldw_Server_API.app.core.Scheduled_Tasks import agent_task_jobs
 from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
     handle_agent_task_job,
     register_executor,
 )
-from tldw_Server_API.app.core.config import settings
 
 pytestmark = pytest.mark.unit
 
@@ -178,6 +180,61 @@ async def test_redelivered_job_for_terminal_slot_is_recorded_noop(consumer_env) 
 
 
 @pytest.mark.asyncio
+async def test_redelivered_terminal_run_dedupes_when_definition_is_unavailable(
+    consumer_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Return the recorded terminal run when its definition later disappears."""
+    user_id = 1022
+    definition = _create_definition(user_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    executor = AsyncMock(return_value="42")
+    register_executor("recurring_question", executor)
+    job = _job(definition, user_id)
+
+    first = await handle_agent_task_job(job, scheduled_db=sdb)
+    monkeypatch.setattr(sdb, "get_definition", Mock(return_value=None))
+    second = await handle_agent_task_job(job, scheduled_db=sdb)
+
+    assert first["status"] == "succeeded"
+    assert second == {
+        "status": "succeeded",
+        "definition_id": definition.id,
+        "run_id": first["run_id"],
+        "deduped": True,
+    }
+    assert executor.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_injected_database_cannot_dedupe_another_owners_run(
+    consumer_env: None,
+) -> None:
+    """Conceal recorded runs when an injected repository belongs to another owner."""
+    definition_owner_id = 1023
+    job_owner_id = 1024
+    definition = _create_definition(definition_owner_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=definition_owner_id)
+    executor = AsyncMock(return_value="42")
+    register_executor("recurring_question", executor)
+
+    owner_result = await handle_agent_task_job(
+        _job(definition, definition_owner_id), scheduled_db=sdb
+    )
+    result = await handle_agent_task_job(
+        _job(definition, job_owner_id), scheduled_db=sdb
+    )
+
+    assert owner_result["status"] == "succeeded"
+    assert result == {
+        "status": "skipped",
+        "definition_id": definition.id,
+        "run_id": None,
+        "reason": "definition_missing",
+    }
+    assert executor.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_paused_definition_skips_with_reason(consumer_env) -> None:
     user_id = 1012
     definition = _create_definition(user_id, lifecycle="paused")
@@ -196,20 +253,113 @@ async def test_paused_definition_skips_with_reason(consumer_env) -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_definition_skips(consumer_env) -> None:
+async def test_missing_definition_skips_without_side_effects(
+    consumer_env: None,
+) -> None:
+    """Skip a missing definition without creating dependent resources."""
     user_id = 1013
-    ghost = _create_definition(user_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    sdb.ensure_schema()
+    missing_definition_id = "definition-never-created"
+    executor = AsyncMock(return_value="must not execute")
+    register_executor("recurring_question", executor)
+    log_messages: list[str] = []
+    sink_id = agent_task_jobs.logger.add(log_messages.append, format="{message}")
 
     job = {
         "id": 78,
         "owner_user_id": user_id,
         "job_type": "agent_task_run",
         # A definition id that was never created: unique to this test.
-        "payload": {"definition_id": ghost.id + "deadbeef", "user_id": user_id},
+        "payload": {
+            "definition_id": missing_definition_id,
+            "user_id": user_id,
+            "family": "recurring_question",
+            "scheduled_for": SLOT,
+            "prompt": "private prompt must not be logged",
+        },
     }
-    result = await handle_agent_task_job(job)
+    try:
+        result = await handle_agent_task_job(job)
+    finally:
+        agent_task_jobs.logger.remove(sink_id)
 
-    assert result["status"] == "skipped"
+    assert result == {
+        "status": "skipped",
+        "definition_id": missing_definition_id,
+        "run_id": None,
+        "reason": "definition_missing",
+    }
+    assert sdb.get_scheduled_task_run_by_slot(
+        definition_id=missing_definition_id, run_slot_key=SLOT
+    ) is None
+    audits, total = sdb.list_audit_events(
+        owner_id=user_id, definition_id=missing_definition_id
+    )
+    assert audits == []
+    assert total == 0
+    assert _latest_notification(user_id) is None
+    executor.assert_not_awaited()
+    assert [message.strip() for message in log_messages] == [
+        "Automation Job skipped because its definition is unavailable "
+        f"(definition_id={missing_definition_id} user_id={user_id} job_id=78)"
+    ]
+    assert "private prompt" not in log_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_cross_owner_definition_is_treated_as_missing(
+    consumer_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Conceal another owner's definition as an unavailable resource."""
+    definition_owner_id = 1020
+    job_owner_id = 1021
+    definition = _create_definition(definition_owner_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=job_owner_id)
+    sdb.ensure_schema()
+    executor = AsyncMock(return_value="must not execute")
+    register_executor("recurring_question", executor)
+    fake_logger = Mock()
+    monkeypatch.setattr(agent_task_jobs, "logger", fake_logger)
+
+    result = await handle_agent_task_job(
+        {
+            "id": 79,
+            "owner_user_id": job_owner_id,
+            "job_type": "agent_task_run",
+            "payload": {
+                "definition_id": definition.id,
+                "user_id": job_owner_id,
+                "family": definition.family,
+                "scheduled_for": SLOT,
+                "prompt": "private prompt must not be logged",
+            },
+        }
+    )
+
+    assert result == {
+        "status": "skipped",
+        "definition_id": definition.id,
+        "run_id": None,
+        "reason": "definition_missing",
+    }
+    assert sdb.get_scheduled_task_run_by_slot(
+        definition_id=definition.id, run_slot_key=SLOT
+    ) is None
+    audits, total = sdb.list_audit_events(
+        owner_id=job_owner_id, definition_id=definition.id
+    )
+    assert audits == []
+    assert total == 0
+    assert _latest_notification(job_owner_id) is None
+    executor.assert_not_awaited()
+    fake_logger.warning.assert_called_once_with(
+        "Automation Job skipped because its definition is unavailable "
+        "(definition_id={definition_id} user_id={user_id} job_id={job_id})",
+        definition_id=definition.id,
+        user_id=job_owner_id,
+        job_id=79,
+    )
 
 
 # ---------------------------------------------------------------------------

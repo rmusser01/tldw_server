@@ -59,6 +59,12 @@ def _definition(
         updated_by="t",
         created_at="2026-08-22T00:00:00+00:00",
         updated_at="2026-08-22T00:00:00+00:00",
+        resolution_state="open",
+        resolved_at=None,
+        resolved_by=None,
+        resolved_result_id=None,
+        finding_policy={},
+        retention_policy={},
     )
 
 

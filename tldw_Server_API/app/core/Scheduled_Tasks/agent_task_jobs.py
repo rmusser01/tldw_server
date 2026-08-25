@@ -36,11 +36,11 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     DefinitionRow,
     ScheduledTasksDatabase,
 )
+from tldw_Server_API.app.core.exceptions import BadRequestError
 
 AUTOMATION_DOMAIN = "scheduled_tasks"
 AUTOMATION_JOB_TYPE = "agent_task_run"
@@ -148,6 +148,8 @@ async def handle_agent_task_job(
 
     Returns a result dict shaped like the reminders consumer's (``status``,
     ``definition_id``, ``run_id``, ``deduped`` for no-op redeliveries).
+    ``run_id`` is ``None`` when no run exists and the owner-scoped definition
+    is unavailable; that skip also includes ``reason="definition_missing"``.
     """
     payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
     definition_id = str(payload.get("definition_id") or "").strip()
@@ -163,20 +165,36 @@ async def handle_agent_task_job(
     now_iso = datetime.now(timezone.utc).isoformat()
 
     sdb = scheduled_db or ScheduledTasksDatabase.for_user(user_id=user_id)
-    cdb = collections_db or CollectionsDatabase.for_user(user_id=user_id)
 
     # Durable run row, deduped on (definition, slot): a redelivered Job for
-    # an already-terminal (or in-flight) slot is a recorded no-op.
-    run = sdb.create_scheduled_task_run(
-        definition_id=definition_id,
-        owner_id=user_id,
-        scheduled_for=payload.get("scheduled_for"),
-        job_id=str(job.get("id")) if job.get("id") is not None else None,
-        run_slot_utc=run_slot_utc,
-        run_slot_key=run_slot_key,
-        status="running",
-        started_at=now_iso,
-    )
+    # an already-terminal (or in-flight) slot reuses the recorded run.
+    try:
+        run = sdb.create_scheduled_task_run(
+            definition_id=definition_id,
+            owner_id=user_id,
+            scheduled_for=payload.get("scheduled_for"),
+            job_id=str(job.get("id")) if job.get("id") is not None else None,
+            run_slot_utc=run_slot_utc,
+            run_slot_key=run_slot_key,
+            status="running",
+            started_at=now_iso,
+        )
+    except KeyError:
+        run = None
+    if run is None or run.get("owner_id") != user_id:
+        logger.warning(
+            "Automation Job skipped because its definition is unavailable "
+            "(definition_id={definition_id} user_id={user_id} job_id={job_id})",
+            definition_id=definition_id,
+            user_id=user_id,
+            job_id=job.get("id"),
+        )
+        return {
+            "status": "skipped",
+            "definition_id": definition_id,
+            "run_id": None,
+            "reason": "definition_missing",
+        }
     if run["status"] in ("succeeded", "skipped", "failed", "timed_out"):
         return {
             "status": run["status"],
@@ -189,6 +207,8 @@ async def handle_agent_task_job(
         definition = sdb.get_definition(owner_id=user_id, definition_id=definition_id)
     except KeyError:
         definition = None
+
+    cdb = collections_db or CollectionsDatabase.for_user(user_id=user_id)
     if definition is None:
         _finish(
             sdb,
