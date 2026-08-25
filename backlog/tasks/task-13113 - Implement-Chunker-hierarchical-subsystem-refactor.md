@@ -1,7 +1,7 @@
 ---
 id: TASK-13113
 title: Implement Chunker hierarchical subsystem refactor
-status: To Do
+status: In Progress
 created_date: 2026-08-24 07:10
 dependencies:
 - TASK-13112
@@ -14,6 +14,7 @@ references:
 - TASK-13112
 documentation:
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
+- Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
 modified_files:
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
 - Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
@@ -23,7 +24,7 @@ modified_files:
 - tldw_Server_API/app/core/Chunking/process_text/dispatch.py
 - tldw_Server_API/app/core/Chunking/hierarchical/
 - tldw_Server_API/tests/Chunking/
-updated_date: 2026-08-24 07:15
+updated_date: 2026-08-25 05:47
 ---
 
 ## Description
@@ -45,13 +46,13 @@ Implement the approved Chunker hierarchical subsystem design in an isolated work
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Pending final approval of TASK-13112 and creation of the detailed implementation plan through the writing-plans workflow.
+Execute `Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md` task-by-task: (1) reconcile current origin/dev and rerun the focused baseline before production edits; (2) freeze public signatures, composition, option, call-trace, logging, malformed-tree, aliasing, and regex contracts; (3) extract passive models and shared paragraph spans while migrating process_text; (4) extract and activate leaf construction; (5) extract the tree builder and per-call service coordination; (6) extract and activate grouping; (7) extract flattening and complete public delegation; (8) enforce dependency boundaries, run the complete Chunking/static/security gates, obtain final code review, and prepare the PR handoff against dev. Each structural stage uses red-green tests and a focused commit. Any behavior correction must satisfy the approved correction gate and land in a separate fix commit.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Created during the second spec-review pass to separate implementation tracking from design-only TASK-13112. This task remains To Do and blocked on final design approval. The implementation plan must use the approved component interfaces, concrete malformed-tree matrix, logging contract, scoped quality gates, baseline reconciliation procedure, and human-owned PR Change summary gate.
+Created during the second spec-review pass to separate implementation tracking from design-only TASK-13112. User approved the final design on 2026-08-24; TASK-13112 was finalized and moved to completed storage, and this task moved to In Progress. Detailed implementation planning completed on 2026-08-24 through the writing-plans workflow. The linked plan uses eight reviewable tasks, incremental active wiring, frozen compatibility characterizations, exact malformed-tree and leaf-call matrices, AST dependency checks, scoped formatting/type/security gates, and an explicit human-written PR Change summary merge blocker. Production code remains untouched pending execution handoff.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
