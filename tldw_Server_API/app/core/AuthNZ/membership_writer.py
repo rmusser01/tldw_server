@@ -39,6 +39,13 @@ class MembershipWriteError(UserRegistrationException):
     """Base class for sanitized runtime membership-write failures."""
 
 
+class MembershipReadError(UserRegistrationException):
+    """A membership-state read failed without exposing backend details."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership state could not be read.")
+
+
 class MembershipAuthorizationError(MembershipWriteError):
     """The persisted actor authority is insufficient for the locked scopes."""
 
