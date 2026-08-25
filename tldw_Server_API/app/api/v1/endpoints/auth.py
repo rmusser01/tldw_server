@@ -77,7 +77,9 @@ from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
     DatabaseError,
+    DatabaseLockError,
     DuplicateOrganizationError,
     DuplicateUserError,
     InvalidRegistrationCodeError,
@@ -110,6 +112,9 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     validate_single_user_session,
 )
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
 from tldw_Server_API.app.core.Resource_Governance.policy_loader import default_policy_loader
@@ -3847,6 +3852,20 @@ async def register(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid registration code."
+        ) from e
+    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as e:
+        logger.warning("Registration deferred because the authentication database is busy")
+        log_counter("auth_register_database_busy")
+        log_histogram("auth_register_duration", time.perf_counter() - start_time)
+        _finalize_register_diag(http_request, response)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication database is busy. Please retry shortly.",
+            headers={
+                "Retry-After": str(
+                    get_authnz_transaction_policy().busy_retry_after_seconds
+                ),
+            },
         ) from e
     except RegistrationError as e:
         logger.error(f"Registration error: {e}")

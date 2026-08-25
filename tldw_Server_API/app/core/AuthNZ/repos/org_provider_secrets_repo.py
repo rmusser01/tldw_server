@@ -299,6 +299,36 @@ class AuthnzOrgProviderSecretsRepo:
             ):
                 raise MembershipAuthorizationError()
 
+    async def authorize_scope_write(
+        self,
+        *,
+        scope_type: str,
+        scope_id: int,
+        authorization_context: ActorMembershipWriteContext,
+    ) -> None:
+        """Revalidate persisted authority before non-database mutation work."""
+
+        scope_norm = _normalize_scope_type(scope_type)
+        postgres = getattr(self.db_pool, "pool", None) is not None
+        try:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
+                await self._lock_authorized_active_parent_scope(
+                    conn,
+                    scope_type=scope_norm,
+                    scope_id=int(scope_id),
+                    postgres=postgres,
+                    authorization_context=authorization_context,
+                )
+        except Exception as exc:
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.authorize_scope_write failed"
+            )
+            raise
+
     async def _canonicalize_provider_identity(
         self,
         conn: Any,

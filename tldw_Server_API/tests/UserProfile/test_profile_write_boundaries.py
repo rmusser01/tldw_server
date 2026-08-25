@@ -100,6 +100,7 @@ BOUNDED_TASK8_TRANSACTION_FUNCTIONS = {
     ),
     "tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py": frozenset(
         {
+            "authorize_scope_write",
             "upsert_secret",
             "fetch_secret_for_manager",
             "list_secrets_for_manager",

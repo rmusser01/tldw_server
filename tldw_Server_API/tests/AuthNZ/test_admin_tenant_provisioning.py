@@ -16,6 +16,10 @@ from tldw_Server_API.app.api.v1.endpoints.admin.admin_tenant_provisioning import
     TenantProvisionResponse,
     router,
 )
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     AnchorOwnership,
@@ -507,3 +511,58 @@ class TestProvisionEndpointUnit:
         assert exc_info.value.status_code == 500
         assert exc_info.value.detail == "Tenant provisioning failed"
         assert logger_stub.error_records == [("Tenant provisioning failed", (), {})]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "failure_type",
+        (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
+    )
+    async def test_busy_database_returns_retryable_503(
+        self,
+        failure_type: type[Exception],
+    ) -> None:
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_tenant_provisioning
+
+        class _BusyTransaction:
+            async def __aenter__(self):
+                raise failure_type()
+
+            async def __aexit__(self, *_args):
+                return False
+
+        class _BusyPool:
+            pool = None
+
+            def transaction(self, *, acquire_timeout_seconds=None):
+                assert acquire_timeout_seconds == (
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                )
+                return _BusyTransaction()
+
+        payload = TenantProvisionRequest(
+            username="tenant_user",
+            email="tenant@example.com",
+            password="securepass123",
+            org_name="TenantOrg",
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+            new_callable=AsyncMock,
+            return_value=_BusyPool(),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await admin_tenant_provisioning.provision_tenant(
+                    payload,
+                    _admin_principal(),
+                )
+
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.detail == (
+            "Authentication database is busy. Please retry shortly."
+        )
+        assert exc_info.value.headers == {
+            "Retry-After": str(
+                get_authnz_transaction_policy().busy_retry_after_seconds
+            ),
+        }
