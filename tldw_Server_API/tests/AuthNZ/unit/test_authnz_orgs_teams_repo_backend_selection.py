@@ -8,7 +8,8 @@ from typing import Any, get_type_hints
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.exceptions import UserRegistrationException
+from tldw_Server_API.app.core.AuthNZ import orgs_teams as orgs_teams_facade
+from tldw_Server_API.app.core.AuthNZ.exceptions import RollbackSignal, UserRegistrationException
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     AnchorOwnership,
@@ -16,6 +17,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipLockBackend,
     MembershipMutationResult,
     MembershipParentRequired,
+    MembershipPreflightChanged,
     MembershipScopeDeletionSnapshot,
     MembershipScopeType,
     MembershipUserVersionFloor,
@@ -95,6 +97,7 @@ class _PoolStub:
     def __init__(self, conn: Any, *, postgres: bool) -> None:
         self._conn = conn
         self.pool = object() if postgres else None
+        self.acquire_timeouts: list[float | None] = []
         self.transaction_acquire_timeouts: list[float | None] = []
 
     def transaction(
@@ -105,7 +108,8 @@ class _PoolStub:
         self.transaction_acquire_timeouts.append(acquire_timeout_seconds)
         return _Tx(self._conn)
 
-    def acquire(self) -> _Tx:
+    def acquire(self, *, timeout: float | None = None) -> _Tx:
+        self.acquire_timeouts.append(timeout)
         return _Tx(self._conn)
 
 
@@ -685,11 +689,51 @@ async def test_row_only_organization_creation_rejects_owner_pointer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_legacy_organization_facade_routes_owner_through_bootstrap_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, Any] = {}
+
+    class _Repo:
+        async def create_organization(self, **_kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("owner-bearing creation bypassed the writer")
+
+        async def create_organization_with_owner_membership(
+            self,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            observed.update(kwargs)
+            return {"id": 17, "owner_user_id": kwargs["owner_user_id"]}
+
+    async def _repo() -> _Repo:
+        return _Repo()
+
+    monkeypatch.setattr(orgs_teams_facade, "_get_orgs_teams_repo", _repo)
+
+    organization = await orgs_teams_facade.create_organization(
+        name="Legacy owner",
+        owner_user_id=7,
+        slug="legacy-owner",
+        metadata={"source": "compatibility"},
+    )
+
+    assert organization == {"id": 17, "owner_user_id": 7}
+    assert observed["name"] == "Legacy owner"
+    assert observed["owner_user_id"] == 7
+    assert observed["slug"] == "legacy-owner"
+    assert observed["metadata"] == {"source": "compatibility"}
+    assert observed["context"] == TrustedMembershipWriteContext(
+        trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_organization_with_owner_membership_reuses_one_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     conn = _SqliteConnWithPgTrap()
-    repo = AuthnzOrgsTeamsRepo(db_pool=_PoolStub(conn, postgres=False))
+    pool = _PoolStub(conn, postgres=False)
+    repo = AuthnzOrgsTeamsRepo(db_pool=pool)
     observed: dict[str, Any] = {}
     events: list[str] = []
 
@@ -736,6 +780,7 @@ async def test_create_organization_with_owner_membership_reuses_one_transaction(
     assert observed["create_conn"] is conn
     assert observed["provision_kwargs"]["conn"] is conn
     assert observed["provision_kwargs"]["org_role"] == "owner"
+    assert pool.transaction_acquire_timeouts == [5.0]
 
 
 @pytest.mark.asyncio
@@ -743,7 +788,8 @@ async def test_create_ownerless_organization_reauthorizes_actor_in_same_transact
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     conn = _SqliteConnWithPgTrap()
-    repo = AuthnzOrgsTeamsRepo(db_pool=_PoolStub(conn, postgres=False))
+    pool = _PoolStub(conn, postgres=False)
+    repo = AuthnzOrgsTeamsRepo(db_pool=pool)
     context = ActorMembershipWriteContext(
         actor_user_id=11,
         required_authority=MembershipAuthority.PLATFORM_ADMIN,
@@ -782,6 +828,7 @@ async def test_create_ownerless_organization_reauthorizes_actor_in_same_transact
     assert observed[0][1][2] is context
     assert observed[0][1][3] is None
     assert observed[1][1][0] is conn
+    assert pool.transaction_acquire_timeouts == [5.0]
 
 
 @pytest.mark.asyncio
@@ -974,7 +1021,8 @@ async def test_transfer_organization_ownership_sqlite_backend_selection_uses_exe
     monkeypatch: pytest.MonkeyPatch,
 ):
     conn = _SqliteTransferOwnershipConn()
-    repo = AuthnzOrgsTeamsRepo(db_pool=_PoolStub(conn, postgres=False))
+    pool = _PoolStub(conn, postgres=False)
+    repo = AuthnzOrgsTeamsRepo(db_pool=pool)
     observed: list[tuple[Any, MembershipLockBackend]] = []
 
     async def _transfer(writer, **kwargs):
@@ -991,6 +1039,7 @@ async def test_transfer_organization_ownership_sqlite_backend_selection_uses_exe
 
     assert row and row["owner_user_id"] == 22
     assert observed == [(conn, MembershipLockBackend.SQLITE)]
+    assert pool.transaction_acquire_timeouts == [5.0]
 
 
 @pytest.mark.asyncio
@@ -1195,3 +1244,61 @@ async def test_missing_scope_delete_is_idempotent_without_parent_delete_race(
     )
 
     assert conn.execute_calls == []
+
+
+@pytest.mark.parametrize(
+    ("method_name", "scope_argument"),
+    (
+        ("delete_organization_with_provider_secrets", "org_id"),
+        ("delete_team_with_provider_secrets", "team_id"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_scope_delete_retries_bound_every_pool_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+    scope_argument: str,
+) -> None:
+    conn = _SqliteDeleteOrgConn()
+    pool = _PoolStub(conn, postgres=False)
+    repo = AuthnzOrgsTeamsRepo(db_pool=pool)
+    snapshot = MembershipScopeDeletionSnapshot(
+        scope_type=(
+            MembershipScopeType.ORGANIZATION
+            if scope_argument == "org_id"
+            else MembershipScopeType.TEAM
+        ),
+        scope_id=5,
+        organization_ids=(5,),
+        team_parents=(
+            ()
+            if scope_argument == "org_id"
+            else (TeamParentOrganization(team_id=5, organization_id=5),)
+        ),
+        membership_rows=(),
+    )
+
+    async def _discover(_writer, **_kwargs):
+        return snapshot
+
+    async def _retry(_writer, **_kwargs):
+        raise RollbackSignal()
+
+    monkeypatch.setattr(MembershipWriter, "discover_scope_deletion", _discover)
+    monkeypatch.setattr(MembershipWriter, "apply_scope_deletion", _retry)
+    monkeypatch.setattr(
+        MembershipWriter,
+        "is_scope_deletion_retry",
+        lambda _writer, _exc: True,
+    )
+
+    with pytest.raises(MembershipPreflightChanged):
+        await getattr(repo, method_name)(
+            **{
+                scope_argument: 5,
+                "context": _BOOTSTRAP_MEMBERSHIP_CONTEXT,
+            }
+        )
+
+    assert pool.acquire_timeouts == [5.0, 5.0, 5.0]
+    assert pool.transaction_acquire_timeouts == [5.0, 5.0, 5.0]

@@ -26,6 +26,9 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
     VersionedUserWriteGateway,
 )
+from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+    AuthnzOrgProviderSecretsRepo,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
     DEFAULT_BASE_TEAM_NAME,
     AuthnzOrgsTeamsRepo,
@@ -143,21 +146,10 @@ async def test_postgres_writer_uses_public_relations_under_shadow_search_path(
             ids["org_id"],
             DEFAULT_BASE_TEAM_NAME,
         )
-        await conn.execute(
-            f'INSERT INTO "{schema}".org_members VALUES ($1, $2, $3, $4)',
-            ids["org_id"],
-            ids["first_id"],
-            "shadow-role",
-            "active",
+        await conn.fetchval(
+            "SELECT set_config('search_path', $1, true)",
+            f"{schema}, public",
         )
-        await conn.execute(
-            f'INSERT INTO "{schema}".team_members VALUES ($1, $2, $3, $4)',
-            ids["team_id"],
-            ids["second_id"],
-            "shadow-role",
-            "active",
-        )
-        await conn.execute(f'SET LOCAL search_path TO "{schema}", public')
 
         repo = AuthnzOrgsTeamsRepo(test_db_pool)
         org_memberships = await repo.list_org_memberships_for_user(
@@ -216,11 +208,11 @@ async def test_postgres_writer_uses_public_relations_under_shadow_search_path(
             ids["second_id"],
         ) == "lead"
         assert await conn.fetchval(
-            f'SELECT role FROM "{schema}".org_members'
-        ) == "shadow-role"
+            f'SELECT COUNT(*) FROM "{schema}".org_members'
+        ) == 0
         assert await conn.fetchval(
-            f'SELECT role FROM "{schema}".team_members'
-        ) == "shadow-role"
+            f'SELECT COUNT(*) FROM "{schema}".team_members'
+        ) == 0
 
 
 class _TwoPartyGate:
@@ -235,7 +227,15 @@ class _TwoPartyGate:
         await self._ready.wait()
 
 
-class _FirstUserLockBarrierConnection:
+class _ManagedPostgresConnectionProxy:
+    _authnz_profile_user_backend = "postgres"
+
+    @property
+    def _authnz_profile_user_guard_identity(self) -> object:
+        return self._conn._authnz_profile_user_guard_identity
+
+
+class _FirstUserLockBarrierConnection(_ManagedPostgresConnectionProxy):
     def __init__(self, conn: Any, gate: _TwoPartyGate) -> None:
         self._conn = conn
         self._gate = gate
@@ -254,7 +254,7 @@ class _FirstUserLockBarrierConnection:
         return getattr(self._conn, name)
 
 
-class _RevocationHoldConnection:
+class _RevocationHoldConnection(_ManagedPostgresConnectionProxy):
     def __init__(
         self,
         conn: Any,
@@ -300,39 +300,68 @@ class _RevocationHoldPool:
             )
 
 
-class _ActorUserLockProbeConnection:
+class _AuthorityLockProbeConnection(_ManagedPostgresConnectionProxy):
     def __init__(
         self,
         conn: Any,
         *,
-        actor_user_id: int,
-        lock_attempted: asyncio.Event,
-        acquired_before_revocation_commit: asyncio.Event,
-        allow_commit: asyncio.Event,
+        authority_sql_prefix: str,
+        authority_lock_attempted: asyncio.Event,
     ) -> None:
         self._conn = conn
-        self._actor_user_id = actor_user_id
-        self._lock_attempted = lock_attempted
-        self._acquired_before_revocation_commit = acquired_before_revocation_commit
-        self._allow_commit = allow_commit
+        self._authority_sql_prefix = authority_sql_prefix
+        self._authority_lock_attempted = authority_lock_attempted
 
-    async def fetchrow(self, sql: str, *parameters: Any) -> Any:
-        actor_lock = (
-            sql == "SELECT id FROM public.users WHERE id = $1 FOR UPDATE"
-            and int(parameters[0]) == self._actor_user_id
-        )
-        if actor_lock:
-            self._lock_attempted.set()
-        result = await self._conn.fetchrow(sql, *parameters)
-        if actor_lock and not self._allow_commit.is_set():
-            self._acquired_before_revocation_commit.set()
-        return result
+    async def fetch(self, sql: str, *parameters: Any) -> Any:
+        if sql.startswith(self._authority_sql_prefix):
+            self._authority_lock_attempted.set()
+        return await self._conn.fetch(sql, *parameters)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._conn, name)
 
 
-class _HoldOrganizationLockConnection:
+class _AuthorityLockProbePool:
+    def __init__(
+        self,
+        pool: Any,
+        *,
+        authority_sql_prefix: str,
+        authority_lock_attempted: asyncio.Event,
+    ) -> None:
+        self._pool = pool
+        self.pool = pool.pool
+        self._authority_sql_prefix = authority_sql_prefix
+        self._authority_lock_attempted = authority_lock_attempted
+
+    def _proxy(self, conn: Any) -> _AuthorityLockProbeConnection:
+        return _AuthorityLockProbeConnection(
+            conn,
+            authority_sql_prefix=self._authority_sql_prefix,
+            authority_lock_attempted=self._authority_lock_attempted,
+        )
+
+    @asynccontextmanager
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self._pool.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
+            yield self._proxy(conn)
+
+    @asynccontextmanager
+    async def acquire(self, *, timeout: float | None = None):
+        async with self._pool.acquire(timeout=timeout) as conn:
+            yield self._proxy(conn)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._pool, name)
+
+
+class _HoldOrganizationLockConnection(_ManagedPostgresConnectionProxy):
     def __init__(
         self,
         conn: Any,
@@ -360,7 +389,7 @@ class _HoldOrganizationLockConnection:
         return getattr(self._conn, name)
 
 
-class _TargetUserLockAttemptConnection:
+class _TargetUserLockAttemptConnection(_ManagedPostgresConnectionProxy):
     def __init__(
         self,
         conn: Any,
@@ -439,10 +468,11 @@ async def test_postgres_opposite_request_orders_share_one_canonical_lock_order(
         timeout=10,
     )
 
-    assert all(
-        result.affected_user_ids == (ids["first_id"], ids["second_id"])
+    assert {
+        user_id
         for result in results
-    )
+        for user_id in result.affected_user_ids
+    } == {ids["first_id"], ids["second_id"]}
     rows = await test_db_pool.fetchall(
         "SELECT user_id, role FROM public.team_members "
         "WHERE team_id = $1 AND user_id = ANY($2::int[]) ORDER BY user_id",
@@ -467,11 +497,15 @@ async def test_postgres_platform_admin_revocation_serializes_before_authorizatio
     ids = await _create_membership_fixture(test_db_pool, f"auth_{uuid.uuid4().hex[:8]}")
     async with test_db_pool.transaction() as conn:
         permission_id = await conn.fetchval(
-            "SELECT id FROM public.permissions WHERE name = 'system.configure'"
+            "INSERT INTO public.permissions (name, description, category) "
+            "VALUES ('system.configure', 'Configure system', 'system') "
+            "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id"
         )
         if grant_source == "user_role":
             role_id = await conn.fetchval(
-                "SELECT id FROM public.roles WHERE name = 'admin'"
+                "INSERT INTO public.roles (name, description, is_system) "
+                "VALUES ('admin', 'Administrator', TRUE) "
+                "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id"
             )
             await conn.execute(
                 "INSERT INTO public.user_roles (user_id, role_id) VALUES ($1, $2) "
@@ -483,7 +517,9 @@ async def test_postgres_platform_admin_revocation_serializes_before_authorizatio
             revoke_parameters = (ids["first_id"], int(role_id))
         elif grant_source == "role_permission":
             role_id = await conn.fetchval(
-                "SELECT id FROM public.roles WHERE name = 'member'"
+                "INSERT INTO public.roles (name, description, is_system) "
+                "VALUES ('test-platform-role', 'Test role', FALSE) "
+                "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id"
             )
             await conn.execute(
                 "INSERT INTO public.user_roles (user_id, role_id) VALUES ($1, $2) "
@@ -515,8 +551,12 @@ async def test_postgres_platform_admin_revocation_serializes_before_authorizatio
             revoke_parameters = (ids["first_id"], int(permission_id))
     revocation_written = asyncio.Event()
     allow_commit = asyncio.Event()
-    lock_attempted = asyncio.Event()
-    acquired_before_revocation_commit = asyncio.Event()
+    authority_lock_attempted = asyncio.Event()
+    authority_sql_prefix = {
+        "user_role": "SELECT ur.role_id FROM public.user_roles",
+        "role_permission": "SELECT rp.role_id, rp.permission_id FROM public.role_permissions",
+        "direct_permission": "SELECT up.permission_id FROM public.user_permissions",
+    }[grant_source]
     revocation_pool = _RevocationHoldPool(
         test_db_pool,
         revocation_written=revocation_written,
@@ -532,14 +572,10 @@ async def test_postgres_platform_admin_revocation_serializes_before_authorizatio
         try:
             async with test_db_pool.transaction() as conn:
                 return await MembershipWriter(test_db_pool).apply_membership_mutations(
-                    conn=_ActorUserLockProbeConnection(
+                    conn=_AuthorityLockProbeConnection(
                         conn,
-                        actor_user_id=ids["first_id"],
-                        lock_attempted=lock_attempted,
-                        acquired_before_revocation_commit=(
-                            acquired_before_revocation_commit
-                        ),
-                        allow_commit=allow_commit,
+                        authority_sql_prefix=authority_sql_prefix,
+                        authority_lock_attempted=authority_lock_attempted,
                     ),
                     context=ActorMembershipWriteContext(
                         actor_user_id=ids["first_id"],
@@ -563,15 +599,12 @@ async def test_postgres_platform_admin_revocation_serializes_before_authorizatio
     revoke_task = asyncio.create_task(_revoke())
     await asyncio.wait_for(revocation_written.wait(), timeout=5)
     mutation_task = asyncio.create_task(_mutate())
-    await asyncio.wait_for(lock_attempted.wait(), timeout=5)
+    await asyncio.wait_for(authority_lock_attempted.wait(), timeout=5)
     try:
-        await asyncio.wait_for(
-            acquired_before_revocation_commit.wait(),
-            timeout=0.25,
-        )
-        acquired_early = True
+        await asyncio.wait_for(asyncio.shield(mutation_task), timeout=0.25)
+        completed_before_revocation_commit = True
     except TimeoutError:
-        acquired_early = False
+        completed_before_revocation_commit = False
     finally:
         allow_commit.set()
 
@@ -581,13 +614,136 @@ async def test_postgres_platform_admin_revocation_serializes_before_authorizatio
     )
 
     assert revoked is True
-    assert acquired_early is False
+    assert completed_before_revocation_commit is False
     assert isinstance(mutation_outcome, MembershipAuthorizationError)
     assert await test_db_pool.fetchval(
         "SELECT role FROM public.team_members WHERE team_id = $1 AND user_id = $2",
         ids["team_id"],
         ids["second_id"],
     ) == "member"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation",
+    ["organization_creation", "scope_deletion", "provider_secret"],
+)
+async def test_postgres_specialized_platform_admin_paths_serialize_revocation(
+    test_db_pool,
+    operation: str,
+) -> None:
+    prefix = f"special_auth_{uuid.uuid4().hex[:8]}"
+    ids = await _create_membership_fixture(test_db_pool, prefix)
+    if operation == "provider_secret":
+        await AuthnzOrgProviderSecretsRepo(test_db_pool).ensure_tables()
+
+    async with test_db_pool.transaction() as conn:
+        permission_id = await conn.fetchval(
+            "INSERT INTO public.permissions (name, description, category) "
+            "VALUES ('system.configure', 'Configure system', 'system') "
+            "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id"
+        )
+        await conn.execute(
+            "INSERT INTO public.user_permissions (user_id, permission_id, granted) "
+            "VALUES ($1, $2, TRUE) "
+            "ON CONFLICT (user_id, permission_id) DO UPDATE SET granted = TRUE",
+            ids["first_id"],
+            permission_id,
+        )
+
+    revocation_written = asyncio.Event()
+    allow_commit = asyncio.Event()
+    authority_lock_attempted = asyncio.Event()
+    revocation_pool = _RevocationHoldPool(
+        test_db_pool,
+        revocation_written=revocation_written,
+        allow_commit=allow_commit,
+    )
+    operation_pool = _AuthorityLockProbePool(
+        test_db_pool,
+        authority_sql_prefix="SELECT up.permission_id FROM public.user_permissions",
+        authority_lock_attempted=authority_lock_attempted,
+    )
+    context = ActorMembershipWriteContext(
+        actor_user_id=ids["first_id"],
+        required_authority=MembershipAuthority.PLATFORM_ADMIN,
+    )
+    created_name = f"{prefix} created organization"
+
+    async def _revoke() -> bool:
+        async with revocation_pool.transaction() as conn:
+            status = await conn.execute(
+                "DELETE FROM public.user_permissions "
+                "WHERE user_id = $1 AND permission_id = $2",
+                ids["first_id"],
+                permission_id,
+            )
+            return status == "DELETE 1"
+
+    async def _operate() -> dict[str, Any] | None | Exception:
+        try:
+            if operation == "organization_creation":
+                return await AuthnzOrgsTeamsRepo(
+                    operation_pool
+                ).create_organization_as_actor(
+                    name=created_name,
+                    context=context,
+                )
+            if operation == "scope_deletion":
+                await AuthnzOrgsTeamsRepo(
+                    operation_pool
+                ).delete_team_with_provider_secrets(
+                    team_id=ids["team_id"],
+                    context=context,
+                )
+                return None
+            return await AuthnzOrgProviderSecretsRepo(operation_pool).upsert_secret(
+                scope_type="team",
+                scope_id=ids["team_id"],
+                provider="openai",
+                encrypted_blob="ciphertext",
+                key_hint="test",
+                metadata=None,
+                updated_at=_OPERATION_TIME,
+                updated_by=ids["first_id"],
+                authorization_context=context,
+            )
+        except Exception as exc:  # noqa: BLE001 - outcome is asserted below
+            return exc
+
+    revoke_task = asyncio.create_task(_revoke())
+    await asyncio.wait_for(revocation_written.wait(), timeout=5)
+    operation_task = asyncio.create_task(_operate())
+    await asyncio.wait_for(authority_lock_attempted.wait(), timeout=5)
+    try:
+        await asyncio.wait_for(asyncio.shield(operation_task), timeout=0.25)
+        completed_before_revocation_commit = True
+    except TimeoutError:
+        completed_before_revocation_commit = False
+    finally:
+        allow_commit.set()
+
+    revoked, operation_outcome = await asyncio.wait_for(
+        asyncio.gather(revoke_task, operation_task),
+        timeout=10,
+    )
+
+    assert revoked is True
+    assert completed_before_revocation_commit is False
+    assert isinstance(operation_outcome, MembershipAuthorizationError)
+    assert await test_db_pool.fetchval(
+        "SELECT COUNT(*) FROM public.organizations WHERE name = $1",
+        created_name,
+    ) == 0
+    assert await test_db_pool.fetchval(
+        "SELECT COUNT(*) FROM public.teams WHERE id = $1",
+        ids["team_id"],
+    ) == 1
+    assert await test_db_pool.fetchval(
+        "SELECT COUNT(*) FROM public.org_provider_secrets "
+        "WHERE scope_type = 'team' AND scope_id = $1 AND provider = 'openai'",
+        ids["team_id"],
+    ) == 0
 
 
 @pytest.mark.asyncio
