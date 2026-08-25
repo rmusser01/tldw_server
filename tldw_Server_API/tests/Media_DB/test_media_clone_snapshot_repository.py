@@ -2684,6 +2684,132 @@ def test_postgres_v26_migration_harvests_original_v25_direct_keywords_and_replay
         backend.get_pool().close_all()
 
 
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    ("index_name", "index_columns"),
+    [
+        ("idx_owned_clone_keywords_keyword", "keyword"),
+        (
+            "idx_owned_clone_keywords_operation",
+            "operation_id, source_identity",
+        ),
+    ],
+)
+def test_postgres_v26_rejects_unrelated_pending_index_name_collision(
+    pg_database_config: DatabaseConfig,
+    index_name: str,
+    index_columns: str,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+        run_postgres_migrate_to_v26,
+    )
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    ident = backend.escape_identifier  # type: ignore[attr-defined]
+    suffix = uuid.uuid4().hex[:12]
+    collision_table = f"clone_index_collision_{suffix}"
+    snapshot = _operation_snapshot(keywords=(f"collision-keyword-{suffix}",))
+    operation_id = f"clone-operation-pg-index-collision-{suffix}"
+    source_identity = f"workspace-source-pg-index-collision-{suffix}"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            created = db.insert_operation_owned_clone_media(
+                snapshot=snapshot,
+                operation_id=operation_id,
+                source_identity=source_identity,
+                expected_content_hash=expected_hash,
+            )
+            with db.transaction() as connection:
+                backend.execute(
+                    "DROP TABLE operationownedclonekeywords CASCADE",
+                    connection=connection,
+                )
+                backend.execute(
+                    f"CREATE TABLE {ident(collision_table)} ("  # nosec B608
+                    "id BIGINT PRIMARY KEY, keyword TEXT NOT NULL, "
+                    "operation_id TEXT NOT NULL, source_identity TEXT NOT NULL)",
+                    connection=connection,
+                )
+                backend.execute(
+                    f"CREATE INDEX {ident(index_name)} "  # nosec B608
+                    f"ON {ident(collision_table)} ({index_columns})",  # nosec B608
+                    connection=connection,
+                )
+                backend.execute(
+                    f"INSERT INTO {ident(collision_table)} "  # nosec B608
+                    "(id, keyword, operation_id, source_identity) "
+                    "VALUES (1, 'sentinel', 'sentinel-operation', 'sentinel-source')",
+                    connection=connection,
+                )
+                keyword_id = backend.execute(
+                    "INSERT INTO Keywords "
+                    "(keyword, uuid, last_modified, client_id, deleted) "
+                    "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, FALSE) RETURNING id",
+                    (snapshot.media["keywords"][0], str(uuid.uuid4()), "901"),
+                    connection=connection,
+                ).rows[0]["id"]
+                backend.execute(
+                    "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (%s, %s)",
+                    (created.media_id, keyword_id),
+                    connection=connection,
+                )
+
+            with pytest.raises(SchemaError, match="index ownership"):
+                with db.transaction() as connection:
+                    run_postgres_migrate_to_v26(db, connection)
+
+            with db.transaction() as connection:
+                assert backend.execute(
+                    "SELECT indexed_table.relname AS table_name "
+                    "FROM pg_class AS index_row "
+                    "JOIN pg_namespace AS namespace_row "
+                    "ON namespace_row.oid = index_row.relnamespace "
+                    "JOIN pg_index AS index_meta "
+                    "ON index_meta.indexrelid = index_row.oid "
+                    "JOIN pg_class AS indexed_table "
+                    "ON indexed_table.oid = index_meta.indrelid "
+                    "WHERE namespace_row.nspname = current_schema() "
+                    "AND index_row.relname = %s",
+                    (index_name,),
+                    connection=connection,
+                ).rows == [{"table_name": collision_table}]
+                assert backend.execute(
+                    f"SELECT keyword FROM {ident(collision_table)} WHERE id = 1",  # nosec B608
+                    connection=connection,
+                ).rows == [{"keyword": "sentinel"}]
+                assert backend.execute(
+                    "SELECT to_regclass(current_schema() || "
+                    "'.operationownedclonekeywords') AS pending",
+                    connection=connection,
+                ).rows[0]["pending"] is None
+                assert backend.execute(
+                    "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = %s",
+                    (created.media_id,),
+                    connection=connection,
+                ).rows[0]["count"] == 1
+                assert backend.execute(
+                    "SELECT system_operation_id, system_operation_kind, "
+                    "system_source_identity, system_content_hash "
+                    "FROM Media WHERE id = %s",
+                    (created.media_id,),
+                    connection=connection,
+                ).rows == [
+                    {
+                        "system_operation_id": operation_id,
+                        "system_operation_kind": "shared_workspace_clone",
+                        "system_source_identity": source_identity,
+                        "system_content_hash": expected_hash,
+                    }
+                ]
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
 def _seed_cross_tenant_v25_keyword_graph(
     db: MediaDatabase,
     backend: Any,

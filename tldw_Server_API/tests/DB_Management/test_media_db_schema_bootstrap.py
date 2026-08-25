@@ -3845,6 +3845,143 @@ def test_sqlite_migration_v26_rolls_back_and_retries_after_interruption(
         }
 
 
+@pytest.mark.integration
+def test_sqlite_migration_v26_replays_after_committed_script_missing_bookkeeping(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    db_path = tmp_path / "media-v26-committed-script-replay.sqlite"
+    _create_minimal_media_v24_database(db_path)
+    migrator = DatabaseMigrator(str(db_path))
+    assert migrator.migrate_to_version(25, create_backup=False)["status"] == "success"
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE MediaKeywords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                keyword_id INTEGER NOT NULL,
+                UNIQUE (media_id, keyword_id),
+                FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+                FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
+            );
+            INSERT INTO Keywords (
+                keyword, uuid, last_modified, client_id
+            ) VALUES (' Replay Pending ', 'replay-keyword-uuid', CURRENT_TIMESTAMP, 'client-v25');
+            INSERT INTO Media (
+                title, type, content_hash, uuid, last_modified, client_id, is_trash,
+                system_operation_id, system_operation_kind,
+                system_source_identity, system_content_hash
+            ) VALUES (
+                'replay pending v25', 'text', 'replay-content', 'replay-media-uuid',
+                CURRENT_TIMESTAMP, 'client-v25', 1, 'operation-replay-v25',
+                'shared_workspace_clone', 'source-replay-v25',
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            );
+            INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (2, 1);
+            INSERT INTO OperationOwnedCloneKeywords (
+                media_id, keyword_id, operation_id, source_identity, created_by_clone
+            ) VALUES (2, 1, 'operation-replay-v25', 'source-replay-v25', 0);
+            """
+        )
+
+    migration = next(item for item in migrator.load_migrations() if item.version == 26)
+    migrator.execute_migration(migration)
+
+    def read_v26_state() -> dict[str, object]:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return {
+                "version": conn.execute(
+                    "SELECT version FROM schema_version"
+                ).fetchone()[0],
+                "pending": [
+                    dict(row)
+                    for row in conn.execute(
+                        "SELECT media_id, keyword, operation_id, source_identity, client_id "
+                        "FROM OperationOwnedCloneKeywords ORDER BY media_id, keyword"
+                    )
+                ],
+                "media": dict(
+                    conn.execute(
+                        "SELECT system_operation_id, system_operation_kind, "
+                        "system_source_identity, system_content_hash "
+                        "FROM Media WHERE id = 2"
+                    ).fetchone()
+                ),
+                "links": conn.execute(
+                    "SELECT COUNT(*) FROM MediaKeywords WHERE media_id = 2"
+                ).fetchone()[0],
+                "keywords": [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT keyword FROM Keywords ORDER BY id"
+                    )
+                ],
+                "indexes": [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'index' "
+                        "AND name IN (?, ?) ORDER BY name",
+                        (
+                            "idx_owned_clone_keywords_keyword",
+                            "idx_owned_clone_keywords_operation",
+                        ),
+                    )
+                ],
+                "triggers": [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'trigger' "
+                        "AND name IN (?, ?) ORDER BY name",
+                        (
+                            "media_validate_system_operation_insert_v26",
+                            "media_validate_system_operation_update_v26",
+                        ),
+                    )
+                ],
+            }
+
+    state_after_first_run = read_v26_state()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM schema_migrations WHERE version = 26")
+        conn.commit()
+
+    migrator.execute_migration(migration)
+
+    assert read_v26_state() == state_after_first_run
+    assert state_after_first_run == {
+        "version": 26,
+        "pending": [
+            {
+                "media_id": 2,
+                "keyword": "replay pending",
+                "operation_id": "operation-replay-v25",
+                "source_identity": "source-replay-v25",
+                "client_id": "client-v25",
+            }
+        ],
+        "media": {
+            "system_operation_id": "operation-replay-v25",
+            "system_operation_kind": "shared_workspace_clone",
+            "system_source_identity": "source-replay-v25",
+            "system_content_hash": "a" * 64,
+        },
+        "links": 0,
+        "keywords": [" Replay Pending "],
+        "indexes": [
+            "idx_owned_clone_keywords_keyword",
+            "idx_owned_clone_keywords_operation",
+        ],
+        "triggers": [
+            "media_validate_system_operation_insert_v26",
+            "media_validate_system_operation_update_v26",
+        ],
+    }
+
+
 @pytest.mark.unit
 def test_sqlite_migration_025_loads_as_idempotent(tmp_path: Path) -> None:
     from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
@@ -3914,6 +4051,8 @@ def test_postgres_migration_v26_body_repairs_markers_and_pending_keywords() -> N
             del params, connection
             statements.append(query)
             normalized = " ".join(query.split()).lower()
+            if "select index_row.relname as index_name" in normalized:
+                return SimpleNamespace(rows=[])
             if "as table_name" in normalized and "from pg_class" in normalized:
                 return SimpleNamespace(
                     rows=[
@@ -4013,6 +4152,16 @@ def test_postgres_migration_v26_repairs_both_committed_v25_shapes(
                         """,
                         connection=connection,
                     )
+                    backend.execute(
+                        "CREATE INDEX idx_owned_clone_keywords_keyword "
+                        "ON operationownedclonekeywords (keyword_id)",
+                        connection=connection,
+                    )
+                    backend.execute(
+                        "CREATE INDEX idx_owned_clone_keywords_operation "
+                        "ON operationownedclonekeywords (operation_id, source_identity)",
+                        connection=connection,
+                    )
                     media_row = backend.execute(
                         "INSERT INTO Media (title, type, content_hash, uuid, last_modified, "
                         "client_id, is_trash, system_operation_id, system_operation_kind, "
@@ -4066,6 +4215,29 @@ def test_postgres_migration_v26_repairs_both_committed_v25_shapes(
                     "FROM operationownedclonekeywords",
                     connection=connection,
                 ).rows
+                index_owners = {
+                    row["index_name"]: row["table_name"]
+                    for row in backend.execute(
+                        "SELECT index_row.relname AS index_name, "
+                        "indexed_table.relname AS table_name "
+                        "FROM pg_class AS index_row "
+                        "JOIN pg_namespace AS namespace_row "
+                        "ON namespace_row.oid = index_row.relnamespace "
+                        "JOIN pg_index AS index_meta "
+                        "ON index_meta.indexrelid = index_row.oid "
+                        "JOIN pg_class AS indexed_table "
+                        "ON indexed_table.oid = index_meta.indrelid "
+                        "WHERE namespace_row.nspname = current_schema() "
+                        "AND index_row.relname = ANY(%s)",
+                        (
+                            [
+                                "idx_owned_clone_keywords_keyword",
+                                "idx_owned_clone_keywords_operation",
+                            ],
+                        ),
+                        connection=connection,
+                    ).rows
+                }
 
             assert columns == {
                 "media_id",
@@ -4081,6 +4253,10 @@ def test_postgres_migration_v26_repairs_both_committed_v25_shapes(
                 "source_identity": "source-pg-v25",
                 "client_id": "901",
             }] if with_old_keyword_holds else [])
+            assert index_owners == {
+                "idx_owned_clone_keywords_keyword": "operationownedclonekeywords",
+                "idx_owned_clone_keywords_operation": "operationownedclonekeywords",
+            }
     finally:
         db.close_connection()
         backend.get_pool().close_all()

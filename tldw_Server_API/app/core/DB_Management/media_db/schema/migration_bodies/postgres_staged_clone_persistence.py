@@ -27,6 +27,10 @@ class PostgresStagedClonePersistenceBody(Protocol):
 _CORE_RELATIONS = ("media", "keywords", "mediakeywords")
 _PENDING_RELATION = "operationownedclonekeywords"
 _LEGACY_RELATION = "operationownedclonekeywords_v25"
+_PENDING_INDEXES = (
+    "idx_owned_clone_keywords_keyword",
+    "idx_owned_clone_keywords_operation",
+)
 _LEGACY_COLUMNS = {
     "media_id",
     "keyword_id",
@@ -210,6 +214,41 @@ def _pending_shape(
     raise SchemaError("Media v26 migration found an unsupported pending keyword shape.")
 
 
+def _owned_pending_indexes(
+    backend: _StagedClonePersistenceBackend,
+    conn: Any,
+    *,
+    pending_exists: bool,
+) -> set[str]:
+    rows = _result_rows(
+        backend.execute(
+            """
+            SELECT index_row.relname AS index_name,
+                   indexed_table.relname AS table_name
+              FROM pg_class AS index_row
+              JOIN pg_namespace AS namespace_row
+                ON namespace_row.oid = index_row.relnamespace
+              JOIN pg_index AS index_meta
+                ON index_meta.indexrelid = index_row.oid
+              JOIN pg_class AS indexed_table
+                ON indexed_table.oid = index_meta.indrelid
+             WHERE namespace_row.nspname = current_schema()
+               AND index_row.relkind IN ('i', 'I')
+               AND index_row.relname = ANY(%s)
+            """,
+            (list(_PENDING_INDEXES),),
+            connection=conn,
+        )
+    )
+    owned_indexes: set[str] = set()
+    for row in rows:
+        index_name = str(row["index_name"])
+        if not pending_exists or str(row["table_name"]) != _PENDING_RELATION:
+            raise SchemaError("Media v26 pending keyword index ownership is inconsistent.")
+        owned_indexes.add(index_name)
+    return owned_indexes
+
+
 def run_postgres_migrate_to_v26(
     db: PostgresStagedClonePersistenceBody,
     conn: Any,
@@ -227,6 +266,11 @@ def run_postgres_migrate_to_v26(
 
     pending_exists, forced_relations = _inspect_and_unlock_relations(backend, conn)
     shape = _pending_shape(backend, conn, pending_exists=pending_exists)
+    owned_pending_indexes = _owned_pending_indexes(
+        backend,
+        conn,
+        pending_exists=pending_exists,
+    )
 
     backend.execute(
         f"""
@@ -285,14 +329,11 @@ def run_postgres_migrate_to_v26(
         connection=conn,
     )
 
-    backend.execute(
-        f"DROP INDEX IF EXISTS {ident('idx_owned_clone_keywords_keyword')}",
-        connection=conn,
-    )
-    backend.execute(
-        f"DROP INDEX IF EXISTS {ident('idx_owned_clone_keywords_operation')}",
-        connection=conn,
-    )
+    for index_name in sorted(owned_pending_indexes):
+        backend.execute(
+            f"DROP INDEX {ident(index_name)}",  # nosec B608
+            connection=conn,
+        )
     if shape == "legacy":
         backend.execute(
             f"ALTER TABLE {pending} RENAME TO {legacy}",
@@ -458,12 +499,12 @@ def run_postgres_migrate_to_v26(
         backend.execute(f"DROP TABLE {legacy}", connection=conn)
 
     backend.execute(
-        f"CREATE INDEX {ident('idx_owned_clone_keywords_keyword')} "
+        f"CREATE INDEX {ident(_PENDING_INDEXES[0])} "
         f"ON {pending} ({ident('keyword')})",
         connection=conn,
     )
     backend.execute(
-        f"CREATE INDEX {ident('idx_owned_clone_keywords_operation')} "
+        f"CREATE INDEX {ident(_PENDING_INDEXES[1])} "
         f"ON {pending} ({ident('operation_id')}, {ident('source_identity')})",
         connection=conn,
     )

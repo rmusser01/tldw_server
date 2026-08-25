@@ -268,6 +268,9 @@ CREATE INDEX idx_owned_clone_keywords_keyword
 CREATE INDEX idx_owned_clone_keywords_operation
     ON OperationOwnedCloneKeywords(operation_id, source_identity);
 
+DROP TRIGGER IF EXISTS media_validate_system_operation_insert_v26;
+DROP TRIGGER IF EXISTS media_validate_system_operation_update_v26;
+
 CREATE TRIGGER media_validate_system_operation_insert_v26
 BEFORE INSERT ON Media
 WHEN NOT COALESCE(
