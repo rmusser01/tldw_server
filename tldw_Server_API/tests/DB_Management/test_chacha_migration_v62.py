@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, SchemaError
 
 pytestmark = pytest.mark.unit
 
@@ -90,3 +90,66 @@ def test_sqlite_v61_upgrade_preserves_workspace_and_is_rerunnable(
 
     assert version == 62
     assert workspace == ("Existing Workspace", None)
+
+
+def test_sqlite_v62_failure_rolls_back_partial_ddl_and_retry_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "chacha-v62-interrupted.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 61)
+    db = CharactersRAGDB(str(db_path), client_id="user-1")
+    original_sql = CharactersRAGDB._MIGRATION_SQL_V61_TO_V62
+    injected_sql = original_sql.replace(
+        "ALTER TABLE workspaces ADD COLUMN system_operation_state TEXT",
+        "SELECT * FROM injected_v62_failure;\n"
+        "ALTER TABLE workspaces ADD COLUMN system_operation_state TEXT",
+        1,
+    )
+
+    try:
+        monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 62)
+        monkeypatch.setattr(CharactersRAGDB, "_MIGRATION_SQL_V61_TO_V62", injected_sql)
+
+        with pytest.raises(SchemaError, match="Workspace clone lifecycle v62 SQLite migration failed"):
+            db._initialize_schema_sqlite()
+
+        conn = db.get_connection()
+        version_after_failure = conn.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()[0]
+        columns_after_failure = {str(row[1]) for row in conn.execute("PRAGMA table_info(workspaces)")}
+        indexes_after_failure = {
+            str(row[1]) for row in conn.execute("PRAGMA index_list(workspaces)")
+        }
+
+        assert version_after_failure == 61
+        assert not {
+            "system_operation_id",
+            "system_operation_kind",
+            "system_operation_state",
+            "system_request_fingerprint",
+        }.intersection(columns_after_failure)
+        assert "idx_workspaces_system_operation" not in indexes_after_failure
+
+        monkeypatch.setattr(CharactersRAGDB, "_MIGRATION_SQL_V61_TO_V62", original_sql)
+        db._initialize_schema_sqlite()
+
+        version_after_retry = conn.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()[0]
+        columns_after_retry = {str(row[1]) for row in conn.execute("PRAGMA table_info(workspaces)")}
+        indexes_after_retry = {str(row[1]) for row in conn.execute("PRAGMA index_list(workspaces)")}
+
+        assert version_after_retry == 62
+        assert {
+            "system_operation_id",
+            "system_operation_kind",
+            "system_operation_state",
+            "system_request_fingerprint",
+        } <= columns_after_retry
+        assert "idx_workspaces_system_operation" in indexes_after_retry
+    finally:
+        db.close_all_connections()

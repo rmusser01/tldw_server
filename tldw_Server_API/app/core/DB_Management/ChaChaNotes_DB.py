@@ -6623,11 +6623,6 @@ ALTER TABLE workspaces ADD COLUMN system_request_fingerprint TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_workspaces_system_operation
   ON workspaces(system_operation_kind, system_operation_state, system_operation_id);
-
-UPDATE db_schema_version
-   SET version = 62
- WHERE schema_name = 'rag_char_chat_schema'
-   AND version = 61;
 """
 
     _MIGRATION_SQL_V60_TO_V61_POSTGRES = """
@@ -12234,12 +12229,34 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Add operation-fenced staged Workspace clone lifecycle markers."""
         if self._get_db_version(conn) != 61:
             raise SchemaError("Workspace clone lifecycle v62 migration requires schema version 61.")  # noqa: TRY003
+        savepoint = "workspace_clone_v62_migration"
+        savepoint_active = False
         try:
-            conn.executescript(self._MIGRATION_SQL_V61_TO_V62)
-        except sqlite3.Error as exc:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V61_TO_V62):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
+                (62, self._SCHEMA_NAME, 61),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 62:
+                raise SchemaError("Workspace clone lifecycle v62 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(  # noqa: TRY003
+                        "Workspace clone lifecycle v62 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
             raise SchemaError(f"Workspace clone lifecycle v62 SQLite migration failed: {exc}") from exc
-        if self._get_db_version(conn) != 62:
-            raise SchemaError("Workspace clone lifecycle v62 SQLite version verification failed.")  # noqa: TRY003
 
     def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""

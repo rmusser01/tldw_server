@@ -115,6 +115,25 @@ def test_publish_moves_owned_staged_target_to_hidden_publication_pending(
     assert db.list_workspaces() == []
 
 
+def test_identical_reservation_replays_hidden_publication_pending_target(
+    db: CharactersRAGDB,
+) -> None:
+    _reserve(db)
+    published = db.publish_clone_target(
+        workspace_id="workspace-target",
+        operation_id="operation-1",
+    )
+
+    replayed = _reserve(db)
+
+    assert replayed == published
+    assert bool(replayed["archived"]) is False
+    assert replayed["system_operation_state"] == "publication_pending"
+    assert db.get_workspace("workspace-target") is None
+    assert db.get_workspace("workspace-target", include_deleted=True) is None
+    assert db.list_workspaces() == []
+
+
 def test_publish_rejects_wrong_operation(db: CharactersRAGDB) -> None:
     _reserve(db)
 
