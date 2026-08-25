@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     JS_SAFE_INTEGER_MAX,
     NotesMoodboardStudioContractError,
+    StudioDiagramManifestV1,
     canonical_json_bytes,
     diagram_render_hash,
     legacy_diagnostic_hash,
@@ -437,6 +438,57 @@ def test_extension_surfaces_retain_allowed_namespaced_keys(surface: str) -> None
         assert parsed.display == extension
 
 
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+@pytest.mark.parametrize("nested", [False, True], ids=["direct", "nested"])
+@pytest.mark.parametrize(
+    "reserved_alias",
+    [
+        "apiKey",
+        "apikey",
+        "APIKey",
+        "APIKEY",
+        "accessToken",
+        "accesstoken",
+        "AccessToken",
+        "private_key",
+        "privateKey",
+        "privatekey",
+        "PrivateKey",
+        "ownerUserId",
+        "owneruserid",
+        "OwnerUserID",
+        "deletedAt",
+        "deletedat",
+        "DeletedAt",
+        "cachedSvg",
+        "cachedsvg",
+        "CachedSVG",
+        "renderHash",
+        "renderhash",
+        "RenderHash",
+    ],
+)
+def test_extension_surfaces_reject_semantic_aliases_recursively(
+    surface: str,
+    nested: bool,
+    reserved_alias: str,
+) -> None:
+    reserved_value = {reserved_alias: "not portable metadata"}
+    extension = {"nested": reserved_value} if nested else reserved_value
+
+    with pytest.raises(NotesMoodboardStudioContractError, match="cannot contain"):
+        if surface == "canvas":
+            parse_notes_moodboard_v1(
+                valid_moodboard_payload(
+                    canvas={"layout_mode": "masonry", "metadata": extension}
+                )
+            )
+        else:
+            parse_notes_moodboard_note_v1(
+                valid_placement_payload(display=extension)
+            )
+
+
 def test_sections_only_studio_state_is_valid_and_acceptance_is_server_bound() -> None:
     payload = valid_studio_payload()
     parsed = parse_studio(payload)
@@ -517,6 +569,30 @@ def test_diagram_source_ids_normalize_to_document_order_before_hash_validation()
         diagram="flowchart TD\n  A-->B",
     )
     assert parsed.accepted_provenance.result_hash == studio_result_hash(parsed)
+
+
+def test_diagram_model_input_normalizes_identically_to_mapping_input() -> None:
+    mapping_payload = valid_studio_payload(with_diagram=True)
+    mapping_manifest = deepcopy(mapping_payload["diagram_manifest_json"])
+    assert isinstance(mapping_manifest, dict)
+    mapping_manifest["source_section_ids"] = ["notes", "cues"]
+    mapping_payload["diagram_manifest_json"] = mapping_manifest
+    mapping_parsed = parse_studio(mapping_payload)
+
+    model_payload = valid_studio_payload(with_diagram=True)
+    model_manifest = deepcopy(model_payload["diagram_manifest_json"])
+    assert isinstance(model_manifest, dict)
+    model_manifest["source_section_ids"] = ["notes", "cues"]
+    model_payload["diagram_manifest_json"] = StudioDiagramManifestV1.model_validate(
+        model_manifest
+    )
+
+    model_parsed = parse_studio(model_payload)
+
+    assert model_parsed.diagram_manifest_json == mapping_parsed.diagram_manifest_json
+    assert model_parsed.accepted_provenance.result_hash == studio_result_hash(
+        model_parsed
+    )
 
 
 @pytest.mark.parametrize(

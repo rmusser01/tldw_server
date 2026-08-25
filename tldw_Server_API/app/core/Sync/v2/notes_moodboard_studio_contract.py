@@ -28,6 +28,9 @@ JS_SAFE_INTEGER_MIN = -JS_SAFE_INTEGER_MAX
 SYNC_ENVELOPE_MAX_BYTES = 262_144
 
 _SAFE_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_EXTENSION_WORD_RE = re.compile(
+    r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[0-9]+"
+)
 _SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}")
 _RFC3339_TIMESTAMP_RE = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
@@ -88,6 +91,7 @@ _CREDENTIAL_EXTENSION_CONCEPTS = frozenset(
         "credential",
         "credentials",
         "password",
+        "private_key",
         "refresh_token",
         "secret",
         "token",
@@ -563,29 +567,32 @@ class NotesStudioDocumentV1(BaseModel):
     def _normalize_diagram_source_order(
         cls, value: object, info: ValidationInfo
     ) -> object:
-        if value is None or not isinstance(value, Mapping):
+        if isinstance(value, StudioDiagramManifestV1):
+            manifest = value.model_dump(mode="json")
+        elif isinstance(value, Mapping):
+            manifest = dict(value)
+        else:
             return value
         payload_json = info.data.get("payload_json")
-        source_ids = value.get("source_section_ids")
+        source_ids = manifest.get("source_section_ids")
         if not isinstance(payload_json, StudioSectionsV1) or not isinstance(
             source_ids, Sequence
         ):
-            return value
+            return manifest
         if isinstance(source_ids, (str, bytes, bytearray)) or any(
             not isinstance(source_id, str) for source_id in source_ids
         ):
-            return value
+            return manifest
         selected = tuple(source_ids)
         if len(set(selected)) != len(selected):
-            return value
+            return manifest
         document_ids = tuple(section.id for section in payload_json.sections)
         if not set(selected).issubset(document_ids):
-            return value
-        normalized = dict(value)
-        normalized["source_section_ids"] = [
+            return manifest
+        manifest["source_section_ids"] = [
             section_id for section_id in document_ids if section_id in selected
         ]
-        return normalized
+        return manifest
 
     @field_validator("excerpt_hash", "companion_content_hash", "note_hash")
     @classmethod
@@ -1114,34 +1121,54 @@ def _validate_extension_scalar(value: object, label: str) -> None:
 
 
 def _validate_extension_key(key: str, label: str) -> None:
-    normalized = re.sub(r"[_.-]+", "_", key.casefold()).strip("_")
+    tokens = _semantic_extension_tokens(key)
     if _contains_extension_concept(
-        normalized, _AUTHORITY_IDENTITY_EXTENSION_CONCEPTS
+        tokens, _AUTHORITY_IDENTITY_EXTENSION_CONCEPTS
     ):
         raise ValueError(f"{label} cannot contain reserved authority or identity keys")
-    if _contains_extension_concept(normalized, _LIFECYCLE_EXTENSION_CONCEPTS):
+    if _contains_extension_concept(tokens, _LIFECYCLE_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain reserved lifecycle keys")
-    if _contains_extension_concept(normalized, _CREDENTIAL_EXTENSION_CONCEPTS):
+    if _contains_extension_concept(tokens, _CREDENTIAL_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain credential keys")
-    if _contains_extension_concept(normalized, _TRANSIENT_EXTENSION_CONCEPTS):
+    if _contains_extension_concept(tokens, _TRANSIENT_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain transient UI or operation keys")
     if _contains_extension_concept(
-        normalized, _DOMAIN_OPERATION_EXTENSION_CONCEPTS
+        tokens, _DOMAIN_OPERATION_EXTENSION_CONCEPTS
     ):
         raise ValueError(f"{label} cannot contain domain or operation keys")
-    if _contains_extension_concept(normalized, _PROVENANCE_EXTENSION_CONCEPTS):
+    if _contains_extension_concept(tokens, _PROVENANCE_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain provenance keys")
-    if _contains_extension_concept(normalized, _HASH_EXTENSION_CONCEPTS):
+    if _contains_extension_concept(tokens, _HASH_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain hash keys")
-    if _contains_extension_concept(normalized, _SCOPE_EXTENSION_CONCEPTS):
+    if _contains_extension_concept(tokens, _SCOPE_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain scope keys")
-    if _contains_extension_concept(normalized, _GENERATED_CACHE_EXTENSION_CONCEPTS):
+    if _contains_extension_concept(tokens, _GENERATED_CACHE_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain generated or cached values")
 
 
-def _contains_extension_concept(normalized: str, concepts: frozenset[str]) -> bool:
-    padded = f"_{normalized}_"
-    return any(f"_{concept}_" in padded for concept in concepts)
+def _semantic_extension_tokens(key: str) -> tuple[str, ...]:
+    return tuple(
+        word.casefold()
+        for component in re.split(r"[_.-]+", key)
+        for word in _EXTENSION_WORD_RE.findall(component)
+    )
+
+
+def _contains_extension_concept(
+    tokens: tuple[str, ...], concepts: frozenset[str]
+) -> bool:
+    for concept in concepts:
+        target = concept.replace("_", "")
+        max_parts = concept.count("_") + 1
+        for start in range(len(tokens)):
+            candidate = ""
+            for token in tokens[start : start + max_parts]:
+                candidate += token
+                if candidate == target:
+                    return True
+                if len(candidate) >= len(target):
+                    break
+    return False
 
 
 def _validate_canonical_json(value: object, label: str) -> None:
