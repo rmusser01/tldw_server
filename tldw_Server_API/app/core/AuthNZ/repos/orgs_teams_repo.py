@@ -28,6 +28,8 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipWriter,
     MembershipWriterContractError,
     MembershipWriteResult,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
 )
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _execute_membership_scope_sql,
@@ -370,16 +372,28 @@ class AuthnzOrgsTeamsRepo:
 
         operation_time = datetime.now(timezone.utc)
         async with self._membership_transaction() as conn:
+            writer = MembershipWriter(self.db_pool)
+            legacy_duplicate_precedence = (
+                type(context) is TrustedMembershipWriteContext
+                and context.trusted_reason is TrustedMembershipReason.BOOTSTRAP
+            )
+            if not legacy_duplicate_precedence:
+                await writer.authorize_organization_creation(
+                    conn=conn,
+                    context=context,
+                    owner_user_id=owner_user_id,
+                )
             await self._raise_for_duplicate_organization_on_connection(
                 conn,
                 name=name,
                 slug=slug,
             )
-            await MembershipWriter(self.db_pool).authorize_organization_creation(
-                conn=conn,
-                context=context,
-                owner_user_id=owner_user_id,
-            )
+            if legacy_duplicate_precedence:
+                await writer.authorize_organization_creation(
+                    conn=conn,
+                    context=context,
+                    owner_user_id=owner_user_id,
+                )
             organization = await self._insert_organization_on_connection(
                 conn,
                 name=name,
