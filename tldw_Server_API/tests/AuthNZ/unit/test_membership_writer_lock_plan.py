@@ -135,9 +135,26 @@ def test_complete_lock_set_is_unique_sorted_and_fully_scoped() -> None:
     )
     assert plan.lock_set.owner_rows == (
         _row(MembershipScopeType.ORGANIZATION, 3, 6),
-        _row(MembershipScopeType.ORGANIZATION, 3, 9),
         _row(MembershipScopeType.ORGANIZATION, 5, 7),
         _row(MembershipScopeType.ORGANIZATION, 5, 8),
+        _row(MembershipScopeType.ORGANIZATION, 3, 9),
+    )
+
+
+def test_owner_rows_use_cross_organization_user_order() -> None:
+    actor, mutations, preflight = _complex_inputs()
+
+    plan = plan_membership_write(
+        context=actor,
+        mutations=mutations,
+        preflight=preflight,
+    )
+
+    assert tuple((row.user_id, row.scope_id) for row in plan.lock_set.owner_rows) == (
+        (6, 3),
+        (7, 5),
+        (8, 5),
+        (9, 3),
     )
 
 
@@ -383,6 +400,79 @@ def test_owner_rows_do_not_require_unaffected_owner_user_locks() -> None:
     assert 99 not in lock_set.user_ids
 
 
+def test_external_lock_set_accepts_owner_rows_sorted_by_user_then_scope() -> None:
+    owner_rows = (
+        _row(MembershipScopeType.ORGANIZATION, 3, 6),
+        _row(MembershipScopeType.ORGANIZATION, 5, 6),
+        _row(MembershipScopeType.ORGANIZATION, 5, 7),
+        _row(MembershipScopeType.ORGANIZATION, 3, 9),
+    )
+
+    lock_set = MembershipLockSet(
+        user_ids=(),
+        org_ids=(3, 5),
+        team_ids=(),
+        membership_rows=(),
+        owner_rows=owner_rows,
+    )
+
+    assert lock_set.owner_rows is owner_rows
+
+
+def test_external_lock_set_rejects_scope_major_owner_row_order() -> None:
+    with pytest.raises(MembershipWriterContractError):
+        MembershipLockSet(
+            user_ids=(),
+            org_ids=(3, 5),
+            team_ids=(),
+            membership_rows=(),
+            owner_rows=(
+                _row(MembershipScopeType.ORGANIZATION, 3, 6),
+                _row(MembershipScopeType.ORGANIZATION, 3, 9),
+                _row(MembershipScopeType.ORGANIZATION, 5, 7),
+                _row(MembershipScopeType.ORGANIZATION, 5, 8),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "owner_rows",
+    [
+        [_row(MembershipScopeType.ORGANIZATION, 3, 6)],
+        (object(),),
+        (_row(MembershipScopeType.TEAM, 3, 6),),
+        (
+            _row(MembershipScopeType.ORGANIZATION, 3, 6),
+            _row(MembershipScopeType.ORGANIZATION, 3, 6),
+        ),
+    ],
+)
+def test_external_lock_set_owner_rows_preserve_shape_scope_and_uniqueness(
+    owner_rows,
+) -> None:
+    with pytest.raises(MembershipWriterContractError):
+        MembershipLockSet(
+            user_ids=(),
+            org_ids=(3,),
+            team_ids=(3,),
+            membership_rows=(),
+            owner_rows=owner_rows,
+        )
+
+
+def test_external_lock_set_owner_rows_remain_disjoint() -> None:
+    shared = _row(MembershipScopeType.ORGANIZATION, 3, 6)
+
+    with pytest.raises(MembershipWriterContractError):
+        MembershipLockSet(
+            user_ids=(6,),
+            org_ids=(3,),
+            team_ids=(),
+            membership_rows=(shared,),
+            owner_rows=(shared,),
+        )
+
+
 def test_lock_plan_retains_exact_factory_inputs() -> None:
     context = ActorMembershipWriteContext(
         actor_user_id=4,
@@ -587,9 +677,9 @@ def test_owner_preflight_retains_deterministic_fully_scoped_identities() -> None
     assert plan.preflight.organization_owners == coverages
     assert plan.lock_set.owner_rows == (
         _row(MembershipScopeType.ORGANIZATION, 3, 6),
-        _row(MembershipScopeType.ORGANIZATION, 3, 9),
         _row(MembershipScopeType.ORGANIZATION, 5, 7),
         _row(MembershipScopeType.ORGANIZATION, 5, 8),
+        _row(MembershipScopeType.ORGANIZATION, 3, 9),
     )
     assert not set(plan.lock_set.membership_rows) & set(plan.lock_set.owner_rows)
 
@@ -739,9 +829,9 @@ def test_postgresql_statements_follow_the_total_lock_phase_order() -> None:
         (MembershipLockPhase.MEMBERSHIP_ROWS, (10, 8)),
         (MembershipLockPhase.MEMBERSHIP_ROWS, (20, 9)),
         (MembershipLockPhase.OWNER_ROWS, (3, 6)),
-        (MembershipLockPhase.OWNER_ROWS, (3, 9)),
         (MembershipLockPhase.OWNER_ROWS, (5, 7)),
         (MembershipLockPhase.OWNER_ROWS, (5, 8)),
+        (MembershipLockPhase.OWNER_ROWS, (3, 9)),
     )
     assert all("FOR UPDATE" in item.sql for item in statements)
     assert all("$1" in item.sql for item in statements)
