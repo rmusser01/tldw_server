@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ import orgs_teams
+from tldw_Server_API.app.core.AuthNZ.exceptions import UserRegistrationException
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipLockBackend,
     MembershipMutationResult,
@@ -14,6 +16,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     TrustedMembershipReason,
     TrustedMembershipWriteContext,
 )
+from tldw_Server_API.app.core.AuthNZ.repos import orgs_teams_repo as orgs_teams_repo_module
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
 _BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
@@ -150,6 +153,57 @@ class _PostgresMembershipListPool:
             raise AssertionError("Postgres backend path should not use SQLite placeholders")
         self.fetchall_calls.append((str(query), tuple(params)))
         return [{"team_id": 2, "user_id": 7, "role": "member", "org_id": 11}]
+
+
+class _NoSecondaryAcquirePool:
+    def __init__(self, *, postgres: bool) -> None:
+        self.pool = object() if postgres else None
+
+    def acquire(self):
+        raise AssertionError("supplied connection must avoid pool acquisition")
+
+    async def fetchall(self, *_args: Any, **_kwargs: Any):  # noqa: ANN002
+        raise AssertionError("supplied connection must avoid pool fetches")
+
+
+class _PostgresMembershipReadConn:
+    def __init__(self) -> None:
+        self.fetch_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def fetch(self, query: str, *params: Any) -> list[dict[str, Any]]:
+        self.fetch_calls.append((str(query), tuple(params)))
+        if "FROM org_members" in query:
+            return [{"org_id": 11, "role": "admin", "status": "active"}]
+        return [
+            {
+                "team_id": 2,
+                "user_id": 7,
+                "role": "member",
+                "org_id": 11,
+                "team_name": "team",
+                "org_name": "org",
+            }
+        ]
+
+
+class _SqliteMembershipReadConn:
+    def __init__(self) -> None:
+        self.execute_calls: list[tuple[str, Any]] = []
+
+    async def execute(self, query: str, params: Any) -> _ListCursor:
+        self.execute_calls.append((str(query), params))
+        if "FROM org_members" in query:
+            return _ListCursor([(11, "admin", "active")])
+        return _ListCursor([(2, 7, "member", 11, "team", "org")])
+
+
+class _FailingMembershipReadPool:
+    def __init__(self, secret: str) -> None:
+        self.pool = object()
+        self._secret = secret
+
+    async def fetchall(self, *_args: Any, **_kwargs: Any):  # noqa: ANN002
+        raise RuntimeError(self._secret)
 
 
 class _SqliteUpdateTeamConn:
@@ -372,6 +426,91 @@ async def test_list_active_team_memberships_for_user_postgres_backend_selection_
     assert rows == [{"team_id": 2, "user_id": 7, "role": "member", "org_id": 11}]
     assert pool.fetchall_calls
     assert "coalesce(tm.status, 'active') = 'active'" in pool.fetchall_calls[0][0].lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "postgres",
+    (False, True),
+)
+async def test_membership_reads_use_supplied_connection_without_secondary_acquisition(
+    postgres: bool,
+):
+    conn = _PostgresMembershipReadConn() if postgres else _SqliteMembershipReadConn()
+    repo = AuthnzOrgsTeamsRepo(db_pool=_NoSecondaryAcquirePool(postgres=postgres))
+
+    team_rows = await repo.list_memberships_for_user(user_id=7, conn=conn)
+    org_rows = await repo.list_org_memberships_for_user(user_id=7, conn=conn)
+
+    assert team_rows[0]["org_id"] == 11
+    assert org_rows == [{"org_id": 11, "role": "admin", "status": "active"}]
+
+
+@pytest.mark.asyncio
+async def test_membership_read_helpers_forward_supplied_connection(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    conn = object()
+    calls: list[tuple[str, int, object | None]] = []
+
+    class _Repo:
+        async def list_memberships_for_user(self, user_id: int, *, conn=None):
+            calls.append(("team", user_id, conn))
+            return []
+
+        async def list_org_memberships_for_user(self, user_id: int, *, conn=None):
+            calls.append(("org", user_id, conn))
+            return []
+
+    async def _repo():
+        return _Repo()
+
+    monkeypatch.setattr(orgs_teams, "_get_orgs_teams_repo", _repo)
+
+    await orgs_teams.list_memberships_for_user(7, db_conn=conn)
+    await orgs_teams.list_org_memberships_for_user(7, db_conn=conn)
+
+    assert calls == [("team", 7, conn), ("org", 7, conn)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation",
+    ("list_memberships_for_user", "list_org_memberships_for_user"),
+)
+async def test_membership_read_failures_are_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+):
+    secret = "password=private database=/private/authnz.db"
+    log_events: list[tuple[dict[str, object], str]] = []
+
+    class _BoundLogger:
+        def __init__(self, fields: dict[str, object] | None = None) -> None:
+            self._fields = fields or {}
+
+        def bind(self, **fields: object):
+            return _BoundLogger(fields)
+
+        def error(self, message: str) -> None:
+            log_events.append((self._fields, message))
+
+    monkeypatch.setattr(orgs_teams_repo_module, "logger", _BoundLogger())
+    repo = AuthnzOrgsTeamsRepo(db_pool=_FailingMembershipReadPool(secret))
+
+    with pytest.raises(UserRegistrationException) as exc_info:
+        await getattr(repo, operation)(user_id=7)
+
+    assert type(exc_info.value).__name__ == "MembershipReadError"
+    assert str(exc_info.value) == "Membership state could not be read."
+    assert exc_info.value.__suppress_context__ is True
+    assert log_events == [
+        (
+            {"operation": operation, "exception_type": "RuntimeError"},
+            "AuthNZ membership read failed",
+        )
+    ]
+    assert secret not in repr(log_events)
 
 
 @pytest.mark.asyncio

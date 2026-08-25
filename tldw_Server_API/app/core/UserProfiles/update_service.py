@@ -139,6 +139,7 @@ class UserProfileUpdateService:
                 user_id=user_id,
                 scope=scope,
                 is_platform_admin=is_platform_admin,
+                db_conn=None if dry_run else db_conn,
             )
         is_postgres_backend = _is_postgres_backend_for_pool(self._db_pool)
         operation_time = datetime.now(timezone.utc)
@@ -642,9 +643,17 @@ class UserProfileUpdateService:
         user_id: int,
         scope: ProfileUpdateScope | None,
         is_platform_admin: bool,
+        db_conn: Any | None = None,
     ) -> _MembershipContext:
-        target_org_rows = await list_org_memberships_for_user(user_id)
-        target_team_rows = await list_memberships_for_user(user_id)
+        read_kwargs = {} if db_conn is None else {"db_conn": db_conn}
+        target_org_rows = await list_org_memberships_for_user(
+            user_id,
+            **read_kwargs,
+        )
+        target_team_rows = await list_memberships_for_user(
+            user_id,
+            **read_kwargs,
+        )
         target_org_roles = {
             int(row.get("org_id")): str(row.get("role") or "member").lower()
             for row in target_org_rows
@@ -664,8 +673,14 @@ class UserProfileUpdateService:
         actor_team_roles: dict[int, str] = {}
         actor_user_id = scope.actor_user_id if scope else None
         if actor_user_id is not None and not is_platform_admin:
-            actor_org_rows = await list_org_memberships_for_user(int(actor_user_id))
-            actor_team_rows = await list_memberships_for_user(int(actor_user_id))
+            actor_org_rows = await list_org_memberships_for_user(
+                int(actor_user_id),
+                **read_kwargs,
+            )
+            actor_team_rows = await list_memberships_for_user(
+                int(actor_user_id),
+                **read_kwargs,
+            )
             actor_org_roles = {
                 int(row.get("org_id")): str(row.get("role") or "member").lower()
                 for row in actor_org_rows
