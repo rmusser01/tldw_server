@@ -410,8 +410,6 @@ class TestProvisionEndpointUnit:
         conn = AsyncMock()
 
         async def _execute(statement: str, *_args: object) -> object:
-            if "INSERT INTO main.org_members" in statement:
-                raise RuntimeError("membership write failed")
             if "INSERT INTO main.organizations" in statement:
                 return SimpleNamespace(lastrowid=10)
             return lookup_cursor
@@ -425,6 +423,11 @@ class TestProvisionEndpointUnit:
         gateway.insert_user = AsyncMock(
             return_value=SimpleNamespace(affected_user_ids=(42,))
         )
+        repo = AsyncMock()
+        repo.provision_org_membership_on_connection.side_effect = RuntimeError(
+            "membership write failed"
+        )
+        creation_writer = AsyncMock()
 
         with (
             patch(
@@ -440,6 +443,16 @@ class TestProvisionEndpointUnit:
                 "VersionedUserWriteGateway",
                 return_value=gateway,
             ),
+            patch.object(
+                admin_tenant_provisioning,
+                "AuthnzOrgsTeamsRepo",
+                return_value=repo,
+            ),
+            patch.object(
+                admin_tenant_provisioning,
+                "MembershipWriter",
+                return_value=creation_writer,
+            ),
         ):
             password_service.return_value.hash_password.return_value = "hashed"
             with pytest.raises(Exception) as exc_info:
@@ -451,6 +464,8 @@ class TestProvisionEndpointUnit:
         assert exc_info.value.status_code == 500
         pool.transaction.assert_called_once_with()
         assert conn.__aexit__.await_args.args[0] is RuntimeError
+        creation_writer.authorize_organization_creation.assert_awaited_once()
+        repo.provision_org_membership_on_connection.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_sanitizes_generic_failure(self, monkeypatch: pytest.MonkeyPatch):
