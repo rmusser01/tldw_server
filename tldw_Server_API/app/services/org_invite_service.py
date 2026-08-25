@@ -15,6 +15,10 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     AnchorOwnership,
     TrustedMembershipReason,
@@ -391,6 +395,8 @@ class OrgInviteService:
                         operation_time=operation_time,
                     )
                 )
+        except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError):
+            raise
         except Exception:
             logger.error("Failed to add user to organization")
             return RedemptionResult(

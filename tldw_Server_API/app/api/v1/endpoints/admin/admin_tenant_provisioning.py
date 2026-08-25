@@ -15,6 +15,10 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     AnchorOwnership,
@@ -200,6 +204,16 @@ async def provision_tenant(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to provision tenants",
         ) from None
+    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication database is busy. Please retry shortly.",
+            headers={
+                "Retry-After": str(
+                    get_authnz_transaction_policy().busy_retry_after_seconds
+                ),
+            },
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:

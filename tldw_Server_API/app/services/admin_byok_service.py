@@ -104,6 +104,8 @@ async def get_shared_byok_repo() -> AuthnzOrgProviderSecretsRepo:
         return repo
     except HTTPException:
         raise
+    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
+        raise _shared_key_control_http_exception(exc) from exc
     except Exception as exc:
         logger.error("Failed to initialize shared BYOK repository")
         raise HTTPException(
@@ -312,6 +314,22 @@ async def upsert_shared_key(
             HTTPException(status_code=400, detail="Invalid provider credential fields")
         )
 
+    repo = await get_shared_byok_repo()
+    try:
+        await repo.authorize_scope_write(
+            scope_type=payload.scope_type,
+            scope_id=payload.scope_id,
+            authorization_context=authorization_context,
+        )
+    except _SHARED_KEY_CONTROL_ERRORS as exc:
+        raise _shared_key_control_http_exception(exc) from exc
+    except Exception as exc:
+        logger.error("Failed to authorize shared BYOK key mutation")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to authorize shared BYOK key mutation",
+        ) from exc
+
     try:
         await test_provider_credentials(
             provider=provider_norm,
@@ -341,7 +359,6 @@ async def upsert_shared_key(
             HTTPException(status_code=500, detail="BYOK encryption is not configured")
         )
 
-    repo = await get_shared_byok_repo()
     now = datetime.now(timezone.utc)
     try:
         row = await repo.upsert_secret(
