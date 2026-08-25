@@ -472,6 +472,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.pos
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_source_hash import (
     run_postgres_migrate_to_v16,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+    run_postgres_migrate_to_v26,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_structure_visual_indexes import (
     run_postgres_migrate_to_v21,
 )
@@ -532,7 +535,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate
 class MediaDatabase:
     """Canonical package-native Media DB runtime class."""
 
-    _CURRENT_SCHEMA_VERSION = 25  # Operation-owned shared Workspace clone Media
+    _CURRENT_SCHEMA_VERSION = 26  # Final staged shared Workspace clone persistence
 
     # <<< Schema Definition (Version 1) >>>
 
@@ -632,16 +635,18 @@ class MediaDatabase:
         FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
     );
 
-    -- Operation-owned clone Keyword holds --
+    -- Operation-owned clone pending Keyword values --
     CREATE TABLE IF NOT EXISTS OperationOwnedCloneKeywords (
         media_id INTEGER NOT NULL,
-        keyword_id INTEGER NOT NULL,
+        keyword TEXT NOT NULL CHECK (
+            length(keyword) BETWEEN 1 AND 255
+            AND keyword = lower(trim(keyword))
+        ),
         operation_id TEXT NOT NULL CHECK (length(operation_id) BETWEEN 1 AND 255),
         source_identity TEXT NOT NULL CHECK (length(source_identity) BETWEEN 1 AND 255),
-        created_by_clone BOOLEAN NOT NULL,
-        PRIMARY KEY (media_id, keyword_id),
-        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
-        FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
+        client_id TEXT NOT NULL CHECK (length(client_id) BETWEEN 1 AND 255),
+        PRIMARY KEY (media_id, keyword),
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
     );
 
     -- Transcripts Table --
@@ -857,7 +862,7 @@ class MediaDatabase:
     CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id);
     CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id);
     CREATE INDEX IF NOT EXISTS idx_owned_clone_keywords_keyword
-        ON OperationOwnedCloneKeywords(keyword_id);
+        ON OperationOwnedCloneKeywords(keyword);
     CREATE INDEX IF NOT EXISTS idx_owned_clone_keywords_operation
         ON OperationOwnedCloneKeywords(operation_id, source_identity);
 
@@ -1817,7 +1822,8 @@ class MediaDatabase:
             with self.transaction() as conn:
                 media_row = self._fetchone_with_connection(
                     conn,
-                    "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0",
+                    "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0 "
+                    "AND system_operation_id IS NULL",
                     (media_id,),
                 )
                 if not media_row:
@@ -1833,6 +1839,7 @@ class MediaDatabase:
                     UPDATE Media
                        SET vector_embedding = ?, last_modified = ?, version = ?, client_id = ?
                      WHERE id = ? AND version = ? AND deleted = 0
+                       AND system_operation_id IS NULL
                     """,
                     (
                         vector_bytes,
@@ -1851,7 +1858,7 @@ class MediaDatabase:
                     )
                 updated_row = self._fetchone_with_connection(
                     conn,
-                    "SELECT * FROM Media WHERE id = ?",
+                    "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL",
                     (media_id,),
                 ) or {}
                 self._log_sync_event(
@@ -1987,6 +1994,7 @@ MediaDatabase._postgres_migrate_to_v22 = run_postgres_migrate_to_v22
 MediaDatabase._postgres_migrate_to_v23 = run_postgres_migrate_to_v23
 MediaDatabase._postgres_migrate_to_v24 = run_postgres_migrate_to_v24
 MediaDatabase._postgres_migrate_to_v25 = run_postgres_migrate_to_v25
+MediaDatabase._postgres_migrate_to_v26 = run_postgres_migrate_to_v26
 MediaDatabase._get_db_version = get_db_version
 MediaDatabase._update_schema_version_postgres = update_schema_version_postgres
 MediaDatabase._sync_postgres_sequences = sync_postgres_sequences

@@ -343,7 +343,9 @@ def has_unvectorized_chunks(
     if is_media_database_like(db_instance):
         try:
             cursor = db_instance.execute_query(
-                "SELECT 1 FROM UnvectorizedMediaChunks WHERE media_id = ? AND deleted = 0 LIMIT 1",
+                "SELECT 1 FROM UnvectorizedMediaChunks c WHERE media_id = ? AND deleted = 0 "
+                "AND EXISTS (SELECT 1 FROM Media m WHERE m.id = c.media_id "
+                "AND m.system_operation_id IS NULL) LIMIT 1",
                 (media_id,),
             )
             return cursor.fetchone() is not None
@@ -721,7 +723,9 @@ def get_unvectorized_chunk_count(
         try:
             cursor = db_instance.execute_query(
                 "SELECT COUNT(*) AS chunk_count FROM UnvectorizedMediaChunks "
-                "WHERE media_id = ? AND deleted = 0",
+                "WHERE media_id = ? AND deleted = 0 AND EXISTS "
+                "(SELECT 1 FROM Media m WHERE m.id = UnvectorizedMediaChunks.media_id "
+                "AND m.system_operation_id IS NULL)",
                 (media_id_int,),
             )
             row = cursor.fetchone()
@@ -760,7 +764,9 @@ def get_unvectorized_max_chunk_index(
         try:
             cursor = db_instance.execute_query(
                 "SELECT MAX(chunk_index) AS max_chunk_index FROM UnvectorizedMediaChunks "
-                "WHERE media_id = ? AND deleted = 0",
+                "WHERE media_id = ? AND deleted = 0 AND EXISTS "
+                "(SELECT 1 FROM Media m WHERE m.id = UnvectorizedMediaChunks.media_id "
+                "AND m.system_operation_id IS NULL)",
                 (media_id_int,),
             )
             row = cursor.fetchone()
@@ -794,6 +800,9 @@ def get_unvectorized_anchor_index_for_offset(
                 FROM UnvectorizedMediaChunks
                 WHERE media_id = ? AND deleted = 0 AND start_char IS NOT NULL AND end_char IS NOT NULL
                   AND start_char <= ? AND end_char > ?
+                  AND EXISTS (SELECT 1 FROM Media m
+                              WHERE m.id = UnvectorizedMediaChunks.media_id
+                                AND m.system_operation_id IS NULL)
                 ORDER BY chunk_index ASC
                 LIMIT 1
                 """,
@@ -825,7 +834,9 @@ def get_unvectorized_chunk_index_by_uuid(
         try:
             cursor = db_instance.execute_query(
                 "SELECT chunk_index FROM UnvectorizedMediaChunks "
-                "WHERE media_id = ? AND uuid = ? AND deleted = 0",
+                "WHERE media_id = ? AND uuid = ? AND deleted = 0 AND EXISTS "
+                "(SELECT 1 FROM Media m WHERE m.id = UnvectorizedMediaChunks.media_id "
+                "AND m.system_operation_id IS NULL)",
                 (media_id, chunk_uuid),
             )
             row = cursor.fetchone()
@@ -857,6 +868,9 @@ def get_unvectorized_chunk_by_index(
                 SELECT chunk_index, chunk_text, start_char, end_char, chunk_type
                 FROM UnvectorizedMediaChunks
                 WHERE media_id = ? AND chunk_index = ? AND deleted = 0
+                  AND EXISTS (SELECT 1 FROM Media m
+                              WHERE m.id = UnvectorizedMediaChunks.media_id
+                                AND m.system_operation_id IS NULL)
                 ORDER BY id DESC
                 LIMIT 1
                 """,
@@ -892,6 +906,9 @@ def get_unvectorized_chunks_in_range(
                 SELECT chunk_index, uuid, chunk_text, start_char, end_char, chunk_type
                 FROM UnvectorizedMediaChunks
                 WHERE media_id = ? AND deleted = 0 AND chunk_index BETWEEN ? AND ?
+                  AND EXISTS (SELECT 1 FROM Media m
+                              WHERE m.id = UnvectorizedMediaChunks.media_id
+                                AND m.system_operation_id IS NULL)
                 ORDER BY chunk_index ASC
                 """,
                 (media_id, start_index, end_index),
@@ -1237,14 +1254,9 @@ def fetch_all_keywords(db: MediaDbLike | MediaDbReadLike) -> list[str]:
     """Return all active keyword strings through the package-level read contract."""
     db_instance = unwrap_media_database_like(db)
     if is_media_database_like(db_instance):
-        order_expr = db_instance._keyword_order_expression("k.keyword")
-        query = (
-            "SELECT k.keyword FROM Keywords k WHERE k.deleted = ? "
-            "AND NOT EXISTS (SELECT 1 FROM OperationOwnedCloneKeywords h "
-            "WHERE h.keyword_id = k.id AND h.created_by_clone = ?) "
-            f"ORDER BY {order_expr}"  # nosec B608
-        )
-        cursor = db_instance.execute_query(query, (False, True))
+        order_expr = db_instance._keyword_order_expression("keyword")
+        query = f"SELECT keyword FROM Keywords WHERE deleted = ? ORDER BY {order_expr}"  # nosec B608
+        cursor = db_instance.execute_query(query, (False,))
         return [row["keyword"] for row in cursor.fetchall()]
 
     reader = _require_read_method(

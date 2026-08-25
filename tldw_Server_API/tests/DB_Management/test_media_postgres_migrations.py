@@ -880,7 +880,7 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
                 connection=conn,
             ).rows
 
-            assert int(version) == 25
+            assert int(version) == 26
             assert _column_definition(
                 backend, conn, "claims_analytics_exports", "job_id"
             ) == {"data_type": "bigint", "is_nullable": "YES"}
@@ -977,7 +977,7 @@ def test_media_postgres_migration_v24_repairs_missing_monitoring_event_extension
                 connection=conn,
             ).scalar
 
-            assert int(version) == 25
+            assert int(version) == 26
             assert backend.table_exists("claims_monitoring_events", connection=conn)
             assert _index_exists(
                 backend,
@@ -1032,8 +1032,14 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
                 backend,
                 conn,
                 "operationownedclonekeywords",
-                "created_by_clone",
-            ) == {"data_type": "boolean", "is_nullable": "NO"}
+                "keyword",
+            ) == {"data_type": "text", "is_nullable": "NO"}
+            assert _column_definition(
+                backend,
+                conn,
+                "operationownedclonekeywords",
+                "client_id",
+            ) == {"data_type": "text", "is_nullable": "NO"}
             backend.execute(
                 "INSERT INTO Media "
                 "(uuid, title, type, content_hash, last_modified, version, client_id) "
@@ -1095,7 +1101,7 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
                 connection=conn,
             ).rows[0]
 
-            assert int(version) == 25
+            assert int(version) == 26
             assert all(
                 _column_definition(backend, conn, "media", column_name)
                 == {"data_type": "text", "is_nullable": "YES"}
@@ -1115,6 +1121,18 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
             assert backend.table_exists(
                 "operationownedclonekeywords",
                 connection=conn,
+            )
+            assert _column_exists(
+                backend,
+                conn,
+                "operationownedclonekeywords",
+                "keyword",
+            )
+            assert not _column_exists(
+                backend,
+                conn,
+                "operationownedclonekeywords",
+                "keyword_id",
             )
             assert dict(ordinary) == {
                 "title": "Ordinary pre-v25 media",

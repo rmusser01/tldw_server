@@ -113,8 +113,29 @@ def run_postgres_migrate_to_v25(
         connection=conn,
     )
     backend.execute(
-        f"CREATE INDEX IF NOT EXISTS {ident('idx_owned_clone_keywords_keyword')} "
-        f"ON {holds_table} ({ident('keyword_id')})",
+        f"""
+        DO $operation_owned_keyword_index_v25$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'operationownedclonekeywords'
+                   AND column_name = 'keyword_id'
+            ) THEN
+                CREATE INDEX IF NOT EXISTS {ident('idx_owned_clone_keywords_keyword')}
+                    ON {holds_table} ({ident('keyword_id')});
+            ELSIF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'operationownedclonekeywords'
+                   AND column_name = 'keyword'
+            ) THEN
+                CREATE INDEX IF NOT EXISTS {ident('idx_owned_clone_keywords_keyword')}
+                    ON {holds_table} ({ident('keyword')});
+            END IF;
+        END
+        $operation_owned_keyword_index_v25$
+        """,  # nosec B608
         connection=conn,
     )
     backend.execute(

@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from collections import deque
 import json
 import sqlite3
 import threading
+from collections import deque
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Metrics.stt_metrics import emit_stt_transcript_read_path_total
-from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
     MediaDbLike,
     require_media_database_like,
 )
+from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+from tldw_Server_API.app.core.Metrics.stt_metrics import emit_stt_transcript_read_path_total
 
 _LATEST_RUN_FALLBACK_CACHE_LIMIT = 1024
 _latest_run_fallback_cache_lock = threading.Lock()
@@ -30,6 +30,7 @@ def _ordered_transcripts_query() -> str:
         FROM Transcripts t
         JOIN Media m ON t.media_id = m.id
         WHERE t.media_id = ? AND t.deleted = 0 AND m.deleted = 0
+          AND m.system_operation_id IS NULL
         ORDER BY
             CASE
                 WHEN m.latest_transcription_run_id IS NOT NULL
@@ -113,7 +114,7 @@ def _resolve_latest_transcript_row(
         """
         SELECT latest_transcription_run_id
         FROM Media
-        WHERE id = ? AND deleted = 0
+        WHERE id = ? AND deleted = 0 AND system_operation_id IS NULL
         """,
         (media_id,),
     )
@@ -128,7 +129,8 @@ def _resolve_latest_transcript_row(
             SELECT t.*
             FROM Transcripts t
             JOIN Media m ON t.media_id = m.id
-            WHERE t.media_id = ? AND t.deleted = 0 AND m.deleted = 0 AND t.transcription_run_id = ?
+            WHERE t.media_id = ? AND t.deleted = 0 AND m.deleted = 0
+              AND m.system_operation_id IS NULL AND t.transcription_run_id = ?
             ORDER BY t.created_at DESC
             LIMIT 1
             """,
@@ -233,7 +235,8 @@ def get_specific_transcript(
         query = (
             "SELECT t.* FROM Transcripts t "
             "JOIN Media m ON t.media_id = m.id "
-            "WHERE t.uuid = ? AND t.deleted = 0 AND m.deleted = 0"
+            "WHERE t.uuid = ? AND t.deleted = 0 AND m.deleted = 0 "
+            "AND m.system_operation_id IS NULL"
         )
         with db_instance.transaction() as conn:
             result = db_instance._fetchone_with_connection(conn, query, (transcript_uuid,))
@@ -260,6 +263,7 @@ def get_media_prompts(
             "SELECT dv.id, dv.uuid, dv.prompt, dv.created_at, dv.version_number "
             "FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id "
             "WHERE dv.media_id = ? AND dv.deleted = 0 AND m.deleted = 0 "
+            "AND m.system_operation_id IS NULL "
             "AND dv.prompt IS NOT NULL AND dv.prompt != '' "
             "ORDER BY dv.version_number DESC"
         )
@@ -295,7 +299,8 @@ def get_specific_prompt(
         query = (
             "SELECT dv.prompt FROM DocumentVersions dv "
             "JOIN Media m ON dv.media_id = m.id "
-            "WHERE dv.uuid = ? AND dv.deleted = 0 AND m.deleted = 0"
+            "WHERE dv.uuid = ? AND dv.deleted = 0 AND m.deleted = 0 "
+            "AND m.system_operation_id IS NULL"
         )
         with db_instance.transaction() as conn:
             result = db_instance._fetchone_with_connection(conn, query, (version_uuid,))

@@ -40,8 +40,11 @@ _PROVENANCE_URL_MAX_LENGTH = 4096
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _CANONICAL_MAX_DEPTH = 64
 _CANONICAL_MAX_CONTAINER_ITEMS = 1_000_000
-_CANONICAL_HASH_DOMAIN = b"tldw.media-clone-snapshot.v1\x00"
-_LOGICAL_COPY_PROJECTION_VERSION = 1
+_CANONICAL_MAX_STRING_LENGTH = 1_000_000
+_KEYWORD_MAX_LENGTH = 255
+_CANONICAL_HASH_DOMAIN = b"tldw.media-clone-snapshot.v2\x00"
+_LOGICAL_COPY_PROJECTION_VERSION = 2
+_LEGACY_JSON_TEXT_KEY = "$tldw_legacy_json_text_v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,7 +172,11 @@ def _normalize_persisted_value(value: Any, *, depth: int = 0) -> Any:
     """Project supported values to their stable database representation."""
     if depth > _CANONICAL_MAX_DEPTH:
         raise ValueError("clone snapshot exceeds the canonical nesting bound")
-    if value is None or isinstance(value, (bool, int, str)):
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, str):
+        if len(value) > _CANONICAL_MAX_STRING_LENGTH:
+            raise ValueError("clone snapshot string exceeds the string bound")
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
@@ -178,6 +185,8 @@ def _normalize_persisted_value(value: Any, *, depth: int = 0) -> Any:
     if isinstance(value, complex):
         raise TypeError("unsupported clone snapshot hash value: complex")
     if isinstance(value, bytes):
+        if len(value) > _CANONICAL_MAX_STRING_LENGTH:
+            raise ValueError("clone snapshot bytes exceed the string bound")
         return {"type": "bytes", "hex": value.hex()}
     if isinstance(value, datetime):
         return value.isoformat()
@@ -191,6 +200,8 @@ def _normalize_persisted_value(value: Any, *, depth: int = 0) -> Any:
         normalized: dict[str, Any] = {}
         for key, item in value.items():
             normalized_key = str(key)
+            if len(normalized_key) > _CANONICAL_MAX_STRING_LENGTH:
+                raise ValueError("clone snapshot mapping key exceeds the string bound")
             if normalized_key in normalized:
                 raise ValueError("clone snapshot mapping has ambiguous persisted keys")
             normalized[normalized_key] = _normalize_persisted_value(
@@ -226,9 +237,25 @@ def _normalize_keywords(keywords: Any) -> tuple[str, ...]:
         if not isinstance(keyword, str):
             raise InputError("snapshot Media keywords must contain strings")
         value = keyword.strip().lower()
+        if len(value) > _KEYWORD_MAX_LENGTH:
+            raise InputError("snapshot Media keywords must be at most 255 characters")
         if value:
             normalized.add(value)
     return tuple(sorted(normalized))
+
+
+def _normalize_source_chunk_metadata(value: Any) -> Any:
+    """Decode source JSON text once while preserving invalid legacy text explicitly."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return {
+                _LEGACY_JSON_TEXT_KEY: _normalize_persisted_value(value),
+            }
+    if isinstance(value, Mapping) and set(value) == {_LEGACY_JSON_TEXT_KEY}:
+        raise InputError("snapshot chunk metadata uses a reserved legacy-text marker")
+    return _normalize_persisted_value(value)
 
 
 def _ordered_projection(rows: Sequence[Mapping[str, Any]]) -> tuple[Mapping[str, Any], ...]:
@@ -277,9 +304,13 @@ def _logical_copy_projection(
                 "chunk_type",
                 "creation_date",
                 "last_modified_orig",
-                "metadata",
             )
         }
+        projected["metadata"] = (
+            _normalize_source_chunk_metadata(row.get("metadata"))
+            if source_rows
+            else _normalize_persisted_value(row.get("metadata"))
+        )
         projected["is_processed"] = (
             False if source_rows else bool(row.get("is_processed"))
         )
@@ -375,15 +406,11 @@ def _operation_conflict() -> ConflictError:
     )
 
 
-def _json_safe(value: Any) -> Any:
-    return _normalize_persisted_value(value)
-
-
 def _json_column(value: Any) -> str | None:
     if value is None:
         return None
     return json.dumps(
-        _json_safe(value),
+        value,
         ensure_ascii=True,
         separators=(",", ":"),
         sort_keys=True,
@@ -529,7 +556,7 @@ class CloneSnapshotRepository:
     ) -> list[dict[str, Any]]:
         rows = self.session._fetchall_with_connection(
             connection,
-            "SELECT id, url, uuid, deleted, is_trash, system_operation_id, "
+            "SELECT id, url, uuid, client_id, deleted, is_trash, system_operation_id, "
             "system_operation_kind, system_source_identity, system_content_hash "
             "FROM Media WHERE url = ? OR system_operation_id = ?",
             (storage_url, operation_id),
@@ -588,6 +615,7 @@ class CloneSnapshotRepository:
             and candidate.get("system_operation_kind") == _CLONE_OPERATION_KIND
             and candidate.get("system_operation_id") == operation_id
             and candidate.get("system_source_identity") == source_identity
+            and str(candidate.get("client_id")) == str(self.session.client_id)
             and hmac.compare_digest(
                 str(candidate.get("system_content_hash") or ""),
                 expected_content_hash,
@@ -603,7 +631,7 @@ class CloneSnapshotRepository:
 
     @staticmethod
     def _decode_json_value(value: Any) -> Any:
-        if value is None or isinstance(value, Mapping):
+        if value is None or isinstance(value, (Mapping, list, tuple, bool, int, float)):
             return value
         if not isinstance(value, str):
             raise _operation_conflict()
@@ -646,24 +674,23 @@ class CloneSnapshotRepository:
             raise _operation_conflict()
         document_row["source_url"] = clone_provenance["source_url"]
 
-        keyword_rows = self.session._fetchall_with_connection(
+        linked_keyword_rows = self.session._fetchall_with_connection(
             connection,
-            "SELECT mk.keyword_id, k.keyword FROM MediaKeywords mk "
-            "JOIN Keywords k ON k.id = mk.keyword_id "
-            "WHERE mk.media_id = ? AND k.deleted = ?",
-            (media_id, active_value),
-        )
-        hold_rows = self.session._fetchall_with_connection(
-            connection,
-            "SELECT keyword_id, operation_id, source_identity "
-            "FROM OperationOwnedCloneKeywords WHERE media_id = ?",
+            "SELECT keyword_id FROM MediaKeywords WHERE media_id = ?",
             (media_id,),
         )
-        keyword_ids = {int(row["keyword_id"]) for row in keyword_rows}
-        if keyword_ids != {int(row["keyword_id"]) for row in hold_rows} or any(
+        pending_rows = self.session._fetchall_with_connection(
+            connection,
+            "SELECT keyword, operation_id, source_identity, client_id "
+            "FROM OperationOwnedCloneKeywords WHERE media_id = ? ORDER BY keyword",
+            (media_id,),
+        )
+        pending_keywords = tuple(str(row["keyword"]) for row in pending_rows)
+        if linked_keyword_rows or pending_keywords != _normalize_keywords(pending_keywords) or any(
             row["operation_id"] != operation_id
             or row["source_identity"] != source_identity
-            for row in hold_rows
+            or str(row["client_id"]) != str(self.session.client_id)
+            for row in pending_rows
         ):
             raise _operation_conflict()
         chunk_rows = [
@@ -691,7 +718,7 @@ class CloneSnapshotRepository:
         try:
             return _logical_copy_projection(
                 media=dict(media_rows[0]),
-                keywords=tuple(str(row["keyword"]) for row in keyword_rows),
+                keywords=pending_keywords,
                 chunks=chunk_rows,
                 transcripts=transcript_rows,
                 document=document_row,
@@ -844,7 +871,7 @@ class CloneSnapshotRepository:
             ),
         )
 
-    def _insert_keywords(
+    def _insert_pending_keywords(
         self,
         connection: Any,
         *,
@@ -852,75 +879,19 @@ class CloneSnapshotRepository:
         keywords: Any,
         operation_id: str,
         source_identity: str,
-        now: str,
     ) -> None:
         for keyword in _normalize_keywords(keywords):
-            rows = self.session._fetchall_with_connection(
-                connection,
-                "SELECT id, deleted FROM Keywords WHERE LOWER(keyword) = ?",
-                (keyword,),
-            )
-            if len(rows) > 1 or (rows and bool(rows[0]["deleted"])):
-                raise _operation_conflict()
-            if rows:
-                keyword_id = int(rows[0]["id"])
-                existing_holds = self.session._fetchall_with_connection(
-                    connection,
-                    "SELECT 1 FROM OperationOwnedCloneKeywords "
-                    "WHERE keyword_id = ? AND created_by_clone = ? LIMIT 1",
-                    (
-                        keyword_id,
-                        True
-                        if self.session.backend_type == BackendType.POSTGRESQL  # type: ignore[attr-defined]
-                        else 1,
-                    ),
-                )
-                created_by_clone = bool(existing_holds)
-            else:
-                sql = (
-                    "INSERT INTO Keywords "
-                    "(keyword, uuid, last_modified, version, client_id, deleted) "
-                    "VALUES (?, ?, ?, 1, ?, ?)"
-                )
-                if self.session.backend_type == BackendType.POSTGRESQL:  # type: ignore[attr-defined]
-                    sql += " RETURNING id"
-                cursor = self.session._execute_with_connection(
-                    connection,
-                    sql,
-                    (
-                        keyword,
-                        str(uuid4()),
-                        now,
-                        self.session.client_id,
-                        self._active_value(),
-                    ),
-                )
-                if self.session.backend_type == BackendType.POSTGRESQL:  # type: ignore[attr-defined]
-                    inserted = cursor.fetchone()
-                    keyword_id = int(inserted["id"]) if inserted else 0
-                else:
-                    keyword_id = int(cursor.lastrowid or 0)
-                if keyword_id <= 0:
-                    raise DatabaseError("Clone keyword insert returned no identity.")
-                created_by_clone = True
-            self.session._execute_with_connection(
-                connection,
-                "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)",
-                (media_id, keyword_id),
-            )
             self.session._execute_with_connection(
                 connection,
                 "INSERT INTO OperationOwnedCloneKeywords "
-                "(media_id, keyword_id, operation_id, source_identity, created_by_clone) "
+                "(media_id, keyword, operation_id, source_identity, client_id) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (
                     media_id,
-                    keyword_id,
+                    keyword,
                     operation_id,
                     source_identity,
-                    created_by_clone
-                    if self.session.backend_type == BackendType.POSTGRESQL  # type: ignore[attr-defined]
-                    else int(created_by_clone),
+                    self.session.client_id,
                 ),
             )
 
@@ -956,7 +927,7 @@ class CloneSnapshotRepository:
                     _normalize_persisted_value(chunk.get("creation_date")),
                     _normalize_persisted_value(chunk.get("last_modified_orig")),
                     self._active_value(),
-                    _json_column(chunk.get("metadata")),
+                    _json_column(_normalize_source_chunk_metadata(chunk.get("metadata"))),
                     str(uuid4()),
                     now,
                     self.session.client_id,
@@ -1074,13 +1045,12 @@ class CloneSnapshotRepository:
                     source_url=snapshot.media.get("url"),
                     now=now,
                 )
-                self._insert_keywords(
+                self._insert_pending_keywords(
                     connection,
                     media_id=media_id,
                     keywords=snapshot.media.get("keywords", ()),
                     operation_id=operation_id,
                     source_identity=source_identity,
-                    now=now,
                 )
                 self._insert_chunks(
                     connection,
@@ -1141,13 +1111,6 @@ class CloneSnapshotRepository:
                 if candidate is None:
                     return 0
                 media_id = int(candidate["id"])
-                keyword_holds = self.session._fetchall_with_connection(
-                    connection,
-                    "SELECT keyword_id, created_by_clone "
-                    "FROM OperationOwnedCloneKeywords WHERE media_id = ? "
-                    "AND operation_id = ? AND source_identity = ?",
-                    (media_id, operation_id, source_identity),
-                )
                 self.session._execute_with_connection(
                     connection,
                     "DELETE FROM DocumentVersionIdentifiers WHERE dv_id IN "
@@ -1156,9 +1119,8 @@ class CloneSnapshotRepository:
                 )
                 self.session._execute_with_connection(
                     connection,
-                    "DELETE FROM OperationOwnedCloneKeywords WHERE media_id = ? "
-                    "AND operation_id = ? AND source_identity = ?",
-                    (media_id, operation_id, source_identity),
+                    "DELETE FROM OperationOwnedCloneKeywords WHERE media_id = ?",
+                    (media_id,),
                 )
                 for table in (
                     "DocumentVersions",
@@ -1187,22 +1149,6 @@ class CloneSnapshotRepository:
                 )
                 if cursor.rowcount != 1:
                     raise _operation_conflict()
-                for hold in keyword_holds:
-                    if not bool(hold["created_by_clone"]):
-                        continue
-                    self.session._execute_with_connection(
-                        connection,
-                        "DELETE FROM Keywords WHERE id = ? "
-                        "AND NOT EXISTS (SELECT 1 FROM MediaKeywords "
-                        "WHERE keyword_id = ?) "
-                        "AND NOT EXISTS (SELECT 1 FROM OperationOwnedCloneKeywords "
-                        "WHERE keyword_id = ?)",
-                        (
-                            int(hold["keyword_id"]),
-                            int(hold["keyword_id"]),
-                            int(hold["keyword_id"]),
-                        ),
-                    )
                 return 1
         except (ConflictError, InputError):
             raise
@@ -1239,6 +1185,88 @@ class CloneSnapshotRepository:
             )
             for row in rows
         ]
+
+    def _promote_pending_keywords(
+        self,
+        connection: Any,
+        *,
+        media_id: int,
+        now: str,
+    ) -> None:
+        rows = self.session._fetchall_with_connection(
+            connection,
+            "SELECT keyword FROM OperationOwnedCloneKeywords "
+            "WHERE media_id = ? ORDER BY keyword",
+            (media_id,),
+        )
+        keywords = tuple(str(row["keyword"]) for row in rows)
+        if keywords != _normalize_keywords(keywords):
+            raise _operation_conflict()
+
+        if self.session.backend_type == BackendType.POSTGRESQL:  # type: ignore[attr-defined]
+            for keyword in keywords:
+                self.session._execute_with_connection(
+                    connection,
+                    "SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))",
+                    ("media-clone-keyword", keyword),
+                )
+
+        for keyword in keywords:
+            canonical_rows = self.session._fetchall_with_connection(
+                connection,
+                "SELECT id, deleted FROM Keywords WHERE LOWER(keyword) = ?",
+                (keyword,),
+            )
+            if len(canonical_rows) > 1 or (
+                canonical_rows and bool(canonical_rows[0]["deleted"])
+            ):
+                raise _operation_conflict()
+            if canonical_rows:
+                keyword_id = int(canonical_rows[0]["id"])
+            else:
+                sql = (
+                    "INSERT INTO Keywords "
+                    "(keyword, uuid, last_modified, version, client_id, deleted) "
+                    "VALUES (?, ?, ?, 1, ?, ?)"
+                )
+                if self.session.backend_type == BackendType.POSTGRESQL:  # type: ignore[attr-defined]
+                    sql += " RETURNING id"
+                cursor = self.session._execute_with_connection(
+                    connection,
+                    sql,
+                    (
+                        keyword,
+                        str(uuid4()),
+                        now,
+                        self.session.client_id,
+                        self._active_value(),
+                    ),
+                )
+                if self.session.backend_type == BackendType.POSTGRESQL:  # type: ignore[attr-defined]
+                    inserted = cursor.fetchone()
+                    keyword_id = int(inserted["id"]) if inserted else 0
+                else:
+                    keyword_id = int(cursor.lastrowid or 0)
+                if keyword_id <= 0:
+                    raise DatabaseError("Clone keyword promotion returned no identity.")
+                self.session._update_fts_keyword(connection, keyword_id, keyword)
+
+            link_sql = "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)"
+            if self.session.backend_type == BackendType.POSTGRESQL:  # type: ignore[attr-defined]
+                link_sql += " ON CONFLICT DO NOTHING"
+            else:
+                link_sql = "INSERT OR IGNORE INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)"
+            self.session._execute_with_connection(
+                connection,
+                link_sql,
+                (media_id, keyword_id),
+            )
+
+        self.session._execute_with_connection(
+            connection,
+            "DELETE FROM OperationOwnedCloneKeywords WHERE media_id = ?",
+            (media_id,),
+        )
 
     def confirm_operation_owned_clone_media(
         self,
@@ -1279,24 +1307,11 @@ class CloneSnapshotRepository:
                 expected_content_hash=expected_content_hash,
             )
             media_id = int(candidate["id"])
-            released_value = (
-                False
-                if self.session.backend_type == BackendType.POSTGRESQL  # type: ignore[attr-defined]
-                else 0
-            )
-            self.session._execute_with_connection(
+            now = self.session._get_current_utc_timestamp_str()
+            self._promote_pending_keywords(
                 connection,
-                "UPDATE OperationOwnedCloneKeywords SET created_by_clone = ? "
-                "WHERE keyword_id IN (SELECT keyword_id "
-                "FROM OperationOwnedCloneKeywords WHERE media_id = ? "
-                "AND operation_id = ? AND source_identity = ?)",
-                (released_value, media_id, operation_id, source_identity),
-            )
-            self.session._execute_with_connection(
-                connection,
-                "DELETE FROM OperationOwnedCloneKeywords WHERE media_id = ? "
-                "AND operation_id = ? AND source_identity = ?",
-                (media_id, operation_id, source_identity),
+                media_id=media_id,
+                now=now,
             )
             cursor = self.session._execute_with_connection(
                 connection,
@@ -1309,7 +1324,7 @@ class CloneSnapshotRepository:
                 "AND system_source_identity = ? AND system_content_hash = ?",
                 (
                     self._active_value(),
-                    self.session._get_current_utc_timestamp_str(),
+                    now,
                     self.session.client_id,
                     media_id,
                     self._active_value(),
@@ -1350,7 +1365,7 @@ class CloneSnapshotRepository:
 
             media_rows = read_rows(
                 f"SELECT * FROM Media WHERE id IN ({placeholders}) "  # nosec B608
-                "AND deleted = ? AND is_trash = ?",
+                "AND deleted = ? AND is_trash = ? AND system_operation_id IS NULL",
                 (*requested_ids, active_value, active_value),
             )
             media_by_id = {int(row["id"]): row for row in media_rows}
@@ -1369,6 +1384,7 @@ class CloneSnapshotRepository:
                 f"SELECT t.* FROM Transcripts t JOIN Media m ON m.id = t.media_id "  # nosec B608
                 f"WHERE t.media_id IN ({placeholders}) AND t.deleted = ? "
                 "AND m.deleted = ? AND m.is_trash = ? "
+                "AND m.system_operation_id IS NULL "
                 "ORDER BY t.media_id, "
                 "CASE WHEN m.latest_transcription_run_id IS NOT NULL "
                 "AND t.transcription_run_id = m.latest_transcription_run_id THEN 0 ELSE 1 END, "
@@ -1387,6 +1403,7 @@ class CloneSnapshotRepository:
                 "JOIN Media m ON m.id = mk.media_id "
                 f"WHERE mk.media_id IN ({placeholders}) AND k.deleted = ? "
                 "AND m.deleted = ? AND m.is_trash = ? "
+                "AND m.system_operation_id IS NULL "
                 f"ORDER BY mk.media_id, {keyword_order}, k.id",  # nosec B608
                 (*requested_ids, active_value, active_value, active_value),
             )

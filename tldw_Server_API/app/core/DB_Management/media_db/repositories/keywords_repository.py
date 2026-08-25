@@ -32,6 +32,7 @@ class KeywordsRepository:
             "JOIN MediaKeywords mk ON k.id = mk.keyword_id "
             "JOIN Media m ON mk.media_id = m.id "
             "WHERE mk.media_id = ? AND k.deleted = ? AND m.deleted = ? "
+            "AND m.system_operation_id IS NULL "
             f"ORDER BY {order_expr}"
         )
         try:
@@ -68,19 +69,6 @@ class KeywordsRepository:
                     kw_uuid = existing["uuid"]
                     is_deleted = existing["deleted"]
                     current_version = existing["version"]
-                    released_value = (
-                        False if db.backend_type == BackendType.POSTGRESQL else 0
-                    )
-                    db._execute_with_connection(
-                        conn,
-                        "UPDATE OperationOwnedCloneKeywords SET created_by_clone = ? "
-                        "WHERE keyword_id = ? AND created_by_clone = ?",
-                        (
-                            released_value,
-                            kw_id,
-                            True if db.backend_type == BackendType.POSTGRESQL else 1,
-                        ),
-                    )
                     if is_deleted:
                         new_version = current_version + 1
                         logger.info(
@@ -174,7 +162,8 @@ class KeywordsRepository:
         try:
             media_info = db._fetchone_with_connection(
                 connection,
-                "SELECT uuid FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid FROM Media WHERE id = ? AND deleted = 0 "
+                "AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_info:
@@ -316,7 +305,9 @@ class KeywordsRepository:
 
                 linked_cursor = db._execute_with_connection(
                     conn,
-                    "SELECT mk.media_id, m.uuid AS media_uuid FROM MediaKeywords mk JOIN Media m ON mk.media_id = m.id WHERE mk.keyword_id = ? AND m.deleted = 0",
+                    "SELECT mk.media_id, m.uuid AS media_uuid FROM MediaKeywords mk "
+                    "JOIN Media m ON mk.media_id = m.id WHERE mk.keyword_id = ? "
+                    "AND m.deleted = 0 AND m.system_operation_id IS NULL",
                     (keyword_id,),
                 )
                 media_to_unlink = linked_cursor.fetchall()
