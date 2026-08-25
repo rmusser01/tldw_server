@@ -131,7 +131,13 @@ def test_pg_forward_migration_adds_missing_columns_and_partial_indexes(jobs_pg_d
             "btree",
             len(expected_columns),
         )
-        assert tuple(state[8]) == expected_columns
+        assert tuple(state[8]) == tuple(
+            column.removesuffix(" DESC") for column in expected_columns
+        )
+        assert tuple(state[9]) == tuple(
+            3 if column.endswith(" DESC") else 0
+            for column in expected_columns
+        )
 
 
 def _read_pg_archive_batch_index_state(cur, index_name):
@@ -140,6 +146,9 @@ def _read_pg_archive_batch_index_state(cur, index_name):
         "i.indisready, i.indisunique, i.indpred IS NULL, "
         "i.indexprs IS NULL, am.amname, i.indnkeyatts, "
         "ARRAY(SELECT pg_get_indexdef(i.indexrelid, key_position, true) "
+        "FROM generate_series(1, i.indnkeyatts) AS key_position "
+        "ORDER BY key_position), "
+        "ARRAY(SELECT i.indoption[key_position - 1]::integer "
         "FROM generate_series(1, i.indnkeyatts) AS key_position "
         "ORDER BY key_position) "
         "FROM pg_class idx "
@@ -195,9 +204,13 @@ def test_pg_archive_batch_read_index_migration_repairs_misdefined_index(
         "btree",
         len(_POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS[index_name]),
     )
-    assert tuple(state[8]) == _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS[
-        index_name
-    ]
+    expected_columns = _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS[index_name]
+    assert tuple(state[8]) == tuple(
+        column.removesuffix(" DESC") for column in expected_columns
+    )
+    assert tuple(state[9]) == tuple(
+        3 if column.endswith(" DESC") else 0 for column in expected_columns
+    )
 
 
 @pytest.mark.parametrize(
@@ -248,6 +261,12 @@ class _ArchiveBatchReadIndexCursor:
                 name for name in self.states if name in rendered
             )
             columns = _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS[index_name]
+            column_names = tuple(
+                column.removesuffix(" DESC") for column in columns
+            )
+            options = tuple(
+                3 if column.endswith(" DESC") else 0 for column in columns
+            )
             valid = self.repair_succeeds
             self.states[index_name] = (
                 True,
@@ -258,7 +277,8 @@ class _ArchiveBatchReadIndexCursor:
                 True,
                 "btree",
                 len(columns),
-                columns,
+                column_names,
+                options,
                 None,
             )
 
@@ -268,6 +288,8 @@ class _ArchiveBatchReadIndexCursor:
 
 def _ready_pg_archive_batch_index_state(index_name):
     columns = _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS[index_name]
+    column_names = tuple(column.removesuffix(" DESC") for column in columns)
+    options = tuple(3 if column.endswith(" DESC") else 0 for column in columns)
     return (
         True,
         True,
@@ -277,7 +299,8 @@ def _ready_pg_archive_batch_index_state(index_name):
         True,
         "btree",
         len(columns),
-        columns,
+        column_names,
+        options,
         None,
     )
 
@@ -299,7 +322,8 @@ def test_pg_archive_batch_read_index_mock_repairs_bad_state_once(bad_state):
             True,
             "btree",
             2,
-            ("id", "archive_id DESC"),
+            ("id", "archive_id"),
+            (0, 3),
             None,
         )
     else:
@@ -313,6 +337,7 @@ def test_pg_archive_batch_read_index_mock_repairs_bad_state_once(bad_state):
             "btree",
             2,
             ("archive_id", "id"),
+            (3, 0),
             None,
         )
     cursor = _ArchiveBatchReadIndexCursor(states)
@@ -348,7 +373,8 @@ def test_pg_archive_batch_read_index_mock_rejects_failed_repair():
         True,
         "btree",
         2,
-        ("id", "archive_id DESC"),
+        ("id", "archive_id"),
+        (0, 3),
         None,
     )
     cursor = _ArchiveBatchReadIndexCursor(states, repair_succeeds=False)
@@ -1057,6 +1083,16 @@ def test_pg_ensure_configures_timeouts_before_each_schema_phase(monkeypatch):
     )
     monkeypatch.setattr(
         jobs_pg_migrations,
+        "_mark_slides_audit_failure_pg",
+        lambda _cursor: None,
+    )
+    monkeypatch.setattr(
+        jobs_pg_migrations,
+        "_audit_slides_generation_pg",
+        lambda _cursor: (None, 0),
+    )
+    monkeypatch.setattr(
+        jobs_pg_migrations,
         "ensure_job_events_pg",
         lambda _dsn: None,
     )
@@ -1069,13 +1105,23 @@ def test_pg_ensure_configures_timeouts_before_each_schema_phase(monkeypatch):
 
     jobs_pg_migrations.ensure_jobs_tables_pg("postgresql://jobs.test/jobs")
 
-    assert [connection.autocommit for connection in connections] == [
+    configured_connections = [
+        connection
+        for connection in connections
+        if connection.recording_cursor.calls
+        and "set_config('statement_timeout'" in connection.recording_cursor.calls[0][0]
+    ]
+    assert [connection.autocommit for connection in configured_connections] == [
         False,
         True,
         True,
     ]
     expected_local = (True, False, False)
-    for connection, local in zip(connections, expected_local, strict=True):
+    for connection, local in zip(
+        configured_connections,
+        expected_local,
+        strict=True,
+    ):
         first_calls = connection.recording_cursor.calls[:2]
         assert first_calls == [
             (

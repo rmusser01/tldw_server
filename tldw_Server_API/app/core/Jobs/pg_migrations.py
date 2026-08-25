@@ -522,6 +522,9 @@ def _pg_archive_batch_read_index_state(
         "i.indexprs IS NULL, am.amname, i.indnkeyatts, "
         "ARRAY(SELECT pg_get_indexdef(i.indexrelid, key_position, true) "
         "FROM generate_series(1, i.indnkeyatts) AS key_position "
+        "ORDER BY key_position), "
+        "ARRAY(SELECT i.indoption[key_position - 1]::integer "
+        "FROM generate_series(1, i.indnkeyatts) AS key_position "
         "ORDER BY key_position), con.conname "
         "FROM pg_class idx "
         "JOIN pg_namespace ns ON ns.oid = idx.relnamespace "
@@ -540,6 +543,12 @@ def _pg_archive_batch_read_index_ready(
 ) -> bool:
     """Return whether one PostgreSQL archive lookup index is canonical."""
 
+    expected_names = tuple(
+        column.removesuffix(" DESC") for column in expected_columns
+    )
+    expected_options = tuple(
+        3 if column.endswith(" DESC") else 0 for column in expected_columns
+    )
     return bool(
         state is not None
         and state[0]
@@ -550,8 +559,9 @@ def _pg_archive_batch_read_index_ready(
         and state[5]
         and str(state[6]) == "btree"
         and int(state[7]) == len(expected_columns)
-        and tuple(state[8]) == expected_columns
-        and state[9] is None
+        and tuple(state[8]) == expected_names
+        and tuple(int(option) for option in state[9]) == expected_options
+        and state[10] is None
     )
 
 
@@ -571,7 +581,7 @@ def _ensure_pg_archive_batch_read_indexes(cur: Any) -> None:
             state = _pg_archive_batch_read_index_state(cur, index_name)
             if state is not None and not state[0]:
                 raise RuntimeError(f"{index_name} belongs to another table")
-            if state is not None and state[9] is not None:
+            if state is not None and state[10] is not None:
                 raise RuntimeError(
                     f"{index_name} is a misdefined constraint-backed index"
                 )
