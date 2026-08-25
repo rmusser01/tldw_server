@@ -36,6 +36,9 @@ class _SharedRepo:
     async def fetch_secret(self, *_args):
         return {"encrypted_blob": "encrypted-provider-secret"}
 
+    async def authorize_scope_write(self, **_kwargs):
+        return None
+
     async def list_secrets(self, **_kwargs):
         if self.list_error is not None:
             raise self.list_error
@@ -51,6 +54,9 @@ class _ExplodingUserRepo:
 
 
 class _ExplodingSharedRepo:
+    async def authorize_scope_write(self, **_kwargs):
+        return None
+
     async def upsert_secret(self, **_kwargs):
         raise RuntimeError("shared BYOK upsert failed at /private/byok-shared.db")
 
@@ -78,6 +84,7 @@ def _principal() -> AuthPrincipal:
 def _allow_byok(monkeypatch) -> None:
     monkeypatch.setattr(service, "require_byok_enabled", lambda: None)
     monkeypatch.setattr(service, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(service, "get_shared_byok_repo", _repo)
 
 
 def _assert_detached_validation_error(exc: HTTPException, sentinel: str) -> None:
@@ -244,6 +251,52 @@ async def test_upsert_shared_key_sanitizes_provider_validation_failures(monkeypa
     _assert_detached_validation_error(
         exc_info.value,
         "shared provider token at /private/shared-provider.json",
+    )
+
+
+@pytest.mark.asyncio
+async def test_upsert_shared_key_authorizes_before_provider_validation(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _UnauthorizedRepo:
+        async def authorize_scope_write(self, **kwargs):
+            captured.update(kwargs)
+            raise MembershipAuthorizationError()
+
+        async def upsert_secret(self, **_kwargs):
+            pytest.fail("storage must not run after failed authorization")
+
+    async def get_shared_repo():
+        return _UnauthorizedRepo()
+
+    async def fail_if_provider_called(**_kwargs):
+        pytest.fail("provider validation must not run before persisted authorization")
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setattr(service, "get_shared_byok_repo", get_shared_repo)
+    monkeypatch.setattr(service, "normalize_credential_fields", lambda *_args: {})
+    monkeypatch.setattr(service, "test_provider_credentials", fail_if_provider_called)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.upsert_shared_key(
+            _principal(),
+            SharedProviderKeyUpsertRequest(
+                scope_type="org",
+                scope_id=42,
+                provider="openai",
+                api_key="sk-test",
+            ),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Not authorized to manage shared BYOK keys"
+    assert captured["scope_type"] == "org"
+    assert captured["scope_id"] == 42
+    authorization_context = captured["authorization_context"]
+    assert authorization_context.actor_user_id == 7
+    assert (
+        authorization_context.required_authority
+        is MembershipAuthority.PLATFORM_ADMIN
     )
 
 
@@ -525,6 +578,9 @@ async def test_revoke_user_key_sanitizes_backend_failure_log(monkeypatch):
 @pytest.mark.asyncio
 async def test_upsert_shared_key_maps_alias_conflict_to_409(monkeypatch):
     class _AliasConflictRepo:
+        async def authorize_scope_write(self, **_kwargs):
+            return None
+
         async def upsert_secret(self, **_kwargs):
             raise ProviderCredentialAliasConflictError("sensitive alias detail")
 
@@ -629,6 +685,9 @@ async def test_upsert_shared_key_canonicalizes_registered_alias(monkeypatch):
     captured: dict = {}
 
     class CapturingRepo:
+        async def authorize_scope_write(self, **kwargs):
+            captured.update(kwargs)
+
         async def upsert_secret(self, **kwargs):
             captured.update(kwargs)
             return {"provider": kwargs["provider"], "key_hint": "test"}
@@ -757,6 +816,9 @@ async def test_shared_key_mutations_preserve_bounded_control_failures(
     expected_detail: str,
 ) -> None:
     class FailingRepo:
+        async def authorize_scope_write(self, **_kwargs):
+            raise failure_type()
+
         async def upsert_secret(self, **_kwargs):
             raise failure_type()
 

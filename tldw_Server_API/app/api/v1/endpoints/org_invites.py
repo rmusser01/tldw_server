@@ -20,7 +20,14 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     OrgInviteRedeemResponse,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 from tldw_Server_API.app.services.auth_service import fetch_active_user_by_id
 from tldw_Server_API.app.services.org_invite_service import get_invite_service
 
@@ -101,13 +108,24 @@ async def redeem_invite(
             detail="User not found",
         )
 
-    result = await invite_service.redeem_invite(
-        code=body.code,
-        user_id=principal.user_id,
-        user_email=user_record.get("email"),
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
+    try:
+        result = await invite_service.redeem_invite(
+            code=body.code,
+            user_id=principal.user_id,
+            user_email=user_record.get("email"),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication database is busy. Please retry shortly.",
+            headers={
+                "Retry-After": str(
+                    get_authnz_transaction_policy().busy_retry_after_seconds
+                ),
+            },
+        ) from exc
 
     if not result.success:
         # Determine appropriate status code based on the failure reason

@@ -8,6 +8,13 @@ from fastapi import HTTPException, Response
 from tldw_Server_API.app.api.v1.endpoints import auth as auth_endpoints
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import RegisterRequest
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 
 
 class _FakeRegistrationService:
@@ -81,3 +88,64 @@ async def test_register_returns_503_when_default_api_key_audit_fails(
         }
     }
     assert registration_service.rollback_calls == [77]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "failure_type",
+    (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
+)
+async def test_register_returns_retryable_503_when_auth_database_is_busy(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_type: type[Exception],
+) -> None:
+    class _BusyRegistrationService:
+        async def register_user(self, **_kwargs):
+            raise failure_type()
+
+    monkeypatch.setattr(
+        auth_endpoints,
+        "get_settings",
+        lambda: SimpleNamespace(
+            DATABASE_URL="sqlite:///tmp/authnz-test.db",
+            PII_REDACT_LOGS=False,
+        ),
+    )
+    monkeypatch.setattr(auth_endpoints, "get_profile", lambda: "multi_user")
+    monkeypatch.setattr(
+        auth_endpoints,
+        "_finalize_register_diag",
+        lambda *_args, **_kwargs: None,
+    )
+
+    request = SimpleNamespace(
+        headers={},
+        state=SimpleNamespace(),
+        url=SimpleNamespace(path="/api/v1/auth/register"),
+        method="POST",
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_endpoints.register(
+            payload=RegisterRequest(
+                username="busyregister",
+                email="busyregister@example.com",
+                password="SecurePass123!",
+            ),
+            http_request=request,
+            response=Response(),
+            _diag=None,
+            registration_service=_BusyRegistrationService(),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == (
+        "Authentication database is busy. Please retry shortly."
+    )
+    assert exc_info.value.headers == {
+        "Retry-After": str(
+            get_authnz_transaction_policy().busy_retry_after_seconds
+        ),
+    }
