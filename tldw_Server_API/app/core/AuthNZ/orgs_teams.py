@@ -7,6 +7,8 @@ from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     MembershipWriteContext,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
@@ -66,6 +68,16 @@ async def create_organization(
         A dict containing the created organization's fields (e.g. id, name, slug).
     """
     repo = await _get_orgs_teams_repo()
+    if owner_user_id is not None:
+        return await repo.create_organization_with_owner_membership(
+            name=name,
+            owner_user_id=owner_user_id,
+            context=TrustedMembershipWriteContext(
+                trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+            ),
+            slug=slug,
+            metadata=metadata,
+        )
     return await repo.create_organization(
         name=name,
         owner_user_id=owner_user_id,
