@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
     VersionedUserWriteGateway,
 )
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import get_rate_limiter
+from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import (
     UserProfileCatalogEntry,
@@ -645,15 +646,29 @@ class UserProfileUpdateService:
         is_platform_admin: bool,
         db_conn: Any | None = None,
     ) -> _MembershipContext:
-        read_kwargs = {} if db_conn is None else {"db_conn": db_conn}
-        target_org_rows = await list_org_memberships_for_user(
-            user_id,
-            **read_kwargs,
-        )
-        target_team_rows = await list_memberships_for_user(
-            user_id,
-            **read_kwargs,
-        )
+        if db_conn is None:
+            async def _list_orgs(member_user_id: int) -> list[dict[str, Any]]:
+                return await list_org_memberships_for_user(member_user_id)
+
+            async def _list_teams(member_user_id: int) -> list[dict[str, Any]]:
+                return await list_memberships_for_user(member_user_id)
+        else:
+            membership_repo = AuthnzOrgsTeamsRepo(self._db_pool)
+
+            async def _list_orgs(member_user_id: int) -> list[dict[str, Any]]:
+                return await membership_repo.list_org_memberships_for_user(
+                    member_user_id,
+                    conn=db_conn,
+                )
+
+            async def _list_teams(member_user_id: int) -> list[dict[str, Any]]:
+                return await membership_repo.list_memberships_for_user(
+                    member_user_id,
+                    conn=db_conn,
+                )
+
+        target_org_rows = await _list_orgs(user_id)
+        target_team_rows = await _list_teams(user_id)
         target_org_roles = {
             int(row.get("org_id")): str(row.get("role") or "member").lower()
             for row in target_org_rows
@@ -673,14 +688,8 @@ class UserProfileUpdateService:
         actor_team_roles: dict[int, str] = {}
         actor_user_id = scope.actor_user_id if scope else None
         if actor_user_id is not None and not is_platform_admin:
-            actor_org_rows = await list_org_memberships_for_user(
-                int(actor_user_id),
-                **read_kwargs,
-            )
-            actor_team_rows = await list_memberships_for_user(
-                int(actor_user_id),
-                **read_kwargs,
-            )
+            actor_org_rows = await _list_orgs(int(actor_user_id))
+            actor_team_rows = await _list_teams(int(actor_user_id))
             actor_org_roles = {
                 int(row.get("org_id")): str(row.get("role") or "member").lower()
                 for row in actor_org_rows
