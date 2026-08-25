@@ -2,10 +2,10 @@
 
 ## Verification Identity
 
-- Tested source commit: `ebbe6d30da`
+- Tested source commit: `2ad82ff4bcc7faee3cac127aa31a11733c5eb550`
 - Rebased onto: `origin/dev` at
-  `d736368d17c92f879d0b5364b45f23488629f5b8`
-- Final verification timestamp: `2026-08-23T19:56:55Z`
+  `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
+- Final verification timestamp: `2026-08-25T02:19:52Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -23,8 +23,8 @@ that immutable source tree.
 | Gate | Result |
 | --- | --- |
 | OpenAPI fingerprint and drift | PASS |
-| Complete PR 1 Python matrix | PASS at direct-marker source: 483 passed, 0 skipped |
-| PostgreSQL-required matrix | PASS at direct-marker source: 24 passed, 0 skipped |
+| Complete PR 1 Python matrix | PASS at final-rebase source: 460 non-PostgreSQL + 24 required PostgreSQL |
+| PostgreSQL-required matrix | PASS at final-rebase source: 24 passed, 0 skipped |
 | Direct pytest marker policy | PASS |
 | CI shard coverage guard | PASS: 0 newly uncovered test files |
 | Admin Webhooks non-PostgreSQL matrix | PASS: 301 passed |
@@ -59,9 +59,9 @@ git diff -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
 Result:
 
 ```text
-path_count:   2013
-schema_count: 2948
-sha256:       2b79239eeb8805e9801cc1cb03af9b952d6de06d2445b29c81bf76d68f650755
+path_count:   2039
+schema_count: 3031
+sha256:       41d99488f7bb295e7c20d6c05085f788e54619c1079fbbf8053522c7dde949a9
 drift-check:  PASS
 ```
 
@@ -108,10 +108,11 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Workflows/test_webhook_admin_endpoints.py
 ```
 
-Final post-review, post-rebase result:
-`483 passed, 459 warnings in 148.36s`; zero skips. This aggregate run executed
-the real PostgreSQL-marked cases as well as the SQLite, API, authorization,
-egress, system-ops, and workflow cases.
+Final post-review, final-rebase proof was run in two explicit provider groups:
+`460 passed, 6 warnings in 46.72s` for the complete non-PostgreSQL matrix and
+`24 passed, 50 warnings in 97.37s` for the required PostgreSQL matrix. No test
+was skipped. Together these runs execute all 484 current test bodies across
+SQLite, PostgreSQL, API, authorization, egress, system-ops, and workflow paths.
 
 One restricted-sandbox attempt failed only because the unchanged workflow test
 creates `Databases/test_wf_dlq.db` inside the external worktree. The exact test
@@ -135,10 +136,9 @@ TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. \
   tldw_Server_API/tests/Admin_Webhooks/test_legacy_import_postgres.py
 ```
 
-Result: `24 passed, 50 warnings in 95.74s`; zero skips. The required flag was
+Result: `24 passed, 50 warnings in 97.37s`; zero skips. The required flag was
 set, and the tests used the running disposable PostgreSQL 18.6 container rather
-than SQLite or an availability skip. The post-rebase aggregate run then
-executed the same 24 PostgreSQL cases with zero skips.
+than SQLite or an availability skip.
 
 ## Pre-PR Review Corrections
 
@@ -477,6 +477,79 @@ passed with normal process permissions. No dependency, runtime image, webhook,
 database, migration, or PostgreSQL behavior changed; the prior required-
 PostgreSQL proof remains applicable.
 
+## Final Rebase Reconciliation
+
+PR #2808 advanced `dev` through
+`9ee0b5a16dca9f5cf6372a3dd2798b84075501fc` before PR #2806 could merge. All
+32 PR commits were rebased onto that exact base. The rebase preserved current
+`dev` behavior and made the following explicit reconciliations:
+
+- current `dev` owns SQLite AuthNZ migrations 091 through 093 for profile
+  versioning, candidate timestamp hardening, and users write-column
+  harmonization; the canonical webhook migration is now additive migration
+  094, including registry, rollback, upgrade, and implementation-plan
+  references;
+- PostgreSQL startup executes user-timestamp, AuthNZ core, canonical webhook,
+  sharing, and remaining readiness ensures together while preserving the
+  current readiness-error contract;
+- direct unit/integration markers remain on every covered test, redundant
+  module-level and `asyncio` markers were removed, and the current `dev`
+  startup tests were included in the marker-policy gate;
+- the OpenAPI fingerprint was regenerated from the rebased application and
+  drift-checked at 2,039 paths, 3,031 schemas, and SHA-256
+  `41d99488f7bb295e7c20d6c05085f788e54619c1079fbbf8053522c7dde949a9`;
+- current `dev` sanitizes ordinary exceptions leaving a managed transaction.
+  `WebhookError`, `WebhookRepositoryError`, and `LegacyImportError` now share a
+  closed, documented `TransactionPassthroughError` marker so their already
+  sanitized fixed error codes survive rollback; arbitrary runtime exceptions
+  remain translated to generic SQLite or PostgreSQL `TransactionError`
+  messages;
+- PostgreSQL test-only `DROP` and `TRUNCATE` setup now uses a plain connection
+  to the ephemeral test database, matching the shared AuthNZ cleanup pattern,
+  while every application query remains on the managed users-write firewall.
+
+The first complete current-base run provided the expected RED evidence:
+`18 failed, 442 passed, 24 skipped`. Eighteen failures came from the new
+transaction sanitization contract; the skips reflected the sandbox's inability
+to reach the host-published disposable PostgreSQL port. After the transaction
+reconciliation, the affected repository, control-plane, importer, and rotation
+set passed `114/114`, and the complete non-PostgreSQL matrix passed `460/460`.
+
+Running the required PostgreSQL matrix with normal localhost access then
+exposed the current users-write firewall in destructive test setup and two
+remaining raw-message assertions (`6 failed, 4 passed, 14 errors`). The two
+representative fixture paths passed after moving destructive DDL to an
+unmanaged test-only connection; the corrected rollback pair passed `2/2`; and
+the final required-provider run passed `24/24` with zero skips against
+PostgreSQL 18.6.
+
+Final source commit `2ad82ff4bcc7faee3cac127aa31a11733c5eb550`
+therefore has the following local proof:
+
+```text
+affected transaction matrix:              114 passed
+complete non-PostgreSQL PR matrix:         460 passed, 0 skipped
+required PostgreSQL matrix:                 24 passed, 0 skipped
+direct pytest marker policy:                 1 passed
+OpenAPI drift check:                        PASS
+focused Ruff, reconciliation files:         PASS
+Bandit, reconciliation production files:    PASS
+focused mypy, repository/startup modules:    PASS
+git diff --check:                            PASS
+```
+
+Broader diagnostic sweeps still show unrelated current-tree baselines outside
+the reconciliation hunks: `chat.py` has pre-existing import-layout findings,
+the OpenAPI schema example produces two low-confidence Bandit B105 false
+positives, and the large AuthNZ database/legacy-import modules retain existing
+mypy debt. These were not rewritten in this already broad PR. The focused
+changed modules and all runtime provider matrices above are green.
+
+The prior Qodo result at pre-rebase head `8b00250005` reported zero bugs and
+zero rule violations. A refreshed Qodo review and complete GitHub-hosted CI run
+against the new exact head remain mandatory after push; this local evidence
+does not substitute for those gates.
+
 ## Upstream Admin UI Baselines
 
 `bun run test` is not green on the exact PR base. An isolated detached worktree
@@ -537,7 +610,8 @@ and webhook browser journey establish the scoped PR behavior.
 
 ## Final Safety Checks
 
-- `git diff --check`: PASS at tested source/test head `1263677011`.
+- `git diff --check`: PASS at tested source commit
+  `2ad82ff4bcc7faee3cac127aa31a11733c5eb550`.
 - OpenAPI evaluation-webhook schema isolation: PASS.
 - Canonical mode default remains `off`.
 - Outbound HTTP, Jobs delivery workers, automatic event producers, test sends,
