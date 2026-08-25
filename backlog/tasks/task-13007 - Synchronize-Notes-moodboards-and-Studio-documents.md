@@ -1,9 +1,10 @@
 ---
 id: TASK-13007
 title: Synchronize Notes moodboards and Studio documents
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-08 20:25'
+updated_date: '2026-08-25 00:45'
 labels:
   - notes
   - sync-v2
@@ -13,11 +14,10 @@ labels:
 dependencies:
   - TASK-13006
 references:
-  - >-
-    https://github.com/rmusser01/tldw_chatbook/blob/dev/backlog/decisions/046-synchronized-database-notes-parity.md
+  - Docs/ADR/031-notes-capability-sync-domains.md
+  - Docs/ADR/040-synchronized-moodboards-and-studio-authority.md
 documentation:
-  - >-
-    https://github.com/rmusser01/tldw_chatbook/blob/dev/Docs/Parity/2026-08-08-notes-server-capability-matrix.md
+  - Docs/superpowers/specs/2026-08-24-notes-moodboard-studio-sync-design.md
 priority: high
 ---
 
@@ -36,6 +36,28 @@ Synchronize Notes moodboards, note placement, and persisted Studio document stat
 - [ ] #5 AI title suggestion summarization and Studio generation requests remain operations while only explicitly accepted persisted output enters synchronized state with provenance.
 - [ ] #6 Concurrent board layout document revision note deletion restore and placement edits yield idempotent outcomes or reviewable conflicts with authorized bounded queries.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Publish the approved authority and lifecycle design in Docs/superpowers/specs/2026-08-24-notes-moodboard-studio-sync-design.md and ADR-040 before implementation.
+2. Run an independent spec review and resolve every valid finding.
+3. Obtain requester approval of the reviewed written spec.
+4. Use the writing-plans workflow to add concrete per-child implementation plans before code changes.
+5. Execute TASK-13007.1 through TASK-13007.4 in dependency order with TDD review verification and live PostgreSQL gates.
+
+ADR required: yes
+ADR path: Docs/ADR/040-synchronized-moodboards-and-studio-authority.md
+Reason: The work changes persistent schema tenant scope sync authority lifecycle conflict policy provenance and capability activation boundaries.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Approved design decomposed into TASK-13007.1 through TASK-13007.4. Existing Chatbook reference paths are stale and will be replaced by the server-local authoritative spec and ADR-040.
+
+The approved design was written to Docs/superpowers/specs/2026-08-24-notes-moodboard-studio-sync-design.md with proposed ADR-040. Independent spec review is the next gate; no implementation has started.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

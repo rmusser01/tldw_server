@@ -71,3 +71,4 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-037](037-canonical-notes-link-sync-and-derived-graph-projections.md) | Accepted | Synchronize explicit manual note links while keeping wikilinks, backlinks, orphan state, and graph summaries deterministic local projections. |
 | [ADR-038](038-canonical-notes-attachment-registry-and-blob-lifecycle.md) | Accepted | Give Notes attachments stable product identity while reusing the shared Sync blob lifecycle. |
 | [ADR-039](039-canonical-notes-task-sync-and-derived-checklist-projections.md) | Accepted | Synchronize mutable Notes tasks and immutable activity while keeping Markdown checklists and read state derived. |
+| [ADR-040](040-synchronized-moodboards-and-studio-authority.md) | Proposed | Synchronize moodboards, explicit placements, and accepted Studio sidecars while retaining existing product authority and derived smart matches. |
