@@ -40,6 +40,10 @@ from .postgres_mediafiles import (
     PostgresMediaFilesBody,
     run_postgres_migrate_to_v11,
 )
+from .postgres_operation_owned_clone_media import (
+    PostgresOperationOwnedCloneMediaBody,
+    run_postgres_migrate_to_v25,
+)
 from .postgres_sequence_sync import (
     PostgresSequenceSyncBody,
     run_postgres_migrate_to_v18,
@@ -72,6 +76,8 @@ __all__ = [
     "run_postgres_migrate_to_v10",
     "PostgresMediaFilesBody",
     "run_postgres_migrate_to_v11",
+    "PostgresOperationOwnedCloneMediaBody",
+    "run_postgres_migrate_to_v25",
     "run_postgres_migrate_to_v17",
     "PostgresClaimsAnalyticsExportJobsBody",
     "run_postgres_migrate_to_v24",

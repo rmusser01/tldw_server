@@ -20,6 +20,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
     DocumentVersionsRepository,
     KeywordsRepository,
     MediaRepository,
+    OperationOwnedMediaResult,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
+    hash_media_clone_snapshot as _hash_media_clone_snapshot,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_lookup_repository import (
     MediaLookupRepository,
@@ -197,6 +201,49 @@ def read_media_clone_snapshots(
         error_message="db must expose the Media DB clone snapshot read contract.",
     )
     return reader.read_media_clone_snapshots(media_ids)
+
+
+def hash_media_clone_snapshot(snapshot: "MediaCloneSnapshot") -> str:
+    """Return the repository-owned canonical content identity for a snapshot."""
+    return _hash_media_clone_snapshot(snapshot)
+
+
+def insert_operation_owned_clone_media(
+    db: MediaDbLike,
+    *,
+    snapshot: "MediaCloneSnapshot",
+    operation_id: str,
+    source_identity: str,
+    expected_content_hash: str,
+) -> OperationOwnedMediaResult:
+    """Insert or replay an isolated operation-owned Media clone snapshot."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_content_hash,
+    )
+
+
+def delete_operation_owned_clone_media(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    source_identity: str,
+    expected_content_hash: str,
+) -> int:
+    """Hard-delete the exact operation-owned Media clone graph."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).delete_operation_owned_clone_media(
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_content_hash,
+    )
 
 
 def get_media_status_by_id(
@@ -1189,8 +1236,10 @@ __all__ = [
     "MediaDbReadLike",
     "MediaWriterLike",
     "MediaRepository",
+    "OperationOwnedMediaResult",
     "create_media_database",
     "create_document_version",
+    "delete_operation_owned_clone_media",
     "get_document_version",
     "get_all_document_versions",
     "get_full_media_details",
@@ -1227,6 +1276,8 @@ __all__ = [
     "get_media_by_uuid",
     "managed_media_database",
     "get_media_repository",
+    "hash_media_clone_snapshot",
+    "insert_operation_owned_clone_media",
     "list_document_versions",
     "search_media",
     "soft_delete_document_version",

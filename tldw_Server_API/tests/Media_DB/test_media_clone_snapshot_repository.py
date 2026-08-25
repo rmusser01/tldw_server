@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import json
 import sqlite3
 import uuid
 from collections.abc import Iterator, Sequence
+from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +24,13 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
-from tldw_Server_API.app.core.Sharing.clone_models import CloneSnapshotUnavailable
+from tldw_Server_API.app.core.Sharing.clone_models import (
+    CloneSnapshotUnavailable,
+    MediaCloneSnapshot,
+)
 
 
 @pytest.fixture
@@ -76,9 +85,10 @@ def _seed_media(
     chunk_text: str,
     transcript_text: str,
     keywords: list[str] | None = None,
+    url: str | None = None,
 ) -> int:
     media_id, _media_uuid, _message = db.add_media_with_keywords(
-        url=f"https://example.test/{uuid.uuid4()}",
+        url=url or f"https://example.test/{uuid.uuid4()}",
         title=title,
         media_type="document",
         content=content,
@@ -95,6 +105,548 @@ def _seed_media(
     assert media_id is not None
     _insert_transcript(db, int(media_id), transcript_text)
     return int(media_id)
+
+
+def _operation_snapshot(
+    *,
+    original_url: str = "https://source.example.test/document",
+    content: str = "source snapshot content",
+    title: str = "Source snapshot",
+) -> MediaCloneSnapshot:
+    return MediaCloneSnapshot.from_rows(
+        media={
+            "id": 41,
+            "url": original_url,
+            "title": title,
+            "type": "document",
+            "content": content,
+            "author": "Source Author",
+            "ingestion_date": "2026-08-25T10:00:00+00:00",
+            "transcription_model": "snapshot-model",
+            "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            "source_hash": hashlib.sha256(b"source-bytes").hexdigest(),
+            "chunking_status": "completed",
+            "latest_transcription_run_id": 2,
+            "next_transcription_run_id": 3,
+            "keywords": ("alpha", "Research"),
+            "vector_embedding": b"source-vector-must-not-copy",
+            "vector_processing": 1,
+            "uuid": "2d608c80-e428-49b4-becd-f50fa3ce7f23",
+            "version": 7,
+            "last_modified": datetime(2026, 8, 25, 10, 5, tzinfo=timezone.utc),
+            "deleted": False,
+            "is_trash": False,
+        },
+        chunks=(
+            {
+                "id": 501,
+                "media_id": 41,
+                "chunk_text": "first source chunk",
+                "chunk_index": 0,
+                "start_char": 0,
+                "end_char": 18,
+                "chunk_type": "text",
+                "creation_date": "2026-08-25T10:01:00+00:00",
+                "last_modified_orig": "2026-08-25T10:01:00+00:00",
+                "is_processed": True,
+                "metadata": {"page": 1, "confidence": Decimal("0.95")},
+                "uuid": "c9639597-c16d-46de-934d-0211c646a97a",
+                "last_modified": "2026-08-25T10:01:00+00:00",
+                "version": 4,
+                "client_id": "source-owner",
+                "deleted": False,
+            },
+            {
+                "id": 502,
+                "media_id": 41,
+                "chunk_text": "second source chunk",
+                "chunk_index": 1,
+                "start_char": 19,
+                "end_char": 38,
+                "chunk_type": "text",
+                "creation_date": "2026-08-25T10:02:00+00:00",
+                "last_modified_orig": "2026-08-25T10:02:00+00:00",
+                "is_processed": True,
+                "metadata": {"page": 2},
+                "uuid": "f540e75a-ddf5-45a3-b95d-cb5ab444d39f",
+                "last_modified": "2026-08-25T10:02:00+00:00",
+                "version": 3,
+                "client_id": "source-owner",
+                "deleted": False,
+            },
+        ),
+        transcripts=(
+            {
+                "id": 601,
+                "media_id": 41,
+                "whisper_model": "snapshot-model",
+                "transcription": "latest source transcript",
+                "created_at": "2026-08-25T10:03:00+00:00",
+                "transcription_run_id": 2,
+                "supersedes_run_id": 1,
+                "idempotency_key": "source-transcript-2",
+                "uuid": "3ae72579-32a2-4f0d-af33-4953983e7512",
+                "last_modified": "2026-08-25T10:03:00+00:00",
+                "version": 2,
+                "client_id": "source-owner",
+                "deleted": False,
+            },
+            {
+                "id": 600,
+                "media_id": 41,
+                "whisper_model": "snapshot-model",
+                "transcription": "first source transcript",
+                "created_at": "2026-08-25T10:02:30+00:00",
+                "transcription_run_id": 1,
+                "supersedes_run_id": None,
+                "idempotency_key": "source-transcript-1",
+                "uuid": "208ee7b7-ea14-42c2-aaf4-5fa8b4a72d2e",
+                "last_modified": "2026-08-25T10:02:30+00:00",
+                "version": 1,
+                "client_id": "source-owner",
+                "deleted": False,
+            },
+        ),
+    )
+
+
+def _ordinary_media_state(db: MediaDatabase, media_id: int) -> dict[str, Any]:
+    media = dict(
+        db.execute_query(
+            "SELECT * FROM Media WHERE id = ?",
+            (media_id,),
+        ).fetchone()
+    )
+    chunks = [
+        dict(row)
+        for row in db.execute_query(
+            "SELECT * FROM UnvectorizedMediaChunks WHERE media_id = ? ORDER BY id",
+            (media_id,),
+        ).fetchall()
+    ]
+    transcripts = [
+        dict(row)
+        for row in db.execute_query(
+            "SELECT * FROM Transcripts WHERE media_id = ? ORDER BY id",
+            (media_id,),
+        ).fetchall()
+    ]
+    return {"media": media, "chunks": chunks, "transcripts": transcripts}
+
+
+@pytest.mark.unit
+def test_operation_owned_snapshot_hash_is_canonical_bounded_and_type_safe() -> None:
+    snapshot = _operation_snapshot()
+
+    digest = media_db_api.hash_media_clone_snapshot(snapshot)
+
+    reordered_mapping = MediaCloneSnapshot.from_rows(
+        media=dict(reversed(tuple(snapshot.media.items()))),
+        chunks=(
+            dict(reversed(tuple(snapshot.chunks[0].items()))),
+            dict(reversed(tuple(snapshot.chunks[1].items()))),
+        ),
+        transcripts=tuple(
+            dict(reversed(tuple(row.items()))) for row in snapshot.transcripts
+        ),
+    )
+    reordered_sequence = MediaCloneSnapshot.from_rows(
+        media=snapshot.media,
+        chunks=reversed(snapshot.chunks),
+        transcripts=snapshot.transcripts,
+    )
+    mutated_nested_value = MediaCloneSnapshot.from_rows(
+        media=snapshot.media,
+        chunks=(
+            {
+                **dict(snapshot.chunks[0]),
+                "metadata": {"page": 1, "confidence": Decimal("0.96")},
+            },
+            snapshot.chunks[1],
+        ),
+        transcripts=snapshot.transcripts,
+    )
+    string_typed_value = MediaCloneSnapshot.from_rows(
+        media=snapshot.media,
+        chunks=(
+            {
+                **dict(snapshot.chunks[0]),
+                "metadata": {"page": "1", "confidence": Decimal("0.95")},
+            },
+            snapshot.chunks[1],
+        ),
+        transcripts=snapshot.transcripts,
+    )
+
+    assert len(digest) == 64
+    assert digest == digest.lower()
+    assert set(digest) <= set("0123456789abcdef")
+    assert media_db_api.hash_media_clone_snapshot(reordered_mapping) == digest
+    assert media_db_api.hash_media_clone_snapshot(reordered_sequence) != digest
+    assert media_db_api.hash_media_clone_snapshot(mutated_nested_value) != digest
+    assert media_db_api.hash_media_clone_snapshot(string_typed_value) != digest
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_insert_isolated_from_url_and_content_collisions(
+    media_db: MediaDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = _operation_snapshot()
+    source_url = str(snapshot.media["url"])
+    source_content = str(snapshot.media["content"])
+    content_collision_id = _seed_media(
+        media_db,
+        title="Ordinary content collision",
+        content=source_content,
+        chunk_text="ordinary content chunk",
+        transcript_text="ordinary content transcript",
+        keywords=["ordinary-content"],
+        url="https://recipient.example.test/content-collision",
+    )
+    url_collision_id = _seed_media(
+        media_db,
+        title="Ordinary URL collision",
+        content="ordinary URL content",
+        chunk_text="ordinary URL chunk",
+        transcript_text="ordinary URL transcript",
+        keywords=["ordinary-url"],
+        url=source_url,
+    )
+    before = {
+        media_id: _ordinary_media_state(media_db, media_id)
+        for media_id in (content_collision_id, url_collision_id)
+    }
+
+    def forbidden_path(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("clone persistence entered an ordinary ingest/source-read path")
+
+    monkeypatch.setattr(media_db, "add_media_with_keywords", forbidden_path)
+    monkeypatch.setattr(media_db, "read_media_clone_snapshots", forbidden_path)
+    operation_id = "clone-operation-001"
+    source_identity = "workspace-source-41"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+
+    result = media_db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_hash,
+    )
+
+    operation_digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+    source_digest = hashlib.sha256(source_identity.encode("utf-8")).hexdigest()
+    expected_url = f"tldw-clone://workspace/{operation_digest}/{source_digest}"
+    assert dataclasses.is_dataclass(result)
+    assert result.media_id not in {content_collision_id, url_collision_id}
+    assert result.media_uuid
+    assert result.created is True
+    assert result.replayed is False
+    assert not hasattr(result, "__dict__")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        result.created = False  # type: ignore[misc]
+
+    owned_row = dict(
+        media_db.execute_query(
+            "SELECT * FROM Media WHERE id = ?",
+            (result.media_id,),
+        ).fetchone()
+    )
+    assert owned_row["url"] == expected_url
+    assert owned_row["url"] != source_url
+    assert owned_row["system_operation_id"] == operation_id
+    assert owned_row["system_operation_kind"] == "shared_workspace_clone"
+    assert owned_row["system_source_identity"] == source_identity
+    assert owned_row["system_content_hash"] == expected_hash
+    assert owned_row["vector_embedding"] is None
+    assert owned_row["vector_processing"] == 0
+
+    document_row = dict(
+        media_db.execute_query(
+            "SELECT content, prompt, analysis_content, safe_metadata, version_number "
+            "FROM DocumentVersions WHERE media_id = ? AND deleted = 0",
+            (result.media_id,),
+        ).fetchone()
+    )
+    provenance = json.loads(document_row["safe_metadata"])
+    assert document_row["content"] == source_content
+    assert document_row["version_number"] == 1
+    assert provenance == {
+        "clone_provenance": {
+            "source_url": source_url,
+        }
+    }
+
+    keywords = [
+        row["keyword"]
+        for row in media_db.execute_query(
+            "SELECT k.keyword FROM MediaKeywords mk "
+            "JOIN Keywords k ON k.id = mk.keyword_id "
+            "WHERE mk.media_id = ? AND k.deleted = 0 ORDER BY LOWER(k.keyword), k.keyword",
+            (result.media_id,),
+        ).fetchall()
+    ]
+    chunks = [
+        dict(row)
+        for row in media_db.execute_query(
+            "SELECT chunk_text, chunk_index, start_char, end_char, chunk_type, "
+            "is_processed, metadata FROM UnvectorizedMediaChunks "
+            "WHERE media_id = ? AND deleted = 0 ORDER BY chunk_index",
+            (result.media_id,),
+        ).fetchall()
+    ]
+    transcripts = [
+        dict(row)
+        for row in media_db.execute_query(
+            "SELECT whisper_model, transcription, transcription_run_id, "
+            "supersedes_run_id, idempotency_key FROM Transcripts "
+            "WHERE media_id = ? AND deleted = 0 ORDER BY transcription_run_id DESC",
+            (result.media_id,),
+        ).fetchall()
+    ]
+    assert keywords == ["alpha", "research"]
+    assert [row["chunk_text"] for row in chunks] == [
+        "first source chunk",
+        "second source chunk",
+    ]
+    assert [row["is_processed"] for row in chunks] == [0, 0]
+    assert [row["transcription"] for row in transcripts] == [
+        "latest source transcript",
+        "first source transcript",
+    ]
+    assert media_db.execute_query(
+        "SELECT COUNT(*) AS count FROM MediaChunks WHERE media_id = ?",
+        (result.media_id,),
+    ).fetchone()["count"] == 0
+    assert {
+        media_id: _ordinary_media_state(media_db, media_id)
+        for media_id in (content_collision_id, url_collision_id)
+    } == before
+
+    replay = media_db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_hash,
+    )
+
+    assert replay.media_id == result.media_id
+    assert replay.media_uuid == result.media_uuid
+    assert replay.created is False
+    assert replay.replayed is True
+    assert media_db.execute_query(
+        "SELECT COUNT(*) AS count FROM Media WHERE system_operation_id = ?",
+        (operation_id,),
+    ).fetchone()["count"] == 1
+    assert {
+        media_id: _ordinary_media_state(media_db, media_id)
+        for media_id in (content_collision_id, url_collision_id)
+    } == before
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_replay_rejects_mutated_snapshot_and_candidate(
+    media_db: MediaDatabase,
+) -> None:
+    snapshot = _operation_snapshot()
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    operation_id = "clone-operation-replay"
+    source_identity = "workspace-source-replay"
+    created = media_db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_hash,
+    )
+    changed_snapshot = _operation_snapshot(content="different source snapshot content")
+
+    with pytest.raises(ConflictError):
+        media_db.insert_operation_owned_clone_media(
+            snapshot=changed_snapshot,
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        )
+
+    replacement_hash = hashlib.sha256(b"different-owned-snapshot").hexdigest()
+    media_db.execute_query(
+        "UPDATE Media SET system_content_hash = ?, version = version + 1, "
+        "last_modified = ?, client_id = ? WHERE id = ?",
+        (
+            replacement_hash,
+            "2026-08-25T14:00:00+00:00",
+            media_db.client_id,
+            created.media_id,
+        ),
+        commit=True,
+    )
+    with pytest.raises(ConflictError):
+        media_db.insert_operation_owned_clone_media(
+            snapshot=snapshot,
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "candidate_mutation",
+    [
+        "soft_deleted",
+        "partial_marker",
+        "wrong_kind",
+    ],
+)
+def test_operation_owned_clone_replay_rejects_inactive_or_inconsistent_candidate(
+    media_db: MediaDatabase,
+    candidate_mutation: str,
+) -> None:
+    snapshot = _operation_snapshot()
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    operation_id = f"clone-operation-{candidate_mutation}"
+    source_identity = "workspace-source-inconsistent"
+    created = media_db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_hash,
+    )
+
+    conn = media_db.get_connection()
+    if candidate_mutation == "soft_deleted":
+        conn.execute(
+            "UPDATE Media SET deleted = 1, version = version + 1, "
+            "last_modified = ?, client_id = ? WHERE id = ?",
+            (
+                "2026-08-25T14:00:00+00:00",
+                media_db.client_id,
+                created.media_id,
+            ),
+        )
+    else:
+        conn.execute("PRAGMA ignore_check_constraints = ON")
+        try:
+            if candidate_mutation == "partial_marker":
+                conn.execute(
+                    "UPDATE Media SET system_source_identity = NULL, "
+                    "version = version + 1, last_modified = ?, client_id = ? "
+                    "WHERE id = ?",
+                    (
+                        "2026-08-25T14:00:00+00:00",
+                        media_db.client_id,
+                        created.media_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "UPDATE Media SET system_operation_kind = ?, "
+                    "version = version + 1, last_modified = ?, client_id = ? "
+                    "WHERE id = ?",
+                    (
+                        "unrelated_operation",
+                        "2026-08-25T14:00:00+00:00",
+                        media_db.client_id,
+                        created.media_id,
+                    ),
+                )
+        finally:
+            conn.execute("PRAGMA ignore_check_constraints = OFF")
+    conn.commit()
+
+    with pytest.raises(ConflictError):
+        media_db.insert_operation_owned_clone_media(
+            snapshot=snapshot,
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        )
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_cleanup_hard_deletes_only_exact_owned_graph(
+    media_db: MediaDatabase,
+) -> None:
+    snapshot = _operation_snapshot()
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    ordinary_id = _seed_media(
+        media_db,
+        title="Ordinary cleanup collision",
+        content=str(snapshot.media["content"]),
+        chunk_text="ordinary cleanup chunk",
+        transcript_text="ordinary cleanup transcript",
+        url=str(snapshot.media["url"]),
+    )
+    ordinary_before = _ordinary_media_state(media_db, ordinary_id)
+    created = media_db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id="clone-operation-cleanup",
+        source_identity="workspace-source-cleanup",
+        expected_content_hash=expected_hash,
+    )
+
+    with pytest.raises(ConflictError):
+        media_db.delete_operation_owned_clone_media(
+            operation_id="clone-operation-cleanup",
+            source_identity="workspace-source-cleanup",
+            expected_content_hash=hashlib.sha256(b"wrong-cleanup-hash").hexdigest(),
+        )
+    assert media_db.execute_query(
+        "SELECT COUNT(*) AS count FROM Media WHERE id = ?",
+        (created.media_id,),
+    ).fetchone()["count"] == 1
+
+    deleted_count = media_db.delete_operation_owned_clone_media(
+        operation_id="clone-operation-cleanup",
+        source_identity="workspace-source-cleanup",
+        expected_content_hash=expected_hash,
+    )
+
+    assert deleted_count == 1
+    assert media_db.delete_operation_owned_clone_media(
+        operation_id="clone-operation-cleanup",
+        source_identity="workspace-source-cleanup",
+        expected_content_hash=expected_hash,
+    ) == 0
+    assert media_db.execute_query(
+        "SELECT COUNT(*) AS count FROM Media WHERE id = ?",
+        (created.media_id,),
+    ).fetchone()["count"] == 0
+    for table in (
+        "DocumentVersions",
+        "MediaKeywords",
+        "UnvectorizedMediaChunks",
+        "Transcripts",
+    ):
+        assert media_db.execute_query(
+            f"SELECT COUNT(*) AS count FROM {table} WHERE media_id = ?",  # nosec B608
+            (created.media_id,),
+        ).fetchone()["count"] == 0
+    assert _ordinary_media_state(media_db, ordinary_id) == ordinary_before
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_package_facade_exposes_insert_and_cleanup(
+    media_db: MediaDatabase,
+) -> None:
+    snapshot = _operation_snapshot()
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+
+    result = media_db_api.insert_operation_owned_clone_media(
+        media_db,
+        snapshot=snapshot,
+        operation_id="clone-operation-facade",
+        source_identity="workspace-source-facade",
+        expected_content_hash=expected_hash,
+    )
+
+    assert result.created is True
+    assert media_db_api.delete_operation_owned_clone_media(
+        media_db,
+        operation_id="clone-operation-facade",
+        source_identity="workspace-source-facade",
+        expected_content_hash=expected_hash,
+    ) == 1
 
 
 @pytest.mark.unit
@@ -793,3 +1345,59 @@ def test_postgres_pool_scope_failure_log_does_not_emit_driver_text(
         pool.close_all()
 
     assert "sensitive scope driver detail" not in "".join(messages)
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+def test_postgres_operation_owned_clone_insert_replay_collision_and_cleanup(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    snapshot = _operation_snapshot()
+    operation_id = f"clone-operation-pg-{uuid.uuid4()}"
+    source_identity = f"workspace-source-pg-{uuid.uuid4()}"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            ordinary_id = _seed_media(
+                db,
+                title="Postgres ordinary collision",
+                content=str(snapshot.media["content"]),
+                chunk_text="postgres ordinary chunk",
+                transcript_text="postgres ordinary transcript",
+                url=str(snapshot.media["url"]),
+            )
+            ordinary_before = _ordinary_media_state(db, ordinary_id)
+
+            created = db.insert_operation_owned_clone_media(
+                snapshot=snapshot,
+                operation_id=operation_id,
+                source_identity=source_identity,
+                expected_content_hash=expected_hash,
+            )
+            replayed = db.insert_operation_owned_clone_media(
+                snapshot=snapshot,
+                operation_id=operation_id,
+                source_identity=source_identity,
+                expected_content_hash=expected_hash,
+            )
+
+            assert created.created is True
+            assert replayed.replayed is True
+            assert replayed.media_id == created.media_id
+            assert _ordinary_media_state(db, ordinary_id) == ordinary_before
+            assert db.delete_operation_owned_clone_media(
+                operation_id=operation_id,
+                source_identity=source_identity,
+                expected_content_hash=expected_hash,
+            ) == 1
+            assert db.execute_query(
+                "SELECT COUNT(*) AS count FROM Media WHERE id = ?",
+                (created.media_id,),
+            ).fetchone()["count"] == 0
+            assert _ordinary_media_state(db, ordinary_id) == ordinary_before
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()

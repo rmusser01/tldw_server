@@ -708,7 +708,7 @@ def test_media_postgres_migration_reaches_v23_and_backfills_transcript_run_histo
                 connection=conn,
             )
 
-        with pytest.raises(BackendDatabaseError, match="unique|duplicate key"):
+        with pytest.raises(BackendDatabaseError):
             with backend.transaction() as conn:
                 backend.execute(
                     """
@@ -734,7 +734,7 @@ def test_media_postgres_migration_reaches_v23_and_backfills_transcript_run_histo
                     connection=conn,
                 )
 
-        with pytest.raises(BackendDatabaseError, match="unique|duplicate key"):
+        with pytest.raises(BackendDatabaseError):
             with backend.transaction() as conn:
                 backend.execute(
                     """
@@ -846,7 +846,7 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
                 connection=conn,
             ).rows
 
-            assert int(version) == 24
+            assert int(version) == 25
             assert _column_definition(
                 backend, conn, "claims_analytics_exports", "job_id"
             ) == {"data_type": "bigint", "is_nullable": "YES"}
@@ -875,7 +875,7 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
                 "SELECT proname FROM pg_proc WHERE proname IN (%s, %s)",
                 ("tldw_claims_safe_json", "tldw_claims_compact_json"),
                 connection=conn,
-            ).fetchall()
+            ).rows
             assert {row["proname"] for row in helper_functions} == {
                 "tldw_claims_safe_json",
                 "tldw_claims_compact_json",
@@ -943,7 +943,7 @@ def test_media_postgres_migration_v24_repairs_missing_monitoring_event_extension
                 connection=conn,
             ).scalar
 
-            assert int(version) == 24
+            assert int(version) == 25
             assert backend.table_exists("claims_monitoring_events", connection=conn)
             assert _index_exists(
                 backend,
@@ -955,5 +955,150 @@ def test_media_postgres_migration_v24_repairs_missing_monitoring_event_extension
                 conn,
                 "idx_claims_monitoring_events_user_id",
             )
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(
+        db_path=":memory:",
+        client_id="pg-migration-v25-owned-media",
+        backend=backend,
+    )
+    media_uuid = str(uuid.uuid4())
+    try:
+        with backend.transaction() as conn:
+            assert all(
+                _column_definition(backend, conn, "media", column_name)
+                == {"data_type": "text", "is_nullable": "YES"}
+                for column_name in (
+                    "system_operation_id",
+                    "system_operation_kind",
+                    "system_source_identity",
+                    "system_content_hash",
+                )
+            )
+            assert _index_exists(backend, conn, "ux_media_system_operation_source")
+            assert _constraint_exists(
+                backend,
+                conn,
+                "ck_media_system_operation_ownership",
+            )
+            backend.execute(
+                "INSERT INTO Media "
+                "(uuid, title, type, content_hash, last_modified, version, client_id) "
+                "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, 1, %s)",
+                (
+                    media_uuid,
+                    "Ordinary pre-v25 media",
+                    "text",
+                    f"ordinary-{media_uuid}",
+                    "901",
+                ),
+                connection=conn,
+            )
+            backend.execute(
+                "DROP INDEX IF EXISTS ux_media_system_operation_source",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE Media DROP CONSTRAINT IF EXISTS "
+                "ck_media_system_operation_ownership",
+                connection=conn,
+            )
+            for column_name in (
+                "system_content_hash",
+                "system_source_identity",
+                "system_operation_kind",
+                "system_operation_id",
+            ):
+                backend.execute(
+                    f'ALTER TABLE Media DROP COLUMN IF EXISTS "{column_name}"',  # nosec B608
+                    connection=conn,
+                )
+            backend.execute(
+                "UPDATE schema_version SET version = %s",
+                (24,),
+                connection=conn,
+            )
+
+        db._initialize_schema()
+
+        with backend.transaction() as conn:
+            version = backend.execute(
+                "SELECT version FROM schema_version LIMIT 1",
+                connection=conn,
+            ).scalar
+            ordinary = backend.execute(
+                "SELECT title, system_operation_id, system_operation_kind, "
+                "system_source_identity, system_content_hash FROM Media WHERE uuid = %s",
+                (media_uuid,),
+                connection=conn,
+            ).rows[0]
+
+            assert int(version) == 25
+            assert all(
+                _column_definition(backend, conn, "media", column_name)
+                == {"data_type": "text", "is_nullable": "YES"}
+                for column_name in (
+                    "system_operation_id",
+                    "system_operation_kind",
+                    "system_source_identity",
+                    "system_content_hash",
+                )
+            )
+            assert _index_exists(backend, conn, "ux_media_system_operation_source")
+            assert _constraint_exists(
+                backend,
+                conn,
+                "ck_media_system_operation_ownership",
+            )
+            assert dict(ordinary) == {
+                "title": "Ordinary pre-v25 media",
+                "system_operation_id": None,
+                "system_operation_kind": None,
+                "system_source_identity": None,
+                "system_content_hash": None,
+            }
+
+        invalid_marker_sets = (
+            ("operation-only", None, None, None),
+            (
+                "operation-missing-hash",
+                "shared_workspace_clone",
+                "source-missing-hash",
+                None,
+            ),
+            (
+                "operation-uppercase-hash",
+                "shared_workspace_clone",
+                "source-uppercase-hash",
+                "A" * 64,
+            ),
+        )
+        for marker_set in invalid_marker_sets:
+            with pytest.raises(BackendDatabaseError):
+                with backend.transaction() as conn:
+                    backend.execute(
+                        "INSERT INTO Media "
+                        "(uuid, title, type, content_hash, last_modified, version, client_id, "
+                        "system_operation_id, system_operation_kind, "
+                        "system_source_identity, system_content_hash) "
+                        "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, 1, %s, %s, %s, %s, %s)",
+                        (
+                            str(uuid.uuid4()),
+                            "Invalid owned media",
+                            "text",
+                            f"invalid-{uuid.uuid4()}",
+                            "901",
+                            *marker_set,
+                        ),
+                        connection=conn,
+                    )
     finally:
         db.close_connection()

@@ -2267,7 +2267,7 @@ def test_fresh_sqlite_bootstrap_includes_transcript_run_history_columns_and_inde
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='Transcripts'"
         ).fetchone()[0]
 
-        assert db._CURRENT_SCHEMA_VERSION == 24
+        assert db._CURRENT_SCHEMA_VERSION == 25
         assert {
             "latest_transcription_run_id",
             "next_transcription_run_id",
@@ -2671,7 +2671,7 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
                     "PRAGMA index_list(claims_monitoring_events)"
                 ).fetchall()
             }
-            assert version_row["version"] == 24
+            assert version_row["version"] == 25
             assert event_index_columns["idx_claims_monitoring_events_user_created_id"] == [
                 "user_id",
                 "created_at",
@@ -2913,8 +2913,8 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
             "SELECT version FROM schema_version LIMIT 1"
         ).fetchone()[0]
 
-        assert version == 24
-        assert db._CURRENT_SCHEMA_VERSION == 24
+        assert version == 25
+        assert db._CURRENT_SCHEMA_VERSION == 25
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3008,7 +3008,7 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()["version"]
 
-        assert version == 24
+        assert version == 25
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3334,7 +3334,7 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
                 ).fetchone()
             )
 
-        assert version == 24
+        assert version == 25
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3358,3 +3358,286 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
         }
     finally:
         db.close_connection()
+
+
+@pytest.mark.integration
+def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v25() -> None:
+    db = MediaDatabase(db_path=":memory:", client_id="owned-media-v25-bootstrap")
+    try:
+        conn = db.get_connection()
+        columns = {
+            row[1]: {"type": row[2], "notnull": row[3]}
+            for row in conn.execute("PRAGMA table_info(Media)").fetchall()
+        }
+        index_rows = {
+            row[1]: {"unique": row[2], "partial": row[4]}
+            for row in conn.execute("PRAGMA index_list(Media)").fetchall()
+        }
+        index_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'ux_media_system_operation_source'"
+        ).fetchone()[0]
+        version = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()[0]
+
+        assert version == 25
+        assert db._CURRENT_SCHEMA_VERSION == 25
+        assert {
+            "system_operation_id",
+            "system_operation_kind",
+            "system_source_identity",
+            "system_content_hash",
+        }.issubset(columns)
+        assert all(
+            columns[column] == {"type": "TEXT", "notnull": 0}
+            for column in (
+                "system_operation_id",
+                "system_operation_kind",
+                "system_source_identity",
+                "system_content_hash",
+            )
+        )
+        assert index_rows["ux_media_system_operation_source"] == {
+            "unique": 1,
+            "partial": 1,
+        }
+        assert "WHERE system_operation_id IS NOT NULL" in index_sql
+
+        now = db._get_current_utc_timestamp_str()
+        conn.execute(
+            "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), "ordinary", "text", "ordinary-hash", now, db.client_id),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id, "
+                "system_operation_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    "partial",
+                    "text",
+                    "partial-hash",
+                    now,
+                    db.client_id,
+                    "operation-only",
+                ),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id, "
+                "system_operation_id, system_operation_kind, system_source_identity, "
+                "system_content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    "invalid hash",
+                    "text",
+                    "invalid-hash",
+                    now,
+                    db.client_id,
+                    "operation-invalid-hash",
+                    "shared_workspace_clone",
+                    "source-invalid-hash",
+                    "G" * 64,
+                ),
+            )
+        conn.execute(
+            "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id, "
+            "system_operation_id, system_operation_kind, system_source_identity, "
+            "system_content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                "owned",
+                "text",
+                "owned-hash",
+                now,
+                db.client_id,
+                "operation-valid",
+                "shared_workspace_clone",
+                "source-valid",
+                "a" * 64,
+            ),
+        )
+    finally:
+        db.close_connection()
+
+
+def _create_minimal_media_v24_database(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE schema_version (version INTEGER PRIMARY KEY NOT NULL);
+            INSERT INTO schema_version(version) VALUES (24);
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_at TIMESTAMP NOT NULL,
+                execution_time REAL NOT NULL,
+                success BOOLEAN NOT NULL DEFAULT 1,
+                error_message TEXT
+            );
+            INSERT INTO schema_migrations (
+                version, name, checksum, applied_at, execution_time, success
+            ) VALUES (24, 'claims_analytics_export_jobs', 'test-v24', CURRENT_TIMESTAMP, 0, 1);
+            CREATE TABLE Media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT UNIQUE,
+                title TEXT NOT NULL,
+                type TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                uuid TEXT UNIQUE NOT NULL,
+                last_modified TEXT NOT NULL,
+                client_id TEXT NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                is_trash INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO Media (
+                url, title, type, content_hash, uuid, last_modified, client_id
+            ) VALUES (
+                'https://ordinary.example.test/v24', 'ordinary v24', 'text',
+                'ordinary-v24-hash', 'ordinary-v24-uuid', CURRENT_TIMESTAMP, 'client-v24'
+            );
+            """
+        )
+
+
+@pytest.mark.integration
+def test_sqlite_migration_v25_recovers_partial_ddl_and_preserves_ordinary_rows(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    db_path = tmp_path / "media-v24-operation-owned-partial.sqlite"
+    _create_minimal_media_v24_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE Media ADD COLUMN system_operation_id TEXT")
+        conn.execute("ALTER TABLE Media ADD COLUMN system_operation_kind TEXT")
+
+    migrator = DatabaseMigrator(str(db_path))
+    result = migrator.migrate_to_version(25, create_backup=False)
+
+    assert result["status"] == "success"
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(Media)")}
+        indexes = {row["name"] for row in conn.execute("PRAGMA index_list(Media)")}
+        version = conn.execute("SELECT version FROM schema_version").fetchone()[0]
+        migration = dict(
+            conn.execute(
+                "SELECT version, name, success FROM schema_migrations WHERE version = 25"
+            ).fetchone()
+        )
+        ordinary = dict(
+            conn.execute(
+                "SELECT title, system_operation_id, system_operation_kind, "
+                "system_source_identity, system_content_hash FROM Media WHERE id = 1"
+            ).fetchone()
+        )
+
+    assert version == 25
+    assert {
+        "system_operation_id",
+        "system_operation_kind",
+        "system_source_identity",
+        "system_content_hash",
+    }.issubset(columns)
+    assert "ux_media_system_operation_source" in indexes
+    assert migration == {
+        "version": 25,
+        "name": "operation_owned_clone_media",
+        "success": 1,
+    }
+    assert ordinary == {
+        "title": "ordinary v24",
+        "system_operation_id": None,
+        "system_operation_kind": None,
+        "system_source_identity": None,
+        "system_content_hash": None,
+    }
+
+
+@pytest.mark.integration
+def test_sqlite_migration_v25_does_not_advance_version_when_ddl_rolls_back(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import (
+        DatabaseMigrator,
+        MigrationError,
+    )
+
+    db_path = tmp_path / "media-v24-operation-owned-interrupted.sqlite"
+    _create_minimal_media_v24_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TRIGGER reject_media_v25_version
+            BEFORE UPDATE ON schema_version
+            WHEN NEW.version = 25
+            BEGIN
+                SELECT RAISE(ABORT, 'simulated version write interruption');
+            END;
+            """
+        )
+
+    migrator = DatabaseMigrator(str(db_path))
+    with pytest.raises(MigrationError):
+        migrator.migrate_to_version(25, create_backup=False)
+
+    with sqlite3.connect(db_path) as conn:
+        columns_after_failure = {
+            row[1] for row in conn.execute("PRAGMA table_info(Media)").fetchall()
+        }
+        version_after_failure = conn.execute(
+            "SELECT version FROM schema_version"
+        ).fetchone()[0]
+        conn.execute("DROP TRIGGER reject_media_v25_version")
+
+    assert version_after_failure == 24
+    assert "system_operation_id" not in columns_after_failure
+
+    result = migrator.migrate_to_version(25, create_backup=False)
+    assert result["status"] == "success"
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 25
+        assert "system_content_hash" in {
+            row[1] for row in conn.execute("PRAGMA table_info(Media)").fetchall()
+        }
+
+
+@pytest.mark.unit
+def test_sqlite_migration_025_loads_as_idempotent(tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    migrator = DatabaseMigrator(str(tmp_path / "migration-v25-loader.sqlite"))
+    migration = next(item for item in migrator.load_migrations() if item.version == 25)
+
+    assert migration.name == "operation_owned_clone_media"
+    assert migration.idempotent is True
+
+
+@pytest.mark.unit
+def test_postgres_migration_v25_body_adds_owned_media_columns_constraint_and_index() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_operation_owned_clone_media import (
+        run_postgres_migrate_to_v25,
+    )
+
+    statements: list[str] = []
+
+    class Backend:
+        @staticmethod
+        def escape_identifier(name: str) -> str:
+            return f'"{name}"'
+
+        @staticmethod
+        def execute(query: str, params=None, *, connection) -> None:
+            del params, connection
+            statements.append(query)
+
+    run_postgres_migrate_to_v25(SimpleNamespace(backend=Backend()), object())
+
+    combined_sql = "\n".join(statements)
+    assert sum("ADD COLUMN IF NOT EXISTS" in query for query in statements) == 4
+    assert any("ck_media_system_operation_ownership" in query for query in statements)
+    assert any("ux_media_system_operation_source" in query for query in statements)
+    assert '"system_content_hash" IS NOT NULL' in combined_sql
+    assert "^[0-9a-f]{64}$" in combined_sql

@@ -5,6 +5,8 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.chunks_reposit
 )
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
     CloneSnapshotRepository,
+    OperationOwnedMediaResult,
+    hash_media_clone_snapshot,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_versions_repository import (
     DocumentVersionsRepository,
@@ -30,6 +32,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_r
 
 __all__ = [
     "CloneSnapshotRepository",
+    "OperationOwnedMediaResult",
     "ChunksRepository",
     "DocumentVersionsRepository",
     "DocumentWorkspaceRepository",
@@ -38,4 +41,5 @@ __all__ = [
     "MediaLookupRepository",
     "MediaSearchRepository",
     "MediaRepository",
+    "hash_media_clone_snapshot",
 ]

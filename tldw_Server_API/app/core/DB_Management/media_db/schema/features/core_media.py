@@ -57,6 +57,10 @@ _EXPECTED_MEDIA_COLUMNS = {
     "deleted",
     "prev_version",
     "merge_parent_uuid",
+    "system_operation_id",
+    "system_operation_kind",
+    "system_source_identity",
+    "system_content_hash",
 }
 
 _POSTGRES_REQUIRED_TABLES = [
