@@ -9,6 +9,7 @@ _INVALID_CONTRACT_MESSAGE = "Invalid membership writer contract."
 _OFFLINE_MIGRATION_SERVING_MESSAGE = (
     "Offline migration membership context is unavailable while serving."
 )
+_MEMBERSHIP_ROLES = frozenset({"owner", "admin", "lead", "member"})
 
 
 class MembershipWriterContractError(ValueError):
@@ -91,6 +92,11 @@ def _require_positive_id(value: object) -> None:
         raise MembershipWriterContractError()
 
 
+def _require_membership_role(value: object) -> None:
+    if type(value) is not str or value not in _MEMBERSHIP_ROLES:
+        raise MembershipWriterContractError()
+
+
 def _require_exact_tuple(value: object) -> None:
     if type(value) is not tuple:
         raise MembershipWriterContractError()
@@ -161,8 +167,7 @@ class MembershipMutation:
             MembershipMutationKind.UPDATE_ROLE,
         }
         if role_required:
-            if type(self.role) is not str or not self.role:
-                raise MembershipWriterContractError()
+            _require_membership_role(self.role)
         elif self.role is not None:
             raise MembershipWriterContractError()
 
