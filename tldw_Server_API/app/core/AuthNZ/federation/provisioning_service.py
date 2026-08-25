@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
     AuthnzOrgsTeamsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 
 _FEDERATION_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
     trusted_reason=TrustedMembershipReason.BOOTSTRAP,
@@ -450,6 +453,9 @@ class FederationProvisioningService:
         users_repo = AuthnzUsersRepo(db_pool=self.db_pool)
         managed_repo = FederatedManagedGrantRepo(db_pool=self.db_pool)
         await managed_repo.ensure_tables()
+        acquire_timeout_seconds = (
+            get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+        )
 
         provider_id = int(provider["id"])
         desired_org_ids, desired_team_ids, desired_role_names, _ = await self._resolve_desired_grants(
@@ -474,7 +480,9 @@ class FederationProvisioningService:
                 if current is None or grant_key in existing_managed_keys:
                     if current is None:
                         operation_time = datetime.now(timezone.utc)
-                        async with self.db_pool.transaction() as conn:
+                        async with self.db_pool.transaction(
+                            acquire_timeout_seconds=acquire_timeout_seconds,
+                        ) as conn:
                             await orgs_repo.provision_org_membership_on_connection(
                                 conn=conn,
                                 org_id=int(org_id),
@@ -512,7 +520,9 @@ class FederationProvisioningService:
                 if current is None or grant_key in existing_managed_keys:
                     if current is None:
                         operation_time = datetime.now(timezone.utc)
-                        async with self.db_pool.transaction() as conn:
+                        async with self.db_pool.transaction(
+                            acquire_timeout_seconds=acquire_timeout_seconds,
+                        ) as conn:
                             await orgs_repo.add_team_member_on_connection(
                                 conn=conn,
                                 team_id=int(team_id),
@@ -618,7 +628,9 @@ class FederationProvisioningService:
                             )
                             continue
                         operation_time = datetime.now(timezone.utc)
-                        async with self.db_pool.transaction() as conn:
+                        async with self.db_pool.transaction(
+                            acquire_timeout_seconds=acquire_timeout_seconds,
+                        ) as conn:
                             removal = (
                                 await orgs_repo.remove_team_member_on_connection(
                                     conn=conn,
@@ -694,7 +706,9 @@ class FederationProvisioningService:
                             )
                             continue
                         operation_time = datetime.now(timezone.utc)
-                        async with self.db_pool.transaction() as conn:
+                        async with self.db_pool.transaction(
+                            acquire_timeout_seconds=acquire_timeout_seconds,
+                        ) as conn:
                             removal = (
                                 await orgs_repo.remove_org_member_on_connection(
                                     conn=conn,

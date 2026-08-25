@@ -4,8 +4,10 @@ import threading
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
+    MembershipTargetNotFound,
     MembershipWriteContext,
     TrustedMembershipReason,
     TrustedMembershipWriteContext,
@@ -69,15 +71,18 @@ async def create_organization(
     """
     repo = await _get_orgs_teams_repo()
     if owner_user_id is not None:
-        return await repo.create_organization_with_owner_membership(
-            name=name,
-            owner_user_id=owner_user_id,
-            context=TrustedMembershipWriteContext(
-                trusted_reason=TrustedMembershipReason.BOOTSTRAP,
-            ),
-            slug=slug,
-            metadata=metadata,
-        )
+        try:
+            return await repo.create_organization_with_owner_membership(
+                name=name,
+                owner_user_id=owner_user_id,
+                context=TrustedMembershipWriteContext(
+                    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+                ),
+                slug=slug,
+                metadata=metadata,
+            )
+        except MembershipTargetNotFound:
+            raise TransactionError("Create organization") from None
     return await repo.create_organization(
         name=name,
         owner_user_id=owner_user_id,

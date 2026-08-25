@@ -23,6 +23,9 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
 from tldw_Server_API.app.core.AuthNZ.repos.org_invites_repo import AuthnzOrgInvitesRepo
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 
 _INVITE_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
     trusted_reason=TrustedMembershipReason.REGISTRATION,
@@ -369,7 +372,11 @@ class OrgInviteService:
         try:
             pool = await self._get_db_pool()
             operation_time = datetime.now(timezone.utc)
-            async with pool.transaction() as conn:
+            async with pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
                 provisioning = (
                     await orgs_repo.provision_org_membership_on_connection(
                         conn=conn,

@@ -53,7 +53,12 @@ class _SQLitePool:
         self.transaction_connections: list[Any] = []
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[_GuardedSQLiteConnection]:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ) -> AsyncIterator[_GuardedSQLiteConnection]:
+        assert acquire_timeout_seconds is not None
         conn = await aiosqlite.connect(self.db_path)
         await conn.execute("PRAGMA foreign_keys = ON")
         await conn.execute("BEGIN IMMEDIATE")
