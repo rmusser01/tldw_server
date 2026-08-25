@@ -92,7 +92,7 @@ class WebhookPatchRequest(BaseModel):
         return self
 
 
-class WebhookRegistrationResponse(BaseModel):
+class AdminWebhookRegistrationResponse(BaseModel):
     """Redacted registration metadata returned by ordinary operations."""
 
     model_config = ConfigDict(extra="forbid", from_attributes=True)
@@ -148,7 +148,7 @@ class WebhookSecretResponse(BaseModel):
         },
     )
 
-    registration: WebhookRegistrationResponse
+    registration: AdminWebhookRegistrationResponse
     signing_secret: str = Field(pattern=r"^whsec_[0-9a-f]{64}$")
     replayed: bool
 
@@ -167,7 +167,7 @@ class WebhookListResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[WebhookRegistrationResponse]
+    items: list[AdminWebhookRegistrationResponse]
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
     offset: int = Field(ge=0, le=1_000)
@@ -223,7 +223,7 @@ class WebhookMigrationStatusResponse(BaseModel):
     rollback_window_expires_at: datetime | None = None
 
 
-class WebhookStatusResponse(BaseModel):
+class AdminWebhookStatusResponse(BaseModel):
     """Explicit canonical-mode readiness without artifact or credential data."""
 
     model_config = ConfigDict(extra="forbid")

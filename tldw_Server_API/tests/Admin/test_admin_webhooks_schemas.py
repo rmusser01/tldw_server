@@ -6,11 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
+    AdminWebhookRegistrationResponse,
+    AdminWebhookStatusResponse,
     WebhookCreateRequest,
     WebhookListResponse,
     WebhookPatchRequest,
-    WebhookRegistrationResponse,
-    WebhookStatusResponse,
 )
 
 pytestmark = pytest.mark.unit
@@ -92,7 +92,9 @@ def test_patch_requires_at_least_one_non_null_recognized_field() -> None:
 
 
 def test_registration_response_is_redacted_and_uses_numeric_identity() -> None:
-    registration = WebhookRegistrationResponse.model_validate(_registration_payload())
+    registration = AdminWebhookRegistrationResponse.model_validate(
+        _registration_payload()
+    )
 
     assert isinstance(registration.id, int)
     assert isinstance(registration.created_at, datetime)
@@ -122,7 +124,7 @@ def test_registration_response_rejects_events_outside_the_catalog() -> None:
     payload["event_types"] = ["*"]
 
     with pytest.raises(ValidationError):
-        WebhookRegistrationResponse.model_validate(payload)
+        AdminWebhookRegistrationResponse.model_validate(payload)
 
 
 def test_list_schema_uses_bounded_offset_metadata() -> None:
@@ -145,7 +147,7 @@ def test_list_schema_uses_bounded_offset_metadata() -> None:
 
 
 def test_status_schema_exposes_rollback_state_without_artifact_paths() -> None:
-    status = WebhookStatusResponse.model_validate(
+    status = AdminWebhookStatusResponse.model_validate(
         {
             "mode": "migrate",
             "route_selection": "canonical",

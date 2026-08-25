@@ -21,6 +21,8 @@ from fastapi.routing import APIRoute
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
+    AdminWebhookRegistrationResponse,
+    AdminWebhookStatusResponse,
     WebhookCatalogItemResponse,
     WebhookCatalogResponse,
     WebhookCreateRequest,
@@ -31,9 +33,7 @@ from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
     WebhookListResponse,
     WebhookMigrationStatusResponse,
     WebhookPatchRequest,
-    WebhookRegistrationResponse,
     WebhookSecretResponse,
-    WebhookStatusResponse,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.audit import (
     MutationAudit,
@@ -346,8 +346,8 @@ async def _audit_read_failure(
     )
 
 
-def _registration_response(registration: WebhookRegistration) -> WebhookRegistrationResponse:
-    return WebhookRegistrationResponse(
+def _registration_response(registration: WebhookRegistration) -> AdminWebhookRegistrationResponse:
+    return AdminWebhookRegistrationResponse(
         id=registration.id,
         description=registration.description,
         target_display=registration.target_display,
@@ -366,8 +366,8 @@ def _registration_response(registration: WebhookRegistration) -> WebhookRegistra
     )
 
 
-def _status_response(status: WebhookStatus) -> WebhookStatusResponse:
-    return WebhookStatusResponse.model_validate(
+def _status_response(status: WebhookStatus) -> AdminWebhookStatusResponse:
+    return AdminWebhookStatusResponse.model_validate(
         {
             "mode": status.mode,
             "route_selection": status.route_selection,
@@ -388,11 +388,11 @@ def _status_response(status: WebhookStatus) -> WebhookStatusResponse:
     )
 
 
-@status_router.get("/webhooks/status", response_model=WebhookStatusResponse)
+@status_router.get("/webhooks/status", response_model=AdminWebhookStatusResponse)
 async def get_webhook_status(
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
-) -> WebhookStatusResponse:
+) -> AdminWebhookStatusResponse:
     _require_platform_admin(principal)
     request_id = _request_id(request)
     try:
@@ -581,13 +581,13 @@ async def rotate_webhook_secret(
     )
 
 
-@canonical_router.get("/webhooks/{webhook_id}", response_model=WebhookRegistrationResponse)
+@canonical_router.get("/webhooks/{webhook_id}", response_model=AdminWebhookRegistrationResponse)
 async def get_webhook(
     request: Request,
     response: Response,
     webhook_id: int = Path(ge=1),
     principal: AuthPrincipal = Depends(get_auth_principal),
-) -> WebhookRegistrationResponse:
+) -> AdminWebhookRegistrationResponse:
     _require_platform_admin(principal)
     request_id = _request_id(request)
     try:
@@ -619,7 +619,7 @@ async def get_webhook(
     return _registration_response(registration)
 
 
-@canonical_router.patch("/webhooks/{webhook_id}", response_model=WebhookRegistrationResponse)
+@canonical_router.patch("/webhooks/{webhook_id}", response_model=AdminWebhookRegistrationResponse)
 async def patch_webhook(
     payload: WebhookPatchRequest,
     request: Request,
@@ -627,7 +627,7 @@ async def patch_webhook(
     webhook_id: int = Path(ge=1),
     if_match: Annotated[str | None, Header(alias="If-Match")] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
-) -> WebhookRegistrationResponse:
+) -> AdminWebhookRegistrationResponse:
     actor_id = _require_webhook_mutation_actor(principal)
     request_id = _request_id(request)
     values = payload.model_dump(exclude_unset=True)

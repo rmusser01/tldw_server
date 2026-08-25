@@ -704,10 +704,15 @@ class TestEgressPolicy:
             def is_alive(self) -> bool:
                 return True
 
+        class _FakeTime:
+            @staticmethod
+            def monotonic() -> float:
+                return next(times)
+
         times = iter([100.0, 100.03, 100.04, 100.05])
         monkeypatch.setattr(egress, "_DNS_RESOLVER_SLOTS", _FakeSlots(), raising=False)
         monkeypatch.setattr(egress.threading, "Thread", _FakeThread)
-        monkeypatch.setattr(egress.time, "monotonic", lambda: next(times))
+        monkeypatch.setattr(egress, "time", _FakeTime())
         monkeypatch.setattr(egress, "logger", captured_logger)
 
         assert egress._getaddrinfo_with_timeout("example.invalid", timeout_s=0.1) == []

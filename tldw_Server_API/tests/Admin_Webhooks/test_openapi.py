@@ -5,6 +5,9 @@ import json
 from fastapi import FastAPI
 
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_webhooks
+from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_webhooks import (
+    webhooks_router as evaluation_webhooks_router,
+)
 
 
 def _openapi() -> dict[str, object]:
@@ -60,3 +63,24 @@ def test_schema_examples_use_reserved_hosts_and_an_obvious_fake_secret() -> None
     assert "whsec_" + ("0" * 64) in encoded
     assert "localhost" not in encoded
     assert "example.com" not in encoded
+
+
+def test_canonical_models_do_not_rename_evaluation_webhook_schemas() -> None:
+    app = FastAPI()
+    app.include_router(evaluation_webhooks_router, prefix="/api/v1/evaluations")
+    app.include_router(admin_webhooks.status_router, prefix="/api/v1/admin")
+    app.include_router(admin_webhooks.canonical_router, prefix="/api/v1/admin")
+
+    spec = app.openapi()
+    evaluation_path = spec["paths"]["/api/v1/evaluations/webhooks"]
+
+    assert evaluation_path["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]["items"] == {
+        "$ref": "#/components/schemas/WebhookStatusResponse"
+    }
+    assert evaluation_path["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {
+        "$ref": "#/components/schemas/WebhookRegistrationResponse"
+    }

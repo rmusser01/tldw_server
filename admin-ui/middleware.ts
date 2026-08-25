@@ -140,7 +140,7 @@ const parseBearerHeader = (authorization: string): string | null => {
 const isValidApiKeyFormat = (apiKey: string): boolean =>
   apiKey.length <= MAX_TOKEN_LENGTH && API_KEY_PATTERN.test(apiKey);
 
-const base64UrlToUint8Array = (input: string): Uint8Array => {
+const base64UrlToUint8Array = (input: string): Uint8Array<ArrayBuffer> => {
   const padded = input.replace(/-/g, '+').replace(/_/g, '/');
   const padding = '='.repeat((4 - (padded.length % 4)) % 4);
   const base64 = `${padded}${padding}`;
@@ -191,7 +191,6 @@ const verifyJwtLocally = async (
 
   const data = new TextEncoder().encode(`${headerSegment}.${payloadSegment}`);
   const signature = base64UrlToUint8Array(signatureSegment);
-  const signatureBuffer = new Uint8Array(signature).buffer;
   const secrets = [secret, secondarySecret].filter((value): value is string => !!value);
   let signatureValid = false;
 
@@ -203,7 +202,7 @@ const verifyJwtLocally = async (
       false,
       ['verify']
     );
-    if (await subtle.verify('HMAC', key, signatureBuffer, data)) {
+    if (await subtle.verify('HMAC', key, signature, data)) {
       signatureValid = true;
       break;
     }
