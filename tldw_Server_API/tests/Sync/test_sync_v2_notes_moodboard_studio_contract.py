@@ -233,6 +233,30 @@ def test_moodboard_normalizes_smart_rule_sets_and_utc_timestamps() -> None:
 
 
 @pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2026-08-24 00:00:00Z",
+        "2026-08-24X00:00:00Z",
+        "2026-W34-1T00:00:00Z",
+        "2026-08-24T00:00:00+0200",
+        "2026-08-24T00:00:00.1234567Z",
+        "2026-08-24T00:00:00.1234568Z",
+    ],
+)
+def test_timestamps_reject_non_rfc3339_forms_and_excess_fractional_precision(
+    timestamp: str,
+) -> None:
+    payload = valid_moodboard_payload()
+    smart_rule = deepcopy(payload["smart_rule"])
+    assert isinstance(smart_rule, dict)
+    smart_rule["updated"] = {"after": timestamp, "before": None}
+    payload["smart_rule"] = smart_rule
+
+    with pytest.raises(NotesMoodboardStudioContractError, match="RFC 3339"):
+        parse_notes_moodboard_v1(payload)
+
+
+@pytest.mark.parametrize(
     ("override", "message"),
     [
         ({"name": ""}, "at least 1"),
@@ -348,6 +372,71 @@ def test_placement_display_has_its_own_extension_limits(
         parse_notes_moodboard_note_v1(valid_placement_payload(display=display))
 
 
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+@pytest.mark.parametrize(
+    "reserved_key",
+    [
+        "placement_id",
+        "placement-id",
+        "source_note_id",
+        "source-note-id",
+        "deleted_at",
+        "deleted.at",
+        "adapter_version",
+        "adapter-version",
+        "domain",
+        "operation",
+        "accepted_provenance",
+        "accepted-provenance",
+        "result_hash",
+        "result.hash",
+        "scope_type",
+        "scope-type",
+        "generated_preview",
+        "generated-preview",
+        "cached_svg",
+        "cached-svg",
+        "api_key",
+        "api-key",
+    ],
+)
+def test_extension_surfaces_reject_reserved_concepts_and_separator_variants(
+    surface: str,
+    reserved_key: str,
+) -> None:
+    extension = {reserved_key: "not portable metadata"}
+
+    with pytest.raises(NotesMoodboardStudioContractError, match="cannot contain"):
+        if surface == "canvas":
+            parse_notes_moodboard_v1(
+                valid_moodboard_payload(
+                    canvas={"layout_mode": "masonry", "metadata": extension}
+                )
+            )
+        else:
+            parse_notes_moodboard_note_v1(
+                valid_placement_payload(display=extension)
+            )
+
+
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+def test_extension_surfaces_retain_allowed_namespaced_keys(surface: str) -> None:
+    extension = {"acme.theme": "paper", "org.example-card": True}
+
+    if surface == "canvas":
+        parsed = parse_notes_moodboard_v1(
+            valid_moodboard_payload(
+                canvas={"layout_mode": "masonry", "metadata": extension}
+            )
+        )
+        assert parsed.canvas.metadata == extension
+    else:
+        parsed = parse_notes_moodboard_note_v1(
+            valid_placement_payload(display=extension)
+        )
+        assert parsed.display == extension
+
+
 def test_sections_only_studio_state_is_valid_and_acceptance_is_server_bound() -> None:
     payload = valid_studio_payload()
     parsed = parse_studio(payload)
@@ -403,6 +492,25 @@ def test_diagram_manifest_validates_source_graph_and_hashes() -> None:
     payload = valid_studio_payload(with_diagram=True)
     parsed = parse_studio(payload)
     assert parsed.diagram_manifest_json is not None
+    assert parsed.diagram_manifest_json.render_hash == diagram_render_hash(
+        diagram_type="flowchart",
+        context="Questions\nWhy?\nAnswer\nBecause.",
+        diagram="flowchart TD\n  A-->B",
+    )
+    assert parsed.accepted_provenance.result_hash == studio_result_hash(parsed)
+
+
+def test_diagram_source_ids_normalize_to_document_order_before_hash_validation() -> None:
+    payload = valid_studio_payload(with_diagram=True)
+    manifest = deepcopy(payload["diagram_manifest_json"])
+    assert isinstance(manifest, dict)
+    manifest["source_section_ids"] = ["notes", "cues"]
+    payload["diagram_manifest_json"] = manifest
+
+    parsed = parse_studio(payload)
+
+    assert parsed.diagram_manifest_json is not None
+    assert parsed.diagram_manifest_json.source_section_ids == ("cues", "notes")
     assert parsed.diagram_manifest_json.render_hash == diagram_render_hash(
         diagram_type="flowchart",
         context="Questions\nWhy?\nAnswer\nBecause.",

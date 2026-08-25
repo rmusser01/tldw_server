@@ -18,6 +18,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -28,61 +29,141 @@ SYNC_ENVELOPE_MAX_BYTES = 262_144
 
 _SAFE_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}")
+_RFC3339_TIMESTAMP_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})"
+)
 _UUID4_MESSAGE = "IDs must be canonical lowercase UUIDv4 strings"
 _DIAGNOSTIC_CODE_RE = re.compile(r"[a-z0-9_.-]{1,64}")
 _DIAGRAM_TYPES = frozenset(
     {"flowchart", "sequence", "class", "state", "er", "gantt", "pie"}
 )
-_AUTHORITY_EXTENSION_KEYS = frozenset(
+_AUTHORITY_IDENTITY_EXTENSION_CONCEPTS = frozenset(
     {
+        "base_revision",
+        "canonical_revision",
+        "client",
+        "client_envelope_id",
         "owner",
         "owner_id",
         "owner_user_id",
+        "device",
+        "device_id",
         "user_id",
         "dataset",
         "dataset_id",
         "client_id",
+        "identity",
+        "idempotency_key",
+        "mutation_group_id",
         "sync_id",
         "object_id",
+        "object_revision",
         "parent_id",
         "moodboard_id",
         "note_id",
-        "canonical_hash",
-        "canonical_revision",
+        "placement_id",
         "revision",
+        "source_note_id",
     }
 )
-_LIFECYCLE_EXTENSION_KEYS = frozenset(
+_LIFECYCLE_EXTENSION_CONCEPTS = frozenset(
     {
         "deleted",
+        "deleted_at",
         "is_deleted",
         "lifecycle",
         "restore_intent",
+        "restored_at",
         "tombstone",
     }
 )
-_CREDENTIAL_EXTENSION_KEYS = frozenset(
+_CREDENTIAL_EXTENSION_CONCEPTS = frozenset(
     {
+        "access_token",
         "api_key",
+        "auth",
         "authorization",
+        "bearer",
         "credential",
         "credentials",
         "password",
+        "refresh_token",
         "secret",
         "token",
     }
 )
-_TRANSIENT_EXTENSION_KEYS = frozenset(
+_TRANSIENT_EXTENSION_CONCEPTS = frozenset(
     {
-        "cached_svg",
         "current_selection",
         "drag",
         "drag_state",
+        "failure",
+        "focus",
         "hover",
         "hovered",
+        "preview",
+        "prompt",
+        "raw_output",
+        "raw_response",
+        "request_metadata",
         "selection",
         "temporary_drag",
         "viewport",
+        "zoom",
+    }
+)
+_DOMAIN_OPERATION_EXTENSION_CONCEPTS = frozenset(
+    {
+        "adapter_version",
+        "domain",
+        "operation",
+        "payload",
+        "protocol_version",
+        "render_version",
+        "schema_version",
+    }
+)
+_PROVENANCE_EXTENSION_CONCEPTS = frozenset(
+    {
+        "accepted_at",
+        "accepted_provenance",
+        "attestation",
+        "model",
+        "provenance",
+        "provider",
+        "source_revision",
+    }
+)
+_HASH_EXTENSION_CONCEPTS = frozenset(
+    {
+        "base_hash",
+        "canonical_hash",
+        "checksum",
+        "companion_content_hash",
+        "digest",
+        "excerpt_hash",
+        "hash",
+        "note_hash",
+        "payload_hash",
+        "render_hash",
+        "result_hash",
+        "source_hash",
+    }
+)
+_SCOPE_EXTENSION_CONCEPTS = frozenset(
+    {"scope", "scope_type", "workspace", "workspace_id"}
+)
+_GENERATED_CACHE_EXTENSION_CONCEPTS = frozenset(
+    {
+        "cache",
+        "cached",
+        "cached_svg",
+        "generated",
+        "generated_at",
+        "generation",
+        "projection",
+        "rendered_cache",
     }
 )
 
@@ -476,6 +557,35 @@ class NotesStudioDocumentV1(BaseModel):
     @classmethod
     def _normalize_excerpt(cls, value: str | None) -> str | None:
         return None if value is None else _normalize_line_endings(value)
+
+    @field_validator("diagram_manifest_json", mode="before")
+    @classmethod
+    def _normalize_diagram_source_order(
+        cls, value: object, info: ValidationInfo
+    ) -> object:
+        if value is None or not isinstance(value, Mapping):
+            return value
+        payload_json = info.data.get("payload_json")
+        source_ids = value.get("source_section_ids")
+        if not isinstance(payload_json, StudioSectionsV1) or not isinstance(
+            source_ids, Sequence
+        ):
+            return value
+        if isinstance(source_ids, (str, bytes, bytearray)) or any(
+            not isinstance(source_id, str) for source_id in source_ids
+        ):
+            return value
+        selected = tuple(source_ids)
+        if len(set(selected)) != len(selected):
+            return value
+        document_ids = tuple(section.id for section in payload_json.sections)
+        if not set(selected).issubset(document_ids):
+            return value
+        normalized = dict(value)
+        normalized["source_section_ids"] = [
+            section_id for section_id in document_ids if section_id in selected
+        ]
+        return normalized
 
     @field_validator("excerpt_hash", "companion_content_hash", "note_hash")
     @classmethod
@@ -1004,18 +1114,34 @@ def _validate_extension_scalar(value: object, label: str) -> None:
 
 
 def _validate_extension_key(key: str, label: str) -> None:
-    folded = key.casefold()
-    key_segments = set(re.split(r"[_.-]+", folded))
-    if folded in _AUTHORITY_EXTENSION_KEYS or folded.startswith("base_"):
-        raise ValueError(f"{label} cannot contain reserved authority or identity keys")
-    if folded in _LIFECYCLE_EXTENSION_KEYS:
-        raise ValueError(f"{label} cannot contain reserved lifecycle keys")
-    if folded in _CREDENTIAL_EXTENSION_KEYS or key_segments.intersection(
-        _CREDENTIAL_EXTENSION_KEYS
+    normalized = re.sub(r"[_.-]+", "_", key.casefold()).strip("_")
+    if _contains_extension_concept(
+        normalized, _AUTHORITY_IDENTITY_EXTENSION_CONCEPTS
     ):
+        raise ValueError(f"{label} cannot contain reserved authority or identity keys")
+    if _contains_extension_concept(normalized, _LIFECYCLE_EXTENSION_CONCEPTS):
+        raise ValueError(f"{label} cannot contain reserved lifecycle keys")
+    if _contains_extension_concept(normalized, _CREDENTIAL_EXTENSION_CONCEPTS):
         raise ValueError(f"{label} cannot contain credential keys")
-    if folded in _TRANSIENT_EXTENSION_KEYS:
-        raise ValueError(f"{label} cannot contain transient UI keys")
+    if _contains_extension_concept(normalized, _TRANSIENT_EXTENSION_CONCEPTS):
+        raise ValueError(f"{label} cannot contain transient UI or operation keys")
+    if _contains_extension_concept(
+        normalized, _DOMAIN_OPERATION_EXTENSION_CONCEPTS
+    ):
+        raise ValueError(f"{label} cannot contain domain or operation keys")
+    if _contains_extension_concept(normalized, _PROVENANCE_EXTENSION_CONCEPTS):
+        raise ValueError(f"{label} cannot contain provenance keys")
+    if _contains_extension_concept(normalized, _HASH_EXTENSION_CONCEPTS):
+        raise ValueError(f"{label} cannot contain hash keys")
+    if _contains_extension_concept(normalized, _SCOPE_EXTENSION_CONCEPTS):
+        raise ValueError(f"{label} cannot contain scope keys")
+    if _contains_extension_concept(normalized, _GENERATED_CACHE_EXTENSION_CONCEPTS):
+        raise ValueError(f"{label} cannot contain generated or cached values")
+
+
+def _contains_extension_concept(normalized: str, concepts: frozenset[str]) -> bool:
+    padded = f"_{normalized}_"
+    return any(f"_{concept}_" in padded for concept in concepts)
 
 
 def _validate_canonical_json(value: object, label: str) -> None:
@@ -1136,10 +1262,12 @@ def _canonical_sha256(value: object) -> str:
 
 
 def _normalize_timestamp(value: object) -> str:
-    if not isinstance(value, str):
+    if not isinstance(value, str) or _RFC3339_TIMESTAMP_RE.fullmatch(value) is None:
         raise ValueError("timestamp must be an RFC 3339 value with a timezone")
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(
+            value[:-1] + "+00:00" if value.endswith("Z") else value
+        )
     except ValueError as exc:
         raise ValueError("timestamp must be an RFC 3339 value with a timezone") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:

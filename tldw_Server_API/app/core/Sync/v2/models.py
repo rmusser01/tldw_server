@@ -525,6 +525,20 @@ def _sync_v2_internal_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     return schemas
 
 
+def sync_v2_advertised_domain_schemas(
+    domain_schemas: Mapping[SyncDomain, dict[str, object]],
+    *,
+    advertised_domains: Sequence[SyncDomain],
+) -> dict[SyncDomain, dict[str, object]]:
+    """Select schemas that are already approved for public advertisement."""
+
+    return {
+        domain: domain_schemas[domain]
+        for domain in advertised_domains
+        if domain in domain_schemas
+    }
+
+
 def sync_v2_server_supported_adapter_versions(
     *,
     notes_task_sync_ready: bool = False,
@@ -2085,6 +2099,7 @@ __all__ = [
     "client_private_server_frontend_limitation_warning",
     "server_frontend_mutation_blockers_for_policy",
     "server_frontend_mutation_enabled_for_policy",
+    "sync_v2_advertised_domain_schemas",
     "sync_v2_domain_schemas",
     "validate_notes_note_upsert_payload",
 ]

@@ -107,6 +107,7 @@ from .models import (
     normalize_supported_adapter_versions,
     normalize_sync_timestamp,
     normalize_sync_v2_requested_domains,
+    sync_v2_advertised_domain_schemas,
     sync_v2_attachment_ref_v2_is_writable,
     sync_v2_dataset_writable_adapter_versions,
     sync_v2_domain_schemas,
@@ -1185,10 +1186,13 @@ class SyncV2Service:
             max_batch_size=self.settings.max_batch_size,
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
-            domain_schemas=(
-                _sync_v2_internal_domain_schemas()
-                if notes_task_ready
-                else sync_v2_domain_schemas()
+            domain_schemas=sync_v2_advertised_domain_schemas(
+                (
+                    _sync_v2_internal_domain_schemas()
+                    if notes_task_ready
+                    else sync_v2_domain_schemas()
+                ),
+                advertised_domains=supported_domains,
             ),
             supported_adapter_versions=sync_v2_server_supported_adapter_versions(
                 notes_task_sync_ready=notes_task_ready,

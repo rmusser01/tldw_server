@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.Sync.v2.materializers import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
+    NOTES_MOODBOARD_STUDIO_DOMAINS,
     NOTES_TASK_SYNC_DOMAINS,
     SyncEnvelopeCreate,
     normalize_supported_adapter_versions,
@@ -303,6 +304,42 @@ def test_explicit_enrollment_rekeys_bootstraps_and_advertises_pair(
             domain: capabilities.writable_adapter_versions[domain]
             for domain in NOTES_TASK_SYNC_DOMAINS
         } == dict.fromkeys(NOTES_TASK_SYNC_DOMAINS, [1])
+    finally:
+        note_db.close_connection()
+
+
+def test_task_ready_public_capabilities_filter_dormant_private_schemas(
+    tmp_path: Path,
+) -> None:
+    note_db, service = _activation_stack(tmp_path)
+    try:
+        note_db.note_store.add_note("Tasks", "Body", note_id=NOTE_ID)
+        service.enroll_dataset(
+            user_id=OWNER_ID,
+            dataset_id=DATASET_ID,
+            domains=_requested_domains(),
+        )
+
+        core_capabilities = service.capabilities(
+            user_id=OWNER_ID,
+            dataset_id=DATASET_ID,
+        )
+        public_capabilities = sync_endpoint._api_capabilities_from_core(
+            core_capabilities
+        )
+
+        assert set(NOTES_TASK_SYNC_DOMAINS).issubset(
+            core_capabilities.domain_schemas
+        )
+        assert set(NOTES_MOODBOARD_STUDIO_DOMAINS).isdisjoint(
+            core_capabilities.domain_schemas
+        )
+        assert set(NOTES_TASK_SYNC_DOMAINS).issubset(
+            public_capabilities.domain_schemas
+        )
+        assert set(NOTES_MOODBOARD_STUDIO_DOMAINS).isdisjoint(
+            public_capabilities.domain_schemas
+        )
     finally:
         note_db.close_connection()
 
