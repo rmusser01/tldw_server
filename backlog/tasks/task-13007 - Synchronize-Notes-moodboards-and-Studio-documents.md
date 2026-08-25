@@ -4,7 +4,7 @@ title: Synchronize Notes moodboards and Studio documents
 status: In Progress
 assignee: []
 created_date: '2026-08-08 20:25'
-updated_date: '2026-08-25 15:39'
+updated_date: '2026-08-25 16:40'
 labels:
   - notes
   - sync-v2
@@ -20,6 +20,16 @@ references:
   - Docs/ADR/040-synchronized-moodboards-and-studio-authority.md
 documentation:
   - Docs/superpowers/specs/2026-08-24-notes-moodboard-studio-sync-design.md
+  - >-
+    Docs/superpowers/plans/2026-08-25-notes-moodboard-studio-contract-storage-implementation-plan.md
+  - >-
+    Docs/superpowers/plans/2026-08-25-portable-moodboard-smart-match-projection-implementation-plan.md
+  - >-
+    Docs/superpowers/plans/2026-08-25-moodboard-manual-placement-sync-implementation-plan.md
+  - >-
+    Docs/superpowers/plans/2026-08-25-accepted-studio-document-sync-implementation-plan.md
+  - >-
+    Docs/superpowers/plans/2026-08-25-moodboard-studio-sync-activation-implementation-plan.md
 priority: high
 ---
 
@@ -69,7 +79,7 @@ Reason: The work changes persistent schema tenant scope sync authority lifecycle
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Reviewed proposed design decomposed into TASK-13007.1 through TASK-13007.5. Existing Chatbook reference paths are stale and will be replaced by the server-local authoritative spec and ADR-040.
+The corrected design was independently reviewed, approved by the requester on 2026-08-25, and accepted as ADR-040. Five dependency-ordered implementation plans now cover TASK-13007.1 through TASK-13007.5.
 
-Independent reviews corrected portable note time client compound-push semantics atomic task boundaries bounded smart matching closed Studio schemas encryption/source authorization REST compatibility placement ordering scope authority lifecycle barriers canonical serialization rollback conflict resolution mixed-version authority rollout and per-PR API drift ownership. ADR-039 now records the proposed per-graph scope-authority amendment. Final independent re-review found no remaining blocker high or medium production-readiness issue. Requester approval of the corrected written spec is the next gate. No implementation has started.
+The required independent plan review found and drove corrections for the existing DSR hard-delete seam, bootstrap origin/phase admission, direct keyword/collection/conversation invalidation, bounded resumable PostgreSQL migrations, server-owned portable timestamps, an authenticated fleet-attestation operator workflow, and complete changed-scope verification. A final re-review approved the stable bundle with no blocking findings. Production implementation has not started.
 <!-- SECTION:NOTES:END -->

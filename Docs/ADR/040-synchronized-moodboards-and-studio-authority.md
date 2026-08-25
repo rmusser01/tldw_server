@@ -1,6 +1,6 @@
 # ADR-040: Synchronized moodboard and Studio authority
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-24
 **Decision owner:** TASK-13007 requester and implementation review
 **Related task:** `TASK-13007`
