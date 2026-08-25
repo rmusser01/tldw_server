@@ -202,39 +202,39 @@ git commit -m "feat(jobs): persist owner-scoped idempotency receipts"
 - Consumes: `IdempotentOperationCommand`.
 - Produces: `JobManager.admit_idempotent_operation(command: IdempotentOperationCommand) -> IdempotentOperationAdmission`.
 
-- [ ] **Step 1: Write failing admission and replay tests**
+- [x] **Step 1: Write failing admission and replay tests**
 
 Cover: first request creates Job and receipt atomically; same key and fingerprint replays the same UUID; same key with another fingerprint raises `KEY_REUSED`; a second key with the same owner/scope/fingerprint creates a receipt alias and returns `CONVERGED`; a second key with a different fingerprint raises `SCOPE_ACTIVE`; a forced receipt insert failure leaves no Job row.
 
-- [ ] **Step 2: Write a real SQLite concurrency test**
+- [x] **Step 2: Write a real SQLite concurrency test**
 
 Use `ThreadPoolExecutor(max_workers=8)` with one `JobManager` per thread and a barrier. Submit the same owner/scope/fingerprint under two keys. Assert every successful result has one UUID, exactly one active Job exists, and exactly two receipt rows exist.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py -v`
 
 Expected: FAIL because the admission method is absent.
 
-- [ ] **Step 4: Implement one `BEGIN IMMEDIATE` admission transaction**
+- [x] **Step 4: Implement one `BEGIN IMMEDIATE` admission transaction**
 
 The backend function signature is:
 
-Implement `admit_idempotent_operation(conn: sqlite3.Connection, *, command: IdempotentOperationCommand, uuid_value: str, now: datetime, counters_enabled: bool) -> IdempotentOperationAdmission`.
+Implement `admit_idempotent_operation(conn: sqlite3.Connection, *, command: IdempotentOperationCommand, uuid_value: str, now: datetime, max_queued_quota: int, submits_per_minute_quota: int, counters_enabled: bool) -> IdempotentOperationAdmission`.
 
-Within one write transaction: read the exact receipt; resolve and validate its Job UUID when present; otherwise find queued/processing Jobs by exact domain/queue/type/owner and `batch_group == operation_scope`; converge only an equal fingerprint encoded in the bounded Job payload; insert an alias receipt when converging; otherwise insert the Job, created event, counters, and receipt. Compare fingerprints with `secrets.compare_digest`. Any losing unique race must reread and validate the winning receipt before returning.
+Within one write transaction: read the exact receipt; resolve and validate its Job UUID when present; otherwise find queued/processing Jobs by exact domain/queue/type/owner and `batch_group == operation_scope`; converge only when that Job's authoritative receipts contain one equal fingerprint; insert an alias receipt when converging; otherwise insert the Job, created event, counters, and receipt. Compare fingerprints with `secrets.compare_digest`. SQLite serializes contenders with `BEGIN IMMEDIATE`; exact replay is also checked before mutable admission policy so accepted operations remain replayable after policy changes.
 
-- [ ] **Step 5: Add manager validation and dispatch**
+- [x] **Step 5: Add manager validation and dispatch**
 
 `JobManager.admit_idempotent_operation` applies queue policy and quota behavior consistently with `create_job`, generates one UUID, and dispatches to the backend implementation. Do not implement this by calling `create_job()` and then inserting a receipt, because that creates a crash window.
 
-- [ ] **Step 6: Run SQLite tests and existing admission regressions**
+- [x] **Step 6: Run SQLite tests and existing admission regressions**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_manager.py tldw_Server_API/tests/Jobs/test_jobs_finalize_idempotency_sqlite.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit SQLite admission**
+- [x] **Step 7: Commit SQLite admission**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations/sqlite/idempotency.py tldw_Server_API/app/core/Jobs/operations/sqlite/__init__.py tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py

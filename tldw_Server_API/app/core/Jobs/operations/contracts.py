@@ -137,6 +137,12 @@ class IdempotentOperationCommand:
             or self.receipt_expires_at.utcoffset() is None
         ):
             raise ValueError("receipt_expires_at must be timezone-aware")
+        if self.job.batch_group != self.operation_scope:
+            raise ValueError("job batch_group must equal operation_scope")
+        if self.job.idempotency_key is not None:
+            raise ValueError(
+                "job idempotency_key must be unset for owner-scoped receipt admission"
+            )
 
 
 @dataclass(frozen=True)

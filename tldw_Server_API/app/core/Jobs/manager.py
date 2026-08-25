@@ -10,6 +10,7 @@ import sqlite3
 import time
 import uuid as _uuid
 from contextvars import ContextVar
+from dataclasses import replace
 from datetime import datetime, timedelta
 from datetime import timezone as _tz
 from pathlib import Path
@@ -72,6 +73,9 @@ from .operations.contracts import (
     BatchRenewLeaseItem,
     BatchRenewLeasesCommand,
     CreateJobCommand,
+    IdempotentOperationAdmission,
+    IdempotentOperationCommand,
+    IdempotentOperationDisposition,
     OperationOutcome,
     ReleaseJobCommand,
     RenewLeaseCommand,
@@ -82,10 +86,12 @@ from .operations.postgres import release_job as _postgres_release_job
 from .operations.postgres import renew_lease as _postgres_renew_lease
 from .operations.postgres import renew_leases_batch as _postgres_renew_leases_batch
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
+from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idempotent_operation
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
 from .operations.sqlite import release_job as _sqlite_release_job
 from .operations.sqlite import renew_lease as _sqlite_renew_lease
 from .operations.sqlite import renew_leases_batch as _sqlite_renew_leases_batch
+from .operations.sqlite import replay_idempotent_operation as _sqlite_replay_idempotent_operation
 from .pg_migrations import (
     POSTGRES_ARCHIVE_CURSOR_TIME_SQL,
     ensure_job_counters_pg,
@@ -3073,6 +3079,150 @@ class JobManager:
                 conn.close()
 
     # CRUD / queries
+    def admit_idempotent_operation(
+        self,
+        command: IdempotentOperationCommand,
+    ) -> IdempotentOperationAdmission:
+        """Atomically admit or replay one owner-scoped user operation."""
+
+        job = command.job
+        if self.backend == "sqlite":
+            replay_conn = self._connect()
+            try:
+                replay = _sqlite_replay_idempotent_operation(replay_conn, command)
+            finally:
+                replay_conn.close()
+            if replay is not None:
+                return replay
+
+        allowed_queues = self._get_allowed_queues(job.domain)
+        if job.queue not in allowed_queues:
+            raise ValueError(  # noqa: TRY003
+                f"Queue '{job.queue}' not allowed for domain '{job.domain}'. "
+                f"Allowed: {allowed_queues}"
+            )
+
+        allowed_job_types: list[str] = []
+        env_all = os.getenv("JOBS_ALLOWED_JOB_TYPES", "").strip()
+        if env_all:
+            allowed_job_types.extend(
+                item.strip() for item in env_all.split(",") if item.strip()
+            )
+        env_domain = os.getenv(
+            f"JOBS_ALLOWED_JOB_TYPES_{str(job.domain).upper()}",
+            "",
+        ).strip()
+        if env_domain:
+            allowed_job_types.extend(
+                item.strip() for item in env_domain.split(",") if item.strip()
+            )
+        if allowed_job_types and job.job_type not in allowed_job_types:
+            raise ValueError(  # noqa: TRY003
+                f"Job type '{job.job_type}' not allowed for domain "
+                f"'{job.domain}'. Allowed: {sorted(set(allowed_job_types))}"
+            )
+
+        now = self._clock.now_utc()
+        payload = job.payload
+        try:
+            cleaned, found, where = self._scan_and_redact_secrets(payload)
+        except _JOB_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(
+                "Jobs secret hygiene scan error during idempotent admission: {}",
+                type(exc).__name__,
+            )
+        else:
+            if found and JobManager._is_truthy(os.getenv("JOBS_SECRET_REJECT", "")):
+                suffix = "..." if len(where) > 3 else ""
+                raise ValueError(  # noqa: TRY003
+                    f"Payload appears to contain secrets at: {where[:3]}{suffix}"
+                )
+            if found:
+                payload = cleaned
+
+        payload = self._maybe_encrypt_json(payload, job.domain)
+        payload_json = json.dumps(payload)
+        payload_bytes = len(payload_json.encode("utf-8"))
+        max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
+        if payload_bytes > max_bytes:
+            if JobManager._is_truthy(os.getenv("JOBS_JSON_TRUNCATE", "")):
+                payload = {"_truncated": True, "len_bytes": payload_bytes}
+            else:
+                raise ValueError(  # noqa: TRY003
+                    f"Payload too large: {payload_bytes} bytes > limit {max_bytes}"
+                )
+
+        if job.owner_user_id and _fair_share_enabled():
+            scheduler = _get_fair_share()
+            active_count = self._count_active_jobs_for_user(job.owner_user_id)
+            if not scheduler.can_submit(job.owner_user_id, active_count):
+                raise BadRequestError(
+                    f"User {job.owner_user_id} has reached the maximum concurrent "
+                    f"job limit ({scheduler.max_per_user})"
+                )
+            fair_priority = scheduler.calculate_priority(
+                job.owner_user_id,
+                active_count,
+            )
+            job = replace(
+                job,
+                priority=min(
+                    job.priority,
+                    self._map_fair_share_score_to_priority(fair_priority),
+                ),
+            )
+
+        if not job.trace_id:
+            job = replace(job, trace_id=str(_uuid.uuid4()))
+        if payload is not job.payload:
+            job = replace(job, payload=payload)
+        command = replace(command, job=job)
+
+        if self.backend == "postgres":
+            raise NotImplementedError(
+                "PostgreSQL durable idempotent admission is not implemented"
+            )
+
+        conn = self._connect()
+        try:
+            result = _sqlite_admit_idempotent_operation(
+                conn,
+                command=command,
+                uuid_value=str(_uuid.uuid4()),
+                now=now,
+                max_queued_quota=self._quota_get(
+                    "JOBS_QUOTA_MAX_QUEUED",
+                    job.domain,
+                    job.owner_user_id,
+                ),
+                submits_per_minute_quota=self._quota_get(
+                    "JOBS_QUOTA_SUBMITS_PER_MIN",
+                    job.domain,
+                    job.owner_user_id,
+                ),
+                counters_enabled=JobManager._is_truthy(
+                    os.getenv("JOBS_COUNTERS_ENABLED", "")
+                ),
+            )
+        finally:
+            conn.close()
+
+        if result.disposition is IdempotentOperationDisposition.CREATED:
+            _safe_increment_created_metric(
+                domain=job.domain,
+                queue=job.queue,
+                job_type=job.job_type,
+            )
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._update_gauges(
+                domain=job.domain,
+                queue=job.queue,
+                job_type=job.job_type,
+            )
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._assert_invariants(result.job)
+        return result
+
     def create_job(
         self,
         *,

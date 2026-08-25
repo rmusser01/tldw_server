@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 
 import pytest
 
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.operations import contracts
 
 pytestmark = pytest.mark.unit
@@ -32,6 +36,7 @@ def _create_job_command(*, owner_user_id: str | None = "recipient-1"):
         payload={"schema_version": 1},
         owner_user_id=owner_user_id,
         batch_group="share:share-1",
+        priority=5,
         max_retries=0,
     )
 
@@ -49,7 +54,7 @@ def _operation_command(**overrides):
         "key_digest": "a" * 64,
         "request_fingerprint": "b" * 64,
         "operation_scope": "share:share-1",
-        "receipt_expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+        "receipt_expires_at": datetime.now(timezone.utc) + timedelta(days=31),
     }
     values.update(overrides)
     return command_type(**values)
@@ -114,3 +119,235 @@ def test_idempotent_operation_conflict_exposes_bounded_reason_and_job_uuid():
     assert str(conflict) == "idempotency_key_reused"
     assert conflict.reason is reason_type.KEY_REUSED
     assert conflict.job_uuid == "job-1"
+
+
+def test_idempotent_operation_command_requires_job_scope_alignment():
+    with pytest.raises(ValueError, match="batch_group"):
+        _operation_command(
+            job=contracts.CreateJobCommand(
+                domain="sharing",
+                queue="workspace-clone",
+                job_type="workspace_clone",
+                payload={"schema_version": 1},
+                owner_user_id="recipient-1",
+                batch_group="share:other",
+            )
+        )
+
+
+def test_idempotent_operation_command_rejects_legacy_job_idempotency_key():
+    with pytest.raises(ValueError, match="idempotency_key"):
+        _operation_command(
+            job=contracts.CreateJobCommand(
+                domain="sharing",
+                queue="workspace-clone",
+                job_type="workspace_clone",
+                payload={"schema_version": 1},
+                owner_user_id="recipient-1",
+                batch_group="share:share-1",
+                idempotency_key="legacy-global-key",
+            )
+        )
+
+
+@pytest.fixture
+def receipt_manager(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    return JobManager(tmp_path / "jobs.db")
+
+
+def _receipt_rows(manager: JobManager):
+    conn = sqlite3.connect(manager.db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        return [
+            dict(row)
+            for row in conn.execute(
+                "SELECT * FROM job_idempotency_receipts ORDER BY receipt_id"
+            )
+        ]
+    finally:
+        conn.close()
+
+
+def _table_count(manager: JobManager, table: str) -> int:
+    queries = {
+        "job_events": "SELECT COUNT(*) FROM job_events",
+        "job_idempotency_receipts": (
+            "SELECT COUNT(*) FROM job_idempotency_receipts"
+        ),
+        "jobs": "SELECT COUNT(*) FROM jobs",
+    }
+    conn = sqlite3.connect(manager.db_path)
+    try:
+        row = conn.execute(queries[table]).fetchone()
+        return int(row[0])
+    finally:
+        conn.close()
+
+
+def test_first_request_atomically_creates_job_and_receipt(receipt_manager):
+    result = receipt_manager.admit_idempotent_operation(_operation_command())
+
+    jobs = receipt_manager.list_jobs(
+        domain="sharing",
+        owner_user_id="recipient-1",
+    )
+    receipts = _receipt_rows(receipt_manager)
+
+    assert result.disposition is contracts.IdempotentOperationDisposition.CREATED
+    assert result.job["uuid"] == jobs[0]["uuid"] == receipts[0]["job_uuid"]
+    assert receipts[0]["key_digest"] == "a" * 64
+    assert jobs[0]["idempotency_key"] is None
+    assert _table_count(receipt_manager, "job_events") == 1
+
+
+def test_same_key_and_fingerprint_replays_same_job(receipt_manager):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    replay = receipt_manager.admit_idempotent_operation(_operation_command())
+
+    assert replay.disposition is contracts.IdempotentOperationDisposition.REPLAYED
+    assert replay.job["uuid"] == first.job["uuid"]
+    assert len(_receipt_rows(receipt_manager)) == 1
+    assert _table_count(receipt_manager, "job_events") == 1
+
+
+def test_exact_replay_survives_queue_policy_change(receipt_manager, monkeypatch):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    monkeypatch.delenv("JOBS_ALLOWED_QUEUES_SHARING")
+
+    replay = receipt_manager.admit_idempotent_operation(_operation_command())
+
+    assert replay.disposition is contracts.IdempotentOperationDisposition.REPLAYED
+    assert replay.job["uuid"] == first.job["uuid"]
+
+
+def test_exact_replay_does_not_require_a_new_retention_window(receipt_manager):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+
+    replay = receipt_manager.admit_idempotent_operation(
+        _operation_command(
+            receipt_expires_at=datetime.now(timezone.utc) + timedelta(days=1)
+        )
+    )
+
+    assert replay.disposition is contracts.IdempotentOperationDisposition.REPLAYED
+    assert replay.job["uuid"] == first.job["uuid"]
+
+
+def test_same_key_is_isolated_between_owners(receipt_manager):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    second = receipt_manager.admit_idempotent_operation(
+        _operation_command(job=_create_job_command(owner_user_id="recipient-2"))
+    )
+
+    assert first.job["uuid"] != second.job["uuid"]
+    assert len(receipt_manager.list_jobs(domain="sharing")) == 2
+    assert len(_receipt_rows(receipt_manager)) == 2
+
+
+def test_same_key_with_different_fingerprint_conflicts(receipt_manager):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+
+    with pytest.raises(contracts.IdempotentOperationConflict) as exc_info:
+        receipt_manager.admit_idempotent_operation(
+            _operation_command(request_fingerprint="c" * 64)
+        )
+
+    assert exc_info.value.reason is contracts.IdempotentOperationConflictReason.KEY_REUSED
+    assert exc_info.value.job_uuid == first.job["uuid"]
+
+
+def test_second_key_with_same_scope_and_fingerprint_converges(receipt_manager):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    converged = receipt_manager.admit_idempotent_operation(
+        _operation_command(key_digest="d" * 64)
+    )
+
+    assert converged.disposition is contracts.IdempotentOperationDisposition.CONVERGED
+    assert converged.job["uuid"] == first.job["uuid"]
+    assert {row["key_digest"] for row in _receipt_rows(receipt_manager)} == {
+        "a" * 64,
+        "d" * 64,
+    }
+
+
+def test_second_key_with_active_scope_and_different_fingerprint_conflicts(
+    receipt_manager,
+):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+
+    with pytest.raises(contracts.IdempotentOperationConflict) as exc_info:
+        receipt_manager.admit_idempotent_operation(
+            _operation_command(
+                key_digest="d" * 64,
+                request_fingerprint="c" * 64,
+            )
+        )
+
+    assert exc_info.value.reason is contracts.IdempotentOperationConflictReason.SCOPE_ACTIVE
+    assert exc_info.value.job_uuid == first.job["uuid"]
+
+
+def test_receipt_insert_failure_rolls_back_new_job(receipt_manager, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.operations.sqlite import idempotency
+
+    def _fail_receipt_insert(*_args, **_kwargs):
+        raise sqlite3.IntegrityError("forced receipt failure")
+
+    monkeypatch.setattr(idempotency, "_insert_receipt", _fail_receipt_insert)
+
+    with pytest.raises(sqlite3.IntegrityError, match="forced receipt failure"):
+        receipt_manager.admit_idempotent_operation(_operation_command())
+
+    assert receipt_manager.list_jobs(domain="sharing") == []
+    assert _receipt_rows(receipt_manager) == []
+
+
+def test_receipt_expiry_must_preserve_thirty_day_replay_window(receipt_manager):
+    with pytest.raises(ValueError, match="at least 30 days"):
+        receipt_manager.admit_idempotent_operation(
+            _operation_command(
+                receipt_expires_at=datetime.now(timezone.utc) + timedelta(days=29)
+            )
+        )
+
+    assert _table_count(receipt_manager, "jobs") == 0
+    assert _table_count(receipt_manager, "job_idempotency_receipts") == 0
+
+
+def test_missing_receipt_job_fails_closed_without_replacement(receipt_manager):
+    receipt_manager.admit_idempotent_operation(_operation_command())
+    conn = sqlite3.connect(receipt_manager.db_path)
+    try:
+        conn.execute("DELETE FROM jobs")
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(
+        contracts.IdempotentOperationUnavailableError,
+        match="exactly one active Job",
+    ):
+        receipt_manager.admit_idempotent_operation(_operation_command())
+
+    assert _table_count(receipt_manager, "jobs") == 0
+    assert _table_count(receipt_manager, "job_idempotency_receipts") == 1
+
+
+def test_concurrent_keys_converge_on_one_active_job(receipt_manager):
+    barrier = Barrier(8)
+
+    def _admit(index: int):
+        manager = JobManager(receipt_manager.db_path)
+        barrier.wait(timeout=10)
+        return manager.admit_idempotent_operation(
+            _operation_command(key_digest=("a" if index % 2 == 0 else "d") * 64)
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(_admit, range(8)))
+
+    assert len({result.job["uuid"] for result in results}) == 1
+    assert len(receipt_manager.list_jobs(domain="sharing")) == 1
+    assert len(_receipt_rows(receipt_manager)) == 2
