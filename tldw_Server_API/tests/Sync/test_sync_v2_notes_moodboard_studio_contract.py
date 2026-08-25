@@ -489,6 +489,109 @@ def test_extension_surfaces_reject_semantic_aliases_recursively(
             )
 
 
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+@pytest.mark.parametrize("nested", [False, True], ids=["direct", "nested"])
+@pytest.mark.parametrize(
+    "reserved_alias",
+    [
+        "client_secret",
+        "clientSecret",
+        "clientsecret",
+        "auth_token",
+        "authToken",
+        "authtoken",
+        "bearer_token",
+        "bearerToken",
+        "bearertoken",
+        "oauth_token",
+        "oauthToken",
+        "oauthtoken",
+        "id_token",
+        "idToken",
+        "idtoken",
+        "session_token",
+        "sessionToken",
+        "sessiontoken",
+        "access_key",
+        "accessKey",
+        "accesskey",
+        "access_key_id",
+        "accessKeyId",
+        "accesskeyid",
+        "secret_key",
+        "secretKey",
+        "secretkey",
+        "api_token",
+        "apiToken",
+        "apitoken",
+        "client_key",
+        "clientKey",
+        "clientkey",
+        "identity_token",
+        "identityToken",
+        "identitytoken",
+        "signing_key",
+        "signingKey",
+        "signingkey",
+        "encryption_key",
+        "encryptionKey",
+        "encryptionkey",
+        "passphrase",
+        "Passphrase",
+        "PASSPHRASE",
+    ],
+)
+def test_extension_surfaces_reject_credential_compound_aliases_recursively(
+    surface: str,
+    nested: bool,
+    reserved_alias: str,
+) -> None:
+    reserved_value = {reserved_alias: "must remain server-bound"}
+    extension = {"nested": reserved_value} if nested else reserved_value
+
+    with pytest.raises(NotesMoodboardStudioContractError, match="cannot contain"):
+        if surface == "canvas":
+            parse_notes_moodboard_v1(
+                valid_moodboard_payload(
+                    canvas={"layout_mode": "masonry", "metadata": extension}
+                )
+            )
+        else:
+            parse_notes_moodboard_note_v1(
+                valid_placement_payload(display=extension)
+            )
+
+
+@pytest.mark.parametrize("surface", ["canvas", "display"])
+@pytest.mark.parametrize("nested", [False, True], ids=["direct", "nested"])
+def test_extension_classifier_uses_exact_concepts_not_substrings(
+    surface: str,
+    nested: bool,
+) -> None:
+    allowed = {
+        "ownership": "shared",
+        "tokenizer": "unicode",
+        "secretary": True,
+        "accessibility": "high-contrast",
+        "authentication": "delegated",
+        "acme.theme": "midnight",
+    }
+    extension = {"nested": allowed} if nested else allowed
+
+    if surface == "canvas":
+        parsed = parse_notes_moodboard_v1(
+            valid_moodboard_payload(
+                canvas={"layout_mode": "masonry", "metadata": extension}
+            )
+        )
+        assert parsed.canvas.metadata == extension
+    else:
+        parsed = parse_notes_moodboard_note_v1(
+            valid_placement_payload(display=extension)
+        )
+        assert parsed.display == extension
+
+
 def test_sections_only_studio_state_is_valid_and_acceptance_is_server_bound() -> None:
     payload = valid_studio_payload()
     parsed = parse_studio(payload)

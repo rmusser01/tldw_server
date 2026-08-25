@@ -83,17 +83,32 @@ _LIFECYCLE_EXTENSION_CONCEPTS = frozenset(
 )
 _CREDENTIAL_EXTENSION_CONCEPTS = frozenset(
     {
+        "access_key",
+        "access_key_id",
         "access_token",
         "api_key",
+        "api_token",
         "auth",
+        "auth_token",
         "authorization",
         "bearer",
+        "bearer_token",
+        "client_key",
+        "client_secret",
         "credential",
         "credentials",
+        "encryption_key",
+        "id_token",
+        "identity_token",
+        "oauth_token",
+        "passphrase",
         "password",
         "private_key",
         "refresh_token",
         "secret",
+        "secret_key",
+        "session_token",
+        "signing_key",
         "token",
     }
 )
