@@ -1035,9 +1035,9 @@ class AuthnzOrgsTeamsRepo:
             if self._is_postgres():
                 query = """
                 SELECT tm.team_id, tm.user_id, tm.role, t.org_id, t.name AS team_name, o.name AS org_name
-                FROM team_members tm
-                JOIN teams t ON tm.team_id = t.id
-                JOIN organizations o ON t.org_id = o.id
+                FROM public.team_members tm
+                JOIN public.teams t ON tm.team_id = t.id
+                JOIN public.organizations o ON t.org_id = o.id
                 WHERE tm.user_id = $1
                 ORDER BY tm.team_id
                 """
@@ -1052,9 +1052,9 @@ class AuthnzOrgsTeamsRepo:
                 cur = await sqlite_conn.execute(
                     """
                     SELECT tm.team_id, tm.user_id, tm.role, t.org_id, t.name, o.name
-                    FROM team_members tm
-                    JOIN teams t ON tm.team_id = t.id
-                    JOIN organizations o ON t.org_id = o.id
+                    FROM main.team_members tm
+                    JOIN main.teams t ON tm.team_id = t.id
+                    JOIN main.organizations o ON t.org_id = o.id
                     WHERE tm.user_id = ?
                     ORDER BY tm.team_id
                     """,
@@ -1589,7 +1589,7 @@ class AuthnzOrgsTeamsRepo:
             if self._is_postgres():
                 query = """
                 SELECT org_id, role, status
-                FROM org_members
+                FROM public.org_members
                 WHERE user_id = $1
                 ORDER BY org_id
                 """
@@ -1614,7 +1614,7 @@ class AuthnzOrgsTeamsRepo:
                 cur = await sqlite_conn.execute(
                     """
                     SELECT org_id, role, status
-                    FROM org_members
+                    FROM main.org_members
                     WHERE user_id = ?
                     ORDER BY org_id
                     """,
