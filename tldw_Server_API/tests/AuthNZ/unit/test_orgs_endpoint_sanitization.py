@@ -179,22 +179,25 @@ async def test_create_org_uses_one_atomic_owner_provisioning_boundary(monkeypatc
 
 
 @pytest.mark.parametrize(
-    ("failure_type", "expected_status"),
+    ("failure_type", "expected_status", "expected_detail"),
     (
-        ("scope", 404),
-        ("target", 404),
-        ("preflight", 409),
-        ("pool", 503),
-        ("timeout", 503),
+        ("scope", 404, "Membership scope or target not found"),
+        ("target", 404, "Membership scope or target not found"),
+        ("preflight", 409, "Membership write conflicted; retry the request"),
+        ("lock", 503, "Authentication database is busy. Please retry shortly."),
+        ("pool", 503, "Authentication database is busy. Please retry shortly."),
+        ("timeout", 503, "Authentication database is busy. Please retry shortly."),
     ),
 )
 def test_membership_race_failures_have_sanitized_http_mappings(
     failure_type: str,
     expected_status: int,
+    expected_detail: str,
 ) -> None:
     from tldw_Server_API.app.api.v1.endpoints import orgs
     from tldw_Server_API.app.core.AuthNZ.exceptions import (
         ConnectionPoolExhaustedError,
+        DatabaseLockError,
     )
     from tldw_Server_API.app.core.AuthNZ.membership_writer import (
         MembershipPreflightChanged,
@@ -206,17 +209,14 @@ def test_membership_race_failures_have_sanitized_http_mappings(
         "scope": MembershipScopeNotFound(),
         "target": MembershipTargetNotFound(),
         "preflight": MembershipPreflightChanged(),
+        "lock": DatabaseLockError(),
         "pool": ConnectionPoolExhaustedError(),
         "timeout": TimeoutError(),
     }
     mapped = orgs._membership_control_http_exception(failures[failure_type])
 
     assert mapped.status_code == expected_status
-    assert mapped.detail in {
-        "Membership scope or target not found",
-        "Membership write conflicted; retry the request",
-        "Membership service is busy; retry the request",
-    }
+    assert mapped.detail == expected_detail
     if expected_status == 503:
         from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
             get_authnz_transaction_policy,
