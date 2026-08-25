@@ -42,7 +42,7 @@ def run_postgres_migrate_to_v26(
                {ident('system_operation_kind')} = NULL,
                {ident('system_source_identity')} = NULL,
                {ident('system_content_hash')} = NULL
-         WHERE NOT (
+         WHERE (
             (
                 {ident('system_operation_id')} IS NULL
                 AND {ident('system_operation_kind')} IS NULL
@@ -56,7 +56,7 @@ def run_postgres_migrate_to_v26(
                 AND length({ident('system_source_identity')}) BETWEEN 1 AND 255
                 AND {ident('system_content_hash')} ~ '^[0-9a-f]{{64}}$'
             )
-         )
+         ) IS NOT TRUE
         """,  # nosec B608
         connection=conn,
     )
@@ -157,8 +157,40 @@ def run_postgres_migrate_to_v26(
                  WHERE owned_media.{ident('system_operation_kind')} = 'shared_workspace_clone'
                    AND length(owned_media.{ident('system_operation_id')}) BETWEEN 1 AND 255
                    AND length(owned_media.{ident('system_source_identity')}) BETWEEN 1 AND 255
+                   AND holds.{ident('operation_id')} = owned_media.{ident('system_operation_id')}
+                   AND holds.{ident('source_identity')} = owned_media.{ident('system_source_identity')}
                    AND length(btrim(source_keyword.{ident('keyword')})) BETWEEN 1 AND 255
                 ON CONFLICT DO NOTHING;
+                DELETE FROM {ident('mediakeywords')} AS links
+                 USING {legacy} AS holds, {media} AS owned_media
+                 WHERE links.{ident('media_id')} = holds.{ident('media_id')}
+                   AND links.{ident('keyword_id')} = holds.{ident('keyword_id')}
+                   AND owned_media.{ident('id')} = holds.{ident('media_id')}
+                   AND owned_media.{ident('system_operation_kind')} = 'shared_workspace_clone'
+                   AND length(owned_media.{ident('system_operation_id')}) BETWEEN 1 AND 255
+                   AND length(owned_media.{ident('system_source_identity')}) BETWEEN 1 AND 255
+                   AND owned_media.{ident('system_content_hash')} ~ '^[0-9a-f]{{64}}$'
+                   AND holds.{ident('operation_id')} = owned_media.{ident('system_operation_id')}
+                   AND holds.{ident('source_identity')} = owned_media.{ident('system_source_identity')};
+                DELETE FROM {keywords} AS doomed
+                 WHERE NOT EXISTS (
+                        SELECT 1 FROM {ident('mediakeywords')} AS links
+                         WHERE links.{ident('keyword_id')} = doomed.{ident('id')}
+                 )
+                   AND EXISTS (
+                        SELECT 1
+                          FROM {legacy} AS holds
+                          JOIN {media} AS owned_media
+                            ON owned_media.{ident('id')} = holds.{ident('media_id')}
+                         WHERE holds.{ident('keyword_id')} = doomed.{ident('id')}
+                           AND holds.{ident('created_by_clone')} IS TRUE
+                           AND owned_media.{ident('system_operation_kind')} = 'shared_workspace_clone'
+                           AND length(owned_media.{ident('system_operation_id')}) BETWEEN 1 AND 255
+                           AND length(owned_media.{ident('system_source_identity')}) BETWEEN 1 AND 255
+                           AND owned_media.{ident('system_content_hash')} ~ '^[0-9a-f]{{64}}$'
+                           AND holds.{ident('operation_id')} = owned_media.{ident('system_operation_id')}
+                           AND holds.{ident('source_identity')} = owned_media.{ident('system_source_identity')}
+                   );
                 DROP TABLE {legacy};
             END IF;
         END

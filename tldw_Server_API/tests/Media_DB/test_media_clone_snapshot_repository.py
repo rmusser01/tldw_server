@@ -403,8 +403,7 @@ def test_operation_owned_snapshot_hash_rejects_unsupported_and_overdeep_values()
         chunks=reserved_chunks,
         transcripts=unsupported.transcripts,
     )
-    with pytest.raises(InputError, match="reserved"):
-        media_db_api.hash_media_clone_snapshot(reserved_snapshot)
+    assert len(media_db_api.hash_media_clone_snapshot(reserved_snapshot)) == 64
 
     overlong_keyword = _operation_snapshot(keywords=("k" * 256,))
     with pytest.raises(InputError, match="255"):
@@ -452,15 +451,16 @@ def test_operation_owned_clone_replay_normalizes_persisted_json_sequences(
         ("true", True),
         ("null", None),
         ('"json scalar"', "json scalar"),
+        ("invalid legacy json text", "invalid legacy json text"),
         (
-            "invalid legacy json text",
-            {"$tldw_legacy_json_text_v1": "invalid legacy json text"},
+            {"$tldw_legacy_json_text_v1": "ordinary mapping"},
+            {"$tldw_legacy_json_text_v1": "ordinary mapping"},
         ),
     ],
 )
 def test_operation_owned_clone_normalizes_source_chunk_json_text_once(
     media_db: MediaDatabase,
-    source_metadata: str,
+    source_metadata: Any,
     semantic_metadata: Any,
 ) -> None:
     base = _operation_snapshot()
@@ -475,18 +475,14 @@ def test_operation_owned_clone_normalizes_source_chunk_json_text_once(
     source_identity = f"workspace-source-json-{uuid.uuid4()}"
     expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
 
-    if not source_metadata.startswith("invalid") and not isinstance(
-        semantic_metadata,
-        str,
-    ):
-        semantic_chunks = [dict(row) for row in base.chunks]
-        semantic_chunks[0]["metadata"] = semantic_metadata
-        semantic_snapshot = MediaCloneSnapshot.from_rows(
-            media=base.media,
-            chunks=semantic_chunks,
-            transcripts=base.transcripts,
-        )
-        assert media_db_api.hash_media_clone_snapshot(semantic_snapshot) == expected_hash
+    semantic_chunks = [dict(row) for row in base.chunks]
+    semantic_chunks[0]["metadata"] = semantic_metadata
+    semantic_snapshot = MediaCloneSnapshot.from_rows(
+        media=base.media,
+        chunks=semantic_chunks,
+        transcripts=base.transcripts,
+    )
+    assert media_db_api.hash_media_clone_snapshot(semantic_snapshot) == expected_hash
 
     created = media_db.insert_operation_owned_clone_media(
         snapshot=snapshot,
@@ -509,7 +505,7 @@ def test_operation_owned_clone_normalizes_source_chunk_json_text_once(
 
 
 @pytest.mark.unit
-def test_operation_owned_clone_chunk_json_type_ambiguity_cannot_replay(
+def test_operation_owned_clone_chunk_json_string_forms_share_logical_value(
     media_db: MediaDatabase,
 ) -> None:
     base = _operation_snapshot()
@@ -525,7 +521,7 @@ def test_operation_owned_clone_chunk_json_type_ambiguity_cannot_replay(
 
     invalid_text = with_metadata("legacy scalar")
     valid_json_string = with_metadata('"legacy scalar"')
-    assert media_db_api.hash_media_clone_snapshot(invalid_text) != (
+    assert media_db_api.hash_media_clone_snapshot(invalid_text) == (
         media_db_api.hash_media_clone_snapshot(valid_json_string)
     )
 
@@ -536,20 +532,14 @@ def test_operation_owned_clone_chunk_json_type_ambiguity_cannot_replay(
         source_identity="workspace-source-json-ambiguity",
         expected_content_hash=expected_hash,
     )
-    media_db.execute_query(
-        "UPDATE UnvectorizedMediaChunks SET metadata = ?, version = version + 1 "
-        "WHERE media_id = ? AND chunk_index = 0",
-        (json.dumps("legacy scalar"), created.media_id),
-        commit=True,
+    replayed = media_db.insert_operation_owned_clone_media(
+        snapshot=valid_json_string,
+        operation_id="clone-operation-json-ambiguity",
+        source_identity="workspace-source-json-ambiguity",
+        expected_content_hash=expected_hash,
     )
-
-    with pytest.raises(ConflictError):
-        media_db.insert_operation_owned_clone_media(
-            snapshot=invalid_text,
-            operation_id="clone-operation-json-ambiguity",
-            source_identity="workspace-source-json-ambiguity",
-            expected_content_hash=expected_hash,
-        )
+    assert replayed.media_id == created.media_id
+    assert replayed.replayed is True
 
 
 @pytest.mark.unit
@@ -972,6 +962,158 @@ def test_operation_owned_clone_confirmation_promotes_pending_keywords(
         (ordinary_id,),
     ).fetchone()["count"] == 1
     assert media_db.get_media_by_id(created.media_id) is not None
+
+
+@pytest.mark.integration
+def test_sqlite_v26_migration_releases_real_v25_keyword_graph_and_replays(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    db_path = str(tmp_path / "clone-media-fix1-v25.sqlite")
+    backend = SQLiteBackend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_path)
+    )
+    database = MediaDatabase(db_path=db_path, client_id="owner-1", backend=backend)
+    snapshot = _operation_snapshot(
+        keywords=("clone-orphan", "recipient-existing", "clone-shared"),
+    )
+    operation_id = "clone-operation-fix1-v25"
+    source_identity = "workspace-source-fix1-v25"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    try:
+        ordinary_id = _seed_media(
+            database,
+            title="Ordinary shared keyword owner",
+            content="ordinary shared keyword content",
+            chunk_text="ordinary shared keyword chunk",
+            transcript_text="ordinary shared keyword transcript",
+            keywords=["clone-shared"],
+        )
+        created = database.insert_operation_owned_clone_media(
+            snapshot=snapshot,
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        )
+        now = database._get_current_utc_timestamp_str()
+        connection = database.get_connection()
+        for keyword in ("clone-orphan", "recipient-existing"):
+            connection.execute(
+                "INSERT INTO Keywords "
+                "(keyword, uuid, last_modified, version, client_id, deleted) "
+                "VALUES (?, ?, ?, 1, ?, 0)",
+                (keyword, str(uuid.uuid4()), now, database.client_id),
+            )
+        keyword_rows = {
+            row["keyword"]: int(row["id"])
+            for row in connection.execute(
+                "SELECT id, keyword FROM Keywords WHERE keyword IN (?, ?, ?)",
+                ("clone-orphan", "recipient-existing", "clone-shared"),
+            ).fetchall()
+        }
+        for keyword_id in keyword_rows.values():
+            connection.execute(
+                "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)",
+                (created.media_id, keyword_id),
+            )
+        connection.executescript(
+            """
+            DROP TABLE OperationOwnedCloneKeywords;
+            CREATE TABLE OperationOwnedCloneKeywords (
+                media_id INTEGER NOT NULL,
+                keyword_id INTEGER NOT NULL,
+                operation_id TEXT NOT NULL,
+                source_identity TEXT NOT NULL,
+                created_by_clone BOOLEAN NOT NULL,
+                PRIMARY KEY (media_id, keyword_id),
+                FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+                FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
+            );
+            UPDATE schema_version SET version = 25;
+            """
+        )
+        for keyword, created_by_clone in (
+            ("clone-orphan", 1),
+            ("recipient-existing", 0),
+            ("clone-shared", 1),
+        ):
+            connection.execute(
+                "INSERT INTO OperationOwnedCloneKeywords "
+                "(media_id, keyword_id, operation_id, source_identity, created_by_clone) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    created.media_id,
+                    keyword_rows[keyword],
+                    operation_id,
+                    source_identity,
+                    created_by_clone,
+                ),
+            )
+        connection.commit()
+    finally:
+        database.close_connection()
+        backend.get_pool().close_all()
+
+    assert DatabaseMigrator(db_path).migrate_to_version(26, create_backup=False)["status"] == "success"
+
+    migrated_backend = SQLiteBackend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_path)
+    )
+    migrated = MediaDatabase(
+        db_path=db_path,
+        client_id="owner-1",
+        backend=migrated_backend,
+    )
+    try:
+        pending = [
+            row["keyword"]
+            for row in migrated.execute_query(
+                "SELECT keyword FROM OperationOwnedCloneKeywords "
+                "WHERE media_id = ? ORDER BY keyword",
+                (created.media_id,),
+            ).fetchall()
+        ]
+        assert pending == ["clone-orphan", "clone-shared", "recipient-existing"]
+        assert migrated.execute_query(
+            "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = ?",
+            (created.media_id,),
+        ).fetchone()["count"] == 0
+        remaining_keywords = {
+            row["keyword"]
+            for row in migrated.execute_query(
+                "SELECT keyword FROM Keywords WHERE keyword IN (?, ?, ?)",
+                ("clone-orphan", "recipient-existing", "clone-shared"),
+            ).fetchall()
+        }
+        assert remaining_keywords == {"recipient-existing", "clone-shared"}
+        assert migrated.execute_query(
+            "SELECT COUNT(*) AS count FROM MediaKeywords mk "
+            "JOIN Keywords k ON k.id = mk.keyword_id "
+            "WHERE mk.media_id = ? AND k.keyword = ?",
+            (ordinary_id, "clone-shared"),
+        ).fetchone()["count"] == 1
+
+        replayed = migrated.insert_operation_owned_clone_media(
+            snapshot=snapshot,
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        )
+        assert replayed.replayed is True
+        assert replayed.media_id == created.media_id
+        assert migrated.confirm_operation_owned_clone_media(
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        ) == 1
+        assert migrated.execute_query(
+            "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = ?",
+            (created.media_id,),
+        ).fetchone()["count"] == 3
+    finally:
+        migrated.close_connection()
+        migrated_backend.get_pool().close_all()
 
 
 @pytest.mark.unit
@@ -2303,10 +2445,7 @@ def test_postgres_clone_chunk_json_text_semantics_match_sqlite(
         ("true", True),
         ("null", None),
         ('"json scalar"', "json scalar"),
-        (
-            "invalid legacy json text",
-            {"$tldw_legacy_json_text_v1": "invalid legacy json text"},
-        ),
+        ("invalid legacy json text", "invalid legacy json text"),
     ]
     try:
         with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):

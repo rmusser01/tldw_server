@@ -5,6 +5,15 @@
 PRAGMA foreign_keys = OFF;
 BEGIN TRANSACTION;
 
+CREATE TABLE IF NOT EXISTS MediaKeywords (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    keyword_id INTEGER NOT NULL,
+    UNIQUE (media_id, keyword_id),
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+    FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS OperationOwnedCloneKeywords (
     media_id INTEGER NOT NULL,
     keyword_id INTEGER NOT NULL,
@@ -56,6 +65,8 @@ SELECT holds.media_id,
    AND media.system_operation_kind = 'shared_workspace_clone'
    AND length(media.system_operation_id) BETWEEN 1 AND 255
    AND length(media.system_source_identity) BETWEEN 1 AND 255
+   AND holds.operation_id = media.system_operation_id
+   AND holds.source_identity = media.system_source_identity
    AND length(trim(keywords.keyword)) BETWEEN 1 AND 255;
 
 INSERT OR IGNORE INTO OperationOwnedCloneKeywords (
@@ -67,6 +78,53 @@ SELECT media_id, keyword_value, operation_id, source_identity, client_value
         SELECT 1
           FROM pragma_table_info('OperationOwnedCloneKeywords_v25')
          WHERE name = 'keyword_id'
+   );
+
+DELETE FROM MediaKeywords
+ WHERE EXISTS (
+        SELECT 1
+          FROM OperationOwnedCloneKeywords_v26_source AS holds
+          JOIN Media AS media ON media.id = holds.media_id
+         WHERE EXISTS (
+                SELECT 1
+                  FROM pragma_table_info('OperationOwnedCloneKeywords_v25')
+                 WHERE name = 'keyword_id'
+           )
+           AND media.system_operation_kind = 'shared_workspace_clone'
+           AND length(media.system_operation_id) BETWEEN 1 AND 255
+           AND length(media.system_source_identity) BETWEEN 1 AND 255
+           AND length(media.system_content_hash) = 64
+           AND media.system_content_hash = lower(media.system_content_hash)
+           AND media.system_content_hash NOT GLOB '*[^0-9a-f]*'
+           AND holds.operation_id = media.system_operation_id
+           AND holds.source_identity = media.system_source_identity
+           AND holds.media_id = MediaKeywords.media_id
+           AND holds.keyword_value = MediaKeywords.keyword_id
+   );
+
+DELETE FROM Keywords
+ WHERE NOT EXISTS (
+        SELECT 1 FROM MediaKeywords WHERE MediaKeywords.keyword_id = Keywords.id
+   )
+   AND EXISTS (
+        SELECT 1
+          FROM OperationOwnedCloneKeywords_v26_source AS holds
+          JOIN Media AS media ON media.id = holds.media_id
+         WHERE EXISTS (
+                SELECT 1
+                  FROM pragma_table_info('OperationOwnedCloneKeywords_v25')
+                 WHERE name = 'keyword_id'
+           )
+           AND media.system_operation_kind = 'shared_workspace_clone'
+           AND length(media.system_operation_id) BETWEEN 1 AND 255
+           AND length(media.system_source_identity) BETWEEN 1 AND 255
+           AND length(media.system_content_hash) = 64
+           AND media.system_content_hash = lower(media.system_content_hash)
+           AND media.system_content_hash NOT GLOB '*[^0-9a-f]*'
+           AND holds.operation_id = media.system_operation_id
+           AND holds.source_identity = media.system_source_identity
+           AND holds.client_value = 1
+           AND holds.keyword_value = Keywords.id
    );
 
 DROP VIEW OperationOwnedCloneKeywords_v26_source;

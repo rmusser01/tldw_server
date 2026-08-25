@@ -44,7 +44,6 @@ _CANONICAL_MAX_STRING_LENGTH = 1_000_000
 _KEYWORD_MAX_LENGTH = 255
 _CANONICAL_HASH_DOMAIN = b"tldw.media-clone-snapshot.v2\x00"
 _LOGICAL_COPY_PROJECTION_VERSION = 2
-_LEGACY_JSON_TEXT_KEY = "$tldw_legacy_json_text_v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,16 +244,12 @@ def _normalize_keywords(keywords: Any) -> tuple[str, ...]:
 
 
 def _normalize_source_chunk_metadata(value: Any) -> Any:
-    """Decode source JSON text once while preserving invalid legacy text explicitly."""
+    """Decode valid source JSON text once and preserve invalid text as a string."""
     if isinstance(value, str):
         try:
             value = json.loads(value)
         except (TypeError, ValueError):
-            return {
-                _LEGACY_JSON_TEXT_KEY: _normalize_persisted_value(value),
-            }
-    if isinstance(value, Mapping) and set(value) == {_LEGACY_JSON_TEXT_KEY}:
-        raise InputError("snapshot chunk metadata uses a reserved legacy-text marker")
+            pass
     return _normalize_persisted_value(value)
 
 

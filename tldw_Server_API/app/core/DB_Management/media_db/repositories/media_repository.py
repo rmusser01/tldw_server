@@ -374,7 +374,9 @@ class MediaRepository:
                                 update_sql = (
                                     f"UPDATE DocumentVersions SET {', '.join(update_fields)} "  # nosec B608
                                     "WHERE id = ? AND version = ? "
-                                    "AND system_operation_id IS NULL"
+                                    "AND EXISTS (SELECT 1 FROM Media m "
+                                    "WHERE m.id = DocumentVersions.media_id "
+                                    "AND m.system_operation_id IS NULL)"
                                 )
                                 update_params.extend([latest_version["id"], current_doc_version])
                                 update_cursor = _exec(update_sql, tuple(update_params))

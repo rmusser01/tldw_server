@@ -92,6 +92,50 @@ def test_media_database_add_media_with_keywords_delegates_to_media_repository(mo
         db.close_connection()
 
 
+@pytest.mark.integration
+def test_media_repository_identical_content_overwrite_updates_document_metadata() -> None:
+    db = MediaDatabase(db_path=":memory:", client_id="identical-overwrite")
+    try:
+        media_id, media_uuid, _ = db.add_media_with_keywords(
+            url="https://example.test/identical-overwrite",
+            title="Identical overwrite",
+            media_type="text",
+            content="same body",
+            keywords=["before"],
+            prompt="old prompt",
+            analysis_content="old analysis",
+            safe_metadata='{"state":"old"}',
+        )
+
+        overwritten_id, overwritten_uuid, _ = db.add_media_with_keywords(
+            url="https://example.test/identical-overwrite",
+            title="Identical overwrite",
+            media_type="text",
+            content="same body",
+            keywords=["after"],
+            prompt="new prompt",
+            analysis_content="new analysis",
+            safe_metadata='{"state":"new"}',
+            overwrite=True,
+        )
+
+        row = db.execute_query(
+            "SELECT prompt, analysis_content, safe_metadata, version "
+            "FROM DocumentVersions WHERE media_id = ? AND deleted = 0 "
+            "ORDER BY version_number DESC LIMIT 1",
+            (media_id,),
+        ).fetchone()
+        assert (overwritten_id, overwritten_uuid) == (media_id, media_uuid)
+        assert dict(row) == {
+            "prompt": "new prompt",
+            "analysis_content": "new analysis",
+            "safe_metadata": '{"state":"new"}',
+            "version": 2,
+        }
+    finally:
+        db.close_connection()
+
+
 @pytest.mark.unit
 def test_ingest_article_wrapper_uses_media_repository(monkeypatch) -> None:
     db = MediaDatabase(db_path=":memory:", client_id="article-wrapper")

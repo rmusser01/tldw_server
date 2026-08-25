@@ -4034,3 +4034,240 @@ def test_postgres_migration_v26_repairs_both_committed_v25_shapes(
     finally:
         db.close_connection()
         backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+def test_postgres_v26_migration_releases_real_v25_keyword_graph(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+        run_postgres_migrate_to_v26,
+    )
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            with db.transaction() as connection:
+                backend.execute(
+                    "DROP TABLE operationownedclonekeywords CASCADE",
+                    connection=connection,
+                )
+                backend.execute(
+                    """
+                    CREATE TABLE operationownedclonekeywords (
+                        media_id BIGINT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                        keyword_id BIGINT NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+                        operation_id TEXT NOT NULL,
+                        source_identity TEXT NOT NULL,
+                        created_by_clone BOOLEAN NOT NULL,
+                        PRIMARY KEY (media_id, keyword_id)
+                    )
+                    """,
+                    connection=connection,
+                )
+                staged_id = backend.execute(
+                    "INSERT INTO Media (title, type, content_hash, uuid, last_modified, "
+                    "client_id, is_trash, system_operation_id, system_operation_kind, "
+                    "system_source_identity, system_content_hash) VALUES "
+                    "(%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, TRUE, %s, %s, %s, %s) "
+                    "RETURNING id",
+                    (
+                        "pending pg fix1 v25",
+                        "text",
+                        "pending-content",
+                        str(uuid.uuid4()),
+                        "901",
+                        "operation-pg-fix1-v25",
+                        "shared_workspace_clone",
+                        "source-pg-fix1-v25",
+                        "a" * 64,
+                    ),
+                    connection=connection,
+                ).rows[0]["id"]
+                ordinary_id = backend.execute(
+                    "INSERT INTO Media (title, type, content_hash, uuid, last_modified, client_id) "
+                    "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s) RETURNING id",
+                    ("ordinary keyword owner", "text", "ordinary", str(uuid.uuid4()), "901"),
+                    connection=connection,
+                ).rows[0]["id"]
+                keyword_ids: dict[str, int] = {}
+                for keyword in ("clone-orphan-pg", "recipient-existing-pg", "clone-shared-pg"):
+                    keyword_ids[keyword] = int(
+                        backend.execute(
+                            "INSERT INTO Keywords "
+                            "(keyword, uuid, last_modified, client_id, deleted) "
+                            "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, FALSE) RETURNING id",
+                            (keyword, str(uuid.uuid4()), "901"),
+                            connection=connection,
+                        ).rows[0]["id"]
+                    )
+                for keyword, created_by_clone in (
+                    ("clone-orphan-pg", True),
+                    ("recipient-existing-pg", False),
+                    ("clone-shared-pg", True),
+                ):
+                    backend.execute(
+                        "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (%s, %s)",
+                        (staged_id, keyword_ids[keyword]),
+                        connection=connection,
+                    )
+                    backend.execute(
+                        "INSERT INTO operationownedclonekeywords "
+                        "(media_id, keyword_id, operation_id, source_identity, created_by_clone) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (
+                            staged_id,
+                            keyword_ids[keyword],
+                            "operation-pg-fix1-v25",
+                            "source-pg-fix1-v25",
+                            created_by_clone,
+                        ),
+                        connection=connection,
+                    )
+                backend.execute(
+                    "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (%s, %s)",
+                    (ordinary_id, keyword_ids["clone-shared-pg"]),
+                    connection=connection,
+                )
+
+                run_postgres_migrate_to_v26(db, connection)
+
+                assert {
+                    row["keyword"]
+                    for row in backend.execute(
+                        "SELECT keyword FROM operationownedclonekeywords WHERE media_id = %s",
+                        (staged_id,),
+                        connection=connection,
+                    ).rows
+                } == {"clone-orphan-pg", "recipient-existing-pg", "clone-shared-pg"}
+                assert backend.execute(
+                    "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = %s",
+                    (staged_id,),
+                    connection=connection,
+                ).rows[0]["count"] == 0
+                assert {
+                    row["keyword"]
+                    for row in backend.execute(
+                        "SELECT keyword FROM Keywords WHERE keyword = ANY(%s)",
+                        (["clone-orphan-pg", "recipient-existing-pg", "clone-shared-pg"],),
+                        connection=connection,
+                    ).rows
+                } == {"recipient-existing-pg", "clone-shared-pg"}
+                assert backend.execute(
+                    "SELECT COUNT(*) AS count FROM MediaKeywords "
+                    "WHERE media_id = %s AND keyword_id = %s",
+                    (ordinary_id, keyword_ids["clone-shared-pg"]),
+                    connection=connection,
+                ).rows[0]["count"] == 1
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+def test_postgres_v26_migration_clears_weak_v25_partial_null_markers(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    partial_rows = [
+        (str(uuid.uuid4()), "partial-operation", None, None, None),
+        (str(uuid.uuid4()), None, "shared_workspace_clone", None, "a" * 64),
+        (str(uuid.uuid4()), "partial-operation", None, "partial-source", "b" * 64),
+    ]
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            with db.transaction() as connection:
+                backend.execute(
+                    "ALTER TABLE Media DROP CONSTRAINT ck_media_system_operation_ownership",
+                    connection=connection,
+                )
+                backend.execute(
+                    """
+                    ALTER TABLE Media
+                    ADD CONSTRAINT ck_media_system_operation_ownership
+                    CHECK (
+                        (
+                            system_operation_id IS NULL
+                            AND system_operation_kind IS NULL
+                            AND system_source_identity IS NULL
+                            AND system_content_hash IS NULL
+                        )
+                        OR
+                        (
+                            system_operation_kind = 'shared_workspace_clone'
+                            AND system_content_hash ~ '^[0-9a-f]{64}$'
+                        )
+                    )
+                    """,
+                    connection=connection,
+                )
+                for index, marker_row in enumerate(partial_rows):
+                    backend.execute(
+                        "INSERT INTO Media "
+                        "(uuid, title, type, content_hash, last_modified, client_id, "
+                        "system_operation_id, system_operation_kind, "
+                        "system_source_identity, system_content_hash) VALUES "
+                        "(%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s)",
+                        (
+                            marker_row[0],
+                            f"weak v25 partial markers {index}",
+                            "text",
+                            f"partial-content-{index}",
+                            "901",
+                            *marker_row[1:],
+                        ),
+                        connection=connection,
+                    )
+                backend.execute(
+                    "UPDATE schema_version SET version = 25",
+                    connection=connection,
+                )
+
+            db._initialize_schema()
+
+            with db.transaction() as connection:
+                rows = backend.execute(
+                    "SELECT system_operation_id, system_operation_kind, "
+                    "system_source_identity, system_content_hash "
+                    "FROM Media WHERE uuid = ANY(%s)",
+                    ([row[0] for row in partial_rows],),
+                    connection=connection,
+                ).rows
+                version = int(
+                    backend.execute(
+                        "SELECT version FROM schema_version LIMIT 1",
+                        connection=connection,
+                    ).scalar
+                )
+                constraint_validated = backend.execute(
+                    "SELECT convalidated FROM pg_constraint "
+                    "WHERE conname = 'ck_media_system_operation_ownership' "
+                    "AND conrelid = 'media'::regclass",
+                    connection=connection,
+                ).rows[0]["convalidated"]
+
+            assert len(rows) == len(partial_rows)
+            assert all(
+                row
+                == {
+                    "system_operation_id": None,
+                    "system_operation_kind": None,
+                    "system_source_identity": None,
+                    "system_content_hash": None,
+                }
+                for row in rows
+            )
+            assert version == 26
+            assert constraint_validated is True
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()
