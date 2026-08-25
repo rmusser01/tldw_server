@@ -240,6 +240,11 @@ class AuthnzOrgProviderSecretsRepo:
             postgres=postgres,
         )
         if authorization_context.required_authority is MembershipAuthority.PLATFORM_ADMIN:
+            membership_writer = MembershipWriter(self.db_pool)
+            await membership_writer.lock_platform_admin_authority_rows(
+                conn=conn,
+                context=authorization_context,
+            )
             role = str(actor_row.get("role") or "").strip().lower()
             if bool(actor_row.get("is_superuser")) or role in {
                 "owner",
@@ -247,9 +252,10 @@ class AuthnzOrgProviderSecretsRepo:
                 "admin",
             }:
                 return
-            if await MembershipWriter(
-                self.db_pool
-            ).has_persisted_platform_admin(conn, actor_user_id):
+            if await membership_writer.has_persisted_platform_admin(
+                conn,
+                actor_user_id,
+            ):
                 return
             raise MembershipAuthorizationError()
 

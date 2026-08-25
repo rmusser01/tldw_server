@@ -907,6 +907,13 @@ _USER_PERMISSION_AUTHORITY_LOCK_SQL = (
     "SELECT up.permission_id FROM public.user_permissions up "
     "WHERE up.user_id = $1 ORDER BY up.permission_id FOR UPDATE OF up"
 )
+_PLATFORM_ADMIN_AUTHORITY_LOCK_SQL = (
+    _ROLE_AUTHORITY_LOCK_SQL,
+    _PERMISSION_AUTHORITY_LOCK_SQL,
+    _USER_ROLE_AUTHORITY_LOCK_SQL,
+    _ROLE_PERMISSION_AUTHORITY_LOCK_SQL,
+    _USER_PERMISSION_AUTHORITY_LOCK_SQL,
+)
 _ACTIVE_MEMBERSHIP_SQL = "LOWER(COALESCE(status, '')) = 'active'"
 
 
@@ -984,13 +991,7 @@ def plan_membership_lock_statements(
                 sql=sql,
                 parameters=(plan.context.actor_user_id,),
             )
-            for sql in (
-                _ROLE_AUTHORITY_LOCK_SQL,
-                _PERMISSION_AUTHORITY_LOCK_SQL,
-                _USER_ROLE_AUTHORITY_LOCK_SQL,
-                _ROLE_PERMISSION_AUTHORITY_LOCK_SQL,
-                _USER_PERMISSION_AUTHORITY_LOCK_SQL,
-            )
+            for sql in _PLATFORM_ADMIN_AUTHORITY_LOCK_SQL
         )
     return tuple(statements)
 
@@ -1035,6 +1036,10 @@ class MembershipWriter:
             if context.actor_user_id in missing_user_ids:
                 raise MembershipAuthorizationError()
             if context.required_authority is MembershipAuthority.PLATFORM_ADMIN:
+                await self.lock_platform_admin_authority_rows(
+                    conn=conn,
+                    context=context,
+                )
                 await self._authorize_platform_admin_actor(
                     conn,
                     context.actor_user_id,
@@ -1538,7 +1543,6 @@ class MembershipWriter:
         snapshot: MembershipScopeDeletionSnapshot,
         lock_set: MembershipLockSet,
     ) -> None:
-        del context
         if self._backend is MembershipLockBackend.SQLITE:
             await self._recheck_scope_deletion_snapshot(conn, snapshot)
             return
@@ -1562,6 +1566,28 @@ class MembershipWriter:
         for row in lock_set.owner_rows:
             statement = _membership_statement(row, MembershipLockPhase.OWNER_ROWS)
             await conn.fetchrow(statement.sql, *statement.parameters)
+        await self.lock_platform_admin_authority_rows(
+            conn=conn,
+            context=context,
+        )
+
+    async def lock_platform_admin_authority_rows(
+        self,
+        *,
+        conn: Any,
+        context: MembershipWriteContext,
+    ) -> None:
+        """Lock persisted platform authority in canonical parent-child order."""
+        validate_membership_write_context(context, serving=True)
+        if self._backend is MembershipLockBackend.SQLITE:
+            return
+        if not (
+            type(context) is ActorMembershipWriteContext
+            and context.required_authority is MembershipAuthority.PLATFORM_ADMIN
+        ):
+            return
+        for sql in _PLATFORM_ADMIN_AUTHORITY_LOCK_SQL:
+            await conn.fetch(sql, context.actor_user_id)
 
     async def _recheck_scope_deletion_snapshot(
         self,

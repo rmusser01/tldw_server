@@ -16,6 +16,8 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipMutation,
     MembershipMutationKind,
     MembershipMutationResult,
+    MembershipRowSnapshot,
+    MembershipScopeDeletionSnapshot,
     MembershipScopeType,
     MembershipUserVersionFloor,
     MembershipWriter,
@@ -1111,6 +1113,10 @@ async def test_organization_creation_authorization_rejects_unusable_actor(
             self.statements.append(str(sql))
             return self._actor_row()
 
+        async def fetch(self, sql, *_parameters):
+            self.statements.append(str(sql))
+            return []
+
         async def execute(self, sql, _parameters):
             self.statements.append(str(sql))
             return _Cursor(self._actor_row())
@@ -1139,6 +1145,7 @@ async def test_organization_creation_authorization_locks_actor_and_owner_in_orde
     class _Connection:
         def __init__(self) -> None:
             self.locked_user_ids: list[int] = []
+            self.authority_statements: list[str] = []
 
         async def fetchrow(self, sql, user_id):
             if "FOR UPDATE" in str(sql):
@@ -1149,6 +1156,11 @@ async def test_organization_creation_authorization_locks_actor_and_owner_in_orde
                 "is_superuser": user_id == 11,
                 "role": "admin" if user_id == 11 else "user",
             }
+
+        async def fetch(self, sql, actor_user_id):
+            assert actor_user_id == 11
+            self.authority_statements.append(sql)
+            return []
 
     pool = type("Pool", (), {"pool": object()})()
     conn = _Connection()
@@ -1163,6 +1175,75 @@ async def test_organization_creation_authorization_locks_actor_and_owner_in_orde
     )
 
     assert conn.locked_user_ids == [7, 11]
+    assert len(conn.authority_statements) == 5
+    assert conn.authority_statements[0].startswith(
+        "SELECT r.id FROM public.roles"
+    )
+    assert conn.authority_statements[-1].startswith(
+        "SELECT up.permission_id FROM public.user_permissions"
+    )
+
+
+@pytest.mark.asyncio
+async def test_scope_deletion_locks_platform_authority_after_membership_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = MembershipScopeDeletionSnapshot(
+        scope_type=MembershipScopeType.ORGANIZATION,
+        scope_id=5,
+        organization_ids=(5,),
+        team_parents=(),
+        membership_rows=(
+            MembershipRowSnapshot(
+                scope_type=MembershipScopeType.ORGANIZATION,
+                scope_id=5,
+                user_id=7,
+                role="member",
+                status="active",
+            ),
+        ),
+    )
+    context = ActorMembershipWriteContext(
+        actor_user_id=11,
+        required_authority=MembershipAuthority.PLATFORM_ADMIN,
+    )
+    writer = MembershipWriter(type("Pool", (), {"pool": object()})())
+    lock_set = writer._build_scope_deletion_lock_set(
+        context=context,
+        snapshot=snapshot,
+    )
+
+    async def _skip_snapshot_recheck(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(
+        writer,
+        "_recheck_scope_deletion_snapshot",
+        _skip_snapshot_recheck,
+    )
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.events: list[tuple[str, str]] = []
+
+        async def fetchrow(self, sql, *_parameters):
+            self.events.append(("row", sql))
+            return {"id": 1}
+
+        async def fetch(self, sql, actor_user_id):
+            assert actor_user_id == 11
+            self.events.append(("authority", sql))
+            return []
+
+    conn = _Connection()
+    await writer._execute_scope_deletion_locks(
+        conn,
+        context=context,
+        snapshot=snapshot,
+        lock_set=lock_set,
+    )
+
+    assert [kind for kind, _sql in conn.events][-5:] == ["authority"] * 5
 
 
 @pytest.mark.parametrize("postgres", [False, True])

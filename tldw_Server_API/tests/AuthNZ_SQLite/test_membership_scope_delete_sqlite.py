@@ -157,8 +157,14 @@ class _SQLiteSecretDeleteGatePool:
         self._release = release
 
     @asynccontextmanager
-    async def transaction(self):
-        async with self._delegate.transaction() as conn:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self._delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             yield _SQLiteSecretDeleteGateConnection(
                 conn,
                 scope_type=self._scope_type,
@@ -177,9 +183,15 @@ class _SQLiteTransactionAttemptPool:
         self._attempted = attempted
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
         self._attempted.set()
-        async with self._delegate.transaction() as conn:
+        async with self._delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             yield conn
 
     def __getattr__(self, name: str) -> Any:
@@ -224,8 +236,14 @@ class _SQLiteUpsertInsertGatePool:
         self._release = release
 
     @asynccontextmanager
-    async def transaction(self):
-        async with self._delegate.transaction() as conn:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self._delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             yield _SQLiteUpsertInsertGateConnection(
                 conn,
                 ready=self._ready,

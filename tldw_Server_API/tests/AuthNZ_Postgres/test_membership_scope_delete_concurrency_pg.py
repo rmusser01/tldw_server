@@ -156,11 +156,17 @@ class _ObservedDeletionPool:
         self.escaped_failures: list[type[BaseException]] = []
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
         self.transaction_count += 1
         attempt = self.transaction_count
         try:
-            async with self._pool.transaction() as conn:
+            async with self._pool.transaction(
+                acquire_timeout_seconds=acquire_timeout_seconds,
+            ) as conn:
                 yield _ParentLockGateConnection(
                     conn,
                     attempt=attempt,
@@ -213,8 +219,14 @@ class _FirstUserLockBarrierPool:
         self._gate = gate
 
     @asynccontextmanager
-    async def transaction(self):
-        async with self._pool.transaction() as conn:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self._pool.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             yield _FirstUserLockBarrierConnection(conn, self._gate)
 
     def __getattr__(self, name: str) -> Any:
@@ -272,8 +284,14 @@ class _ProviderSecretDeleteGatePool:
         self._release = release
 
     @asynccontextmanager
-    async def transaction(self):
-        async with self._delegate.transaction() as conn:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self._delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             yield _ProviderSecretDeleteGateConnection(
                 conn,
                 scope_type=self._scope_type,
@@ -341,8 +359,14 @@ class _ProviderUpsertRacePool:
         self._allow_insert = allow_insert
 
     @asynccontextmanager
-    async def transaction(self):
-        async with self._delegate.transaction() as conn:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self._delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             yield _ProviderUpsertRaceConnection(
                 conn,
                 parent_lock_attempted=self._parent_lock_attempted,
@@ -416,8 +440,14 @@ class _ProviderUpsertHoldPool:
         self.backend_pid: int | None = None
 
     @asynccontextmanager
-    async def transaction(self):
-        async with self._delegate.transaction() as conn:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self._delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             self.backend_pid = int(await conn.fetchval("SELECT pg_backend_pid()"))
             yield _ProviderUpsertHoldConnection(
                 conn,
@@ -456,8 +486,14 @@ class _DeletionParentAttemptPool:
         self.backend_pid: int | None = None
 
     @asynccontextmanager
-    async def transaction(self):
-        async with self._delegate.transaction() as conn:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self._delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             self.backend_pid = int(await conn.fetchval("SELECT pg_backend_pid()"))
             yield _DeletionParentAttemptConnection(conn, self._attempted)
 
