@@ -28,7 +28,7 @@
 **Goal:** Establish a bounded development runtime and prevent false backend-unavailable UI.
 **Success Criteria:** One bundler qualifies under the recorded guardrails or a bounded containment is documented; cancellations do not produce outage UI while genuine outages still do.
 **Tests:** Runtime probe tests, package-script contract, request-event/background-proxy tests, WebLayout connection tests.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 2: Workspace and Settings Defects
 **Goal:** Correct Research initialization, Prompt responsive behavior, Settings form ownership, and Kanban gate drift.
@@ -94,7 +94,7 @@
 - Consumes: the existing `e2e:smoke:all-pages:gate` route traversal and `TLDW_WEB_AUTOSTART=false` Playwright contract.
 - Consumes: an explicit healthy `TLDW_E2E_SERVER_URL` and matching `TLDW_E2E_API_KEY`; the probe fails closed instead of measuring an offline/fallback route sweep.
 
-- [ ] **Step 1: Write pure evaluator tests**
+- [x] **Step 1: Write pure evaluator tests**
 
 ```ts
 import { describe, expect, it } from "vitest"
@@ -122,13 +122,13 @@ it("fails a responsive runtime whose idle growth exceeds two GiB", () => {
 })
 ```
 
-- [ ] **Step 2: Run the evaluator tests and observe red**
+- [x] **Step 2: Run the evaluator tests and observe red**
 
 Run: `cd apps/tldw-frontend && bunx vitest run scripts/__tests__/dev-runtime-uat.test.ts`
 
 Expected: FAIL because `dev-runtime-uat-lib.mjs` does not exist.
 
-- [ ] **Step 3: Implement process discovery and exact guardrails**
+- [x] **Step 3: Implement process discovery and exact guardrails**
 
 ```js
 export const MAX_RSS_BYTES = 16 * 2 ** 30
@@ -151,7 +151,7 @@ export function evaluateRuntime(samples) {
 
 The CLI must verify the explicit backend health endpoint, spawn `bun run dev:webpack` or `bun run dev:turbopack`, wait for HTTP readiness, run the complete all-pages route gate with WebUI autostart disabled and offline fallback forbidden, sample the whole descendant process tree, health-check through 20 warm-idle minutes, run a second critical-route pass, write JSON, and terminate only the process group it created.
 
-- [ ] **Step 4: Start one isolated backend profile, then run short probes**
+- [x] **Step 4: Start one isolated backend profile, then run short probes**
 
 Use the existing `scripts/onboarding-uat/profile.mjs` helpers to start the repository mock model service and one disposable backend shared by both candidate measurements. Health-check the backend and keep its profile, ports, and API key identical across candidates. Stop and classify an environment defect if the backend cannot become healthy; do not continue with offline fallback.
 
@@ -163,15 +163,15 @@ TLDW_E2E_ALLOW_OFFLINE=0 TLDW_E2E_SERVER_URL=http://127.0.0.1:18180 TLDW_E2E_API
 TLDW_E2E_ALLOW_OFFLINE=0 TLDW_E2E_SERVER_URL=http://127.0.0.1:18180 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-UAT bun run uat:dev-runtime -- --bundler=turbopack --port=18182 --warm-idle-ms=60000 --output=test-results/dev-runtime/turbopack-short.json
 ```
 
-- [ ] **Step 5: Run the qualifying comparison and select the default from evidence**
+- [x] **Step 5: Run the qualifying comparison and select the default from evidence**
 
-Run each bundler with `--warm-idle-ms=1200000` against the same healthy backend profile. If exactly one qualifies, set `package.json` `dev` to that command and keep both named commands. If neither qualifies, keep `dev` unchanged, add an explicit `uat:dev` bounded command selected from the less severe report, and record both failed reasons on `TASK-13124.1` without calling either stable.
+Run each still-viable bundler with `--warm-idle-ms=1200000` against the same healthy backend profile. A candidate that has already crossed an irreversible guardrail in the clean short probe is terminated rather than held for the remaining idle interval. If exactly one qualifies, set `package.json` `dev` to that command and keep both named commands. If neither qualifies, keep `dev` unchanged, add an explicit `uat:dev` bounded command selected from the less severe report, and record both failed reasons on `TASK-13124.1` without calling either stable.
 
-- [ ] **Step 6: Lock the package-script contract and documentation**
+- [x] **Step 6: Lock the package-script contract and documentation**
 
-After the comparison, add a literal assertion for the selected default to `next-config-dev-watch-guard.test.ts`; do not compute the expectation from the implementation under test. Also assert that both `dev:webpack` and `dev:turbopack` remain defined and distinct. Document the selected command, both report paths, the UAT-host thresholds, and that the red bottom-left number is Next.js development tooling rather than an application-error counter.
+After the comparison, add a literal assertion for the selected default to `next-config-dev-watch-guard.test.ts`; do not compute the expectation from the implementation under test. Also assert that both `dev:webpack` and `dev:turbopack` remain defined and distinct. Document the selected command, both report paths, the UAT-host thresholds, and that the red bottom-left number is Next.js development tooling rather than a tldw-owned counter. Because it reflects Next's captured errors, retain it as actionable UAT evidence.
 
-- [ ] **Step 7: Verify and commit**
+- [x] **Step 7: Verify and commit**
 
 Run: `cd apps/tldw-frontend && bunx vitest run scripts/__tests__/dev-runtime-uat.test.ts __tests__/next-config-dev-watch-guard.test.ts`
 
