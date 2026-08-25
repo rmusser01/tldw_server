@@ -42,10 +42,18 @@ def test_user_persona_visuals_dir_is_created_under_user_base(
     assert visuals_dir.is_dir()
 
 
-def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) -> None:
+def test_migration_v44_to_latest_creates_persona_visual_tables(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify v44 migration recreates persona visual tables and indexes."""
-    seeded = CharactersRAGDB(db_path, "persona-visuals-seed")
-    seeded.close_connection()
+    with monkeypatch.context() as version_patch:
+        version_patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 44)
+        seeded = CharactersRAGDB(db_path, "persona-visuals-v44-seed")
+        try:
+            assert seeded._get_db_version(seeded.get_connection()) == 44
+        finally:
+            seeded.close_connection()
 
     CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
         db_path,
@@ -262,10 +270,18 @@ def test_sqlite_linear_migration_rejects_skipped_versions(
             db.close_connection()
 
 
-def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -> None:
+def test_migration_v44_to_latest_repairs_missing_persona_tables(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify drifted v44 databases repair missing persona schema artifacts."""
-    seeded = CharactersRAGDB(db_path, "persona-visuals-missing-persona-seed")
-    seeded.close_connection()
+    with monkeypatch.context() as version_patch:
+        version_patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 44)
+        seeded = CharactersRAGDB(db_path, "persona-visuals-missing-persona-v44-seed")
+        try:
+            assert seeded._get_db_version(seeded.get_connection()) == 44
+        finally:
+            seeded.close_connection()
 
     CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
         db_path,
