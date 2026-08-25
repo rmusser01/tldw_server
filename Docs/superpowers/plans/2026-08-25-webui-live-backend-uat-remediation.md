@@ -343,7 +343,7 @@ Commit: `fix(research): wait for workspace before loading saved views`
 - Produces: compact state derived from the `PromptBody` root container width rather than `window.innerWidth` alone.
 - Preserves: current mobile controls, desktop sidebar, keyboard focus, and accessible names.
 
-- [ ] **Step 1: Reproduce on the clean bundle before changing CSS**
+- [x] **Step 1: Reproduce on the clean bundle before changing CSS**
 
 Add a Playwright geometry helper that opens `/prompts` at 1365x768 and 1365x900, dismisses the intentional tour, and asserts:
 
@@ -356,33 +356,30 @@ await expect(page.getByTestId("prompts-search")).toBeEditable()
 
 If both viewports pass twice with a clean `.next`, record gate drift on the task and correct only the stale audit setup. Continue to Step 2 only when the geometry test is red.
 
-- [ ] **Step 2: Run the focused geometry test and preserve the failing trace**
+- [x] **Step 2: Run the focused geometry test and preserve the result**
 
 Run: `cd apps/tldw-frontend && bunx playwright test e2e/workflows/tier-2-features/prompts-workspace.spec.ts --project=tier-2 --grep 'fits standard desktop content widths' --workers=1 --trace=on`
 
-- [ ] **Step 3: Replace viewport-only compact detection with container measurement**
+- [x] **Step 3: Stop conditional production remediation when the gate is green**
 
-Attach a ref to the `PromptBody` root, observe it with `ResizeObserver`, and derive compact mode from `root.clientWidth`. Keep the window resize fallback only when `ResizeObserver` is unavailable.
+The clean geometry test passed twice at both reported 1365px viewports, so the
+planned `ResizeObserver` production change was not justified and was not added.
 
-```tsx
-const workspaceRootRef = useRef<HTMLDivElement | null>(null)
-const updateCompactLayout = useCallback(() => {
-  const width = workspaceRootRef.current?.clientWidth ?? window.innerWidth
-  setIsCompactViewport(width < PROMPTS_COMPACT_CONTENT_WIDTH_PX)
-}, [])
-```
+- [x] **Step 4: Add complete acceptance-matrix regression coverage**
 
-The threshold must be the smallest value that makes both acceptance viewports pass without switching the wide-desktop fixture to compact mode.
+The geometry gate now covers 390x844, 1365x768, 1365x900, and 1536x960. It
+asserts global overflow, expected sidebar visibility, sidebar/search geometry,
+and enabled/editable primary controls. The full-suite run also exposed a lazy
+editor page-object race; the harness now polls for either supported editor
+instead of treating `Locator.isVisible()` as a wait.
 
-- [ ] **Step 4: Add component regression coverage**
+- [x] **Step 5: Verify mobile, desktop, and wide viewports and commit**
 
-Mock `ResizeObserver`, report 900px then 1280px, and assert the prompt sidebar is absent then present while the search control remains reachable.
+Run the focused Tier-2 geometry test at all four acceptance widths and the
+complete `prompts-workspace.spec.ts`. Component coverage was not added because
+production responsive behavior was unchanged.
 
-- [ ] **Step 5: Verify mobile, desktop, and wide viewports and commit**
-
-Run the component test, the focused Tier-2 geometry test at all four acceptance widths, and the complete `prompts-workspace.spec.ts`.
-
-Commit: `fix(prompts): respond to available workspace width`
+Commit: `test(prompts): harden responsive live-backend coverage`
 
 ---
 
