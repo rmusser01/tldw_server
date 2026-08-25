@@ -449,17 +449,17 @@ Commit: `fix(settings): keep connection form initialization authoritative`
 - Consumes: production `RouteErrorBoundary routeId="kanban" routeLabel="Kanban"` in `option-kanban-playground.tsx`.
 - Produces: matching smoke inventory `{ path: "/kanban", routeId: "kanban", routeLabel: "Kanban" }`.
 
-- [ ] **Step 1: Lock the canonical route boundary contract**
+- [x] **Step 1: Lock the canonical route boundary contract**
 
 Keep the existing unit case asserting `routeId="kanban"` and `routeLabel="Kanban"`; add a source/inventory assertion that the all-pages entry matches those values.
 
-- [ ] **Step 2: Run the focused forced-error scenario and observe red**
+- [x] **Step 2: Run the focused forced-error scenario and observe red**
 
 Run: `cd apps/tldw-frontend && bunx playwright test e2e/smoke/all-pages.spec.ts --grep 'Kanban Playground forced-error fixture' --workers=1`
 
 Expected: the `kanban-playground` query value does not trigger the `kanban` boundary.
 
-- [ ] **Step 3: Correct only the stale smoke inventory**
+- [x] **Step 3: Correct only the stale smoke inventory**
 
 ```ts
 {
@@ -472,9 +472,16 @@ Expected: the `kanban-playground` query value does not trigger the `kanban` boun
 
 Do not add a Kanban-specific crash hook or alter the production boundary.
 
-- [ ] **Step 4: Verify error and recovery paths and commit**
+- [x] **Step 4: Verify error and recovery paths and commit**
 
 Run the focused Playwright scenario, click Retry after removing the query signal, and assert the normal board heading returns. Run the shared route-boundary unit test.
+
+The focused live-backend scenario now removes the query through Next Router,
+dismisses the expected development overlay, clicks Retry, and observes the
+normal Kanban heading. The recovery interaction is scoped to Kanban so the
+generic boundary loop does not unexpectedly load every target route. The
+production-mode component test confirms the fixture remains inert outside
+development/test builds.
 
 Commit: `test(webui): align Kanban route recovery fixture`
 

@@ -6,6 +6,15 @@ const readSource = (relativePath: string) =>
   readFileSync(path.join(process.cwd(), relativePath), "utf8")
 
 describe("e2e harness readiness contracts", () => {
+  it("keeps the Kanban forced-error fixture aligned with its canonical boundary", () => {
+    const smokeSource = readSource("e2e/smoke/all-pages.spec.ts")
+
+    expect(smokeSource).toMatch(
+      /name: 'Kanban Playground',[\s\S]*?path: '\/kanban',[\s\S]*?routeId: 'kanban',[\s\S]*?routeLabel: 'Kanban'/
+    )
+    expect(smokeSource).not.toContain("routeId: 'kanban-playground'")
+  })
+
   it("keeps smoke and review harnesses off direct networkidle waits", () => {
     const smokeSource = readSource("e2e/smoke/all-pages.spec.ts")
     const reviewSource = readSource("e2e/review/parallel-review.spec.ts")
