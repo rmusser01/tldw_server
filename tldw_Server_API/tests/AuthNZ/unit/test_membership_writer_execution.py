@@ -915,7 +915,7 @@ async def test_owner_queries_treat_only_explicit_active_status_as_active(postgre
 
 
 @pytest.mark.asyncio
-async def test_postgres_persisted_authority_locks_all_rbac_rows_in_total_order() -> None:
+async def test_postgres_persisted_authority_read_does_not_acquire_unplanned_locks() -> None:
     class _LockedRbacConnection:
         def __init__(self) -> None:
             self.statements: list[str] = []
@@ -963,7 +963,7 @@ async def test_postgres_persisted_authority_locks_all_rbac_rows_in_total_order()
         "permissions",
         "user_permissions",
     ]
-    assert all("FOR UPDATE" in statement for statement in conn.statements)
+    assert all("FOR UPDATE" not in statement for statement in conn.statements)
 
 
 async def _apply_as_persisted_platform_admin(
@@ -1078,7 +1078,7 @@ async def test_writer_path_filters_expired_platform_admin_grants(
     assert not await MembershipWriter(pool)._has_persisted_platform_admin(conn, 11)
     if postgres:
         assert len(conn.statements) == 5
-        assert all("FOR UPDATE" in statement for statement in conn.statements)
+        assert all("FOR UPDATE" not in statement for statement in conn.statements)
     else:
         assert all(
             "expires_at IS NULL" in statement
@@ -1136,7 +1136,7 @@ async def test_platform_admin_filters_expired_role_and_direct_grants(postgres) -
     assert not await MembershipWriter(pool)._has_persisted_platform_admin(conn, 11)
     assert len(conn.statements) == (5 if postgres else 3)
     if postgres:
-        assert all("FOR UPDATE" in statement for statement in conn.statements)
+        assert all("FOR UPDATE" not in statement for statement in conn.statements)
     else:
         assert all(
             "expires_at IS NULL" in statement
