@@ -1,6 +1,6 @@
 # Durable Shared Workspace Clone Jobs Design
 
-**Status:** Revised after pre-implementation review; awaiting confirmation
+**Status:** Approved in chat on 2026-08-25
 
 **Backlog:** TASK-12020.41
 
