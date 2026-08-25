@@ -327,6 +327,19 @@ async def test_asyncpg_connection_guards_all_raw_query_and_copy_entrypoints(
         lambda: connection.copy_to_table("users", source=object()),
         lambda: connection.copy_to_table('"users"', source=object()),
         lambda: connection.copy_records_to_table("public.users", records=[]),
+        lambda: connection.copy_to_table("org_members", source=object()),
+        lambda: connection.copy_to_table(
+            '"team_members"',
+            source=object(),
+        ),
+        lambda: connection.copy_records_to_table(
+            "public.org_members",
+            records=[],
+        ),
+        lambda: connection.copy_records_to_table(
+            "team_members",
+            records=[],
+        ),
     )
     for call in calls:
         with pytest.raises(ProfileUserWriteRejected):
@@ -375,6 +388,64 @@ async def test_asyncpg_connection_reset_bypasses_guard_for_driver_cleanup_only(
     ]
     with pytest.raises(ProfileUserWriteRejected):
         await connection.execute(reset_query)
+
+
+@pytest.mark.asyncio
+async def test_asyncpg_connection_allows_unprotected_copy_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delegated: list[tuple[str, str, str | None]] = []
+
+    async def _copy_to_table(
+        connection: Any,
+        table_name: str,
+        *,
+        schema_name: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        del connection, kwargs
+        delegated.append(("copy_to_table", table_name, schema_name))
+        return "COPY 1"
+
+    async def _copy_records_to_table(
+        connection: Any,
+        table_name: str,
+        *,
+        schema_name: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        del connection, kwargs
+        delegated.append(("copy_records_to_table", table_name, schema_name))
+        return "COPY 1"
+
+    monkeypatch.setattr(asyncpg.Connection, "copy_to_table", _copy_to_table)
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "copy_records_to_table",
+        _copy_records_to_table,
+    )
+    connection = object.__new__(_GuardedAsyncpgConnection)
+    connection._authnz_profile_user_guard_identity = object()
+
+    assert (
+        await connection.copy_to_table(
+            "audit_events",
+            schema_name="public",
+            source=object(),
+        )
+        == "COPY 1"
+    )
+    assert (
+        await connection.copy_records_to_table(
+            "api_keys",
+            records=[],
+        )
+        == "COPY 1"
+    )
+    assert delegated == [
+        ("copy_to_table", "audit_events", "public"),
+        ("copy_records_to_table", "api_keys", None),
+    ]
 
 
 @pytest.mark.asyncio

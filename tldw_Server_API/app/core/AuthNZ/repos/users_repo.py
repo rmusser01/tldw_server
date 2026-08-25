@@ -529,15 +529,19 @@ class AuthnzUsersRepo:
         try:
             async with self.db_pool.transaction() as conn:
                 if self._is_postgres_backend():
+                    locked_user = await conn.fetchrow(
+                        "SELECT id FROM public.users WHERE id = $1 FOR UPDATE",
+                        int(user_id),
+                    )
+                    if locked_user is None:
+                        return False
                     row = await conn.fetchrow(
-                        """
-                        DELETE FROM user_roles ur
-                        USING roles r
-                        WHERE ur.role_id = r.id
-                          AND ur.user_id = $1
-                          AND r.name = $2
-                        RETURNING ur.user_id
-                        """,
+                        "DELETE FROM public.user_roles ur "
+                        "USING public.roles r "
+                        "WHERE ur.role_id = r.id "
+                        "AND ur.user_id = $1 "
+                        "AND r.name = $2 "
+                        "RETURNING ur.user_id",
                         int(user_id),
                         str(role_name),
                     )

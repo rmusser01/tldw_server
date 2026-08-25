@@ -15,9 +15,25 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    AnchorOwnership,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.org_invites_repo import AuthnzOrgInvitesRepo
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
+
+_INVITE_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.REGISTRATION,
+)
 
 
 class InviteStatus(str, Enum):
@@ -356,25 +372,39 @@ class OrgInviteService:
                 message="You are already a member of this organization"
             )
 
-        # Add user to org
+        # Add user to the org/default team and optional invite team atomically.
         try:
-            await orgs_repo.add_org_member(org_id=org_id, user_id=user_id, role=role)
-        except Exception as e:
-            logger.error(f"Failed to add user {user_id} to org {org_id}: {e}")
+            pool = await self._get_db_pool()
+            operation_time = datetime.now(timezone.utc)
+            async with pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
+                provisioning = (
+                    await orgs_repo.provision_org_membership_on_connection(
+                        conn=conn,
+                        org_id=org_id,
+                        user_id=user_id,
+                        org_role=role,
+                        team_id=team_id,
+                        team_role=role if team_id is not None else None,
+                        team_failure_is_best_effort=True,
+                        context=_INVITE_MEMBERSHIP_CONTEXT,
+                        anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+                        operation_time=operation_time,
+                    )
+                )
+        except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError):
+            raise
+        except Exception:
+            logger.error("Failed to add user to organization")
             return RedemptionResult(
                 success=False,
                 message="Failed to join organization"
             )
 
-        # If team-specific invite, also add to team
-        team_membership_failed = False
-        if team_id:
-            try:
-                await orgs_repo.add_team_member(team_id=team_id, user_id=user_id, role=role)
-            except Exception as e:
-                logger.warning(f"Failed to add user {user_id} to team {team_id}: {e}")
-                # Don't fail the whole operation - org membership succeeded
-                team_membership_failed = True
+        team_membership_failed = provisioning.team_membership_failed
 
         # Record the redemption
         try:

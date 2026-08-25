@@ -1,15 +1,47 @@
-from types import SimpleNamespace
 import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
-from fastapi import Response
+from fastapi import HTTPException, Response
 from starlette.requests import Request
 
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+
+@pytest.mark.asyncio
+async def test_org_bootstrap_uses_atomic_owner_creation(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+    import tldw_Server_API.app.core.AuthNZ.database as database_module
+    import tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo as repo_module
+
+    observed = {}
+
+    async def _no_memberships(_user_id):
+        return []
+
+    async def _pool():
+        return object()
+
+    class _Repo:
+        def __init__(self, *, db_pool):
+            observed["pool"] = db_pool
+
+        async def create_organization_with_owner_membership(self, **kwargs):
+            observed["kwargs"] = kwargs
+            return {"id": 11}
+
+    monkeypatch.setattr(auth, "list_memberships_for_user", _no_memberships)
+    monkeypatch.setattr(database_module, "get_db_pool", _pool)
+    monkeypatch.setattr(repo_module, "AuthnzOrgsTeamsRepo", _Repo)
+
+    await auth._ensure_user_org_membership(7, "alice")
+
+    assert observed["kwargs"]["name"] == "alice Workspace"
+    assert observed["kwargs"]["owner_user_id"] == 7
+    assert observed["kwargs"]["context"].trusted_reason.value == "bootstrap"
 
 
 @pytest.mark.asyncio
@@ -105,7 +137,7 @@ async def test_reset_password_weak_and_success(monkeypatch):
     request = Request(scope)
 
     # Weak password
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 - endpoint contract is exercised here
         await _auth.reset_password(
             data=_auth.ResetPasswordRequest(token="tok", new_password="weak"),
             request=request,
@@ -684,9 +716,8 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
             self.redis_client = object()
 
         async def create_session(self, **kwargs):
-            from datetime import datetime, timezone as _tz
             self.created_kwargs = dict(kwargs)
-            self.created_at = datetime.now(_tz.utc)
+            self.created_at = datetime.now(timezone.utc)
             return {"session_id": 777}
 
         async def store_ephemeral_value(self, key: str, value: str, ttl_seconds: int):

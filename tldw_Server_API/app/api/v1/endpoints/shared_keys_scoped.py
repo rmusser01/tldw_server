@@ -27,6 +27,12 @@ from tldw_Server_API.app.core.AuthNZ.byok_testing import (
     test_provider_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipScopeNotFound,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_members, list_team_members
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
@@ -89,6 +95,19 @@ def _is_admin_principal(principal: AuthPrincipal) -> bool:
     return bool(permissions & _ADMIN_CLAIM_PERMISSIONS)
 
 
+def _manager_write_context(
+    principal: AuthPrincipal,
+) -> ActorMembershipWriteContext:
+    return ActorMembershipWriteContext(
+        actor_user_id=_principal_user_id(principal),
+        required_authority=(
+            MembershipAuthority.PLATFORM_ADMIN
+            if _is_admin_principal(principal)
+            else MembershipAuthority.SCOPED_MEMBERSHIP
+        ),
+    )
+
+
 def _principal_user_id(principal: AuthPrincipal) -> int:
     raw_id = principal.user_id
     try:
@@ -109,7 +128,11 @@ async def _require_org_manager(principal: AuthPrincipal, org_id: int) -> None:
         members = await list_org_members(org_id=org_id, limit=1000, offset=0)
         uid = int(principal.user_id)
         for m in members:
-            if int(m.get("user_id")) == uid and _is_manager(m.get("role")):
+            if (
+                int(m.get("user_id")) == uid
+                and str(m.get("status") or "").strip().lower() == "active"
+                and _is_manager(m.get("role"))
+            ):
                 return
     except Exception:
         logger.debug("Org manager check failed")
@@ -125,7 +148,11 @@ async def _require_team_manager(principal: AuthPrincipal, team_id: int) -> None:
         members = await list_team_members(team_id)
         uid = int(principal.user_id)
         for m in members:
-            if int(m.get("user_id")) == uid and _is_manager(m.get("role")):
+            if (
+                int(m.get("user_id")) == uid
+                and str(m.get("status") or "").strip().lower() == "active"
+                and _is_manager(m.get("role"))
+            ):
                 return
     except Exception:
         logger.debug("Team manager check failed")
@@ -238,17 +265,28 @@ async def upsert_org_shared_key(
     repo = await _get_shared_byok_repo()
     now = datetime.now(timezone.utc)
     actor_id = _principal_user_id(principal)
-    row = await repo.upsert_secret(
-        scope_type="org",
-        scope_id=org_id,
-        provider=provider_norm,
-        encrypted_blob=dumps_envelope(envelope),
-        key_hint=key_hint_for_api_key(api_key),
-        metadata=payload.metadata,
-        updated_at=now,
-        created_by=actor_id,
-        updated_by=actor_id,
-    )
+    try:
+        row = await repo.upsert_secret(
+            scope_type="org",
+            scope_id=org_id,
+            provider=provider_norm,
+            encrypted_blob=dumps_envelope(envelope),
+            key_hint=key_hint_for_api_key(api_key),
+            metadata=payload.metadata,
+            updated_at=now,
+            created_by=actor_id,
+            updated_by=actor_id,
+            authorization_context=_manager_write_context(principal),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="Org manager role required") from exc
+    except MembershipScopeNotFound as exc:
+        raise HTTPException(status_code=404, detail="Organization not found") from exc
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Conflicting provider credential aliases",
+        ) from exc
     return SharedProviderKeyResponse(
         scope_type="org",
         scope_id=org_id,
@@ -267,7 +305,15 @@ async def list_org_shared_keys(
     await _require_org_manager(principal, org_id)
     repo = await _get_shared_byok_repo()
     try:
-        rows = await repo.list_secrets(scope_type="org", scope_id=org_id)
+        rows = await repo.list_secrets_for_manager(
+            scope_type="org",
+            scope_id=org_id,
+            authorization_context=_manager_write_context(principal),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="Org manager role required") from exc
+    except MembershipScopeNotFound as exc:
+        raise HTTPException(status_code=404, detail="Organization not found") from exc
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     items = [
@@ -303,7 +349,16 @@ async def test_org_shared_key(
 
     repo = await _get_shared_byok_repo()
     try:
-        row = await repo.fetch_secret("org", org_id, provider_norm)
+        row = await repo.fetch_secret_for_manager(
+            scope_type="org",
+            scope_id=org_id,
+            provider=provider_norm,
+            authorization_context=_manager_write_context(principal),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="Org manager role required") from exc
+    except MembershipScopeNotFound as exc:
+        raise HTTPException(status_code=404, detail="Organization not found") from exc
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     if not row:
@@ -401,7 +456,12 @@ async def delete_org_shared_key(
             org_id,
             canonical_provider_name(provider),
             revoked_by=actor_id,
+            authorization_context=_manager_write_context(principal),
         )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="Org manager role required") from exc
+    except MembershipScopeNotFound as exc:
+        raise HTTPException(status_code=404, detail="Organization not found") from exc
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     if not deleted:
@@ -487,17 +547,28 @@ async def upsert_team_shared_key(
     repo = await _get_shared_byok_repo()
     now = datetime.now(timezone.utc)
     actor_id = _principal_user_id(principal)
-    row = await repo.upsert_secret(
-        scope_type="team",
-        scope_id=team_id,
-        provider=provider_norm,
-        encrypted_blob=dumps_envelope(envelope),
-        key_hint=key_hint_for_api_key(api_key),
-        metadata=payload.metadata,
-        updated_at=now,
-        created_by=actor_id,
-        updated_by=actor_id,
-    )
+    try:
+        row = await repo.upsert_secret(
+            scope_type="team",
+            scope_id=team_id,
+            provider=provider_norm,
+            encrypted_blob=dumps_envelope(envelope),
+            key_hint=key_hint_for_api_key(api_key),
+            metadata=payload.metadata,
+            updated_at=now,
+            created_by=actor_id,
+            updated_by=actor_id,
+            authorization_context=_manager_write_context(principal),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="Team manager role required") from exc
+    except MembershipScopeNotFound as exc:
+        raise HTTPException(status_code=404, detail="Team not found") from exc
+    except ProviderCredentialAliasConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Conflicting provider credential aliases",
+        ) from exc
     return SharedProviderKeyResponse(
         scope_type="team",
         scope_id=team_id,
@@ -516,7 +587,15 @@ async def list_team_shared_keys(
     await _require_team_manager(principal, team_id)
     repo = await _get_shared_byok_repo()
     try:
-        rows = await repo.list_secrets(scope_type="team", scope_id=team_id)
+        rows = await repo.list_secrets_for_manager(
+            scope_type="team",
+            scope_id=team_id,
+            authorization_context=_manager_write_context(principal),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="Team manager role required") from exc
+    except MembershipScopeNotFound as exc:
+        raise HTTPException(status_code=404, detail="Team not found") from exc
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     items = [
@@ -552,7 +631,16 @@ async def test_team_shared_key(
 
     repo = await _get_shared_byok_repo()
     try:
-        row = await repo.fetch_secret("team", team_id, provider_norm)
+        row = await repo.fetch_secret_for_manager(
+            scope_type="team",
+            scope_id=team_id,
+            provider=provider_norm,
+            authorization_context=_manager_write_context(principal),
+        )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="Team manager role required") from exc
+    except MembershipScopeNotFound as exc:
+        raise HTTPException(status_code=404, detail="Team not found") from exc
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     if not row:
@@ -650,7 +738,12 @@ async def delete_team_shared_key(
             team_id,
             canonical_provider_name(provider),
             revoked_by=actor_id,
+            authorization_context=_manager_write_context(principal),
         )
+    except MembershipAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="Team manager role required") from exc
+    except MembershipScopeNotFound as exc:
+        raise HTTPException(status_code=404, detail="Team not found") from exc
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     if not deleted:

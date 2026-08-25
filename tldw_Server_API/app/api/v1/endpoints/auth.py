@@ -44,7 +44,6 @@ from tldw_Server_API.app.api.v1.API_Deps.federation_deps import (
     get_oidc_federation_service_dep,
     require_enterprise_federation,
 )
-from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 
 #
 # Local imports
@@ -62,6 +61,7 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     SingleUserSessionResponse,
     TokenResponse,
 )
+from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
     AuditEventType,
@@ -71,11 +71,15 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.auth_governor import get_auth_governor
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     global_settings as _csrf_globals,
+)
+from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     resolve_effective_csrf_enabled,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
     DatabaseError,
+    DatabaseLockError,
     DuplicateOrganizationError,
     DuplicateUserError,
     InvalidRegistrationCodeError,
@@ -86,6 +90,9 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     TokenExpiredError,
     WeakPasswordError,
 )
+from tldw_Server_API.app.core.AuthNZ.federation.claim_mapping import preview_claim_mapping
+from tldw_Server_API.app.core.AuthNZ.federation.provisioning_service import FederationProvisioningService
+from tldw_Server_API.app.core.AuthNZ.federation.state_repo import FederationStateRepo
 from tldw_Server_API.app.core.AuthNZ.input_validation import get_input_validator
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     is_single_user_ip_allowed,
@@ -105,34 +112,53 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     validate_single_user_session,
 )
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
 from tldw_Server_API.app.core.Resource_Governance.policy_loader import default_policy_loader
 from tldw_Server_API.app.core.Resource_Governance.tenant import hash_entity
-from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.testing import (
+    env_flag_enabled as _env_flag_enabled,
+)
+from tldw_Server_API.app.core.testing import (
+    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+)
+from tldw_Server_API.app.core.testing import (
+    is_test_mode as _is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
+    is_truthy as _is_truthy,
+)
 from tldw_Server_API.app.services.auth_service import (
     apply_password_reset as _svc_apply_password_reset,
+)
+from tldw_Server_API.app.services.auth_service import (
     fetch_active_user_by_id,
-    fetch_password_reset_token_record as _svc_fetch_password_reset_token_record,
-    fetch_user_by_email_for_password_reset as _svc_fetch_user_by_email_for_password_reset,
-    fetch_user_by_email_for_verification as _svc_fetch_user_by_email_for_verification,
     fetch_user_by_login_identifier,
-    mark_user_verified as _svc_mark_user_verified,
-    store_password_reset_token as _svc_store_password_reset_token,
-    verify_user_email_once as _svc_verify_user_email_once,
     update_user_last_login,
     update_user_password_hash,
 )
-from tldw_Server_API.app.services.registration_service import RegistrationService
-from tldw_Server_API.app.core.AuthNZ.federation.claim_mapping import preview_claim_mapping
-from tldw_Server_API.app.core.AuthNZ.federation.oidc_service import OIDCFederationService
-from tldw_Server_API.app.core.AuthNZ.federation.provisioning_service import FederationProvisioningService
-from tldw_Server_API.app.core.AuthNZ.federation.state_repo import FederationStateRepo
-from tldw_Server_API.app.core.testing import (
-    env_flag_enabled as _env_flag_enabled,
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-    is_test_mode as _is_test_mode,
-    is_truthy as _is_truthy,
+from tldw_Server_API.app.services.auth_service import (
+    fetch_password_reset_token_record as _svc_fetch_password_reset_token_record,
 )
+from tldw_Server_API.app.services.auth_service import (
+    fetch_user_by_email_for_password_reset as _svc_fetch_user_by_email_for_password_reset,
+)
+from tldw_Server_API.app.services.auth_service import (
+    fetch_user_by_email_for_verification as _svc_fetch_user_by_email_for_verification,
+)
+from tldw_Server_API.app.services.auth_service import (
+    mark_user_verified as _svc_mark_user_verified,
+)
+from tldw_Server_API.app.services.auth_service import (
+    store_password_reset_token as _svc_store_password_reset_token,
+)
+from tldw_Server_API.app.services.auth_service import (
+    verify_user_email_once as _svc_verify_user_email_once,
+)
+from tldw_Server_API.app.services.registration_service import RegistrationService
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -927,27 +953,38 @@ async def _ensure_user_org_membership(user_id: int, username: Optional[str] = No
 
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-        from tldw_Server_API.app.core.AuthNZ.orgs_teams import create_organization
+        from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+            TrustedMembershipReason,
+            TrustedMembershipWriteContext,
+        )
         from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
+        pool = await get_db_pool()
+        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
+        context = TrustedMembershipWriteContext(
+            trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+        )
         org = None
         for attempt in range(3):
             name = base_name if attempt == 0 else f"{base_name}-{secrets.token_hex(2)}"
             try:
-                org = await create_organization(name=name, owner_user_id=int(user_id))
+                org = await repo.create_organization_with_owner_membership(
+                    name=name,
+                    owner_user_id=int(user_id),
+                    context=context,
+                )
                 break
             except DuplicateOrganizationError:
                 continue
 
         if not org:
             return
-
-        pool = await get_db_pool()
-        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
-        await repo.add_org_member(org_id=org["id"], user_id=int(user_id), role="owner")
     except Exception as exc:
         # Best-effort bootstrap: org creation failures must not block login flows.
-        logger.warning("Org bootstrap failed for user {}: {}", user_id, exc)
+        logger.bind(error_type=type(exc).__name__).warning(
+            "Org bootstrap failed for user_id={}",
+            user_id,
+        )
 
 def _is_pytest_context() -> bool:
     """Return True when running under pytest or explicit test-mode flags."""
@@ -1069,9 +1106,9 @@ async def _get_auth_endpoint_rg_governor(request: Request) -> Optional[Any]:
             if loader is None:
                 loader = default_policy_loader()
                 await loader.load_once()
-                setattr(state, "rg_policy_loader", loader)
+                state.rg_policy_loader = loader
             fallback = MemoryResourceGovernor(policy_loader=loader)
-            setattr(state, "auth_endpoint_rg_governor", fallback)
+            state.auth_endpoint_rg_governor = fallback
             return fallback
         except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Auth endpoint RG fallback governor init failed: {}", exc)
@@ -2745,7 +2782,7 @@ async def verify_email(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired verification token",
-            )
+            ) from None
 
         # Update user's verification status only when it is currently unverified.
         updated_rows = await _verify_user_email_once(
@@ -3815,6 +3852,20 @@ async def register(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid registration code."
+        ) from e
+    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as e:
+        logger.warning("Registration deferred because the authentication database is busy")
+        log_counter("auth_register_database_busy")
+        log_histogram("auth_register_duration", time.perf_counter() - start_time)
+        _finalize_register_diag(http_request, response)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication database is busy. Please retry shortly.",
+            headers={
+                "Retry-After": str(
+                    get_authnz_transaction_policy().busy_retry_after_seconds
+                ),
+            },
         ) from e
     except RegistrationError as e:
         logger.error(f"Registration error: {e}")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import UserRegistrationException
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Security.crypto import (
@@ -15,7 +16,7 @@ def normalize_provider_name(provider: str) -> str:
     return (provider or "").strip().lower()
 
 
-class ProviderCredentialAliasConflictError(ValueError):
+class ProviderCredentialAliasConflictError(ValueError, UserRegistrationException):
     """Raised when more than one legacy alias row exists for one provider."""
 
 

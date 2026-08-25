@@ -8,10 +8,17 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_current_user,
 )
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 pytestmark = pytest.mark.integration
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 def _attach_api_key_whoami_router(app: FastAPI) -> None:
@@ -144,7 +151,6 @@ async def test_multi_user_api_key_happy_path_principal_matches_state(
         uuid_value=uuid4(),
     )
     user_id = int(created_user["id"])
-
     mgr = APIKeyManager(pool)
     await mgr.initialize()
     key_rec = await mgr.create_api_key(user_id=user_id, name="api-key-happy")
@@ -237,13 +243,13 @@ async def test_api_key_scopes_org_and_team_membership(
 
     org_a = await create_organization(name="Scoped Org A", owner_user_id=None)
     org_b = await create_organization(name="Scoped Org B", owner_user_id=None)
-    await add_org_member(org_id=int(org_a["id"]), user_id=user_id, role="member")
-    await add_org_member(org_id=int(org_b["id"]), user_id=user_id, role="member")
+    await add_org_member(org_id=int(org_a["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_org_member(org_id=int(org_b["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     team_a = await create_team(org_id=int(org_a["id"]), name="Scoped Team A")
     team_b = await create_team(org_id=int(org_b["id"]), name="Scoped Team B")
-    await add_team_member(team_id=int(team_a["id"]), user_id=user_id, role="member")
-    await add_team_member(team_id=int(team_b["id"]), user_id=user_id, role="member")
+    await add_team_member(team_id=int(team_a["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_team_member(team_id=int(team_b["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     mgr = APIKeyManager(pool)
     await mgr.initialize()

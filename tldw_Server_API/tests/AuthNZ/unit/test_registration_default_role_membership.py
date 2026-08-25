@@ -6,11 +6,20 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import aiosqlite
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import RegistrationError
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    AnchorOwnership,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
+    AuthnzOrgsTeamsRepo,
+)
 from tldw_Server_API.app.services.registration_service import RegistrationService
 
 
@@ -28,14 +37,26 @@ class _SQLitePool:
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
+        self.transaction_connections: list[Any] = []
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ) -> AsyncIterator[Any]:
+        assert acquire_timeout_seconds is not None
+        from tldw_Server_API.app.core.AuthNZ.database import (
+            _GuardedSQLiteConnection,
+        )
+
         conn = await aiosqlite.connect(self.db_path)
         await conn.execute("PRAGMA foreign_keys = ON")
         await conn.execute("BEGIN IMMEDIATE")
         try:
-            yield conn
+            guarded = _GuardedSQLiteConnection(conn)
+            self.transaction_connections.append(guarded)
+            yield guarded
             await conn.commit()
         except Exception:
             await conn.rollback()
@@ -58,8 +79,10 @@ def _initialize_auth_db(db_path: Path) -> None:
                 role TEXT NOT NULL,
                 is_active INTEGER NOT NULL,
                 is_verified INTEGER NOT NULL,
+                is_superuser INTEGER NOT NULL DEFAULT 0,
                 created_by INTEGER,
-                storage_quota_mb INTEGER NOT NULL
+                storage_quota_mb INTEGER NOT NULL,
+                profile_version TEXT NOT NULL
             );
             CREATE TABLE roles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,6 +107,60 @@ def _initialize_auth_db(db_path: Path) -> None:
                 status TEXT,
                 details TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE organizations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                owner_user_id INTEGER,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+            CREATE TABLE org_members (
+                org_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT NOT NULL DEFAULT 'member',
+                status TEXT NOT NULL DEFAULT 'active',
+                PRIMARY KEY (org_id, user_id),
+                FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE TABLE teams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                org_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                slug TEXT,
+                description TEXT,
+                metadata TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                UNIQUE (org_id, name),
+                FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+            );
+            CREATE TABLE team_members (
+                team_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT NOT NULL DEFAULT 'member',
+                status TEXT NOT NULL DEFAULT 'active',
+                PRIMARY KEY (team_id, user_id),
+                FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE TABLE user_config_overrides (
+                user_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, key)
+            );
+            CREATE TABLE org_config_overrides (
+                org_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (org_id, key)
+            );
+            CREATE TABLE team_config_overrides (
+                team_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (team_id, key)
             );
             CREATE TABLE registration_codes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,3 +316,81 @@ async def test_unknown_registration_code_role_rolls_back_user_and_code_use(tmp_p
     assert user_count == 0
     assert times_used == 0
     assert membership_count == 0
+
+
+@pytest.mark.asyncio
+async def test_org_scoped_registration_uses_registration_writer_on_caller_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, db_path = _make_service(tmp_path)
+    expires_at = (datetime.utcnow() + timedelta(days=1)).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        org_id = conn.execute(
+            "INSERT INTO organizations (name) VALUES (?)",
+            ("Registration org",),
+        ).lastrowid
+        team_id = conn.execute(
+            "INSERT INTO teams (org_id, name) VALUES (?, ?)",
+            (org_id, "Registration team"),
+        ).lastrowid
+        conn.execute(
+            """
+            INSERT INTO registration_codes (
+                code, role_to_grant, times_used, max_uses, expires_at, is_active,
+                org_id, org_role, team_id
+            ) VALUES (?, ?, 0, 1, ?, 1, ?, ?, ?)
+            """,
+            (
+                "org-registration-code",
+                "user",
+                expires_at,
+                org_id,
+                "admin",
+                team_id,
+            ),
+        )
+
+    observed: list[dict[str, Any]] = []
+    original = AuthnzOrgsTeamsRepo.provision_org_membership_on_connection
+
+    async def _record(self, **kwargs):
+        observed.append(kwargs)
+        return await original(
+            self,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        AuthnzOrgsTeamsRepo,
+        "provision_org_membership_on_connection",
+        _record,
+    )
+
+    payload = await service.register_user(
+        username="org-registration-user",
+        email="org-registration-user@example.com",
+        password="Strong!Pass9",
+        registration_code="org-registration-code",
+    )
+
+    assert len(observed) == 1
+    assert observed[0]["conn"] is service.db_pool.transaction_connections[0]
+    assert observed[0]["context"] == TrustedMembershipWriteContext(
+        trusted_reason=TrustedMembershipReason.REGISTRATION,
+    )
+    assert observed[0]["anchor_ownership"] is AnchorOwnership.WRITER_OWNS_ANCHOR
+    assert observed[0]["org_role"] == "admin"
+    assert observed[0]["team_id"] == team_id
+    assert observed[0]["team_role"] == "member"
+    assert observed[0]["team_failure_is_best_effort"] is False
+    with sqlite3.connect(db_path) as conn:
+        org_role = conn.execute(
+            "SELECT role FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, payload["user_id"]),
+        ).fetchone()[0]
+        team_role = conn.execute(
+            "SELECT role FROM team_members WHERE team_id = ? AND user_id = ?",
+            (team_id, payload["user_id"]),
+        ).fetchone()[0]
+    assert (org_role, team_role) == ("admin", "member")

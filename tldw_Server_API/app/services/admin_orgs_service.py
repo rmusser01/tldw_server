@@ -6,7 +6,6 @@ from typing import Any
 from fastapi import HTTPException, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     OrganizationCreateRequest,
     OrganizationResponse,
@@ -22,18 +21,27 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     OrgMembershipItem,
     TeamCreateRequest,
     TeamMemberAddRequest,
-    TeamMemberRoleUpdateRequest,
     TeamMemberRemoveResponse,
-    TeamMembershipItem,
     TeamMemberResponse,
+    TeamMemberRoleUpdateRequest,
+    TeamMembershipItem,
     TeamResponse,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
-from tldw_Server_API.app.core.config_sections.stt import _parse_bool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DuplicateOrganizationError,
     DuplicateTeamError,
     UserRegistrationException,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipParentRequired,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_org_member as core_add_org_member,
@@ -42,19 +50,22 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_team_member as core_add_team_member,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
-    create_organization as core_create_organization,
+    create_organization_as_actor as core_create_organization_as_actor,
+)
+from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
+    create_organization_with_owner_membership as core_create_organization_with_owner_membership,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     create_team as core_create_team,
+)
+from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
+    list_memberships_for_user as core_list_team_memberships_for_user,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     list_org_members as core_list_org_members,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     list_org_memberships_for_user as core_list_org_memberships_for_user,
-)
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
-    list_memberships_for_user as core_list_team_memberships_for_user,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     list_organizations as core_list_organizations,
@@ -69,14 +80,15 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     remove_team_member as core_remove_team_member,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
-    update_team_member_role as core_update_team_member_role,
+    update_org_member_role as core_update_org_member_role,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
-    update_org_member_role as core_update_org_member_role,
+    update_team_member_role as core_update_team_member_role,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.org_stt_settings_repo import AuthnzOrgSttSettingsRepo
 from tldw_Server_API.app.core.config import get_stt_config
+from tldw_Server_API.app.core.config_sections.stt import _parse_bool
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
@@ -125,6 +137,56 @@ def _is_postgres_connection(db: Any) -> bool:
         return True
 
     return callable(getattr(db, "fetchrow", None))
+
+
+def _membership_write_context(
+    principal: AuthPrincipal,
+) -> ActorMembershipWriteContext:
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        )
+    return ActorMembershipWriteContext(
+        actor_user_id=principal.user_id,
+        required_authority=(
+            MembershipAuthority.PLATFORM_ADMIN
+            if admin_scope_service.is_platform_admin(principal)
+            else MembershipAuthority.SCOPED_MEMBERSHIP
+        ),
+    )
+
+
+_MEMBERSHIP_CONTROL_ERRORS = (
+    MembershipAuthorizationError,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
+)
+
+
+def _membership_control_http_error(
+    exc: (
+        MembershipAuthorizationError
+        | MembershipPreflightChanged
+        | MembershipScopeNotFound
+        | MembershipTargetNotFound
+    ),
+) -> HTTPException:
+    if isinstance(exc, MembershipAuthorizationError):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        )
+    if isinstance(exc, (MembershipScopeNotFound, MembershipTargetNotFound)):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Membership scope or target not found",
+        )
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Membership write conflicted; retry the request",
+    )
 
 
 async def _list_teams_by_org_conn(db, org_id: int, limit: int, offset: int) -> list[dict[str, Any]]:
@@ -224,7 +286,9 @@ async def _emit_membership_audit_event(
             metadata=metadata,
         )
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Audit ({action}) skipped/failed: {exc}")
+        logger.bind(error_type=type(exc).__name__, audit_action=action).debug(
+            "Admin organization audit skipped or failed"
+        )
 
 
 async def create_org(
@@ -233,12 +297,22 @@ async def create_org(
 ) -> OrganizationResponse:
     try:
         admin_scope_service.require_platform_admin(principal)
-        row = await core_create_organization(
-            name=payload.name,
-            owner_user_id=payload.owner_user_id,
-            slug=payload.slug,
-        )
+        if payload.owner_user_id is None:
+            row = await core_create_organization_as_actor(
+                name=payload.name,
+                slug=payload.slug,
+                context=_membership_write_context(principal),
+            )
+        else:
+            row = await core_create_organization_with_owner_membership(
+                name=payload.name,
+                owner_user_id=payload.owner_user_id,
+                slug=payload.slug,
+                context=_membership_write_context(principal),
+            )
         return OrganizationResponse(**row)
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except DuplicateOrganizationError as dup:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -592,6 +666,7 @@ async def add_team_member(
             team_id=team_id,
             user_id=payload.user_id,
             role=payload.role or "member",
+            context=_membership_write_context(principal),
         )
         await _emit_membership_audit_event(
             request,
@@ -602,6 +677,13 @@ async def add_team_member(
             metadata={"target_user_id": payload.user_id, "role": payload.role or "member"},
         )
         return TeamMemberResponse(**row)
+    except MembershipParentRequired:
+        raise HTTPException(
+            status_code=400,
+            detail="User must be an organization member first",
+        ) from None
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -641,7 +723,11 @@ async def remove_team_member(
 ) -> TeamMemberRemoveResponse:
     try:
         await admin_scope_service.get_scoped_team(team_id, principal, require_admin=True)
-        res = await core_remove_team_member(team_id=team_id, user_id=user_id)
+        res = await core_remove_team_member(
+            team_id=team_id,
+            user_id=user_id,
+            context=_membership_write_context(principal),
+        )
         removed = bool(res.get("removed"))
         if not removed:
             return TeamMemberRemoveResponse(
@@ -664,6 +750,8 @@ async def remove_team_member(
             user_id=int(res.get("user_id", user_id)),
             removed=True,
         )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -680,7 +768,12 @@ async def update_team_member_role(
 ) -> TeamMemberResponse:
     try:
         team = await admin_scope_service.get_scoped_team(team_id, principal, require_admin=True)
-        row = await core_update_team_member_role(team_id=team_id, user_id=user_id, role=payload.role)
+        row = await core_update_team_member_role(
+            team_id=team_id,
+            user_id=user_id,
+            role=payload.role,
+            context=_membership_write_context(principal),
+        )
         if not row:
             raise HTTPException(status_code=404, detail="Team membership not found")
         await _emit_membership_audit_event(
@@ -694,6 +787,8 @@ async def update_team_member_role(
         response_payload = dict(row)
         response_payload["org_id"] = team.get("org_id") if isinstance(team, dict) else None
         return TeamMemberResponse(**response_payload)
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -713,6 +808,7 @@ async def add_org_member(
             org_id=org_id,
             user_id=payload.user_id,
             role=payload.role or "member",
+            context=_membership_write_context(principal),
         )
         await _emit_membership_audit_event(
             request,
@@ -723,6 +819,8 @@ async def add_org_member(
             metadata={"target_user_id": payload.user_id, "role": payload.role or "member"},
         )
         return OrgMemberResponse(**row)
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -768,7 +866,11 @@ async def remove_org_member(
 ) -> OrgMemberRemoveResponse:
     try:
         await admin_scope_service.enforce_admin_org_access(principal, org_id, require_admin=True)
-        res = await core_remove_org_member(org_id=org_id, user_id=user_id)
+        res = await core_remove_org_member(
+            org_id=org_id,
+            user_id=user_id,
+            context=_membership_write_context(principal),
+        )
         if res.get("error") == "owner_required":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -796,6 +898,8 @@ async def remove_org_member(
             user_id=int(res.get("user_id", user_id)),
             removed=True,
         )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
@@ -812,7 +916,12 @@ async def update_org_member_role(
 ) -> OrgMemberResponse:
     try:
         await admin_scope_service.enforce_admin_org_access(principal, org_id, require_admin=True)
-        row = await core_update_org_member_role(org_id=org_id, user_id=user_id, role=payload.role)
+        row = await core_update_org_member_role(
+            org_id=org_id,
+            user_id=user_id,
+            role=payload.role,
+            context=_membership_write_context(principal),
+        )
         if not row:
             raise HTTPException(status_code=404, detail="Org membership not found")
         if row.get("error") == "owner_required":
@@ -829,6 +938,8 @@ async def update_org_member_role(
             metadata={"target_user_id": user_id, "new_role": payload.role},
         )
         return OrgMemberResponse(**row)
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_error(exc) from None
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:

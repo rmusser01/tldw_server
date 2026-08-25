@@ -262,15 +262,14 @@ async def test_byok_resolution_freezes_one_server_config_generation(
         fetch_secret_for_active_user = fetch_secret_for_user
 
     class SharedRepo:
-        async def fetch_secret(
+        async def fetch_authorized_secret_for_user(
             self,
             scope_type,
             _scope_id,
+            user_id,
             _provider,
-            *,
-            include_revoked=False,
         ):
-            assert include_revoked is True
+            assert user_id == 7
             return row if scope_type == source else None
 
     async def get_user_repo():
@@ -2121,16 +2120,15 @@ async def test_shared_repository_outage_does_not_advance_precedence(
         fetch_secret_for_active_user = fetch_secret_for_user
 
     class _FakeSharedRepo:
-        async def fetch_secret(
+        async def fetch_authorized_secret_for_user(
             self,
             requested_scope: str,
             scope_id: int,
+            user_id: int,
             provider: str,
-            *,
-            include_revoked: bool = False,
         ):
             assert requested_scope == scope_type
-            assert include_revoked is True
+            assert user_id == 1
             raise ConnectionError("shared store outage with token=do-not-leak")
 
     async def _fake_get_user_repo():
@@ -2814,16 +2812,15 @@ async def test_present_non_dict_credential_fields_fail_closed(
         fetch_secret_for_active_user = fetch_secret_for_user
 
     class _FakeSharedRepo:
-        async def fetch_secret(
+        async def fetch_authorized_secret_for_user(
             self,
             scope_type: str,
             scope_id: int,
+            user_id: int,
             provider: str,
-            *,
-            include_revoked: bool = False,
         ):
             assert scope_type == scope
-            assert include_revoked is True
+            assert user_id == 1
             return row
 
     async def _get_user_repo():
@@ -4408,6 +4405,75 @@ async def test_redis_oauth_refresh_lock_finishes_release_before_cancellation_ret
 
     assert released
     assert closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scope_type", "team_ids", "org_ids", "scope_id"),
+    [
+        ("team", [41], [], 41),
+        ("org", [], [43], 43),
+    ],
+)
+async def test_default_shared_resolution_reauthorizes_active_membership(
+    monkeypatch,
+    scope_type,
+    team_ids,
+    org_ids,
+    scope_id,
+) -> None:
+    """Candidate scope IDs never authorize a shared credential by themselves."""
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    class _UserRepo:
+        async def fetch_secret_for_active_user(self, *_args, **_kwargs):
+            return None
+
+        async def fetch_secret_for_user(self, *_args, **_kwargs):
+            return None
+
+    class _SharedRepo:
+        async def fetch_secret(self, *_args, **_kwargs):
+            raise AssertionError("default resolution must use the authorized read")
+
+        async def fetch_authorized_secret_for_user(
+            self,
+            actual_scope_type,
+            actual_scope_id,
+            user_id,
+            provider,
+        ):
+            assert (actual_scope_type, actual_scope_id) == (scope_type, scope_id)
+            assert user_id == 7
+            assert provider == "openai"
+            return {"revoked_at": None, "last_used_at": None}
+
+    async def _get_user_repo():
+        return _UserRepo()
+
+    async def _get_shared_repo():
+        return _SharedRepo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _get_user_repo)
+    monkeypatch.setattr(byok_runtime, "_get_org_repo", _get_shared_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr(
+        byok_runtime,
+        "_extract_payload",
+        lambda _row, _provider: {"api_key": "current-shared-key"},
+    )
+
+    resolution = await byok_runtime.resolve_byok_credentials(
+        "openai",
+        user_id=7,
+        team_ids=team_ids,
+        org_ids=org_ids,
+        server_config_snapshot={},
+    )
+
+    assert resolution.source == scope_type
+    assert resolution.api_key == "current-shared-key"
 
 
 @pytest.mark.asyncio

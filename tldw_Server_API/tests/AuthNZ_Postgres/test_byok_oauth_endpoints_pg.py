@@ -11,6 +11,80 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
+
+
+async def _execute_membership_fixture_sql(test_db_pool, query: str, *args) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
+    )
+
+    async with test_db_pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            query,
+            *args,
+            backend="postgres",
+        )
+
+
+async def _insert_postgres_user(
+    test_db_pool,
+    *,
+    username: str,
+    email: str,
+    password_hash: str,
+    role: str = "user",
+    is_superuser: bool = False,
+) -> int:
+    from tldw_Server_API.app.core.AuthNZ.profile_version import (
+        VersionedUserWriteGateway,
+    )
+
+    async with test_db_pool.transaction() as conn:
+        result = await VersionedUserWriteGateway("postgres").insert_user(
+            conn,
+            values={
+                "uuid": str(uuid.uuid4()),
+                "username": username,
+                "email": email,
+                "password_hash": password_hash,
+                "role": role,
+                "is_active": True,
+                "is_verified": True,
+                "is_superuser": is_superuser,
+                "storage_quota_mb": 5120,
+            },
+        )
+    return result.affected_user_ids[0]
+
+
+async def _set_postgres_user_active(
+    test_db_pool,
+    *,
+    user_id: int,
+    value: bool | None,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_version import (
+        VersionedUserWriteGateway,
+    )
+
+    async with test_db_pool.transaction() as conn:
+        await VersionedUserWriteGateway("postgres").execute_update(
+            conn,
+            user_id=user_id,
+            profile_visible_fields=("is_active",),
+            statement="UPDATE public.users SET is_active = $1 WHERE id = $2",
+            parameters=(value, user_id),
+        )
+
 
 class _PostgresMutationConnectionGate:
     def __init__(self, connection, owner: "_PostgresMutationGatePool") -> None:
@@ -29,6 +103,11 @@ class _PostgresMutationConnectionGate:
             await self.owner.release_revoke.wait()
         self.owner.identity_lock_count += 1
         return result
+
+    async def fetchrow(self, query: str, *args):
+        if self.owner.role == "upsert" and "for update" in query.lower():
+            self.owner.upsert_attempted.set()
+        return await self.connection.fetchrow(query, *args)
 
     def __getattr__(self, name: str):
         return getattr(self.connection, name)
@@ -55,8 +134,14 @@ class _PostgresMutationGatePool:
         self.identity_lock_count = 0
 
     @asynccontextmanager
-    async def transaction(self):
-        async with self.delegate.transaction() as connection:
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
+        async with self.delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as connection:
             yield _PostgresMutationConnectionGate(connection, self)
 
     async def fetchone(self, query: str, *args):
@@ -167,20 +252,12 @@ def _capture_real_openai_adapter_headers(monkeypatch):
 async def _create_postgres_runtime_scope(test_db_pool) -> tuple[int, int, int]:
     """Create one active user with active org and team memberships."""
     suffix = uuid.uuid4().hex
-    user = await test_db_pool.fetchrow(
-        """
-        INSERT INTO users (
-            uuid, username, email, password_hash, role,
-            is_active, is_verified, is_superuser, storage_quota_mb
-        ) VALUES ($1, $2, $3, $4, 'user', TRUE, TRUE, FALSE, 5120)
-        RETURNING id
-        """,
-        str(uuid.uuid4()),
-        f"runtime-{suffix}",
-        f"runtime-{suffix}@example.com",
-        "hashed-password",
+    user_id = await _insert_postgres_user(
+        test_db_pool,
+        username=f"runtime-{suffix}",
+        email=f"runtime-{suffix}@example.com",
+        password_hash="hashed-password",
     )
-    user_id = int(user["id"])
     org = await test_db_pool.fetchrow(
         """
         INSERT INTO organizations (uuid, name, owner_user_id, is_active)
@@ -192,9 +269,10 @@ async def _create_postgres_runtime_scope(test_db_pool) -> tuple[int, int, int]:
         user_id,
     )
     org_id = int(org["id"])
-    await test_db_pool.execute(
+    await _execute_membership_fixture_sql(
+        test_db_pool,
         """
-        INSERT INTO org_members (org_id, user_id, role, status)
+        INSERT INTO public.org_members (org_id, user_id, role, status)
         VALUES ($1, $2, 'lead', 'active')
         """,
         org_id,
@@ -210,15 +288,83 @@ async def _create_postgres_runtime_scope(test_db_pool) -> tuple[int, int, int]:
         f"Runtime Team {suffix}",
     )
     team_id = int(team["id"])
-    await test_db_pool.execute(
+    await _execute_membership_fixture_sql(
+        test_db_pool,
         """
-        INSERT INTO team_members (team_id, user_id, role, status)
+        INSERT INTO public.team_members (team_id, user_id, role, status)
         VALUES ($1, $2, 'lead', 'active')
         """,
         team_id,
         user_id,
     )
     return user_id, org_id, team_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_org_provider_secrets_use_public_schema_under_shadow_search_path(
+    test_db_pool,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+        AuthnzOrgProviderSecretsRepo,
+    )
+
+    _user_id, org_id, _team_id = await _create_postgres_runtime_scope(test_db_pool)
+    schema = f"org_secret_shadow_{uuid.uuid4().hex[:8]}"
+    now = datetime.now(timezone.utc)
+
+    async with test_db_pool.transaction() as conn:
+        await conn.execute(f'CREATE SCHEMA "{schema}"')
+        await conn.execute(
+            f'CREATE TABLE "{schema}".org_provider_secrets '
+            "(LIKE public.org_provider_secrets INCLUDING ALL)"
+        )
+        await conn.fetchval(
+            "SELECT set_config('search_path', $1, TRUE)",
+            f'"{schema}", public',
+        )
+
+        class _ConnectionBoundPool:
+            pool = object()
+
+            @asynccontextmanager
+            async def transaction(
+                self,
+                *,
+                acquire_timeout_seconds: float | None = None,
+            ):
+                assert acquire_timeout_seconds is not None
+                yield conn
+
+            async def fetchall(self, query: str, *args):
+                return await conn.fetch(query, *args)
+
+            async def execute(self, query: str, *args):
+                return await conn.execute(query, *args)
+
+        repo = AuthnzOrgProviderSecretsRepo(_ConnectionBoundPool())  # type: ignore[arg-type]
+        written = await repo.upsert_secret(
+            scope_type="org",
+            scope_id=org_id,
+            provider="openai",
+            encrypted_blob="public-only",
+            key_hint="shadow-test",
+            metadata=None,
+            updated_at=now,
+        )
+        fetched = await repo.fetch_secret("org", org_id, "openai")
+
+        assert written["provider"] == "openai"
+        assert fetched is not None
+        assert fetched["encrypted_blob"] == "public-only"
+        assert await conn.fetchval(
+            "SELECT COUNT(*) FROM public.org_provider_secrets "
+            "WHERE scope_type = 'org' AND scope_id = $1",
+            org_id,
+        ) == 1
+        assert await conn.fetchval(
+            f'SELECT COUNT(*) FROM "{schema}".org_provider_secrets'
+        ) == 0
 
 
 async def _insert_postgres_user_payload(
@@ -360,13 +506,16 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_postgres
     ) is not None
 
     if null_boundary in {"team_user", "org_user"}:
-        await test_db_pool.execute(
-            "UPDATE users SET is_active = NULL WHERE id = $1",
-            user_id,
+        await _set_postgres_user_active(
+            test_db_pool,
+            user_id=user_id,
+            value=None,
         )
     elif null_boundary == "team_membership":
-        await test_db_pool.execute(
-            "UPDATE team_members SET status = NULL WHERE team_id = $1 AND user_id = $2",
+        await _execute_membership_fixture_sql(
+            test_db_pool,
+            "UPDATE public.team_members SET status = NULL "
+            "WHERE team_id = $1 AND user_id = $2",
             scope_id,
             user_id,
         )
@@ -381,8 +530,10 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_postgres
             org_id,
         )
     elif null_boundary == "org_membership":
-        await test_db_pool.execute(
-            "UPDATE org_members SET status = NULL WHERE org_id = $1 AND user_id = $2",
+        await _execute_membership_fixture_sql(
+            test_db_pool,
+            "UPDATE public.org_members SET status = NULL "
+            "WHERE org_id = $1 AND user_id = $2",
             scope_id,
             user_id,
         )
@@ -444,7 +595,7 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
         add_org_member,
         add_team_member,
-        create_organization,
+        create_organization_with_owner_membership,
         create_team,
     )
     from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
@@ -465,45 +616,19 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     admin_username = f"byok-pg-admin-{name_suffix}"
     user_username = f"byok-pg-user-{name_suffix}"
 
-    await test_db_pool.execute(
-        """
-        INSERT INTO users (
-            uuid,
-            username,
-            email,
-            password_hash,
-            role,
-            is_active,
-            is_verified,
-            is_superuser,
-            storage_quota_mb
-        ) VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, TRUE, 5120)
-        """,
-        str(uuid.uuid4()),
-        admin_username,
-        f"{admin_username}@example.com",
-        "hashed-admin",
-        "admin",
+    admin_id = await _insert_postgres_user(
+        test_db_pool,
+        username=admin_username,
+        email=f"{admin_username}@example.com",
+        password_hash="hashed-admin",
+        role="admin",
+        is_superuser=True,
     )
-    await test_db_pool.execute(
-        """
-        INSERT INTO users (
-            uuid,
-            username,
-            email,
-            password_hash,
-            role,
-            is_active,
-            is_verified,
-            is_superuser,
-            storage_quota_mb
-        ) VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, FALSE, 5120)
-        """,
-        str(uuid.uuid4()),
-        user_username,
-        f"{user_username}@example.com",
-        "hashed-user",
-        "user",
+    user_id = await _insert_postgres_user(
+        test_db_pool,
+        username=user_username,
+        email=f"{user_username}@example.com",
+        password_hash="hashed-user",
     )
 
     admin_row = await test_db_pool.fetchrow(
@@ -517,17 +642,30 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     assert admin_row is not None
     assert user_row is not None
 
-    admin_id = int(admin_row["id"])
-    user_id = int(user_row["id"])
+    assert int(admin_row["id"]) == admin_id
+    assert int(user_row["id"]) == user_id
 
-    org = await create_organization(name=f"BYOK Org {name_suffix}", owner_user_id=admin_id)
+    org = await create_organization_with_owner_membership(
+        name=f"BYOK Org {name_suffix}",
+        owner_user_id=admin_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     team = await create_team(org_id=int(org["id"]), name=f"BYOK Team {name_suffix}")
-    await add_org_member(org_id=int(org["id"]), user_id=user_id, role="lead")
-    await add_team_member(team_id=int(team["id"]), user_id=user_id, role="lead")
+    await add_org_member(org_id=int(org["id"]), user_id=user_id, role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_team_member(team_id=int(team["id"]), user_id=user_id, role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     shared_repo = AuthnzOrgProviderSecretsRepo(test_db_pool)
     await shared_repo.ensure_tables()
-    base_scope_id = 1_000_000 + (uuid.uuid4().int % 1_000_000)
+    repo_org = await create_organization_with_owner_membership(
+        name=f"BYOK Repo Org {name_suffix}",
+        owner_user_id=admin_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
+    repo_team = await create_team(
+        org_id=int(repo_org["id"]),
+        name=f"BYOK Repo Team {name_suffix}",
+    )
+    base_scope_id = int(repo_team["id"])
     now = datetime.now(timezone.utc)
     written = await shared_repo.upsert_secret(
         scope_type="team",
@@ -540,7 +678,7 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     )
     assert written["provider"] == "openai"
 
-    legacy_scope_id = base_scope_id + 1
+    legacy_scope_id = int(repo_org["id"])
     await test_db_pool.execute(
         """
         INSERT INTO org_provider_secrets (
@@ -560,7 +698,7 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     await shared_repo.touch_last_used("org", legacy_scope_id, "openai", now)
     assert await shared_repo.delete_secret("org", legacy_scope_id, "openai")
 
-    revoked_scope_id = base_scope_id + 2
+    revoked_scope_id = 1_000_000 + (uuid.uuid4().int % 1_000_000)
     await test_db_pool.execute(
         """
         INSERT INTO org_provider_secrets (
@@ -640,7 +778,7 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
         assert authorized_revoked["provider"] == "custom-openai-api"
         assert authorized_revoked["revoked_at"] is not None
 
-    conflict_scope_id = base_scope_id + 3
+    conflict_scope_id = 1_000_000 + (uuid.uuid4().int % 1_000_000)
     for provider in ("custom-openai", "openai-compatible"):
         await test_db_pool.execute(
             """
@@ -949,21 +1087,13 @@ async def test_openai_mutation_lock_bound_repo_executes_delete_postgres(
         AuthnzUserProviderSecretsRepo,
     )
 
-    user_uuid = uuid.uuid4()
-    user_row = await test_db_pool.fetchone(
-        """
-        INSERT INTO users (
-            uuid, username, email, password_hash, role,
-            is_active, is_verified, is_superuser
-        ) VALUES ($1, $2, $3, $4, 'user', TRUE, TRUE, FALSE)
-        RETURNING id
-        """,
-        user_uuid,
-        f"lock-delete-{user_uuid.hex}",
-        f"lock-delete-{user_uuid.hex}@example.com",
-        "hashed-password",
+    user_suffix = uuid.uuid4().hex
+    user_id = await _insert_postgres_user(
+        test_db_pool,
+        username=f"lock-delete-{user_suffix}",
+        email=f"lock-delete-{user_suffix}@example.com",
+        password_hash="hashed-password",
     )
-    user_id = int(user_row["id"])
     repo = AuthnzUserProviderSecretsRepo(test_db_pool)
     await repo.upsert_secret(
         user_id=user_id,
@@ -1012,22 +1142,15 @@ async def test_alias_revoke_and_canonical_upsert_serialize_postgres(
 
     now = datetime.now(timezone.utc)
     identity = 1_000_000 + (uuid.uuid4().int % 1_000_000)
+    actor_user_id = identity
     if owner_kind == "user":
-        user_uuid = uuid.uuid4()
-        user_row = await test_db_pool.fetchone(
-            """
-            INSERT INTO users (
-                uuid, username, email, password_hash, role,
-                is_active, is_verified, is_superuser
-            ) VALUES ($1, $2, $3, $4, 'user', TRUE, TRUE, FALSE)
-            RETURNING id
-            """,
-            user_uuid,
-            f"alias-race-{user_uuid.hex}",
-            f"alias-race-{user_uuid.hex}@example.com",
-            "hashed-password",
+        user_suffix = uuid.uuid4().hex
+        identity = await _insert_postgres_user(
+            test_db_pool,
+            username=f"alias-race-{user_suffix}",
+            email=f"alias-race-{user_suffix}@example.com",
+            password_hash="hashed-password",
         )
-        identity = int(user_row["id"])
         await test_db_pool.execute(
             """
             INSERT INTO user_provider_secrets (
@@ -1041,6 +1164,9 @@ async def test_alias_revoke_and_canonical_upsert_serialize_postgres(
             now,
         )
     else:
+        actor_user_id, identity, _team_id = await _create_postgres_runtime_scope(
+            test_db_pool
+        )
         await test_db_pool.execute(
             """
             INSERT INTO org_provider_secrets (
@@ -1102,7 +1228,12 @@ async def test_alias_revoke_and_canonical_upsert_serialize_postgres(
         revoke_repo = AuthnzOrgProviderSecretsRepo(revoke_pool)
         upsert_repo = AuthnzOrgProviderSecretsRepo(upsert_pool)
         revoke_task = asyncio.create_task(
-            revoke_repo.delete_secret("org", identity, "openai", revoked_by=identity)
+            revoke_repo.delete_secret(
+                "org",
+                identity,
+                "openai",
+                revoked_by=actor_user_id,
+            )
         )
 
         async def upsert():
@@ -1114,8 +1245,8 @@ async def test_alias_revoke_and_canonical_upsert_serialize_postgres(
                 key_hint="canonical",
                 metadata=None,
                 updated_at=now,
-                created_by=identity,
-                updated_by=identity,
+                created_by=actor_user_id,
+                updated_by=actor_user_id,
             )
 
         final_query = (
@@ -1706,10 +1837,10 @@ async def test_inactive_user_blocks_overlapping_oauth_refresh_before_openai_adap
         await asyncio.wait_for(initial_reads_ready.wait(), timeout=10)
         await asyncio.sleep(0)
         assert not second_task.done()
-        await test_db_pool.execute(
-            "UPDATE users SET is_active = $1 WHERE id = $2",
-            inactive_value,
-            user_id,
+        await _set_postgres_user_active(
+            test_db_pool,
+            user_id=user_id,
+            value=inactive_value,
         )
     finally:
         release_refresh.set()
@@ -1769,9 +1900,10 @@ async def test_inactive_user_static_openai_key_fails_before_adapter_postgres(
         provider="openai",
         payload=build_secret_payload("sk-inactive-owner-must-not-dispatch"),
     )
-    await test_db_pool.execute(
-        "UPDATE users SET is_active = FALSE WHERE id = $1",
-        user_id,
+    await _set_postgres_user_active(
+        test_db_pool,
+        user_id=user_id,
+        value=False,
     )
     adapter, captured_headers = _capture_real_openai_adapter_headers(monkeypatch)
     adapter_calls = 0

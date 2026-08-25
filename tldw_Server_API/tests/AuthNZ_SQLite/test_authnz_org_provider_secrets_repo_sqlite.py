@@ -64,6 +64,40 @@ def _scope_id(state, scope_type: str) -> int:
     return int(state[scope_type]["id"])
 
 
+async def _execute_membership_fixture_sql(pool, query: str, parameters: tuple) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
+    )
+
+    async with pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            query,
+            parameters,
+            backend="sqlite",
+        )
+
+
+async def _execute_profile_fixture_update(
+    pool,
+    *,
+    user_id: int,
+    value,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_version import (
+        VersionedUserWriteGateway,
+    )
+
+    async with pool.acquire() as conn:
+        await VersionedUserWriteGateway("sqlite").execute_update(
+            conn,
+            user_id=user_id,
+            profile_visible_fields=("is_active",),
+            statement="UPDATE users SET is_active = ? WHERE id = ?",
+            parameters=(value, user_id),
+        )
+
+
 class _SQLiteMutationGatePool:
     """Coordinate old split-statement and new transactional mutation paths."""
 
@@ -84,10 +118,16 @@ class _SQLiteMutationGatePool:
         self.upsert_attempted = upsert_attempted
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
         if self.role == "upsert":
             self.upsert_attempted.set()
-        async with self.delegate.transaction() as conn:
+        async with self.delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             if self.role == "revoke":
                 self.revoke_ready.set()
                 await self.release_revoke.wait()
@@ -218,8 +258,10 @@ async def test_authorized_shared_fetch_is_atomic_across_active_scope_boundaries(
     ) is None
 
     if disabled_boundary == "team_membership":
-        await state["pool"].execute(
-            "UPDATE team_members SET status = 'suspended' WHERE team_id = ? AND user_id = ?",
+        await _execute_membership_fixture_sql(
+            state["pool"],
+            "UPDATE main.team_members SET status = 'suspended' "
+            "WHERE team_id = ? AND user_id = ?",
             (scope_id, user_id),
         )
     elif disabled_boundary == "team":
@@ -233,8 +275,10 @@ async def test_authorized_shared_fetch_is_atomic_across_active_scope_boundaries(
             (int(state["org"]["id"]),),
         )
     elif disabled_boundary == "org_membership":
-        await state["pool"].execute(
-            "UPDATE org_members SET status = 'suspended' WHERE org_id = ? AND user_id = ?",
+        await _execute_membership_fixture_sql(
+            state["pool"],
+            "UPDATE main.org_members SET status = 'suspended' "
+            "WHERE org_id = ? AND user_id = ?",
             (scope_id, user_id),
         )
     else:
@@ -292,14 +336,17 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_sqlite(
         # Current SQLite schemas reject this legacy state at the storage
         # boundary; PostgreSQL coverage below exercises the nullable-row join.
         with pytest.raises(IntegrityError):
-            await state["pool"].execute(
-                "UPDATE users SET is_active = NULL WHERE id = ?",
-                (user_id,),
+            await _execute_profile_fixture_update(
+                state["pool"],
+                user_id=user_id,
+                value=None,
             )
         return
     elif null_boundary == "team_membership":
-        await state["pool"].execute(
-            "UPDATE team_members SET status = NULL WHERE team_id = ? AND user_id = ?",
+        await _execute_membership_fixture_sql(
+            state["pool"],
+            "UPDATE main.team_members SET status = NULL "
+            "WHERE team_id = ? AND user_id = ?",
             (scope_id, user_id),
         )
     elif null_boundary == "team":
@@ -313,8 +360,10 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_sqlite(
             (int(state["org"]["id"]),),
         )
     elif null_boundary == "org_membership":
-        await state["pool"].execute(
-            "UPDATE org_members SET status = NULL WHERE org_id = ? AND user_id = ?",
+        await _execute_membership_fixture_sql(
+            state["pool"],
+            "UPDATE main.org_members SET status = NULL "
+            "WHERE org_id = ? AND user_id = ?",
             (scope_id, user_id),
         )
     else:
@@ -544,7 +593,6 @@ async def test_authorized_shared_alias_lookup_uses_one_sqlite_snapshot_during_ro
     from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
         AuthnzOrgProviderSecretsRepo,
     )
-
     state, _repo = shared_repo_state
     scope_type = "team"
     scope_id = _scope_id(state, scope_type)
@@ -923,6 +971,9 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
     from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
         AuthnzOrgProviderSecretsRepo,
     )
+    from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
+        AuthnzOrgsTeamsRepo,
+    )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
         build_secret_payload,
@@ -955,6 +1006,11 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
         uuid_value=uuid.uuid4(),
     )
     user_id = int(created_user["id"])
+    organization = await AuthnzOrgsTeamsRepo(pool).create_organization(
+        name="BYOK repository organization",
+        owner_user_id=None,
+    )
+    scope_id = int(organization["id"])
 
     repo = AuthnzOrgProviderSecretsRepo(pool)
     await repo.ensure_tables()
@@ -967,7 +1023,7 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
 
     await repo.upsert_secret(
         scope_type="org",
-        scope_id=1,
+        scope_id=scope_id,
         provider="OpenAI",
         encrypted_blob=encrypted_blob,
         key_hint=key_hint,
@@ -977,7 +1033,7 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
         updated_by=user_id,
     )
 
-    row = await repo.fetch_secret("org", 1, "openai")
+    row = await repo.fetch_secret("org", scope_id, "openai")
     assert row is not None
     assert row["provider"] == "openai"
     assert row["encrypted_blob"] == encrypted_blob
@@ -985,22 +1041,30 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
     assert row["created_by"] == user_id
     assert row["updated_by"] == user_id
 
-    items = await repo.list_secrets(scope_type="org", scope_id=1)
+    items = await repo.list_secrets(scope_type="org", scope_id=scope_id)
     assert len(items) == 1
     assert items[0]["provider"] == "openai"
 
-    items_filtered = await repo.list_secrets(scope_type="org", scope_id=1, provider="openai")
+    items_filtered = await repo.list_secrets(
+        scope_type="org",
+        scope_id=scope_id,
+        provider="openai",
+    )
     assert len(items_filtered) == 1
 
-    await repo.touch_last_used("org", 1, "openai", now)
-    refreshed = await repo.fetch_secret("org", 1, "openai")
+    await repo.touch_last_used("org", scope_id, "openai", now)
+    refreshed = await repo.fetch_secret("org", scope_id, "openai")
     assert refreshed is not None
     assert refreshed["last_used_at"] is not None
 
-    deleted = await repo.delete_secret("org", 1, "openai")
+    deleted = await repo.delete_secret("org", scope_id, "openai")
     assert deleted
-    missing = await repo.fetch_secret("org", 1, "openai")
+    missing = await repo.fetch_secret("org", scope_id, "openai")
     assert missing is None
-    revoked_rows = await repo.list_secrets(scope_type="org", scope_id=1, include_revoked=True)
+    revoked_rows = await repo.list_secrets(
+        scope_type="org",
+        scope_id=scope_id,
+        include_revoked=True,
+    )
     assert len(revoked_rows) == 1
     assert revoked_rows[0]["revoked_at"] is not None
