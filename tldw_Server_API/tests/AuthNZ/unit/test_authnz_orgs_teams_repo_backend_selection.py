@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     AnchorOwnership,
     MembershipAuthority,
+    MembershipAuthorizationError,
     MembershipLockBackend,
     MembershipMutationResult,
     MembershipParentRequired,
@@ -806,6 +807,32 @@ async def test_owner_organization_creation_preserves_duplicate_precedence(
         )
 
     assert not authorized
+
+
+@pytest.mark.asyncio
+async def test_actor_organization_creation_authorizes_before_duplicate_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = _SqliteConnWithPgTrap()
+
+    async def reject_actor(*_args: Any, **_kwargs: Any) -> None:
+        raise MembershipAuthorizationError()
+
+    monkeypatch.setattr(
+        MembershipWriter,
+        "authorize_organization_creation",
+        reject_actor,
+    )
+    repo = AuthnzOrgsTeamsRepo(db_pool=_PoolStub(conn, postgres=False))
+
+    with pytest.raises(MembershipAuthorizationError):
+        await repo.create_organization_with_owner_membership(
+            name="Existing",
+            owner_user_id=999,
+            context=_ACTOR_MEMBERSHIP_CONTEXT,
+        )
+
+    assert conn.execute_calls == []
 
 
 @pytest.mark.asyncio
