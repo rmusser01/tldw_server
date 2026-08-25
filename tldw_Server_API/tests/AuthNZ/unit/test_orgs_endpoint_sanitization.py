@@ -184,6 +184,8 @@ async def test_create_org_uses_one_atomic_owner_provisioning_boundary(monkeypatc
         ("scope", 404),
         ("target", 404),
         ("preflight", 409),
+        ("pool", 503),
+        ("timeout", 503),
     ),
 )
 def test_membership_race_failures_have_sanitized_http_mappings(
@@ -191,6 +193,9 @@ def test_membership_race_failures_have_sanitized_http_mappings(
     expected_status: int,
 ) -> None:
     from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.core.AuthNZ.exceptions import (
+        ConnectionPoolExhaustedError,
+    )
     from tldw_Server_API.app.core.AuthNZ.membership_writer import (
         MembershipPreflightChanged,
         MembershipScopeNotFound,
@@ -201,13 +206,27 @@ def test_membership_race_failures_have_sanitized_http_mappings(
         "scope": MembershipScopeNotFound(),
         "target": MembershipTargetNotFound(),
         "preflight": MembershipPreflightChanged(),
+        "pool": ConnectionPoolExhaustedError(),
+        "timeout": TimeoutError(),
     }
     mapped = orgs._membership_control_http_exception(failures[failure_type])
 
     assert mapped.status_code == expected_status
-    assert "Membership write" in str(mapped.detail) or "not found" in str(
-        mapped.detail
-    ).lower()
+    assert mapped.detail in {
+        "Membership scope or target not found",
+        "Membership write conflicted; retry the request",
+        "Membership service is busy; retry the request",
+    }
+    if expected_status == 503:
+        from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+            get_authnz_transaction_policy,
+        )
+
+        assert mapped.headers == {
+            "Retry-After": str(
+                get_authnz_transaction_policy().busy_retry_after_seconds
+            ),
+        }
 
 
 @pytest.mark.asyncio
