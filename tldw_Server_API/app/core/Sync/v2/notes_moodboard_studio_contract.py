@@ -732,9 +732,8 @@ _VALIDATION_ERROR_MAX_LENGTH = 1_024
 def canonical_json_bytes(value: object) -> bytes:
     """Serialize one canonical JSON value as compact sorted UTF-8 bytes."""
 
-    if isinstance(value, BaseModel):
-        value = _validated_contract_model_dump(value, "canonical JSON model")
     try:
+        value = _validated_canonical_primitives(value, "value", set())
         _validate_canonical_json(value, "value")
         return json.dumps(
             value,
@@ -1034,20 +1033,39 @@ def _validated_contract_model_dump(value: BaseModel, label: str) -> dict[str, An
         if isinstance(value, model):
             validated = _parse_model(model, value, label)
             return validated.model_dump(mode="json")
-    return value.model_dump(mode="json")
+    raise NotesMoodboardStudioContractError(
+        f"{label} cannot contain unsupported model values"
+    )
 
 
-def _validated_contract_primitives(value: object, label: str) -> object:
+def _validated_canonical_primitives(
+    value: object,
+    label: str,
+    active: set[int],
+) -> object:
     if isinstance(value, BaseModel):
-        return _validated_contract_model_dump(value, label)
-    if isinstance(value, Mapping):
-        return {
-            key: _validated_contract_primitives(item, label)
-            for key, item in value.items()
-        }
-    if isinstance(value, (list, tuple)):
-        return [_validated_contract_primitives(item, label) for item in value]
-    return value
+        value = _validated_contract_model_dump(value, label)
+    if not isinstance(value, (Mapping, list, tuple)):
+        return value
+
+    value_id = id(value)
+    if value_id in active:
+        raise NotesMoodboardStudioContractError(
+            f"{label} cannot contain circular values"
+        )
+    active.add(value_id)
+    try:
+        if isinstance(value, Mapping):
+            return {
+                key: _validated_canonical_primitives(item, label, active)
+                for key, item in value.items()
+            }
+        return [
+            _validated_canonical_primitives(item, label, active)
+            for item in value
+        ]
+    finally:
+        active.remove(value_id)
 
 
 def _object_hash(
@@ -1101,12 +1119,7 @@ def _studio_result_semantic(
     if isinstance(payload, NotesStudioDocumentV1):
         values = payload.model_dump(mode="json")
     elif isinstance(payload, Mapping):
-        values = cast(
-            dict[str, object],
-            _validated_contract_primitives(
-                dict(payload), "Studio result hash nested model"
-            ),
-        )
+        values = payload
     else:
         raise NotesMoodboardStudioContractError(
             "Studio result hash requires a payload object"
@@ -1119,7 +1132,9 @@ def _studio_result_semantic(
     manifest = values["diagram_manifest_json"]
     if manifest is not None:
         if isinstance(manifest, BaseModel):
-            manifest = manifest.model_dump(mode="json")
+            manifest = _validated_contract_model_dump(
+                manifest, "Studio diagram manifest"
+            )
         if not isinstance(manifest, Mapping):
             raise NotesMoodboardStudioContractError(
                 "Studio diagram manifest must be an object or null"
@@ -1139,13 +1154,10 @@ def _studio_result_semantic(
         diagram = manifest["diagram"]
         if isinstance(diagram, str):
             manifest["diagram"] = _normalize_line_endings(diagram)
-    payload_json = values["payload_json"]
-    if isinstance(payload_json, BaseModel):
-        payload_json = payload_json.model_dump(mode="json")
     return {
         "note_id": values["note_id"],
         "source_note_id": values["source_note_id"],
-        "payload_json": payload_json,
+        "payload_json": values["payload_json"],
         "template_type": values["template_type"],
         "handwriting_mode": values["handwriting_mode"],
         "excerpt_snapshot": excerpt,
@@ -1350,24 +1362,25 @@ def _contains_credential_concept(tokens: tuple[str, ...]) -> bool:
         tokens, _EXACT_CREDENTIAL_EXTENSION_CONCEPTS
     ):
         return True
-    for start in range(len(tokens)):
-        candidate = ""
-        for token in tokens[start:]:
-            candidate += token
-            if _is_full_credential_compound(candidate):
-                return True
-    return False
 
-
-def _is_full_credential_compound(candidate: str) -> bool:
+    candidate = "".join(tokens)
     state_slots = 2 * (len(candidate) + 1)
     if not candidate or state_slots > _CREDENTIAL_GRAMMAR_MAX_STATES:
         return False
+    boundaries = {0}
+    offset = 0
+    for token in tokens:
+        offset += len(token)
+        boundaries.add(offset)
 
     qualifier_states = [False] * (len(candidate) + 1)
     terminal_states = [False] * (len(candidate) + 1)
-    for offset in range(len(candidate)):
-        if offset == 0 or qualifier_states[offset]:
+    for offset in range(len(candidate) + 1):
+        if terminal_states[offset] and offset in boundaries:
+            return True
+        if offset == len(candidate):
+            break
+        if offset in boundaries or qualifier_states[offset]:
             for qualifier in _CREDENTIAL_QUALIFIERS:
                 if candidate.startswith(qualifier, offset):
                     qualifier_states[offset + len(qualifier)] = True
@@ -1375,7 +1388,7 @@ def _is_full_credential_compound(candidate: str) -> bool:
             for terminal in _CREDENTIAL_TERMINALS:
                 if candidate.startswith(terminal, offset):
                     terminal_states[offset + len(terminal)] = True
-    return terminal_states[-1]
+    return False
 
 
 def _validate_canonical_json(value: object, label: str) -> None:

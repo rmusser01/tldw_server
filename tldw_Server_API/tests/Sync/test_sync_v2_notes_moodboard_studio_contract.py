@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
 from copy import deepcopy
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from tldw_Server_API.app.core.Sync.v2 import notes_moodboard_studio_contract as contract_module
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     JS_SAFE_INTEGER_MAX,
     MoodboardCanvasV1,
@@ -36,6 +38,14 @@ COLLECTION_ID = "dc20376a-69ca-411f-849c-53c59d7f645a"
 HASH_A = "sha256:" + "a" * 64
 HASH_B = "sha256:" + "b" * 64
 ACCEPTED_AT = "2026-08-24T00:00:00Z"
+
+
+class _GenericPayloadWrapper(BaseModel):
+    value: object
+
+
+class _GenericPayloadWrapperSubclass(_GenericPayloadWrapper):
+    pass
 
 
 def valid_moodboard_payload(**overrides: object) -> dict[str, object]:
@@ -188,6 +198,63 @@ def test_canonical_json_rejects_noncanonical_object_keys(key: str) -> None:
 def test_canonical_json_rejects_invalid_utf8_surrogates() -> None:
     with pytest.raises(NotesMoodboardStudioContractError, match="UTF-8"):
         canonical_json_bytes({"x": "\ud800"})
+
+
+@pytest.mark.parametrize(
+    "wrapper_type",
+    [_GenericPayloadWrapper, _GenericPayloadWrapperSubclass],
+    ids=["base", "subclass"],
+)
+@pytest.mark.parametrize("content_position", ["direct", "mapping", "list"])
+@pytest.mark.parametrize(
+    "entry_point",
+    ["canonical_json", "legacy_hash", "studio_result_hash"],
+)
+def test_unsupported_model_wrappers_cannot_hide_forged_contracts(
+    wrapper_type: type[_GenericPayloadWrapper],
+    content_position: str,
+    entry_point: str,
+) -> None:
+    parsed = parse_notes_moodboard_v1(valid_moodboard_payload())
+    forged = parsed.model_copy(update={"name": ""})
+    if content_position == "direct":
+        content: object = forged
+    elif content_position == "mapping":
+        content = {"nested": forged}
+    else:
+        content = [forged]
+    wrapped = wrapper_type(value=content)
+
+    with pytest.raises(NotesMoodboardStudioContractError, match="unsupported model"):
+        if entry_point == "canonical_json":
+            canonical_json_bytes(wrapped)
+        elif entry_point == "legacy_hash":
+            legacy_diagnostic_hash(wrapped)
+        else:
+            payload = valid_studio_payload()
+            payload["payload_json"] = wrapped
+            studio_result_hash(payload)
+
+
+def test_canonical_json_serializes_nested_known_contracts_after_revalidation() -> None:
+    parsed = parse_notes_moodboard_v1(valid_moodboard_payload())
+    primitive = parsed.model_dump(mode="json")
+
+    assert canonical_json_bytes({"nested": [parsed]}) == canonical_json_bytes(
+        {"nested": [primitive]}
+    )
+
+
+@pytest.mark.parametrize("position", ["mapping", "list"])
+def test_canonical_json_revalidates_forged_nested_known_contracts(
+    position: str,
+) -> None:
+    parsed = parse_notes_moodboard_v1(valid_moodboard_payload())
+    forged = parsed.model_copy(update={"name": ""})
+    nested: object = forged if position == "mapping" else [forged]
+
+    with pytest.raises(NotesMoodboardStudioContractError, match="name"):
+        canonical_json_bytes({"nested": nested})
 
 
 def test_placement_id_is_exact_namespaced_digest() -> None:
@@ -797,6 +864,53 @@ def test_extension_classifier_uses_exact_concepts_not_substrings(
         assert parsed.display == extension
 
 
+def test_credential_grammar_atom_work_is_linear_in_total_key_characters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_qualifiers = contract_module._CREDENTIAL_QUALIFIERS
+    original_terminals = contract_module._CREDENTIAL_TERMINALS
+    atom_checks = 0
+
+    class CountingVocabulary:
+        def __init__(self, values: tuple[str, ...]) -> None:
+            self._values = values
+
+        def __iter__(self) -> Iterator[str]:
+            nonlocal atom_checks
+            for value in self._values:
+                atom_checks += 1
+                yield value
+
+    monkeypatch.setattr(
+        contract_module,
+        "_CREDENTIAL_QUALIFIERS",
+        CountingVocabulary(original_qualifiers),
+    )
+    monkeypatch.setattr(
+        contract_module,
+        "_CREDENTIAL_TERMINALS",
+        CountingVocabulary(original_terminals),
+    )
+    metadata = {
+        f"{index:02d}." + ".".join("z" for _ in range(30)): index
+        for index in range(64)
+    }
+    joined_character_count = sum(
+        len(key.replace(".", "")) for key in metadata
+    )
+    atom_budget = joined_character_count * (
+        len(original_qualifiers) + len(original_terminals)
+    )
+
+    parse_notes_moodboard_v1(
+        valid_moodboard_payload(
+            canvas={"layout_mode": "freeform", "metadata": metadata}
+        )
+    )
+
+    assert atom_checks <= atom_budget
+
+
 def test_sections_only_studio_state_is_valid_and_acceptance_is_server_bound() -> None:
     payload = valid_studio_payload()
     parsed = parse_studio(payload)
@@ -819,6 +933,67 @@ def test_sections_only_studio_state_is_valid_and_acceptance_is_server_bound() ->
             bound_attestation="server",
             bound_accepted_at="2026-08-24T00:00:01Z",
         )
+
+
+@pytest.mark.parametrize("selected_field", ["payload_json", "manifest_source_graph"])
+def test_studio_result_hash_rejects_selected_cycles_with_contract_error(
+    selected_field: str,
+) -> None:
+    payload = valid_studio_payload(with_diagram=selected_field == "manifest_source_graph")
+    cycle: dict[str, object] = {}
+    cycle["self"] = cycle
+    if selected_field == "payload_json":
+        payload["payload_json"] = cycle
+    else:
+        manifest = payload["diagram_manifest_json"]
+        assert isinstance(manifest, dict)
+        manifest["source_graph"] = cycle
+
+    with pytest.raises(NotesMoodboardStudioContractError, match="circular"):
+        studio_result_hash(payload)
+
+
+@pytest.mark.parametrize(
+    "ignored_location",
+    ["outer", "accepted_provenance", "diagram_manifest"],
+)
+def test_studio_result_hash_does_not_walk_ignored_cyclic_fields(
+    ignored_location: str,
+) -> None:
+    payload = valid_studio_payload(with_diagram=ignored_location == "diagram_manifest")
+    expected = studio_result_hash(payload)
+    cycle: dict[str, object] = {}
+    cycle["self"] = cycle
+    if ignored_location == "outer":
+        payload["ignored_cycle"] = cycle
+    elif ignored_location == "accepted_provenance":
+        provenance = payload["accepted_provenance"]
+        assert isinstance(provenance, dict)
+        provenance["ignored_cycle"] = cycle
+    else:
+        manifest = payload["diagram_manifest_json"]
+        assert isinstance(manifest, dict)
+        manifest["ignored_cycle"] = cycle
+
+    assert studio_result_hash(payload) == expected
+
+
+def test_studio_result_hash_does_not_walk_ignored_unsupported_models() -> None:
+    payload = valid_studio_payload()
+    expected = studio_result_hash(payload)
+    parsed = parse_notes_moodboard_v1(valid_moodboard_payload())
+    forged = parsed.model_copy(update={"name": ""})
+    payload["ignored_wrapper"] = _GenericPayloadWrapper(value=forged)
+
+    assert studio_result_hash(payload) == expected
+
+
+def test_canonical_json_rejects_cycles_with_stable_contract_error() -> None:
+    cycle: dict[str, object] = {}
+    cycle["self"] = cycle
+
+    with pytest.raises(NotesMoodboardStudioContractError, match="circular"):
+        canonical_json_bytes(cycle)
 
 
 @pytest.mark.parametrize(
