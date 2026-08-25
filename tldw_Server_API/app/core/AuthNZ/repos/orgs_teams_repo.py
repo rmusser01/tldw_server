@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipMutationKind,
     MembershipMutationRelationship,
     MembershipParentRequired,
+    MembershipReadError,
     MembershipScopeType,
     MembershipWriteContext,
     MembershipWriter,
@@ -1032,7 +1033,12 @@ class AuthnzOrgsTeamsRepo:
             logger.error(f"AuthnzOrgsTeamsRepo.update_team_member_role failed: {exc}")
             raise
 
-    async def list_memberships_for_user(self, user_id: int) -> list[dict[str, Any]]:
+    async def list_memberships_for_user(
+        self,
+        user_id: int,
+        *,
+        conn: Any | None = None,
+    ) -> list[dict[str, Any]]:
         """
         List team memberships (including org_id) for a user.
 
@@ -1041,21 +1047,23 @@ class AuthnzOrgsTeamsRepo:
         """
         try:
             if self._is_postgres():
-                rows = await self.db_pool.fetchall(
-                    """
-                    SELECT tm.team_id, tm.user_id, tm.role, t.org_id, t.name AS team_name, o.name AS org_name
-                    FROM team_members tm
-                    JOIN teams t ON tm.team_id = t.id
-                    JOIN organizations o ON t.org_id = o.id
-                    WHERE tm.user_id = $1
-                    ORDER BY tm.team_id
-                    """,
-                    user_id,
+                query = """
+                SELECT tm.team_id, tm.user_id, tm.role, t.org_id, t.name AS team_name, o.name AS org_name
+                FROM team_members tm
+                JOIN teams t ON tm.team_id = t.id
+                JOIN organizations o ON t.org_id = o.id
+                WHERE tm.user_id = $1
+                ORDER BY tm.team_id
+                """
+                rows = (
+                    await conn.fetch(query, user_id)
+                    if conn is not None
+                    else await self.db_pool.fetchall(query, user_id)
                 )
                 return [dict(r) for r in rows]
 
-            async with self.db_pool.acquire() as conn:
-                cur = await conn.execute(
+            async def _read(sqlite_conn: Any) -> list[dict[str, Any]]:
+                cur = await sqlite_conn.execute(
                     """
                     SELECT tm.team_id, tm.user_id, tm.role, t.org_id, t.name, o.name
                     FROM team_members tm
@@ -1068,11 +1076,17 @@ class AuthnzOrgsTeamsRepo:
                 )
                 rows = await cur.fetchall()
                 return [self._membership_row_to_dict(r) for r in rows]
+
+            if conn is not None:
+                return await _read(conn)
+            async with self.db_pool.acquire() as acquired_conn:
+                return await _read(acquired_conn)
         except Exception as exc:  # pragma: no cover - surfaced via callers
-            logger.error(
-                f"AuthnzOrgsTeamsRepo.list_memberships_for_user failed: {exc}"
-            )
-            raise
+            logger.bind(
+                operation="list_memberships_for_user",
+                exception_type=type(exc).__name__,
+            ).error("AuthNZ membership read failed")
+            raise MembershipReadError() from None
 
     async def list_active_team_memberships_for_user(
         self,
@@ -1579,20 +1593,24 @@ class AuthnzOrgsTeamsRepo:
     async def list_org_memberships_for_user(
         self,
         user_id: int,
+        *,
+        conn: Any | None = None,
     ) -> list[dict[str, Any]]:
         """
         List org memberships for a user: ``[{org_id, role, status}]``.
         """
         try:
-            if self.db_pool.pool:
-                rows = await self.db_pool.fetchall(
-                    """
-                    SELECT org_id, role, status
-                    FROM org_members
-                    WHERE user_id = $1
-                    ORDER BY org_id
-                    """,
-                    user_id,
+            if self._is_postgres():
+                query = """
+                SELECT org_id, role, status
+                FROM org_members
+                WHERE user_id = $1
+                ORDER BY org_id
+                """
+                rows = (
+                    await conn.fetch(query, user_id)
+                    if conn is not None
+                    else await self.db_pool.fetchall(query, user_id)
                 )
                 normalized: list[dict[str, Any]] = []
                 for r in rows:
@@ -1606,8 +1624,8 @@ class AuthnzOrgsTeamsRepo:
                     )
                 return normalized
 
-            async with self.db_pool.acquire() as conn:
-                cur = await conn.execute(
+            async def _read(sqlite_conn: Any) -> list[dict[str, Any]]:
+                cur = await sqlite_conn.execute(
                     """
                     SELECT org_id, role, status
                     FROM org_members
@@ -1618,11 +1636,17 @@ class AuthnzOrgsTeamsRepo:
                 )
                 rows = await cur.fetchall()
                 return [{"org_id": r[0], "role": r[1], "status": r[2]} for r in rows]
+
+            if conn is not None:
+                return await _read(conn)
+            async with self.db_pool.acquire() as acquired_conn:
+                return await _read(acquired_conn)
         except Exception as exc:  # pragma: no cover - surfaced via callers
-            logger.error(
-                f"AuthnzOrgsTeamsRepo.list_org_memberships_for_user failed: {exc}"
-            )
-            raise
+            logger.bind(
+                operation="list_org_memberships_for_user",
+                exception_type=type(exc).__name__,
+            ).error("AuthNZ membership read failed")
+            raise MembershipReadError() from None
 
     async def list_organizations_for_user(
         self,
