@@ -4,7 +4,7 @@ title: Remediate latest-dev WebUI live-backend UAT failures and certify tiers 1-
 status: In Progress
 assignee: []
 created_date: '2026-08-25 15:03'
-updated_date: '2026-08-25 15:30'
+updated_date: '2026-08-25 15:51'
 labels:
   - webui
   - uat
@@ -17,6 +17,7 @@ references:
 documentation:
   - >-
     Docs/superpowers/specs/2026-08-25-webui-live-backend-uat-remediation-design.md
+  - Docs/superpowers/plans/2026-08-25-webui-live-backend-uat-remediation.md
 priority: high
 ---
 
@@ -39,6 +40,12 @@ Remediate every confirmed product, development-runtime, and live-server release-
 - [ ] #9 Before final certification the branch is synchronized with then-current origin/dev and all final tier results record the exact commit.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Execute the approved five-stage implementation plan inline: remediate TASK-13124.1 through TASK-13124.8 test-first, build the isolated live-tier runner under TASK-13124.9, run complete Tier-1 through Tier-3 inventories, create/fix child tasks for new confirmed findings, synchronize current origin/dev, and certify the exact final commit.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
@@ -47,6 +54,8 @@ Remediate every confirmed product, development-runtime, and live-server release-
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Pre-implementation review revised the design to: compare bundlers with bounded memory/responsiveness criteria before selecting a default; inventory mocked/intercepted tier cases separately from live-backend evidence; use the repository mock OpenAI-compatible service through the real backend; coverage-map and delete redundant legacy live tests; gate saved views only on narrow workspace existence; re-prove the Prompt layout issue cleanly; use the generic Kanban error mechanism; and synchronize with then-current origin/dev before final certification.
+
+2026-08-25: Requester confirmed the revised design. Detailed implementation plan completed and self-reviewed; execution proceeds inline without subagent delegation.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
