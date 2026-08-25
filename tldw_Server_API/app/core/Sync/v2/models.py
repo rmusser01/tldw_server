@@ -38,6 +38,9 @@ SyncDomain = Literal[
     "notes.link",
     "notes.task",
     "notes.task_activity",
+    "notes.moodboard",
+    "notes.moodboard_note",
+    "notes.studio_document",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -134,6 +137,14 @@ NOTES_TASK_SYNC_DOMAINS: tuple[SyncDomain, ...] = (
 NOTES_TASK_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     domain: ["upsert", "tombstone"] for domain in NOTES_TASK_SYNC_DOMAINS
 }
+NOTES_MOODBOARD_STUDIO_DOMAINS: tuple[SyncDomain, ...] = (
+    "notes.moodboard",
+    "notes.moodboard_note",
+    "notes.studio_document",
+)
+NOTES_MOODBOARD_STUDIO_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    domain: ["upsert", "tombstone"] for domain in NOTES_MOODBOARD_STUDIO_DOMAINS
+}
 WORKSPACE_SYNC_DOMAINS: list[SyncDomain] = [
     "workspaces.workspace",
     "workspaces.source_ref",
@@ -175,10 +186,12 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
 SYNC_V2_KNOWN_DOMAINS: tuple[SyncDomain, ...] = (
     *SYNC_V2_SUPPORTED_DOMAINS,
     *NOTES_TASK_SYNC_DOMAINS,
+    *NOTES_MOODBOARD_STUDIO_DOMAINS,
 )
 SYNC_V2_INTERNAL_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **SYNC_V2_SUPPORTED_OPERATIONS,
     **NOTES_TASK_SYNC_OPERATIONS,
+    **NOTES_MOODBOARD_STUDIO_OPERATIONS,
 }
 SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS = 100
 SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN = 8
@@ -457,6 +470,11 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
 def _sync_v2_internal_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     """Return private known-domain contracts without advertising dormant domains."""
 
+    from .notes_moodboard_studio_contract import (
+        NotesMoodboardNoteV1,
+        NotesMoodboardV1,
+        NotesStudioDocumentV1,
+    )
     from .notes_task_contract import (
         NotesTaskActivityTombstoneV1,
         NotesTaskActivityV1,
@@ -467,6 +485,9 @@ def _sync_v2_internal_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     task_schema = NotesTaskV1Payload.model_json_schema()
     activity_schema = NotesTaskActivityV1.model_json_schema()
     activity_tombstone_schema = NotesTaskActivityTombstoneV1.model_json_schema()
+    moodboard_schema = NotesMoodboardV1.model_json_schema()
+    placement_schema = NotesMoodboardNoteV1.model_json_schema()
+    studio_schema = NotesStudioDocumentV1.model_json_schema()
     schemas.update(
         {
             "notes.task": {
@@ -480,6 +501,24 @@ def _sync_v2_internal_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
                 "operations": ["upsert", "tombstone"],
                 "upsert": activity_schema,
                 "tombstone": activity_tombstone_schema,
+            },
+            "notes.moodboard": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": moodboard_schema,
+                "tombstone": moodboard_schema,
+            },
+            "notes.moodboard_note": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": placement_schema,
+                "tombstone": placement_schema,
+            },
+            "notes.studio_document": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": studio_schema,
+                "tombstone": studio_schema,
             },
         }
     )
@@ -1974,6 +2013,8 @@ __all__ = [
     "NOTES_LINK_SYNC_OPERATIONS",
     "NOTES_TASK_SYNC_DOMAINS",
     "NOTES_TASK_SYNC_OPERATIONS",
+    "NOTES_MOODBOARD_STUDIO_DOMAINS",
+    "NOTES_MOODBOARD_STUDIO_OPERATIONS",
     "NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS",
     "NOTES_NOTE_CONTENT_MAX_CHARS",
     "NOTES_NOTE_TITLE_MAX_CHARS",

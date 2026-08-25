@@ -215,6 +215,53 @@ def test_notes_task_domains_are_known_internally_but_not_supported_or_public() -
     ]
 
 
+def test_notes_moodboard_studio_domains_are_known_but_strictly_dormant() -> None:
+    dormant = {
+        "notes.moodboard",
+        "notes.moodboard_note",
+        "notes.studio_document",
+    }
+
+    assert core_sync_models.NOTES_MOODBOARD_STUDIO_DOMAINS == (
+        "notes.moodboard",
+        "notes.moodboard_note",
+        "notes.studio_document",
+    )
+    assert dormant.issubset(set(core_sync_models.SyncDomain.__args__))
+    assert dormant.issubset(core_sync_models.SYNC_V2_KNOWN_DOMAINS)
+    assert dormant.issubset(core_sync_models.SYNC_V2_INTERNAL_OPERATIONS)
+    assert dormant.isdisjoint(core_sync_models.SYNC_V2_SUPPORTED_DOMAINS)
+    assert dormant.isdisjoint(core_sync_models.SYNC_V2_SUPPORTED_OPERATIONS)
+    assert dormant.isdisjoint(core_sync_models.sync_v2_domain_schemas())
+    assert dormant.isdisjoint(core_sync_models.sync_v2_server_supported_adapter_versions())
+    assert dormant.isdisjoint(core_sync_models.sync_v2_dataset_writable_adapter_versions())
+
+    private_schemas = core_sync_models._sync_v2_internal_domain_schemas()
+    assert dormant.issubset(private_schemas)
+    for domain in dormant:
+        assert private_schemas[domain]["schema_version"] == 1
+        assert private_schemas[domain]["operations"] == ["upsert", "tombstone"]
+
+    assert dormant.isdisjoint(SyncCapabilitiesResponse().domains)
+    assert dormant.isdisjoint(SyncCapabilitiesResponse().operations)
+    assert dormant.isdisjoint(SyncCapabilitiesResponse().domain_schemas)
+
+    with pytest.raises(ValidationError):
+        api_sync_models.SyncDeviceRegisterRequest.model_validate(
+            {
+                "display_name": "Premature client",
+                "supported_domains": ["notes.moodboard"],
+            }
+        )
+    with pytest.raises(ValidationError):
+        api_sync_models.SyncProfileBootstrapRequest.model_validate(
+            {
+                "mode": "offline_sync",
+                "requested_domains": ["notes.studio_document"],
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("domain", "payload"),
     [
