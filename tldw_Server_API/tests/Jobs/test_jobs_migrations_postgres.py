@@ -29,6 +29,53 @@ _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS = {
 }
 
 
+def test_pg_schema_persists_owner_scoped_idempotency_receipts(jobs_pg_dsn):
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = 'job_idempotency_receipts'"
+            )
+            columns = {row[0] for row in cur.fetchall()}
+            assert columns == {
+                "receipt_id",
+                "domain",
+                "queue",
+                "job_type",
+                "owner_user_id",
+                "key_digest",
+                "request_fingerprint",
+                "operation_scope",
+                "job_uuid",
+                "job_id",
+                "created_at",
+                "expires_at",
+            }
+            assert not {"idempotency_key", "raw_key", "client_key"} & columns
+
+            cur.execute(
+                "SELECT indexname, indexdef FROM pg_indexes "
+                "WHERE schemaname = current_schema() "
+                "AND tablename = 'job_idempotency_receipts'"
+            )
+            index_definitions = {row[0]: row[1] for row in cur.fetchall()}
+            assert (
+                "(domain, queue, job_type, owner_user_id, key_digest)"
+                in index_definitions[
+                    "idx_job_idempotency_receipts_owner_key"
+                ]
+            )
+            assert "(job_uuid)" in index_definitions[
+                "idx_job_idempotency_receipts_job_uuid"
+            ]
+            assert (
+                "(operation_scope, owner_user_id, expires_at)"
+                in index_definitions["idx_job_idempotency_receipts_scope"]
+            )
+
+
 def test_pg_forward_migration_adds_missing_columns_and_partial_indexes(jobs_pg_dsn):
 
 

@@ -137,17 +137,17 @@ git commit -m "feat(jobs): define durable idempotency receipt contract"
 - Consumes: validated digest, fingerprint, scope, owner, and immutable Job identity from Task 1.
 - Produces: `job_idempotency_receipts` with identical logical columns and constraints on both backends.
 
-- [ ] **Step 1: Add failing SQLite and PostgreSQL schema assertions**
+- [x] **Step 1: Add failing SQLite and PostgreSQL schema assertions**
 
 Assert these columns exist: `receipt_id`, `domain`, `queue`, `job_type`, `owner_user_id`, `key_digest`, `request_fingerprint`, `operation_scope`, `job_uuid`, `job_id`, `created_at`, `expires_at`. Assert a unique index over `(domain, queue, job_type, owner_user_id, key_digest)`, lookup indexes on `job_uuid` and `(operation_scope, owner_user_id, expires_at)`, and no column capable of storing a raw client key.
 
-- [ ] **Step 2: Run migration tests and verify failure**
+- [x] **Step 2: Run migration tests and verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py -k idempotency_receipt -v`
 
 Expected: FAIL because the table and policies do not exist.
 
-- [ ] **Step 3: Add backend-parity DDL**
+- [x] **Step 3: Add backend-parity DDL**
 
 Use the following logical schema in both migration modules, translating identity and timestamp types for each backend:
 
@@ -171,11 +171,11 @@ CREATE TABLE IF NOT EXISTS job_idempotency_receipts (
 
 Do not add a foreign key to `jobs`: the referenced active row intentionally moves to `jobs_archive`. Add check constraints for digest lengths and bounded text where PostgreSQL supports them; manager validation remains authoritative on both backends.
 
-- [ ] **Step 4: Add PostgreSQL grants and RLS**
+- [x] **Step 4: Add PostgreSQL grants and RLS**
 
 Enable and force RLS with the same `domain_filter` and `owner_filter` used by `jobs`. Add `job_idempotency_receipts_select` and `job_idempotency_receipts_modify` policies, sequence usage grants, and include the table in the migration debug inventory.
 
-- [ ] **Step 5: Run schema and compatibility tests**
+- [x] **Step 5: Run schema and compatibility tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_migrations_compat_sqlite.py -v`
 
@@ -183,7 +183,7 @@ Run when PostgreSQL fixture is available: `source .venv/bin/activate && python -
 
 Expected: PASS; PostgreSQL may skip only through the canonical unavailable fixture.
 
-- [ ] **Step 6: Commit schema parity**
+- [x] **Step 6: Commit schema parity**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/migrations.py tldw_Server_API/app/core/Jobs/pg_migrations.py tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py
