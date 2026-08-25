@@ -1,9 +1,16 @@
-import os
-from datetime import datetime, timedelta
+import sqlite3
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    CreateJobCommand,
+    IdempotentOperationCommand,
+    IdempotentOperationDisposition,
+    IdempotentOperationUnavailableError,
+)
 
 
 def _set_env(monkeypatch):
@@ -33,6 +40,200 @@ def _backdate_sqlite(job_id: int, days: int = 2):
             conn.close()
         except Exception:
             _ = None
+
+
+def _receipt_command(
+    *,
+    key_digest: str = "a" * 64,
+    operation_scope: str = "share:share-1",
+) -> IdempotentOperationCommand:
+    return IdempotentOperationCommand(
+        job=CreateJobCommand(
+            domain="sharing",
+            queue="workspace-clone",
+            job_type="workspace_clone",
+            payload={"schema_version": 1},
+            owner_user_id="recipient-1",
+            batch_group=operation_scope,
+            priority=5,
+            max_retries=0,
+        ),
+        key_digest=key_digest,
+        request_fingerprint="b" * 64,
+        operation_scope=operation_scope,
+        receipt_expires_at=datetime.now(timezone.utc) + timedelta(days=31),
+    )
+
+
+def _terminalize_old(manager: JobManager, *job_ids: int) -> None:
+    old = (datetime.now(timezone.utc) - timedelta(days=40)).strftime(
+        "%Y-%m-%d %H:%M:%S.%f"
+    )
+    conn = sqlite3.connect(manager.db_path)
+    try:
+        with conn:
+            placeholders = ",".join("?" for _ in job_ids)
+            conn.execute(
+                f"UPDATE jobs SET status='completed', completed_at=? "  # nosec B608
+                f"WHERE id IN ({placeholders})",  # nosec B608
+                (old, *job_ids),
+            )
+    finally:
+        conn.close()
+
+
+def _receipt_count(manager: JobManager) -> int:
+    conn = sqlite3.connect(manager.db_path)
+    try:
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) FROM job_idempotency_receipts"
+            ).fetchone()[0]
+        )
+    finally:
+        conn.close()
+
+
+def test_prune_archives_receipt_job_when_global_archive_is_disabled(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    manager = JobManager(tmp_path / "jobs.db")
+    receipt_job = manager.admit_idempotent_operation(_receipt_command()).job
+    ordinary_job = manager.create_job(
+        domain="sharing",
+        queue="workspace-clone",
+        job_type="ordinary",
+        payload={"kind": "ordinary"},
+        owner_user_id="recipient-1",
+    )
+    _terminalize_old(manager, int(receipt_job["id"]), int(ordinary_job["id"]))
+
+    deleted = manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    archived = manager.get_job_or_archived_by_uuid(receipt_job["uuid"])
+    assert deleted == 2
+    assert archived is not None
+    assert archived["archived"] is True
+    assert manager.get_job_or_archived_by_uuid(ordinary_job["uuid"]) is None
+    replay = manager.admit_idempotent_operation(_receipt_command())
+    assert replay.disposition is IdempotentOperationDisposition.REPLAYED
+    assert replay.job["archived"] is True
+
+
+def test_prune_rolls_back_when_receipt_correlation_is_ambiguous(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    manager = JobManager(tmp_path / "jobs.db")
+    receipt_job = manager.admit_idempotent_operation(_receipt_command()).job
+    ordinary_job = manager.create_job(
+        domain="sharing",
+        queue="workspace-clone",
+        job_type="ordinary",
+        payload={},
+        owner_user_id="recipient-1",
+    )
+    _terminalize_old(manager, int(receipt_job["id"]), int(ordinary_job["id"]))
+    conn = sqlite3.connect(manager.db_path)
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE job_idempotency_receipts SET job_id=?",
+                (int(ordinary_job["id"]),),
+            )
+    finally:
+        conn.close()
+
+    with pytest.raises(IdempotentOperationUnavailableError):
+        manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    assert manager.get_job_by_uuid(receipt_job["uuid"]) is not None
+    assert manager.get_job_by_uuid(ordinary_job["uuid"]) is not None
+    conn = sqlite3.connect(manager.db_path)
+    try:
+        assert int(conn.execute("SELECT COUNT(*) FROM jobs_archive").fetchone()[0]) == 0
+    finally:
+        conn.close()
+
+
+def test_receipt_pruning_requires_expired_unique_terminal_archive(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    manager = JobManager(tmp_path / "jobs.db")
+    archived_job = manager.admit_idempotent_operation(_receipt_command()).job
+    alias = manager.admit_idempotent_operation(
+        _receipt_command(key_digest="e" * 64)
+    )
+    assert alias.disposition is IdempotentOperationDisposition.CONVERGED
+    active_terminal = manager.admit_idempotent_operation(
+        _receipt_command(
+            key_digest="c" * 64,
+            operation_scope="share:share-2",
+        )
+    ).job
+    active_nonterminal = manager.admit_idempotent_operation(
+        _receipt_command(
+            key_digest="d" * 64,
+            operation_scope="share:share-3",
+        )
+    ).job
+    _terminalize_old(manager, int(archived_job["id"]))
+    conn = sqlite3.connect(manager.db_path)
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET status='completed', completed_at=? WHERE id=?",
+                (
+                    datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
+                    int(active_terminal["id"]),
+                ),
+            )
+    finally:
+        conn.close()
+    assert manager.prune_jobs(
+        statuses=["completed"],
+        older_than_days=30,
+        job_type="workspace_clone",
+    ) == 1
+
+    future = datetime.now(timezone.utc) + timedelta(days=32)
+    assert manager.prune_idempotency_receipts(now=future, limit=1) == 1
+    assert _receipt_count(manager) == 3
+    assert manager.prune_idempotency_receipts(now=future, limit=1) == 1
+    assert _receipt_count(manager) == 2
+    assert manager.prune_idempotency_receipts(now=future, limit=1) == 0
+    assert manager.get_job_by_uuid(active_terminal["uuid"]) is not None
+    assert manager.get_job_by_uuid(active_nonterminal["uuid"]) is not None
+
+
+def test_receipt_pruning_is_idempotent_after_archival(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    manager = JobManager(tmp_path / "jobs.db")
+    job = manager.admit_idempotent_operation(_receipt_command()).job
+    _terminalize_old(manager, int(job["id"]))
+    assert manager.prune_jobs(statuses=["completed"], older_than_days=30) == 1
+    future = datetime.now(timezone.utc) + timedelta(days=32)
+
+    assert manager.prune_idempotency_receipts(now=future) == 1
+    assert manager.prune_idempotency_receipts(now=future) == 0
+    archived = manager.get_job_or_archived_by_uuid(job["uuid"])
+    assert archived is not None
+    assert archived["archived"] is True
+
+
+@pytest.mark.parametrize("limit", (0, -1, 10_001, True))
+def test_receipt_pruning_requires_bounded_positive_limit(tmp_path, limit):
+    manager = JobManager(tmp_path / "jobs.db")
+
+    with pytest.raises(ValueError, match="limit"):
+        manager.prune_idempotency_receipts(limit=limit)
 
 
 def test_jobs_prune_dry_run_and_filters_sqlite(monkeypatch, tmp_path):

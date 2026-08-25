@@ -1,6 +1,7 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -8,6 +9,12 @@ psycopg = pytest.importorskip("psycopg")
 pytestmark = pytest.mark.pg_jobs
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    CreateJobCommand,
+    IdempotentOperationCommand,
+    IdempotentOperationDisposition,
+    IdempotentOperationUnavailableError,
+)
 from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
 
 
@@ -21,6 +28,153 @@ def _backdate_pg(dsn: str, job_id: int, days: int = 2):
             )
     finally:
         conn.close()
+
+
+def _receipt_command(
+    *,
+    key_digest: str = "a" * 64,
+    operation_scope: str = "share:share-1",
+) -> IdempotentOperationCommand:
+    return IdempotentOperationCommand(
+        job=CreateJobCommand(
+            domain="sharing",
+            queue="workspace-clone",
+            job_type="workspace_clone",
+            payload={"schema_version": 1},
+            owner_user_id="recipient-1",
+            batch_group=operation_scope,
+            priority=5,
+            max_retries=0,
+        ),
+        key_digest=key_digest,
+        request_fingerprint="b" * 64,
+        operation_scope=operation_scope,
+        receipt_expires_at=datetime.now(timezone.utc) + timedelta(days=31),
+    )
+
+
+def _set_terminal_pg(
+    dsn: str,
+    job_id: int,
+    *,
+    days_old: int,
+) -> None:
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', "
+            "completed_at=NOW() - (%s || ' days')::interval WHERE id=%s",
+            (days_old, job_id),
+        )
+
+
+def _receipt_count_pg(dsn: str) -> int:
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM job_idempotency_receipts")
+        return int(cur.fetchone()[0])
+
+
+def test_pg_prune_archives_receipt_job_without_global_archive(
+    monkeypatch,
+    jobs_pg_dsn,
+):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    receipt_job = manager.admit_idempotent_operation(_receipt_command()).job
+    ordinary_job = manager.create_job(
+        domain="sharing",
+        queue="workspace-clone",
+        job_type="ordinary",
+        payload={"kind": "ordinary"},
+        owner_user_id="recipient-1",
+    )
+    _set_terminal_pg(jobs_pg_dsn, int(receipt_job["id"]), days_old=40)
+    _set_terminal_pg(jobs_pg_dsn, int(ordinary_job["id"]), days_old=40)
+
+    deleted = manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    archived = manager.get_job_or_archived_by_uuid(receipt_job["uuid"])
+    assert deleted == 2
+    assert archived is not None
+    assert archived["archived"] is True
+    assert manager.get_job_or_archived_by_uuid(ordinary_job["uuid"]) is None
+    replay = manager.admit_idempotent_operation(_receipt_command())
+    assert replay.disposition is IdempotentOperationDisposition.REPLAYED
+    assert replay.job["archived"] is True
+
+
+def test_pg_prune_rolls_back_on_ambiguous_receipt(
+    monkeypatch,
+    jobs_pg_dsn,
+):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    receipt_job = manager.admit_idempotent_operation(_receipt_command()).job
+    ordinary_job = manager.create_job(
+        domain="sharing",
+        queue="workspace-clone",
+        job_type="ordinary",
+        payload={},
+        owner_user_id="recipient-1",
+    )
+    _set_terminal_pg(jobs_pg_dsn, int(receipt_job["id"]), days_old=40)
+    _set_terminal_pg(jobs_pg_dsn, int(ordinary_job["id"]), days_old=40)
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE job_idempotency_receipts SET job_id=%s",
+            (int(ordinary_job["id"]),),
+        )
+
+    with pytest.raises(IdempotentOperationUnavailableError):
+        manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    assert manager.get_job_by_uuid(receipt_job["uuid"]) is not None
+    assert manager.get_job_by_uuid(ordinary_job["uuid"]) is not None
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs_archive")
+        assert int(cur.fetchone()[0]) == 0
+
+
+def test_pg_receipt_pruning_requires_expired_unique_terminal_archive(
+    monkeypatch,
+    jobs_pg_dsn,
+):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    archived_job = manager.admit_idempotent_operation(_receipt_command()).job
+    alias = manager.admit_idempotent_operation(
+        _receipt_command(key_digest="e" * 64)
+    )
+    assert alias.disposition is IdempotentOperationDisposition.CONVERGED
+    active_terminal = manager.admit_idempotent_operation(
+        _receipt_command(
+            key_digest="c" * 64,
+            operation_scope="share:share-2",
+        )
+    ).job
+    active_nonterminal = manager.admit_idempotent_operation(
+        _receipt_command(
+            key_digest="d" * 64,
+            operation_scope="share:share-3",
+        )
+    ).job
+    _set_terminal_pg(jobs_pg_dsn, int(archived_job["id"]), days_old=40)
+    _set_terminal_pg(jobs_pg_dsn, int(active_terminal["id"]), days_old=0)
+    assert manager.prune_jobs(
+        statuses=["completed"],
+        older_than_days=30,
+        job_type="workspace_clone",
+    ) == 1
+
+    future = datetime.now(timezone.utc) + timedelta(days=32)
+    assert manager.prune_idempotency_receipts(now=future, limit=1) == 1
+    assert _receipt_count_pg(jobs_pg_dsn) == 3
+    assert manager.prune_idempotency_receipts(now=future, limit=1) == 1
+    assert _receipt_count_pg(jobs_pg_dsn) == 2
+    assert manager.prune_idempotency_receipts(now=future, limit=1) == 0
+    assert manager.get_job_by_uuid(active_terminal["uuid"]) is not None
+    assert manager.get_job_by_uuid(active_nonterminal["uuid"]) is not None
 
 
 def test_jobs_prune_dry_run_and_filters_postgres(monkeypatch, jobs_pg_dsn):

@@ -335,27 +335,27 @@ git commit -m "fix(jobs): make receipt replay archive-consistent"
 - Consumes: terminal receipt-backed Jobs and receipt expiry timestamps.
 - Produces: `JobManager.prune_idempotency_receipts(*, now: datetime | None = None, limit: int = 1000) -> int` and receipt-safe `prune_jobs()`.
 
-- [ ] **Step 1: Write failing prune and retention tests**
+- [x] **Step 1: Write failing prune and retention tests**
 
 Cover archive-before-delete disabled, mixed receipt/non-receipt batches, nonterminal expired receipt preservation, terminal unexpired replay, terminal expired receipt deletion only after the Job is archived, and idempotent repeated pruning.
 
-- [ ] **Step 2: Run prune tests and verify failure**
+- [x] **Step 2: Run prune tests and verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_prune_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_prune_postgres.py -k receipt -v`
 
-- [ ] **Step 3: Archive receipt-backed candidates unconditionally**
+- [x] **Step 3: Archive receipt-backed candidates unconditionally**
 
 Within each existing prune transaction, partition locked candidates into globally archived rows and receipt-backed rows. Insert every receipt-backed row into `jobs_archive` before deleting active rows, using the existing exact archive projection and UUID collision checks. Keep non-receipt behavior controlled by `JOBS_ARCHIVE_BEFORE_DELETE`.
 
-- [ ] **Step 4: Implement bounded receipt pruning**
+- [x] **Step 4: Implement bounded receipt pruning**
 
 Delete at most `limit` receipts whose `expires_at <= now`, whose referenced Job is terminal, and whose UUID exists exactly once in `jobs_archive`. Never delete a receipt referencing active/nonterminal work. Keep this operation separate from `prune_jobs` so routine Job pruning does not silently shorten the 30-day replay contract.
 
-- [ ] **Step 5: Run all Jobs prune tests**
+- [x] **Step 5: Run all Jobs prune tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_prune_sqlite.py tldw_Server_API/tests/Jobs/test_prune_jobs.py tldw_Server_API/tests/Jobs/test_jobs_prune_postgres.py -v`
 
-- [ ] **Step 6: Commit retention behavior**
+- [x] **Step 6: Commit retention behavior**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/tests/Jobs/test_jobs_prune_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_prune_postgres.py

@@ -76,6 +76,7 @@ from .operations.contracts import (
     IdempotentOperationAdmission,
     IdempotentOperationCommand,
     IdempotentOperationDisposition,
+    IdempotentOperationUnavailableError,
     OperationOutcome,
     ReleaseJobCommand,
     RenewLeaseCommand,
@@ -8838,6 +8839,169 @@ class JobManager:
                 emit_job_event("job.released", job=released_job, attrs={"reason": reason})
         return True
 
+    @staticmethod
+    def _validate_receipt_candidate_rows(rows: list[Any]) -> dict[int, str]:
+        """Validate receipt-to-active-Job correlations selected for pruning."""
+
+        candidates: dict[int, str] = {}
+        for raw_row in rows:
+            row = dict(raw_row)
+            job_id = int(row["active_id"])
+            job_uuid = str(row.get("active_uuid") or "").strip()
+            valid = (
+                bool(job_uuid)
+                and job_id == int(row["receipt_job_id"])
+                and job_uuid == row.get("receipt_job_uuid")
+                and row.get("active_domain") == row.get("receipt_domain")
+                and row.get("active_queue") == row.get("receipt_queue")
+                and row.get("active_job_type") == row.get("receipt_job_type")
+                and row.get("active_owner_user_id")
+                == row.get("receipt_owner_user_id")
+                and row.get("active_batch_group")
+                == row.get("receipt_operation_scope")
+            )
+            if not valid:
+                raise IdempotentOperationUnavailableError(
+                    "receipt and prune candidate correlation do not match"
+                )
+            observed_uuid = candidates.setdefault(job_id, job_uuid)
+            if observed_uuid != job_uuid:
+                raise IdempotentOperationUnavailableError(
+                    "prune candidate resolves to multiple Job UUIDs"
+                )
+        return candidates
+
+    def _receipt_backed_prune_candidates(
+        self,
+        conn: Any,
+        *,
+        where_clause: str,
+        params: tuple[Any, ...],
+        cursor: Any | None = None,
+    ) -> dict[int, str]:
+        """Return validated receipt-backed active Jobs in one prune population."""
+
+        query = f"""
+            WITH candidates AS (
+              SELECT id, uuid, domain, queue, job_type, owner_user_id, batch_group
+              FROM jobs{where_clause}
+            )
+            SELECT candidates.id AS active_id,
+                   candidates.uuid AS active_uuid,
+                   candidates.domain AS active_domain,
+                   candidates.queue AS active_queue,
+                   candidates.job_type AS active_job_type,
+                   candidates.owner_user_id AS active_owner_user_id,
+                   candidates.batch_group AS active_batch_group,
+                   receipts.job_id AS receipt_job_id,
+                   receipts.job_uuid AS receipt_job_uuid,
+                   receipts.domain AS receipt_domain,
+                   receipts.queue AS receipt_queue,
+                   receipts.job_type AS receipt_job_type,
+                   receipts.owner_user_id AS receipt_owner_user_id,
+                   receipts.operation_scope AS receipt_operation_scope
+            FROM candidates
+            JOIN job_idempotency_receipts AS receipts
+              ON receipts.job_uuid = candidates.uuid
+              OR receipts.job_id = candidates.id
+            ORDER BY candidates.id, receipts.receipt_id
+        """  # nosec B608
+        if self.backend == "postgres":
+            if cursor is None:
+                raise RuntimeError("PostgreSQL receipt pruning requires a cursor")
+            cursor.execute(query, params)
+            rows = list(cursor.fetchall() or [])
+        else:
+            rows = list(conn.execute(query, params).fetchall() or [])
+        return self._validate_receipt_candidate_rows(rows)
+
+    def _exact_receipt_archive_uuids(
+        self,
+        conn: Any,
+        *,
+        where_clause: str,
+        params: tuple[Any, ...],
+        cursor: Any | None = None,
+    ) -> set[str]:
+        """Return exact existing archives and reject ambiguous/corrupt copies."""
+
+        projection_fields = ("id", *SLIDES_ARCHIVE_EXACT_FIELDS)
+        active_projection = ", ".join(
+            f"candidates.{field} AS active__{field}"
+            for field in projection_fields
+        )
+        archive_projection = ", ".join(
+            f"archived.{field} AS archived__{field}"
+            for field in projection_fields
+        )
+        query = f"""
+            WITH candidates AS (
+              SELECT * FROM jobs{where_clause}
+            )
+            SELECT {active_projection}, archived.archive_id AS archived__archive_id,
+                   {archive_projection},
+                   archived.payload_compressed AS archived__payload_compressed,
+                   archived.result_compressed AS archived__result_compressed
+            FROM candidates
+            LEFT JOIN jobs_archive AS archived ON archived.uuid = candidates.uuid
+            ORDER BY candidates.id, archived.archive_id
+        """  # nosec B608
+        if self.backend == "postgres":
+            if cursor is None:
+                raise RuntimeError("PostgreSQL archive validation requires a cursor")
+            cursor.execute(query, params)
+            rows = list(cursor.fetchall() or [])
+        else:
+            rows = list(conn.execute(query, params).fetchall() or [])
+
+        grouped: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+        for raw_row in rows:
+            row = dict(raw_row)
+            active = {
+                field: row.get(f"active__{field}") for field in projection_fields
+            }
+            job_uuid = str(active.get("uuid") or "").strip()
+            if not job_uuid:
+                raise IdempotentOperationUnavailableError(
+                    "receipt-backed prune candidate has no Job UUID"
+                )
+            _, archived_rows = grouped.setdefault(job_uuid, (active, []))
+            if row.get("archived__archive_id") is not None:
+                archived_rows.append(
+                    {
+                        field: row.get(f"archived__{field}")
+                        for field in projection_fields
+                    }
+                    | {
+                        "payload_compressed": row.get(
+                            "archived__payload_compressed"
+                        ),
+                        "result_compressed": row.get(
+                            "archived__result_compressed"
+                        ),
+                    }
+                )
+
+        exact_uuids: set[str] = set()
+        for job_uuid, (active_raw, archived_rows) in grouped.items():
+            if not archived_rows:
+                continue
+            if len(archived_rows) != 1:
+                raise IdempotentOperationUnavailableError(
+                    "receipt-backed Job has ambiguous archive authority"
+                )
+            active = normalize_slides_archive_projection(active_raw)
+            archived = normalize_slides_archive_projection(archived_rows[0])
+            if any(
+                active.get(field) != archived.get(field)
+                for field in projection_fields
+            ):
+                raise IdempotentOperationUnavailableError(
+                    "receipt-backed Job archive does not match the active row"
+                )
+            exact_uuids.add(job_uuid)
+        return exact_uuids
+
     def _prune_postgres_batch(
         self,
         cur: Any,
@@ -8852,6 +9016,15 @@ class JobManager:
             return 0
         candidate_where_clause = " WHERE id = ANY(%s)"
         candidate_params: tuple[Any, ...] = (candidate_ids,)
+        receipt_candidates = self._receipt_backed_prune_candidates(
+            None,
+            where_clause=candidate_where_clause,
+            params=candidate_params,
+            cursor=cur,
+        )
+        archive_candidate_ids = (
+            candidate_ids if archive_enabled else sorted(receipt_candidates)
+        )
         cur.execute(
             (
                 "UPDATE job_dependencies AS dependency_edge SET "
@@ -8867,7 +9040,9 @@ class JobManager:
             ),
             candidate_params,
         )
-        if archive_enabled:
+        if archive_candidate_ids:
+            archive_candidate_where_clause = " WHERE id = ANY(%s)"
+            archive_candidate_params: tuple[Any, ...] = (archive_candidate_ids,)
             archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
             archive_select_projection = ", ".join(
                 (
@@ -8880,22 +9055,33 @@ class JobManager:
             )
             exact_collisions = self._idempotent_slides_archive_collisions(
                 None,
-                where_clause=candidate_where_clause,
-                params=candidate_params,
+                where_clause=archive_candidate_where_clause,
+                params=archive_candidate_params,
                 cursor=cur,
             )
-            archive_where_clause = candidate_where_clause
-            archive_params: tuple[Any, ...] = candidate_params
+            if receipt_candidates:
+                receipt_ids = sorted(receipt_candidates)
+                receipt_where_clause = " WHERE id = ANY(%s)"
+                exact_collisions.update(
+                    self._exact_receipt_archive_uuids(
+                        None,
+                        where_clause=receipt_where_clause,
+                        params=(receipt_ids,),
+                        cursor=cur,
+                    )
+                )
+            archive_where_clause = archive_candidate_where_clause
+            archive_params: tuple[Any, ...] = archive_candidate_params
             if exact_collisions:
                 archive_where_clause += " AND (uuid IS NULL OR NOT (uuid = ANY(%s)))"
-                archive_params = (*candidate_params, sorted(exact_collisions))
+                archive_params = (*archive_candidate_params, sorted(exact_collisions))
             prompt_archive_params = (
-                *candidate_params,
+                *archive_candidate_params,
                 "prompt_studio",
                 "optimization",
             )
             cur.execute(
-                f"SELECT id, queue, payload FROM jobs{candidate_where_clause} "  # nosec B608
+                f"SELECT id, queue, payload FROM jobs{archive_candidate_where_clause} "  # nosec B608
                 "AND domain = %s AND job_type = %s FOR UPDATE",
                 prompt_archive_params,
             )
@@ -8976,6 +9162,17 @@ class JobManager:
                             continue
             except _JOB_NONCRITICAL_EXCEPTIONS:
                 pass
+            if receipt_candidates:
+                archived_receipt_uuids = self._exact_receipt_archive_uuids(
+                    None,
+                    where_clause=" WHERE id = ANY(%s)",
+                    params=(sorted(receipt_candidates),),
+                    cursor=cur,
+                )
+                if archived_receipt_uuids != set(receipt_candidates.values()):
+                    raise IdempotentOperationUnavailableError(
+                        "receipt-backed Jobs were not archived exactly once"
+                    )
 
         if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
             counter_groups = (
@@ -9227,6 +9424,11 @@ class JobManager:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                                 logger.info(f"[JM TEST MUT] prune_jobs dry_run count={int(count)}")
                         return count
+                    receipt_candidates = self._receipt_backed_prune_candidates(
+                        conn,
+                        where_clause=where_clause,
+                        params=tuple(params),
+                    )
                     conn.execute(
                         (
                             "UPDATE job_dependencies SET "
@@ -9249,13 +9451,33 @@ class JobManager:
                         ),
                         tuple(params),
                     )
-                    # Optional archive copy
-                    if archive_enabled:
+                    # Receipt-backed jobs always archive before active deletion;
+                    # global archive policy still controls all other candidates.
+                    if archive_enabled or receipt_candidates:
+                        receipt_exists_clause = (
+                            " EXISTS (SELECT 1 FROM job_idempotency_receipts "
+                            "AS receipt WHERE receipt.job_uuid = jobs.uuid "
+                            "AND receipt.job_id = jobs.id "
+                            "AND receipt.domain = jobs.domain "
+                            "AND receipt.queue = jobs.queue "
+                            "AND receipt.job_type = jobs.job_type "
+                            "AND receipt.owner_user_id = jobs.owner_user_id "
+                            "AND receipt.operation_scope = jobs.batch_group)"
+                        )
+                        receipt_where_clause = (
+                            where_clause + " AND" + receipt_exists_clause
+                        )
+                        archive_where_clause = (
+                            where_clause
+                            if archive_enabled
+                            else receipt_where_clause
+                        )
+                        archive_params = list(params)
                         prompt_archive_params = tuple(
-                            params + ["prompt_studio", "optimization"]
+                            archive_params + ["prompt_studio", "optimization"]
                         )
                         prompt_rows = conn.execute(
-                            f"SELECT id, queue, payload FROM jobs{where_clause} "  # nosec B608
+                            f"SELECT id, queue, payload FROM jobs{archive_where_clause} "  # nosec B608
                             "AND domain = ? AND job_type = ?",
                             prompt_archive_params,
                         ).fetchall()
@@ -9277,11 +9499,17 @@ class JobManager:
                                 )
                         exact_collisions = self._idempotent_slides_archive_collisions(
                             conn,
-                            where_clause=where_clause,
-                            params=tuple(params),
+                            where_clause=archive_where_clause,
+                            params=tuple(archive_params),
                         )
-                        archive_where_clause = where_clause
-                        archive_params = list(params)
+                        if receipt_candidates:
+                            exact_collisions.update(
+                                self._exact_receipt_archive_uuids(
+                                    conn,
+                                    where_clause=receipt_where_clause,
+                                    params=tuple(params),
+                                )
+                            )
                         if exact_collisions:
                             collision_placeholders = ",".join(
                                 ["?"] * len(exact_collisions)
@@ -9379,6 +9607,20 @@ class JobManager:
                                         continue
                         except _JOB_NONCRITICAL_EXCEPTIONS:
                             pass
+                        if receipt_candidates:
+                            archived_receipt_uuids = (
+                                self._exact_receipt_archive_uuids(
+                                    conn,
+                                    where_clause=receipt_where_clause,
+                                    params=tuple(params),
+                                )
+                            )
+                            if archived_receipt_uuids != set(
+                                receipt_candidates.values()
+                            ):
+                                raise IdempotentOperationUnavailableError(
+                                    "receipt-backed Jobs were not archived exactly once"
+                                )
                     # Counters: subtract queued/processing/quarantined rows if they are part of prune set
                     if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
                         for r in (
@@ -9466,6 +9708,110 @@ class JobManager:
                             count=1,
                         )
             raise
+        finally:
+            conn.close()
+
+    def prune_idempotency_receipts(
+        self,
+        *,
+        now: datetime | None = None,
+        limit: int = 1000,
+    ) -> int:
+        """Delete expired receipts only after one exact terminal archive exists."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10_000:
+            raise ValueError("limit must be an integer between 1 and 10000")
+        reference_time = _require_aware_utc(now, field_name="now")
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        WITH candidates AS (
+                          SELECT receipt.receipt_id
+                          FROM job_idempotency_receipts AS receipt
+                          WHERE receipt.expires_at <= %s
+                            AND NOT EXISTS (
+                              SELECT 1 FROM jobs AS active
+                              WHERE active.uuid = receipt.job_uuid
+                                 OR active.id = receipt.job_id
+                            )
+                            AND 1 = (
+                              SELECT COUNT(*) FROM jobs_archive AS archived
+                              WHERE archived.uuid = receipt.job_uuid
+                            )
+                            AND EXISTS (
+                              SELECT 1 FROM jobs_archive AS archived
+                              WHERE archived.uuid = receipt.job_uuid
+                                AND archived.id = receipt.job_id
+                                AND archived.domain = receipt.domain
+                                AND archived.queue = receipt.queue
+                                AND archived.job_type = receipt.job_type
+                                AND archived.owner_user_id = receipt.owner_user_id
+                                AND archived.batch_group = receipt.operation_scope
+                                AND archived.status IN (
+                                  'completed','failed','cancelled','quarantined'
+                                )
+                            )
+                          ORDER BY receipt.expires_at, receipt.receipt_id
+                          FOR UPDATE OF receipt SKIP LOCKED
+                          LIMIT %s
+                        )
+                        DELETE FROM job_idempotency_receipts AS receipt
+                        USING candidates
+                        WHERE receipt.receipt_id = candidates.receipt_id
+                        RETURNING receipt.receipt_id
+                        """,
+                        (reference_time, limit),
+                    )
+                    return len(cur.fetchall() or [])
+
+            reference_sql = _sqlite_utc(reference_time)
+            conn.execute("BEGIN IMMEDIATE")
+            with conn:
+                rows = conn.execute(
+                    """
+                    SELECT receipt.receipt_id
+                    FROM job_idempotency_receipts AS receipt
+                    WHERE julianday(receipt.expires_at) <= julianday(?)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM jobs AS active
+                        WHERE active.uuid = receipt.job_uuid
+                           OR active.id = receipt.job_id
+                      )
+                      AND 1 = (
+                        SELECT COUNT(*) FROM jobs_archive AS archived
+                        WHERE archived.uuid = receipt.job_uuid
+                      )
+                      AND EXISTS (
+                        SELECT 1 FROM jobs_archive AS archived
+                        WHERE archived.uuid = receipt.job_uuid
+                          AND archived.id = receipt.job_id
+                          AND archived.domain = receipt.domain
+                          AND archived.queue = receipt.queue
+                          AND archived.job_type = receipt.job_type
+                          AND archived.owner_user_id = receipt.owner_user_id
+                          AND archived.batch_group = receipt.operation_scope
+                          AND archived.status IN (
+                            'completed','failed','cancelled','quarantined'
+                          )
+                      )
+                    ORDER BY receipt.expires_at, receipt.receipt_id
+                    LIMIT ?
+                    """,
+                    (reference_sql, limit),
+                ).fetchall()
+                receipt_ids = [int(row[0]) for row in rows]
+                if not receipt_ids:
+                    return 0
+                placeholders = ",".join("?" for _ in receipt_ids)
+                deleted = conn.execute(
+                    "DELETE FROM job_idempotency_receipts "
+                    f"WHERE receipt_id IN ({placeholders})",  # nosec B608
+                    tuple(receipt_ids),
+                )
+                return int(deleted.rowcount or 0)
         finally:
             conn.close()
 
