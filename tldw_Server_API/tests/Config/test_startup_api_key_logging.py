@@ -18,3 +18,15 @@ def test_startup_api_key_log_value_shows_full_key_only_when_explicit(monkeypatch
     display = startup_logging.startup_api_key_log_value(api_key)
 
     assert display == api_key
+
+
+def test_normalize_startup_log_level_accepts_case_insensitive_loguru_level() -> None:
+    assert startup_logging.normalize_startup_log_level("warning") == "WARNING"
+
+
+def test_normalize_startup_log_level_falls_back_to_info() -> None:
+    assert startup_logging.normalize_startup_log_level("not-a-level") == "INFO"
+
+
+def test_normalize_startup_log_level_defaults_to_info_when_missing() -> None:
+    assert startup_logging.normalize_startup_log_level(None) == "INFO"

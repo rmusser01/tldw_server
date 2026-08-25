@@ -345,7 +345,12 @@ def _prompt_yes_no(prompt: str, default_yes: bool, non_interactive: bool) -> boo
     if non_interactive:
         return default_yes
     suffix = "Y/n" if default_yes else "y/N"
-    response = input(f"{prompt} ({suffix}): ").strip().lower()
+    try:
+        response = input(f"{prompt} ({suffix}): ").strip().lower()
+    except EOFError:
+        default = "yes" if default_yes else "no"
+        print(f"\n⚠️  No interactive input detected; using default: {default}")
+        return default_yes
     if not response:
         return default_yes
     return response in {"y", "yes"}

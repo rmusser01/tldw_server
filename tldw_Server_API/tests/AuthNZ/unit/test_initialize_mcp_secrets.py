@@ -103,3 +103,41 @@ def test_authnz_initializer_does_not_create_missing_exclusive_env_file(
         _ensure_env_file()
 
     assert not missing_env.exists()  # nosec B101
+
+
+def test_prompt_yes_no_uses_yes_default_when_stdin_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _closed_stdin(_prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _closed_stdin)
+
+    result = initialize_module._prompt_yes_no(
+        "Generate missing keys?",
+        default_yes=True,
+        non_interactive=False,
+    )
+
+    assert result is True
+    assert "No interactive input detected; using default: yes" in capsys.readouterr().out
+
+
+def test_prompt_yes_no_uses_no_default_when_stdin_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _closed_stdin(_prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _closed_stdin)
+
+    result = initialize_module._prompt_yes_no(
+        "Generate replacement keys?",
+        default_yes=False,
+        non_interactive=False,
+    )
+
+    assert result is False
+    assert "No interactive input detected; using default: no" in capsys.readouterr().out

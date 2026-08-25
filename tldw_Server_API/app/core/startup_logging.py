@@ -5,6 +5,21 @@ from __future__ import annotations
 import os
 
 _SHOW_KEY_TRUE_VALUES = {"true", "1", "yes"}
+_LOGURU_LEVELS = {
+    "TRACE",
+    "DEBUG",
+    "INFO",
+    "SUCCESS",
+    "WARNING",
+    "ERROR",
+    "CRITICAL",
+}
+
+
+def normalize_startup_log_level(value: str | None) -> str:
+    """Return a valid Loguru startup level, defaulting to INFO."""
+    normalized = (value or "INFO").strip().upper()
+    return normalized if normalized in _LOGURU_LEVELS else "INFO"
 
 
 def mask_api_key_for_startup_logs(api_key: str) -> str:

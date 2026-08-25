@@ -38,6 +38,7 @@ from starlette.staticfiles import StaticFiles
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 from tldw_Server_API.app.core.startup_logging import (
+    normalize_startup_log_level as _normalize_startup_log_level,
     startup_api_key_log_value as _startup_api_key_log_value,
 )
 from tldw_Server_API.app.core.Logging.access_log_middleware import (
@@ -766,7 +767,7 @@ def _unwrap_stderr(stream):
 
 # Reset Loguru and configure a single, thread-safe sink
 logger.remove()
-_log_level = "DEBUG"
+_log_level = _normalize_startup_log_level(_early_os.getenv("LOG_LEVEL"))
 _force_color = _shared_env_flag_enabled("FORCE_COLOR") or _shared_env_flag_enabled("PY_COLORS")
 _sink_choice = _early_os.getenv("LOG_STREAM", "stderr").lower()
 _stderr = _unwrap_stderr(sys.__stderr__ or sys.stderr)
