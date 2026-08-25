@@ -329,3 +329,18 @@ class CloneSnapshotUnavailable(Exception):
         if self.cleanup_state not in {"complete", "pending", "unknown"}:
             raise ValueError("cleanup_state must be complete, pending, or unknown")
         Exception.__init__(self, self.code)
+
+
+@dataclass(frozen=True, slots=True)
+class ClonePersistenceError(Exception):
+    """Controlled fatal clone persistence failure with bounded diagnostics."""
+
+    code: str = "clone_persistence_failed"
+    cleanup_state: str = "unknown"
+
+    def __post_init__(self) -> None:
+        _validate_warning_code(self.code)
+        _validate_ascii(self.cleanup_state, "cleanup_state", 16)
+        if self.cleanup_state not in {"complete", "pending", "unknown"}:
+            raise ValueError("cleanup_state must be complete, pending, or unknown")
+        Exception.__init__(self, self.code)
