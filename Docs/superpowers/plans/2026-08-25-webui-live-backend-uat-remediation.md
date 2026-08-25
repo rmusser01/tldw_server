@@ -269,6 +269,7 @@ Commit: `fix(webui): corroborate backend outage events`
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/use-source-saved-views.ts`
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/index.tsx`
+- Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/workspace-server-reconcile.ts`
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/use-source-saved-views.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage12.source-list-view-state.test.tsx`
 - Modify: `apps/tldw-frontend/e2e/workflows/research-workspace.real-backend.spec.ts`
@@ -278,7 +279,7 @@ Commit: `fix(webui): corroborate backend outage events`
 - Produces: `serverWorkspaceIdentity: string | null`; readiness is `serverWorkspaceIdentity === workspaceId`.
 - Consumes: `reconcileResearchWorkspaceServerState(...): { workspaceReady: boolean; errors: string[] }`.
 
-- [ ] **Step 1: Add a red hook ordering test**
+- [x] **Step 1: Add a red hook ordering test**
 
 ```tsx
 const { rerender } = renderHook(
@@ -290,35 +291,40 @@ rerender({ exists: true })
 await waitFor(() => expect(tldwClient.listWorkspaceSourceViews).toHaveBeenCalledWith("workspace-new"))
 ```
 
-- [ ] **Step 2: Run the hook test and observe red**
+- [x] **Step 2: Run the hook test and observe red**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/use-source-saved-views.test.tsx`
 
 Expected: current signature lists immediately when `workspaceId` is non-null.
 
-- [ ] **Step 3: Add narrow identity readiness**
+- [x] **Step 3: Add narrow identity readiness**
 
-Reset `serverWorkspaceIdentity` synchronously when `activeWorkspaceId` changes. Set it only after the matching reconciliation result returns `workspaceReady` without errors and the request sequence still matches. Do not tie it to source/context projection completion.
+Reset `serverWorkspaceIdentity` synchronously when `activeWorkspaceId` changes. Publish it from the matching reconciliation request's `onWorkspaceReady` callback immediately after the parent upsert succeeds and only while the request sequence still matches. Record the full reconcile signature only after source reconciliation also completes without errors; saved views do not wait for that later work.
 
 ```tsx
 const [serverWorkspaceIdentity, setServerWorkspaceIdentity] = React.useState<string | null>(null)
 React.useLayoutEffect(() => setServerWorkspaceIdentity(null), [activeWorkspaceId])
 
+onWorkspaceReady: () => {
+  if (!cancelled && requestSeq === workspaceServerReconcileRequestSeqRef.current) {
+    setServerWorkspaceIdentity(activeWorkspaceId)
+  }
+}
+
 if (reconcileResult.errors.length === 0 && reconcileResult.workspaceReady) {
   workspaceServerReconcileSignatureRef.current = reconcileSignature
-  setServerWorkspaceIdentity(activeWorkspaceId)
 }
 ```
 
-- [ ] **Step 4: Guard every saved-view operation**
+- [x] **Step 4: Guard every saved-view operation**
 
 Include `workspaceExists` in the list effect, `available`, retry, and mutation preconditions. Identity/generation guards remain unchanged so late readiness for workspace A cannot unlock workspace B.
 
-- [ ] **Step 5: Add live request-order evidence**
+- [x] **Step 5: Add live request-order evidence**
 
 In `research-workspace.real-backend.spec.ts`, collect request timestamps for workspace upsert and `/source-views`; create a fresh workspace and assert the successful upsert response completes before the first saved-view list request. Assert no `Source view not found` alert.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run the Step 2 command plus the Stage-12 test and the focused live-server scenario.
 

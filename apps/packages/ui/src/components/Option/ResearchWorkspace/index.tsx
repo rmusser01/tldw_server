@@ -1339,7 +1339,10 @@ const ResearchWorkspaceBody: React.FC = () => {
   const sourceStatusFailureRef = React.useRef<Record<number, number>>({})
   const workspaceStatusRequestSeqRef = React.useRef(0)
   const workspaceStatusInFlightRef = React.useRef(false)
+  const workspaceServerReconcileRequestSeqRef = React.useRef(0)
   const workspaceServerReconcileSignatureRef = React.useRef<string | null>(null)
+  const [serverWorkspaceIdentity, setServerWorkspaceIdentity] =
+    React.useState<string | null>(null)
   const isMountedRef = React.useRef(false)
   const deepResearchBundleImportRequestSeqRef = React.useRef(0)
   const [deepResearchBundleImportState, setDeepResearchBundleImportState] =
@@ -1369,6 +1372,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   } = useSourceListViewState()
   const sourceSavedViewsController = useSourceSavedViews(
     workspaceId,
+    workspaceId !== null && serverWorkspaceIdentity === workspaceId,
     sourceListViewState,
     applySourceListViewState
   )
@@ -1403,6 +1407,104 @@ const ResearchWorkspaceBody: React.FC = () => {
   React.useEffect(() => {
     workspaceServerSourcesRef.current = sources
   }, [sources])
+
+  React.useLayoutEffect(() => {
+    workspaceServerReconcileRequestSeqRef.current += 1
+    workspaceServerReconcileSignatureRef.current = null
+    setServerWorkspaceIdentity(null)
+  }, [workspaceId])
+
+  React.useEffect(() => {
+    if (!isStoreHydrated || !workspaceId) return
+
+    const canReconcileWorkspaceServer =
+      typeof tldwClient.upsertWorkspace === "function" &&
+      typeof tldwClient.getWorkspaceSources === "function" &&
+      typeof tldwClient.addWorkspaceSource === "function"
+    if (!canReconcileWorkspaceServer) {
+      if (statusGuardrailsEnabled) {
+        setWorkspaceStatusProjectionError("Workspace server sync unavailable")
+        setWorkspaceStatusProjectionLoading(false)
+      }
+      return
+    }
+
+    const activeWorkspaceId = workspaceId
+    const reconcileSignature = [
+      activeWorkspaceId,
+      workspaceName,
+      workspaceServerSourceSignature,
+      workspaceServerSelectedSourceSignature
+    ].join("::")
+    if (workspaceServerReconcileSignatureRef.current === reconcileSignature) {
+      setServerWorkspaceIdentity(activeWorkspaceId)
+      return
+    }
+
+    let cancelled = false
+    const requestSeq = ++workspaceServerReconcileRequestSeqRef.current
+    if (statusGuardrailsEnabled) {
+      setWorkspaceStatusProjectionLoading(true)
+      setWorkspaceStatusProjectionError(null)
+    }
+
+    void reconcileResearchWorkspaceServerState({
+      client: tldwClient,
+      workspaceId: activeWorkspaceId,
+      workspaceName,
+      sources: workspaceServerSourcesRef.current,
+      selectedSourceIds,
+      onWorkspaceReady: () => {
+        if (
+          !cancelled &&
+          requestSeq === workspaceServerReconcileRequestSeqRef.current
+        ) {
+          setServerWorkspaceIdentity(activeWorkspaceId)
+        }
+      }
+    })
+      .then((reconcileResult) => {
+        if (
+          cancelled ||
+          requestSeq !== workspaceServerReconcileRequestSeqRef.current
+        ) {
+          return
+        }
+        if (reconcileResult.errors.length === 0 && reconcileResult.workspaceReady) {
+          workspaceServerReconcileSignatureRef.current = reconcileSignature
+          return
+        }
+        if (statusGuardrailsEnabled) {
+          setWorkspaceStatusProjectionError("Workspace server sync unavailable")
+          if (!reconcileResult.workspaceReady) {
+            setWorkspaceStatusProjectionLoading(false)
+          }
+        }
+      })
+      .catch(() => {
+        if (
+          !cancelled &&
+          requestSeq === workspaceServerReconcileRequestSeqRef.current &&
+          statusGuardrailsEnabled
+        ) {
+          setWorkspaceStatusProjectionError("Workspace server sync unavailable")
+          setWorkspaceStatusProjectionLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+      workspaceServerReconcileRequestSeqRef.current += 1
+    }
+  }, [
+    isStoreHydrated,
+    selectedSourceIds,
+    statusGuardrailsEnabled,
+    workspaceId,
+    workspaceName,
+    workspaceServerSelectedSourceSignature,
+    workspaceServerSourceSignature
+  ])
   const activeFolderSourceIds = React.useMemo(
     () =>
       activeFolderId
@@ -1783,7 +1885,6 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (!statusGuardrailsEnabled) {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
-      workspaceServerReconcileSignatureRef.current = null
       workspaceProjectedSourceStatusByMediaIdRef.current = {
         workspaceId: null,
         fallbackReady: false,
@@ -1795,10 +1896,13 @@ const ResearchWorkspaceBody: React.FC = () => {
       setWorkspaceStatusProjectionLoading(false)
       return
     }
-    if (!isStoreHydrated || !workspaceId) {
+    if (
+      !isStoreHydrated ||
+      !workspaceId ||
+      serverWorkspaceIdentity !== workspaceId
+    ) {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
-      workspaceServerReconcileSignatureRef.current = null
       workspaceProjectedSourceStatusByMediaIdRef.current = {
         workspaceId: null,
         fallbackReady: false,
@@ -1818,7 +1922,6 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (!hasWorkspaceContextApi && !hasLegacyWorkspaceStatusApis) {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
-      workspaceServerReconcileSignatureRef.current = null
       workspaceProjectedSourceStatusByMediaIdRef.current = {
         workspaceId,
         fallbackReady: true,
@@ -1896,38 +1999,6 @@ const ResearchWorkspaceBody: React.FC = () => {
       setWorkspaceStatusProjectionLoading(true)
       try {
         const statusProjectionErrors: string[] = []
-        const canReconcileWorkspaceServer =
-          typeof tldwClient.upsertWorkspace === "function" &&
-          typeof tldwClient.getWorkspaceSources === "function" &&
-          typeof tldwClient.addWorkspaceSource === "function"
-        const reconcileSignature = [
-          activeWorkspaceId,
-          workspaceName,
-          workspaceServerSourceSignature,
-          workspaceServerSelectedSourceSignature
-        ].join("::")
-
-        if (
-          canReconcileWorkspaceServer &&
-          workspaceServerReconcileSignatureRef.current !== reconcileSignature
-        ) {
-          const reconcileResult = await reconcileResearchWorkspaceServerState({
-            client: tldwClient,
-            workspaceId: activeWorkspaceId,
-            workspaceName,
-            sources: workspaceServerSourcesRef.current,
-            selectedSourceIds
-          })
-          if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
-            return
-          }
-          if (reconcileResult.errors.length === 0 && reconcileResult.workspaceReady) {
-            workspaceServerReconcileSignatureRef.current = reconcileSignature
-          } else if (reconcileResult.errors.length > 0) {
-            statusProjectionErrors.push("Workspace server sync unavailable")
-          }
-        }
-
         if (hasWorkspaceContextApi) {
           const workspaceContext = await tldwClient.getWorkspaceContext(
             activeWorkspaceId
@@ -2039,6 +2110,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   }, [
     isStoreHydrated,
+    serverWorkspaceIdentity,
     setSourceStatusByMediaId,
     statusGuardrailsEnabled,
     selectedSourceIds,

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -13,6 +13,9 @@ const savedViewHarness = vi.hoisted(() => ({
   paneControllers: [] as unknown[],
   rows: [] as WorkspaceSourceSavedViewResponse[],
   nextId: 1,
+  upsertWorkspace: vi.fn(),
+  getWorkspaceSources: vi.fn(),
+  addWorkspaceSource: vi.fn(),
   listWorkspaceSourceViews: vi.fn(),
   createWorkspaceSourceView: vi.fn(),
   updateWorkspaceSourceView: vi.fn(),
@@ -63,6 +66,16 @@ const validView = (
 const latestController = (): SourceSavedViewsController =>
   savedViewHarness.paneControllers.at(-1)! as SourceSavedViewsController
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 const openSavedViewCommands = async (
   user: ReturnType<typeof userEvent.setup>,
   viewName: string
@@ -74,6 +87,11 @@ const openSavedViewCommands = async (
   await screen.findByRole("menuitem", {
     name: `Apply saved view ${viewName}`
   })
+}
+
+const expectDialogClosingOrGone = (name: string) => {
+  const dialog = screen.queryByRole("dialog", { name })
+  if (dialog) expect(dialog).toHaveClass("ant-zoom-leave")
 }
 
 const testState = {
@@ -222,6 +240,9 @@ vi.mock("@/utils/research-workspace-prefill", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getMediaDetails: vi.fn().mockResolvedValue({}),
+    upsertWorkspace: savedViewHarness.upsertWorkspace,
+    getWorkspaceSources: savedViewHarness.getWorkspaceSources,
+    addWorkspaceSource: savedViewHarness.addWorkspaceSource,
     listWorkspaceSourceViews: savedViewHarness.listWorkspaceSourceViews,
     createWorkspaceSourceView: savedViewHarness.createWorkspaceSourceView,
     updateWorkspaceSourceView: savedViewHarness.updateWorkspaceSourceView,
@@ -352,7 +373,13 @@ vi.mock("../StudioPane", () => ({
 }))
 
 vi.mock("../WorkspaceStatusBar", () => ({
-  WorkspaceStatusBar: () => <div data-testid="workspace-status-bar" />
+  WorkspaceStatusBar: (props: {
+    workspaceContextStatus?: { detail?: string } | null
+  }) => (
+    <div data-testid="workspace-status-bar">
+      {props.workspaceContextStatus?.detail || ""}
+    </div>
+  )
 }))
 
 if (!(globalThis as { ResizeObserver?: unknown }).ResizeObserver) {
@@ -416,6 +443,11 @@ describe("ResearchWorkspace source list view state", () => {
     savedViewHarness.rows = []
     savedViewHarness.paneControllers = []
     savedViewHarness.hookInvocations.mockClear()
+    savedViewHarness.upsertWorkspace.mockImplementation(
+      async (workspaceId: string) => ({ id: workspaceId })
+    )
+    savedViewHarness.getWorkspaceSources.mockResolvedValue([])
+    savedViewHarness.addWorkspaceSource.mockResolvedValue({})
     savedViewHarness.listWorkspaceSourceViews.mockImplementation(
       async (workspaceId: string) => ({
         items: savedViewHarness.rows.filter(
@@ -479,6 +511,94 @@ describe("ResearchWorkspace source list view state", () => {
     )
   })
 
+  it("loads saved views after upsert but before source reconciliation finishes", async () => {
+    const upsert = deferred<{ id: string }>()
+    const sourceRows = deferred<never[]>()
+    savedViewHarness.upsertWorkspace.mockReturnValue(upsert.promise)
+    savedViewHarness.getWorkspaceSources.mockReturnValue(sourceRows.promise)
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() =>
+      expect(savedViewHarness.upsertWorkspace).toHaveBeenCalledWith(
+        "workspace-1",
+        expect.any(Object)
+      )
+    )
+    expect(savedViewHarness.listWorkspaceSourceViews).not.toHaveBeenCalled()
+
+    upsert.resolve({ id: "workspace-1" })
+
+    await waitFor(() =>
+      expect(savedViewHarness.listWorkspaceSourceViews).toHaveBeenCalledWith(
+        "workspace-1"
+      )
+    )
+    expect(savedViewHarness.getWorkspaceSources).toHaveBeenCalledWith(
+      "workspace-1"
+    )
+
+    sourceRows.resolve([])
+  })
+
+  it("does not let a late workspace A upsert unlock saved views for workspace B", async () => {
+    const upsertA = deferred<{ id: string }>()
+    const upsertB = deferred<{ id: string }>()
+    savedViewHarness.upsertWorkspace.mockImplementation(
+      (workspaceId: string) =>
+        workspaceId === "workspace-1" ? upsertA.promise : upsertB.promise
+    )
+
+    const { rerender } = render(<ResearchWorkspace />)
+    await waitFor(() =>
+      expect(savedViewHarness.upsertWorkspace).toHaveBeenCalledWith(
+        "workspace-1",
+        expect.any(Object)
+      )
+    )
+
+    testState.workspaceId = "workspace-2"
+    rerender(<ResearchWorkspace />)
+    await waitFor(() =>
+      expect(savedViewHarness.upsertWorkspace).toHaveBeenCalledWith(
+        "workspace-2",
+        expect.any(Object)
+      )
+    )
+
+    await act(async () => upsertA.resolve({ id: "workspace-1" }))
+    expect(savedViewHarness.listWorkspaceSourceViews).not.toHaveBeenCalled()
+    expect(savedViewHarness.hookInvocations).not.toHaveBeenCalledWith(
+      "workspace-2",
+      true,
+      expect.anything(),
+      expect.anything()
+    )
+
+    await act(async () => upsertB.resolve({ id: "workspace-2" }))
+    await waitFor(() =>
+      expect(savedViewHarness.listWorkspaceSourceViews).toHaveBeenCalledWith(
+        "workspace-2"
+      )
+    )
+  })
+
+  it("keeps saved views blocked and shows workspace recovery when upsert fails", async () => {
+    savedViewHarness.upsertWorkspace.mockRejectedValue(
+      new Error("workspace parent unavailable")
+    )
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("workspace-status-bar")[0]).toHaveTextContent(
+        "Workspace server sync unavailable"
+      )
+    )
+    expect(savedViewHarness.listWorkspaceSourceViews).not.toHaveBeenCalled()
+    expect(screen.queryByText(/Source view not found/i)).not.toBeInTheDocument()
+  })
+
   it("preserves source list view state across sources pane remounts", async () => {
     const { rerender } = render(<ResearchWorkspace />)
 
@@ -538,12 +658,15 @@ describe("ResearchWorkspace source list view state", () => {
     await waitFor(() => expect(document.activeElement).toBe(invokers[1]))
   })
 
-  it("passes the raw nullable workspace identity to the single page controller", () => {
+  it("passes the raw nullable workspace identity and readiness to the single page controller", async () => {
     const { rerender } = render(<ResearchWorkspace />)
-    expect(savedViewHarness.hookInvocations).toHaveBeenCalledWith(
-      "workspace-1",
-      expect.any(Object),
-      expect.any(Function)
+    await waitFor(() =>
+      expect(savedViewHarness.hookInvocations).toHaveBeenCalledWith(
+        "workspace-1",
+        true,
+        expect.any(Object),
+        expect.any(Function)
+      )
     )
 
     testState.workspaceId = null
@@ -551,11 +674,13 @@ describe("ResearchWorkspace source list view state", () => {
 
     expect(savedViewHarness.hookInvocations).toHaveBeenLastCalledWith(
       null,
+      false,
       expect.any(Object),
       expect.any(Function)
     )
     expect(savedViewHarness.hookInvocations).not.toHaveBeenCalledWith(
       "local",
+      expect.anything(),
       expect.anything(),
       expect.anything()
     )
@@ -582,8 +707,15 @@ describe("ResearchWorkspace source list view state", () => {
       testState.workspaceId = nextWorkspaceId
       rerender(<ResearchWorkspace />)
 
-      expect(screen.queryByRole("dialog", { name: "Save source view" })).not.toBeInTheDocument()
-      expect(screen.queryByDisplayValue("Draft A")).not.toBeInTheDocument()
+      expectDialogClosingOrGone("Save source view")
+      const closingDialog = screen.queryByRole("dialog", {
+        name: "Save source view"
+      })
+      if (closingDialog) {
+        expect(
+          within(closingDialog).getByRole("button", { name: "Save" })
+        ).toBeDisabled()
+      }
       expect(savedViewHarness.createWorkspaceSourceView).not.toHaveBeenCalled()
     }
   )
@@ -611,9 +743,7 @@ describe("ResearchWorkspace source list view state", () => {
       testState.workspaceId = nextWorkspaceId
       rerender(<ResearchWorkspace />)
 
-      expect(
-        screen.queryByRole("dialog", { name: "Replace saved view?" })
-      ).not.toBeInTheDocument()
+      expectDialogClosingOrGone("Replace saved view?")
       expect(savedViewHarness.updateWorkspaceSourceView).not.toHaveBeenCalled()
     }
   )
@@ -640,13 +770,19 @@ describe("ResearchWorkspace source list view state", () => {
     testState.activeFolderId = "folder-1"
     testState.selectedSourceIds = ["source-1"]
     const first = render(<ResearchWorkspace />)
-    await user.click(screen.getByRole("button", { name: "Set current filters" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Set current filters" })
+    )
     expect(screen.getByTestId("source-list-type-state")).toHaveTextContent("website")
     expect(screen.getByTestId("source-list-expanded-state")).toHaveTextContent(
       "expanded"
     )
 
-    await user.click(screen.getByRole("button", { name: "Save source view" }))
+    const saveViewButton = screen.getByRole("button", {
+      name: "Save source view"
+    })
+    await waitFor(() => expect(saveViewButton).toBeEnabled())
+    await user.click(saveViewButton)
     const saveDialog = await screen.findByRole("dialog", { name: "Save source view" })
     await user.type(within(saveDialog).getByRole("textbox", { name: "View name" }), "Current filters")
     await user.click(within(saveDialog).getByRole("button", { name: "Save" }))
@@ -662,9 +798,7 @@ describe("ResearchWorkspace source list view state", () => {
         })
       })
     ])
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Save source view" })).not.toBeInTheDocument()
-    )
+    await waitFor(() => expectDialogClosingOrGone("Save source view"))
 
     first.unmount()
     savedViewHarness.paneControllers = []

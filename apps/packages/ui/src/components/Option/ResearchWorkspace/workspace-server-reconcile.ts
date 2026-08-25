@@ -36,6 +36,7 @@ export interface ResearchWorkspaceServerReconcileInput {
   workspaceName?: string | null
   sources: WorkspaceSource[]
   selectedSourceIds?: string[]
+  onWorkspaceReady?: () => void
 }
 
 const DEFAULT_RESEARCH_WORKSPACE_NAME = "Research Workspace"
@@ -119,7 +120,8 @@ export const reconcileResearchWorkspaceServerState = async ({
   workspaceId,
   workspaceName,
   sources,
-  selectedSourceIds
+  selectedSourceIds,
+  onWorkspaceReady
 }: ResearchWorkspaceServerReconcileInput): Promise<ResearchWorkspaceServerReconcileResult> => {
   const result: ResearchWorkspaceServerReconcileResult = {
     workspaceReady: false,
@@ -135,6 +137,7 @@ export const reconcileResearchWorkspaceServerState = async ({
       study_materials_policy: "workspace"
     })
     result.workspaceReady = true
+    onWorkspaceReady?.()
   } catch (error) {
     appendReconcileError(
       result,
