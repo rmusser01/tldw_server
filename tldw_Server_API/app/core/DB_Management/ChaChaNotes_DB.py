@@ -47,7 +47,7 @@ import time  # noqa: E402
 import unicodedata  # noqa: E402
 import uuid  # noqa: E402
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -680,8 +680,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 61  # Schema v61 persists recipient shared-chat threads and receipts
-    _POSTGRES_SCHEMA_VERSION = 61
+    _CURRENT_SCHEMA_VERSION = 62  # Schema v62 adds staged Workspace clone lifecycle markers
+    _POSTGRES_SCHEMA_VERSION = 62
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -723,6 +723,8 @@ class CharactersRAGDB:
     _ALLOWED_CONVERSATION_ASSISTANT_KINDS: tuple[str, ...] = ("character", "persona")
     _ALLOWED_PERSONA_MEMORY_MODES: tuple[str, ...] = ("read_only", "read_write")
     _WORKSPACE_ACTIVITY_MAX_METADATA_BYTES = 16 * 1024
+    _WORKSPACE_CLONE_OPERATION_KIND = "shared_workspace_clone"
+    _WORKSPACE_CLONE_RECONCILIATION_MAX = 100
     _WORKSPACE_ACTIVITY_SECRET_KEY_RE = re.compile(
         r"(^|[_\-.])("
         r"api[_\-.]?key|access[_\-.]?key|secret|token|password|passwd|pwd|"
@@ -6611,6 +6613,23 @@ UPDATE db_schema_version
    AND version = 60;
 """
 
+    _MIGRATION_SQL_V61_TO_V62 = """
+ALTER TABLE workspaces ADD COLUMN system_operation_id TEXT;
+ALTER TABLE workspaces ADD COLUMN system_operation_kind TEXT
+  CHECK(system_operation_kind IS NULL OR system_operation_kind = 'shared_workspace_clone');
+ALTER TABLE workspaces ADD COLUMN system_operation_state TEXT
+  CHECK(system_operation_state IS NULL OR system_operation_state IN ('staged', 'publication_pending'));
+ALTER TABLE workspaces ADD COLUMN system_request_fingerprint TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_workspaces_system_operation
+  ON workspaces(system_operation_kind, system_operation_state, system_operation_id);
+
+UPDATE db_schema_version
+   SET version = 62
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 61;
+"""
+
     _MIGRATION_SQL_V60_TO_V61_POSTGRES = """
 CREATE TABLE IF NOT EXISTS shared_workspace_chat_threads (
   recipient_user_id TEXT NOT NULL CHECK(char_length(btrim(recipient_user_id)) > 0),
@@ -6659,6 +6678,18 @@ CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_status_updated
   ON shared_workspace_chat_requests(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_share_updated
   ON shared_workspace_chat_requests(share_id, updated_at);
+"""
+
+    _MIGRATION_SQL_V61_TO_V62_POSTGRES = """
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS system_operation_id TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS system_operation_kind TEXT
+  CHECK (system_operation_kind IS NULL OR system_operation_kind = 'shared_workspace_clone');
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS system_operation_state TEXT
+  CHECK (system_operation_state IS NULL OR system_operation_state IN ('staged', 'publication_pending'));
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS system_request_fingerprint TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_workspaces_system_operation
+  ON workspaces(system_operation_kind, system_operation_state, system_operation_id);
 """
 
     _SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL = """
@@ -7769,6 +7800,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (58, "_migrate_from_v58_to_v59"),
             (59, "_migrate_from_v59_to_v60_sqlite"),
             (60, "_migrate_from_v60_to_v61_sqlite"),
+            (61, "_migrate_from_v61_to_v62_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -12198,6 +12230,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_db_version(conn) != 61:
             raise SchemaError("Shared workspace chat v61 SQLite version verification failed.")  # noqa: TRY003
 
+    def _migrate_from_v61_to_v62_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add operation-fenced staged Workspace clone lifecycle markers."""
+        if self._get_db_version(conn) != 61:
+            raise SchemaError("Workspace clone lifecycle v62 migration requires schema version 61.")  # noqa: TRY003
+        try:
+            conn.executescript(self._MIGRATION_SQL_V61_TO_V62)
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Workspace clone lifecycle v62 SQLite migration failed: {exc}") from exc
+        if self._get_db_version(conn) != 62:
+            raise SchemaError("Workspace clone lifecycle v62 SQLite version verification failed.")  # noqa: TRY003
+
     def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""
 
@@ -13450,6 +13493,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         if self._get_schema_version_postgres(conn) != 61:
             raise SchemaError("Shared workspace chat v61 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v61_to_v62_postgres(self, conn: Any) -> None:
+        """Add operation-fenced staged Workspace clone lifecycle markers."""
+        if self._get_schema_version_postgres(conn) != 61:
+            raise SchemaError("Workspace clone lifecycle v62 migration requires schema version 61.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V61_TO_V62_POSTGRES,
+            conn,
+            expected_version=62,
+        )
+        if self._get_schema_version_postgres(conn) != 62:
+            raise SchemaError("Workspace clone lifecycle v62 PostgreSQL version verification failed.")  # noqa: TRY003
 
     def _notes_graph_schema_postgres(self, conn: Any) -> None:
         """Create owner-scoped graph projections and direct-write invalidation."""
@@ -16343,6 +16398,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 61 and current_db_version == 60:
                         self._migrate_from_v60_to_v61_sqlite(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 62 and current_db_version == 61:
+                        self._migrate_from_v61_to_v62_sqlite(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -16774,6 +16832,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 61 and current_db_version == 60:
                     self._migrate_from_v60_to_v61_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 62 and current_db_version == 61:
+                    self._migrate_from_v61_to_v62_sqlite(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -20734,6 +20795,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 61:
                 self._migrate_from_v60_to_v61_postgres(conn)
                 current_version = 61
+            if current_version < 62:
+                self._migrate_from_v61_to_v62_postgres(conn)
+                current_version = 62
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -22601,6 +22665,29 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return normalized
 
     @staticmethod
+    def _validate_workspace_clone_identifier(value: Any, field_name: str) -> str:
+        """Validate one clone lifecycle identifier using the clone request contract."""
+        if not isinstance(value, str) or not value:
+            raise InputError(f"{field_name} must be a non-empty ASCII string")  # noqa: TRY003
+        if len(value) > 255:
+            raise InputError(f"{field_name} must be at most 255 characters")  # noqa: TRY003
+        if not value.isascii() or any(ord(character) < 0x21 or ord(character) > 0x7E for character in value):
+            raise InputError(f"{field_name} must contain only printable ASCII characters")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _normalize_workspace_clone_name(value: Any) -> str:
+        """Normalize a clone target name using the immutable clone request contract."""
+        if not isinstance(value, str):
+            raise InputError("name must be a non-empty string")  # noqa: TRY003
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise InputError("name must be non-empty after normalization")  # noqa: TRY003
+        if len(normalized) > 255:
+            raise InputError("name must be at most 255 characters")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
     def _validate_workspace_project_root_backend(backend: Any) -> str:
         """Validate a Workspace-owned project-root backend."""
         normalized = str(backend or "").strip().lower()
@@ -22710,6 +22797,290 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         return workspace
 
+    def _get_workspace_internal(
+        self,
+        workspace_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Read a Workspace without public lifecycle-marker filtering."""
+        query = "SELECT * FROM workspaces WHERE id = ?"
+        if not include_deleted:
+            query += " AND deleted = 0"
+        row = self.execute_query(query, (workspace_id,)).fetchone()
+        return self._workspace_row_to_dict(row) if row else None
+
+    def _get_workspace_internal_with_conn(
+        self,
+        conn: Any,
+        workspace_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Read a Workspace through an existing lifecycle transaction."""
+        query = "SELECT * FROM workspaces WHERE id = ?"
+        if not include_deleted:
+            query += " AND deleted = 0"
+        row = conn.execute(query, (workspace_id,)).fetchone()
+        return self._workspace_row_to_dict(row) if row else None
+
+    @classmethod
+    def _clone_reservation_matches(
+        cls,
+        row: Mapping[str, Any],
+        *,
+        operation_id: str,
+        request_fingerprint: str,
+        name: str,
+        description: str | None,
+        workspace_profile: str,
+    ) -> bool:
+        """Return whether an existing row is the exact reusable reservation."""
+        return (
+            not bool(row.get("deleted"))
+            and row.get("system_operation_kind") == cls._WORKSPACE_CLONE_OPERATION_KIND
+            and row.get("system_operation_state") in {"staged", "publication_pending"}
+            and row.get("system_operation_id") == operation_id
+            and row.get("system_request_fingerprint") == request_fingerprint
+            and row.get("name") == name
+            and row.get("description") == description
+            and row.get("workspace_profile") == workspace_profile
+        )
+
+    @staticmethod
+    def _clone_target_conflict(workspace_id: str) -> ConflictError:
+        """Build the controlled collision error for a deterministic target id."""
+        return ConflictError(
+            f"Workspace clone target '{workspace_id}' is already reserved.",
+            entity="workspaces",
+            entity_id=workspace_id,
+        )
+
+    def reserve_clone_target(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        request_fingerprint: str,
+        name: str,
+        description: str | None,
+        workspace_profile: str,
+    ) -> dict[str, Any]:
+        """Reserve a deterministic hidden Workspace target for one clone operation."""
+        validated_workspace_id = self._validate_workspace_clone_identifier(workspace_id, "workspace_id")
+        validated_operation_id = self._validate_workspace_clone_identifier(operation_id, "operation_id")
+        validated_fingerprint = self._validate_workspace_clone_identifier(
+            request_fingerprint,
+            "request_fingerprint",
+        )
+        normalized_name = self._normalize_workspace_clone_name(name)
+        normalized_profile = self._validate_workspace_profile(workspace_profile)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO workspaces (
+                        id, name, description, metadata_json, study_materials_policy,
+                        workspace_profile, archived, created_at, last_modified, deleted,
+                        client_id, version, system_operation_id, system_operation_kind,
+                        system_operation_state, system_request_fingerprint
+                    ) VALUES (?, ?, ?, '{}', 'general', ?, ?, ?, ?, ?, ?, 1, ?, ?, 'staged', ?)
+                    ON CONFLICT(id) DO NOTHING
+                    """,
+                    (
+                        validated_workspace_id,
+                        normalized_name,
+                        description,
+                        normalized_profile,
+                        True,
+                        now,
+                        now,
+                        False,
+                        self.client_id or "unknown",
+                        validated_operation_id,
+                        self._WORKSPACE_CLONE_OPERATION_KIND,
+                        validated_fingerprint,
+                    ),
+                )
+                workspace = self._get_workspace_internal_with_conn(
+                    conn,
+                    validated_workspace_id,
+                    include_deleted=True,
+                )
+                if workspace is None:  # pragma: no cover - defensive database invariant
+                    raise CharactersRAGDBError("Failed to load reserved Workspace clone target.")  # noqa: TRY003
+                if not self._clone_reservation_matches(
+                    workspace,
+                    operation_id=validated_operation_id,
+                    request_fingerprint=validated_fingerprint,
+                    name=normalized_name,
+                    description=description,
+                    workspace_profile=normalized_profile,
+                ):
+                    raise self._clone_target_conflict(validated_workspace_id)
+                return workspace
+        except ConflictError:
+            raise
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError("Workspace clone target reservation failed.") from exc  # noqa: TRY003
+
+    def _transition_clone_target(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        expected_state: str,
+        set_clause: str,
+        set_params: tuple[Any, ...],
+    ) -> dict[str, Any]:
+        """Apply one exact operation-owned clone lifecycle transition."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                cursor = conn.execute(
+                    f"""
+                    UPDATE workspaces
+                       SET {set_clause}, last_modified = ?, version = version + 1
+                     WHERE id = ?
+                       AND deleted = ?
+                       AND system_operation_id = ?
+                       AND system_operation_kind = ?
+                       AND system_operation_state = ?
+                    """,  # nosec B608 - set_clause is fixed at internal call sites.
+                    (
+                        *set_params,
+                        now,
+                        workspace_id,
+                        False,
+                        operation_id,
+                        self._WORKSPACE_CLONE_OPERATION_KIND,
+                        expected_state,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise self._clone_target_conflict(workspace_id)
+                workspace = self._get_workspace_internal_with_conn(conn, workspace_id)
+                if workspace is None:  # pragma: no cover - defensive database invariant
+                    raise CharactersRAGDBError("Failed to load transitioned Workspace clone target.")  # noqa: TRY003
+                return workspace
+        except ConflictError:
+            raise
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError("Workspace clone target transition failed.") from exc  # noqa: TRY003
+
+    def publish_clone_target(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """Move an exact owned staged target into hidden publication-pending state."""
+        validated_workspace_id = self._validate_workspace_clone_identifier(workspace_id, "workspace_id")
+        validated_operation_id = self._validate_workspace_clone_identifier(operation_id, "operation_id")
+        return self._transition_clone_target(
+            workspace_id=validated_workspace_id,
+            operation_id=validated_operation_id,
+            expected_state="staged",
+            set_clause="archived = ?, system_operation_state = ?",
+            set_params=(False, "publication_pending"),
+        )
+
+    def confirm_clone_target_publication(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """Expose an exact owned publication-pending target by clearing all markers."""
+        validated_workspace_id = self._validate_workspace_clone_identifier(workspace_id, "workspace_id")
+        validated_operation_id = self._validate_workspace_clone_identifier(operation_id, "operation_id")
+        return self._transition_clone_target(
+            workspace_id=validated_workspace_id,
+            operation_id=validated_operation_id,
+            expected_state="publication_pending",
+            set_clause=(
+                "system_operation_id = NULL, system_operation_kind = NULL, "
+                "system_operation_state = NULL, system_request_fingerprint = NULL"
+            ),
+            set_params=(),
+        )
+
+    def discard_clone_target(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+    ) -> bool:
+        """Soft-delete only an exact operation-owned staged or pending clone target."""
+        validated_workspace_id = self._validate_workspace_clone_identifier(workspace_id, "workspace_id")
+        validated_operation_id = self._validate_workspace_clone_identifier(operation_id, "operation_id")
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE workspaces
+                       SET deleted = ?, last_modified = ?, version = version + 1
+                     WHERE id = ?
+                       AND deleted = ?
+                       AND system_operation_id = ?
+                       AND system_operation_kind = ?
+                       AND system_operation_state IN ('staged', 'publication_pending')
+                    """,
+                    (
+                        True,
+                        now,
+                        validated_workspace_id,
+                        False,
+                        validated_operation_id,
+                        self._WORKSPACE_CLONE_OPERATION_KIND,
+                    ),
+                )
+                return cursor.rowcount == 1
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError("Workspace clone target discard failed.") from exc  # noqa: TRY003
+
+    def list_clone_targets_for_reconciliation(
+        self,
+        *,
+        operation_ids: Sequence[str],
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return a bounded set of caller-correlated staged clone targets."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise InputError("limit must be an integer between 1 and 100")  # noqa: TRY003
+        if isinstance(operation_ids, (str, bytes)) or not isinstance(operation_ids, Sequence):
+            raise InputError("operation_ids must be a sequence of identifiers")  # noqa: TRY003
+        if len(operation_ids) > self._WORKSPACE_CLONE_RECONCILIATION_MAX:
+            raise InputError("operation_ids may contain at most 100 identifiers")  # noqa: TRY003
+        if not operation_ids:
+            return []
+        validated_ids = [
+            self._validate_workspace_clone_identifier(operation_id, "operation_id")
+            for operation_id in operation_ids
+        ]
+        placeholders = ", ".join("?" for _ in validated_ids)
+        cursor = self.execute_query(
+            f"""
+            SELECT *
+              FROM workspaces
+             WHERE deleted = ?
+               AND system_operation_kind = ?
+               AND system_operation_state IN ('staged', 'publication_pending')
+               AND system_operation_id IN ({placeholders})
+             ORDER BY system_operation_id ASC, id ASC
+             LIMIT ?
+            """,  # nosec B608 - placeholders are generated from bounded validated inputs.
+            (
+                False,
+                self._WORKSPACE_CLONE_OPERATION_KIND,
+                *validated_ids,
+                limit,
+            ),
+        )
+        return [self._workspace_row_to_dict(row) for row in cursor.fetchall()]
+
     def upsert_workspace(
         self,
         workspace_id: str,
@@ -22783,12 +23154,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             with self.transaction() as conn:
                 conn.execute(query, params)
-        except sqlite3.IntegrityError:
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
             # Race condition: another thread inserted between our check and insert.
             existing = self.get_workspace(workspace_id)
             if existing is not None:
                 return existing
-            raise  # pragma: no cover
+            if self._get_workspace_internal(workspace_id, include_deleted=True) is not None:
+                raise ConflictError(  # noqa: TRY003
+                    f"Workspace '{workspace_id}' already exists.",
+                    entity="workspaces",
+                    entity_id=workspace_id,
+                ) from exc
+            raise CharactersRAGDBError("Workspace creation failed.") from exc  # noqa: TRY003
         return self.get_workspace(workspace_id)  # type: ignore[return-value]
 
     def get_workspace(
@@ -22799,10 +23176,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> dict[str, Any] | None:
         """Retrieve a workspace by id, optionally including soft-deleted rows."""
         if include_deleted:
-            cursor = self.execute_query("SELECT * FROM workspaces WHERE id = ?", (workspace_id,))
+            cursor = self.execute_query(
+                "SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL",
+                (workspace_id,),
+            )
         else:
             cursor = self.execute_query(
-                "SELECT * FROM workspaces WHERE id = ? AND deleted = 0",
+                "SELECT * FROM workspaces "
+                "WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL",
                 (workspace_id,),
             )
         row = cursor.fetchone()
@@ -22810,7 +23191,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def list_workspaces(self) -> list[dict[str, Any]]:
         """Return all non-deleted workspaces ordered by name."""
-        query = "SELECT * FROM workspaces WHERE deleted = 0 ORDER BY name"
+        query = (
+            "SELECT * FROM workspaces "
+            "WHERE deleted = 0 AND system_operation_state IS NULL ORDER BY name"
+        )
         cursor = self.execute_query(query, ())
         return [self._workspace_row_to_dict(row) for row in cursor.fetchall()]
 

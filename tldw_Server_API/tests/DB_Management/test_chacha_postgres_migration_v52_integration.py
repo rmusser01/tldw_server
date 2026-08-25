@@ -1,4 +1,4 @@
-"""PostgreSQL migration coverage from ChaChaNotes schema v52 to current v61."""
+"""PostgreSQL migration coverage from ChaChaNotes schema v52 to current v62."""
 
 import pytest
 
@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
 
 
-def test_postgres_v52_to_current_v61_preserves_questions_and_is_rerunnable(
+def test_postgres_v52_to_current_v62_preserves_questions_and_is_rerunnable(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -62,7 +62,7 @@ def test_postgres_v52_to_current_v61_preserves_questions_and_is_rerunnable(
         question = db.get_question(question_id)
 
         assert columns == {"group_id", "group_prompt"}
-        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 61
+        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 62
         assert int(version) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         relations = {
             row["table_name"]
