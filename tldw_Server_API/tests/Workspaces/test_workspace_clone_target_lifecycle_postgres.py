@@ -6,12 +6,13 @@ from collections.abc import Iterator
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, QueryResult
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
 )
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Sharing.clone_models import CloneSnapshotUnavailable
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(60)]
@@ -96,6 +97,7 @@ def test_postgres_workspace_clone_snapshot_is_repeatable_and_returns_connection(
     acquired_connections = []
     returned_connections: list[tuple[object, str]] = []
     observed_modes: dict[str, str] = {}
+    observed_scope: dict[str, str] = {}
 
     def tracked_get_connection():
         connection = original_get_connection()
@@ -111,6 +113,15 @@ def test_postgres_workspace_clone_snapshot_is_repeatable_and_returns_connection(
         result = original_execute(query, params, connection=connection, **kwargs)
         if not observed_modes and "FROM workspaces" in query:
             with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT current_setting('app.current_user_id', true) AS current_user_id, "
+                    "current_setting('app.user_id', true) AS user_id, "
+                    "current_setting('app.org_ids', true) AS org_ids, "
+                    "current_setting('app.team_ids', true) AS team_ids, "
+                    "current_setting('app.is_admin', true) AS is_admin, "
+                    "current_role::text AS current_role, session_user::text AS session_user"
+                )
+                observed_scope.update(cursor.fetchone())
                 cursor.execute("SHOW transaction_isolation")
                 observed_modes["isolation"] = str(next(iter(cursor.fetchone().values())))
                 cursor.execute("SHOW transaction_read_only")
@@ -153,12 +164,19 @@ def test_postgres_workspace_clone_snapshot_is_repeatable_and_returns_connection(
     monkeypatch.setattr(pool, "return_connection", tracked_return_connection)
     monkeypatch.setattr(backend, "execute", interleaved_execute)
 
-    snapshot = postgres_db.read_workspace_clone_snapshot("workspace-source")
+    with scoped_context(user_id="user-1", org_ids=[12], team_ids=[77], is_admin=True):
+        snapshot = postgres_db.read_workspace_clone_snapshot("workspace-source")
 
     snapshot_connection = acquired_connections[0]
     assert snapshot_connection is not caller_connection
     assert returned_connections.count((snapshot_connection, "IDLE")) == 1
     assert observed_modes == {"isolation": "repeatable read", "read_only": "on"}
+    assert observed_scope["current_user_id"] == "user-1"
+    assert observed_scope["user_id"] == "user-1"
+    assert observed_scope["org_ids"] == "12"
+    assert observed_scope["team_ids"] == "77"
+    assert observed_scope["is_admin"] == "1"
+    assert observed_scope["current_role"] == observed_scope["session_user"]
     assert snapshot.workspace["name"] == "Workspace v1"
     assert snapshot.sources[0]["title"] == "Source v1"
     assert snapshot.memberships[0]["label"] == "Membership v1"
@@ -194,6 +212,105 @@ def test_postgres_workspace_clone_snapshot_rolls_back_and_returns_on_failure(
 
     assert len(acquired_connections) == 1
     assert returned_connections == [(acquired_connections[0], "IDLE")]
+
+
+@pytest.mark.parametrize(
+    "failure_mode",
+    ["scope_apply", "scope_verification", "transaction_mode"],
+)
+def test_postgres_workspace_snapshot_setup_failure_stops_before_table_queries(
+    postgres_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+) -> None:
+    _seed_workspace_snapshot(postgres_db)
+    caller_connection = postgres_db.get_connection()
+    backend = postgres_db.backend
+    pool = backend.get_pool()
+    original_get_connection = pool.get_connection
+    original_return_connection = pool.return_connection
+    original_execute = backend.execute
+    acquired_connections = []
+    returned_connections: list[tuple[object, str]] = []
+    table_queries: list[str] = []
+
+    def tracked_get_connection():
+        connection = original_get_connection()
+        acquired_connections.append(connection)
+        return connection
+
+    def tracked_return_connection(connection) -> None:
+        status = getattr(connection.info.transaction_status, "name", "")
+        returned_connections.append((connection, str(status)))
+        original_return_connection(connection)
+
+    def mismatched_execute(query, params=None, connection=None, **kwargs):
+        if any(
+            table_name in query
+            for table_name in (
+                "FROM workspaces",
+                "FROM workspace_resource_memberships",
+                "FROM workspace_sources",
+                "FROM workspace_notes",
+                "FROM workspace_artifacts",
+            )
+        ):
+            table_queries.append(query)
+        if (
+            failure_mode == "scope_verification"
+            and "current_setting('app.current_user_id'" in query
+        ):
+            return QueryResult(
+                rows=[
+                    {
+                        "current_user_id": "wrong-user",
+                        "user_id": "user-1",
+                        "org_ids": "",
+                        "team_ids": "",
+                        "is_admin": "0",
+                        "row_security": "on",
+                        "current_role": "postgres",
+                        "session_user": "postgres",
+                    }
+                ],
+                rowcount=1,
+            )
+        if failure_mode == "transaction_mode" and query.strip().upper() == (
+            "SHOW TRANSACTION_READ_ONLY"
+        ):
+            return QueryResult(
+                rows=[{"transaction_read_only": "off"}],
+                rowcount=1,
+            )
+        return original_execute(query, params, connection=connection, **kwargs)
+
+    monkeypatch.setattr(pool, "get_connection", tracked_get_connection)
+    monkeypatch.setattr(pool, "return_connection", tracked_return_connection)
+    monkeypatch.setattr(backend, "execute", mismatched_execute)
+
+    scope_kwargs: dict[str, object] = {
+        "user_id": "user-1",
+        "org_ids": [],
+        "team_ids": [],
+        "is_admin": False,
+    }
+    if failure_mode == "scope_apply":
+        monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_SWITCH", "1")
+        monkeypatch.setenv(
+            "TLDW_CONTENT_PG_ROLE_WHITELIST",
+            "task3_missing_snapshot_role",
+        )
+        scope_kwargs["session_role"] = "task3_missing_snapshot_role"
+
+    with scoped_context(**scope_kwargs):
+        with pytest.raises(CloneSnapshotUnavailable):
+            postgres_db.read_workspace_clone_snapshot("workspace-source")
+
+    assert table_queries == []
+    assert len(acquired_connections) == 1
+    snapshot_connection = acquired_connections[0]
+    assert snapshot_connection is not caller_connection
+    assert returned_connections == [(snapshot_connection, "IDLE")]
 
 
 def test_postgres_reserve_publish_replay_and_confirm_are_hidden_and_fenced(

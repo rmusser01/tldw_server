@@ -23255,8 +23255,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     raise RuntimeError("SQLite snapshot transaction unavailable")
             else:
                 pool = backend.get_pool()
-                connection = self._open_new_connection(backend)
-                connection.commit()
+                connection = pool.get_connection()
+                connection.rollback()
+                backend.apply_and_verify_scope(
+                    connection,
+                    fallback_user_id=self.client_id,
+                )
                 with connection.cursor() as cursor:
                     cursor.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
                 isolation_rows = backend.execute(

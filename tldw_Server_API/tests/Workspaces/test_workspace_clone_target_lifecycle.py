@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from pathlib import Path
 
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -197,6 +200,28 @@ def test_workspace_clone_snapshot_rejects_private_memory_database() -> None:
             memory_db.read_workspace_clone_snapshot("workspace-source")
     finally:
         memory_db.close_all_connections()
+
+
+def test_workspace_clone_snapshot_reads_named_shared_cache_memory_database() -> None:
+    db_uri = f"file:task3-workspace-{uuid.uuid4()}?mode=memory&cache=shared"
+    backend = SQLiteBackend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_uri)
+    )
+    memory_db = CharactersRAGDB(
+        ":memory:",
+        client_id="shared-memory",
+        backend=backend,
+    )
+    try:
+        _seed_workspace_snapshot(memory_db)
+
+        snapshot = memory_db.read_workspace_clone_snapshot("workspace-source")
+
+        assert snapshot.workspace["name"] == "Workspace v1"
+        assert snapshot.sources[0]["title"] == "Source v1"
+    finally:
+        memory_db.close_all_connections()
+        backend.get_pool().close_all()
 
 
 def test_workspace_clone_snapshot_redacts_setup_failure(

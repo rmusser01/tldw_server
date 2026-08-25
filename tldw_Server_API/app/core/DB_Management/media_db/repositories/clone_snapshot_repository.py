@@ -86,7 +86,11 @@ class CloneSnapshotRepository:
             else:
                 pool = backend.get_pool()
                 connection = pool.get_connection()
-                connection.commit()
+                connection.rollback()
+                backend.apply_and_verify_scope(
+                    connection,
+                    fallback_user_id=self.session.client_id,
+                )
                 with connection.cursor() as cursor:
                     cursor.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
                 isolation_rows = backend.execute(
@@ -190,9 +194,24 @@ class CloneSnapshotRepository:
                 "t.transcription_run_id DESC, t.created_at DESC, t.id DESC",
                 (*requested_ids, active_value, active_value, active_value),
             )
+            keyword_order = (
+                "LOWER(k.keyword), k.keyword"
+                if backend.backend_type == BackendType.POSTGRESQL
+                else "k.keyword COLLATE NOCASE"
+            )
+            keyword_rows = read_rows(
+                f"SELECT mk.media_id, k.keyword FROM MediaKeywords mk "  # nosec B608
+                "JOIN Keywords k ON k.id = mk.keyword_id "
+                "JOIN Media m ON m.id = mk.media_id "
+                f"WHERE mk.media_id IN ({placeholders}) AND k.deleted = ? "
+                "AND m.deleted = ? AND m.is_trash = ? "
+                f"ORDER BY mk.media_id, {keyword_order}, k.id",  # nosec B608
+                (*requested_ids, active_value, active_value, active_value),
+            )
 
             chunks_by_media = {media_id: [] for media_id in requested_ids}
             transcripts_by_media = {media_id: [] for media_id in requested_ids}
+            keywords_by_media = {media_id: [] for media_id in requested_ids}
             for row in chunk_rows:
                 media_id = int(row["media_id"])
                 if media_id not in chunks_by_media:
@@ -203,15 +222,22 @@ class CloneSnapshotRepository:
                 if media_id not in transcripts_by_media:
                     raise CloneSnapshotUnavailable(cleanup_state="complete")
                 transcripts_by_media[media_id].append(row)
+            for row in keyword_rows:
+                media_id = int(row["media_id"])
+                if media_id not in keywords_by_media:
+                    raise CloneSnapshotUnavailable(cleanup_state="complete")
+                keywords_by_media[media_id].append(str(row["keyword"]))
 
-            return {
-                media_id: MediaCloneSnapshot.from_rows(
-                    media=media_by_id[media_id],
+            snapshots: dict[int, MediaCloneSnapshot] = {}
+            for media_id in requested_ids:
+                media_row = dict(media_by_id[media_id])
+                media_row["keywords"] = tuple(keywords_by_media[media_id])
+                snapshots[media_id] = MediaCloneSnapshot.from_rows(
+                    media=media_row,
                     chunks=chunks_by_media[media_id],
                     transcripts=transcripts_by_media[media_id],
                 )
-                for media_id in requested_ids
-            }
+            return snapshots
 
         return self._run_snapshot(materialize)
 
