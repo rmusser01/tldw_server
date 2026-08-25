@@ -613,6 +613,15 @@ describe("fetch-backed WebUI api client", () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(
       true
     )
+    expect(storedRequestHistory()[0]).toEqual(
+      expect.objectContaining({
+        url: "/slow",
+        ok: false,
+        errorMessage: "Request timed out"
+      })
+    )
+
+    localStorage.removeItem("tldw-request-history")
 
     const controller = new AbortController()
     const abortedRequest = apiClient.get("/caller-abort", {
@@ -621,8 +630,11 @@ describe("fetch-backed WebUI api client", () => {
     controller.abort()
 
     await expect(abortedRequest).rejects.toMatchObject({
-      name: "ApiError"
+      name: "AbortError",
+      code: "REQUEST_ABORTED",
+      message: "Request aborted"
     })
+    expect(storedRequestHistory()).toEqual([])
   })
 
   it("returns binary and empty responses using the request config response type", async () => {

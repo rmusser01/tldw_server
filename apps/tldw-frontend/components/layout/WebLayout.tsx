@@ -62,7 +62,6 @@ import { CommandPalette } from '@/components/Common/CommandPalette';
 import {
   useConnectionActions,
   useConnectionState,
-  useConnectionUxState,
 } from '@/hooks/useConnectionState';
 import { ConnectionPhase } from '@/types/connection';
 
@@ -91,6 +90,13 @@ type OptionLayoutProps = {
   hideSidebar?: boolean;
   allowNestedHideHeader?: boolean;
   allowNestedHideSidebar?: boolean;
+};
+
+type BackendUnavailableCandidate = {
+  detail: BackendUnreachableDetail;
+  sequence: number;
+  baselineLastCheckedAt: number | null;
+  baselineChecksSinceConfigChange: number;
 };
 
 const SHORTCUT_LOADING_MIN_MS = 0;
@@ -130,10 +136,20 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const historyId = useStoreMessageOption((state) => state.historyId);
   const serverChatId = useStoreMessageOption((state) => state.serverChatId);
   const mobileSidebarPathRef = React.useRef(location.pathname);
-  const { phase, isConnected } = useConnectionState();
+  const {
+    phase,
+    isConnected,
+    isChecking,
+    lastCheckedAt,
+    checksSinceConfigChange,
+  } = useConnectionState();
   const { checkOnce } = useConnectionActions();
-  const { isChecking } = useConnectionUxState();
   const { fatalBackendRecoveryActive } = useBackendRecoveryUi();
+  const backendUnavailableSequenceRef = React.useRef(0);
+  const [backendUnavailableCandidate, setBackendUnavailableCandidate] =
+    useState<BackendUnavailableCandidate | null>(null);
+  const [settledBackendUnavailableSequence, setSettledBackendUnavailableSequence] =
+    useState<number | null>(null);
   const [backendUnavailableDetail, setBackendUnavailableDetail] =
     useState<BackendUnreachableDetail | null>(null);
   const suppressBackendUnavailableModal = React.useMemo(() => {
@@ -209,40 +225,93 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     });
   }, [location.pathname, setChatSidebarCollapsed]);
 
+  const corroborateBackendUnavailable = React.useCallback(
+    (detail: BackendUnreachableDetail) => {
+      const sequence = backendUnavailableSequenceRef.current + 1;
+      backendUnavailableSequenceRef.current = sequence;
+      setBackendUnavailableCandidate({
+        detail,
+        sequence,
+        baselineLastCheckedAt: lastCheckedAt,
+        baselineChecksSinceConfigChange: checksSinceConfigChange,
+      });
+      setSettledBackendUnavailableSequence(null);
+      setBackendUnavailableDetail(null);
+      void checkOnce({ force: true })
+        .catch(() => undefined)
+        .finally(() => {
+          if (backendUnavailableSequenceRef.current === sequence) {
+            setSettledBackendUnavailableSequence(sequence);
+          }
+        });
+    },
+    [checkOnce, checksSinceConfigChange, lastCheckedAt]
+  );
+
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const onBackendUnreachable = (event: Event) => {
       if (suppressBackendUnavailableModal) return;
       const detail = (event as CustomEvent<BackendUnreachableDetail | undefined>)?.detail;
       if (!detail || typeof detail !== 'object') return;
-      setBackendUnavailableDetail(detail);
-      void checkOnce({ force: true }).catch(() => undefined);
+      corroborateBackendUnavailable(detail);
     };
 
     window.addEventListener(BACKEND_UNREACHABLE_EVENT, onBackendUnreachable as EventListener);
     return () => {
       window.removeEventListener(BACKEND_UNREACHABLE_EVENT, onBackendUnreachable as EventListener);
     };
-  }, [checkOnce, suppressBackendUnavailableModal]);
+  }, [corroborateBackendUnavailable, suppressBackendUnavailableModal]);
 
   React.useEffect(() => {
-    if (!isChecking && isConnected && phase === ConnectionPhase.CONNECTED) {
-      setBackendUnavailableDetail(null);
+    if (
+      !backendUnavailableCandidate ||
+      isChecking ||
+      settledBackendUnavailableSequence !== backendUnavailableCandidate.sequence ||
+      (lastCheckedAt === backendUnavailableCandidate.baselineLastCheckedAt &&
+        checksSinceConfigChange ===
+          backendUnavailableCandidate.baselineChecksSinceConfigChange)
+    ) {
+      return;
     }
-  }, [isChecking, isConnected, phase]);
+
+    if (isConnected && phase === ConnectionPhase.CONNECTED) {
+      setBackendUnavailableCandidate(null);
+      setBackendUnavailableDetail(null);
+      return;
+    }
+
+    if (!isConnected && phase === ConnectionPhase.ERROR) {
+      setBackendUnavailableDetail(backendUnavailableCandidate.detail);
+    }
+    setBackendUnavailableCandidate(null);
+  }, [
+    backendUnavailableCandidate,
+    checksSinceConfigChange,
+    isChecking,
+    isConnected,
+    lastCheckedAt,
+    phase,
+    settledBackendUnavailableSequence,
+  ]);
 
   const closeBackendUnavailableModal = React.useCallback(() => {
+    backendUnavailableSequenceRef.current += 1;
+    setBackendUnavailableCandidate(null);
+    setSettledBackendUnavailableSequence(null);
     setBackendUnavailableDetail(null);
   }, []);
 
   const openHealthDiagnostics = React.useCallback(() => {
-    setBackendUnavailableDetail(null);
+    closeBackendUnavailableModal();
     navigate('/settings/health');
-  }, [navigate]);
+  }, [closeBackendUnavailableModal, navigate]);
 
   const retryConnectionCheck = React.useCallback(() => {
-    void checkOnce({ force: true }).catch(() => undefined);
-  }, [checkOnce]);
+    if (backendUnavailableDetail) {
+      corroborateBackendUnavailable(backendUnavailableDetail);
+    }
+  }, [backendUnavailableDetail, corroborateBackendUnavailable]);
 
   // Create toggle function for sidebar
   const toggleSidebar = () => {

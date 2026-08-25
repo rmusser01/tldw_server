@@ -28,7 +28,7 @@
 **Goal:** Establish a bounded development runtime and prevent false backend-unavailable UI.
 **Success Criteria:** One bundler qualifies under the recorded guardrails or a bounded containment is documented; cancellations do not produce outage UI while genuine outages still do.
 **Tests:** Runtime probe tests, package-script contract, request-event/background-proxy tests, WebLayout connection tests.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 2: Workspace and Settings Defects
 **Goal:** Correct Research initialization, Prompt responsive behavior, Settings form ownership, and Kanban gate drift.
@@ -185,7 +185,9 @@ Commit: `fix(webui): select evidence-backed development runtime`
 
 **Files:**
 - Modify: `apps/packages/ui/src/services/request-events.ts`
+- Modify: `apps/packages/ui/src/services/backend-unreachable.ts`
 - Modify: `apps/packages/ui/src/services/background-proxy.ts`
+- Create: `apps/packages/ui/src/services/__tests__/request-events.test.ts`
 - Modify: `apps/tldw-frontend/lib/api.ts`
 - Modify: `apps/packages/ui/src/services/__tests__/background-proxy.test.ts`
 - Modify: `apps/tldw-frontend/lib/__tests__/api-client.fetch.test.ts`
@@ -196,7 +198,7 @@ Commit: `fix(webui): select evidence-backed development runtime`
 - Produces: `isExplicitRequestCancellation(value: unknown): boolean` in `request-events.ts` for `AbortError`, `REQUEST_ABORTED`, and established abort messages.
 - Consumes: `useConnectionActions().checkOnce({ force: true })`, `ConnectionPhase`, and the existing `tldw:backend-unreachable` event.
 
-- [ ] **Step 1: Add red cancellation and corroboration tests**
+- [x] **Step 1: Add red cancellation and corroboration tests**
 
 ```ts
 it("does not persist or emit an explicitly aborted request", async () => {
@@ -218,13 +220,13 @@ it("keeps a status-zero candidate hidden when the forced check reconnects", asyn
 })
 ```
 
-- [ ] **Step 2: Run focused tests and observe red**
+- [x] **Step 2: Run focused tests and observe red**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/background-proxy.test.ts lib/__tests__/api-client.fetch.test.ts __tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx`
 
 Expected: cancellation is recorded and/or the modal appears before connection corroboration.
 
-- [ ] **Step 3: Centralize explicit cancellation classification**
+- [x] **Step 3: Centralize explicit cancellation classification**
 
 ```ts
 export const isExplicitRequestCancellation = (value: unknown): boolean => {
@@ -237,7 +239,7 @@ export const isExplicitRequestCancellation = (value: unknown): boolean => {
 
 Use this predicate before `recordRequestError`, `notifyBackendUnavailable`, and direct `recordFailure`. Preserve a thrown cancellation object so callers still observe cancellation.
 
-- [ ] **Step 4: Make WebLayout display only corroborated candidates**
+- [x] **Step 4: Make WebLayout display only corroborated candidates**
 
 Store `backendUnavailableCandidate` separately from visible detail. On each event, increment a sequence ref, clear visible recovery, and force `checkOnce`. An effect promotes only the current candidate when checking has settled outside `CONNECTED`; it clears both candidate and detail when connected.
 
@@ -250,11 +252,11 @@ if (!isChecking && phase === ConnectionPhase.CONNECTED && isConnected) {
 }
 ```
 
-- [ ] **Step 5: Verify genuine outage and retry behavior**
+- [x] **Step 5: Verify genuine outage and retry behavior**
 
 Add a test where the forced check settles in `ConnectionPhase.ERROR`; assert sanitized method/path/message and Retry remain visible. Then make Retry settle connected and assert recovery UI clears.
 
-- [ ] **Step 6: Run adjacent tests and commit**
+- [x] **Step 6: Run adjacent tests and commit**
 
 Run the Step 2 command plus `cd apps/tldw-frontend && bunx vitest run __tests__/components/layout/WebLayout.backend-unreachable.test.tsx ../packages/ui/src/store/__tests__/connection.test.ts`.
 

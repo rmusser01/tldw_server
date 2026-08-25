@@ -25,6 +25,7 @@ import {
 } from "@/services/tldw/single-user-credential"
 import {
   BACKEND_UNREACHABLE_EVENT,
+  isExplicitRequestCancellation,
   type BackendUnreachableDetail
 } from "@/services/request-events"
 import {
@@ -342,9 +343,6 @@ type RequestAbortError = Error & {
   code?: string
   details?: unknown
 }
-
-const isAbortErrorMessage = (value?: string) =>
-  typeof value === "string" && value.toLowerCase().includes("abort")
 
 const readErrorMessage = (error: unknown, fallback = "Aborted") =>
   error instanceof Error && error.message ? error.message : fallback
@@ -1038,7 +1036,7 @@ async function bgRequestImpl<
     details?: unknown,
     code?: string
   ): (Error & { status?: number; code?: string; details?: unknown }) => {
-    if (isAbortErrorMessage(msg)) {
+    if (isExplicitRequestCancellation({ message: msg, code })) {
       return createAbortError(msg, status, details)
     }
     const error = new Error(`${msg} (${method} ${path})`) as Error & {
@@ -1073,6 +1071,7 @@ async function bgRequestImpl<
   type RuntimeResponsePayload = {
     ok: boolean
     error?: string
+    code?: string
     status?: number
     data?: unknown
     headers?: Record<string, string>
@@ -1094,12 +1093,15 @@ async function bgRequestImpl<
       resp?.error,
       `Request failed: ${resp?.status}`
     )
-    const eligibleForBackendUnavailableEvent = shouldNotifyBackendUnavailable({
-      method: String(method),
-      path: String(path),
-      status: resp?.status,
-      error: rawMessage
-    })
+    const explicitCancellation = isExplicitRequestCancellation(rawMessage) ||
+      isExplicitRequestCancellation(resp)
+    const eligibleForBackendUnavailableEvent = !explicitCancellation &&
+      shouldNotifyBackendUnavailable({
+        method: String(method),
+        path: String(path),
+        status: resp?.status,
+        error: rawMessage
+      })
     const scopedError =
       servicePromptConfig &&
       isRequestConfigScopeChangedError({
@@ -1115,10 +1117,11 @@ async function bgRequestImpl<
           details: scopedError.details
         }
       : sanitizeRagProviderError
-      ? isAbortErrorMessage(rawMessage)
+      ? explicitCancellation
         ? {
             message: "Aborted",
-            status: asValidatedHttpStatus(resp?.status)
+            status: asValidatedHttpStatus(resp?.status),
+            code: "REQUEST_ABORTED"
           }
         : sanitizeRagProviderFailure({
             status: resp?.status,
@@ -1128,6 +1131,7 @@ async function bgRequestImpl<
       : {
           message: rawMessage,
           status: resp?.status,
+          code: resp?.code,
           details: resp?.data
         }
     const diagnosticEntry = {
@@ -1140,7 +1144,10 @@ async function bgRequestImpl<
     }
 
     if (
-      !isAbortErrorMessage(sanitized.message) &&
+      !isExplicitRequestCancellation({
+        message: sanitized.message,
+        code: sanitized.code
+      }) &&
       !isExpectedStatus(resp?.status)
     ) {
       if (sanitized.code) {
@@ -1503,8 +1510,7 @@ const createSanitizedRagStreamAbortError = (): RequestAbortError =>
 
 const isRequestAbort = (error: unknown, signal?: AbortSignal): boolean =>
   Boolean(signal?.aborted) ||
-  (error as { name?: unknown } | null)?.name === "AbortError" ||
-  (error as { code?: unknown } | null)?.code === "REQUEST_ABORTED"
+  isExplicitRequestCancellation(error)
 
 const yieldToBrowser = async (): Promise<void> => {
   if (typeof requestAnimationFrame === "function") {

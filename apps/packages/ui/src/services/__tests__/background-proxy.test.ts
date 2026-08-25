@@ -997,6 +997,42 @@ describe("background proxy fallback safety", () => {
     })
   })
 
+  it("preserves code-only cancellation identity without diagnostics or outage events", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      code: "REQUEST_ABORTED",
+      error: "request stopped"
+    })
+    const eventSpy = vi.fn()
+    window.addEventListener("tldw:backend-unreachable", eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+
+      await expect(
+        bgRequest({
+          path: "/api/v1/chats/?limit=200&offset=0&ordering=-updated_at",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({
+        name: "AbortError",
+        status: 0,
+        code: "REQUEST_ABORTED"
+      })
+    } finally {
+      window.removeEventListener("tldw:backend-unreachable", eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+    expect(
+      mocks.storageSet.mock.calls.some(([key]) => key === "__tldwLastRequestError")
+    ).toBe(false)
+  })
+
   it("falls back to direct request on GET extension timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
