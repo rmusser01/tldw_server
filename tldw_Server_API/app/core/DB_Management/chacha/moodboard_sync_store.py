@@ -310,6 +310,12 @@ class MoodboardSyncStore:
                     revision=int(row["canonical_revision"]),
                     deleted=bool(row["deleted"]),
                 )
+                if payload.smart_rule is not None:
+                    self._db._prove_moodboard_collection_sync_ids_v61(
+                        conn,
+                        owner_user_id=owner,
+                        collection_sync_ids=payload.smart_rule.collection_sync_ids,
+                    )
                 if row["source_diagnostic_code"] is not None or row["canonical_hash"] != expected:
                     raise ValueError("moodboard lineage mismatch")
                 sync_ids[int(row["id"])] = str(row["sync_id"])
@@ -391,13 +397,14 @@ class MoodboardSyncStore:
                 parent_revision, parent_hash = self._db.note_store._notes_note_head(
                     dict(parent)
                 )
-                if (
-                    parsed.note_revision > parent_revision
-                    or parsed.note_hash != parent_hash
+                if parsed.note_revision > parent_revision:
+                    raise ValueError("Studio parent head mismatch")
+                if parsed.note_revision == parent_revision and (
+                    parsed.note_hash != parent_hash
                     or parsed.companion_content_hash
                     != self._db.note_store._normalized_text_hash(parent["content"])
                 ):
-                    raise ValueError("Studio parent head mismatch")
+                    raise ValueError("Studio current parent head mismatch")
                 provenance = parsed.accepted_provenance
                 if parsed.source_note_id is None:
                     if (
@@ -408,7 +415,7 @@ class MoodboardSyncStore:
                 else:
                     source = self._execute(
                         conn,
-                        "SELECT * FROM notes WHERE client_id=? AND id=? AND deleted=0",
+                        "SELECT * FROM notes WHERE client_id=? AND id=?",
                         (owner, parsed.source_note_id),
                     ).fetchone()
                     if source is None:
@@ -422,13 +429,16 @@ class MoodboardSyncStore:
                     if (
                         provenance.source_revision is None
                         or provenance.source_revision > source_revision
-                        or provenance.source_hash != source_hash
+                    ):
+                        raise ValueError("Studio source head mismatch")
+                    if provenance.source_revision == source_revision and (
+                        provenance.source_hash != source_hash
                         or (
                             parsed.excerpt_snapshot is not None
                             and parsed.excerpt_snapshot not in normalized_source
                         )
                     ):
-                        raise ValueError("Studio source head mismatch")
+                        raise ValueError("Studio current source head mismatch")
                 deleted = bool(row["deleted"])
                 if deleted != bool(row["parent_deleted"]):
                     raise ValueError("Studio lifecycle differs from parent note")

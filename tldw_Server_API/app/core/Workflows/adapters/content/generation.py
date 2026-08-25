@@ -807,9 +807,11 @@ async def run_notes_studio_generate_adapter(config: dict[str, Any], context: dic
         )
         response_text = extract_openai_content(response) or ""
         json_match = re.search(r"\{[\s\S]*\}", response_text)
-        payload = json.loads(json_match.group()) if json_match else fallback_payload
+        if json_match is None:
+            return {"payload": fallback_payload, "source": "deterministic_fallback"}
+        payload = json.loads(json_match.group())
         if not isinstance(payload, dict):
-            payload = fallback_payload
+            return {"payload": fallback_payload, "source": "deterministic_fallback"}
         payload.setdefault("meta", fallback_payload["meta"])
         payload.setdefault("sections", fallback_payload["sections"])
         return {"payload": payload, "source": "llm"}

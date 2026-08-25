@@ -2306,6 +2306,61 @@ class TestContentAdaptersErrorHandling:
         assert isinstance(result["payload"], dict)
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("response_text", "expected_source"),
+        (
+            ("The model returned prose instead of JSON.", "deterministic_fallback"),
+            ("[]", "deterministic_fallback"),
+            ("{malformed", "deterministic_fallback"),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "notes-1",
+                                "kind": "notes",
+                                "title": "Notes",
+                                "content": "Accepted model output.",
+                            }
+                        ]
+                    }
+                ),
+                "llm",
+            ),
+        ),
+    )
+    async def test_notes_studio_generate_labels_only_accepted_json_as_llm(
+        self,
+        base_context,
+        response_text,
+        expected_source,
+    ):
+        """Fallback payloads carry the engine identity that actually produced them."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import (
+            run_notes_studio_generate_adapter,
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=response_text,
+        ):
+            result = await run_notes_studio_generate_adapter(
+                {
+                    "excerpt_text": "Sample study notes.",
+                    "source_note_id": "note-1",
+                    "provider": "mock",
+                    "model": "mock-model",
+                },
+                base_context,
+            )
+
+        assert result["source"] == expected_source
+        assert isinstance(result["payload"], dict)
+        if expected_source == "llm":
+            assert result["payload"]["sections"][0]["content"] == "Accepted model output."
+
+    @pytest.mark.asyncio
     async def test_summarize_adapter_sanitizes_backend_errors(self, monkeypatch, base_context, sample_long_text):
         """Test summarize adapter hides backend exception details."""
         monkeypatch.delenv("TEST_MODE", raising=False)

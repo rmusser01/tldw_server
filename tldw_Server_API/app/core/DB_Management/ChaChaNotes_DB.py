@@ -47,7 +47,7 @@ import time  # noqa: E402
 import unicodedata  # noqa: E402
 import uuid  # noqa: E402
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -12508,6 +12508,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ).encode("utf-8")
         return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
+    def _prove_moodboard_collection_sync_ids_v61(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        owner_user_id: str,
+        collection_sync_ids: Iterable[str],
+    ) -> None:
+        """Require each portable collection identity to resolve once for its owner."""
+        query, _ = self._prepare_backend_statement(
+            "SELECT client_id FROM keyword_collections WHERE sync_id=?",
+            (),
+        )
+        for collection_sync_id in collection_sync_ids:
+            rows = conn.execute(query, (collection_sync_id,)).fetchall()
+            if (
+                len(rows) != 1
+                or str(rows[0]["client_id"]).strip() != owner_user_id
+            ):
+                raise ValueError(
+                    "moodboard portable collection identity is unavailable"
+                )
+
     def _legacy_moodboard_rule_v61(
         self,
         conn: sqlite3.Connection,
@@ -12529,18 +12551,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if set(parsed) - allowed:
                 raise ValueError("legacy moodboard smart rule has unknown fields")
             collection_sync_ids = list(parsed.get("collection_sync_ids") or [])
-            for collection_sync_id in collection_sync_ids:
-                rows = conn.execute(
-                    "SELECT client_id FROM keyword_collections WHERE sync_id=?",
-                    (collection_sync_id,),
-                ).fetchall()
-                if (
-                    len(rows) != 1
-                    or str(rows[0]["client_id"]).strip() != owner_user_id
-                ):
-                    raise ValueError(
-                        "legacy moodboard portable collection identity is unavailable"
-                    )
+            self._prove_moodboard_collection_sync_ids_v61(
+                conn,
+                owner_user_id=owner_user_id,
+                collection_sync_ids=collection_sync_ids,
+            )
             legacy_collection_ids = list(parsed.get("collection_ids") or [])
             legacy_collection_ids.extend(parsed.get("notebook_collection_ids") or [])
             for collection_id in legacy_collection_ids:
@@ -12551,6 +12566,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if len(rows) != 1 or not str(rows[0][0]).strip():
                     raise ValueError("legacy moodboard collection identity is unavailable")
                 collection_sync_ids.append(str(rows[0][0]))
+            self._prove_moodboard_collection_sync_ids_v61(
+                conn,
+                owner_user_id=owner_user_id,
+                collection_sync_ids=collection_sync_ids,
+            )
             updated = parsed.get("updated")
             if updated is None:
                 updated = {
@@ -12969,24 +12989,69 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if not owner:
                 raise SchemaError("Notes Studio v61 migration could not prove sidecar ownership.")  # noqa: TRY003
             note_row = dict(note)
-            note_revision = max(1, int(note_row.get("version") or 1))
-            note_hash = self._legacy_note_hash_v61(note_row)
             accepted_at = self._legacy_sync_timestamp_v61(row["last_modified"])
+            accepted_time = datetime.fromisoformat(accepted_at.replace("Z", "+00:00"))
+            note_modified_time = datetime.fromisoformat(
+                self._legacy_sync_timestamp_v61(note_row["last_modified"]).replace(
+                    "Z", "+00:00"
+                )
+            )
+            legacy_companion_hash = row.get("companion_content_hash")
+            companion_hash = (
+                None
+                if legacy_companion_hash is None
+                else str(legacy_companion_hash).strip()
+            )
+            current_companion_hash = "sha256:" + hashlib.sha256(
+                str(note_row.get("content") or "")
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .encode("utf-8")
+            ).hexdigest()
+            parent_changed_after_acceptance = note_modified_time > accepted_time
+            parent_lineage_proven = (
+                not parent_changed_after_acceptance
+                and companion_hash == current_companion_hash
+            )
+            note_revision = (
+                max(1, int(note_row.get("version") or 1))
+                if parent_lineage_proven
+                else 1
+            )
+            note_hash = (
+                self._legacy_note_hash_v61(note_row)
+                if parent_lineage_proven
+                else self._note_task_v60_hash(
+                    {
+                        "domain": "notes.studio_document.unproven_parent_lineage",
+                        "note_id": row["note_id"],
+                        "accepted_at": accepted_at,
+                        "companion_content_hash": companion_hash,
+                    }
+                )
+            )
             source_note_id = row.get("source_note_id")
             source_revision = None
             source_hash = None
             source_problem = False
+            source_changed_after_acceptance = False
+            source = None
             if source_note_id is not None:
                 source = conn.execute("SELECT * FROM notes WHERE id=?", (source_note_id,)).fetchone()
                 if (
                     source is None
                     or str(source["client_id"]).strip() != owner
-                    or bool(source["deleted"])
                 ):
                     source_problem = True
                 else:
-                    source_revision = max(1, int(source["version"] or 1))
-                    source_hash = self._legacy_note_hash_v61(dict(source))
+                    source_modified_time = datetime.fromisoformat(
+                        self._legacy_sync_timestamp_v61(source["last_modified"]).replace(
+                            "Z", "+00:00"
+                        )
+                    )
+                    source_changed_after_acceptance = (
+                        source_modified_time > accepted_time or bool(source["deleted"])
+                    )
             raw_payload = row["payload_json"]
             raw_manifest = row.get("diagram_manifest_json")
             diagnostic_code = diagnostic_hash = None
@@ -12999,15 +13064,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             excerpt_hash = (
                 None
-                if excerpt_snapshot is None
-                else "sha256:" + hashlib.sha256(
-                    str(excerpt_snapshot).replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
-                ).hexdigest()
+                if row.get("excerpt_hash") is None
+                else str(row["excerpt_hash"]).strip()
             )
-            companion_hash = "sha256:" + hashlib.sha256(
-                str(note_row.get("content") or "").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
-            ).hexdigest()
+            expected_excerpt_hash = (
+                None
+                if excerpt_snapshot is None
+                else "sha256:"
+                + hashlib.sha256(excerpt_snapshot.encode("utf-8")).hexdigest()
+            )
+            if source_note_id is not None:
+                source_revision = (
+                    max(1, int(source["version"] or 1))
+                    if source is not None and not source_problem and not source_changed_after_acceptance
+                    else 1
+                )
+                source_hash = (
+                    self._legacy_note_hash_v61(dict(source))
+                    if source is not None and not source_problem and not source_changed_after_acceptance
+                    else self._note_task_v60_hash(
+                        {
+                            "domain": "notes.studio_document.unproven_source_lineage",
+                            "note_id": source_note_id,
+                            "accepted_at": accepted_at,
+                            "excerpt_hash": excerpt_hash,
+                        }
+                    )
+                )
             provenance: dict[str, Any]
+            failure_code = "legacy_studio_payload_invalid"
             try:
                 payload_obj = json.loads(str(raw_payload))
                 if not isinstance(payload_obj, Mapping):
@@ -13044,8 +13129,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     source_content = str(source["content"] or "").replace(
                         "\r\n", "\n"
                     ).replace("\r", "\n")
-                    if excerpt_snapshot not in source_content:
+                    if (
+                        not source_changed_after_acceptance
+                        and excerpt_snapshot not in source_content
+                    ):
                         raise ValueError("legacy Studio excerpt is absent from source note")
+                    if excerpt_hash != expected_excerpt_hash:
+                        raise ValueError("legacy Studio excerpt hash mismatches excerpt")
                 manifest_obj = None if raw_manifest is None else json.loads(str(raw_manifest))
                 if manifest_obj is not None:
                     if not isinstance(manifest_obj, Mapping):
@@ -13085,6 +13175,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "source_hash": source_hash,
                     "result_hash": result_hash,
                 }
+                if parent_changed_after_acceptance or source_changed_after_acceptance:
+                    failure_code = "legacy_studio_lineage_unproven"
+                    raise ValueError("legacy Studio historical lineage is unavailable")
+                if not parent_lineage_proven:
+                    raise ValueError("legacy Studio companion binding mismatches parent")
                 complete = {**content_state, "accepted_provenance": provenance}
                 parsed = parse_notes_studio_document_v1(
                     complete,
@@ -13115,7 +13210,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     raise ValueError("legacy Studio canonical envelope is oversized")
             except (NotesMoodboardStudioContractError, TypeError, ValueError, json.JSONDecodeError):
                 diagnostic = moodboard_studio_legacy_source_diagnostic(
-                    "legacy_studio_payload_invalid",
+                    failure_code,
                     {"sidecar": row, "note_id": row["note_id"]},
                 )
                 diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]

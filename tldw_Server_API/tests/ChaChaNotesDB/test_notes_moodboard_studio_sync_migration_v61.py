@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import sqlite3
@@ -27,7 +28,12 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     diagram_render_hash,
+    notes_moodboard_object_hash,
+    notes_studio_document_object_hash,
+    parse_notes_moodboard_v1,
+    parse_notes_studio_document_tombstone_v1,
     placement_object_id,
+    studio_result_hash,
 )
 
 pytestmark = pytest.mark.unit
@@ -216,8 +222,10 @@ def _prepare_v60_product_database(
             handwriting_mode="accented",
             source_note_id=SOURCE_NOTE_ID,
             excerpt_snapshot="Source excerpt",
-            excerpt_hash="legacy-excerpt-hash",
-            companion_content_hash="legacy-content-hash",
+            excerpt_hash="sha256:"
+            + hashlib.sha256(b"Source excerpt").hexdigest(),
+            companion_content_hash="sha256:"
+            + hashlib.sha256(b"Studio markdown").hexdigest(),
             render_version=1,
         )
         db.close_all_connections()
@@ -489,6 +497,60 @@ def test_v61_legacy_studio_oversized_envelope_is_blocked_before_binding(
 
     assert _schema_version(db_path) == 60  # nosec B101
     assert _database_dump(db_path) == before  # nosec B101
+
+
+@pytest.mark.parametrize("edited_note", ("parent", "source"))
+def test_v61_legacy_studio_never_rebinds_historical_state_to_a_later_note_head(
+    tmp_path: Path,
+    edited_note: str,
+) -> None:
+    db_path = tmp_path / f"legacy-studio-stale-{edited_note}.sqlite"
+    _prepare_v60_product_database(db_path)
+    note_id = STUDIO_NOTE_ID if edited_note == "parent" else SOURCE_NOTE_ID
+    new_content = (
+        "Studio markdown edited later"
+        if edited_note == "parent"
+        else "Source excerpt body edited later"
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        legacy = dict(
+            conn.execute(
+                "SELECT * FROM note_studio_documents WHERE note_id=?",
+                (STUDIO_NOTE_ID,),
+            ).fetchone()
+        )
+        conn.execute(
+            "UPDATE notes SET content=?,version=version+1,last_modified=? WHERE id=?",
+            (new_content, "2099-01-01T00:00:00Z", note_id),
+        )
+
+    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    try:
+        studio = db.get_note_studio_document(STUDIO_NOTE_ID)
+        assert studio is not None  # nosec B101
+        assert studio["source_diagnostic_code"] is not None  # nosec B101
+        assert studio["companion_content_hash"] == legacy["companion_content_hash"]  # nosec B101
+        provenance = studio["accepted_provenance_json"]
+        assert provenance["accepted_at"] == db._legacy_sync_timestamp_v61(  # nosec B101
+            legacy["last_modified"]
+        )
+        current = db.get_note_by_id(note_id)
+        assert current is not None  # nosec B101
+        current_hash = db._legacy_note_hash_v61(current)
+        retained_binding_hash = (
+            studio["note_hash"]
+            if edited_note == "parent"
+            else provenance["source_hash"]
+        )
+        assert retained_binding_hash != current_hash  # nosec B101
+        with pytest.raises(ConflictError, match="canonical readiness proof"):
+            db.bind_local_studio_graph_to_dataset(
+                owner_user_id=OWNER,
+                target_dataset_id=DATASET_A,
+            )
+    finally:
+        db.close_all_connections()
 
 
 @pytest.mark.parametrize("collection_state", ("unknown", "cross_owner", "ambiguous"))
@@ -953,6 +1015,109 @@ def test_same_dataset_moodboard_replay_reproves_bound_canonical_state(
         db.close_all_connections()
 
 
+@pytest.mark.parametrize(
+    ("collection_state", "allowed"),
+    (
+        ("unknown", False),
+        ("cross_owner", False),
+        ("ambiguous", False),
+        ("live", True),
+        ("tombstoned", True),
+    ),
+)
+def test_bound_moodboard_replay_and_bootstrap_reprove_collection_scope(
+    tmp_path: Path,
+    collection_state: str,
+    allowed: bool,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / f"bound-collection-{collection_state}.sqlite"),
+        client_id=OWNER,
+    )
+    portable_id = "44444444-4444-4444-8444-444444444444"
+    try:
+        board_id = db.add_moodboard("Bound collection board")
+        assert board_id is not None  # nosec B101
+        db.bind_local_moodboard_graph_to_dataset(
+            owner_user_id=OWNER,
+            target_dataset_id=DATASET_A,
+        )
+        if collection_state == "ambiguous":
+            db.execute_query("DROP INDEX idx_keyword_collections_sync_id_unique")
+        if collection_state in {"cross_owner", "ambiguous"}:
+            db.execute_query(
+                "INSERT INTO keyword_collections(sync_id,name,deleted,client_id,version) "
+                "VALUES (?,?,0,?,1)",
+                (portable_id, "Other collection", OTHER_OWNER),
+            )
+        if collection_state in {"ambiguous", "live", "tombstoned"}:
+            db.execute_query(
+                "INSERT INTO keyword_collections(sync_id,name,deleted,client_id,version) "
+                "VALUES (?,?,?,?,1)",
+                (
+                    portable_id,
+                    "Owner collection",
+                    int(collection_state == "tombstoned"),
+                    OWNER,
+                ),
+            )
+
+        board = db.get_moodboard_by_id(board_id)
+        assert board is not None  # nosec B101
+        smart_rule = {
+            "query": None,
+            "keyword_tokens": [],
+            "collection_sync_ids": [portable_id],
+            "sources": [],
+            "updated": {"after": None, "before": None},
+        }
+        payload = parse_notes_moodboard_v1(
+            {
+                "moodboard_id": board["sync_id"],
+                "name": board["name"],
+                "description": board["description"],
+                "smart_rule": smart_rule,
+                "canvas": board["canvas_json"],
+            }
+        )
+        canonical_hash = notes_moodboard_object_hash(
+            payload,
+            revision=board["canonical_revision"],
+            deleted=False,
+        )
+        db.execute_query(
+            "UPDATE moodboards SET smart_rule_json=?,canonical_hash=?,"
+            "source_diagnostic_code=NULL,source_diagnostic_hash=NULL WHERE id=?",
+            (json.dumps(smart_rule), canonical_hash, board_id),
+        )
+
+        if allowed:
+            assert db.bind_local_moodboard_graph_to_dataset(  # nosec B101
+                owner_user_id=OWNER,
+                target_dataset_id=DATASET_A,
+            ) == {"moodboards": 1, "moodboard_notes": 0}
+            assert [  # nosec B101
+                row["id"]
+                for row in db.page_moodboards_for_sync_bootstrap(
+                    owner_user_id=OWNER,
+                    dataset_id=DATASET_A,
+                )
+            ] == [board_id]
+        else:
+            with pytest.raises(ConflictError, match="canonical readiness proof"):
+                db.bind_local_moodboard_graph_to_dataset(
+                    owner_user_id=OWNER,
+                    target_dataset_id=DATASET_A,
+                )
+            with pytest.raises(ConflictError, match="canonical readiness proof"):
+                db.page_moodboards_for_sync_bootstrap(
+                    owner_user_id=OWNER,
+                    dataset_id=DATASET_A,
+                )
+    finally:
+        db.close_all_connections()
+
+
 def test_same_dataset_studio_replay_reproves_bound_canonical_state(
     tmp_path: Path,
 ) -> None:
@@ -985,12 +1150,15 @@ def test_same_dataset_studio_replay_reproves_bound_canonical_state(
         db.close_all_connections()
 
 
-@pytest.mark.parametrize("mutated_note", ("companion", "source"))
-def test_studio_binder_reproves_current_note_and_source_heads(
+@pytest.mark.parametrize("tampered_claim", ("companion", "source"))
+def test_studio_binder_rejects_hash_consistent_current_head_tampering(
     tmp_path: Path,
-    mutated_note: str,
+    tampered_claim: str,
 ) -> None:
-    db = CharactersRAGDB(str(tmp_path / f"studio-head-{mutated_note}.sqlite"), client_id=OWNER)
+    db = CharactersRAGDB(
+        str(tmp_path / f"studio-head-{tampered_claim}.sqlite"),
+        client_id=OWNER,
+    )
     try:
         source_id = db.add_note("Source", "source excerpt remains present")
         companion_id = db.add_note("Companion", "accepted markdown")
@@ -1015,16 +1183,31 @@ def test_studio_binder_reproves_current_note_and_source_heads(
             companion_content_hash="sha256:" + "1" * 64,
             render_version=1,
         )
-        changed_id = companion_id if mutated_note == "companion" else source_id
-        changed_content = (
-            "changed accepted markdown"
-            if mutated_note == "companion"
-            else "changed source excerpt remains present"
+        document = db.get_note_studio_document(companion_id)
+        assert document is not None  # nosec B101
+        mapping = db.note_store._studio_document_mapping(document)
+        provenance = dict(mapping["accepted_provenance"])
+        if tampered_claim == "companion":
+            mapping["note_hash"] = "sha256:" + "2" * 64
+        else:
+            provenance["source_hash"] = "sha256:" + "3" * 64
+        mapping["accepted_provenance"] = provenance
+        provenance["result_hash"] = studio_result_hash(mapping)
+        parsed = parse_notes_studio_document_tombstone_v1(mapping)
+        canonical_hash = notes_studio_document_object_hash(
+            parsed,
+            revision=document["canonical_revision"],
+            deleted=False,
         )
-        assert db.update_note(  # nosec B101
-            changed_id,
-            {"content": changed_content},
-            expected_version=1,
+        db.execute_query(
+            "UPDATE note_studio_documents SET note_hash=?,accepted_provenance_json=?,"
+            "canonical_hash=? WHERE note_id=?",
+            (
+                mapping["note_hash"],
+                json.dumps(provenance, sort_keys=True, separators=(",", ":")),
+                canonical_hash,
+                companion_id,
+            ),
         )
 
         with pytest.raises(ConflictError, match="canonical readiness proof"):
@@ -1043,6 +1226,80 @@ def test_studio_binder_reproves_current_note_and_source_heads(
             ).fetchone()[0]
         assert authority is None  # nosec B101
         assert scope == LOCAL_UNBOUND  # nosec B101
+    finally:
+        db.close_all_connections()
+
+
+def test_studio_accepted_state_survives_parent_edit_and_source_tombstone(
+    tmp_path: Path,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "studio-stale-valid.sqlite"), client_id=OWNER)
+    try:
+        source_id = db.add_note("Source", "source excerpt remains present")
+        companion_id = db.add_note("Companion", "accepted markdown")
+        assert source_id is not None and companion_id is not None  # nosec B101
+        db.create_note_studio_document(
+            note_id=companion_id,
+            payload_json={
+                "sections": [
+                    {
+                        "id": "notes-1",
+                        "kind": "notes",
+                        "title": "Notes",
+                        "content": "accepted markdown",
+                    }
+                ]
+            },
+            template_type="lined",
+            handwriting_mode="accented",
+            source_note_id=source_id,
+            excerpt_snapshot="source excerpt",
+            excerpt_hash="sha256:" + "0" * 64,
+            companion_content_hash="sha256:" + "1" * 64,
+            render_version=1,
+        )
+        accepted = db.get_note_studio_document(companion_id)
+        assert accepted is not None  # nosec B101
+        retained = {
+            key: accepted[key]
+            for key in (
+                "payload_json",
+                "note_revision",
+                "note_hash",
+                "accepted_provenance_json",
+                "canonical_hash",
+            )
+        }
+        assert db.update_note(  # nosec B101
+            companion_id,
+            {"content": "ordinary edit after Studio acceptance"},
+            expected_version=1,
+        )
+        assert db.soft_delete_note(source_id, expected_version=1)  # nosec B101
+        stale = db.get_note_studio_document(companion_id)
+        assert stale is not None  # nosec B101
+        assert {key: stale[key] for key in retained} == retained  # nosec B101
+
+        expected = {"note_studio_documents": 1}
+        assert db.bind_local_studio_graph_to_dataset(  # nosec B101
+            owner_user_id=OWNER,
+            target_dataset_id=DATASET_A,
+        ) == expected
+        assert db.bind_local_studio_graph_to_dataset(  # nosec B101
+            owner_user_id=OWNER,
+            target_dataset_id=DATASET_A,
+        ) == expected
+        bootstrap = db.page_studio_documents_for_sync_bootstrap(
+            owner_user_id=OWNER,
+            dataset_id=DATASET_A,
+        )
+        assert len(bootstrap) == 1  # nosec B101
+        assert json.loads(bootstrap[0]["payload_json"]) == retained["payload_json"]  # nosec B101
+        assert json.loads(bootstrap[0]["accepted_provenance_json"]) == retained[  # nosec B101
+            "accepted_provenance_json"
+        ]
+        for key in ("note_revision", "note_hash", "canonical_hash"):
+            assert bootstrap[0][key] == retained[key]  # nosec B101
     finally:
         db.close_all_connections()
 
