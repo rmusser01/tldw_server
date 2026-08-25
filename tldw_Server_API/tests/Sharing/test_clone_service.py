@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, is_dataclass
+from datetime import date, datetime, time
+from decimal import Decimal
 from types import MappingProxyType
 from unittest.mock import MagicMock, patch
+from uuid import UUID
 
 import pytest
 
@@ -76,6 +79,15 @@ def test_clone_contract_rejects_non_ascii_identifier():
         )
 
 
+def test_clone_contract_rejects_operation_owned_media_above_media_copied():
+    with pytest.raises(ValueError, match="operation_owned_media_count.*media_copied"):
+        CloneCopyCounts(
+            media_attempted=2,
+            media_copied=1,
+            operation_owned_media_count=2,
+        )
+
+
 def test_snapshot_defensively_copies_mutable_rows():
     row = {"id": "source-1", "title": "Original"}
     snapshot = WorkspaceCloneSnapshot.from_rows(
@@ -129,11 +141,98 @@ def test_direct_snapshot_construction_is_also_immutable():
     assert snapshot.sources[0]["nested"]["value"] == "Original"
 
 
+def test_snapshot_converts_bytearray_to_bytes():
+    buffer = bytearray(b"original")
+    snapshot = WorkspaceCloneSnapshot.from_rows(
+        workspace={"id": "ws", "buffer": buffer},
+        sources=[],
+        notes=[],
+        artifacts=[],
+    )
+
+    buffer[:] = b"changed!"
+    assert snapshot.workspace["buffer"] == b"original"
+    assert isinstance(snapshot.workspace["buffer"], bytes)
+
+
+def test_snapshot_converts_memoryview_to_bytes():
+    buffer = bytearray(b"original")
+    snapshot = WorkspaceCloneSnapshot.from_rows(
+        workspace={"id": "ws", "buffer": memoryview(buffer)},
+        sources=[],
+        notes=[],
+        artifacts=[],
+    )
+
+    buffer[:] = b"changed!"
+    assert snapshot.workspace["buffer"] == b"original"
+    assert isinstance(snapshot.workspace["buffer"], bytes)
+
+
+def test_snapshot_rejects_unsupported_custom_values():
+    class MutablePayload:
+        def __init__(self) -> None:
+            self.values = []
+
+    with pytest.raises(TypeError, match="unsupported clone snapshot value type"):
+        WorkspaceCloneSnapshot.from_rows(
+            workspace={"id": "ws", "payload": MutablePayload()},
+            sources=[],
+            notes=[],
+            artifacts=[],
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        None,
+        True,
+        7,
+        3.5,
+        "text",
+        b"bytes",
+        date(2026, 8, 25),
+        datetime(2026, 8, 25, 12, 30, 45),
+        time(12, 30, 45),
+        Decimal("12.34"),
+        UUID("12345678-1234-5678-1234-567812345678"),
+    ),
+)
+def test_snapshot_preserves_expected_immutable_db_scalars(value):
+    snapshot = WorkspaceCloneSnapshot.from_rows(
+        workspace={"id": "ws", "value": value},
+        sources=[],
+        notes=[],
+        artifacts=[],
+    )
+
+    assert snapshot.workspace["value"] == value
+    assert type(snapshot.workspace["value"]) is type(value)
+
+
 def test_clone_warning_rejects_unbounded_or_invalid_count():
     with pytest.raises(ValueError, match="count"):
         CloneWarning(code="warning", count=-1)
     with pytest.raises(ValueError, match="ASCII"):
         CloneWarning(code="warning-é", count=1)
+
+
+@pytest.mark.parametrize(
+    "code",
+    (
+        "Warning_Code",
+        "warning-code",
+        "https://example.com",
+        "/tmp/private",
+        "ValueError:failed",
+        "_warning",
+        "a" * 65,
+    ),
+)
+def test_clone_contract_rejects_non_structural_warning_codes(code):
+    with pytest.raises(ValueError, match="warning code"):
+        CloneWarning(code=code, count=1)
 
 
 def test_clone_result_rejects_unbounded_warnings():

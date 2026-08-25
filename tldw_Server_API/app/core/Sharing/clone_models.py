@@ -1,21 +1,39 @@
 """Immutable contracts for shared Workspace clone snapshots and results."""
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
-from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import date, datetime, time
+from decimal import Decimal
 from types import MappingProxyType
 from typing import Any
+from uuid import UUID
 
 MAX_IDENTIFIER_LENGTH = 255
 MAX_NAME_LENGTH = 255
-MAX_WARNING_CODE_LENGTH = 128
+MAX_WARNING_CODE_LENGTH = 64
 MAX_WARNING_COUNT = 1_000_000_000
 MAX_WARNINGS = 8
 
 _READINESS_VALUES = frozenset({"ready", "unavailable"})
 _VECTOR_READINESS_VALUES = frozenset({"ready", "needs_indexing", "not_configured"})
 _OUTCOMES = frozenset({"complete", "partial"})
+_WARNING_CODE_PATTERN = re.compile(r"[a-z][a-z0-9_]{0,63}")
+_IMMUTABLE_SCALAR_TYPES = (
+    type(None),
+    bool,
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+    date,
+    datetime,
+    time,
+    Decimal,
+    UUID,
+)
 
 
 def _validate_ascii(value: Any, field_name: str, maximum: int) -> str:
@@ -32,6 +50,15 @@ def _validate_identifier(value: Any, field_name: str) -> str:
     return _validate_ascii(value, field_name, MAX_IDENTIFIER_LENGTH)
 
 
+def _validate_warning_code(value: Any) -> str:
+    if not isinstance(value, str) or _WARNING_CODE_PATTERN.fullmatch(value) is None:
+        raise ValueError(
+            "warning code must be a lowercase ASCII identifier of at most "
+            f"{MAX_WARNING_CODE_LENGTH} characters"
+        )
+    return value
+
+
 def _normalize_name(value: Any) -> str:
     if not isinstance(value, str):
         raise ValueError("name must be a non-empty string")
@@ -46,14 +73,16 @@ def _normalize_name(value: Any) -> str:
 def _freeze(value: Any) -> Any:
     """Deep-copy a row and replace mutable containers with immutable equivalents."""
     if isinstance(value, Mapping):
-        return MappingProxyType(
-            {deepcopy(key): _freeze(item) for key, item in value.items()}
-        )
+        return MappingProxyType({_freeze(key): _freeze(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
         return tuple(_freeze(item) for item in value)
     if isinstance(value, (set, frozenset)):
         return frozenset(_freeze(item) for item in value)
-    return deepcopy(value)
+    if isinstance(value, (bytearray, memoryview)):
+        return bytes(value)
+    if type(value) in _IMMUTABLE_SCALAR_TYPES:
+        return value
+    raise TypeError(f"unsupported clone snapshot value type: {type(value).__name__}")
 
 
 def _freeze_row(row: Mapping[str, Any], field_name: str) -> Mapping[str, Any]:
@@ -204,6 +233,8 @@ class CloneCopyCounts:
                 raise ValueError(
                     f"{item_name}_copied plus {item_name}_failed cannot exceed {item_name}_attempted"
                 )
+        if self.operation_owned_media_count > self.media_copied:
+            raise ValueError("operation_owned_media_count cannot exceed media_copied")
 
     @classmethod
     def empty(cls) -> CloneCopyCounts:
@@ -237,7 +268,7 @@ class CloneWarning:
     count: int
 
     def __post_init__(self) -> None:
-        _validate_ascii(self.code, "warning code", MAX_WARNING_CODE_LENGTH)
+        _validate_warning_code(self.code)
         _validate_count(self.count, "warning count")
 
 
