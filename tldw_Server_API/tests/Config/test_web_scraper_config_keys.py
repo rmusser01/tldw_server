@@ -97,3 +97,27 @@ def test_web_scraper_raw_section_values_do_not_break_preflight_config(monkeypatc
 
     assert web_scraper["web_scraper_preflight_analyzers"] == "true"
     assert web_scraper["web_scraper_future_secret"] == "100%private"
+
+
+def test_web_scraper_config_excludes_default_only_options(monkeypatch):
+    from tldw_Server_API.app.core import config as cfg
+
+    parser = configparser.ConfigParser(defaults={"unrelated_default_secret": "do-not-export"})
+    parser["Web-Scraper"] = {"web_scraper_preflight_analyzers": "true"}
+    monkeypatch.setattr(cfg, "load_comprehensive_config", lambda: parser)
+
+    web_scraper = cfg.load_and_log_configs(environment={})["web_scraper"]
+
+    assert "unrelated_default_secret" not in web_scraper
+
+
+def test_web_scraper_config_retains_explicit_override_of_default(monkeypatch):
+    from tldw_Server_API.app.core import config as cfg
+
+    parser = configparser.ConfigParser(defaults={"web_scraper_preflight_scan_depth": "normal"})
+    parser["Web-Scraper"] = {"web_scraper_preflight_scan_depth": "deep"}
+    monkeypatch.setattr(cfg, "load_comprehensive_config", lambda: parser)
+
+    web_scraper = cfg.load_and_log_configs(environment={})["web_scraper"]
+
+    assert web_scraper["web_scraper_preflight_scan_depth"] == "deep"
