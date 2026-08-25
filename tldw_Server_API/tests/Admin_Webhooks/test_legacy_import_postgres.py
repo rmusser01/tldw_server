@@ -32,7 +32,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 )
 
 pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
-pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.postgres, pytest.mark.asyncio]
 
 NOW = datetime(2026, 8, 22, 21, 0, tzinfo=timezone.utc)
 
@@ -165,6 +165,7 @@ async def _applied_file_import(
     )
 
 
+@pytest.mark.integration
 async def test_postgres_legacy_snapshot_uses_real_legacy_table(test_db_pool) -> None:
     assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
     await _reset_canonical(test_db_pool)
@@ -205,6 +206,7 @@ async def test_postgres_legacy_snapshot_uses_real_legacy_table(test_db_pool) -> 
     assert snapshot.canonical_non_deleted_count == 0
 
 
+@pytest.mark.integration
 async def test_postgres_database_only_apply_commits_mapping_sequence_and_readback(
     test_db_pool,
     tmp_path: Path,
@@ -306,6 +308,7 @@ async def test_postgres_database_only_apply_commits_mapping_sequence_and_readbac
     assert [audit.outcome for audit in audits] == ["accepted", "completed"]
 
 
+@pytest.mark.integration
 async def test_postgres_extract_rechecks_canonical_activity_before_publication(
     test_db_pool,
     tmp_path: Path,
@@ -347,6 +350,7 @@ async def test_postgres_extract_rechecks_canonical_activity_before_publication(
     assert not output.exists()
 
 
+@pytest.mark.integration
 async def test_postgres_extract_rechecks_retirement_before_publication(
     test_db_pool,
     tmp_path: Path,
@@ -392,6 +396,7 @@ async def test_postgres_extract_rechecks_retirement_before_publication(
 
 
 @pytest.mark.parametrize("closing_action", ["activity", "retirement"])
+@pytest.mark.integration
 async def test_postgres_extract_holds_migration_lock_through_plaintext_publication(
     test_db_pool,
     tmp_path: Path,

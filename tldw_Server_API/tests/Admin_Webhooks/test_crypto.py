@@ -20,8 +20,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
     load_webhook_key_ring,
 )
 
-pytestmark = pytest.mark.unit
-
 
 def _key(byte: int) -> str:
     return base64.b64encode(bytes([byte]) * 32).decode("ascii")
@@ -41,6 +39,7 @@ def key_ring() -> WebhookKeyRing:
     return WebhookKeyRing.from_environment(_environment())
 
 
+@pytest.mark.unit
 def test_context_prevents_cross_row_substitution(key_ring: WebhookKeyRing) -> None:
     protected = key_ring.encrypt_text(
         purpose="registration.secret",
@@ -72,6 +71,7 @@ def test_context_prevents_cross_row_substitution(key_ring: WebhookKeyRing) -> No
         ),
     ],
 )
+@pytest.mark.unit
 def test_context_prevents_cross_purpose_and_version_substitution(
     key_ring: WebhookKeyRing,
     purpose: str,
@@ -92,6 +92,7 @@ def test_context_prevents_cross_purpose_and_version_substitution(
     assert exc_info.value.code is WebhookKeyErrorCode.CONTEXT_MISMATCH
 
 
+@pytest.mark.unit
 def test_runtime_key_ring_ignores_unrelated_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -129,6 +130,7 @@ def test_runtime_key_ring_ignores_unrelated_credentials(
         '{"primary": "' + _key(1) + '=="}',
     ],
 )
+@pytest.mark.unit
 def test_key_ring_rejects_malformed_or_invalid_key_configuration(
     raw_keys: str,
 ) -> None:
@@ -143,6 +145,7 @@ def test_key_ring_rejects_malformed_or_invalid_key_configuration(
     assert raw_keys not in str(exc_info.value)
 
 
+@pytest.mark.unit
 def test_key_ring_rejects_duplicate_ids_before_object_construction() -> None:
     raw = '{"primary":"' + _key(1) + '","primary":"' + _key(2) + '"}'
 
@@ -166,12 +169,14 @@ def test_key_ring_rejects_duplicate_ids_before_object_construction() -> None:
         },
     ],
 )
+@pytest.mark.unit
 def test_empty_ring_or_primary_is_unavailable(environ: dict[str, str]) -> None:
     with pytest.raises(WebhookKeyError) as exc_info:
         WebhookKeyRing.from_environment(environ)
     assert exc_info.value.code is WebhookKeyErrorCode.KEY_UNAVAILABLE
 
 
+@pytest.mark.unit
 def test_primary_must_name_a_configured_key() -> None:
     with pytest.raises(WebhookKeyError) as exc_info:
         WebhookKeyRing.from_environment(_environment(primary="missing"))
@@ -192,6 +197,7 @@ def test_primary_must_name_a_configured_key() -> None:
         },
     ],
 )
+@pytest.mark.unit
 def test_runtime_loader_returns_only_closed_redacted_state(
     environ: dict[str, str],
 ) -> None:
@@ -212,6 +218,7 @@ def test_runtime_loader_returns_only_closed_redacted_state(
     assert exc_info.value.code.value == result.code.value
 
 
+@pytest.mark.unit
 def test_runtime_loader_returns_available_ring() -> None:
     result = load_webhook_key_ring(_environment())
 
@@ -219,6 +226,7 @@ def test_runtime_loader_returns_available_ring() -> None:
     assert result.require_ring() is result.ring
 
 
+@pytest.mark.unit
 def test_runtime_loader_defaults_to_process_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -231,6 +239,7 @@ def test_runtime_loader_defaults_to_process_environment(
     assert result.require_ring().primary_id == "primary"
 
 
+@pytest.mark.unit
 def test_primary_only_writes_and_previous_key_reads() -> None:
     previous_primary = WebhookKeyRing.from_environment(_environment(primary="previous"))
     old_value = previous_primary.encrypt_text(
@@ -253,6 +262,7 @@ def test_primary_only_writes_and_previous_key_reads() -> None:
     ).key_id == "primary"
 
 
+@pytest.mark.unit
 def test_utf8_and_arbitrary_bytes_round_trip(key_ring: WebhookKeyRing) -> None:
     text = "receiver-☃-é"
     arbitrary = bytes(range(256))
@@ -280,6 +290,7 @@ def test_utf8_and_arbitrary_bytes_round_trip(key_ring: WebhookKeyRing) -> None:
     ) == arbitrary
 
 
+@pytest.mark.unit
 def test_event_body_limit_and_context(key_ring: WebhookKeyRing) -> None:
     accepted = key_ring.encrypt_event_body(
         event_id="evt-1",
@@ -313,6 +324,7 @@ def test_event_body_limit_and_context(key_ring: WebhookKeyRing) -> None:
         assert substitution.value.code is WebhookKeyErrorCode.CONTEXT_MISMATCH
 
 
+@pytest.mark.unit
 def test_event_body_decryption_rechecks_size_bound(key_ring: WebhookKeyRing) -> None:
     oversized = key_ring.encrypt_bytes(
         purpose="event.body",
@@ -329,6 +341,7 @@ def test_event_body_decryption_rechecks_size_bound(key_ring: WebhookKeyRing) -> 
     assert exc_info.value.code is WebhookKeyErrorCode.EVENT_BODY_TOO_LARGE
 
 
+@pytest.mark.unit
 def test_noncanonical_outer_base64_is_rejected(key_ring: WebhookKeyRing) -> None:
     protected = key_ring.encrypt_text(
         purpose="registration.secret",
@@ -351,6 +364,7 @@ def test_noncanonical_outer_base64_is_rejected(key_ring: WebhookKeyRing) -> None
     assert exc_info.value.code is WebhookKeyErrorCode.DECRYPTION_FAILED
 
 
+@pytest.mark.unit
 def test_unknown_key_tamper_and_can_decrypt_fail_closed(
     key_ring: WebhookKeyRing,
 ) -> None:
@@ -390,6 +404,7 @@ def test_unknown_key_tamper_and_can_decrypt_fail_closed(
     assert "tampered" not in str(tamper_error.value)
 
 
+@pytest.mark.unit
 def test_reencrypt_to_configured_target_does_not_change_primary(
     key_ring: WebhookKeyRing,
 ) -> None:
@@ -416,6 +431,7 @@ def test_reencrypt_to_configured_target_does_not_change_primary(
     ) == "https://receiver.example/private"
 
 
+@pytest.mark.unit
 def test_migration_fingerprints_are_keyed_deterministic_and_domain_separated(
     key_ring: WebhookKeyRing,
 ) -> None:
@@ -448,6 +464,7 @@ def test_migration_fingerprints_are_keyed_deterministic_and_domain_separated(
     )[1]
 
 
+@pytest.mark.unit
 def test_migration_fingerprint_rejects_caller_controlled_domain(
     key_ring: WebhookKeyRing,
 ) -> None:

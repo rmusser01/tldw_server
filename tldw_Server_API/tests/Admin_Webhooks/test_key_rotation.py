@@ -39,7 +39,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 )
 from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
-pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
+pytestmark = pytest.mark.asyncio
 
 NOW = datetime(2026, 8, 22, 14, 0, tzinfo=timezone.utc)
 SOURCE_KEY_ID = "key-2026-01"
@@ -334,6 +334,7 @@ async def rotation(
         await pool.close()
 
 
+@pytest.mark.unit
 async def test_start_audits_before_state_change_and_persists_operation(
     rotation: RotationFixture,
 ) -> None:
@@ -394,6 +395,7 @@ async def test_start_audits_before_state_change_and_persists_operation(
     assert attempted_outcomes == ["accepted", "completed"]
 
 
+@pytest.mark.unit
 async def test_preoperation_audit_failure_leaves_rotation_state_untouched(
     rotation: RotationFixture,
 ) -> None:
@@ -424,6 +426,7 @@ async def test_preoperation_audit_failure_leaves_rotation_state_untouched(
         (SOURCE_KEY_ID, "missing-target", WebhookErrorCode.KEY_UNAVAILABLE),
     ],
 )
+@pytest.mark.unit
 async def test_start_rejects_invalid_or_missing_keys_with_correlated_audit(
     rotation: RotationFixture,
     source_key_id: str,
@@ -445,6 +448,7 @@ async def test_start_rejects_invalid_or_missing_keys_with_correlated_audit(
     assert (await rotation.repository.get_migration_state()).rotation_phase is None
 
 
+@pytest.mark.unit
 async def test_start_rejects_primary_mismatch_incomplete_import_and_active_operation(
     rotation: RotationFixture,
 ) -> None:
@@ -479,6 +483,7 @@ async def test_start_rejects_primary_mismatch_incomplete_import_and_active_opera
     assert incomplete.value.code is WebhookErrorCode.MIGRATION_PENDING
 
 
+@pytest.mark.unit
 async def test_start_rejects_durable_primary_mismatch_without_state_change(
     rotation: RotationFixture,
 ) -> None:
@@ -504,6 +509,7 @@ async def test_start_rejects_durable_primary_mismatch_without_state_change(
     assert await rotation.repository.get_migration_state() == drifted
 
 
+@pytest.mark.unit
 async def test_only_one_rotation_operation_can_be_active(
     rotation: RotationFixture,
 ) -> None:
@@ -522,6 +528,7 @@ async def test_only_one_rotation_operation_can_be_active(
     assert exc_info.value.code is WebhookErrorCode.KEY_ROTATION_IN_PROGRESS
 
 
+@pytest.mark.unit
 async def test_resume_rewrites_every_inventory_then_verify_and_finalize_cutover(
     rotation: RotationFixture,
 ) -> None:
@@ -618,6 +625,7 @@ async def test_resume_rewrites_every_inventory_then_verify_and_finalize_cutover(
     ]
 
 
+@pytest.mark.unit
 async def test_resume_recovers_after_a_committed_database_batch(
     rotation: RotationFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -658,6 +666,7 @@ async def test_resume_recovers_after_a_committed_database_batch(
     assert resumed.processed_count == 7
 
 
+@pytest.mark.unit
 async def test_resume_recovers_file_publication_before_cursor_commit_once(
     rotation: RotationFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -702,6 +711,7 @@ async def test_resume_recovers_file_publication_before_cursor_commit_once(
     assert resumed.processed_count == 7
 
 
+@pytest.mark.unit
 async def test_repository_protected_value_cas_rejects_concurrent_change(
     rotation: RotationFixture,
 ) -> None:
@@ -743,6 +753,7 @@ async def test_repository_protected_value_cas_rejects_concurrent_change(
     assert replaced is False
 
 
+@pytest.mark.unit
 async def test_database_rewrite_and_cursor_rollback_together(
     rotation: RotationFixture,
 ) -> None:
@@ -792,6 +803,7 @@ async def test_database_rewrite_and_cursor_rollback_together(
     assert durable_state.rotation_processed_count == 0
 
 
+@pytest.mark.unit
 async def test_already_target_envelope_is_accounted_once(
     rotation: RotationFixture,
 ) -> None:
@@ -825,6 +837,7 @@ async def test_already_target_envelope_is_accounted_once(
     assert progress.processed_count == 7
 
 
+@pytest.mark.unit
 async def test_resume_refuses_removed_source_key_and_wrong_operation(
     rotation: RotationFixture,
 ) -> None:
@@ -850,6 +863,7 @@ async def test_resume_refuses_removed_source_key_and_wrong_operation(
     assert wrong_operation.value.code is WebhookErrorCode.PRECONDITION_FAILED
 
 
+@pytest.mark.unit
 async def test_resume_rejects_durable_primary_drift_without_mutation(
     rotation: RotationFixture,
 ) -> None:
@@ -878,6 +892,7 @@ async def test_resume_rejects_durable_primary_drift_without_mutation(
     assert rotation.store_path.read_bytes() == file_before
 
 
+@pytest.mark.unit
 async def test_followup_commands_require_accepted_audit_before_mutation(
     rotation: RotationFixture,
 ) -> None:
@@ -935,6 +950,7 @@ async def test_followup_commands_require_accepted_audit_before_mutation(
     assert await rotation.repository.get_migration_state() == awaiting_state
 
 
+@pytest.mark.unit
 async def test_expired_replay_secret_is_outside_rotation_inventory(
     rotation: RotationFixture,
 ) -> None:
@@ -971,6 +987,7 @@ async def test_expired_replay_secret_is_outside_rotation_inventory(
     assert verified.verified_count == verified.processed_count == 6
 
 
+@pytest.mark.unit
 async def test_replay_expiring_after_rotation_start_remains_in_stable_inventory(
     rotation: RotationFixture,
 ) -> None:
@@ -998,6 +1015,7 @@ async def test_replay_expiring_after_rotation_start_remains_in_stable_inventory(
     assert verified.verified_count == verified.processed_count == 7
 
 
+@pytest.mark.unit
 async def test_malformed_pending_marker_fails_without_file_or_cursor_publication(
     rotation: RotationFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -1032,6 +1050,7 @@ async def test_malformed_pending_marker_fails_without_file_or_cursor_publication
     assert publications == []
 
 
+@pytest.mark.unit
 async def test_finalize_requires_source_key_and_repeats_full_readback(
     rotation: RotationFixture,
 ) -> None:
@@ -1096,6 +1115,7 @@ async def test_finalize_requires_source_key_and_repeats_full_readback(
     assert durable.rotation_phase == "awaiting_primary_cutover"
 
 
+@pytest.mark.unit
 def test_pending_aggregate_marker_round_trips_exact_closed_shape() -> None:
     ring = _ring(primary_id=SOURCE_KEY_ID)
     identity = {
@@ -1129,6 +1149,7 @@ def test_pending_aggregate_marker_round_trips_exact_closed_shape() -> None:
         PendingIncidentWebhookMarker.from_store_record({**record, "plaintext": "no"})
 
 
+@pytest.mark.unit
 def test_rotation_batch_size_is_bounded(rotation: RotationFixture) -> None:
     with pytest.raises(ValueError, match="batch_size"):
         WebhookKeyRotationService(

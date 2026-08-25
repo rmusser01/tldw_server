@@ -28,7 +28,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     WebhookRepositoryErrorCode,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
+pytestmark = pytest.mark.asyncio
 
 NOW = datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc)
 
@@ -137,6 +137,7 @@ def _idempotency_values(
     )
 
 
+@pytest.mark.unit
 async def test_create_commits_before_connection_close(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -156,6 +157,7 @@ async def test_create_commits_before_connection_close(
         await reopened_pool.close()
 
 
+@pytest.mark.unit
 async def test_sequence_allocation_is_unique_under_concurrency(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -168,6 +170,7 @@ async def test_sequence_allocation_is_unique_under_concurrency(
     assert sorted(allocated) == list(range(1, 13))
 
 
+@pytest.mark.unit
 async def test_insert_read_list_event_roundtrip_and_tombstone_exclusion(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -214,6 +217,7 @@ async def test_insert_read_list_event_roundtrip_and_tombstone_exclusion(
     ]
 
 
+@pytest.mark.unit
 async def test_patch_versions_follow_effective_field_changes(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -302,6 +306,7 @@ async def test_patch_versions_follow_effective_field_changes(
     assert stored.secret == _protected("secret-replacement")
 
 
+@pytest.mark.unit
 async def test_secret_rotation_requirement_cannot_be_cleared_without_new_secret(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -336,6 +341,7 @@ async def test_secret_rotation_requirement_cannot_be_cleared_without_new_secret(
     assert rotated.registration.secret_version == 2
 
 
+@pytest.mark.unit
 async def test_stale_revision_counts_and_over_limit_state(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -387,6 +393,7 @@ async def test_stale_revision_counts_and_over_limit_state(
     assert active_full.value.code is WebhookRepositoryErrorCode.ACTIVE_LIMIT
 
 
+@pytest.mark.unit
 async def test_purge_eligibility_honors_all_blockers(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -479,6 +486,7 @@ async def test_purge_eligibility_honors_all_blockers(
     ) == [eligible.id]
 
 
+@pytest.mark.unit
 async def test_idempotency_new_replay_conflict_in_progress_expiry_and_supersession(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -606,6 +614,7 @@ async def test_idempotency_new_replay_conflict_in_progress_expiry_and_supersessi
     assert superseded.resource_superseded is True
 
 
+@pytest.mark.unit
 async def test_idempotency_is_route_scoped_and_persists_no_sensitive_inputs(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -647,6 +656,7 @@ async def test_idempotency_is_route_scoped_and_persists_no_sensitive_inputs(
     assert b"url-query-canary" not in database_bytes
 
 
+@pytest.mark.unit
 async def test_migration_state_cas_and_activity_marker_persistence(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -684,6 +694,7 @@ async def test_migration_state_cas_and_activity_marker_persistence(
     assert retained.first_canonical_activity_kind == "registration_mutation"
 
 
+@pytest.mark.unit
 async def test_migration_state_persists_key_rotation_cursor(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -737,6 +748,7 @@ async def test_migration_state_persists_key_rotation_cursor(
     assert reread.rotation_processed_count == 41
 
 
+@pytest.mark.unit
 async def test_transaction_rolls_back_after_injected_exception(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -751,6 +763,7 @@ async def test_transaction_rolls_back_after_injected_exception(
         assert await tx.allocate_registration_id() == 1
 
 
+@pytest.mark.unit
 async def test_invalid_migration_activity_kind_is_rejected(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -759,6 +772,7 @@ async def test_invalid_migration_activity_kind_is_rejected(
             await tx.mark_first_canonical_activity("arbitrary", NOW)
 
 
+@pytest.mark.unit
 async def test_database_contains_only_redacted_registration_target(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
@@ -780,6 +794,7 @@ async def test_database_contains_only_redacted_registration_target(
     )
 
 
+@pytest.mark.unit
 async def test_repository_rejects_unredacted_target_metadata(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:

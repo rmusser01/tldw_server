@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 
@@ -36,9 +38,8 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 )
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
-pytestmark = pytest.mark.unit
 
-
+@pytest.mark.unit
 def test_settings_default_off_and_validate_bounds() -> None:
     settings = AdminWebhookSettings.from_environment({})
 
@@ -52,18 +53,21 @@ def test_settings_default_off_and_validate_bounds() -> None:
 
 
 @pytest.mark.parametrize("value", ["", "enabled", "disabled"])
+@pytest.mark.unit
 def test_settings_reject_invalid_mode(value: str) -> None:
     with pytest.raises(ValueError, match="TLDW_ADMIN_WEBHOOKS_MODE"):
         AdminWebhookSettings.from_environment({"TLDW_ADMIN_WEBHOOKS_MODE": value})
 
 
 @pytest.mark.parametrize("value", ["yes", "0", "1", "disabled"])
+@pytest.mark.unit
 def test_settings_reject_noncanonical_boolean(value: str) -> None:
     with pytest.raises(ValueError, match="TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT"):
         AdminWebhookSettings.from_environment({"TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT": value})
 
 
 @pytest.mark.parametrize("mode", ["migrate", "on"])
+@pytest.mark.unit
 def test_legacy_compatibility_requires_off_mode(mode: str) -> None:
     with pytest.raises(ValueError, match="requires canonical mode off"):
         AdminWebhookSettings.from_environment(
@@ -74,6 +78,7 @@ def test_legacy_compatibility_requires_off_mode(mode: str) -> None:
         )
 
 
+@pytest.mark.unit
 def test_legacy_compatibility_selects_only_legacy_routes() -> None:
     settings = AdminWebhookSettings.from_environment(
         {"TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT": "true"}
@@ -94,11 +99,13 @@ def test_legacy_compatibility_selects_only_legacy_routes() -> None:
         ("TLDW_ADMIN_WEBHOOK_ROLLBACK_WINDOW_DAYS", "31"),
     ],
 )
+@pytest.mark.unit
 def test_settings_reject_out_of_range_integers(name: str, value: str) -> None:
     with pytest.raises(ValueError, match=name):
         AdminWebhookSettings.from_environment({name: value})
 
 
+@pytest.mark.unit
 def test_settings_reject_active_limit_above_registration_limit() -> None:
     with pytest.raises(ValueError, match="cannot exceed"):
         AdminWebhookSettings.from_environment(
@@ -120,12 +127,14 @@ def test_settings_reject_active_limit_above_registration_limit() -> None:
         {"ENVIRONMENT": "Production"},
     ],
 )
+@pytest.mark.unit
 def test_production_environment_mapping_matches_supported_markers(
     environ: dict[str, str],
 ) -> None:
     assert is_production_environment_mapping(environ) is True
 
 
+@pytest.mark.unit
 def test_http_override_is_rejected_in_production() -> None:
     with pytest.raises(ValueError, match="forbidden in production"):
         AdminWebhookSettings.from_environment(
@@ -136,6 +145,7 @@ def test_http_override_is_rejected_in_production() -> None:
         )
 
 
+@pytest.mark.unit
 def test_settings_are_immutable() -> None:
     settings = AdminWebhookSettings.from_environment({})
 
@@ -143,6 +153,7 @@ def test_settings_are_immutable() -> None:
         settings.mode = AdminWebhookMode.ON  # type: ignore[misc]
 
 
+@pytest.mark.unit
 def test_catalog_is_explicit_and_rejects_wildcard() -> None:
     assert EVENT_API_VERSION == "2026-07-01"
     assert tuple(item.event_type for item in EVENT_CATALOG) == (
@@ -164,6 +175,7 @@ def test_catalog_is_explicit_and_rejects_wildcard() -> None:
     "subscriptions",
     [[], ["user.created", "user.created"], ["webhook.test"]],
 )
+@pytest.mark.unit
 def test_catalog_rejects_empty_duplicate_and_reserved_subscriptions(
     subscriptions: list[str],
 ) -> None:
@@ -171,6 +183,7 @@ def test_catalog_rejects_empty_duplicate_and_reserved_subscriptions(
         validate_subscriptions(subscriptions)
 
 
+@pytest.mark.unit
 def test_catalog_normalizes_sets_to_catalog_order() -> None:
     first = normalize_subscriptions(
         ["incident.notify", "user.created", "incident.updated"]
@@ -186,6 +199,7 @@ def test_catalog_normalizes_sets_to_catalog_order() -> None:
     )
 
 
+@pytest.mark.unit
 def test_etag_is_strong_and_round_trips() -> None:
     value = build_registration_etag(webhook_id=41, revision=7)
 
@@ -205,12 +219,14 @@ def test_etag_is_strong_and_round_trips() -> None:
         "",
     ],
 )
+@pytest.mark.unit
 def test_etag_parser_rejects_weak_wildcard_and_malformed_values(value: str) -> None:
     with pytest.raises(WebhookError) as exc_info:
         parse_registration_etag(value, expected_webhook_id=41)
     assert exc_info.value.code is WebhookErrorCode.PRECONDITION_FAILED
 
 
+@pytest.mark.unit
 def test_etag_parser_rejects_another_registration() -> None:
     with pytest.raises(WebhookError) as exc_info:
         parse_registration_etag(
@@ -224,12 +240,14 @@ def test_etag_parser_rejects_another_registration() -> None:
     "value",
     ["short", "has space in it", "x" * 256, "line\nbreak", "unicode-é"],
 )
+@pytest.mark.unit
 def test_idempotency_key_rejects_weak_or_malformed_values(value: str) -> None:
     with pytest.raises(WebhookError) as exc_info:
         validate_idempotency_key(value)
     assert exc_info.value.code is WebhookErrorCode.IDEMPOTENCY_KEY_INVALID
 
 
+@pytest.mark.unit
 def test_idempotency_digests_are_deterministic_and_domain_separated() -> None:
     key = "0123456789abcdef0123456789abcdef"
     scope = build_idempotency_scope(
@@ -258,6 +276,7 @@ def test_idempotency_digests_are_deterministic_and_domain_separated() -> None:
     assert "canary" not in fingerprint
 
 
+@pytest.mark.unit
 def test_idempotency_fingerprint_separates_key_body_scope_and_condition() -> None:
     key = "0123456789abcdef0123456789abcdef"
     scope = build_idempotency_scope(
@@ -302,6 +321,7 @@ def test_idempotency_fingerprint_separates_key_body_scope_and_condition() -> Non
     ) != baseline
 
 
+@pytest.mark.unit
 def test_request_id_accepts_only_bounded_safe_values() -> None:
     generated = "00000000-0000-4000-8000-000000000001"
 
@@ -327,6 +347,7 @@ def test_request_id_accepts_only_bounded_safe_values() -> None:
         "https://receiver.example/" + ("x" * 2_050),
     ],
 )
+@pytest.mark.unit
 def test_target_validation_rejects_unsafe_or_malformed_urls(
     url: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -342,6 +363,7 @@ def test_target_validation_rejects_unsafe_or_malformed_urls(
     assert exc_info.value.code is WebhookErrorCode.VALIDATION_FAILED
 
 
+@pytest.mark.unit
 def test_target_validation_requires_https_without_dev_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -361,6 +383,7 @@ def test_target_validation_requires_https_without_dev_override(
     assert target.hostname == "receiver.example"
 
 
+@pytest.mark.unit
 def test_target_validation_delegates_and_returns_only_redacted_display(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -383,6 +406,7 @@ def test_target_validation_delegates_and_returns_only_redacted_display(
     assert "secret" not in target.target_display
 
 
+@pytest.mark.unit
 def test_target_validation_fails_closed_when_central_policy_denies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -408,6 +432,7 @@ def test_target_validation_fails_closed_when_central_policy_denies(
         ("http://example.com:8080/private", "http://example.com:8080"),
     ],
 )
+@pytest.mark.unit
 def test_redact_target_returns_origin_without_default_port(
     url: str,
     expected: str,
@@ -415,11 +440,57 @@ def test_redact_target_returns_origin_without_default_port(
     assert redact_target(url) == expected
 
 
+@pytest.mark.unit
 def test_webhook_error_is_centralized_in_core_exceptions() -> None:
     assert core_exceptions.WebhookError is WebhookError
 
 
+@pytest.mark.unit
 def test_repository_implementation_lives_in_db_management() -> None:
     assert AdminWebhookRepository.__module__ == (
         "tldw_Server_API.app.core.DB_Management.admin_webhooks_repository"
     )
+
+
+@pytest.mark.unit
+def test_each_webhook_pr_test_has_one_direct_accepted_marker() -> None:
+    accepted = frozenset(
+        {"unit", "integration", "external_api", "local_llm_service"}
+    )
+    violations: list[str] = []
+    tests_root = Path(__file__).parents[1]
+    paths = [
+        *sorted(Path(__file__).parent.glob("test_*.py")),
+        tests_root / "Admin" / "test_admin_system_ops_service.py",
+        tests_root / "Admin" / "test_admin_webhooks_schemas.py",
+        tests_root / "Admin" / "test_admin_webhooks_service.py",
+        tests_root / "Admin" / "test_system_ops.py",
+        tests_root / "Security" / "test_egress.py",
+        tests_root / "Services" / "test_startup_auth.py",
+    ]
+
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not node.name.startswith("test_"):
+                continue
+            markers: list[str] = []
+            for decorator in node.decorator_list:
+                target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                if (
+                    isinstance(target, ast.Attribute)
+                    and target.attr in accepted
+                    and isinstance(target.value, ast.Attribute)
+                    and target.value.attr == "mark"
+                    and isinstance(target.value.value, ast.Name)
+                    and target.value.value.id == "pytest"
+                ):
+                    markers.append(target.attr)
+            if len(markers) != 1:
+                violations.append(
+                    f"{path.name}:{node.lineno}:{node.name}:markers={markers!r}"
+                )
+
+    assert not violations, "\n".join(violations)

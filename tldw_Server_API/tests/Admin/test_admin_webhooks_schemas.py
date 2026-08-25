@@ -36,6 +36,7 @@ def _registration_payload() -> dict[str, object]:
     }
 
 
+@pytest.mark.unit
 def test_create_schema_accepts_only_inactive_server_secret_contract() -> None:
     request = WebhookCreateRequest.model_validate(
         {
@@ -73,6 +74,7 @@ def test_create_schema_accepts_only_inactive_server_secret_contract() -> None:
         },
     ),
 )
+@pytest.mark.unit
 def test_create_schema_rejects_secret_active_and_wildcard(
     payload: dict[str, object],
 ) -> None:
@@ -80,6 +82,7 @@ def test_create_schema_rejects_secret_active_and_wildcard(
         WebhookCreateRequest.model_validate(payload)
 
 
+@pytest.mark.unit
 def test_patch_requires_at_least_one_non_null_recognized_field() -> None:
     for payload in ({}, {"description": None}, {"unknown": "value"}):
         with pytest.raises(ValidationError):
@@ -91,6 +94,7 @@ def test_patch_requires_at_least_one_non_null_recognized_field() -> None:
     assert same_value_candidate.model_fields_set == {"description"}
 
 
+@pytest.mark.unit
 def test_registration_response_is_redacted_and_uses_numeric_identity() -> None:
     registration = AdminWebhookRegistrationResponse.model_validate(
         _registration_payload()
@@ -119,6 +123,7 @@ def test_registration_response_is_redacted_and_uses_numeric_identity() -> None:
     assert "secret" not in registration.model_dump()
 
 
+@pytest.mark.unit
 def test_registration_response_rejects_events_outside_the_catalog() -> None:
     payload = _registration_payload()
     payload["event_types"] = ["*"]
@@ -127,6 +132,7 @@ def test_registration_response_rejects_events_outside_the_catalog() -> None:
         AdminWebhookRegistrationResponse.model_validate(payload)
 
 
+@pytest.mark.unit
 def test_list_schema_uses_bounded_offset_metadata() -> None:
     response = WebhookListResponse.model_validate(
         {
@@ -146,6 +152,7 @@ def test_list_schema_uses_bounded_offset_metadata() -> None:
         )
 
 
+@pytest.mark.unit
 def test_status_schema_exposes_rollback_state_without_artifact_paths() -> None:
     status = AdminWebhookStatusResponse.model_validate(
         {

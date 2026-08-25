@@ -10,9 +10,8 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
 )
 from tldw_Server_API.cli.commands import admin_webhooks
 
-pytestmark = pytest.mark.unit
 
-
+@pytest.mark.unit
 def test_command_tree_exposes_import_rollback_and_rotation_operations() -> None:
     runner = CliRunner()
 
@@ -35,6 +34,7 @@ def test_command_tree_exposes_import_rollback_and_rotation_operations() -> None:
     assert {"finalize", "resume", "start", "verify"}.issubset(rotation.output.split())
 
 
+@pytest.mark.unit
 def test_import_apply_requires_quiescence_before_runtime_initialization(
     monkeypatch,
 ) -> None:
@@ -66,6 +66,7 @@ def test_import_apply_requires_quiescence_before_runtime_initialization(
     assert runtime_called is False
 
 
+@pytest.mark.unit
 def test_import_apply_requires_literal_digest_before_runtime_initialization(
     monkeypatch,
 ) -> None:
@@ -96,6 +97,7 @@ def test_import_apply_requires_literal_digest_before_runtime_initialization(
     assert runtime_called is False
 
 
+@pytest.mark.unit
 def test_runtime_preserves_closed_key_rotation_error_code(monkeypatch) -> None:
     async def failing_runtime(_operation):
         raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)

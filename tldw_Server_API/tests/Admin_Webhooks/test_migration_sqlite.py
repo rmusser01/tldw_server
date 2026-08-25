@@ -12,8 +12,6 @@ from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_094_create_canonical_admin_webhook_tables,
 )
 
-pytestmark = pytest.mark.unit
-
 CANONICAL_TABLES = {
     "admin_webhook_sequences",
     "admin_webhook_registrations",
@@ -260,6 +258,7 @@ def _insert_command_event(conn: sqlite3.Connection, event_id: str = "event-1") -
 
 
 @pytest.mark.parametrize("starting_version", [0, 79, 80, 82, 93])
+@pytest.mark.unit
 def test_sqlite_094_is_additive_across_supported_upgrade_points(
     tmp_path: Path,
     starting_version: int,
@@ -309,6 +308,7 @@ def test_sqlite_094_is_additive_across_supported_upgrade_points(
             ).fetchone() == legacy_row
 
 
+@pytest.mark.unit
 def test_sqlite_094_has_exact_columns_foreign_keys_and_seed_state() -> None:
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
@@ -360,6 +360,7 @@ def test_sqlite_094_has_exact_columns_foreign_keys_and_seed_state() -> None:
     ) in delivery_fks
 
 
+@pytest.mark.unit
 def test_sqlite_094_enforces_source_and_delivery_uniqueness() -> None:
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
@@ -452,6 +453,7 @@ def test_sqlite_094_enforces_source_and_delivery_uniqueness() -> None:
     )
 
 
+@pytest.mark.unit
 def test_sqlite_094_enforces_attempt_and_idempotency_invariants() -> None:
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
@@ -555,6 +557,7 @@ def test_sqlite_094_enforces_attempt_and_idempotency_invariants() -> None:
         ),
     ],
 )
+@pytest.mark.unit
 def test_sqlite_094_enforces_json_utf8_byte_bounds(
     field: str,
     exact_json: str,
@@ -592,6 +595,7 @@ def test_sqlite_094_enforces_json_utf8_byte_bounds(
             )
 
 
+@pytest.mark.unit
 def test_sqlite_094_enforces_migration_and_rotation_state_machine() -> None:
     conn = sqlite3.connect(":memory:")
     migration_094_create_canonical_admin_webhook_tables(conn)
@@ -702,6 +706,7 @@ def test_sqlite_094_enforces_migration_and_rotation_state_machine() -> None:
     )
 
 
+@pytest.mark.unit
 def test_sqlite_094_rerun_is_idempotent() -> None:
     conn = sqlite3.connect(":memory:")
     migration_094_create_canonical_admin_webhook_tables(conn)
@@ -722,6 +727,7 @@ def test_sqlite_094_rerun_is_idempotent() -> None:
     ).fetchone() == (4,)
 
 
+@pytest.mark.unit
 def test_sqlite_094_rolls_back_all_ddl_when_one_statement_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

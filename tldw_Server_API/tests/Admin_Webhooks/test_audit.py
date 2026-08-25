@@ -25,7 +25,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     MandatoryAuditWriteError,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
+pytestmark = pytest.mark.asyncio
 
 
 class RecordingAuditService:
@@ -91,6 +91,7 @@ def _operation_record(**overrides: object) -> OperationalAudit:
     return OperationalAudit(**values)  # type: ignore[arg-type]
 
 
+@pytest.mark.unit
 async def test_mutation_audit_writes_flushes_and_stops_isolated_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -142,6 +143,7 @@ async def test_mutation_audit_writes_flushes_and_stops_isolated_service(
         ("admin_webhook.rotate_secret", AuditEventType.DATA_UPDATE, AuditEventCategory.SECURITY),
     ],
 )
+@pytest.mark.unit
 async def test_mutation_actions_have_closed_event_mapping(
     monkeypatch: pytest.MonkeyPatch,
     action: str,
@@ -167,6 +169,7 @@ async def test_mutation_actions_have_closed_event_mapping(
 
 
 @pytest.mark.parametrize("failure", ["create", "log", "flush"])
+@pytest.mark.unit
 async def test_every_mandatory_adapter_failure_is_sanitized_and_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
@@ -196,6 +199,7 @@ async def test_every_mandatory_adapter_failure_is_sanitized_and_fail_closed(
     assert service.stop_calls == (0 if failure == "create" else 1)
 
 
+@pytest.mark.unit
 async def test_write_and_stop_are_independently_bounded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -224,6 +228,7 @@ async def test_write_and_stop_are_independently_bounded(
     assert AUDIT_STOP_TIMEOUT_SECONDS == 1.0
 
 
+@pytest.mark.unit
 async def test_operational_audit_has_only_closed_bounded_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -273,11 +278,13 @@ async def test_operational_audit_has_only_closed_bounded_fields(
         lambda: _operation_record(reason_code="caller text"),
     ],
 )
+@pytest.mark.unit
 async def test_audit_record_types_reject_unbounded_or_open_values(record: object) -> None:
     with pytest.raises((TypeError, ValueError)):
         record()  # type: ignore[operator]
 
 
+@pytest.mark.unit
 def test_actor_identity_validators_reject_free_text_and_bound_output() -> None:
     assert validate_actor_principal_id("api_key:0123456789abcdef") == "api_key:0123456789abcdef"
     assert validate_actor_kind("api_key") == "api_key"
@@ -298,6 +305,7 @@ def test_actor_identity_validators_reject_free_text_and_bound_output() -> None:
             validate_actor_roles(invalid)
 
 
+@pytest.mark.unit
 def test_reason_codes_are_closed_enums() -> None:
     mutation = _mutation_record(
         outcome="denied",

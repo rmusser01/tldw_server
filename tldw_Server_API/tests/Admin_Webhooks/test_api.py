@@ -28,8 +28,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
-pytestmark = pytest.mark.unit
-
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
 REQUEST_ID = "4aa1324c-7fb7-49cf-9058-ce0df25d5932"
 IDEMPOTENCY_KEY = "0123456789abcdef0123456789abcdef"
@@ -216,6 +214,7 @@ def _client(
     return TestClient(app, raise_server_exceptions=False), service, mandatory_audit, read_audit
 
 
+@pytest.mark.unit
 def test_create_returns_one_time_secret_etag_and_no_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -241,6 +240,7 @@ def test_create_returns_one_time_secret_etag_and_no_store(
     mandatory_audit.assert_awaited_once()
 
 
+@pytest.mark.unit
 def test_patch_requires_current_etag_and_returns_new_etag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -262,6 +262,7 @@ def test_patch_requires_current_etag_and_returns_new_etag(
     assert updated.headers["etag"] == '"admin-webhook-41-r2"'
 
 
+@pytest.mark.unit
 def test_get_and_rotate_return_current_etags_and_rotate_is_never_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -325,6 +326,7 @@ def test_get_and_rotate_return_current_etags_and_rotate_is_never_cached(
         ),
     ),
 )
+@pytest.mark.unit
 def test_every_canonical_route_denies_non_platform_admin(
     monkeypatch: pytest.MonkeyPatch,
     method: str,
@@ -383,6 +385,7 @@ def test_every_canonical_route_denies_non_platform_admin(
         ),
     ),
 )
+@pytest.mark.unit
 def test_mutations_require_user_backed_platform_admin(
     monkeypatch: pytest.MonkeyPatch,
     method: str,
@@ -397,6 +400,7 @@ def test_mutations_require_user_backed_platform_admin(
     assert response.json()["error"]["code"] == "admin_webhook_user_principal_required"
 
 
+@pytest.mark.unit
 def test_validation_error_never_reflects_destination_or_forbidden_secret(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -429,6 +433,7 @@ def test_validation_error_never_reflects_destination_or_forbidden_secret(
     assert canary not in caplog.text
 
 
+@pytest.mark.unit
 def test_authentication_error_preserves_only_exact_bearer_challenge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -457,6 +462,7 @@ def test_authentication_error_preserves_only_exact_bearer_challenge(
     assert "authentication-canary" not in response.text
 
 
+@pytest.mark.unit
 def test_unmapped_http_exception_and_auth_unavailability_drop_injected_headers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -493,6 +499,7 @@ def test_unmapped_http_exception_and_auth_unavailability_drop_injected_headers(
     ("retry_after", "expected"),
     (("60", "60"), ("00060", "60"), (" 60", None), ("+60", None), ("86401", None)),
 )
+@pytest.mark.unit
 def test_rate_limit_header_is_strictly_bounded(
     monkeypatch: pytest.MonkeyPatch,
     retry_after: str,
@@ -515,6 +522,7 @@ def test_rate_limit_header_is_strictly_bounded(
     assert "x-injected" not in response.headers
 
 
+@pytest.mark.unit
 def test_list_uses_server_total_without_synthesizing_etag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -536,6 +544,7 @@ def test_list_uses_server_total_without_synthesizing_etag(
     }
 
 
+@pytest.mark.unit
 def test_read_audit_failure_does_not_change_successful_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -563,6 +572,7 @@ def test_read_audit_failure_does_not_change_successful_response(
     assert "audit-canary" not in repr(warning.call_args)
 
 
+@pytest.mark.unit
 def test_domain_failures_use_closed_status_code_and_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -579,6 +589,7 @@ def test_domain_failures_use_closed_status_code_and_message(
     }
 
 
+@pytest.mark.unit
 def test_control_plane_factory_failure_is_read_audited(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

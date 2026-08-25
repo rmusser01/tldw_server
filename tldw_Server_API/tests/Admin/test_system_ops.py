@@ -20,6 +20,7 @@ def _setup_env(monkeypatch, *, user_db_base: str) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
     _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
 

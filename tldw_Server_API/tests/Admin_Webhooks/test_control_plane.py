@@ -54,7 +54,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     RegistrationTarget,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
+pytestmark = pytest.mark.asyncio
 
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
 RAW_URL = "https://hooks.example.com/private/receive?token=url-query-canary"
@@ -335,6 +335,7 @@ async def _seed_registration(
         )
 
 
+@pytest.mark.unit
 async def test_create_is_inactive_encrypted_and_exact_replay_returns_same_secret(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -369,6 +370,7 @@ async def test_create_is_inactive_encrypted_and_exact_replay_returns_same_secret
     assert b"url-query-canary" not in database_bytes
 
 
+@pytest.mark.unit
 async def test_create_audit_is_awaited_before_commit(plane: ControlPlaneFixture) -> None:
     observed_counts: list[int] = []
 
@@ -381,6 +383,7 @@ async def test_create_audit_is_awaited_before_commit(plane: ControlPlaneFixture)
     assert await plane.repository.count_registrations() == 1
 
 
+@pytest.mark.unit
 async def test_audit_failure_rolls_back_create_claim_and_activity(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -402,6 +405,7 @@ async def test_audit_failure_rolls_back_create_claim_and_activity(
     assert retried.replayed is False
 
 
+@pytest.mark.unit
 async def test_fail_once_audit_error_is_preserved_across_sqlite_transaction(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -422,6 +426,7 @@ async def test_fail_once_audit_error_is_preserved_across_sqlite_transaction(
     assert (await plane.repository.get_migration_state()).first_canonical_activity_at is None
 
 
+@pytest.mark.unit
 async def test_audit_failure_rolls_back_patch_delete_and_rotation(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -462,6 +467,7 @@ async def test_audit_failure_rolls_back_patch_delete_and_rotation(
     assert retried_rotation.replayed is False
 
 
+@pytest.mark.unit
 async def test_create_commit_failure_attempts_correlated_failed_audit_and_rolls_back(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -505,6 +511,7 @@ async def test_create_commit_failure_attempts_correlated_failed_audit_and_rolls_
         ("ok", ("user.created",), 31),
     ],
 )
+@pytest.mark.unit
 async def test_create_bounds_are_denied_without_unvalidated_audit_metadata(
     plane: ControlPlaneFixture,
     description: str,
@@ -530,6 +537,7 @@ async def test_create_bounds_are_denied_without_unvalidated_audit_metadata(
     assert await plane.repository.count_registrations() == 0
 
 
+@pytest.mark.unit
 async def test_target_policy_denial_does_not_put_target_canary_in_audit(
     plane: ControlPlaneFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -552,6 +560,7 @@ async def test_target_policy_denial_does_not_put_target_canary_in_audit(
     assert "private" not in repr(records)
 
 
+@pytest.mark.unit
 async def test_create_replay_normalizes_event_order_and_conflict_precedes_key_state(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -587,6 +596,7 @@ async def test_create_replay_normalizes_event_order_and_conflict_precedes_key_st
     assert unavailable.value.code is WebhookErrorCode.KEY_UNAVAILABLE
 
 
+@pytest.mark.unit
 async def test_concurrent_identical_create_has_one_new_result_and_one_replay(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -602,6 +612,7 @@ async def test_concurrent_identical_create_has_one_new_result_and_one_replay(
     assert await plane.repository.count_registrations() == 1
 
 
+@pytest.mark.unit
 async def test_durable_in_progress_claim_returns_stable_conflict(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -639,6 +650,7 @@ async def test_durable_in_progress_claim_returns_stable_conflict(
     assert records[0].outcome == "denied"
 
 
+@pytest.mark.unit
 async def test_patch_no_op_does_not_change_versions_or_activity(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -679,6 +691,7 @@ async def test_patch_no_op_does_not_change_versions_or_activity(
         RegistrationChanges(timeout_seconds=31),
     ],
 )
+@pytest.mark.unit
 async def test_patch_bounds_are_denied_without_mutation(
     plane: ControlPlaneFixture,
     changes: RegistrationChanges,
@@ -697,6 +710,7 @@ async def test_patch_bounds_are_denied_without_mutation(
     assert (await plane.repository.get_migration_state()).first_canonical_activity_at is None
 
 
+@pytest.mark.unit
 async def test_patch_version_rules_and_catalog_event_order(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -738,6 +752,7 @@ async def test_patch_version_rules_and_catalog_event_order(
     assert activity.first_canonical_activity_kind == "registration_mutation"
 
 
+@pytest.mark.unit
 async def test_patch_requires_current_strong_etag_and_existing_registration(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -773,6 +788,7 @@ async def test_patch_requires_current_strong_etag_and_existing_registration(
     assert all("bad-etag-canary" not in repr(record) for record in records)
 
 
+@pytest.mark.unit
 async def test_metadata_patch_disable_and_delete_work_without_keys(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -813,6 +829,7 @@ async def test_metadata_patch_disable_and_delete_work_without_keys(
     assert await plane.repository.get_registration(registration.id) is None
 
 
+@pytest.mark.unit
 async def test_effective_delete_marks_first_canonical_activity(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -836,6 +853,7 @@ async def test_effective_delete_marks_first_canonical_activity(
         RegistrationChanges(active=True),
     ],
 )
+@pytest.mark.unit
 async def test_protected_or_activation_patch_requires_key(
     plane: ControlPlaneFixture,
     changes: RegistrationChanges,
@@ -856,6 +874,7 @@ async def test_protected_or_activation_patch_requires_key(
     assert exc_info.value.code is WebhookErrorCode.KEY_UNAVAILABLE
 
 
+@pytest.mark.unit
 async def test_activation_requires_delivery_capacity_and_rotated_imported_secret(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -905,6 +924,7 @@ async def test_activation_requires_delivery_capacity_and_rotated_imported_secret
     assert at_limit.value.code is WebhookErrorCode.ACTIVE_LIMIT
 
 
+@pytest.mark.unit
 async def test_rotate_clears_marker_and_replay_precedes_changed_revision(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -929,6 +949,7 @@ async def test_rotate_clears_marker_and_replay_precedes_changed_revision(
     assert activity.first_canonical_activity_at == NOW + timedelta(minutes=3)
 
 
+@pytest.mark.unit
 async def test_rotate_requires_inactive_and_current_etag(plane: ControlPlaneFixture) -> None:
     registration = await _seed_registration(plane, active=True)
 
@@ -948,6 +969,7 @@ async def test_rotate_requires_inactive_and_current_etag(plane: ControlPlaneFixt
     assert stale.value.code is WebhookErrorCode.PRECONDITION_FAILED
 
 
+@pytest.mark.unit
 async def test_secret_replays_are_superseded_only_by_rotation_or_delete(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -990,6 +1012,7 @@ async def test_secret_replays_are_superseded_only_by_rotation_or_delete(
     assert deleted_replay.value.code is WebhookErrorCode.IDEMPOTENCY_RESULT_SUPERSEDED
 
 
+@pytest.mark.unit
 async def test_list_get_and_status_do_not_require_decryption(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -1019,6 +1042,7 @@ async def test_list_get_and_status_do_not_require_decryption(
     assert status.migration.rollback_expires_at == NOW + timedelta(days=7)
 
 
+@pytest.mark.unit
 async def test_catalog_and_status_expose_only_effective_pr1_contract(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -1044,6 +1068,7 @@ async def test_catalog_and_status_expose_only_effective_pr1_contract(
     assert "/srv/" not in repr(status)
 
 
+@pytest.mark.unit
 async def test_mode_and_migration_gates_but_status_remains_available(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -1088,6 +1113,7 @@ async def test_mode_and_migration_gates_but_status_remains_available(
     assert pending.value.code is WebhookErrorCode.MIGRATION_PENDING
 
 
+@pytest.mark.unit
 async def test_key_rotation_and_primary_mismatch_block_only_protected_writes(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -1183,6 +1209,7 @@ async def test_key_rotation_and_primary_mismatch_block_only_protected_writes(
     assert mismatch.value.code is WebhookErrorCode.KEY_CONFIGURATION_MISMATCH
 
 
+@pytest.mark.unit
 async def test_registration_limit_is_atomic_under_concurrent_create(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -1213,6 +1240,7 @@ async def test_registration_limit_is_atomic_under_concurrent_create(
     assert await plane.repository.count_registrations() == 1
 
 
+@pytest.mark.unit
 async def test_audit_unavailability_replaces_original_denial(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -1228,6 +1256,7 @@ async def test_audit_unavailability_replaces_original_denial(
     assert exc_info.value.code is WebhookErrorCode.AUDIT_UNAVAILABLE
 
 
+@pytest.mark.unit
 async def test_errors_and_audits_are_secret_free(plane: ControlPlaneFixture) -> None:
     records: list[MutationAudit] = []
     first = await plane.service.create(
@@ -1248,5 +1277,6 @@ async def test_errors_and_audits_are_secret_free(plane: ControlPlaneFixture) -> 
     assert IDEMPOTENCY_KEY not in serialized
 
 
+@pytest.mark.unit
 def test_unavailable_delivery_capability_is_fail_closed() -> None:
     assert UnavailableDeliveryCapability().is_ready() is False

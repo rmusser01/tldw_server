@@ -11,7 +11,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_migration_sqlite import (
 )
 
 pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
-pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.postgres, pytest.mark.asyncio]
 
 CANONICAL_TABLES = {
     "admin_webhook_sequences",
@@ -65,6 +65,7 @@ async def _insert_command_event(pool, event_id: str = "event-1") -> None:
     )
 
 
+@pytest.mark.integration
 async def test_postgres_schema_is_additive_idempotent_and_preserves_legacy_rows(
     test_db_pool,
 ) -> None:
@@ -173,6 +174,7 @@ async def test_postgres_schema_is_additive_idempotent_and_preserves_legacy_rows(
     }
 
 
+@pytest.mark.integration
 async def test_postgres_schema_has_equivalent_partial_uniqueness_and_checks(
     test_db_pool,
 ) -> None:
@@ -252,6 +254,7 @@ async def test_postgres_schema_has_equivalent_partial_uniqueness_and_checks(
         ),
     ],
 )
+@pytest.mark.integration
 async def test_postgres_schema_enforces_json_utf8_byte_bounds(
     test_db_pool,
     field: str,

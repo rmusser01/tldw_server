@@ -37,7 +37,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     RegistrationTarget,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
+pytestmark = pytest.mark.asyncio
 
 NOW = datetime(2026, 8, 22, 20, 0, tzinfo=timezone.utc)
 CATALOG_EVENTS = tuple(item.event_type for item in EVENT_CATALOG)
@@ -146,6 +146,7 @@ async def legacy_import(
         await pool.close()
 
 
+@pytest.mark.unit
 async def test_dry_run_is_deterministic_redacted_and_mutates_no_source_or_database(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -172,6 +173,7 @@ async def test_dry_run_is_deterministic_redacted_and_mutates_no_source_or_databa
     assert not legacy_import.request.rollback_key_path.exists()
 
 
+@pytest.mark.unit
 async def test_source_snapshot_does_not_reopen_store_after_strict_read(
     legacy_import: LegacyImportFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -202,6 +204,7 @@ async def test_source_snapshot_does_not_reopen_store_after_strict_read(
         ),
     ],
 )
+@pytest.mark.unit
 async def test_strict_system_ops_source_handling(
     legacy_import: LegacyImportFixture,
     payload: bytes,
@@ -226,6 +229,7 @@ async def test_strict_system_ops_source_handling(
     assert caught.value.code.value == expected_code
 
 
+@pytest.mark.unit
 async def test_dry_run_rejects_id_that_leaves_no_next_sequence_value(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -239,6 +243,7 @@ async def test_dry_run_rejects_id_that_leaves_no_next_sequence_value(
     assert caught.value.code.value == "admin_webhook_sequence_exhausted"
 
 
+@pytest.mark.unit
 async def test_repository_snapshot_reads_legacy_rows_and_canonical_allocator_state(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -276,6 +281,7 @@ async def test_repository_snapshot_reads_legacy_rows_and_canonical_allocator_sta
     assert snapshot.next_registration_id == 1
 
 
+@pytest.mark.unit
 async def test_apply_imports_inactive_preserves_secret_and_sanitizes_exact_fields(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -325,6 +331,7 @@ async def test_apply_imports_inactive_preserves_secret_and_sanitizes_exact_field
     ]
 
 
+@pytest.mark.unit
 async def test_apply_audit_failure_has_zero_database_source_or_artifact_side_effects(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -358,6 +365,7 @@ async def test_apply_audit_failure_has_zero_database_source_or_artifact_side_eff
     assert not legacy_import.request.rollback_key_path.exists()
 
 
+@pytest.mark.unit
 async def test_literal_report_approval_detects_payload_tampering_before_audit(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -379,6 +387,7 @@ async def test_literal_report_approval_detects_payload_tampering_before_audit(
     assert await legacy_import.repository.count_registrations() == 0
 
 
+@pytest.mark.unit
 async def test_fresh_install_apply_completes_without_rollback_artifacts(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -415,6 +424,7 @@ class _StaticLegacyDecryptor(LegacySecretDecryptor):
         return "database-secret-canary"
 
 
+@pytest.mark.unit
 async def test_database_only_import_preserves_collision_mapping_and_advances_sequence(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -523,6 +533,7 @@ async def test_database_only_import_preserves_collision_mapping_and_advances_seq
     assert not (tmp_path / "database.backup").exists()
 
 
+@pytest.mark.unit
 async def test_encrypted_database_source_requires_explicit_decryption_flag(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -562,6 +573,7 @@ async def test_encrypted_database_source_requires_explicit_decryption_flag(
     assert legacy_import.audits == []
 
 
+@pytest.mark.unit
 async def test_reject_source_is_audited_and_bound_to_exact_record_fingerprint(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -594,6 +606,7 @@ async def test_reject_source_is_audited_and_bound_to_exact_record_fingerprint(
     assert len(drifted.accepted) == 1
 
 
+@pytest.mark.unit
 async def test_extract_rollback_backup_writes_distinct_private_plaintext_file(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -629,6 +642,7 @@ async def test_extract_rollback_backup_writes_distinct_private_plaintext_file(
     ]
 
 
+@pytest.mark.unit
 async def test_extract_cleans_created_plaintext_when_transaction_exit_is_cancelled(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -670,6 +684,7 @@ async def test_extract_cleans_created_plaintext_when_transaction_exit_is_cancell
     assert not output.exists()
 
 
+@pytest.mark.unit
 async def test_extract_failure_cleanup_preserves_replaced_output_inode(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -716,6 +731,7 @@ async def test_extract_failure_cleanup_preserves_replaced_output_inode(
 
 
 @pytest.mark.parametrize("closing_action", ["activity", "retirement"])
+@pytest.mark.unit
 async def test_extract_holds_migration_lock_through_plaintext_publication(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -807,6 +823,7 @@ async def test_extract_holds_migration_lock_through_plaintext_publication(
     closing_task.result()
 
 
+@pytest.mark.unit
 async def test_extract_checks_closed_window_before_artifact_access_or_audit(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -842,6 +859,7 @@ async def test_extract_checks_closed_window_before_artifact_access_or_audit(
     assert not (tmp_path / "must-not-exist.json").exists()
 
 
+@pytest.mark.unit
 async def test_extract_rechecks_activity_after_accepted_audit_before_artifact_access(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -887,6 +905,7 @@ async def test_extract_rechecks_activity_after_accepted_audit_before_artifact_ac
     assert not output.exists()
 
 
+@pytest.mark.unit
 async def test_extract_rechecks_retirement_after_accepted_audit_before_artifact_access(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -935,6 +954,7 @@ async def test_extract_rechecks_retirement_after_accepted_audit_before_artifact_
     assert not output.exists()
 
 
+@pytest.mark.unit
 async def test_destroy_rollback_key_requires_expiry_then_retires_idempotently(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -997,6 +1017,7 @@ async def test_destroy_rollback_key_requires_expiry_then_retires_idempotently(
         "after_complete",
     ],
 )
+@pytest.mark.unit
 async def test_apply_resumes_from_every_durable_stage_without_duplicate_import(
     legacy_import: LegacyImportFixture,
     crash_stage: str,
@@ -1039,6 +1060,7 @@ async def test_apply_resumes_from_every_durable_stage_without_duplicate_import(
     assert "webhook_deliveries" not in sanitized
 
 
+@pytest.mark.unit
 async def test_resume_after_backup_publish_preserves_unrelated_store_changes(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -1085,6 +1107,7 @@ async def test_resume_after_backup_publish_preserves_unrelated_store_changes(
     }
 
 
+@pytest.mark.unit
 async def test_resume_rejects_authenticated_backup_with_wrong_webhook_subtree(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -1156,6 +1179,7 @@ async def test_resume_rejects_authenticated_backup_with_wrong_webhook_subtree(
     assert await legacy_import.repository.count_registrations() == 0
 
 
+@pytest.mark.unit
 async def test_reserved_operation_resumes_when_reviewed_report_is_missing(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -1195,6 +1219,7 @@ async def test_reserved_operation_resumes_when_reviewed_report_is_missing(
     assert await legacy_import.repository.count_registrations() == 1
 
 
+@pytest.mark.unit
 async def test_public_verify_and_sanitize_resumes_database_committed_import(
     legacy_import: LegacyImportFixture,
 ) -> None:

@@ -57,6 +57,7 @@ def _write_exact_size_json(path: Path, size: int) -> None:
             remaining -= len(part)
 
 
+@pytest.mark.unit
 def test_atomic_save_fsyncs_file_replace_and_parent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -106,6 +107,7 @@ def test_atomic_save_fsyncs_file_replace_and_parent(
 
 
 @pytest.mark.parametrize("failure_point", ["before_write", "write", "replace"])
+@pytest.mark.unit
 def test_atomic_save_never_publishes_partial_destination(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -158,6 +160,7 @@ def test_atomic_save_never_publishes_partial_destination(
     assert list(tmp_path.glob(".system_ops.json.*")) == []
 
 
+@pytest.mark.unit
 def test_atomic_save_only_tolerates_unsupported_directory_fsync(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -193,6 +196,7 @@ def test_atomic_save_only_tolerates_unsupported_directory_fsync(
         service._atomic_write_store(path, {"ok": False})
 
 
+@pytest.mark.unit
 def test_locked_store_retains_process_and_file_locks_during_atomic_publication(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -238,6 +242,7 @@ def test_locked_store_retains_process_and_file_locks_during_atomic_publication(
     assert file_lock_active is False
 
 
+@pytest.mark.unit
 def test_strict_store_reader_handles_only_absent_or_whitespace_as_empty(
     tmp_path: Path,
 ) -> None:
@@ -251,6 +256,7 @@ def test_strict_store_reader_handles_only_absent_or_whitespace_as_empty(
     assert service._load_store_strict(path) == {"webhooks": []}
 
 
+@pytest.mark.unit
 def test_strict_store_reader_accepts_exact_limit_and_rejects_one_byte_more(
     tmp_path: Path,
 ) -> None:
@@ -272,6 +278,7 @@ def test_strict_store_reader_accepts_exact_limit_and_rejects_one_byte_more(
         (b"[]", "JSON object"),
     ],
 )
+@pytest.mark.unit
 def test_strict_store_reader_rejects_invalid_content_without_side_effects(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -300,6 +307,7 @@ def test_strict_store_reader_rejects_invalid_content_without_side_effects(
     assert writes == []
 
 
+@pytest.mark.unit
 def test_strict_store_reader_propagates_read_errors_and_rejects_symlinks(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -326,6 +334,7 @@ def test_strict_store_reader_propagates_read_errors_and_rejects_symlinks(
             service._load_store_strict(path)
 
 
+@pytest.mark.unit
 def test_normalize_incident_record_leaves_resolution_metrics_empty_for_unresolved_incident() -> None:
     normalized = _normalize_incident_record(
         {
@@ -340,6 +349,7 @@ def test_normalize_incident_record_leaves_resolution_metrics_empty_for_unresolve
     assert normalized["time_to_resolve_seconds"] is None
 
 
+@pytest.mark.unit
 def test_normalize_incident_record_skips_seed_creation_event_for_acknowledgement() -> None:
     normalized = _normalize_incident_record(
         {

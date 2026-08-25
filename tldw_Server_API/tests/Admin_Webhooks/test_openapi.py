@@ -10,8 +10,6 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_webhooks impor
     webhooks_router as evaluation_webhooks_router,
 )
 
-pytestmark = pytest.mark.unit
-
 
 def _openapi() -> dict[str, object]:
     app = FastAPI()
@@ -20,6 +18,7 @@ def _openapi() -> dict[str, object]:
     return app.openapi()
 
 
+@pytest.mark.unit
 def test_pr1_openapi_has_only_control_plane_operations() -> None:
     paths = _openapi()["paths"]
 
@@ -32,6 +31,7 @@ def test_pr1_openapi_has_only_control_plane_operations() -> None:
     assert "/api/v1/admin/webhooks/{webhook_id}/deliveries" not in paths
 
 
+@pytest.mark.unit
 def test_every_canonical_operation_uses_bounded_validation_error_schema() -> None:
     spec = _openapi()
     paths = spec["paths"]
@@ -46,6 +46,7 @@ def test_every_canonical_operation_uses_bounded_validation_error_schema() -> Non
     assert "HTTPValidationError" not in schemas
 
 
+@pytest.mark.unit
 def test_canonical_operations_declare_stable_error_envelopes() -> None:
     paths = _openapi()["paths"]
     expected = {"401", "403", "404", "409", "412", "422", "428", "429", "500", "503"}
@@ -59,6 +60,7 @@ def test_canonical_operations_declare_stable_error_envelopes() -> None:
                 assert schema == {"$ref": "#/components/schemas/WebhookErrorResponse"}
 
 
+@pytest.mark.unit
 def test_schema_examples_use_reserved_hosts_and_an_obvious_fake_secret() -> None:
     encoded = json.dumps(_openapi(), sort_keys=True)
 
@@ -68,6 +70,7 @@ def test_schema_examples_use_reserved_hosts_and_an_obvious_fake_secret() -> None
     assert "example.com" not in encoded
 
 
+@pytest.mark.unit
 def test_canonical_models_do_not_rename_evaluation_webhook_schemas() -> None:
     app = FastAPI()
     app.include_router(evaluation_webhooks_router, prefix="/api/v1/evaluations")

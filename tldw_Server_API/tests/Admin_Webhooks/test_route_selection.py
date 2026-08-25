@@ -10,8 +10,6 @@ from tldw_Server_API.app.api.v1.endpoints import admin as admin_endpoints
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
-pytestmark = pytest.mark.unit
-
 
 def _pairs(router: APIRouter) -> list[tuple[str, str]]:
     return [(method, route.path) for route in router.routes for method in (route.methods or set())]
@@ -32,6 +30,7 @@ def _build(environ: dict[str, str]) -> APIRouter:
         {"TLDW_ADMIN_WEBHOOKS_MODE": "on", "TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT": "false"},
     ),
 )
+@pytest.mark.unit
 def test_selected_router_has_no_duplicate_method_path_pairs(
     environ: dict[str, str],
 ) -> None:
@@ -39,6 +38,7 @@ def test_selected_router_has_no_duplicate_method_path_pairs(
     assert len(pairs) == len(set(pairs))
 
 
+@pytest.mark.unit
 def test_canonical_selection_excludes_legacy_delivery_routes() -> None:
     pairs = set(
         _pairs(
@@ -59,6 +59,7 @@ def test_canonical_selection_excludes_legacy_delivery_routes() -> None:
     assert ("POST", "/admin/incidents/{incident_id}/notify-webhooks") not in pairs
 
 
+@pytest.mark.unit
 def test_legacy_selection_excludes_canonical_catalog_and_rotation() -> None:
     pairs = set(
         _pairs(
@@ -81,6 +82,7 @@ def test_legacy_selection_excludes_canonical_catalog_and_rotation() -> None:
 
 
 @pytest.mark.parametrize("mode", ("migrate", "on"))
+@pytest.mark.unit
 def test_legacy_compatibility_is_rejected_outside_off_mode(mode: str) -> None:
     with pytest.raises(ValueError, match="Legacy webhook compatibility"):
         _build(
@@ -91,6 +93,7 @@ def test_legacy_compatibility_is_rejected_outside_off_mode(mode: str) -> None:
         )
 
 
+@pytest.mark.unit
 def test_canonical_off_warning_is_fixed_and_emitted_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -110,6 +113,7 @@ def test_canonical_off_warning_is_fixed_and_emitted_once(
     ]
 
 
+@pytest.mark.unit
 def test_legacy_create_and_update_audits_omit_target_and_event_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

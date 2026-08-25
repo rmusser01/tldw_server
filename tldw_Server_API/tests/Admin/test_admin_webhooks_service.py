@@ -22,6 +22,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_generate_signature_deterministic():
     sig1 = generate_signature("secret", "12345", '{"hello": "world"}')
     sig2 = generate_signature("secret", "12345", '{"hello": "world"}')
@@ -29,12 +30,14 @@ def test_generate_signature_deterministic():
     assert sig1.startswith("v1=")
 
 
+@pytest.mark.unit
 def test_generate_signature_changes_with_secret():
     sig1 = generate_signature("secret-a", "12345", "body")
     sig2 = generate_signature("secret-b", "12345", "body")
     assert sig1 != sig2
 
 
+@pytest.mark.unit
 def test_generate_signature_changes_with_timestamp():
     sig1 = generate_signature("secret", "12345", "body")
     sig2 = generate_signature("secret", "99999", "body")
@@ -46,6 +49,7 @@ def test_generate_signature_changes_with_timestamp():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_row_to_record_from_dict():
     encrypted = encrypt_admin_webhook_secret("s3cret")
     row = {
@@ -71,6 +75,7 @@ def test_row_to_record_from_dict():
     assert record.created_by == 42
 
 
+@pytest.mark.unit
 def test_row_to_record_handles_invalid_json():
     encrypted = encrypt_admin_webhook_secret("s3cret")
     row = {
@@ -152,6 +157,7 @@ def webhook_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_create_webhook_generates_secret(svc: AdminWebhooksService):
     async def _return_inserted_row(_query: str, params: tuple[object, ...]) -> dict[str, object]:
         return {
@@ -180,6 +186,7 @@ async def test_create_webhook_generates_secret(svc: AdminWebhooksService):
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_list_webhooks(svc: AdminWebhooksService):
     svc.db_pool.fetchone.return_value = {"cnt": 2}
     secret_one = encrypt_admin_webhook_secret("s1")
@@ -207,6 +214,7 @@ async def test_list_webhooks(svc: AdminWebhooksService):
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_update_webhook_skips_none_fields(svc: AdminWebhooksService):
     encrypted = encrypt_admin_webhook_secret("s")
     svc.db_pool.fetchone.return_value = {
@@ -224,6 +232,7 @@ async def test_update_webhook_skips_none_fields(svc: AdminWebhooksService):
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_delete_webhook(svc: AdminWebhooksService):
     result = await svc.delete_webhook(42)
     assert result is True
@@ -236,6 +245,7 @@ async def test_delete_webhook(svc: AdminWebhooksService):
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_deliver_success(svc: AdminWebhooksService):
     wh = WebhookRecord(
         id=1, url="https://example.com/hook", secret="test-secret",
@@ -266,6 +276,7 @@ async def test_deliver_success(svc: AdminWebhooksService):
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_deliver_refreshes_signature_and_timestamp_for_each_retry_attempt(svc: AdminWebhooksService):
     wh = WebhookRecord(
         id=1, url="https://example.com/hook", secret="test-secret",
@@ -306,6 +317,7 @@ async def test_deliver_refreshes_signature_and_timestamp_for_each_retry_attempt(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_dispatch_event_filters_by_event_type(svc: AdminWebhooksService):
     svc.db_pool.fetchone.side_effect = [
         {"cnt": 2},  # list_webhooks count
@@ -347,6 +359,7 @@ async def test_dispatch_event_filters_by_event_type(svc: AdminWebhooksService):
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_dispatch_event_counts_only_2xx_deliveries(svc: AdminWebhooksService):
     webhooks = [
         WebhookRecord(

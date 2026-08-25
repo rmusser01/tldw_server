@@ -51,7 +51,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 )
 
 pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
-pytestmark = [pytest.mark.postgres, pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.postgres, pytest.mark.asyncio]
 
 NOW = datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc)
 
@@ -184,6 +184,7 @@ def _idempotency(
     )
 
 
+@pytest.mark.integration
 async def test_postgres_commit_sequence_and_readback(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -201,6 +202,7 @@ async def test_postgres_commit_sequence_and_readback(
     assert sorted(allocated) == list(range(2, 12))
 
 
+@pytest.mark.integration
 async def test_postgres_registration_list_supports_bounded_offset(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -219,6 +221,7 @@ async def test_postgres_registration_list_supports_bounded_offset(
         await pg_repo.repository.list_registrations(limit=2, offset=1_001)
 
 
+@pytest.mark.integration
 async def test_postgres_counts_secret_rotation_required(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -247,6 +250,7 @@ async def test_postgres_counts_secret_rotation_required(
     assert await pg_repo.repository.count_secret_rotation_required() == 0
 
 
+@pytest.mark.integration
 async def test_postgres_pages_and_replaces_every_protected_inventory(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -362,6 +366,7 @@ async def test_postgres_pages_and_replaces_every_protected_inventory(
         )
 
 
+@pytest.mark.integration
 async def test_postgres_protected_rewrite_and_rotation_cursor_are_atomic(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -448,6 +453,7 @@ async def test_postgres_protected_rewrite_and_rotation_cursor_are_atomic(
         )
 
 
+@pytest.mark.integration
 async def test_postgres_revision_noop_versions_soft_delete_and_limits(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -511,6 +517,7 @@ async def test_postgres_revision_noop_versions_soft_delete_and_limits(
     assert snapshot.canonical_non_deleted_count == 0
 
 
+@pytest.mark.integration
 async def test_fail_once_audit_error_is_preserved_across_postgres_transaction(
     pg_repo: PostgreSQLRepositoryFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -608,6 +615,7 @@ async def _run_idempotent_create(
         return IdempotencyLookupKind.NEW
 
 
+@pytest.mark.integration
 async def test_postgres_identical_idempotency_race_has_one_winner_and_replay(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -633,6 +641,7 @@ async def test_postgres_identical_idempotency_race_has_one_winner_and_replay(
     assert await pg_repo.repository.count_registrations() == 1
 
 
+@pytest.mark.integration
 async def test_postgres_registration_admission_is_atomic_under_concurrency(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -657,6 +666,7 @@ async def test_postgres_registration_admission_is_atomic_under_concurrency(
     assert await pg_repo.repository.count_registrations() == 1
 
 
+@pytest.mark.integration
 async def test_postgres_conflicting_idempotency_race_has_one_winner_and_conflict(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -687,6 +697,7 @@ async def test_postgres_conflicting_idempotency_race_has_one_winner_and_conflict
     assert await pg_repo.repository.count_registrations() == 1
 
 
+@pytest.mark.integration
 async def test_postgres_migration_and_activity_compare_and_set(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -712,6 +723,7 @@ async def test_postgres_migration_and_activity_compare_and_set(
     assert stale.value.code is WebhookRepositoryErrorCode.STALE_MIGRATION_STATE
 
 
+@pytest.mark.integration
 async def test_postgres_transaction_rolls_back_resource_and_sequence(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -726,6 +738,7 @@ async def test_postgres_transaction_rolls_back_resource_and_sequence(
         assert await tx.allocate_registration_id() == 1
 
 
+@pytest.mark.integration
 async def test_postgres_lock_timeout_maps_to_database_busy_without_claim(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
@@ -751,6 +764,7 @@ async def test_postgres_lock_timeout_maps_to_database_busy_without_claim(
     assert await pg_repo.pool.fetchval("SELECT COUNT(*) FROM admin_webhook_idempotency") == 0
 
 
+@pytest.mark.integration
 async def test_postgres_statement_timeout_maps_to_database_busy(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
