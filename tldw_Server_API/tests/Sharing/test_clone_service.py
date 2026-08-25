@@ -1,13 +1,152 @@
 """Unit tests for CloneService — media ID mapping, deep copy of chunks/transcripts."""
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError, is_dataclass
+from types import MappingProxyType
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tldw_Server_API.app.core.Sharing.clone_models import (
+    CloneCopyCounts,
+    CloneRetrievalReadiness,
+    CloneWarning,
+    MediaCloneSnapshot,
+    WorkspaceCloneRequest,
+    WorkspaceCloneResult,
+    WorkspaceCloneSnapshot,
+)
 from tldw_Server_API.app.core.Sharing.clone_service import CloneService
 
 pytestmark = pytest.mark.unit
+
+
+def test_clone_contracts_are_frozen_and_slotted():
+    contracts = (
+        WorkspaceCloneRequest,
+        WorkspaceCloneSnapshot,
+        MediaCloneSnapshot,
+        CloneCopyCounts,
+        CloneRetrievalReadiness,
+        CloneWarning,
+        WorkspaceCloneResult,
+    )
+
+    for contract in contracts:
+        assert is_dataclass(contract)
+        assert contract.__dataclass_params__.frozen is True
+        assert "__dict__" not in contract.__slots__
+
+    readiness = CloneRetrievalReadiness("ready", "ready", "needs_indexing")
+    with pytest.raises(FrozenInstanceError):
+        readiness.text_search = "unavailable"
+
+
+def test_clone_request_normalizes_name():
+    request = WorkspaceCloneRequest(
+        source_workspace_id="source",
+        target_workspace_id="target",
+        operation_id="operation",
+        request_fingerprint="fingerprint",
+        name="  Research\t Workspace  ",
+    )
+
+    assert request.name == "Research Workspace"
+
+
+def test_clone_request_rejects_empty_normalized_name():
+    with pytest.raises(ValueError, match="name"):
+        WorkspaceCloneRequest(
+            source_workspace_id="source",
+            target_workspace_id="target",
+            operation_id="operation",
+            request_fingerprint="fingerprint",
+            name=" \t\n ",
+        )
+
+
+def test_clone_contract_rejects_non_ascii_identifier():
+    with pytest.raises(ValueError, match="ASCII"):
+        WorkspaceCloneRequest(
+            source_workspace_id="sourcé",
+            target_workspace_id="target",
+            operation_id="operation",
+            request_fingerprint="fingerprint",
+            name="Copy",
+        )
+
+
+def test_snapshot_defensively_copies_mutable_rows():
+    row = {"id": "source-1", "title": "Original"}
+    snapshot = WorkspaceCloneSnapshot.from_rows(
+        workspace={"id": "ws"}, sources=[row], notes=[], artifacts=[]
+    )
+    row["title"] = "Changed"
+    assert snapshot.sources[0]["title"] == "Original"
+
+
+def test_snapshot_rows_are_recursive_immutable_views():
+    row = {"id": "source-1", "metadata": {"tags": ["one"]}}
+    snapshot = WorkspaceCloneSnapshot.from_rows(
+        workspace={"id": "ws"}, sources=[row], notes=[], artifacts=[]
+    )
+
+    assert isinstance(snapshot.workspace, MappingProxyType)
+    assert isinstance(snapshot.sources, tuple)
+    assert isinstance(snapshot.sources[0], MappingProxyType)
+    assert isinstance(snapshot.sources[0]["metadata"], MappingProxyType)
+    assert snapshot.sources[0]["metadata"]["tags"] == ("one",)
+    with pytest.raises(TypeError):
+        snapshot.sources[0]["title"] = "Changed"
+
+
+def test_media_snapshot_defensively_copies_rows():
+    media = {"id": 1, "metadata": {"labels": ["source"]}}
+    chunks = [{"text": "chunk"}]
+    transcripts = [{"transcription": "text"}]
+    snapshot = MediaCloneSnapshot.from_rows(media, chunks, transcripts)
+
+    media["metadata"]["labels"].append("changed")
+    chunks[0]["text"] = "changed"
+    transcripts[0]["transcription"] = "changed"
+
+    assert snapshot.media["metadata"]["labels"] == ("source",)
+    assert snapshot.chunks[0]["text"] == "chunk"
+    assert snapshot.transcripts[0]["transcription"] == "text"
+
+
+def test_direct_snapshot_construction_is_also_immutable():
+    row = {"id": "source-1", "nested": {"value": "Original"}}
+    snapshot = WorkspaceCloneSnapshot(
+        workspace={"id": "ws"},
+        memberships=[],
+        sources=[row],
+        notes=[],
+        artifacts=[],
+    )
+
+    row["nested"]["value"] = "Changed"
+    assert snapshot.sources[0]["nested"]["value"] == "Original"
+
+
+def test_clone_warning_rejects_unbounded_or_invalid_count():
+    with pytest.raises(ValueError, match="count"):
+        CloneWarning(code="warning", count=-1)
+    with pytest.raises(ValueError, match="ASCII"):
+        CloneWarning(code="warning-é", count=1)
+
+
+def test_clone_result_rejects_unbounded_warnings():
+    with pytest.raises(ValueError, match="at most 8"):
+        WorkspaceCloneResult(
+            workspace_id="target",
+            name="Copy",
+            outcome="partial",
+            publication_confirmed=False,
+            counts=CloneCopyCounts.empty(),
+            readiness=CloneRetrievalReadiness("ready", "ready", "needs_indexing"),
+            warnings=tuple(CloneWarning(code=f"w{i}", count=1) for i in range(9)),
+        )
 
 
 def _make_service(
