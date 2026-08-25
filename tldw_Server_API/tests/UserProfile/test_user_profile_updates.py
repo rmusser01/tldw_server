@@ -519,30 +519,46 @@ async def test_membership_updates_use_caller_transaction_and_one_outer_touch(
 async def test_membership_context_forwards_owned_connection_to_all_reads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    db_pool = object()
     db_conn = object()
     calls: list[tuple[str, int, object | None]] = []
 
-    async def _org_memberships(user_id: int, *, db_conn=None):
-        calls.append(("org", user_id, db_conn))
-        return [{"org_id": 11, "role": "admin", "status": "active"}]
+    class _Repo:
+        def __init__(self, supplied_pool: object) -> None:
+            assert supplied_pool is db_pool
 
-    async def _team_memberships(user_id: int, *, db_conn=None):
-        calls.append(("team", user_id, db_conn))
-        return [{"team_id": 22, "org_id": 11, "role": "lead"}]
+        async def list_org_memberships_for_user(self, user_id: int, *, conn=None):
+            calls.append(("org", user_id, conn))
+            return [{"org_id": 11, "role": "admin", "status": "active"}]
+
+        async def list_memberships_for_user(self, user_id: int, *, conn=None):
+            calls.append(("team", user_id, conn))
+            return [{"team_id": 22, "org_id": 11, "role": "lead"}]
+
+    async def _facade_trap(*_args, **_kwargs):
+        raise AssertionError(
+            "transaction-bound membership reads must bypass runtime repo readiness"
+        )
 
     monkeypatch.setattr(
         update_service_module,
         "list_org_memberships_for_user",
-        _org_memberships,
+        _facade_trap,
     )
     monkeypatch.setattr(
         update_service_module,
         "list_memberships_for_user",
-        _team_memberships,
+        _facade_trap,
+    )
+    monkeypatch.setattr(
+        update_service_module,
+        "AuthnzOrgsTeamsRepo",
+        _Repo,
+        raising=False,
     )
 
     context = await update_service_module.UserProfileUpdateService(
-        db_pool=object(),
+        db_pool=db_pool,
     )._build_membership_context(  # noqa: SLF001
         user_id=7,
         scope=update_service_module.ProfileUpdateScope(actor_user_id=9),

@@ -171,19 +171,13 @@ async def get_team(team_id: int) -> dict[str, Any] | None:
     return await repo.get_team(team_id)
 
 
-async def list_memberships_for_user(
-    user_id: int,
-    *,
-    db_conn: Any | None = None,
-) -> list[dict[str, Any]]:
+async def list_memberships_for_user(user_id: int) -> list[dict[str, Any]]:
     """List team memberships (and org_id) for a given user.
 
     Returns: list of {team_id, org_id, role}
     """
     repo = await _get_orgs_teams_repo()
-    if db_conn is None:
-        return await repo.list_memberships_for_user(user_id)
-    return await repo.list_memberships_for_user(user_id, conn=db_conn)
+    return await repo.list_memberships_for_user(user_id)
 
 
 async def list_active_team_memberships_for_user(user_id: int) -> list[dict[str, Any]]:
@@ -335,11 +329,7 @@ async def update_team_member_role(
     )
 
 
-async def list_org_memberships_for_user(
-    user_id: int,
-    *,
-    db_conn: Any | None = None,
-) -> list[dict[str, Any]]:
+async def list_org_memberships_for_user(user_id: int) -> list[dict[str, Any]]:
     """
     List organization memberships for a given user.
 
@@ -350,9 +340,7 @@ async def list_org_memberships_for_user(
         A list of dicts describing memberships, each containing at least ``org_id`` and ``role``.
     """
     repo = await _get_orgs_teams_repo()
-    if db_conn is None:
-        return await repo.list_org_memberships_for_user(user_id)
-    return await repo.list_org_memberships_for_user(user_id, conn=db_conn)
+    return await repo.list_org_memberships_for_user(user_id)
 
 
 async def remove_team_member(
