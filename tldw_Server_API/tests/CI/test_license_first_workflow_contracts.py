@@ -504,7 +504,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 55
     assert combined_text.count("github.event.pull_request.head.sha") == 52
     assert combined_text.count("github.event.pull_request.base.sha") == 4
-    assert combined_text.count("needs.admission.outputs.base_sha") == 10
+    assert combined_text.count("needs.admission.outputs.base_sha") == 11
 
     for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():
         changes_job = workflows[name][0]["jobs"]["changes"]

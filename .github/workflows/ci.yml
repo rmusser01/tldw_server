@@ -925,6 +925,8 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
               tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
@@ -2406,6 +2408,8 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
               tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
@@ -3758,6 +3762,8 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
               tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
@@ -5033,6 +5039,8 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
               tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
@@ -6314,6 +6322,8 @@ jobs:
           - name: admin-watchlists-webhooks
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_w*.py
+          - name: admin-webhooks-canonical
+            paths: >-
               tldw_Server_API/tests/Admin_Webhooks
           - name: admin-system-usage
             paths: >-
