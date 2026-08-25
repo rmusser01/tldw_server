@@ -535,7 +535,8 @@ class MediaLookupRepository:
         db = self.session
         try:
             count_cursor = db.execute_query(
-                "SELECT COUNT(*) AS total_items FROM Media WHERE deleted = 0 AND is_trash = 1"
+                "SELECT COUNT(*) AS total_items FROM Media WHERE deleted = 0 "
+                "AND is_trash = 1 AND system_operation_id IS NULL"
             )
             count_row = count_cursor.fetchone()
             total_items = count_row["total_items"] if count_row else 0
@@ -548,6 +549,7 @@ class MediaLookupRepository:
                     FROM Media
                     WHERE deleted = 0
                       AND is_trash = 1
+                      AND system_operation_id IS NULL
                     ORDER BY trash_date DESC, last_modified DESC, id DESC
                     LIMIT ? OFFSET ?
                     """,

@@ -60,8 +60,19 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
         f"AND {ident('media')}.org_id IS NOT NULL "
         f"AND {ident('media')}.org_id = ANY({org_array}))"
     )
+    marked_clone_predicate = (
+        f"({ident('media')}.system_operation_kind = 'shared_workspace_clone' "
+        f"AND {ident('media')}.system_operation_id IS NOT NULL "
+        f"AND length({ident('media')}.system_operation_id) BETWEEN 1 AND 255 "
+        f"AND {ident('media')}.system_source_identity IS NOT NULL "
+        f"AND length({ident('media')}.system_source_identity) BETWEEN 1 AND 255 "
+        f"AND {ident('media')}.system_content_hash ~ '^[0-9a-f]{{64}}$')"
+    )
     media_access_predicate = (
-        f"({is_admin} OR ({not_deleted_predicate} AND ({personal_predicate} OR {team_predicate} OR {org_predicate})))"
+        f"({is_admin} OR "
+        f"({not_deleted_predicate} AND "
+        f"({personal_predicate} OR {team_predicate} OR {org_predicate})) OR "
+        f"({personal_predicate} AND {marked_clone_predicate}))"
     )
 
     policy_sets = {

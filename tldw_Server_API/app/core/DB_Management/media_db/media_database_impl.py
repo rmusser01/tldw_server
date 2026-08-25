@@ -13,8 +13,10 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
+    confirm_operation_owned_clone_media,
     delete_operation_owned_clone_media,
     insert_operation_owned_clone_media,
+    list_operation_owned_clone_media,
     read_media_clone_snapshots,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.audio_preset_ops import (
@@ -588,8 +590,11 @@ class MediaDatabase:
             OR
             (
                 system_operation_id IS NOT NULL
+                AND length(system_operation_id) BETWEEN 1 AND 255
+                AND system_operation_kind IS NOT NULL
                 AND system_operation_kind = 'shared_workspace_clone'
                 AND system_source_identity IS NOT NULL
+                AND length(system_source_identity) BETWEEN 1 AND 255
                 AND system_content_hash IS NOT NULL
                 AND length(system_content_hash) = 64
                 AND system_content_hash = lower(system_content_hash)
@@ -623,6 +628,18 @@ class MediaDatabase:
         media_id INTEGER NOT NULL,
         keyword_id INTEGER NOT NULL,
         UNIQUE (media_id, keyword_id),
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+        FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
+    );
+
+    -- Operation-owned clone Keyword holds --
+    CREATE TABLE IF NOT EXISTS OperationOwnedCloneKeywords (
+        media_id INTEGER NOT NULL,
+        keyword_id INTEGER NOT NULL,
+        operation_id TEXT NOT NULL CHECK (length(operation_id) BETWEEN 1 AND 255),
+        source_identity TEXT NOT NULL CHECK (length(source_identity) BETWEEN 1 AND 255),
+        created_by_clone BOOLEAN NOT NULL,
+        PRIMARY KEY (media_id, keyword_id),
         FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
         FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
     );
@@ -839,6 +856,10 @@ class MediaDatabase:
 
     CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id);
     CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id);
+    CREATE INDEX IF NOT EXISTS idx_owned_clone_keywords_keyword
+        ON OperationOwnedCloneKeywords(keyword_id);
+    CREATE INDEX IF NOT EXISTS idx_owned_clone_keywords_operation
+        ON OperationOwnedCloneKeywords(operation_id, source_identity);
 
     CREATE INDEX IF NOT EXISTS idx_transcripts_media_id ON Transcripts(media_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_transcripts_uuid ON Transcripts(uuid);
@@ -2240,6 +2261,8 @@ MediaDatabase.get_connection = get_connection
 MediaDatabase.read_media_clone_snapshots = read_media_clone_snapshots
 MediaDatabase.insert_operation_owned_clone_media = insert_operation_owned_clone_media
 MediaDatabase.delete_operation_owned_clone_media = delete_operation_owned_clone_media
+MediaDatabase.list_operation_owned_clone_media = list_operation_owned_clone_media
+MediaDatabase.confirm_operation_owned_clone_media = confirm_operation_owned_clone_media
 MediaDatabase.close_connection = close_connection
 MediaDatabase.release_context_connection = release_context_connection
 MediaDatabase._execute_with_connection = _execute_with_connection

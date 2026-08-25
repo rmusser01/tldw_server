@@ -70,8 +70,11 @@ def run_postgres_migrate_to_v25(
                         OR
                         (
                             {ident('system_operation_id')} IS NOT NULL
+                            AND length({ident('system_operation_id')}) BETWEEN 1 AND 255
+                            AND {ident('system_operation_kind')} IS NOT NULL
                             AND {ident('system_operation_kind')} = 'shared_workspace_clone'
                             AND {ident('system_source_identity')} IS NOT NULL
+                            AND length({ident('system_source_identity')}) BETWEEN 1 AND 255
                             AND {ident('system_content_hash')} IS NOT NULL
                             AND {ident('system_content_hash')} ~ '^[0-9a-f]{{64}}$'
                         )
@@ -87,6 +90,36 @@ def run_postgres_migrate_to_v25(
         f"ON {table} ({ident('system_operation_kind')}, "
         f"{ident('system_operation_id')}, {ident('system_source_identity')}) "
         f"WHERE {ident('system_operation_id')} IS NOT NULL",
+        connection=conn,
+    )
+    holds_table = ident("operationownedclonekeywords")
+    backend.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {holds_table} (
+            {ident('media_id')} BIGINT NOT NULL,
+            {ident('keyword_id')} BIGINT NOT NULL,
+            {ident('operation_id')} TEXT NOT NULL
+                CHECK (length({ident('operation_id')}) BETWEEN 1 AND 255),
+            {ident('source_identity')} TEXT NOT NULL
+                CHECK (length({ident('source_identity')}) BETWEEN 1 AND 255),
+            {ident('created_by_clone')} BOOLEAN NOT NULL,
+            PRIMARY KEY ({ident('media_id')}, {ident('keyword_id')}),
+            FOREIGN KEY ({ident('media_id')}) REFERENCES {table} ({ident('id')})
+                ON DELETE CASCADE,
+            FOREIGN KEY ({ident('keyword_id')}) REFERENCES {ident('keywords')} ({ident('id')})
+                ON DELETE CASCADE
+        )
+        """,  # nosec B608
+        connection=conn,
+    )
+    backend.execute(
+        f"CREATE INDEX IF NOT EXISTS {ident('idx_owned_clone_keywords_keyword')} "
+        f"ON {holds_table} ({ident('keyword_id')})",
+        connection=conn,
+    )
+    backend.execute(
+        f"CREATE INDEX IF NOT EXISTS {ident('idx_owned_clone_keywords_operation')} "
+        f"ON {holds_table} ({ident('operation_id')}, {ident('source_identity')})",
         connection=conn,
     )
 

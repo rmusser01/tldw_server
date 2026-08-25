@@ -41,6 +41,7 @@ _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _CANONICAL_MAX_DEPTH = 64
 _CANONICAL_MAX_CONTAINER_ITEMS = 1_000_000
 _CANONICAL_HASH_DOMAIN = b"tldw.media-clone-snapshot.v1\x00"
+_LOGICAL_COPY_PROJECTION_VERSION = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +62,24 @@ class OperationOwnedMediaResult:
             raise TypeError("created and replayed must be booleans")
         if self.created == self.replayed:
             raise ValueError("exactly one of created or replayed must be true")
+
+
+@dataclass(frozen=True, slots=True)
+class OperationOwnedMediaReference:
+    """Bounded reconciliation identity for one pending clone Media row."""
+
+    media_id: int
+    media_uuid: str
+    source_identity: str
+    expected_content_hash: str
+
+    def __post_init__(self) -> None:
+        if isinstance(self.media_id, bool) or not isinstance(self.media_id, int) or self.media_id <= 0:
+            raise ValueError("media_id must be a positive integer")
+        if not isinstance(self.media_uuid, str) or not self.media_uuid:
+            raise ValueError("media_uuid must be a non-empty string")
+        _validate_identifier(self.source_identity, "source_identity")
+        _validate_sha256(self.expected_content_hash, "expected_content_hash")
 
 
 def _canonical_frame(tag: bytes, payload: bytes) -> bytes:
@@ -85,12 +104,6 @@ def _canonical_parts(value: Any, *, depth: int = 0) -> Iterator[bytes]:
         if not math.isfinite(value):
             raise ValueError("non-finite clone snapshot floats are unsupported")
         yield _canonical_frame(b"f", value.hex().encode("ascii"))
-        return
-    if isinstance(value, complex):
-        if not math.isfinite(value.real) or not math.isfinite(value.imag):
-            raise ValueError("non-finite clone snapshot complex values are unsupported")
-        payload = f"{value.real.hex()}|{value.imag.hex()}".encode("ascii")
-        yield _canonical_frame(b"x", payload)
         return
     if isinstance(value, str):
         yield _canonical_frame(b"s", value.encode("utf-8"))
@@ -152,24 +165,193 @@ def _canonical_parts(value: Any, *, depth: int = 0) -> Iterator[bytes]:
     raise TypeError(f"unsupported clone snapshot hash value: {type(value).__name__}")
 
 
+def _normalize_persisted_value(value: Any, *, depth: int = 0) -> Any:
+    """Project supported values to their stable database representation."""
+    if depth > _CANONICAL_MAX_DEPTH:
+        raise ValueError("clone snapshot exceeds the canonical nesting bound")
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("non-finite clone snapshot floats are unsupported")
+        return value
+    if isinstance(value, complex):
+        raise TypeError("unsupported clone snapshot hash value: complex")
+    if isinstance(value, bytes):
+        return {"type": "bytes", "hex": value.hex()}
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, (date, time, Decimal, UUID)):
+        if isinstance(value, Decimal) and not value.is_finite():
+            raise ValueError("non-finite clone snapshot decimals are unsupported")
+        return str(value)
+    if isinstance(value, Mapping):
+        if len(value) > _CANONICAL_MAX_CONTAINER_ITEMS:
+            raise ValueError("clone snapshot mapping exceeds the item bound")
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key)
+            if normalized_key in normalized:
+                raise ValueError("clone snapshot mapping has ambiguous persisted keys")
+            normalized[normalized_key] = _normalize_persisted_value(
+                item,
+                depth=depth + 1,
+            )
+        return normalized
+    if isinstance(value, (list, tuple, frozenset)):
+        if len(value) > _CANONICAL_MAX_CONTAINER_ITEMS:
+            raise ValueError("clone snapshot sequence exceeds the item bound")
+        normalized_items = tuple(
+            _normalize_persisted_value(item, depth=depth + 1) for item in value
+        )
+        if isinstance(value, frozenset):
+            return tuple(sorted(normalized_items, key=_canonical_bytes))
+        return normalized_items
+    raise TypeError(f"unsupported clone snapshot hash value: {type(value).__name__}")
+
+
+def _canonical_bytes(value: Any) -> bytes:
+    return b"".join(_canonical_parts(value))
+
+
+def _bounded_source_url(value: Any) -> str | None:
+    return value[:_PROVENANCE_URL_MAX_LENGTH] if isinstance(value, str) else None
+
+
+def _normalize_keywords(keywords: Any) -> tuple[str, ...]:
+    if not isinstance(keywords, tuple):
+        raise InputError("snapshot Media keywords must be a tuple")
+    normalized: set[str] = set()
+    for keyword in keywords:
+        if not isinstance(keyword, str):
+            raise InputError("snapshot Media keywords must contain strings")
+        value = keyword.strip().lower()
+        if value:
+            normalized.add(value)
+    return tuple(sorted(normalized))
+
+
+def _ordered_projection(rows: Sequence[Mapping[str, Any]]) -> tuple[Mapping[str, Any], ...]:
+    return tuple(sorted(rows, key=_canonical_bytes))
+
+
+def _logical_copy_projection(
+    *,
+    media: Mapping[str, Any],
+    keywords: tuple[str, ...],
+    chunks: Sequence[Mapping[str, Any]],
+    transcripts: Sequence[Mapping[str, Any]],
+    document: Mapping[str, Any],
+    source_rows: bool,
+) -> Mapping[str, Any]:
+    media_projection = {
+        field: _normalize_persisted_value(media.get(field))
+        for field in (
+            "title",
+            "type",
+            "content",
+            "author",
+            "ingestion_date",
+            "transcription_model",
+            "content_hash",
+            "source_hash",
+            "latest_transcription_run_id",
+        )
+    }
+    media_projection["chunking_status"] = _normalize_persisted_value(
+        media.get("chunking_status") or "completed"
+    )
+    media_projection["next_transcription_run_id"] = _normalize_persisted_value(
+        media.get("next_transcription_run_id") or 1
+    )
+
+    chunk_projection: list[Mapping[str, Any]] = []
+    for row in chunks:
+        projected = {
+            field: _normalize_persisted_value(row.get(field))
+            for field in (
+                "chunk_text",
+                "chunk_index",
+                "start_char",
+                "end_char",
+                "chunk_type",
+                "creation_date",
+                "last_modified_orig",
+                "metadata",
+            )
+        }
+        projected["is_processed"] = (
+            False if source_rows else bool(row.get("is_processed"))
+        )
+        chunk_projection.append(projected)
+
+    transcript_projection = [
+        {
+            field: _normalize_persisted_value(row.get(field))
+            for field in (
+                "whisper_model",
+                "transcription",
+                "created_at",
+                "transcription_run_id",
+                "supersedes_run_id",
+                "idempotency_key",
+            )
+        }
+        for row in transcripts
+    ]
+    return {
+        "projection_version": _LOGICAL_COPY_PROJECTION_VERSION,
+        "media": media_projection,
+        "document": {
+            field: _normalize_persisted_value(document.get(field))
+            for field in (
+                "version_number",
+                "prompt",
+                "analysis_content",
+                "source_url",
+                "content",
+            )
+        },
+        "keywords": _normalize_keywords(keywords),
+        "chunks": _ordered_projection(chunk_projection),
+        "transcripts": _ordered_projection(transcript_projection),
+    }
+
+
+def _snapshot_logical_copy_projection(snapshot: MediaCloneSnapshot) -> Mapping[str, Any]:
+    content = snapshot.media.get("content")
+    return _logical_copy_projection(
+        media=snapshot.media,
+        keywords=_normalize_keywords(snapshot.media.get("keywords", ())),
+        chunks=snapshot.chunks,
+        transcripts=snapshot.transcripts,
+        document={
+            "version_number": 1,
+            "prompt": None,
+            "analysis_content": None,
+            "source_url": _bounded_source_url(snapshot.media.get("url")),
+            "content": "" if content is None else content,
+        },
+        source_rows=True,
+    )
+
+
+def _hash_logical_copy_projection(projection: Mapping[str, Any]) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(_CANONICAL_HASH_DOMAIN)
+    for part in _canonical_parts(projection):
+        hasher.update(part)
+    return hasher.hexdigest()
+
+
 def hash_media_clone_snapshot(snapshot: MediaCloneSnapshot) -> str:
-    """Return the canonical lowercase SHA-256 identity of one immutable snapshot."""
+    """Hash the versioned canonical logical-copy projection of a snapshot."""
 
     from tldw_Server_API.app.core.Sharing.clone_models import MediaCloneSnapshot
 
     if not isinstance(snapshot, MediaCloneSnapshot):
         raise TypeError("snapshot must be a MediaCloneSnapshot")
-    hasher = hashlib.sha256()
-    hasher.update(_CANONICAL_HASH_DOMAIN)
-    for part in _canonical_parts(
-        {
-            "media": snapshot.media,
-            "chunks": snapshot.chunks,
-            "transcripts": snapshot.transcripts,
-        }
-    ):
-        hasher.update(part)
-    return hasher.hexdigest()
+    return _hash_logical_copy_projection(_snapshot_logical_copy_projection(snapshot))
 
 
 def _validate_identifier(value: Any, field_name: str) -> str:
@@ -194,24 +376,12 @@ def _operation_conflict() -> ConflictError:
 
 
 def _json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    if isinstance(value, bytes):
-        return {"type": "bytes", "hex": value.hex()}
-    if isinstance(value, (datetime, date, time, Decimal, UUID)):
-        return str(value)
-    if isinstance(value, Mapping):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (tuple, frozenset)):
-        return [_json_safe(item) for item in value]
-    raise TypeError(f"unsupported clone snapshot JSON value: {type(value).__name__}")
+    return _normalize_persisted_value(value)
 
 
 def _json_column(value: Any) -> str | None:
     if value is None:
         return None
-    if isinstance(value, str):
-        return value
     return json.dumps(
         _json_safe(value),
         ensure_ascii=True,
@@ -361,27 +531,58 @@ class CloneSnapshotRepository:
             connection,
             "SELECT id, url, uuid, deleted, is_trash, system_operation_id, "
             "system_operation_kind, system_source_identity, system_content_hash "
-            "FROM Media WHERE url = ? OR "
-            "(system_operation_id = ? AND system_source_identity = ?)",
-            (storage_url, operation_id, source_identity),
+            "FROM Media WHERE url = ? OR system_operation_id = ?",
+            (storage_url, operation_id),
         )
         return [dict(row) for row in rows]
 
-    @staticmethod
+    def _lock_owned_insert(
+        self,
+        connection: Any,
+        *,
+        operation_id: str,
+        source_identity: str,
+    ) -> None:
+        if self.session.backend_type != BackendType.POSTGRESQL:  # type: ignore[attr-defined]
+            return
+        self.session._execute_with_connection(
+            connection,
+            "SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))",
+            (f"media-clone:{operation_id}", source_identity),
+        )
+
     def _verify_owned_candidate(
+        self,
         candidates: Sequence[Mapping[str, Any]],
         *,
         storage_url: str,
         operation_id: str,
         source_identity: str,
         expected_content_hash: str,
-        require_active: bool,
+        require_pending: bool,
     ) -> Mapping[str, Any] | None:
-        if not candidates:
+        relevant: list[Mapping[str, Any]] = []
+        for candidate in candidates:
+            candidate_operation = candidate.get("system_operation_id")
+            candidate_source = candidate.get("system_source_identity")
+            if candidate_operation == operation_id:
+                if (
+                    candidate.get("system_operation_kind") != _CLONE_OPERATION_KIND
+                    or not isinstance(candidate_source, str)
+                    or candidate.get("url")
+                    != self._storage_url(operation_id, candidate_source)
+                ):
+                    raise _operation_conflict()
+            if candidate.get("url") == storage_url or (
+                candidate_operation == operation_id
+                and candidate_source == source_identity
+            ):
+                relevant.append(candidate)
+        if not relevant:
             return None
-        if len(candidates) != 1:
+        if len(relevant) != 1:
             raise _operation_conflict()
-        candidate = candidates[0]
+        candidate = relevant[0]
         exact_marker = (
             candidate.get("url") == storage_url
             and candidate.get("system_operation_kind") == _CLONE_OPERATION_KIND
@@ -392,13 +593,132 @@ class CloneSnapshotRepository:
                 expected_content_hash,
             )
         )
-        active = not bool(candidate.get("deleted")) and not bool(candidate.get("is_trash"))
-        if not exact_marker or (require_active and not active):
+        pending = not bool(candidate.get("deleted")) and bool(candidate.get("is_trash"))
+        if not exact_marker or (require_pending and not pending):
             raise _operation_conflict()
         return candidate
 
     def _active_value(self) -> bool | int:
         return False if self.session.backend_type == BackendType.POSTGRESQL else 0  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _decode_json_value(value: Any) -> Any:
+        if value is None or isinstance(value, Mapping):
+            return value
+        if not isinstance(value, str):
+            raise _operation_conflict()
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            raise _operation_conflict() from None
+
+    def _persisted_logical_copy_projection(
+        self,
+        connection: Any,
+        *,
+        media_id: int,
+        operation_id: str,
+        source_identity: str,
+    ) -> Mapping[str, Any]:
+        active_value = self._active_value()
+        media_rows = self.session._fetchall_with_connection(
+            connection,
+            "SELECT title, type, content, author, ingestion_date, transcription_model, "
+            "chunking_status, content_hash, source_hash, latest_transcription_run_id, "
+            "next_transcription_run_id FROM Media WHERE id = ?",
+            (media_id,),
+        )
+        document_rows = self.session._fetchall_with_connection(
+            connection,
+            "SELECT version_number, prompt, analysis_content, safe_metadata, content "
+            "FROM DocumentVersions WHERE media_id = ? AND deleted = ?",
+            (media_id, active_value),
+        )
+        if len(media_rows) != 1 or len(document_rows) != 1:
+            raise _operation_conflict()
+
+        document_row = dict(document_rows[0])
+        provenance = self._decode_json_value(document_row.pop("safe_metadata"))
+        if not isinstance(provenance, Mapping):
+            raise _operation_conflict()
+        clone_provenance = provenance.get("clone_provenance")
+        if not isinstance(clone_provenance, Mapping) or "source_url" not in clone_provenance:
+            raise _operation_conflict()
+        document_row["source_url"] = clone_provenance["source_url"]
+
+        keyword_rows = self.session._fetchall_with_connection(
+            connection,
+            "SELECT mk.keyword_id, k.keyword FROM MediaKeywords mk "
+            "JOIN Keywords k ON k.id = mk.keyword_id "
+            "WHERE mk.media_id = ? AND k.deleted = ?",
+            (media_id, active_value),
+        )
+        hold_rows = self.session._fetchall_with_connection(
+            connection,
+            "SELECT keyword_id, operation_id, source_identity "
+            "FROM OperationOwnedCloneKeywords WHERE media_id = ?",
+            (media_id,),
+        )
+        keyword_ids = {int(row["keyword_id"]) for row in keyword_rows}
+        if keyword_ids != {int(row["keyword_id"]) for row in hold_rows} or any(
+            row["operation_id"] != operation_id
+            or row["source_identity"] != source_identity
+            for row in hold_rows
+        ):
+            raise _operation_conflict()
+        chunk_rows = [
+            dict(row)
+            for row in self.session._fetchall_with_connection(
+                connection,
+                "SELECT chunk_text, chunk_index, start_char, end_char, chunk_type, "
+                "creation_date, last_modified_orig, is_processed, metadata "
+                "FROM UnvectorizedMediaChunks WHERE media_id = ? AND deleted = ?",
+                (media_id, active_value),
+            )
+        ]
+        for chunk in chunk_rows:
+            chunk["metadata"] = self._decode_json_value(chunk.get("metadata"))
+        transcript_rows = [
+            dict(row)
+            for row in self.session._fetchall_with_connection(
+                connection,
+                "SELECT whisper_model, transcription, created_at, transcription_run_id, "
+                "supersedes_run_id, idempotency_key FROM Transcripts "
+                "WHERE media_id = ? AND deleted = ?",
+                (media_id, active_value),
+            )
+        ]
+        try:
+            return _logical_copy_projection(
+                media=dict(media_rows[0]),
+                keywords=tuple(str(row["keyword"]) for row in keyword_rows),
+                chunks=chunk_rows,
+                transcripts=transcript_rows,
+                document=document_row,
+                source_rows=False,
+            )
+        except (InputError, TypeError, ValueError):
+            raise _operation_conflict() from None
+
+    def _verify_persisted_logical_copy(
+        self,
+        connection: Any,
+        *,
+        media_id: int,
+        operation_id: str,
+        source_identity: str,
+        expected_content_hash: str,
+    ) -> None:
+        persisted_hash = _hash_logical_copy_projection(
+            self._persisted_logical_copy_projection(
+                connection,
+                media_id=media_id,
+                operation_id=operation_id,
+                source_identity=source_identity,
+            )
+        )
+        if not hmac.compare_digest(persisted_hash, expected_content_hash):
+            raise _operation_conflict()
 
     def _insert_media_row(
         self,
@@ -420,8 +740,8 @@ class CloneSnapshotRepository:
             raise InputError("snapshot Media title must be a non-empty string")
         if not isinstance(media_type, str) or not media_type:
             raise InputError("snapshot Media type must be a non-empty string")
-        if not isinstance(content, str):
-            raise InputError("snapshot Media content must be a string")
+        if content is not None and not isinstance(content, str):
+            raise InputError("snapshot Media content must be a string or null")
         if not isinstance(content_hash, str) or not content_hash:
             raise InputError("snapshot Media content_hash must be a non-empty string")
 
@@ -453,9 +773,9 @@ class CloneSnapshotRepository:
                 media_type,
                 content,
                 media.get("author"),
-                media.get("ingestion_date"),
+                _normalize_persisted_value(media.get("ingestion_date")),
                 media.get("transcription_model"),
-                active_value,
+                True if self.session.backend_type == BackendType.POSTGRESQL else 1,  # type: ignore[attr-defined]
                 None,
                 None,
                 media.get("chunking_status") or "completed",
@@ -499,11 +819,7 @@ class CloneSnapshotRepository:
         source_url: Any,
         now: str,
     ) -> None:
-        bounded_source_url = (
-            source_url[:_PROVENANCE_URL_MAX_LENGTH]
-            if isinstance(source_url, str)
-            else None
-        )
+        bounded_source_url = _bounded_source_url(source_url)
         safe_metadata = json.dumps(
             {"clone_provenance": {"source_url": bounded_source_url}},
             ensure_ascii=True,
@@ -534,19 +850,11 @@ class CloneSnapshotRepository:
         *,
         media_id: int,
         keywords: Any,
+        operation_id: str,
+        source_identity: str,
         now: str,
     ) -> None:
-        if not isinstance(keywords, tuple):
-            raise InputError("snapshot Media keywords must be a tuple")
-        normalized: set[str] = set()
-        for keyword in keywords:
-            if not isinstance(keyword, str):
-                raise InputError("snapshot Media keywords must contain strings")
-            value = keyword.strip().lower()
-            if value:
-                normalized.add(value)
-
-        for keyword in sorted(normalized):
+        for keyword in _normalize_keywords(keywords):
             rows = self.session._fetchall_with_connection(
                 connection,
                 "SELECT id, deleted FROM Keywords WHERE LOWER(keyword) = ?",
@@ -556,6 +864,18 @@ class CloneSnapshotRepository:
                 raise _operation_conflict()
             if rows:
                 keyword_id = int(rows[0]["id"])
+                existing_holds = self.session._fetchall_with_connection(
+                    connection,
+                    "SELECT 1 FROM OperationOwnedCloneKeywords "
+                    "WHERE keyword_id = ? AND created_by_clone = ? LIMIT 1",
+                    (
+                        keyword_id,
+                        True
+                        if self.session.backend_type == BackendType.POSTGRESQL  # type: ignore[attr-defined]
+                        else 1,
+                    ),
+                )
+                created_by_clone = bool(existing_holds)
             else:
                 sql = (
                     "INSERT INTO Keywords "
@@ -582,10 +902,26 @@ class CloneSnapshotRepository:
                     keyword_id = int(cursor.lastrowid or 0)
                 if keyword_id <= 0:
                     raise DatabaseError("Clone keyword insert returned no identity.")
+                created_by_clone = True
             self.session._execute_with_connection(
                 connection,
                 "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)",
                 (media_id, keyword_id),
+            )
+            self.session._execute_with_connection(
+                connection,
+                "INSERT INTO OperationOwnedCloneKeywords "
+                "(media_id, keyword_id, operation_id, source_identity, created_by_clone) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    media_id,
+                    keyword_id,
+                    operation_id,
+                    source_identity,
+                    created_by_clone
+                    if self.session.backend_type == BackendType.POSTGRESQL  # type: ignore[attr-defined]
+                    else int(created_by_clone),
+                ),
             )
 
     def _insert_chunks(
@@ -617,8 +953,8 @@ class CloneSnapshotRepository:
                     chunk.get("start_char"),
                     chunk.get("end_char"),
                     chunk.get("chunk_type"),
-                    chunk.get("creation_date"),
-                    chunk.get("last_modified_orig"),
+                    _normalize_persisted_value(chunk.get("creation_date")),
+                    _normalize_persisted_value(chunk.get("last_modified_orig")),
                     self._active_value(),
                     _json_column(chunk.get("metadata")),
                     str(uuid4()),
@@ -651,7 +987,7 @@ class CloneSnapshotRepository:
                     media_id,
                     transcript.get("whisper_model"),
                     transcription,
-                    transcript.get("created_at"),
+                    _normalize_persisted_value(transcript.get("created_at")),
                     transcript.get("transcription_run_id"),
                     transcript.get("supersedes_run_id"),
                     transcript.get("idempotency_key"),
@@ -684,6 +1020,11 @@ class CloneSnapshotRepository:
         storage_url = self._storage_url(operation_id, source_identity)
         try:
             with self.session.transaction() as connection:
+                self._lock_owned_insert(
+                    connection,
+                    operation_id=operation_id,
+                    source_identity=source_identity,
+                )
                 candidate = self._verify_owned_candidate(
                     self._owned_candidates(
                         connection,
@@ -695,9 +1036,16 @@ class CloneSnapshotRepository:
                     operation_id=operation_id,
                     source_identity=source_identity,
                     expected_content_hash=expected_content_hash,
-                    require_active=True,
+                    require_pending=True,
                 )
                 if candidate is not None:
+                    self._verify_persisted_logical_copy(
+                        connection,
+                        media_id=int(candidate["id"]),
+                        operation_id=operation_id,
+                        source_identity=source_identity,
+                        expected_content_hash=expected_content_hash,
+                    )
                     return OperationOwnedMediaResult(
                         media_id=int(candidate["id"]),
                         media_uuid=str(candidate["uuid"]),
@@ -718,7 +1066,11 @@ class CloneSnapshotRepository:
                 self._insert_document_version(
                     connection,
                     media_id=media_id,
-                    content=str(snapshot.media["content"]),
+                    content=(
+                        ""
+                        if snapshot.media.get("content") is None
+                        else str(snapshot.media["content"])
+                    ),
                     source_url=snapshot.media.get("url"),
                     now=now,
                 )
@@ -726,6 +1078,8 @@ class CloneSnapshotRepository:
                     connection,
                     media_id=media_id,
                     keywords=snapshot.media.get("keywords", ()),
+                    operation_id=operation_id,
+                    source_identity=source_identity,
                     now=now,
                 )
                 self._insert_chunks(
@@ -782,16 +1136,29 @@ class CloneSnapshotRepository:
                     operation_id=operation_id,
                     source_identity=source_identity,
                     expected_content_hash=expected_content_hash,
-                    require_active=False,
+                    require_pending=False,
                 )
                 if candidate is None:
                     return 0
                 media_id = int(candidate["id"])
+                keyword_holds = self.session._fetchall_with_connection(
+                    connection,
+                    "SELECT keyword_id, created_by_clone "
+                    "FROM OperationOwnedCloneKeywords WHERE media_id = ? "
+                    "AND operation_id = ? AND source_identity = ?",
+                    (media_id, operation_id, source_identity),
+                )
                 self.session._execute_with_connection(
                     connection,
                     "DELETE FROM DocumentVersionIdentifiers WHERE dv_id IN "
                     "(SELECT id FROM DocumentVersions WHERE media_id = ?)",
                     (media_id,),
+                )
+                self.session._execute_with_connection(
+                    connection,
+                    "DELETE FROM OperationOwnedCloneKeywords WHERE media_id = ? "
+                    "AND operation_id = ? AND source_identity = ?",
+                    (media_id, operation_id, source_identity),
                 )
                 for table in (
                     "DocumentVersions",
@@ -820,6 +1187,22 @@ class CloneSnapshotRepository:
                 )
                 if cursor.rowcount != 1:
                     raise _operation_conflict()
+                for hold in keyword_holds:
+                    if not bool(hold["created_by_clone"]):
+                        continue
+                    self.session._execute_with_connection(
+                        connection,
+                        "DELETE FROM Keywords WHERE id = ? "
+                        "AND NOT EXISTS (SELECT 1 FROM MediaKeywords "
+                        "WHERE keyword_id = ?) "
+                        "AND NOT EXISTS (SELECT 1 FROM OperationOwnedCloneKeywords "
+                        "WHERE keyword_id = ?)",
+                        (
+                            int(hold["keyword_id"]),
+                            int(hold["keyword_id"]),
+                            int(hold["keyword_id"]),
+                        ),
+                    )
                 return 1
         except (ConflictError, InputError):
             raise
@@ -828,6 +1211,118 @@ class CloneSnapshotRepository:
                 "Operation-owned clone Media cleanup failed"
             )
             raise DatabaseError("Operation-owned clone Media cleanup failed.") from None
+
+    def list_operation_owned_clone_media(
+        self,
+        *,
+        operation_id: str,
+        limit: int = 100,
+    ) -> list[OperationOwnedMediaReference]:
+        """List bounded pending identities for one caller-supplied operation."""
+        operation_id = _validate_identifier(operation_id, "operation_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise InputError("limit must be an integer between 1 and 100")
+        with self.session.transaction() as connection:
+            rows = self.session._fetchall_with_connection(
+                connection,
+                "SELECT id, uuid, system_source_identity, system_content_hash "
+                "FROM Media WHERE system_operation_kind = ? AND system_operation_id = ? "
+                "ORDER BY id ASC LIMIT ?",
+                (_CLONE_OPERATION_KIND, operation_id, limit),
+            )
+        return [
+            OperationOwnedMediaReference(
+                media_id=int(row["id"]),
+                media_uuid=str(row["uuid"]),
+                source_identity=str(row["system_source_identity"]),
+                expected_content_hash=str(row["system_content_hash"]),
+            )
+            for row in rows
+        ]
+
+    def confirm_operation_owned_clone_media(
+        self,
+        *,
+        operation_id: str,
+        source_identity: str,
+        expected_content_hash: str,
+    ) -> int:
+        """Activate and clear markers from one exact pending clone Media row."""
+        operation_id = _validate_identifier(operation_id, "operation_id")
+        source_identity = _validate_identifier(source_identity, "source_identity")
+        expected_content_hash = _validate_sha256(
+            expected_content_hash,
+            "expected_content_hash",
+        )
+        storage_url = self._storage_url(operation_id, source_identity)
+        with self.session.transaction() as connection:
+            candidate = self._verify_owned_candidate(
+                self._owned_candidates(
+                    connection,
+                    storage_url=storage_url,
+                    operation_id=operation_id,
+                    source_identity=source_identity,
+                ),
+                storage_url=storage_url,
+                operation_id=operation_id,
+                source_identity=source_identity,
+                expected_content_hash=expected_content_hash,
+                require_pending=True,
+            )
+            if candidate is None:
+                return 0
+            self._verify_persisted_logical_copy(
+                connection,
+                media_id=int(candidate["id"]),
+                operation_id=operation_id,
+                source_identity=source_identity,
+                expected_content_hash=expected_content_hash,
+            )
+            media_id = int(candidate["id"])
+            released_value = (
+                False
+                if self.session.backend_type == BackendType.POSTGRESQL  # type: ignore[attr-defined]
+                else 0
+            )
+            self.session._execute_with_connection(
+                connection,
+                "UPDATE OperationOwnedCloneKeywords SET created_by_clone = ? "
+                "WHERE keyword_id IN (SELECT keyword_id "
+                "FROM OperationOwnedCloneKeywords WHERE media_id = ? "
+                "AND operation_id = ? AND source_identity = ?)",
+                (released_value, media_id, operation_id, source_identity),
+            )
+            self.session._execute_with_connection(
+                connection,
+                "DELETE FROM OperationOwnedCloneKeywords WHERE media_id = ? "
+                "AND operation_id = ? AND source_identity = ?",
+                (media_id, operation_id, source_identity),
+            )
+            cursor = self.session._execute_with_connection(
+                connection,
+                "UPDATE Media SET is_trash = ?, trash_date = NULL, "
+                "system_operation_id = NULL, system_operation_kind = NULL, "
+                "system_source_identity = NULL, system_content_hash = NULL, "
+                "last_modified = ?, version = version + 1, client_id = ? "
+                "WHERE id = ? AND deleted = ? AND is_trash = ? "
+                "AND system_operation_kind = ? AND system_operation_id = ? "
+                "AND system_source_identity = ? AND system_content_hash = ?",
+                (
+                    self._active_value(),
+                    self.session._get_current_utc_timestamp_str(),
+                    self.session.client_id,
+                    media_id,
+                    self._active_value(),
+                    True if self.session.backend_type == BackendType.POSTGRESQL else 1,  # type: ignore[attr-defined]
+                    _CLONE_OPERATION_KIND,
+                    operation_id,
+                    source_identity,
+                    expected_content_hash,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise _operation_conflict()
+            return 1
 
     def read(self, media_ids: Sequence[int]) -> dict[int, MediaCloneSnapshot]:
         """Return active Media rows and child collections in requested ID order."""
@@ -969,11 +1464,42 @@ def delete_operation_owned_clone_media(
     )
 
 
+def list_operation_owned_clone_media(
+    self: MediaDbLike,
+    *,
+    operation_id: str,
+    limit: int = 100,
+) -> list[OperationOwnedMediaReference]:
+    """MediaDatabase binding for bounded pending clone Media enumeration."""
+    return CloneSnapshotRepository.from_legacy_db(self).list_operation_owned_clone_media(
+        operation_id=operation_id,
+        limit=limit,
+    )
+
+
+def confirm_operation_owned_clone_media(
+    self: MediaDbLike,
+    *,
+    operation_id: str,
+    source_identity: str,
+    expected_content_hash: str,
+) -> int:
+    """MediaDatabase binding for exact pending clone Media confirmation."""
+    return CloneSnapshotRepository.from_legacy_db(self).confirm_operation_owned_clone_media(
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_content_hash,
+    )
+
+
 __all__ = [
     "CloneSnapshotRepository",
+    "OperationOwnedMediaReference",
     "OperationOwnedMediaResult",
+    "confirm_operation_owned_clone_media",
     "delete_operation_owned_clone_media",
     "hash_media_clone_snapshot",
     "insert_operation_owned_clone_media",
+    "list_operation_owned_clone_media",
     "read_media_clone_snapshots",
 ]

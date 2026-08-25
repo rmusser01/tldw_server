@@ -3360,6 +3360,40 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
         db.close_connection()
 
 
+_INVALID_OPERATION_OWNERSHIP_MARKERS = (
+    ("operation-only", None, None, None),
+    ("operation-null-kind", None, "source-null-kind", "a" * 64),
+    ("", "shared_workspace_clone", "source-empty-operation", "a" * 64),
+    ("o" * 256, "shared_workspace_clone", "source-long-operation", "a" * 64),
+    ("operation-empty-source", "shared_workspace_clone", "", "a" * 64),
+    ("operation-long-source", "shared_workspace_clone", "s" * 256, "a" * 64),
+    ("operation-wrong-kind", "other_kind", "source-wrong-kind", "a" * 64),
+    ("operation-uppercase-hash", "shared_workspace_clone", "source-hash", "A" * 64),
+)
+
+
+def _assert_sqlite_rejects_invalid_operation_markers(
+    connection: sqlite3.Connection,
+    *,
+    client_id: str,
+) -> None:
+    for index, marker_set in enumerate(_INVALID_OPERATION_OWNERSHIP_MARKERS):
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id, "
+                "system_operation_id, system_operation_kind, system_source_identity, "
+                "system_content_hash) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    f"invalid owned media {index}",
+                    "text",
+                    f"invalid-{index}",
+                    client_id,
+                    *marker_set,
+                ),
+            )
+
+
 @pytest.mark.integration
 def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v25() -> None:
     db = MediaDatabase(db_path=":memory:", client_id="owned-media-v25-bootstrap")
@@ -3377,6 +3411,12 @@ def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v25() -> N
             "SELECT sql FROM sqlite_master WHERE type = 'index' "
             "AND name = 'ux_media_system_operation_source'"
         ).fetchone()[0]
+        hold_columns = {
+            row[1]: {"type": row[2], "notnull": row[3], "pk": row[5]}
+            for row in conn.execute(
+                "PRAGMA table_info(OperationOwnedCloneKeywords)"
+            ).fetchall()
+        }
         version = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()[0]
 
         assert version == 25
@@ -3401,6 +3441,18 @@ def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v25() -> N
             "partial": 1,
         }
         assert "WHERE system_operation_id IS NOT NULL" in index_sql
+        assert set(hold_columns) == {
+            "media_id",
+            "keyword_id",
+            "operation_id",
+            "source_identity",
+            "created_by_clone",
+        }
+        assert hold_columns["created_by_clone"] == {
+            "type": "BOOLEAN",
+            "notnull": 1,
+            "pk": 0,
+        }
 
         now = db._get_current_utc_timestamp_str()
         conn.execute(
@@ -3408,38 +3460,10 @@ def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v25() -> N
             "VALUES (?, ?, ?, ?, ?, ?)",
             (str(uuid.uuid4()), "ordinary", "text", "ordinary-hash", now, db.client_id),
         )
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(
-                "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id, "
-                "system_operation_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    str(uuid.uuid4()),
-                    "partial",
-                    "text",
-                    "partial-hash",
-                    now,
-                    db.client_id,
-                    "operation-only",
-                ),
-            )
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(
-                "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id, "
-                "system_operation_id, system_operation_kind, system_source_identity, "
-                "system_content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    str(uuid.uuid4()),
-                    "invalid hash",
-                    "text",
-                    "invalid-hash",
-                    now,
-                    db.client_id,
-                    "operation-invalid-hash",
-                    "shared_workspace_clone",
-                    "source-invalid-hash",
-                    "G" * 64,
-                ),
-            )
+        _assert_sqlite_rejects_invalid_operation_markers(
+            conn,
+            client_id=db.client_id,
+        )
         conn.execute(
             "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id, "
             "system_operation_id, system_operation_kind, system_source_identity, "
@@ -3521,6 +3545,10 @@ def test_sqlite_migration_v25_recovers_partial_ddl_and_preserves_ordinary_rows(
         conn.row_factory = sqlite3.Row
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(Media)")}
         indexes = {row["name"] for row in conn.execute("PRAGMA index_list(Media)")}
+        hold_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'OperationOwnedCloneKeywords'"
+        ).fetchone()
         version = conn.execute("SELECT version FROM schema_version").fetchone()[0]
         migration = dict(
             conn.execute(
@@ -3533,6 +3561,10 @@ def test_sqlite_migration_v25_recovers_partial_ddl_and_preserves_ordinary_rows(
                 "system_source_identity, system_content_hash FROM Media WHERE id = 1"
             ).fetchone()
         )
+        _assert_sqlite_rejects_invalid_operation_markers(
+            conn,
+            client_id="client-v24",
+        )
 
     assert version == 25
     assert {
@@ -3542,6 +3574,7 @@ def test_sqlite_migration_v25_recovers_partial_ddl_and_preserves_ordinary_rows(
         "system_content_hash",
     }.issubset(columns)
     assert "ux_media_system_operation_source" in indexes
+    assert hold_table is not None
     assert migration == {
         "version": 25,
         "name": "operation_owned_clone_media",
@@ -3639,5 +3672,6 @@ def test_postgres_migration_v25_body_adds_owned_media_columns_constraint_and_ind
     assert sum("ADD COLUMN IF NOT EXISTS" in query for query in statements) == 4
     assert any("ck_media_system_operation_ownership" in query for query in statements)
     assert any("ux_media_system_operation_source" in query for query in statements)
+    assert any("operationownedclonekeywords" in query.lower() for query in statements)
     assert '"system_content_hash" IS NOT NULL' in combined_sql
     assert "^[0-9a-f]{64}$" in combined_sql

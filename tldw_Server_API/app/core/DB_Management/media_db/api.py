@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
     DocumentVersionsRepository,
     KeywordsRepository,
     MediaRepository,
+    OperationOwnedMediaReference,
     OperationOwnedMediaResult,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
@@ -240,6 +241,37 @@ def delete_operation_owned_clone_media(
     return CloneSnapshotRepository.from_legacy_db(
         db_instance
     ).delete_operation_owned_clone_media(
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_content_hash,
+    )
+
+
+def list_operation_owned_clone_media(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    limit: int = 100,
+) -> list[OperationOwnedMediaReference]:
+    """Return bounded pending clone Media identities for one operation."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).list_operation_owned_clone_media(operation_id=operation_id, limit=limit)
+
+
+def confirm_operation_owned_clone_media(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    source_identity: str,
+    expected_content_hash: str,
+) -> int:
+    """Activate and clear markers from one exact pending clone Media row."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).confirm_operation_owned_clone_media(
         operation_id=operation_id,
         source_identity=source_identity,
         expected_content_hash=expected_content_hash,
@@ -1205,9 +1237,14 @@ def fetch_all_keywords(db: MediaDbLike | MediaDbReadLike) -> list[str]:
     """Return all active keyword strings through the package-level read contract."""
     db_instance = unwrap_media_database_like(db)
     if is_media_database_like(db_instance):
-        order_expr = db_instance._keyword_order_expression("keyword")
-        query = f"SELECT keyword FROM Keywords WHERE deleted = ? ORDER BY {order_expr}"  # nosec B608
-        cursor = db_instance.execute_query(query, (False,))
+        order_expr = db_instance._keyword_order_expression("k.keyword")
+        query = (
+            "SELECT k.keyword FROM Keywords k WHERE k.deleted = ? "
+            "AND NOT EXISTS (SELECT 1 FROM OperationOwnedCloneKeywords h "
+            "WHERE h.keyword_id = k.id AND h.created_by_clone = ?) "
+            f"ORDER BY {order_expr}"  # nosec B608
+        )
+        cursor = db_instance.execute_query(query, (False, True))
         return [row["keyword"] for row in cursor.fetchall()]
 
     reader = _require_read_method(
@@ -1236,7 +1273,9 @@ __all__ = [
     "MediaDbReadLike",
     "MediaWriterLike",
     "MediaRepository",
+    "OperationOwnedMediaReference",
     "OperationOwnedMediaResult",
+    "confirm_operation_owned_clone_media",
     "create_media_database",
     "create_document_version",
     "delete_operation_owned_clone_media",
@@ -1278,6 +1317,7 @@ __all__ = [
     "get_media_repository",
     "hash_media_clone_snapshot",
     "insert_operation_owned_clone_media",
+    "list_operation_owned_clone_media",
     "list_document_versions",
     "search_media",
     "soft_delete_document_version",

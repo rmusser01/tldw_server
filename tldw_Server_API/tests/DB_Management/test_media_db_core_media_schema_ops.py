@@ -268,6 +268,7 @@ def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_t
         "media",
         "keywords",
         "mediakeywords",
+        "operationownedclonekeywords",
         "transcripts",
         "mediachunks",
         "unvectorizedmediachunks",

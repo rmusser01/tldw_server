@@ -94,6 +94,40 @@ def _constraint_exists(backend, conn, constraint_name: str) -> bool:
     return bool(result.rows)
 
 
+_INVALID_OPERATION_OWNERSHIP_MARKERS = (
+    ("operation-only", None, None, None),
+    ("operation-null-kind", None, "source-null-kind", "a" * 64),
+    ("", "shared_workspace_clone", "source-empty-operation", "a" * 64),
+    ("o" * 256, "shared_workspace_clone", "source-long-operation", "a" * 64),
+    ("operation-empty-source", "shared_workspace_clone", "", "a" * 64),
+    ("operation-long-source", "shared_workspace_clone", "s" * 256, "a" * 64),
+    ("operation-wrong-kind", "other_kind", "source-wrong-kind", "a" * 64),
+    ("operation-uppercase-hash", "shared_workspace_clone", "source-hash", "A" * 64),
+)
+
+
+def _assert_postgres_rejects_invalid_operation_markers(backend) -> None:
+    for index, marker_set in enumerate(_INVALID_OPERATION_OWNERSHIP_MARKERS):
+        with pytest.raises(BackendDatabaseError):
+            with backend.transaction() as conn:
+                backend.execute(
+                    "INSERT INTO Media "
+                    "(uuid, title, type, content_hash, last_modified, version, client_id, "
+                    "system_operation_id, system_operation_kind, "
+                    "system_source_identity, system_content_hash) "
+                    "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, 1, %s, %s, %s, %s, %s)",
+                    (
+                        str(uuid.uuid4()),
+                        f"Invalid owned media {index}",
+                        "text",
+                        f"invalid-{uuid.uuid4()}",
+                        "901",
+                        *marker_set,
+                    ),
+                    connection=conn,
+                )
+
+
 @pytest.mark.integration
 def test_media_postgres_migration_adds_safe_metadata(pg_database_config: DatabaseConfig) -> None:
     """Downgrade schema to v4 and ensure migration restores the v5 metadata column."""
@@ -972,6 +1006,7 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
     )
     media_uuid = str(uuid.uuid4())
     try:
+        _assert_postgres_rejects_invalid_operation_markers(backend)
         with backend.transaction() as conn:
             assert all(
                 _column_definition(backend, conn, "media", column_name)
@@ -989,6 +1024,16 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
                 conn,
                 "ck_media_system_operation_ownership",
             )
+            assert backend.table_exists(
+                "operationownedclonekeywords",
+                connection=conn,
+            )
+            assert _column_definition(
+                backend,
+                conn,
+                "operationownedclonekeywords",
+                "created_by_clone",
+            ) == {"data_type": "boolean", "is_nullable": "NO"}
             backend.execute(
                 "INSERT INTO Media "
                 "(uuid, title, type, content_hash, last_modified, version, client_id) "
@@ -1011,6 +1056,14 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
                 "ck_media_system_operation_ownership",
                 connection=conn,
             )
+            backend.execute(
+                "DROP POLICY IF EXISTS media_visibility_access ON Media",
+                connection=conn,
+            )
+            backend.execute(
+                "DROP TABLE IF EXISTS OperationOwnedCloneKeywords",
+                connection=conn,
+            )
             for column_name in (
                 "system_content_hash",
                 "system_source_identity",
@@ -1028,6 +1081,7 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
             )
 
         db._initialize_schema()
+        _assert_postgres_rejects_invalid_operation_markers(backend)
 
         with backend.transaction() as conn:
             version = backend.execute(
@@ -1058,6 +1112,10 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
                 conn,
                 "ck_media_system_operation_ownership",
             )
+            assert backend.table_exists(
+                "operationownedclonekeywords",
+                connection=conn,
+            )
             assert dict(ordinary) == {
                 "title": "Ordinary pre-v25 media",
                 "system_operation_id": None,
@@ -1066,39 +1124,5 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
                 "system_content_hash": None,
             }
 
-        invalid_marker_sets = (
-            ("operation-only", None, None, None),
-            (
-                "operation-missing-hash",
-                "shared_workspace_clone",
-                "source-missing-hash",
-                None,
-            ),
-            (
-                "operation-uppercase-hash",
-                "shared_workspace_clone",
-                "source-uppercase-hash",
-                "A" * 64,
-            ),
-        )
-        for marker_set in invalid_marker_sets:
-            with pytest.raises(BackendDatabaseError):
-                with backend.transaction() as conn:
-                    backend.execute(
-                        "INSERT INTO Media "
-                        "(uuid, title, type, content_hash, last_modified, version, client_id, "
-                        "system_operation_id, system_operation_kind, "
-                        "system_source_identity, system_content_hash) "
-                        "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, 1, %s, %s, %s, %s, %s)",
-                        (
-                            str(uuid.uuid4()),
-                            "Invalid owned media",
-                            "text",
-                            f"invalid-{uuid.uuid4()}",
-                            "901",
-                            *marker_set,
-                        ),
-                        connection=conn,
-                    )
     finally:
         db.close_connection()

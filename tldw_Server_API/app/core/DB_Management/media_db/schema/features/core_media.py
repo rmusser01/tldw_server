@@ -67,6 +67,7 @@ _POSTGRES_REQUIRED_TABLES = [
     "media",
     "keywords",
     "mediakeywords",
+    "operationownedclonekeywords",
     "transcripts",
     "mediachunks",
     "unvectorizedmediachunks",

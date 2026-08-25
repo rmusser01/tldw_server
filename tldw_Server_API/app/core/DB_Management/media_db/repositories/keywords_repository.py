@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
 
+
 class KeywordsRepository:
     """Repository for keyword rows and media-keyword links."""
 
@@ -21,7 +22,7 @@ class KeywordsRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "KeywordsRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> KeywordsRepository:
         return cls(session=db)
 
     def fetch_for_media(self, media_id: int) -> list[str]:
@@ -67,6 +68,19 @@ class KeywordsRepository:
                     kw_uuid = existing["uuid"]
                     is_deleted = existing["deleted"]
                     current_version = existing["version"]
+                    released_value = (
+                        False if db.backend_type == BackendType.POSTGRESQL else 0
+                    )
+                    db._execute_with_connection(
+                        conn,
+                        "UPDATE OperationOwnedCloneKeywords SET created_by_clone = ? "
+                        "WHERE keyword_id = ? AND created_by_clone = ?",
+                        (
+                            released_value,
+                            kw_id,
+                            True if db.backend_type == BackendType.POSTGRESQL else 1,
+                        ),
+                    )
                     if is_deleted:
                         new_version = current_version + 1
                         logger.info(
