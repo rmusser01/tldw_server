@@ -88,13 +88,24 @@ class _CancellationRequested(Exception):
     """Internal control-flow marker for cooperative cancellation."""
 
 
+class _PublicationPending(Exception):
+    """Internal marker for an exact reservation already awaiting publication."""
+
+
 class _FatalClone(Exception):
     """Internal bounded fatal failure classification."""
 
-    def __init__(self, code: str, cause: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        cause: BaseException | None = None,
+        *,
+        cleanup_ambiguous: bool = False,
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.cause = cause
+        self.cleanup_ambiguous = cleanup_ambiguous
 
 
 @dataclass(slots=True)
@@ -188,7 +199,6 @@ class CloneService:
 
         reporter = _ProgressReporter(on_progress)
         state = _CopyState()
-        reservation_attempted = False
         target_reserved = False
 
         try:
@@ -202,7 +212,6 @@ class CloneService:
             self._cancel_if_requested(should_cancel)
 
             description, workspace_profile = self._reservation_fields(prepared.workspace)
-            reservation_attempted = True
             try:
                 reservation = self._tgt_chacha.reserve_clone_target(
                     workspace_id=request.target_workspace_id,
@@ -214,9 +223,23 @@ class CloneService:
                 )
             except Exception as exc:
                 self._log_failure("Workspace clone target reservation failed", request, exc)
-                raise _FatalClone("clone_reservation_failed", exc) from None
-            if not self._reservation_matches(reservation, request):
-                raise _FatalClone("clone_validation_failed")
+                raise _FatalClone(
+                    "clone_reservation_failed",
+                    exc,
+                    cleanup_ambiguous=True,
+                ) from None
+            if not self._reservation_matches(
+                reservation,
+                request,
+                description=description,
+                workspace_profile=workspace_profile,
+            ):
+                raise _FatalClone(
+                    "clone_validation_failed",
+                    cleanup_ambiguous=True,
+                )
+            if reservation["system_operation_state"] == "publication_pending":
+                raise _PublicationPending
             target_reserved = True
 
             self._copy_sources(
@@ -265,11 +288,15 @@ class CloneService:
             return result
         except CloneSnapshotUnavailable:
             raise
+        except _PublicationPending:
+            raise ClonePersistenceError(
+                code="clone_publication_pending",
+                cleanup_state="pending",
+            ) from None
         except _CancellationRequested:
             cleanup_state = self._cleanup(
                 request,
                 state,
-                reservation_attempted=reservation_attempted,
                 target_reserved=target_reserved,
             )
             raise CloneCancelled(cleanup_state=cleanup_state) from None
@@ -277,9 +304,10 @@ class CloneService:
             cleanup_state = self._cleanup(
                 request,
                 state,
-                reservation_attempted=reservation_attempted,
                 target_reserved=target_reserved,
             )
+            if exc.cleanup_ambiguous:
+                cleanup_state = "pending"
             raise ClonePersistenceError(
                 code=exc.code,
                 cleanup_state=cleanup_state,
@@ -289,7 +317,6 @@ class CloneService:
             cleanup_state = self._cleanup(
                 request,
                 state,
-                reservation_attempted=reservation_attempted,
                 target_reserved=target_reserved,
             )
             raise ClonePersistenceError(
@@ -374,10 +401,11 @@ class CloneService:
             if membership.get("resource_type") != "media":
                 membership_media_ids.append(None)
                 continue
-            media_id = cls._normalize_media_reference(membership.get("resource_id"))
+            media_id = cls._normalize_active_membership_media_reference(
+                membership.get("resource_id")
+            )
             membership_media_ids.append(media_id)
-            if media_id is not None:
-                ordered_ids.setdefault(media_id, None)
+            ordered_ids.setdefault(media_id, None)
         return tuple(ordered_ids), tuple(source_media_ids), tuple(membership_media_ids)
 
     @staticmethod
@@ -404,6 +432,13 @@ class CloneService:
             return parsed if parsed > 0 else None
         raise _FatalClone("clone_validation_failed")
 
+    @classmethod
+    def _normalize_active_membership_media_reference(cls, value: Any) -> int:
+        media_id = cls._normalize_media_reference(value)
+        if media_id is None:
+            raise _FatalClone("clone_validation_failed")
+        return media_id
+
     @staticmethod
     def _reservation_fields(snapshot: WorkspaceCloneSnapshot) -> tuple[str | None, str]:
         description = snapshot.workspace.get("description")
@@ -418,11 +453,37 @@ class CloneService:
     def _reservation_matches(
         reservation: Any,
         request: WorkspaceCloneRequest,
+        *,
+        description: str | None,
+        workspace_profile: str,
     ) -> bool:
-        return (
-            isinstance(reservation, Mapping)
-            and str(reservation.get("id") or "") == request.target_workspace_id
-            and reservation.get("system_operation_state") == "staged"
+        if not isinstance(reservation, Mapping):
+            return False
+        if str(reservation.get("id") or "") != request.target_workspace_id:
+            return False
+        if reservation.get("system_operation_state") not in {
+            "staged",
+            "publication_pending",
+        }:
+            return False
+        if reservation.get("deleted") in (True, 1):
+            return False
+
+        expected_fields = (
+            (("system_operation_id", "operation_id"), request.operation_id),
+            (
+                ("system_request_fingerprint", "request_fingerprint"),
+                request.request_fingerprint,
+            ),
+            (("name",), request.name),
+            (("description",), description),
+            (("workspace_profile", "profile"), workspace_profile),
+        )
+        return all(
+            reservation.get(field_name) == expected
+            for field_names, expected in expected_fields
+            for field_name in field_names
+            if field_name in reservation
         )
 
     @staticmethod
@@ -460,6 +521,9 @@ class CloneService:
                     reporter.emit("sources", 0.25 + 0.35 * ((index + 1) / len(sources)))
                     continue
 
+            source_key = self._resource_key(source.get("id"))
+            if source_key is None:
+                raise _FatalClone("clone_validation_failed")
             payload = self._source_payload(source, tracked)
             try:
                 copied = self._tgt_chacha.add_workspace_source(
@@ -467,19 +531,36 @@ class CloneService:
                     payload,
                 )
             except Exception as exc:
-                state.sources_failed += 1
-                state.warn("source_copy_failed")
-                self._log_failure("Workspace clone source copy failed", request, exc)
-                if tracked is not None and tracked.reference_count == 0:
-                    self._delete_unreferenced_media(request, state, tracked)
-                reporter.emit("sources", 0.25 + 0.35 * ((index + 1) / len(sources)))
-                continue
+                self._log_failure(
+                    "Workspace clone source write response unavailable",
+                    request,
+                    exc,
+                )
+                try:
+                    copied = self._tgt_chacha.get_workspace_source(
+                        request.target_workspace_id,
+                        source_key,
+                    )
+                except Exception as lookup_exc:
+                    self._log_failure(
+                        "Workspace clone source reconciliation failed",
+                        request,
+                        lookup_exc,
+                    )
+                    raise _FatalClone("clone_validation_failed", lookup_exc) from None
+                if copied is None:
+                    state.sources_failed += 1
+                    state.warn("source_copy_failed")
+                    if tracked is not None and tracked.reference_count == 0:
+                        self._delete_unreferenced_media(request, state, tracked)
+                    reporter.emit(
+                        "sources",
+                        0.25 + 0.35 * ((index + 1) / len(sources)),
+                    )
+                    continue
             if not self._source_copy_matches(copied, payload):
                 raise _FatalClone("clone_validation_failed")
 
-            source_key = self._resource_key(source.get("id"))
-            if source_key is None:
-                raise _FatalClone("clone_validation_failed")
             state.copied_source_ids.add(source_key)
             state.sources_copied += 1
             if tracked is not None:
@@ -732,18 +813,53 @@ class CloneService:
 
         source_identity = f"media:{source_media_id}"
         content_hash = prepared.media_hashes[source_media_id]
+        insert_kwargs = {
+            "snapshot": prepared.media_snapshots[source_media_id],
+            "operation_id": request.operation_id,
+            "source_identity": source_identity,
+            "expected_content_hash": content_hash,
+        }
         try:
-            result = self._tgt_media.insert_operation_owned_clone_media(
-                snapshot=prepared.media_snapshots[source_media_id],
-                operation_id=request.operation_id,
-                source_identity=source_identity,
-                expected_content_hash=content_hash,
-            )
+            result = self._tgt_media.insert_operation_owned_clone_media(**insert_kwargs)
         except Exception as exc:
-            state.media_failed_once.add(source_media_id)
-            state.warn("media_copy_failed")
-            self._log_failure("Workspace clone Media copy failed", request, exc)
-            return None
+            self._log_failure(
+                "Workspace clone Media write response unavailable",
+                request,
+                exc,
+            )
+            try:
+                result = self._tgt_media.insert_operation_owned_clone_media(**insert_kwargs)
+            except Exception as retry_exc:
+                self._log_failure("Workspace clone Media retry failed", request, retry_exc)
+                try:
+                    deleted = self._tgt_media.delete_operation_owned_clone_media(
+                        operation_id=request.operation_id,
+                        source_identity=source_identity,
+                        expected_content_hash=content_hash,
+                    )
+                except Exception as cleanup_exc:
+                    self._log_failure(
+                        "Workspace clone ambiguous Media cleanup failed",
+                        request,
+                        cleanup_exc,
+                    )
+                    raise _FatalClone(
+                        "clone_cleanup_incomplete",
+                        cleanup_exc,
+                        cleanup_ambiguous=True,
+                    ) from None
+                if (
+                    isinstance(deleted, bool)
+                    or not isinstance(deleted, int)
+                    or deleted not in {0, 1}
+                ):
+                    raise _FatalClone(
+                        "clone_cleanup_incomplete",
+                        cleanup_ambiguous=True,
+                    ) from None
+                state.media_failed_once.add(source_media_id)
+                state.warn("media_copy_failed")
+                return None
 
         if not isinstance(result, OperationOwnedMediaResult):
             self._delete_possible_media_identity(
@@ -798,9 +914,16 @@ class CloneService:
             )
         except Exception as exc:
             self._log_failure("Workspace clone invalid Media cleanup failed", request, exc)
-            raise _FatalClone("clone_cleanup_incomplete", exc) from None
+            raise _FatalClone(
+                "clone_cleanup_incomplete",
+                exc,
+                cleanup_ambiguous=True,
+            ) from None
         if deleted != 1:
-            raise _FatalClone("clone_cleanup_incomplete")
+            raise _FatalClone(
+                "clone_cleanup_incomplete",
+                cleanup_ambiguous=True,
+            )
 
     @staticmethod
     def _resource_key(value: Any) -> str | None:
@@ -896,7 +1019,6 @@ class CloneService:
         request: WorkspaceCloneRequest,
         state: _CopyState,
         *,
-        reservation_attempted: bool,
         target_reserved: bool,
     ) -> str:
         cleanup_complete = True
@@ -914,7 +1036,7 @@ class CloneService:
             if deleted != 1:
                 cleanup_complete = False
 
-        if reservation_attempted:
+        if target_reserved:
             try:
                 discarded = self._tgt_chacha.discard_clone_target(
                     workspace_id=request.target_workspace_id,
@@ -924,7 +1046,7 @@ class CloneService:
                 cleanup_complete = False
                 self._log_failure("Workspace clone target cleanup failed", request, exc)
             else:
-                if target_reserved and not discarded:
+                if not discarded:
                     cleanup_complete = False
         return "complete" if cleanup_complete else "pending"
 
