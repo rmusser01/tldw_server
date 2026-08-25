@@ -12,6 +12,9 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
+    read_media_clone_snapshots,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.audio_preset_ops import (
     count_audio_presets,
     create_audio_preset,
@@ -2197,6 +2200,7 @@ MediaDatabase.get_audio_preset = get_audio_preset
 MediaDatabase.update_audio_preset = update_audio_preset
 MediaDatabase.soft_delete_audio_preset = soft_delete_audio_preset
 MediaDatabase.get_connection = get_connection
+MediaDatabase.read_media_clone_snapshots = read_media_clone_snapshots
 MediaDatabase.close_connection = close_connection
 MediaDatabase.release_context_connection = release_context_connection
 MediaDatabase._execute_with_connection = _execute_with_connection

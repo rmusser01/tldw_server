@@ -51,9 +51,12 @@ from collections.abc import Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
 
 from loguru import logger  # noqa: E402
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
 try:  # Prefer psycopg v3 sql helper, fall back to psycopg2 if available
     from psycopg import sql as psycopg_sql  # type: ignore
@@ -23214,6 +23217,155 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         cursor = self.execute_query(query, ())
         return [self._workspace_row_to_dict(row) for row in cursor.fetchall()]
+
+    def read_workspace_clone_snapshot(self, workspace_id: str) -> WorkspaceCloneSnapshot:
+        """Read one active Workspace and its cloneable rows from one source snapshot."""
+        from tldw_Server_API.app.core.Sharing.clone_models import (
+            CloneSnapshotUnavailable,
+            WorkspaceCloneSnapshot,
+        )
+
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise CloneSnapshotUnavailable(cleanup_state="complete")
+
+        backend = self.backend
+        connection: Any | None = None
+        pool: Any | None = None
+        committed = False
+        primary_error: BaseException | None = None
+        cleanup_error: BaseException | None = None
+        snapshot: WorkspaceCloneSnapshot | None = None
+
+        try:
+            if backend.backend_type == BackendType.SQLITE:
+                sqlite_path = str(getattr(backend.config, "sqlite_path", "") or "").strip()
+                lowered_path = sqlite_path.lower()
+                private_memory = sqlite_path == ":memory:" or (
+                    "mode=memory" in lowered_path and "cache=shared" not in lowered_path
+                )
+                if not sqlite_path or private_memory:
+                    raise CloneSnapshotUnavailable(cleanup_state="complete")
+                connection = backend.connect()
+                connection.execute("PRAGMA query_only = ON")
+                query_only_row = connection.execute("PRAGMA query_only").fetchone()
+                if query_only_row is None or int(query_only_row[0]) != 1:
+                    raise RuntimeError("SQLite query-only mode unavailable")
+                connection.execute("BEGIN")
+                if not bool(getattr(connection, "in_transaction", False)):
+                    raise RuntimeError("SQLite snapshot transaction unavailable")
+            else:
+                pool = backend.get_pool()
+                connection = self._open_new_connection(backend)
+                connection.commit()
+                with connection.cursor() as cursor:
+                    cursor.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                isolation_rows = backend.execute(
+                    "SHOW transaction_isolation",
+                    connection=connection,
+                    log_errors=False,
+                ).rows
+                read_only_rows = backend.execute(
+                    "SHOW transaction_read_only",
+                    connection=connection,
+                    log_errors=False,
+                ).rows
+                isolation = next(iter(isolation_rows[0].values()), None) if isolation_rows else None
+                read_only = next(iter(read_only_rows[0].values()), None) if read_only_rows else None
+                if str(isolation).lower() != "repeatable read" or str(read_only).lower() not in {
+                    "on",
+                    "true",
+                }:
+                    raise RuntimeError("PostgreSQL repeatable read unavailable")
+
+            active_value = False if backend.backend_type == BackendType.POSTGRESQL else 0
+
+            def read_rows(query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+                result = backend.execute(
+                    query,
+                    params,
+                    connection=connection,
+                    log_errors=False,
+                )
+                return [dict(row) for row in result.rows]
+
+            workspace_rows = read_rows(
+                "SELECT * FROM workspaces "
+                "WHERE id = ? AND deleted = ? AND system_operation_state IS NULL",
+                (workspace_id, active_value),
+            )
+            if len(workspace_rows) != 1:
+                raise CloneSnapshotUnavailable(cleanup_state="complete")
+
+            membership_rows = read_rows(
+                "SELECT * FROM workspace_resource_memberships "
+                "WHERE workspace_id = ? AND deleted = ? "
+                "ORDER BY updated_at DESC, resource_type ASC, resource_id ASC",
+                (workspace_id, active_value),
+            )
+            source_rows = read_rows(
+                "SELECT * FROM workspace_sources WHERE workspace_id = ? "
+                "ORDER BY position, added_at",
+                (workspace_id,),
+            )
+            note_rows = read_rows(
+                "SELECT * FROM workspace_notes WHERE workspace_id = ? AND deleted = ? "
+                "ORDER BY last_modified DESC",
+                (workspace_id, active_value),
+            )
+            artifact_rows = read_rows(
+                "SELECT * FROM workspace_artifacts WHERE workspace_id = ? ORDER BY created_at DESC",
+                (workspace_id,),
+            )
+
+            normalized_memberships = []
+            for row in membership_rows:
+                normalized = self._normalize_workspace_membership_row(row)
+                if normalized is None:
+                    raise RuntimeError("Workspace membership row unavailable")
+                normalized_memberships.append(normalized)
+            normalized_artifacts = []
+            for row in artifact_rows:
+                normalized = self._normalize_workspace_artifact_row(row)
+                if normalized is None:
+                    raise RuntimeError("Workspace artifact row unavailable")
+                normalized_artifacts.append(normalized)
+
+            snapshot = WorkspaceCloneSnapshot.from_rows(
+                workspace=self._workspace_row_to_dict(workspace_rows[0]),
+                memberships=normalized_memberships,
+                sources=source_rows,
+                notes=note_rows,
+                artifacts=normalized_artifacts,
+            )
+            connection.commit()
+            committed = True
+        except BaseException as exc:  # noqa: BLE001 - cleanup must run for every path
+            primary_error = exc
+
+        if connection is not None:
+            if not committed:
+                try:
+                    connection.rollback()
+                except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+                    cleanup_error = exc
+            try:
+                if backend.backend_type == BackendType.SQLITE:
+                    backend.disconnect(connection)
+                else:
+                    (pool or backend.get_pool()).return_connection(connection)
+            except BaseException as exc:  # noqa: BLE001 - convert cleanup failures below
+                cleanup_error = cleanup_error or exc
+
+        if primary_error is not None and not isinstance(primary_error, Exception):
+            raise primary_error
+        if primary_error is not None or cleanup_error is not None or snapshot is None:
+            failure = primary_error or cleanup_error
+            logger.bind(
+                backend=backend.backend_type.value,
+                exception_type=type(failure).__name__ if failure is not None else "Unknown",
+            ).warning("Workspace clone snapshot read failed")
+            raise CloneSnapshotUnavailable(cleanup_state="complete") from None
+        return snapshot
 
     def update_workspace(
         self,

@@ -2,8 +2,8 @@
 
 import contextlib
 import json
-from collections.abc import Iterator
-from typing import Any, Protocol
+from collections.abc import Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Protocol
 
 from loguru import logger
 
@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.media_db import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
+    CloneSnapshotRepository,
     DocumentVersionsRepository,
     KeywordsRepository,
     MediaRepository,
@@ -48,6 +49,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
 from tldw_Server_API.app.core.DB_Management.media_db.services import (
     media_details_service,
 )
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Sharing.clone_models import MediaCloneSnapshot
 
 
 class MediaWriterLike(Protocol):
@@ -177,6 +181,22 @@ def get_media_by_id(
         include_deleted=include_deleted,
         include_trash=include_trash,
     )
+
+
+def read_media_clone_snapshots(
+    db: MediaDbLike,
+    media_ids: Sequence[int],
+) -> dict[int, "MediaCloneSnapshot"]:
+    """Read cloneable Media rows through one repository-owned source snapshot."""
+    db_instance = unwrap_media_database_like(db)
+    if is_media_database_like(db_instance):
+        return CloneSnapshotRepository.from_legacy_db(db_instance).read(media_ids)
+    reader = _require_read_method(
+        db,
+        "read_media_clone_snapshots",
+        error_message="db must expose the Media DB clone snapshot read contract.",
+    )
+    return reader.read_media_clone_snapshots(media_ids)
 
 
 def get_media_status_by_id(
@@ -1200,6 +1220,7 @@ __all__ = [
     "fetch_all_keywords",
     "check_media_exists",
     "permanently_delete_item",
+    "read_media_clone_snapshots",
     "get_media_by_id",
     "get_media_source_projection",
     "get_media_status_by_id",
