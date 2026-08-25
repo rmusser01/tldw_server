@@ -13,8 +13,6 @@ from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
     WebhookPatchRequest,
 )
 
-pytestmark = pytest.mark.unit
-
 
 def _registration_payload() -> dict[str, object]:
     return {

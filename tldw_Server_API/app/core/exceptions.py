@@ -37,7 +37,11 @@ _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
 _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
 
 
-class WebhookError(Exception):
+class TransactionPassthroughError(Exception):
+    """Sanitized domain failure that may cross a rolled-back DB transaction."""
+
+
+class WebhookError(TransactionPassthroughError):
     """Expected webhook domain failure with no caller-controlled message text."""
 
     def __init__(

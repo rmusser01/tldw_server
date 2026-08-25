@@ -5,6 +5,7 @@ import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+import asyncpg
 import pytest
 import pytest_asyncio
 
@@ -62,10 +63,19 @@ class PostgreSQLRepositoryFixture:
     pool: object
 
 
+async def _execute_test_ddl(test_db_pool, query: str) -> None:
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        await connection.execute(query)
+    finally:
+        await connection.close()
+
+
 @pytest_asyncio.fixture
 async def pg_repo(test_db_pool) -> PostgreSQLRepositoryFixture:
     assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
-    await test_db_pool.execute(
+    await _execute_test_ddl(
+        test_db_pool,
         """
         TRUNCATE TABLE
             admin_webhook_delivery_attempts,
@@ -396,7 +406,7 @@ async def test_postgres_protected_rewrite_and_rotation_cursor_are_atomic(
     )[0]
     replacement = _protected("atomic-target", key_id="key-2026-09")
 
-    with pytest.raises(TransactionError, match="rollback protected batch"):
+    with pytest.raises(TransactionError, match="PostgreSQL transaction"):
         async with pg_repo.repository.transaction() as tx:
             assert await tx.replace_protected_value(
                 row,
@@ -727,7 +737,7 @@ async def test_postgres_migration_and_activity_compare_and_set(
 async def test_postgres_transaction_rolls_back_resource_and_sequence(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
-    with pytest.raises(TransactionError, match="injected"):
+    with pytest.raises(TransactionError, match="PostgreSQL transaction"):
         async with pg_repo.repository.transaction() as tx:
             webhook_id = await tx.allocate_registration_id()
             await tx.insert_registration(_registration_insert(webhook_id))

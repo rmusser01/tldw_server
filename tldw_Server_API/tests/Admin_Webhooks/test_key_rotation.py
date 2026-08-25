@@ -771,7 +771,7 @@ async def test_database_rewrite_and_cursor_rollback_together(
         target_key_id=TARGET_KEY_ID,
     )
 
-    with pytest.raises(TransactionError, match="rollback batch"):
+    with pytest.raises(TransactionError, match="SQLite transaction"):
         async with rotation.repository.transaction() as tx:
             assert await tx.replace_protected_value(
                 row,

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import asyncpg
 import pytest
 
 from tldw_Server_API.app.core.Admin_Webhooks.audit import OperationalAudit
@@ -71,8 +72,17 @@ def _settings() -> AdminWebhookSettings:
     )
 
 
+async def _execute_test_ddl(test_db_pool, query: str) -> None:
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        await connection.execute(query)
+    finally:
+        await connection.close()
+
+
 async def _reset_canonical(test_db_pool) -> None:
-    await test_db_pool.execute(
+    await _execute_test_ddl(
+        test_db_pool,
         """
         TRUNCATE TABLE
             admin_webhook_delivery_attempts,
@@ -106,7 +116,10 @@ async def _applied_file_import(
     )
     assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
     await _reset_canonical(test_db_pool)
-    await test_db_pool.execute("DROP TABLE IF EXISTS admin_webhooks CASCADE")
+    await _execute_test_ddl(
+        test_db_pool,
+        "DROP TABLE IF EXISTS admin_webhooks CASCADE",
+    )
     private = tmp_path / "private"
     private.mkdir(mode=0o700)
     store_path = private / "system_ops.json"
@@ -169,7 +182,10 @@ async def _applied_file_import(
 async def test_postgres_legacy_snapshot_uses_real_legacy_table(test_db_pool) -> None:
     assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
     await _reset_canonical(test_db_pool)
-    await test_db_pool.execute("DROP TABLE IF EXISTS admin_webhooks CASCADE")
+    await _execute_test_ddl(
+        test_db_pool,
+        "DROP TABLE IF EXISTS admin_webhooks CASCADE",
+    )
     await test_db_pool.execute(
         """
         CREATE TABLE admin_webhooks (
@@ -218,7 +234,10 @@ async def test_postgres_database_only_apply_commits_mapping_sequence_and_readbac
     )
     assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
     await _reset_canonical(test_db_pool)
-    await test_db_pool.execute("DROP TABLE IF EXISTS admin_webhooks CASCADE")
+    await _execute_test_ddl(
+        test_db_pool,
+        "DROP TABLE IF EXISTS admin_webhooks CASCADE",
+    )
     await test_db_pool.execute(
         """
         CREATE TABLE admin_webhooks (

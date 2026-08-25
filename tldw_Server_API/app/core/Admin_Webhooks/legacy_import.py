@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     RegistrationInsert,
     RegistrationTarget,
 )
+from tldw_Server_API.app.core.exceptions import TransactionPassthroughError
 from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
 from .audit import (
@@ -94,7 +95,7 @@ class LegacyImportErrorCode(str, Enum):
     OPERATION_FAILED = "admin_webhook_operation_failed"
 
 
-class LegacyImportError(Exception):
+class LegacyImportError(TransactionPassthroughError):
     """Sanitized expected failure at the offline migration boundary."""
 
     def __init__(self, code: LegacyImportErrorCode | str) -> None:

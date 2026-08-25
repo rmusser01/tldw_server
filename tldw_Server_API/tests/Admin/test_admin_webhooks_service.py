@@ -14,9 +14,6 @@ from tldw_Server_API.app.services.admin_webhooks_service import (
     generate_signature,
 )
 
-pytestmark = pytest.mark.unit
-
-
 # ---------------------------------------------------------------------------
 # HMAC signing
 # ---------------------------------------------------------------------------

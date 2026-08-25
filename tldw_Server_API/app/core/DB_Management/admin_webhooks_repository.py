@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
     DatabaseLockError,
 )
+from tldw_Server_API.app.core.exceptions import TransactionPassthroughError
 
 _MAX_PAGE_SIZE = 500
 _MIN_TOMBSTONE_RETENTION_DAYS = 30
@@ -130,7 +131,7 @@ class WebhookRepositoryErrorCode(str, Enum):
     STALE_MIGRATION_STATE = "admin_webhook_migration_state_stale"
 
 
-class WebhookRepositoryError(Exception):
+class WebhookRepositoryError(TransactionPassthroughError):
     """Sanitized repository failure with no database or caller-controlled text."""
 
     def __init__(self, code: WebhookRepositoryErrorCode | str) -> None:

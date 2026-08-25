@@ -17,8 +17,6 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     _normalize_incident_record,
 )
 
-pytestmark = pytest.mark.unit
-
 _MAX_STORE_BYTES = 67_108_864
 
 

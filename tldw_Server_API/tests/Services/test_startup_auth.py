@@ -9,8 +9,6 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 
-pytestmark = pytest.mark.unit
-
 
 def _install_module(
     monkeypatch: pytest.MonkeyPatch,
@@ -279,7 +277,6 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
     assert exc_info.value.__cause__ is None
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("failure_mode", ["false", "exception"])
 @pytest.mark.unit
 async def test_pg_user_timestamp_readiness_failure_blocks_startup(
@@ -324,7 +321,6 @@ async def test_pg_user_timestamp_readiness_failure_blocks_startup(
     assert exc_info.value.__cause__ is None
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("failure_mode", ["false", "exception"])
 @pytest.mark.unit
 async def test_pg_sharing_readiness_failure_blocks_startup(
@@ -369,7 +365,6 @@ async def test_pg_sharing_readiness_failure_blocks_startup(
     assert exc_info.value.__cause__ is None
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_init_auth_services_raises_auth_startup_error_when_db_pool_init_fails(
     monkeypatch: pytest.MonkeyPatch,
@@ -441,7 +436,6 @@ async def test_db_pool_startup_failure_log_does_not_expose_exception_text(
 
     assert marker not in output.getvalue()
 
-@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_init_auth_services_aborts_when_schema_readiness_fails(
     monkeypatch: pytest.MonkeyPatch,
@@ -485,7 +479,7 @@ async def test_init_auth_services_aborts_when_schema_readiness_fails(
     assert calls == ["get_db_pool", "ensure_schema"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_init_auth_services_aborts_when_schema_readiness_import_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

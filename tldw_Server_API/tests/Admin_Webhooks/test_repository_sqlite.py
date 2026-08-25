@@ -750,7 +750,7 @@ async def test_migration_state_persists_key_rotation_cursor(
 async def test_transaction_rolls_back_after_injected_exception(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
-    with pytest.raises(TransactionError, match="injected"):
+    with pytest.raises(TransactionError, match="SQLite transaction"):
         async with sqlite_repo.repository.transaction() as tx:
             webhook_id = await tx.allocate_registration_id()
             await tx.insert_registration(_registration_insert(webhook_id))

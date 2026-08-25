@@ -7,8 +7,6 @@ from tldw_Server_API.app.core.exceptions import EgressPolicyError
 from tldw_Server_API.app.core.Security import egress
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
 
-pytestmark = pytest.mark.unit
-
 
 class _CapturedLogger:
     """Capture Loguru bind/opt calls and messages for egress log assertions."""

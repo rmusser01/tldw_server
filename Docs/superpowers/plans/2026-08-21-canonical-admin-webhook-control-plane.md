@@ -105,7 +105,7 @@
 **Modify**
 
 - `tldw_Server_API/app/core/Security/egress.py` - expose a structured platform-webhook policy adapter that composes existing generic and webhook-specific global lists without changing tenant workflow callers.
-- `tldw_Server_API/app/core/AuthNZ/migrations.py` - additive SQLite migration 091.
+- `tldw_Server_API/app/core/AuthNZ/migrations.py` - additive SQLite migration 094.
 - `tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py` - idempotent equivalent PostgreSQL ensure path.
 - `tldw_Server_API/app/services/admin_system_ops_service.py` - strict bounded migration snapshots and crash-safe atomic JSON publication while preserving existing locking.
 - `tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py` - replace unmounted direct-SQL/delivery routes with the canonical PR 1 router.
@@ -438,7 +438,7 @@ Expected: tests PASS and the scan prints no match.
 
 **Interfaces:**
 - Consumes: SQLite migration registry at version 90 and PostgreSQL idempotent ensure helpers.
-- Produces: SQLite migration 091 and `ensure_admin_webhook_canonical_tables_pg(conn)` with equivalent canonical tables, constraints, partial indexes, and migration-state seed.
+- Produces: SQLite migration 094 and `ensure_admin_webhook_canonical_tables_pg(conn)` with equivalent canonical tables, constraints, partial indexes, and migration-state seed.
 
 - [ ] **Step 1: Write failing schema-contract tests before DDL**
 
@@ -473,9 +473,9 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py
 ```
 
-Expected: SQLite FAIL because migration 091 is absent. PostgreSQL either FAIL against the configured disposable fixture or SKIP with the repository's explicit no-test-database reason; never point it at staging or production.
+Expected: SQLite FAIL because migration 094 is absent. PostgreSQL either FAIL against the configured disposable fixture or SKIP with the repository's explicit no-test-database reason; never point it at staging or production.
 
-- [ ] **Step 3: Implement migration 091 and the PostgreSQL parity helper**
+- [ ] **Step 3: Implement migration 094 and the PostgreSQL parity helper**
 
 The registration table stores numeric ID, description, encrypted URL/secret plus key IDs, `target_hostname`, `target_display`, canonical event JSON, `active`, timeout, target/delivery/secret versions, `secret_rotation_required`, revision, creator/updater, timestamps, and tombstone metadata. `target_version` starts at 1 and increments only when URL ciphertext changes, so disable and other non-URL updates never invalidate its envelope identity. `secret_rotation_required` is non-null and defaults false for canonical creates. The sequence row starts at 1 and is updated in the same transaction as insertion; IDs are allocated and inserted atomically and are never reused.
 
@@ -484,7 +484,7 @@ The migration-state singleton stores `state_revision`; import `phase` exactly `m
 Create the remaining canonical tables exactly as defined by the design even though PR 1 only writes registration, idempotency, and migration-state rows. Include encrypted event-body columns now so key rotation and later data-plane work do not require a divergent schema. Use bounded text/check constraints and backend-equivalent partial indexes rather than nullable unique shortcuts.
 
 ```python
-def migration_091_create_canonical_admin_webhook_tables(conn: sqlite3.Connection) -> None:
+def migration_094_create_canonical_admin_webhook_tables(conn: sqlite3.Connection) -> None:
     for statement in CANONICAL_ADMIN_WEBHOOK_SQLITE_DDL:
         conn.execute(statement)
     conn.execute(
@@ -500,7 +500,7 @@ def migration_091_create_canonical_admin_webhook_tables(conn: sqlite3.Connection
 Define `CANONICAL_ADMIN_WEBHOOK_SQLITE_DDL` as an ordered tuple of one complete
 statement per element. Do not use `executescript()`: it can implicitly commit
 outside the `MigrationManager` transaction and make the injected-failure gate
-lie. Add migration 091 to the ordered SQLite registry. Wire
+lie. Add migration 094 to the ordered SQLite registry. Wire
 `ensure_admin_webhook_canonical_tables_pg()` into the same PostgreSQL
 startup/ensure path used by neighboring AuthNZ tables. Do not reinterpret
 migrations 080/082 as canonical and do not drop/sanitize legacy data in DDL.
@@ -534,7 +534,7 @@ Expected: all configured matrices PASS; PostgreSQL absence is recorded as an env
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py`
 
 **Interfaces:**
-- Consumes: `DatabasePool.transaction()`, canonical domain records from Task 1, and migration 091 from Task 3.
+- Consumes: `DatabasePool.transaction()`, canonical domain records from Task 1, and migration 094 from Task 3.
 - Produces: `AdminWebhookRepository`, `AdminWebhookUnitOfWork`, `RegistrationInsert`, `RegistrationPatch`, `IdempotencyLookup`, `MigrationState`, `mark_first_canonical_activity(kind, at)`, and backend-neutral transaction methods used by control plane, rotation, and import.
 
 - [ ] **Step 1: Write failing SQLite repository tests**
