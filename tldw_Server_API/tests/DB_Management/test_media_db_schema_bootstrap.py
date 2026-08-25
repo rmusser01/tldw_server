@@ -3910,9 +3910,56 @@ def test_postgres_migration_v26_body_repairs_markers_and_pending_keywords() -> N
             return f'"{name}"'
 
         @staticmethod
-        def execute(query: str, params=None, *, connection) -> None:
+        def execute(query: str, params=None, *, connection):
             del params, connection
             statements.append(query)
+            normalized = " ".join(query.split()).lower()
+            if "as table_name" in normalized and "from pg_class" in normalized:
+                return SimpleNamespace(
+                    rows=[
+                        {
+                            "table_name": name,
+                            "rls_enabled": name in {"media", "operationownedclonekeywords"},
+                            "rls_forced": name in {"media", "operationownedclonekeywords"},
+                            "is_table_owner": True,
+                            "is_schema_owner": True,
+                        }
+                        for name in (
+                            "media",
+                            "keywords",
+                            "mediakeywords",
+                            "operationownedclonekeywords",
+                        )
+                    ]
+                )
+            if "select table_row.relname" in normalized:
+                return SimpleNamespace(
+                    rows=[
+                        {"relname": name}
+                        for name in (
+                            "media",
+                            "keywords",
+                            "mediakeywords",
+                            "operationownedclonekeywords",
+                        )
+                    ]
+                )
+            if "select column_name" in normalized:
+                return SimpleNamespace(
+                    rows=[
+                        {"column_name": name}
+                        for name in (
+                            "media_id",
+                            "keyword_id",
+                            "operation_id",
+                            "source_identity",
+                            "created_by_clone",
+                        )
+                    ]
+                )
+            if "select count(*) as count" in normalized:
+                return SimpleNamespace(rows=[{"count": 0}])
+            return SimpleNamespace(rows=[])
 
     run_postgres_migrate_to_v26(SimpleNamespace(backend=Backend()), object())
 
@@ -3924,6 +3971,9 @@ def test_postgres_migration_v26_body_repairs_markers_and_pending_keywords() -> N
     assert "drop constraint if exists" in combined_sql
     assert "ck_media_system_operation_ownership" in combined_sql
     assert "^[0-9a-f]{64}$" in combined_sql
+    assert "in access exclusive mode" in combined_sql
+    assert "no force row level security" in combined_sql
+    assert "force row level security" in combined_sql
 
 
 @pytest.mark.integration

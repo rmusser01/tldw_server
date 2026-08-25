@@ -5,6 +5,34 @@
 PRAGMA foreign_keys = OFF;
 BEGIN TRANSACTION;
 
+UPDATE Media
+   SET system_operation_id = NULL,
+       system_operation_kind = NULL,
+       system_source_identity = NULL,
+       system_content_hash = NULL
+ WHERE NOT COALESCE(
+    (
+        system_operation_id IS NULL
+        AND system_operation_kind IS NULL
+        AND system_source_identity IS NULL
+        AND system_content_hash IS NULL
+    )
+    OR
+    (
+        system_operation_id IS NOT NULL
+        AND length(system_operation_id) BETWEEN 1 AND 255
+        AND system_operation_kind IS NOT NULL
+        AND system_operation_kind = 'shared_workspace_clone'
+        AND system_source_identity IS NOT NULL
+        AND length(system_source_identity) BETWEEN 1 AND 255
+        AND system_content_hash IS NOT NULL
+        AND length(system_content_hash) = 64
+        AND system_content_hash = lower(system_content_hash)
+        AND system_content_hash NOT GLOB '*[^0-9a-f]*'
+    ),
+    0
+ );
+
 CREATE TABLE IF NOT EXISTS MediaKeywords (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     media_id INTEGER NOT NULL,
@@ -80,26 +108,112 @@ SELECT media_id, keyword_value, operation_id, source_identity, client_value
          WHERE name = 'keyword_id'
    );
 
+INSERT OR IGNORE INTO OperationOwnedCloneKeywords (
+    media_id, keyword, operation_id, source_identity, client_id
+)
+SELECT links.media_id,
+       lower(trim(keywords.keyword)),
+       media.system_operation_id,
+       media.system_source_identity,
+       media.client_id
+  FROM MediaKeywords AS links
+  JOIN Keywords AS keywords ON keywords.id = links.keyword_id
+  JOIN Media AS media ON media.id = links.media_id
+ WHERE media.system_operation_id IS NOT NULL
+   AND length(media.system_operation_id) BETWEEN 1 AND 255
+   AND media.system_operation_kind = 'shared_workspace_clone'
+   AND media.system_source_identity IS NOT NULL
+   AND length(media.system_source_identity) BETWEEN 1 AND 255
+   AND media.system_content_hash IS NOT NULL
+   AND length(media.system_content_hash) = 64
+   AND media.system_content_hash = lower(media.system_content_hash)
+   AND media.system_content_hash NOT GLOB '*[^0-9a-f]*'
+   AND length(trim(keywords.keyword)) BETWEEN 1 AND 255;
+
+CREATE TABLE OperationOwnedCloneKeywords_v26_coverage (
+    complete INTEGER NOT NULL CHECK (complete = 1)
+);
+
+INSERT INTO OperationOwnedCloneKeywords_v26_coverage (complete)
+SELECT CASE WHEN EXISTS (
+    SELECT 1
+      FROM MediaKeywords AS links
+      JOIN Media AS media ON media.id = links.media_id
+      LEFT JOIN Keywords AS keywords ON keywords.id = links.keyword_id
+     WHERE media.system_operation_id IS NOT NULL
+       AND length(media.system_operation_id) BETWEEN 1 AND 255
+       AND media.system_operation_kind = 'shared_workspace_clone'
+       AND media.system_source_identity IS NOT NULL
+       AND length(media.system_source_identity) BETWEEN 1 AND 255
+       AND media.system_content_hash IS NOT NULL
+       AND length(media.system_content_hash) = 64
+       AND media.system_content_hash = lower(media.system_content_hash)
+       AND media.system_content_hash NOT GLOB '*[^0-9a-f]*'
+       AND (
+            keywords.id IS NULL
+            OR length(trim(keywords.keyword)) NOT BETWEEN 1 AND 255
+            OR NOT EXISTS (
+                SELECT 1
+                  FROM OperationOwnedCloneKeywords AS pending
+                 WHERE pending.media_id = links.media_id
+                   AND pending.keyword = lower(trim(keywords.keyword))
+                   AND pending.operation_id = media.system_operation_id
+                   AND pending.source_identity = media.system_source_identity
+                   AND pending.client_id = media.client_id
+            )
+       )
+) THEN 0 ELSE 1 END;
+
+INSERT INTO OperationOwnedCloneKeywords_v26_coverage (complete)
+SELECT CASE WHEN EXISTS (
+    SELECT 1
+      FROM OperationOwnedCloneKeywords_v26_source AS holds
+      JOIN Media AS media ON media.id = holds.media_id
+      LEFT JOIN Keywords AS keywords ON keywords.id = holds.keyword_value
+     WHERE EXISTS (
+            SELECT 1
+              FROM pragma_table_info('OperationOwnedCloneKeywords_v25')
+             WHERE name = 'keyword_id'
+       )
+       AND media.system_operation_id IS NOT NULL
+       AND length(media.system_operation_id) BETWEEN 1 AND 255
+       AND media.system_operation_kind = 'shared_workspace_clone'
+       AND media.system_source_identity IS NOT NULL
+       AND length(media.system_source_identity) BETWEEN 1 AND 255
+       AND media.system_content_hash IS NOT NULL
+       AND length(media.system_content_hash) = 64
+       AND media.system_content_hash = lower(media.system_content_hash)
+       AND media.system_content_hash NOT GLOB '*[^0-9a-f]*'
+       AND holds.operation_id = media.system_operation_id
+       AND holds.source_identity = media.system_source_identity
+       AND (
+            keywords.id IS NULL
+            OR length(trim(keywords.keyword)) NOT BETWEEN 1 AND 255
+            OR NOT EXISTS (
+                SELECT 1
+                  FROM OperationOwnedCloneKeywords AS pending
+                 WHERE pending.media_id = holds.media_id
+                   AND pending.keyword = lower(trim(keywords.keyword))
+                   AND pending.operation_id = media.system_operation_id
+                   AND pending.source_identity = media.system_source_identity
+                   AND pending.client_id = media.client_id
+            )
+       )
+) THEN 0 ELSE 1 END;
+
 DELETE FROM MediaKeywords
  WHERE EXISTS (
-        SELECT 1
-          FROM OperationOwnedCloneKeywords_v26_source AS holds
-          JOIN Media AS media ON media.id = holds.media_id
-         WHERE EXISTS (
-                SELECT 1
-                  FROM pragma_table_info('OperationOwnedCloneKeywords_v25')
-                 WHERE name = 'keyword_id'
-           )
-           AND media.system_operation_kind = 'shared_workspace_clone'
+        SELECT 1 FROM Media AS media
+         WHERE media.id = MediaKeywords.media_id
+           AND media.system_operation_id IS NOT NULL
            AND length(media.system_operation_id) BETWEEN 1 AND 255
+           AND media.system_operation_kind = 'shared_workspace_clone'
+           AND media.system_source_identity IS NOT NULL
            AND length(media.system_source_identity) BETWEEN 1 AND 255
+           AND media.system_content_hash IS NOT NULL
            AND length(media.system_content_hash) = 64
            AND media.system_content_hash = lower(media.system_content_hash)
            AND media.system_content_hash NOT GLOB '*[^0-9a-f]*'
-           AND holds.operation_id = media.system_operation_id
-           AND holds.source_identity = media.system_source_identity
-           AND holds.media_id = MediaKeywords.media_id
-           AND holds.keyword_value = MediaKeywords.keyword_id
    );
 
 DELETE FROM Keywords
@@ -127,41 +241,32 @@ DELETE FROM Keywords
            AND holds.keyword_value = Keywords.id
    );
 
+INSERT INTO OperationOwnedCloneKeywords_v26_coverage (complete)
+SELECT CASE WHEN EXISTS (
+    SELECT 1
+      FROM MediaKeywords AS links
+      JOIN Media AS media ON media.id = links.media_id
+     WHERE media.system_operation_id IS NOT NULL
+       AND length(media.system_operation_id) BETWEEN 1 AND 255
+       AND media.system_operation_kind = 'shared_workspace_clone'
+       AND media.system_source_identity IS NOT NULL
+       AND length(media.system_source_identity) BETWEEN 1 AND 255
+       AND media.system_content_hash IS NOT NULL
+       AND length(media.system_content_hash) = 64
+       AND media.system_content_hash = lower(media.system_content_hash)
+       AND media.system_content_hash NOT GLOB '*[^0-9a-f]*'
+) THEN 0 ELSE 1 END;
+
 DROP VIEW OperationOwnedCloneKeywords_v26_source;
 
 DROP TABLE OperationOwnedCloneKeywords_v25;
+
+DROP TABLE OperationOwnedCloneKeywords_v26_coverage;
 
 CREATE INDEX idx_owned_clone_keywords_keyword
     ON OperationOwnedCloneKeywords(keyword);
 CREATE INDEX idx_owned_clone_keywords_operation
     ON OperationOwnedCloneKeywords(operation_id, source_identity);
-
-UPDATE Media
-   SET system_operation_id = NULL,
-       system_operation_kind = NULL,
-       system_source_identity = NULL,
-       system_content_hash = NULL
- WHERE NOT (
-    (
-        system_operation_id IS NULL
-        AND system_operation_kind IS NULL
-        AND system_source_identity IS NULL
-        AND system_content_hash IS NULL
-    )
-    OR
-    (
-        system_operation_id IS NOT NULL
-        AND length(system_operation_id) BETWEEN 1 AND 255
-        AND system_operation_kind IS NOT NULL
-        AND system_operation_kind = 'shared_workspace_clone'
-        AND system_source_identity IS NOT NULL
-        AND length(system_source_identity) BETWEEN 1 AND 255
-        AND system_content_hash IS NOT NULL
-        AND length(system_content_hash) = 64
-        AND system_content_hash = lower(system_content_hash)
-        AND system_content_hash NOT GLOB '*[^0-9a-f]*'
-    )
- );
 
 CREATE TRIGGER media_validate_system_operation_insert_v26
 BEFORE INSERT ON Media

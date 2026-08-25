@@ -27,7 +27,11 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
-from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, InputError
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
+    ConflictError,
+    InputError,
+    SchemaError,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Sharing.clone_models import (
@@ -1111,6 +1115,106 @@ def test_sqlite_v26_migration_releases_real_v25_keyword_graph_and_replays(
             "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = ?",
             (created.media_id,),
         ).fetchone()["count"] == 3
+    finally:
+        migrated.close_connection()
+        migrated_backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+def test_sqlite_v26_migration_harvests_original_v25_direct_keywords_and_replays(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    db_path = str(tmp_path / "clone-media-original-v25.sqlite")
+    backend = SQLiteBackend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_path)
+    )
+    database = MediaDatabase(db_path=db_path, client_id="owner-1", backend=backend)
+    keywords = ("original-v25-alpha", "original-v25-research")
+    snapshot = _operation_snapshot(keywords=keywords)
+    operation_id = "clone-operation-original-v25"
+    source_identity = "workspace-source-original-v25"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    try:
+        created = database.insert_operation_owned_clone_media(
+            snapshot=snapshot,
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        )
+        connection = database.get_connection()
+        now = database._get_current_utc_timestamp_str()
+        for keyword in keywords:
+            keyword_id = connection.execute(
+                "INSERT INTO Keywords "
+                "(keyword, uuid, last_modified, version, client_id, deleted) "
+                "VALUES (?, ?, ?, 1, ?, 0)",
+                (keyword, str(uuid.uuid4()), now, database.client_id),
+            ).lastrowid
+            connection.execute(
+                "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)",
+                (created.media_id, keyword_id),
+            )
+        connection.executescript(
+            """
+            DROP TABLE OperationOwnedCloneKeywords;
+            UPDATE schema_version SET version = 25;
+            """
+        )
+        connection.commit()
+    finally:
+        database.close_connection()
+        backend.get_pool().close_all()
+
+    assert DatabaseMigrator(db_path).migrate_to_version(26, create_backup=False)["status"] == "success"
+
+    migrated_backend = SQLiteBackend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_path)
+    )
+    migrated = MediaDatabase(
+        db_path=db_path,
+        client_id="owner-1",
+        backend=migrated_backend,
+    )
+    try:
+        assert [
+            row["keyword"]
+            for row in migrated.execute_query(
+                "SELECT keyword FROM OperationOwnedCloneKeywords "
+                "WHERE media_id = ? ORDER BY keyword",
+                (created.media_id,),
+            ).fetchall()
+        ] == list(keywords)
+        assert migrated.execute_query(
+            "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = ?",
+            (created.media_id,),
+        ).fetchone()["count"] == 0
+        assert {
+            row["keyword"]
+            for row in migrated.execute_query(
+                "SELECT keyword FROM Keywords WHERE keyword IN (?, ?)",
+                keywords,
+            ).fetchall()
+        } == set(keywords)
+
+        replayed = migrated.insert_operation_owned_clone_media(
+            snapshot=snapshot,
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        )
+        assert replayed.media_id == created.media_id
+        assert replayed.replayed is True
+        assert migrated.confirm_operation_owned_clone_media(
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        ) == 1
+        assert migrated.execute_query(
+            "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = ?",
+            (created.media_id,),
+        ).fetchone()["count"] == len(keywords)
     finally:
         migrated.close_connection()
         migrated_backend.get_pool().close_all()
@@ -2487,6 +2591,482 @@ def test_postgres_clone_chunk_json_text_semantics_match_sqlite(
                     expected_content_hash=expected_hash,
                 ) == 1
     finally:
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+def test_postgres_v26_migration_harvests_original_v25_direct_keywords_and_replays(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+        run_postgres_migrate_to_v26,
+    )
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    suffix = uuid.uuid4().hex
+    keywords = (f"original-pg-alpha-{suffix}", f"original-pg-research-{suffix}")
+    snapshot = _operation_snapshot(keywords=keywords)
+    operation_id = f"clone-operation-pg-original-{suffix}"
+    source_identity = f"workspace-source-pg-original-{suffix}"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            created = db.insert_operation_owned_clone_media(
+                snapshot=snapshot,
+                operation_id=operation_id,
+                source_identity=source_identity,
+                expected_content_hash=expected_hash,
+            )
+            with db.transaction() as connection:
+                backend.execute(
+                    "DROP TABLE operationownedclonekeywords CASCADE",
+                    connection=connection,
+                )
+                for keyword in keywords:
+                    keyword_id = backend.execute(
+                        "INSERT INTO Keywords "
+                        "(keyword, uuid, last_modified, client_id, deleted) "
+                        "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, FALSE) RETURNING id",
+                        (keyword, str(uuid.uuid4()), "901"),
+                        connection=connection,
+                    ).rows[0]["id"]
+                    backend.execute(
+                        "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (%s, %s)",
+                        (created.media_id, keyword_id),
+                        connection=connection,
+                    )
+
+                run_postgres_migrate_to_v26(db, connection)
+
+            assert [
+                row["keyword"]
+                for row in db.execute_query(
+                    "SELECT keyword FROM OperationOwnedCloneKeywords "
+                    "WHERE media_id = ? ORDER BY keyword",
+                    (created.media_id,),
+                ).fetchall()
+            ] == list(keywords)
+            assert db.execute_query(
+                "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = ?",
+                (created.media_id,),
+            ).fetchone()["count"] == 0
+            assert {
+                row["keyword"]
+                for row in db.execute_query(
+                    "SELECT keyword FROM Keywords WHERE keyword = ANY(?)",
+                    (list(keywords),),
+                ).fetchall()
+            } == set(keywords)
+
+            replayed = db.insert_operation_owned_clone_media(
+                snapshot=snapshot,
+                operation_id=operation_id,
+                source_identity=source_identity,
+                expected_content_hash=expected_hash,
+            )
+            assert replayed.media_id == created.media_id
+            assert replayed.replayed is True
+            assert db.confirm_operation_owned_clone_media(
+                operation_id=operation_id,
+                source_identity=source_identity,
+                expected_content_hash=expected_hash,
+            ) == 1
+            assert db.execute_query(
+                "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = ?",
+                (created.media_id,),
+            ).fetchone()["count"] == len(keywords)
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
+def _seed_cross_tenant_v25_keyword_graph(
+    db: MediaDatabase,
+    backend: Any,
+    *,
+    suffix: str,
+) -> dict[str, int]:
+    media_ids: dict[str, int] = {}
+    with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+        with db.transaction() as connection:
+            backend.execute(
+                "DROP TABLE operationownedclonekeywords CASCADE",
+                connection=connection,
+            )
+            backend.execute(
+                """
+                CREATE TABLE operationownedclonekeywords (
+                    media_id BIGINT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                    keyword_id BIGINT NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+                    operation_id TEXT NOT NULL,
+                    source_identity TEXT NOT NULL,
+                    created_by_clone BOOLEAN NOT NULL,
+                    PRIMARY KEY (media_id, keyword_id)
+                )
+                """,
+                connection=connection,
+            )
+            for tenant in ("tenant-a", "tenant-b"):
+                operation_id = f"operation-{tenant}-{suffix}"
+                source_identity = f"source-{tenant}-{suffix}"
+                media_id = int(
+                    backend.execute(
+                        "INSERT INTO Media "
+                        "(title, type, content_hash, uuid, last_modified, client_id, is_trash, "
+                        "system_operation_id, system_operation_kind, system_source_identity, "
+                        "system_content_hash) VALUES "
+                        "(%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, TRUE, %s, %s, %s, %s) "
+                        "RETURNING id",
+                        (
+                            f"staged {tenant}",
+                            "text",
+                            f"content-{tenant}-{suffix}",
+                            str(uuid.uuid4()),
+                            tenant,
+                            operation_id,
+                            "shared_workspace_clone",
+                            source_identity,
+                            "a" * 64,
+                        ),
+                        connection=connection,
+                    ).rows[0]["id"]
+                )
+                keyword_id = int(
+                    backend.execute(
+                        "INSERT INTO Keywords "
+                        "(keyword, uuid, last_modified, client_id, deleted) "
+                        "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, FALSE) RETURNING id",
+                        (f"keyword-{tenant}-{suffix}", str(uuid.uuid4()), tenant),
+                        connection=connection,
+                    ).rows[0]["id"]
+                )
+                backend.execute(
+                    "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (%s, %s)",
+                    (media_id, keyword_id),
+                    connection=connection,
+                )
+                backend.execute(
+                    "INSERT INTO operationownedclonekeywords "
+                    "(media_id, keyword_id, operation_id, source_identity, created_by_clone) "
+                    "VALUES (%s, %s, %s, %s, FALSE)",
+                    (media_id, keyword_id, operation_id, source_identity),
+                    connection=connection,
+                )
+                media_ids[tenant] = media_id
+            backend.execute(
+                "ALTER TABLE operationownedclonekeywords ENABLE ROW LEVEL SECURITY",
+                connection=connection,
+            )
+            backend.execute(
+                "ALTER TABLE operationownedclonekeywords FORCE ROW LEVEL SECURITY",
+                connection=connection,
+            )
+            backend.execute(
+                """
+                CREATE POLICY operationownedclonekeywords_v25_tenant
+                ON operationownedclonekeywords FOR ALL
+                USING (
+                    EXISTS (
+                        SELECT 1 FROM Media AS owned_media
+                        WHERE owned_media.id = operationownedclonekeywords.media_id
+                          AND COALESCE(
+                              owned_media.owner_user_id::TEXT,
+                              owned_media.client_id
+                          ) = current_setting('app.current_user_id', TRUE)
+                    )
+                )
+                WITH CHECK (
+                    EXISTS (
+                        SELECT 1 FROM Media AS owned_media
+                        WHERE owned_media.id = operationownedclonekeywords.media_id
+                          AND COALESCE(
+                              owned_media.owner_user_id::TEXT,
+                              owned_media.client_id
+                          ) = current_setting('app.current_user_id', TRUE)
+                    )
+                )
+                """,
+                connection=connection,
+            )
+    return media_ids
+
+
+def _transfer_clone_migration_ownership(
+    backend: Any,
+    *,
+    role_name: str,
+) -> tuple[str, str]:
+    ident = backend.escape_identifier
+    with backend.transaction() as connection:
+        original_user = str(
+            backend.execute(
+                "SELECT current_user::TEXT AS current_user",
+                connection=connection,
+            ).rows[0]["current_user"]
+        )
+        schema_owner = str(
+            backend.execute(
+                "SELECT pg_get_userbyid(nspowner) AS owner "
+                "FROM pg_namespace WHERE nspname = current_schema()",
+                connection=connection,
+            ).rows[0]["owner"]
+        )
+        backend.execute(
+            f"CREATE ROLE {ident(role_name)} NOLOGIN NOSUPERUSER NOBYPASSRLS",
+            connection=connection,
+        )
+        backend.execute(
+            f"GRANT {ident(role_name)} TO CURRENT_USER",
+            connection=connection,
+        )
+        backend.execute(
+            f"ALTER SCHEMA {ident('public')} OWNER TO {ident(role_name)}",
+            connection=connection,
+        )
+        for table in (
+            "media",
+            "keywords",
+            "mediakeywords",
+            "operationownedclonekeywords",
+        ):
+            backend.execute(
+                f"ALTER TABLE {ident(table)} OWNER TO {ident(role_name)}",
+                connection=connection,
+            )
+    return original_user, schema_owner
+
+
+def _restore_clone_migration_ownership(
+    backend: Any,
+    *,
+    role_name: str,
+    original_user: str,
+    schema_owner: str,
+) -> None:
+    ident = backend.escape_identifier
+    with backend.transaction() as connection:
+        relation_names = {
+            row["relname"]
+            for row in backend.execute(
+                "SELECT c.relname FROM pg_class AS c "
+                "JOIN pg_namespace AS n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = current_schema() "
+                "AND c.relname = ANY(%s) AND c.relkind IN ('r', 'p')",
+                (
+                    [
+                        "media",
+                        "keywords",
+                        "mediakeywords",
+                        "operationownedclonekeywords",
+                        "operationownedclonekeywords_v25",
+                    ],
+                ),
+                connection=connection,
+            ).rows
+        }
+        for table in sorted(relation_names):
+            backend.execute(
+                f"ALTER TABLE {ident(table)} OWNER TO {ident(original_user)}",
+                connection=connection,
+            )
+        backend.execute(
+            f"ALTER SCHEMA {ident('public')} OWNER TO {ident(schema_owner)}",
+            connection=connection,
+        )
+        backend.execute(
+            f"REVOKE {ident(role_name)} FROM CURRENT_USER",
+            connection=connection,
+        )
+        backend.execute(f"DROP ROLE {ident(role_name)}", connection=connection)
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+def test_postgres_v26_schema_owner_migrates_all_tenants_under_forced_rls(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+        run_postgres_migrate_to_v26,
+    )
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="tenant-a", backend=backend)
+    suffix = uuid.uuid4().hex[:12]
+    role_name = f"clone_v26_owner_{suffix}"
+    media_ids = _seed_cross_tenant_v25_keyword_graph(db, backend, suffix=suffix)
+    ownership: tuple[str, str] | None = None
+    monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_SWITCH", "1")
+    monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_WHITELIST", role_name)
+    try:
+        ownership = _transfer_clone_migration_ownership(
+            backend,
+            role_name=role_name,
+        )
+        with scoped_context(
+            user_id="tenant-a",
+            org_ids=[],
+            team_ids=[],
+            is_admin=False,
+            session_role=role_name,
+        ):
+            with db.transaction() as connection:
+                principal = backend.execute(
+                    "SELECT current_role::TEXT AS role, rolsuper, rolbypassrls "
+                    "FROM pg_roles WHERE rolname = current_role",
+                    connection=connection,
+                ).rows[0]
+                assert principal == {
+                    "role": role_name,
+                    "rolsuper": False,
+                    "rolbypassrls": False,
+                }
+                assert backend.execute(
+                    "SELECT current_setting('app.current_user_id', TRUE) AS user_id, "
+                    "current_setting('app.is_admin', TRUE) AS is_admin",
+                    connection=connection,
+                ).rows[0] == {"user_id": "tenant-a", "is_admin": "0"}
+                run_postgres_migrate_to_v26(db, connection)
+
+        with backend.transaction() as connection:
+            assert {
+                (int(row["media_id"]), row["keyword"])
+                for row in backend.execute(
+                    "SELECT media_id, keyword FROM operationownedclonekeywords",
+                    connection=connection,
+                ).rows
+            } == {
+                (media_ids[tenant], f"keyword-{tenant}-{suffix}")
+                for tenant in ("tenant-a", "tenant-b")
+            }
+            assert backend.execute(
+                "SELECT COUNT(*) AS count FROM MediaKeywords "
+                "WHERE media_id = ANY(%s)",
+                (list(media_ids.values()),),
+                connection=connection,
+            ).rows[0]["count"] == 0
+            states = {
+                row["relname"]: (row["relrowsecurity"], row["relforcerowsecurity"])
+                for row in backend.execute(
+                    "SELECT relname, relrowsecurity, relforcerowsecurity "
+                    "FROM pg_class WHERE oid = ANY(%s::regclass[])",
+                    (
+                        [
+                            "media",
+                            "operationownedclonekeywords",
+                        ],
+                    ),
+                    connection=connection,
+                ).rows
+            }
+            assert states == {
+                "media": (True, True),
+                "operationownedclonekeywords": (True, True),
+            }
+            assert backend.execute(
+                "SELECT to_regclass(current_schema() || "
+                "'.operationownedclonekeywords_v25') AS legacy",
+                connection=connection,
+            ).rows[0]["legacy"] is None
+    finally:
+        if ownership is not None:
+            _restore_clone_migration_ownership(
+                backend,
+                role_name=role_name,
+                original_user=ownership[0],
+                schema_owner=ownership[1],
+            )
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+def test_postgres_v26_failure_after_no_force_rolls_back_rls_and_legacy_graph(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+        run_postgres_migrate_to_v26,
+    )
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="tenant-a", backend=backend)
+    suffix = uuid.uuid4().hex[:12]
+    role_name = f"clone_v26_rollback_{suffix}"
+    media_ids = _seed_cross_tenant_v25_keyword_graph(db, backend, suffix=suffix)
+    ownership: tuple[str, str] | None = None
+    original_execute = backend.execute
+    saw_no_force = False
+    monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_SWITCH", "1")
+    monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_WHITELIST", role_name)
+
+    def interrupt_after_no_force(query, params=None, connection=None, **kwargs):
+        nonlocal saw_no_force
+        normalized = " ".join(query.split()).lower()
+        if " no force row level security" in normalized:
+            saw_no_force = True
+        elif saw_no_force and normalized.startswith("update \"media\""):
+            raise SchemaError("simulated v26 migration interruption")
+        return original_execute(query, params, connection=connection, **kwargs)
+
+    try:
+        ownership = _transfer_clone_migration_ownership(
+            backend,
+            role_name=role_name,
+        )
+        monkeypatch.setattr(backend, "execute", interrupt_after_no_force)
+        with scoped_context(
+            user_id="tenant-a",
+            org_ids=[],
+            team_ids=[],
+            is_admin=False,
+            session_role=role_name,
+        ):
+            with pytest.raises(SchemaError, match="simulated v26 migration interruption"):
+                with db.transaction() as connection:
+                    run_postgres_migrate_to_v26(db, connection)
+        assert saw_no_force is True
+
+        with backend.transaction() as connection:
+            states = {
+                row["relname"]: (row["relrowsecurity"], row["relforcerowsecurity"])
+                for row in original_execute(
+                    "SELECT relname, relrowsecurity, relforcerowsecurity "
+                    "FROM pg_class WHERE oid = ANY(%s::regclass[])",
+                    (["media", "operationownedclonekeywords"],),
+                    connection=connection,
+                ).rows
+            }
+            assert states == {
+                "media": (True, True),
+                "operationownedclonekeywords": (True, True),
+            }
+            assert original_execute(
+                "SELECT COUNT(*) AS count FROM operationownedclonekeywords",
+                connection=connection,
+            ).rows[0]["count"] == 2
+            assert original_execute(
+                "SELECT COUNT(*) AS count FROM MediaKeywords "
+                "WHERE media_id = ANY(%s)",
+                (list(media_ids.values()),),
+                connection=connection,
+            ).rows[0]["count"] == 2
+    finally:
+        monkeypatch.setattr(backend, "execute", original_execute)
+        if ownership is not None:
+            _restore_clone_migration_ownership(
+                backend,
+                role_name=role_name,
+                original_user=ownership[0],
+                schema_owner=ownership[1],
+            )
         db.close_connection()
         backend.get_pool().close_all()
 
