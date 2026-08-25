@@ -1196,7 +1196,8 @@ describe("PlaygroundForm role-play starter", () => {
     )
 
     const selector = screen.getByTestId("model-selector")
-    expect(selector).toHaveTextContent("deepseek-chat - Provider setup needed")
+    expect(selector).toHaveTextContent("deepseek-chat")
+    expect(selector).toHaveTextContent("Provider setup needed")
     expect(selector).toHaveAttribute(
       "title",
       "Configure the selected model provider before chatting as Ada"

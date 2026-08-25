@@ -492,6 +492,11 @@ Commit: `test(webui): align Kanban route recovery fixture`
 **Files:**
 - Modify: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
 - Modify: `apps/tldw-frontend/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts`
+- Modify: `apps/tldw-frontend/e2e/utils/api-assertions.ts`
+- Modify: `apps/tldw-frontend/scripts/onboarding-uat/profile.mjs`
+- Modify: `apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx`
+- Modify: `apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx`
+- Modify: `apps/packages/ui/src/components/Option/Playground/ChatModelSelectorDropdown.tsx`
 - Modify only if tracing proves a product defect: `apps/packages/ui/src/hooks/chat/useCharacterChatMode.ts`
 - Modify only if tracing proves a product defect: `apps/packages/ui/src/hooks/chat/useChatActions.ts`
 - Modify only if tracing proves a product defect: `apps/packages/ui/src/hooks/chat/personaServerChat.ts`
@@ -506,15 +511,15 @@ Commit: `test(webui): align Kanban route recovery fixture`
 - Produces: reusable live-test readiness `{ providerId: "custom-openai-api"; modelId: string; reason?: string }` selected from advertised configured chat-capable models.
 - Preserves: no-provider SEND gating with a truthful user-visible reason.
 
-- [ ] **Step 1: Reconcile overlap before edits**
+- [x] **Step 1: Reconcile overlap before edits**
 
 Compare `origin/dev...codex/character-chat-phase8-continuity` and `origin/dev...codex/chat-character-overlay-tracked-identity` for the four conditional production files. Record overlapping commits/files on `TASK-13124.5`; port or avoid duplicated changes rather than editing around them.
 
-- [ ] **Step 2: Trace all five boundaries without code changes**
+- [x] **Step 2: Trace all five boundaries without code changes**
 
 For disposable, tracked character, and tracked persona cases, capture usable-model metadata, create-chat payload identity, created chat ID, terminal streaming outcome, and post-reload chat identity. Attach the bounded trace to the Backlog task.
 
-- [ ] **Step 3: Add red live assertions for deterministic provider wiring**
+- [x] **Step 3: Add red live assertions for deterministic provider wiring**
 
 ```ts
 expect(readiness).toMatchObject({ providerId: "custom-openai-api" })
@@ -524,17 +529,19 @@ await page.reload()
 await expect(trackedIdentityBadge).toContainText(expectedDisplayName)
 ```
 
-- [ ] **Step 4: Fix the first proven broken boundary only**
+- [x] **Step 4: Fix the first proven broken boundary only**
 
-If readiness selected a catalog-only model, fix the test helper to require configured/chat-capable metadata. If the canonical identity is absent, update the responsible `useCharacterChatMode`, `useChatActions`, or `personaServerChat` create payload and add a focused hook test. If persistence drops identity after creation, fix `character-chat-session.ts` or the message handler and assert reload state. Do not weaken the final persistence assertion.
+Tracing proved that identity transport, chat creation, message persistence, and the backend completion path were correct. The broken boundary was the fresh-page session latch: without a prior restore attempt, immediate persistence stayed disabled and a quick reload could lose `serverChatId` while retaining the selected character. The fix settles that latch when the scoped store has no valid session. A second bounded defect wired the already-computed model-usability state into the visible selector so blocked models no longer display a contradictory Healthy badge. The capture helper now waits for in-flight response parsing so a completed streaming call cannot disappear from evidence collection.
 
-- [ ] **Step 5: Preserve truthful no-provider behavior**
+- [x] **Step 5: Preserve truthful no-provider behavior**
 
-Run Phase-7 readiness without the mock environment and assert SEND remains blocked with a concrete readiness reason and no `/complete-v2` call.
+The Phase-7 gate selects a real provider-unconfigured or unavailable model advertised by the backend while the deterministic custom provider remains available for the callable case. It asserts the accessible setup status, warning selector, preserved draft/character, and absence of `/complete-v2`; this covers the blocked path without requiring a second backend process.
 
-- [ ] **Step 6: Verify deterministic live cases and commit**
+- [x] **Step 6: Verify deterministic live cases and commit**
 
 Run the three Chat Cockpit real-server cases through the isolated backend/mock service, the focused hook tests for any touched production boundary, and Phase-7 readiness.
+
+Verification: 3/3 Chat Cockpit live cases passed; blocked and callable Phase-7 cases passed; 51/51 focused unit/integration tests passed; touched frontend lint completed with zero errors (pre-existing explicit-any warnings remain in the large real-server spec). Bandit is not applicable because this task touches TypeScript/JavaScript only.
 
 Commit: `fix(chat): prove tracked assistant continuity on live backend`
 

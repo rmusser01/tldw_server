@@ -2271,6 +2271,11 @@ export const PlaygroundForm = ({
       connectionStatusWarning={
         !isConnectionReady || connectionUxState === "connected_degraded"
       }
+      modelUsabilityLabel={characterChatModelUsabilityLabel ?? undefined}
+      modelUsabilityTitle={characterChatModelUsabilityTitle ?? undefined}
+      modelUsabilityWarning={Boolean(
+        characterChatModelUsability && !characterChatModelUsability.canSend
+      )}
       modelDropdownMenuItems={modelDropdownMenuItems}
       modelDropdownOpen={modelDropdownOpen}
       modelSearchQuery={modelSearchQuery}
