@@ -162,6 +162,9 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
         ensure_user_timestamp_timezones_pg=_make_pg_ensure("user_timestamps"),
         ensure_authnz_core_tables_pg=_make_pg_ensure("authnz_core"),
+        ensure_admin_webhook_canonical_tables_pg=_make_pg_ensure(
+            "admin_webhook_canonical"
+        ),
         ensure_notification_permissions_pg=_make_pg_ensure("notification_permissions"),
         ensure_sharing_tables_pg=_make_pg_ensure("sharing"),
         ensure_generated_files_table_pg=_make_pg_ensure("generated_files"),
@@ -181,6 +184,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     assert pg_calls == [
         "user_timestamps",
         "authnz_core",
+        "admin_webhook_canonical",
         "sharing",
         "notification_permissions",
         "generated_files",
@@ -206,6 +210,7 @@ async def test_pg_ensure_false_emits_high_signal_warning(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _failed_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
@@ -246,6 +251,7 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _profile_version_not_ready,
+        "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
@@ -289,6 +295,7 @@ async def test_pg_user_timestamp_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _timestamp_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
@@ -332,6 +339,7 @@ async def test_pg_sharing_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _failed_sharing_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,

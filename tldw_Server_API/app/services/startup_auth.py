@@ -105,6 +105,7 @@ async def _ensure_pg_extras(db_pool: object) -> None:
             return
 
         from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+            ensure_admin_webhook_canonical_tables_pg,
             ensure_api_keys_tables_pg,
             ensure_authnz_core_tables_pg,
             ensure_generated_files_table_pg,
@@ -128,6 +129,11 @@ async def _ensure_pg_extras(db_pool: object) -> None:
                 "AuthNZ core tables",
                 ensure_authnz_core_tables_pg,
                 "AUTHNZ_CORE_SCHEMA_NOT_READY",
+            ),
+            (
+                "canonical admin webhook tables",
+                ensure_admin_webhook_canonical_tables_pg,
+                None,
             ),
             (
                 "sharing tables",

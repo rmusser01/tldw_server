@@ -538,6 +538,7 @@ async def setup_database():
 
             from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
             from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+                ensure_admin_webhook_canonical_tables_pg,
                 ensure_api_keys_tables_pg,
                 ensure_authnz_core_tables_pg,
                 ensure_billing_tables_pg,
@@ -559,6 +560,9 @@ async def setup_database():
 
             if not await ensure_sharing_tables_pg(pool):
                 raise RuntimeError("Failed to ensure Postgres sharing tables")
+
+            if not await ensure_admin_webhook_canonical_tables_pg(pool):
+                raise RuntimeError("Failed to ensure Postgres canonical admin webhook tables")
 
             # Ensure billing tables used by webhook/invoice/audit paths.
             ok_billing_tables = await ensure_billing_tables_pg(pool)

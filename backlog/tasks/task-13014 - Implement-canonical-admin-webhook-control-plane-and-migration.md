@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-22 16:27'
+updated_date: '2026-08-22 17:00'
 labels:
   - admin
   - webhooks
@@ -64,6 +64,8 @@ Planning correction: the approved design assigns final legacy-handler deletion a
 2026-08-22 Task 1 complete: added immutable mode/settings/catalog/domain contracts, strong registration ETags, request-ID normalization, domain-separated idempotency digests, strict target validation/redaction, and the focused global platform-webhook egress adapter. Corrected existing WORKFLOWS_WEBHOOK wildcard normalization (*.example now normalizes to example) and added production-detector parity for lowercase tldw_production. TDD evidence: missing-package RED; targeted production-parity RED; final focused matrix 130 passed with 2 existing warnings. Ruff and Bandit passed; git diff --check passed.
 
 2026-08-22 Task 2 complete: added a dedicated immutable webhook key ring over the repository explicit-key AES-GCM primitive. Strict loading preserves duplicate JSON pairs, requires canonical base64 32-byte keys and a configured primary, ignores unrelated credentials, and exposes a non-throwing closed runtime load result. Contextual envelopes bind purpose plus row/version identity; previous keys are read-only, ordinary writes use only the primary, rotation can explicitly re-encrypt, outer/base64 tampering fails closed, and event decrypt rechecks the 64 KiB bound. Migration fingerprints are HMAC-SHA256 under closed domains. TDD evidence includes missing-module RED, no-argument loader RED, and envelope/event readback RED; final combined Task 1-2 matrix 165 passed with 2 existing warnings. Ruff, Bandit, fallback scan, and git diff --check passed.
+
+2026-08-22 Task 3 complete: added additive SQLite migration 091 and an atomic PostgreSQL ensure helper for seven canonical webhook tables, backend-equivalent checks/partial indexes, sequence and singleton migration-state seeds, encrypted event-body storage, delivery/attempt/idempotency contracts, and crash-resumable import/rotation state. Startup now runs the PostgreSQL ensure in both application and standalone initialization paths. Review improvement: split report, backup, and rollback-key owner/group/mode/file-identity evidence and tightened phase/artifact/retirement combinations. TDD RED proved both helpers absent and startup unwired. Verification: SQLite canonical+legacy matrix 13 passed/2 warnings; disposable PostgreSQL matrix 4 passed/2 warnings with no skips; startup/core matrix 9 passed/2 warnings; Ruff passed (ignoring only two pre-existing SIM300 assertions in test_startup_auth.py); Bandit passed with existing nosec notices; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
