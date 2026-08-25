@@ -23,6 +23,9 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipWriteResult,
 )
 from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 
 DEFAULT_BASE_TEAM_NAME = "Default-Base"
 DEFAULT_BASE_TEAM_SLUG = "default-base"
@@ -49,6 +52,14 @@ class AuthnzOrgsTeamsRepo:
         _ = conn  # Compatibility placeholder for legacy call sites.
         return bool(getattr(self.db_pool, "pool", None))
 
+    def _membership_transaction(self) -> Any:
+        """Open a membership transaction with the shared acquisition bound."""
+
+        policy = get_authnz_transaction_policy()
+        return self.db_pool.transaction(
+            acquire_timeout_seconds=policy.db_pool_acquire_timeout_seconds,
+        )
+
     async def _apply_direct_membership_mutations(
         self,
         *,
@@ -59,7 +70,7 @@ class AuthnzOrgsTeamsRepo:
         """Own one bounded transaction and one final anchor touch per changed user."""
 
         sampled_time = operation_time or datetime.now(timezone.utc)
-        async with self.db_pool.transaction() as conn:
+        async with self._membership_transaction() as conn:
             return await MembershipWriter(self.db_pool).apply_membership_mutations(
                 conn=conn,
                 context=context,
@@ -1323,7 +1334,7 @@ class AuthnzOrgsTeamsRepo:
                 kind=MembershipMutationKind.ADD,
                 role=role,
             )
-            async with self.db_pool.transaction() as conn:
+            async with self._membership_transaction() as conn:
                 writer = MembershipWriter(self.db_pool)
                 default_team_id = await self._get_or_create_default_team_id(
                     conn,
@@ -1481,7 +1492,7 @@ class AuthnzOrgsTeamsRepo:
                 user_id=user_id,
                 kind=MembershipMutationKind.REMOVE,
             )
-            async with self.db_pool.transaction() as conn:
+            async with self._membership_transaction() as conn:
                 default_team_id = await self._get_or_create_default_team_id(
                     conn,
                     org_id,

@@ -337,7 +337,7 @@ async def test_postgres_opposite_request_orders_share_one_canonical_lock_order(
             ids["team_id"],
             ids["second_id"],
             MembershipMutationKind.UPDATE_ROLE,
-            "viewer",
+            "member",
         ),
     )
     opposite_order = (
@@ -383,7 +383,7 @@ async def test_postgres_opposite_request_orders_share_one_canonical_lock_order(
         [ids["first_id"], ids["second_id"]],
     )
     assert tuple((int(row["user_id"]), str(row["role"])) for row in rows) in {
-        ((ids["first_id"], "lead"), (ids["second_id"], "viewer")),
+        ((ids["first_id"], "lead"), (ids["second_id"], "member")),
         ((ids["first_id"], "member"), (ids["second_id"], "admin")),
     }
 
