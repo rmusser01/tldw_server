@@ -129,6 +129,7 @@ const EXTRA_PAGES: PageEntry[] = [
   { path: "/settings/tldw", name: "TLDW Settings", category: "settings" },
   { path: "/settings/model", name: "Model Settings", category: "settings" },
   { path: "/settings/chat", name: "Chat Settings", category: "settings" },
+  { path: "/settings/chat-macros", name: "Chat Macros Settings", category: "settings" },
   { path: "/settings/prompt", name: "Workflow prompts", category: "settings" },
   { path: "/settings/knowledge", name: "Knowledge Settings", category: "settings" },
   { path: "/settings/rag", name: "RAG Settings", category: "settings" },

@@ -389,21 +389,26 @@ Commit: `test(prompts): harden responsive live-backend coverage`
 - Modify: `apps/packages/ui/src/components/Option/Settings/TldwConnectionSettings.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Settings/__tests__/SetupRecoverySettings.test.tsx`
+- Modify: `apps/packages/ui/src/components/Layouts/settings-nav-config.ts`
+- Modify: `apps/packages/ui/src/components/Layouts/__tests__/settings-layout-labels.test.tsx`
+- Create: `apps/tldw-frontend/pages/settings/chat-macros.tsx`
+- Modify: `apps/tldw-frontend/e2e/smoke/page-inventory.ts`
+- Modify: `apps/tldw-frontend/e2e/page-mapping.ts`
 - Modify: `apps/tldw-frontend/e2e/workflows/tier-1-critical/settings-core.spec.ts`
 
 **Interfaces:**
 - Consumes: parent `Form` `initialValues` and later `form.setFieldsValue` calls in `tldw.tsx`.
 - Preserves: `rememberApiKey` component state for help copy and persistence result messaging.
 
-- [ ] **Step 1: Add a red warning regression**
+- [x] **Step 1: Add a red warning regression**
 
 Render `TldwSettings`, spy on `console.error`, wait for config hydration, and assert no Ant warning contains `initialValues` or `initialValue` for `rememberApiKey`.
 
-- [ ] **Step 2: Run focused Settings tests and observe red**
+- [x] **Step 2: Run focused Settings tests and observe red**
 
 Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx`
 
-- [ ] **Step 3: Remove the child initializer**
+- [x] **Step 3: Remove the child initializer**
 
 ```tsx
 <Form.Item name="rememberApiKey" valuePropName="checked">
@@ -415,13 +420,20 @@ Run: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Opt
 
 Do not replace it with a controlled `checked` prop; Ant Form remains the field owner.
 
-- [ ] **Step 4: Lock heading hierarchy and navigation labels**
+- [x] **Step 4: Lock heading hierarchy and navigation labels**
 
 Assert the settings shell has one page-level `Settings` heading, `Setup & Recovery` is level 2, and Workflow Prompts and Prompt Studio links retain distinct accessible names.
 
-- [ ] **Step 5: Verify save/persistence and commit**
+Review also found `/settings/chat-macros` assigned to a nonexistent
+`"experience"` group, which both failed TypeScript and removed the destination
+from rendered navigation. Reassign it to `preferencesWorkflow`, add the missing
+Next.js page that caused the restored link to reach a 404, register it in both
+UAT page inventories, and lock the accessible link plus live route.
 
-Run focused unit tests and `settings-core.spec.ts --project=tier-1 --workers=1`.
+- [x] **Step 5: Verify save/persistence and commit**
+
+Run focused unit tests, `settings-core.spec.ts --project=tier-1 --workers=1`,
+and the existing device/session manual API-key persistence scenarios.
 
 Commit: `fix(settings): keep connection form initialization authoritative`
 

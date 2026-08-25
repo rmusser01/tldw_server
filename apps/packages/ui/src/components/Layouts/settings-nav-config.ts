@@ -117,7 +117,7 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
   },
   {
     path: "/settings/chat-macros",
-    group: "experience",
+    group: "preferencesWorkflow",
     labelToken: "settings:chatMacrosNav",
     icon: CombineIcon,
     order: 2.5

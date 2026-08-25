@@ -96,4 +96,10 @@ describe("settings navigation labels", () => {
     expect(screen.queryByRole("link", { name: "Manage Prompts" }))
       .not.toBeInTheDocument()
   })
+
+  it("keeps chat macros in the preferences and workflow navigation", () => {
+    renderSettingsLayout("/settings/chat-macros")
+
+    expect(screen.getByRole("link", { name: /^chat macros$/i })).toBeVisible()
+  })
 })
