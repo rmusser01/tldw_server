@@ -44,6 +44,38 @@ class AdmissionRejectionReason(str, Enum):
     POLICY_REJECTED = "policy_rejected"
 
 
+class IdempotentOperationDisposition(str, Enum):
+    """How a durable idempotent operation admission was resolved."""
+
+    CREATED = "created"
+    REPLAYED = "replayed"
+    CONVERGED = "converged"
+
+
+class IdempotentOperationConflictReason(str, Enum):
+    """Stable conflicts returned by durable idempotent admission."""
+
+    KEY_REUSED = "idempotency_key_reused"
+    SCOPE_ACTIVE = "operation_already_in_progress"
+
+
+class IdempotentOperationConflict(RuntimeError):
+    """A durable admission conflicts with previously accepted work."""
+
+    def __init__(
+        self,
+        reason: IdempotentOperationConflictReason,
+        job_uuid: str | None = None,
+    ) -> None:
+        super().__init__(reason.value)
+        self.reason = reason
+        self.job_uuid = job_uuid
+
+
+class IdempotentOperationUnavailableError(RuntimeError):
+    """A receipt-to-Job correlation cannot be proven safe."""
+
+
 @dataclass(frozen=True)
 class CreateJobCommand:
     """Backend-neutral command payload for creating a Jobs row."""
@@ -61,6 +93,81 @@ class CreateJobCommand:
     batch_group: str | None = None
     request_id: str | None = None
     trace_id: str | None = None
+
+
+@dataclass(frozen=True)
+class IdempotentOperationCommand:
+    """Backend-neutral command for receipt-backed Job admission."""
+
+    job: CreateJobCommand
+    key_digest: str
+    request_fingerprint: str
+    operation_scope: str
+    receipt_expires_at: datetime
+
+    def __post_init__(self) -> None:
+        """Reject unowned, malformed, or unbounded receipt metadata."""
+
+        owner_user_id = self.job.owner_user_id
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("owner_user_id must be a non-empty string")
+        for field_name in ("key_digest", "request_fingerprint"):
+            value = getattr(self, field_name)
+            if (
+                not isinstance(value, str)
+                or len(value) != 64
+                or any(char not in "0123456789abcdef" for char in value)
+            ):
+                raise ValueError(f"{field_name} must be a lowercase SHA-256 hex digest")
+        if (
+            not isinstance(self.operation_scope, str)
+            or not self.operation_scope.strip()
+            or len(self.operation_scope) > 200
+        ):
+            raise ValueError("operation_scope must be between 1 and 200 ASCII characters")
+        try:
+            self.operation_scope.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise ValueError(
+                "operation_scope must be between 1 and 200 ASCII characters"
+            ) from exc
+        if (
+            not isinstance(self.receipt_expires_at, datetime)
+            or self.receipt_expires_at.tzinfo is None
+            or self.receipt_expires_at.utcoffset() is None
+        ):
+            raise ValueError("receipt_expires_at must be timezone-aware")
+
+
+@dataclass(frozen=True)
+class IdempotentOperationAdmission:
+    """Immutable result of admitting or replaying a receipt-backed Job."""
+
+    job: dict[str, Any]
+    disposition: IdempotentOperationDisposition
+
+    def __post_init__(self) -> None:
+        """Defensively copy mutable Job data returned by database backends."""
+
+        object.__setattr__(self, "job", copy.deepcopy(self.job))
+
+    @classmethod
+    def created(cls, job: dict[str, Any]) -> IdempotentOperationAdmission:
+        """Build a result for a newly admitted Job."""
+
+        return cls(job=job, disposition=IdempotentOperationDisposition.CREATED)
+
+    @classmethod
+    def replayed(cls, job: dict[str, Any]) -> IdempotentOperationAdmission:
+        """Build a result for an exact idempotency-key replay."""
+
+        return cls(job=job, disposition=IdempotentOperationDisposition.REPLAYED)
+
+    @classmethod
+    def converged(cls, job: dict[str, Any]) -> IdempotentOperationAdmission:
+        """Build a result for a second key converged on active work."""
+
+        return cls(job=job, disposition=IdempotentOperationDisposition.CONVERGED)
 
 
 @dataclass(frozen=True)

@@ -49,7 +49,7 @@
 - Consumes: existing `CreateJobCommand` and normalized Job row dictionaries.
 - Produces: `IdempotentOperationCommand`, `IdempotentOperationDisposition`, `IdempotentOperationAdmission`, `IdempotentOperationConflict`, and `IdempotentOperationUnavailableError`.
 
-- [ ] **Step 1: Write contract invariant tests**
+- [x] **Step 1: Write contract invariant tests**
 
 ```python
 def test_idempotent_operation_command_requires_owner_and_bounded_digests():
@@ -69,13 +69,13 @@ def test_idempotent_admission_freezes_job_row():
     assert result.job["status"] == "queued"
 ```
 
-- [ ] **Step 2: Run the contract tests and verify the imports fail**
+- [x] **Step 2: Run the contract tests and verify the imports fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py -k contract -v`
 
 Expected: FAIL because the new contracts do not exist.
 
-- [ ] **Step 3: Add immutable contracts with explicit outcomes**
+- [x] **Step 3: Add immutable contracts with explicit outcomes**
 
 ```python
 class IdempotentOperationDisposition(str, Enum):
@@ -112,13 +112,13 @@ class IdempotentOperationUnavailableError(RuntimeError):
 
 Validate ASCII bounded fields, exactly 64 lowercase hexadecimal characters for both digests, a non-empty owner, an operation scope of at most 200 ASCII characters, and a timezone-aware expiry at least 30 days after admission time. Copy mutable row data in result construction.
 
-- [ ] **Step 4: Run contract tests**
+- [x] **Step 4: Run contract tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py -k contract -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the contract**
+- [x] **Step 5: Commit the contract**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations/contracts.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py
