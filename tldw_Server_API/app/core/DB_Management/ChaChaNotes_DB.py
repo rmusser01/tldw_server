@@ -72,8 +72,7 @@ except ImportError:  # pragma: no cover - compatibility fallback
 #
 import contextlib  # noqa: E402
 
-from tldw_Server_API.app.core.config import load_comprehensive_config, settings  # noqa: E402
-from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements  # noqa: E402
+from tldw_Server_API.app.core.config import load_comprehensive_config  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
     BackendType,
     DatabaseBackend,
@@ -103,29 +102,16 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
     replace_insert_or_ignore,
     transform_sqlite_query_for_postgres,
 )
-from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed  # noqa: E402
+from tldw_Server_API.app.core.exceptions import NotesTaskContractError  # noqa: E402
 from tldw_Server_API.app.core.Flashcards.asset_refs import (  # noqa: E402
     extract_flashcard_asset_uuids,
     sanitize_flashcard_text_for_search,
-)
-from tldw_Server_API.app.core.Flashcards.source_review import (  # noqa: E402
-    build_source_review_launch_metadata,
-)
-from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import (  # noqa: E402
-    MATURE_INTERVAL_DAYS,
-    SchedulerSettingsError,
-    build_next_interval_previews,
-    coerce_queue_state,
-    get_default_scheduler_settings,
-    normalize_scheduler_settings,
-    parse_iso_datetime,
-    scheduler_settings_to_json,
-    simulate_review_transition,
-    to_iso_z,
 )
 from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (  # noqa: E402
     FsrsSettingsError,
@@ -133,8 +119,20 @@ from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (  # noqa: E402
     normalize_fsrs_settings,
     simulate_fsrs_review_transition,
 )
-from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile  # noqa: E402
-from tldw_Server_API.app.core.exceptions import NotesTaskContractError  # noqa: E402
+from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import (  # noqa: E402
+    MATURE_INTERVAL_DAYS,
+    SchedulerSettingsError,
+    build_next_interval_previews,
+    coerce_queue_state,
+    normalize_scheduler_settings,
+    scheduler_settings_to_json,
+    simulate_review_transition,
+    to_iso_z,
+)
+from tldw_Server_API.app.core.Flashcards.source_review import (  # noqa: E402
+    build_source_review_launch_metadata,
+)
+from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload  # noqa: E402
 from tldw_Server_API.app.core.Sync.v2.notes_link import (  # noqa: E402
     NOTES_LINK_LABEL_MAX_CHARS,
     NOTES_LINK_WEIGHT_MAX,
@@ -142,16 +140,9 @@ from tldw_Server_API.app.core.Sync.v2.notes_link import (  # noqa: E402
     validate_notes_link_object_id,
     validate_notes_link_properties,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (  # noqa: E402
-    canonical_json_bytes,
-    notes_task_object_hash,
-    parse_notes_task_v1,
-)
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (  # noqa: E402
     SYNC_ENVELOPE_MAX_BYTES,
     NotesMoodboardStudioContractError,
-    canonical_json_bytes as canonical_moodboard_studio_json_bytes,
-    legacy_source_diagnostic as moodboard_studio_legacy_source_diagnostic,
     notes_moodboard_note_object_hash,
     notes_moodboard_object_hash,
     notes_studio_document_object_hash,
@@ -161,7 +152,17 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (  
     placement_object_id,
     studio_result_hash,
 )
-from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload  # noqa: E402
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    canonical_json_bytes as canonical_moodboard_studio_json_bytes,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    legacy_source_diagnostic as moodboard_studio_legacy_source_diagnostic,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (  # noqa: E402
+    canonical_json_bytes,
+    notes_task_object_hash,
+    parse_notes_task_v1,
+)
 from tldw_Server_API.app.core.Workspaces.file_inventory_models import (  # noqa: E402
     bounded_inventory_diagnostics,
     decode_inventory_cursor,
@@ -33248,7 +33249,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return dict(row)
         except (TypeError, ValueError):
             if hasattr(row, "keys"):
-                return {key: row[key] for key in row.keys()}
+                keys = row.keys()
+                return {key: row[key] for key in keys}
         return None
 
     def _normalize_note_folder_path(self, value: Any) -> str | None:
@@ -34440,15 +34442,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(f"Failed to create flashcard template: {exc}") from exc  # noqa: TRY003
 
     def count_flashcard_templates(self) -> int:
-        try:
-            cursor = self.execute_query(
-                "SELECT COUNT(*) AS cnt FROM flashcard_templates WHERE deleted = ?",
-                (self._flashcard_template_deleted_value(False),),
-            )
-            row = cursor.fetchone()
-            return int(row["cnt"]) if row else 0
-        except CharactersRAGDBError:
-            raise
+        cursor = self.execute_query(
+            "SELECT COUNT(*) AS cnt FROM flashcard_templates WHERE deleted = ?",
+            (self._flashcard_template_deleted_value(False),),
+        )
+        row = cursor.fetchone()
+        return int(row["cnt"]) if row else 0
 
     def list_flashcard_templates(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         query = (
@@ -34456,14 +34455,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "placeholder_definitions_json, created_at, last_modified, deleted, client_id, version "
             "FROM flashcard_templates WHERE deleted = ? ORDER BY name ASC LIMIT ? OFFSET ?"
         )
-        try:
-            cursor = self.execute_query(
-                query,
-                (self._flashcard_template_deleted_value(False), limit, offset),
-            )
-            return [self._serialize_flashcard_template_row(dict(row)) for row in cursor.fetchall()]
-        except CharactersRAGDBError:
-            raise
+        cursor = self.execute_query(
+            query,
+            (self._flashcard_template_deleted_value(False), limit, offset),
+        )
+        return [self._serialize_flashcard_template_row(dict(row)) for row in cursor.fetchall()]
 
     def get_flashcard_template(self, template_id: int, *, include_deleted: bool = False) -> dict[str, Any] | None:
         query = (
@@ -34475,12 +34471,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not include_deleted:
             query += " AND deleted = ?"
             params.append(self._flashcard_template_deleted_value(False))
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            row = cursor.fetchone()
-            return self._serialize_flashcard_template_row(dict(row)) if row else None
-        except CharactersRAGDBError:
-            raise
+        cursor = self.execute_query(query, tuple(params))
+        row = cursor.fetchone()
+        return self._serialize_flashcard_template_row(dict(row)) if row else None
 
     def update_flashcard_template(
         self,
@@ -34906,8 +34899,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if deck_id is not None:
             return f"{deck_id_column} = ?", (deck_id,), False
         if not include_workspace_items:
-            return f"{deck_alias}.workspace_id IS NULL", tuple(), True
-        return "", tuple(), False
+            return f"{deck_alias}.workspace_id IS NULL", (), True
+        return "", (), False
 
     @staticmethod
     def _normalize_flashcard_sqlite_query(q: str) -> str:
@@ -36069,11 +36062,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     {
                         "deck_id": int(row["deck_id"]),
                         "deck_name": str(row["deck_name"] or f"Deck {row['deck_id']}"),
-                        "total": int((row["total_count"] or 0)),
-                        "new": int((row["new_count"] or 0)),
-                        "learning": int((row["learning_count"] or 0)),
-                        "due": int((row["due_count"] or 0)),
-                        "mature": int((row["mature_count"] or 0)),
+                        "total": int(row["total_count"] or 0),
+                        "new": int(row["new_count"] or 0),
+                        "learning": int(row["learning_count"] or 0),
+                        "due": int(row["due_count"] or 0),
+                        "mature": int(row["mature_count"] or 0),
                     }
                 )
 

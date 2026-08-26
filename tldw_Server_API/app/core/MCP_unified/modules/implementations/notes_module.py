@@ -1225,7 +1225,7 @@ class NotesModule(BaseModule):
                         "task_id": task_id,
                         "task": self._task_response(db, task, scope=scope),
                     })
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - keep per-item batch failures isolated.
                     failed.append({
                         "task_id": task_id,
                         "error_type": exc.__class__.__name__,
