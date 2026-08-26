@@ -273,12 +273,90 @@ def test_completed_projection_requires_valid_confirmed_result() -> None:
     assert response.diagnostics == {}
 
 
+def test_completed_unconfirmed_result_remains_finalizing() -> None:
+    response = project_clone_operation(
+        _job(
+            status="completed",
+            result=_successful_result(publication_confirmed=False),
+        ),
+        share_id=42,
+        recipient_user_id=9,
+    )
+
+    assert response.status == "running"
+    assert response.progress is not None
+    assert response.progress.model_dump() == {
+        "phase": "finalizing",
+        "percent": 99,
+        "message_code": "clone_finalizing",
+    }
+    assert response.result is None
+    assert response.error is None
+
+
+def test_compensated_completed_projection_reports_bounded_failure() -> None:
+    response = project_clone_operation(
+        _job(
+            status="completed",
+            result={
+                "schema_version": 1,
+                "publication_state": "aborted",
+                "failure_code": "clone_permission_removed",
+                "cleanup_state": "complete",
+            },
+        ),
+        share_id=42,
+        recipient_user_id=9,
+    )
+
+    assert response.status == "failed"
+    assert response.retryable is False
+    assert response.error is not None
+    assert response.error.model_dump() == {
+        "code": "clone_permission_removed",
+        "message_key": "sharing.clone.errors.clone_permission_removed",
+        "message": "The owner disabled copying before the operation completed.",
+        "cleanup_state": "complete",
+    }
+
+
+def test_compensation_in_progress_reports_failed_with_pending_cleanup() -> None:
+    response = project_clone_operation(
+        _job(
+            status="completed",
+            result={
+                "schema_version": 1,
+                "publication_state": "aborting",
+                "failure_code": "clone_access_revoked",
+                "cleanup_state": "pending",
+            },
+        ),
+        share_id=42,
+        recipient_user_id=9,
+    )
+
+    assert response.status == "failed"
+    assert response.error is not None
+    assert response.error.code == "clone_access_revoked"
+    assert response.error.cleanup_state == "pending"
+
+
 @pytest.mark.parametrize(
     "result",
     (
         None,
         {},
-        _successful_result(publication_confirmed=False),
+        {
+            "schema_version": 1,
+            "publication_state": "authorized",
+            "clone_result": {"private_path": "/owner/private.db"},
+        },
+        {
+            "schema_version": 1,
+            "publication_state": "aborted",
+            "failure_code": "backend-secret",
+            "cleanup_state": "complete",
+        },
         {**_successful_result(), "private_path": "/owner/private.db"},
         {**_successful_result(), "workspace_id": "wrong-target"},
     ),

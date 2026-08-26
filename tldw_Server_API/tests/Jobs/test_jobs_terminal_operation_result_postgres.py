@@ -124,6 +124,37 @@ def test_postgres_active_and_archived_terminal_patches(
     assert _stored_result(jobs_pg_dsn, "jobs_archive", str(archived["uuid"]))["cleanup_state"] == "complete"
 
 
+def test_postgres_failed_job_without_result_can_record_proven_cleanup(
+    terminal_manager: JobManager,
+    jobs_pg_dsn: str,
+) -> None:
+    job = _create_terminal_job(terminal_manager, jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status = 'failed', result = NULL WHERE uuid = %s",
+            (job["uuid"],),
+        )
+    command = TerminalOperationResultPatchCommand(
+        job_uuid=str(job["uuid"]),
+        owner_user_id="recipient-7",
+        domain="sharing",
+        queue="workspace-clone",
+        job_type="workspace_clone",
+        operation_scope="share:7",
+        allowed_statuses=("failed",),
+        expected_result_fingerprint=_fingerprint({}),
+        replacement_result={"schema_version": 1, "cleanup_state": "complete"},
+    )
+
+    outcome = terminal_manager.patch_terminal_operation_result(command)
+
+    assert outcome is TerminalOperationResultPatchOutcome.APPLIED
+    assert _stored_result(jobs_pg_dsn, "jobs", str(job["uuid"])) == {
+        "schema_version": 1,
+        "cleanup_state": "complete",
+    }
+
+
 def test_postgres_duplicate_authority_fails_closed(
     terminal_manager: JobManager,
     jobs_pg_dsn: str,

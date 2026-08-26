@@ -4,7 +4,7 @@
 
 **Goal:** Replace the in-memory shared-workspace clone background task with one durable, owner-scoped Jobs operation exposed through canonical POST and GET envelopes and executed by a lifecycle-managed worker.
 
-**Architecture:** The recipient API validates and fingerprints a bounded request, replays or atomically admits it through the generic Jobs receipt primitive, and projects only the canonical Workspace operation contract. A dedicated Sharing worker revalidates current authorization, runs the synchronous clone service in a worker thread, completes the fenced Job while the copy remains hidden, then exposes operation-owned media and the target Workspace in a bounded post-completion finalizer. A periodic bounded reconciliation pass repairs completed-but-hidden targets and cleans terminal failures after hard exits; exact terminal-result changes use an owner/domain/queue/type/status-scoped CAS that works against active or archived Jobs.
+**Architecture:** The recipient API validates and fingerprints a bounded request, replays or atomically admits it through the generic Jobs receipt primitive, and projects only the canonical Workspace operation contract. A dedicated Sharing worker revalidates current authorization, runs the synchronous clone service in a worker thread, and completes the fenced Job while the copy remains hidden. Its post-completion finalizer uses an exact terminal-result CAS to select a durable publication or compensation checkpoint before exposing or deleting resources, then confirms the public result after media and the target Workspace are visible. A periodic bounded reconciliation pass resumes checkpointed work and scans active/archive Jobs with runtime-owned keyset cursors; exact terminal-result changes use an owner/domain/queue/type/status-scoped CAS that works against active or archived Jobs.
 
 **Tech Stack:** FastAPI, Pydantic v2, Python asyncio and `asyncio.to_thread`, Jobs `WorkerSDK`, SQLite/PostgreSQL Jobs backends, AuthNZ shared-workspace repository, CharactersRAGDB, MediaDatabase, pytest.
 
@@ -17,7 +17,7 @@
 - Use Jobs domain `sharing`, queue `workspace-clone`, job type `workspace_clone`, recipient ownership, and `max_retries=0`.
 - Require an exact 16-200 character `Idempotency-Key` containing only `[A-Za-z0-9._~-]`; never persist the raw key.
 - Keep Job payloads and public progress content-free and bounded; never persist source titles, URLs, paths, credentials, or authorization claims.
-- Revalidate canonical active access and `allow_clone` before owner data access, at every CloneService cancellation boundary, and before publication.
+- Revalidate canonical active access and `allow_clone` before owner data access, at every CloneService cancellation boundary, and immediately before the durable publication checkpoint.
 - Keep the clone target and operation-owned media hidden until durable fenced Job completion; expose media before the Workspace.
 - Treat missing, foreign, malformed, ambiguous, and wrong-scope operation rows as neutral `404` or typed `503` exactly as the approved contract requires.
 - Do not add vector generation in this task; report `needs_indexing` when applicable.
@@ -178,35 +178,35 @@ Commit: `feat(sharing): expose durable clone operations`
 - Consumes: Task 1 payload/result contracts, Task 2 terminal patch and failure callback, CloneService, canonical share repository, user-scoped DB loaders, and operation-owned publication/cleanup methods.
 - Produces: `handle_shared_workspace_clone_job(job, *, runtime)`, `finalize_shared_workspace_clone(job, result, *, runtime)`, `reconcile_shared_workspace_clone_jobs(*, jobs, limit=100)`, and `run_shared_workspace_clone_jobs_worker(stop_event=None)`.
 
-- [ ] **Step 1: Write failing payload, authorization, and thread-boundary tests**
+- [x] **Step 1: Write failing payload, authorization, and thread-boundary tests**
 
 Reject malformed payloads and Job scope, revalidate active membership/`allow_clone` before owner DB resolution and through a thread-to-event-loop authorization bridge at CloneService boundaries, derive the target from Job UUID, pass progress/cancellation callbacks, use `asyncio.to_thread`, and close thread-local ChaCha/Media connections in the worker thread.
 
-- [ ] **Step 2: Write failing publication and hard-exit reconciliation tests**
+- [x] **Step 2: Write failing publication and hard-exit reconciliation tests**
 
 Prove durable completion precedes exposure, media is exposed before Workspace, callback rejection cleans staged data, completed hidden copies are finalized, failed/cancelled/quarantined copies are discarded, unrelated media is untouched, cleanup result CAS is scoped, archived Jobs reconcile, all passes are bounded, and GET remains side-effect free.
 
-- [ ] **Step 3: Run worker tests red**
+- [x] **Step 3: Run worker tests red**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Sharing/test_shared_workspace_clone_jobs_worker.py tldw_Server_API/tests/Sharing/test_shared_workspace_clone_reconciliation.py`
 
-- [ ] **Step 4: Implement the thread-owned clone boundary**
+- [x] **Step 4: Implement the thread-owned clone boundary**
 
-Resolve/cache DB objects only after initial authorization, open their thread-local connections inside `to_thread`, bridge each synchronous `should_cancel()` call to the event-loop share repository with a bounded timeout, classify only stable clone errors, disable retries, and serialize the validated result with `publication_confirmed=true` only after `publication_pending` validation succeeds.
+Resolve/cache DB objects only after initial authorization, open their thread-local connections inside `to_thread`, bridge each synchronous `should_cancel()` call to the event-loop share repository with a bounded timeout, classify only stable clone errors, disable retries, and serialize a validated terminal result with `publication_confirmed=false` so post-completion finalization owns authorization and exposure.
 
-- [ ] **Step 5: Implement post-completion publication**
+- [x] **Step 5: Implement post-completion publication**
 
-After WorkerSDK fenced completion, enumerate and confirm exact operation-owned media, then clear the exact Workspace publication marker. Treat zero-row idempotent replays as success only after re-reading the deterministic target state; never expose the Workspace before all owned media are active.
+After WorkerSDK fenced completion, keep the public operation in `running/finalizing`, reauthorize, and CAS the unconfirmed terminal result to `authorized` before mutation. Enumerate and confirm exact operation-owned media, clear the exact Workspace publication marker, then CAS to `publication_confirmed=true`. Revocation must win an `aborting` CAS before cleanup and records `aborted` only after cleanup succeeds. Treat zero-row idempotent replays as success only after re-reading deterministic state; never expose the Workspace before all owned media are active.
 
-- [ ] **Step 6: Implement bounded periodic reconciliation**
+- [x] **Step 6: Implement bounded periodic reconciliation**
 
-Run a scoped Jobs integrity sweep, scan at most 100 active/archive clone Jobs per pass, finalize completed hidden targets, clean terminal failed targets/media, patch cleanup metadata through Task 2's CAS, and sleep interruptibly. Run this loop and WorkerSDK under the single runner and stop both from the same stop event.
+Run a scoped Jobs integrity sweep, scan at most 100 active/archive clone Jobs per pass with keyset cursor progression, resume authorized publication and aborting cleanup, finalize completed hidden targets, clean terminal failed targets/media, patch cleanup metadata through Task 2's CAS, and sleep interruptibly. Run this loop and WorkerSDK under the single runner and stop both from the same stop event.
 
-- [ ] **Step 7: Run worker/reconciliation and foundation regression tests green**
+- [x] **Step 7: Run worker/reconciliation and foundation regression tests green**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Sharing/test_shared_workspace_clone_jobs_worker.py tldw_Server_API/tests/Sharing/test_shared_workspace_clone_reconciliation.py tldw_Server_API/tests/Sharing/test_clone_service.py tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py`
 
-- [ ] **Step 8: Commit the worker slice**
+- [x] **Step 8: Commit the worker slice**
 
 Commit: `feat(sharing): execute clone jobs safely`
 

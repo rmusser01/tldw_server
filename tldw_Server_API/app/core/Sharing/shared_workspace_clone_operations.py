@@ -46,6 +46,9 @@ _PROGRESS_PHASES = frozenset(
     }
 )
 _TERMINAL_FAILURE_STATUSES = frozenset({"failed", "cancelled", "quarantined"})
+_PUBLICATION_ABORT_CODES = frozenset(
+    {"clone_access_revoked", "clone_permission_removed"}
+)
 _RETRYABLE_FAILURE_CODES = frozenset(
     {
         "clone_interrupted",
@@ -137,6 +140,109 @@ def _canonical_json(value: Mapping[str, Any]) -> bytes:
     ).encode("ascii")
 
 
+def clone_request_fingerprint(
+    *,
+    share_id: int,
+    recipient_user_id: int,
+    requested_name: str | None,
+) -> str:
+    """Fingerprint the normalized, server-owned identity of one clone request."""
+
+    if isinstance(share_id, bool) or not isinstance(share_id, int) or share_id <= 0:
+        raise ValueError("share_id must be a positive integer")
+    if (
+        isinstance(recipient_user_id, bool)
+        or not isinstance(recipient_user_id, int)
+        or recipient_user_id <= 0
+    ):
+        raise ValueError("recipient_user_id must be a positive integer")
+    identity = {
+        "schema_version": CLONE_SCHEMA_VERSION,
+        "share_id": share_id,
+        "recipient_user_id": recipient_user_id,
+        "requested_name": normalize_clone_name(requested_name),
+    }
+    return _sha256(_canonical_json(identity))
+
+
+def build_clone_publication_checkpoint(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Persist the authorization checkpoint before exposing cloned resources."""
+
+    validated = SharedWorkspaceCloneResult.model_validate(dict(result))
+    if validated.publication_confirmed:
+        raise ValueError("publication checkpoint requires an unconfirmed result")
+    return {
+        "schema_version": CLONE_SCHEMA_VERSION,
+        "publication_state": "authorized",
+        "clone_result": validated.model_dump(mode="json"),
+    }
+
+
+def parse_clone_publication_checkpoint(value: Any) -> dict[str, Any] | None:
+    """Return the validated unconfirmed clone result from an exact checkpoint."""
+
+    candidate = _mapping(value)
+    if candidate.get("publication_state") != "authorized":
+        return None
+    if set(candidate) != {"schema_version", "publication_state", "clone_result"}:
+        raise ValueError("publication checkpoint is malformed")
+    if candidate.get("schema_version") != CLONE_SCHEMA_VERSION:
+        raise ValueError("publication checkpoint schema is unsupported")
+    validated = SharedWorkspaceCloneResult.model_validate(
+        _mapping(candidate.get("clone_result"))
+    )
+    if validated.publication_confirmed:
+        raise ValueError("publication checkpoint result must be unconfirmed")
+    return validated.model_dump(mode="json")
+
+
+def build_clone_publication_abort(
+    failure_code: str,
+    *,
+    cleanup_state: str = "complete",
+) -> dict[str, Any]:
+    """Build the bounded terminal result for a compensated publication denial."""
+
+    if failure_code not in _PUBLICATION_ABORT_CODES:
+        raise ValueError("publication abort code is unsupported")
+    if cleanup_state not in {"pending", "complete"}:
+        raise ValueError("publication abort cleanup state is unsupported")
+    return {
+        "schema_version": CLONE_SCHEMA_VERSION,
+        "publication_state": (
+            "aborted" if cleanup_state == "complete" else "aborting"
+        ),
+        "failure_code": failure_code,
+        "cleanup_state": cleanup_state,
+    }
+
+
+def parse_clone_publication_abort(value: Any) -> tuple[str, str] | None:
+    """Return the exact failure code and cleanup state from an abort result."""
+
+    candidate = _mapping(value)
+    publication_state = candidate.get("publication_state")
+    if publication_state not in {"aborting", "aborted"}:
+        return None
+    if set(candidate) != {
+        "schema_version",
+        "publication_state",
+        "failure_code",
+        "cleanup_state",
+    }:
+        raise ValueError("publication abort result is malformed")
+    failure_code = candidate.get("failure_code")
+    cleanup_state = candidate.get("cleanup_state")
+    if (
+        candidate.get("schema_version") != CLONE_SCHEMA_VERSION
+        or failure_code not in _PUBLICATION_ABORT_CODES
+        or (publication_state, cleanup_state)
+        not in {("aborting", "pending"), ("aborted", "complete")}
+    ):
+        raise ValueError("publication abort result is malformed")
+    return str(failure_code), str(cleanup_state)
+
+
 def build_clone_admission_command(
     *,
     share_id: int,
@@ -166,7 +272,11 @@ def build_clone_admission_command(
         "recipient_user_id": recipient_user_id,
         "requested_name": name,
     }
-    fingerprint = _sha256(_canonical_json(identity))
+    fingerprint = clone_request_fingerprint(
+        share_id=share_id,
+        recipient_user_id=recipient_user_id,
+        requested_name=name,
+    )
     key_digest = _sha256(f"{recipient_user_id}\0{key}".encode("ascii"))
     operation_scope = f"share:{share_id}"
     payload = {**identity, "request_fingerprint": fingerprint}
@@ -303,21 +413,29 @@ def _cleanup_state(job: Mapping[str, Any]) -> str:
     return str(state)
 
 
-def _failure(job: Mapping[str, Any], status: str) -> tuple[SharedWorkspaceCloneError, bool]:
-    raw_code = job.get("error_code")
-    if not isinstance(raw_code, str) or _SAFE_ERROR_CODE_RE.fullmatch(raw_code) is None:
-        raw_code = "clone_interrupted" if status == "cancelled" else "clone_failed"
-    code = raw_code if raw_code in _ERROR_COPY else "clone_failed"
+def _failure_from_code(
+    code: str,
+    *,
+    cleanup_state: str,
+) -> tuple[SharedWorkspaceCloneError, bool]:
+    code = code if code in _ERROR_COPY else "clone_failed"
     message_key, message = _ERROR_COPY.get(code, _GENERIC_ERROR)
     return (
         SharedWorkspaceCloneError(
             code=code,
             message_key=message_key,
             message=message,
-            cleanup_state=_cleanup_state(job),
+            cleanup_state=cleanup_state,
         ),
         code in _RETRYABLE_FAILURE_CODES,
     )
+
+
+def _failure(job: Mapping[str, Any], status: str) -> tuple[SharedWorkspaceCloneError, bool]:
+    raw_code = job.get("error_code")
+    if not isinstance(raw_code, str) or _SAFE_ERROR_CODE_RE.fullmatch(raw_code) is None:
+        raw_code = "clone_interrupted" if status == "cancelled" else "clone_failed"
+    return _failure_from_code(raw_code, cleanup_state=_cleanup_state(job))
 
 
 def project_clone_operation(
@@ -349,10 +467,31 @@ def project_clone_operation(
             public_status = "queued" if status == "queued" else "running"
             progress = _progress(job, status)
         elif status == "completed":
-            public_status = "succeeded"
-            result = SharedWorkspaceCloneResult.model_validate(_mapping(job.get("result")))
-            if not result.publication_confirmed or result.workspace_id != workspace_id:
-                raise CloneOperationUnavailable("clone result is not publication-confirmed")
+            raw_result = _mapping(job.get("result"))
+            publication_abort = parse_clone_publication_abort(raw_result)
+            if publication_abort is not None:
+                public_status = "failed"
+                error, retryable = _failure_from_code(
+                    publication_abort[0],
+                    cleanup_state=publication_abort[1],
+                )
+            else:
+                checkpoint_result = parse_clone_publication_checkpoint(raw_result)
+                result = SharedWorkspaceCloneResult.model_validate(
+                    checkpoint_result if checkpoint_result is not None else raw_result
+                )
+                if result.workspace_id != workspace_id:
+                    raise CloneOperationUnavailable("clone result target is invalid")
+                if result.publication_confirmed:
+                    public_status = "succeeded"
+                else:
+                    public_status = "running"
+                    progress = SharedWorkspaceCloneProgress(
+                        phase="finalizing",
+                        percent=99,
+                        message_code="clone_finalizing",
+                    )
+                    result = None
         elif status in _TERMINAL_FAILURE_STATUSES:
             public_status = "failed"
             error, retryable = _failure(job, status)
@@ -392,7 +531,12 @@ __all__ = [
     "CloneOperationNotFound",
     "CloneOperationUnavailable",
     "build_clone_admission_command",
+    "build_clone_publication_abort",
+    "build_clone_publication_checkpoint",
+    "clone_request_fingerprint",
     "normalize_clone_name",
+    "parse_clone_publication_abort",
+    "parse_clone_publication_checkpoint",
     "project_clone_operation",
     "target_workspace_id",
     "validate_idempotency_key",

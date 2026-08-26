@@ -303,7 +303,7 @@ class WorkspaceCloneResult:
         object.__setattr__(self, "warnings", normalized_warnings)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class CloneCancelled(Exception):
     """Controlled cooperative-cancellation failure with no unsafe detail."""
 
@@ -317,7 +317,7 @@ class CloneCancelled(Exception):
         Exception.__init__(self, self.code)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class CloneSnapshotUnavailable(Exception):
     """Controlled failure when a coherent source snapshot cannot be established."""
 
@@ -331,7 +331,7 @@ class CloneSnapshotUnavailable(Exception):
         Exception.__init__(self, self.code)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class ClonePersistenceError(Exception):
     """Controlled fatal clone persistence failure with bounded diagnostics."""
 

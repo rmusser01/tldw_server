@@ -4035,6 +4035,8 @@ class JobManager:
             parsed = self._parse_json_value(raw_result)
             if parsed is None and compressed_result is not None:
                 parsed = self._decode_archive_blob(compressed_result)
+            if parsed is None:
+                parsed = {}
             return self._maybe_decrypt_json(
                 parsed,
                 fail_on_error=True,

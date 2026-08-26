@@ -68,7 +68,11 @@ def _command(
     replacement: dict[str, object] | None = None,
     **overrides: object,
 ) -> TerminalOperationResultPatchCommand:
-    current_result = current or {"schema_version": 1, "cleanup_state": "pending"}
+    current_result = (
+        current
+        if current is not None
+        else {"schema_version": 1, "cleanup_state": "pending"}
+    )
     values: dict[str, object] = {
         "job_uuid": str(job["uuid"]),
         "owner_user_id": "recipient-7",
@@ -123,6 +127,33 @@ def test_active_terminal_result_patch_is_exact_and_advances_updated_at(
     assert outcome is TerminalOperationResultPatchOutcome.APPLIED
     assert result == {"schema_version": 1, "cleanup_state": "complete"}
     assert updated_at != "2000-01-01 00:00:00"
+
+
+def test_failed_job_without_result_can_record_proven_cleanup(
+    terminal_manager: JobManager,
+) -> None:
+    job = _create_terminal_job(terminal_manager)
+    with sqlite3.connect(terminal_manager.db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status = 'failed', result = NULL WHERE uuid = ?",
+            (job["uuid"],),
+        )
+
+    outcome = terminal_manager.patch_terminal_operation_result(
+        _command(
+            job,
+            current={},
+            allowed_statuses=("failed",),
+        )
+    )
+
+    result, _updated_at = _stored_result(
+        terminal_manager,
+        "jobs",
+        str(job["uuid"]),
+    )
+    assert outcome is TerminalOperationResultPatchOutcome.APPLIED
+    assert result == {"schema_version": 1, "cleanup_state": "complete"}
 
 
 def test_archived_terminal_result_patch_clears_compressed_authority(

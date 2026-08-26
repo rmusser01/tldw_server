@@ -108,13 +108,13 @@ The worker derives the target workspace UUID deterministically from the durable 
 
 The Workspace DB adds explicit `reserve_clone_target`, `publish_clone_target`, and `discard_clone_target` methods rather than calling the currently nonexistent `CharactersRAGDB.create_workspace()` path. Reservation uses the deterministic ID, existing Workspace validation, `archived=true`, and a bounded system metadata marker containing the clone operation ID. It is idempotent only when an existing row carries the same marker and normalized request identity. A collision with any other row fails closed.
 
-Targets carrying the system clone marker are excluded from normal and archived recipient lists. Publication verifies the marker and sets `archived=false` only after copy/readiness validation, but retains a `publication_pending` marker until fenced Job completion succeeds. The worker then clears the marker best-effort, making the copy discoverable. Controlled failure soft-deletes the staged target. A bounded clone-worker reconciliation pass cleans staged or publication-pending targets correlated with terminal failed/cancelled/quarantined Jobs, and clears stale markers from valid completed targets after a hard process exit. It uses the same operation ownership markers for media cleanup. This keeps partial targets out of normal Workspace navigation without inventing a second operation-status store.
+Targets carrying the system clone marker are excluded from normal and archived recipient lists. Publication verifies the marker and sets `archived=false` only after copy/readiness validation, but retains a `publication_pending` marker until fenced Job completion succeeds. The completed Job initially stores an unconfirmed clone result. After one final authorization check, an exact terminal-result CAS replaces it with a bounded `authorized` publication checkpoint before any media marker is cleared. That checkpoint is the durable point of no return: the worker exposes exact operation-owned media, exposes the Workspace, and then CASes the result to `publication_confirmed=true`. A revoked permission path must first win an `aborting` CAS before deleting anything, then records `aborted` only after cleanup is proven. Controlled copy failure soft-deletes the staged target. A bounded clone-worker reconciliation pass resumes authorized publication, resumes aborting cleanup, cleans staged targets correlated with terminal failed/cancelled/quarantined Jobs, and confirms valid completed targets after a hard process exit. This keeps partial targets out of normal Workspace navigation without inventing a second operation-status store or allowing publication and cleanup to race.
 
 The initial clone implementation is not transactionally resumable across ChaChaNotes and Media databases. Automatic retries are disabled. A terminal fatal failure is not re-enqueued with the same key. `Try again` generates a new idempotency key and therefore a new Job and deterministic target ID.
 
 ### Authorization And Capability Policy
 
-Admission resolves the canonical active recipient share and checks `allow_clone`. The worker repeats that resolution before opening owner content databases, before each top-level source/note/artifact copy, and before publication. Revoked access or removed clone permission triggers controlled cancellation and cleanup. Authorization reads use a thread-local repository handle and never trust permission claims from the Job payload.
+Admission resolves the canonical active recipient share and checks `allow_clone`. The worker repeats that resolution before opening owner content databases, before each top-level source/note/artifact copy, and immediately before committing the durable publication checkpoint. Revoked access or removed clone permission before that checkpoint triggers controlled cancellation or CAS-selected compensation and cleanup. Once the checkpoint wins, reconciliation completes publication without reauthorizing because media activation clears operation markers and therefore cannot be rolled back safely after a hard exit. Authorization reads never trust permission claims from the Job payload.
 
 Status lookup authenticates the Job owner first, then verifies domain, queue, type, and share correlation from bounded identifiers. Missing, foreign, malformed, or mismatched operations return the same neutral `404`. Status remains readable by its recipient owner after later share revocation.
 
@@ -166,6 +166,8 @@ Jobs statuses map as follows:
 
 - `queued` -> `queued`
 - `processing` -> `running`
+- `completed` with a valid unconfirmed result or `authorized` checkpoint -> `running` in the `finalizing` phase
+- `completed` with an exact `aborting` or `aborted` compensation result -> `failed` with bounded cleanup state
 - `completed` -> `succeeded` only when the typed result validates and records `publication_confirmed=true`
 - `failed`, `cancelled`, or `quarantined` -> `failed`
 
@@ -191,7 +193,7 @@ The result contains:
 
 - `outcome`: `complete` or `partial`
 - target workspace ID and normalized name
-- `publication_confirmed`: true only after the deterministic target was published before fenced Job completion
+- `publication_confirmed`: true only after exact operation-owned media and the deterministic target are public and the terminal-result confirmation CAS succeeds
 - attempted, copied, and failed counts by item class, plus operation-owned media created count
 - retrieval readiness:
   - `text_search`: `ready` or `unavailable`
@@ -255,7 +257,7 @@ The spec uses shutdown phase `JOB_POLLER_QUIESCE`. New acquisition stops before 
 
 The copy represents a point-in-time snapshot taken when worker execution begins, not an unlabelled mixture of owner edits made during the run. After permission validation, the source ChaChaNotes and Media repositories open read-only repeatable snapshots using their backend-native transaction support. Target writes use separate recipient connections. Source Workspace metadata, membership rows, media content, chunks, and transcripts are read from those snapshots.
 
-If either backend cannot establish the required read snapshot, a referenced source cannot be read consistently, or the snapshot is lost, the worker fails with `source_snapshot_unavailable` before publication. It does not silently continue from fresh reads. Permission is still rechecked outside the content snapshot between top-level items and immediately before publication, so a revocation cancels the operation even though the source snapshot remains readable.
+If either backend cannot establish the required read snapshot, a referenced source cannot be read consistently, or the snapshot is lost, the worker fails with `source_snapshot_unavailable` before publication. It does not silently continue from fresh reads. Permission is still rechecked outside the content snapshot between top-level items and immediately before the durable publication checkpoint, so a revocation before that checkpoint cancels or compensates the operation even though the source snapshot remains readable.
 
 ## WebUI Design
 
