@@ -10,11 +10,13 @@
   `a53fe714f9610c6b908504381838409a039051ba`
 - Final reviewer-remediated CI/E2E source commit:
   `dac56c2004b859103ceef393f023927014a988da`
+- Latest Qodo and independent-review remediation source commit:
+  `517d7b016089e220fa55eab3483f212031b6f5cb`
 - Rebased onto: `origin/dev` at
   `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
 - Final ratchet comparison base: `origin/dev` at
   `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
-- Final verification timestamp: `2026-08-26T00:16:51Z`
+- Final verification timestamp: `2026-08-26T01:51:37Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -54,6 +56,8 @@ This evidence file is a documentation-only follow-up to those source trees.
 | Package-wide admin UI tests | STRICT RATCHET PASS: 41 inherited failures, 0 regressions; all safety counters zero |
 | Package-wide admin UI lint | PASS: 0 errors, 41 unchanged warnings |
 | Two-project real-backend Playwright | PASS: JWT 26 passed/1 expected skip; single-user 1 passed/26 expected skips |
+| Post-ratchet review remediation | PASS locally: 4 Qodo findings and 7 independent-review findings closed |
+| Credential destination proof | PASS: hostile request Host never received the single-user API key |
 
 PR 1 remains default-off. These results do not authorize outbound webhook
 delivery or canonical activation.
@@ -600,14 +604,17 @@ frontend unit shards, backend/security checks, CodeQL, and the reported E2E
 smoke and onboarding/UX checks passed in that hosted run.
 
 Source commit `a53fe714f9610c6b908504381838409a039051ba` introduced the
-exact-base ratchet. Final reviewer-remediated source
-`dac56c2004b859103ceef393f023927014a988da` closes the remaining report,
-provenance, and runner gaps. The workflow now:
+exact-base ratchet. Reviewer-remediated source
+`dac56c2004b859103ceef393f023927014a988da` closed the initial report,
+provenance, and runner gaps. Latest remediation source
+`517d7b016089e220fa55eab3483f212031b6f5cb` closes the subsequent Qodo,
+independent-review, and old-head CI findings. The workflow now:
 
 1. installs frozen head dependencies and runs the complete head suite with
    human-readable, JSON, and minimal safety reporters;
-2. rejects zero-test runs, inconsistent JSON counters, unhandled errors,
-   module/suite errors, and failed or inconsistent hook lifecycles;
+2. rejects zero-test runs, missing file-level messages, assertion or nested
+   suite counter inconsistencies, unhandled errors, module/suite errors, and
+   failed or inconsistent hook lifecycles;
 3. fingerprints each failed assertion by package-relative file, full name,
    normalized failure messages, and duplicate multiplicity;
 4. extracts only validated failed files, rejects every changed failed-test
@@ -615,7 +622,10 @@ provenance, and runner gaps. The workflow now:
 5. uses NUL-delimited repository-relative changed paths and `./`-prefixed
    replay paths, then permits only exact unchanged base failure fingerprints;
 6. pins the checked-out helper and safety reporter to workflow constants with
-   SHA-256 and rejects any mismatch.
+   SHA-256, then revalidates after the head run, before base replay, and before
+   comparison;
+7. publishes manual runs as `frontend-required-diagnostic`, so a manually
+   dispatched diagnostic cannot satisfy the protected required-check name.
 
 The digest check has an event-dependent trust boundary. A default-branch
 `workflow_run` authenticates the checked-out head artifacts against the
@@ -625,7 +635,7 @@ constants, and checked-out artifacts. A manual `workflow_dispatch` inherits
 the trust of the selected workflow ref. The final pinned digests are:
 
 ```text
-ratchet helper:  b74fdd14d915134458bc0334c4db2e992497f00bc07ab8c9353967c7169f3ede
+ratchet helper:  cdb398d906152e741fe01636a18c4ac1f1bfec59ff78bad7b21d02212fcd1a9f
 safety reporter: 433e8ab9a163694775fa4a50ceae2f7722358331d1f8f4426ec7ec31e36e93f3
 ```
 
@@ -633,9 +643,11 @@ The final exact comparison used Node 20.19.5, Bun 1.3.2, and base
 `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`:
 
 ```text
-full head:             41 failed, 720 passed, 761 total, 17 failed files
-head safety:           modules=145, unhandled=0, module=0, hook=0
+full head:             41 failed, 728 passed, 769 total, 17 failed files
+head suites:           346 total, 312 passed, 34 failed, 0 pending
+head safety:           modules=146, unhandled=0, module=0, hook=0
 exact-base replay:     41 failed,  89 passed, 130 total, 17 failed files
+base suites:            43 total,   9 passed, 34 failed, 0 pending
 base safety:           modules=17,  unhandled=0, module=0, hook=0
 ratchet comparison:    inherited=41 regressions=0, exit 0
 ```
@@ -646,13 +658,45 @@ The final failed-file list exactly matched the prior strict run. None of those
 regressions, proving that an otherwise inherited failure becomes blocking when
 its owning test file changes.
 
+Qodo comment `5383466884` was refreshed against the previous pushed head and
+reported four valid findings. The remediation prevents request-controlled
+hostnames and protocols from selecting a credential-bearing backend, replaces
+synchronous filesystem calls in async reporter tests, documents every
+`compare_reports` option and failure contract, and honors project-specific
+backend URL overrides. The request now selects only the known `3101` or `3102`
+project; the destination comes from its explicit project environment variable
+or trusted loopback default.
+
+Independent review additionally found a digest revalidation gap, incomplete
+strict suite-metadata reconciliation, direct manual-input interpolation into
+Bash, a manual required-check self-ratchet path, swallowed teardown failures,
+and incomplete hook-lifecycle coverage. All were reproduced or inspected and
+closed. The reviewer suggestion to equate suite count with file count was not
+adopted because real Vitest output contains nested suites: the final report has
+346 suites across 146 files. The helper instead derives each file root and
+every `ancestorTitles` prefix, applies failed-over-passed-over-pending status
+precedence, and exactly reconciles the real head and base reports.
+
+The prior remote head's hosted run failed all eight frontend unit shards for a
+single workflow-policy reason: dependency impact exceeded 500 tests and no
+frontend test file was directly changed. The workflow previously exited before
+sharding. It now retains and shards the complete dependency-impact set in that
+case; directly changed tests remain the bounded fallback when such tests exist.
+
+A production build/start proof used JWT and single-user overrides on ports
+`9101` and `9102`, started the single-user UI on `3102`, and sent a request with
+`Host: attacker.example:3102` plus an API-key cookie. The UI returned 200 while
+the mock backend recorded `GET /api/v1/users/me`, the API-key header, and
+`Host: 127.0.0.1:9102`. The hostile hostname received no request or credential.
+
 TDD and final verification:
 
 ```text
 real failed-beforeEach lifecycle regression:  RED before hook accounting
-reporter lifecycle regression:                 4 passed
-reporter/project-routing/middleware matrix:    10 passed
-ratchet helper/workflow contracts:             24 passed
+all four hook lifecycle cases:                 PASS
+reporter/routing/health/teardown matrix:        5 files, 21 passed
+ratchet helper/workflow contracts:             34 passed
+embedded workflow Bash syntax:                 22 steps passed bash -n
 strict exact-base comparison:                  inherited=41 regressions=0
 Ruff and git diff --check:                     PASS
 admin package lint:                            PASS, 0 errors, 41 baseline warnings
@@ -661,6 +705,10 @@ admin production build:                       PASS, 49/49 pages
 real-backend JWT project:                      26 passed, 1 expected skip
 real-backend single-user project:              1 passed, 26 expected skips
 ```
+
+`actionlint` was not installed in the local environment. The workflow parsed
+through PyYAML in the 34 passing contract tests, and all 22 Bash `run` blocks
+passed `bash -n`; GitHub's exact-head workflow validation remains required.
 
 The complete local `tests/CI` collection finished with 225 passed and two
 failures. Both reproduce unchanged on the exact base: the stale
@@ -736,7 +784,7 @@ clean suite; they are governed by the strict exact-base ratchet.
 ## Final Safety Checks
 
 - `git diff --check`: PASS at tested source commit
-  `dac56c2004b859103ceef393f023927014a988da`.
+  `517d7b016089e220fa55eab3483f212031b6f5cb`.
 - Exact-base admin UI comparison: PASS with 41 inherited failures and 0
   regressions; head and base unhandled/module/hook safety counters are all zero.
 - Real-backend admin UI: PASS in sequential JWT and single-user processes;
