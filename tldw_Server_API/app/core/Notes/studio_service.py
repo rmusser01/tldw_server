@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
 )
 from tldw_Server_API.app.core.Notes.studio_markdown import (
     NOTE_STUDIO_RENDER_VERSION,
-    normalize_studio_payload,
+    build_derived_studio_payload,
     render_studio_markdown,
     stable_content_hash,
     studio_payload_from_markdown,
@@ -170,19 +170,23 @@ class NotesStudioService:
         payload = generated.get("payload")
         if not isinstance(payload, dict) or not payload:
             raise InputError("Notes Studio generation failed to return a canonical payload.")  # noqa: TRY003
+        try:
+            payload = build_derived_studio_payload(
+                payload,
+                template_type=template_type,
+                handwriting_mode=handwriting_mode,
+                render_version=NOTE_STUDIO_RENDER_VERSION,
+                fallback_title=derived_title,
+                source_note_id=str(source_note["id"]),
+            )
+        except (TypeError, ValueError) as exc:
+            raise InputError(
+                "Notes Studio generation did not return canonical sections."
+            ) from exc
         executed_provider, executed_model = self._derive_execution_identity(
             generated,
             provider=provider,
             model=model,
-        )
-
-        payload = normalize_studio_payload(
-            payload,
-            template_type=template_type,
-            handwriting_mode=handwriting_mode,
-            render_version=NOTE_STUDIO_RENDER_VERSION,
-            fallback_title=derived_title,
-            source_note_id=str(source_note["id"]),
         )
 
         markdown = render_studio_markdown(payload)

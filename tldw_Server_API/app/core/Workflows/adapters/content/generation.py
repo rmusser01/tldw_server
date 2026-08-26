@@ -22,8 +22,8 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
-    StudioSectionsV1,
+from tldw_Server_API.app.core.Notes.studio_markdown import (
+    canonical_studio_sections,
 )
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
@@ -123,9 +123,7 @@ def _sanitize_notes_studio_llm_payload(payload: object) -> dict[str, Any] | None
     if not isinstance(payload, Mapping) or "sections" not in payload:
         return None
     try:
-        sections = StudioSectionsV1.model_validate(
-            {"sections": payload["sections"]}
-        ).model_dump(mode="json")
+        sections = {"sections": canonical_studio_sections(payload["sections"])}
     except (TypeError, ValueError):
         return None
 

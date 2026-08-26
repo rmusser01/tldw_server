@@ -16,6 +16,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    StudioSectionsV1,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -725,6 +728,159 @@ def test_real_generation_adapter_no_provider_fallback_persists_canonical_aliases
         "handwriting_mode": "accented",
         "render_version": 1,
     }
+
+
+def test_real_generation_adapter_preserves_exact_contract_sections_and_llm_identity(
+    studio_db,
+):
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    assert source_note_id is not None
+    service = NotesStudioService(db=db, user_id="notes_studio_unit")
+    raw_sections = [
+        {
+            "id": "questions-custom-α",
+            "kind": "cue",
+            "title": "  Révision 🌿  ",
+            "items": ["  leading cue  ", "Cafe\u0301 and 漢字  "],
+        },
+        {
+            "id": "summary-custom",
+            "kind": "summary",
+            "title": "  Non-default summary  ",
+            "content": "  leading summary\ntrailing summary  ",
+        },
+        {
+            "id": "notes-custom",
+            "kind": "notes",
+            "title": "Notes Δ",
+            "content": "  leading notes\ntrailing notes  ",
+        },
+    ]
+    expected_sections = StudioSectionsV1.model_validate(
+        {"sections": raw_sections}
+    ).model_dump(mode="json")["sections"]
+
+    with patch(
+        "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+        return_value=json.dumps(
+            {
+                "meta": {"title": "Provider Study Notes"},
+                "sections": raw_sections,
+            },
+            ensure_ascii=False,
+        ),
+    ):
+        result = asyncio.run(
+            service.derive_from_excerpt(
+                source_note_id=str(source_note_id),
+                excerpt_text="Accepted excerpt",
+                template_type="lined",
+                handwriting_mode="accented",
+                provider="openai",
+                model="gpt-test",
+            )
+        )
+
+    document = result["studio_document"]
+    assert document["payload_json"]["sections"] == expected_sections
+    assert document["accepted_provenance_json"]["provider"] == "openai"
+    assert document["accepted_provenance_json"]["model"] == "gpt-test"
+
+
+def test_custom_generation_adapter_preserves_valid_contract_sections_before_provenance(
+    studio_db,
+):
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    assert source_note_id is not None
+    raw_sections = [
+        {
+            "id": "custom-cue",
+            "kind": "cue",
+            "title": "  Prompt  ",
+            "items": ["  exact item  "],
+        },
+        {
+            "id": "custom-summary",
+            "kind": "summary",
+            "title": "Summary",
+            "content": "  exact summary  ",
+        },
+    ]
+
+    async def adapter(_request, _context):
+        return {
+            "source": "llm",
+            "payload": {
+                "meta": {"title": "Custom Study Notes", "provider_only": "drop"},
+                "layout": {"provider_only": True},
+                "sections": raw_sections,
+                "provider_only": {"trace": "drop"},
+            },
+        }
+
+    result = asyncio.run(
+        NotesStudioService(
+            db=db,
+            user_id="notes_studio_unit",
+            generation_adapter=adapter,
+        ).derive_from_excerpt(
+            source_note_id=str(source_note_id),
+            excerpt_text="Accepted excerpt",
+            template_type="lined",
+            handwriting_mode="accented",
+            provider="openai",
+            model="gpt-test",
+        )
+    )
+
+    document = result["studio_document"]
+    assert document["payload_json"]["sections"] == raw_sections
+    assert set(document["payload_json"]) == {"meta", "layout", "sections"}
+    assert set(document["payload_json"]["meta"]) == {"title", "source_note_id"}
+    assert document["accepted_provenance_json"]["provider"] == "openai"
+    assert document["accepted_provenance_json"]["model"] == "gpt-test"
+
+
+def test_custom_llm_adapter_with_invalid_sections_is_rejected_before_provenance(
+    studio_db,
+):
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    assert source_note_id is not None
+
+    async def adapter(_request, _context):
+        return {
+            "source": "llm",
+            "payload": {
+                "sections": [
+                    {
+                        "id": "invalid",
+                        "kind": "provider-kind",
+                        "title": "Provider section",
+                        "content": "Provider content",
+                    }
+                ]
+            },
+        }
+
+    with pytest.raises(InputError, match="canonical sections"):
+        asyncio.run(
+            NotesStudioService(
+                db=db,
+                user_id="notes_studio_unit",
+                generation_adapter=adapter,
+            ).derive_from_excerpt(
+                source_note_id=str(source_note_id),
+                excerpt_text="Accepted excerpt",
+                template_type="lined",
+                handwriting_mode="accented",
+                provider="openai",
+                model="gpt-test",
+            )
+        )
 
 
 @pytest.mark.parametrize(
