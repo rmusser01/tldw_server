@@ -317,6 +317,33 @@ def test_ensure_studio_document_accepts_identical_storage_normalized_retry(
     assert second["canonical_revision"] == 1
 
 
+@pytest.mark.parametrize(
+    "companion_hash_hint",
+    (None, stable_content_hash("caller supplied non-authoritative content")),
+    ids=("none", "non-authoritative"),
+)
+def test_ensure_studio_document_normalizes_companion_hash_hint_on_retry(
+    studio_db,
+    companion_hash_hint: str | None,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    companion = "# Study\n\nAccepted companion"
+    note_id = db.add_note(title="Study", content=companion)
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id), source_note_id=str(source_note_id)
+    )
+    fields["companion_content_hash"] = companion_hash_hint
+
+    first = service._ensure_studio_document(**fields)
+    second = service._ensure_studio_document(**fields)
+
+    assert second == first
+    assert second["companion_content_hash"] == stable_content_hash(companion)
+
+
 def test_ensure_studio_document_returns_exact_stored_state_after_parent_edit(
     studio_db,
 ) -> None:
@@ -412,7 +439,7 @@ def test_ensure_studio_document_rejects_different_payload_after_parent_edit(
 
 @pytest.mark.parametrize(
     "difference",
-    ("source", "excerpt", "manifest", "provenance", "companion"),
+    ("source", "excerpt", "manifest", "provenance"),
 )
 def test_ensure_studio_document_rejects_other_different_accepted_semantics(
     studio_db,
@@ -465,8 +492,6 @@ def test_ensure_studio_document_rejects_other_different_accepted_semantics(
         }
     elif difference == "provenance":
         changed["provenance_model"] = "gpt-different"
-    else:
-        changed["companion_content_hash"] = stable_content_hash("Different companion")
 
     with pytest.raises(ConflictError, match="captured retry"):
         service._ensure_studio_document(**changed)
@@ -495,6 +520,45 @@ def test_ensure_studio_document_returns_exact_parent_tombstone_lifecycle(
 
     assert replayed == tombstone
     assert replayed["canonical_hash"] != live["canonical_hash"]
+
+
+@pytest.mark.parametrize(
+    "companion_hash_hint",
+    (None, stable_content_hash("caller supplied non-authoritative content")),
+    ids=("none", "non-authoritative"),
+)
+def test_ensure_studio_document_normalizes_companion_hint_for_tombstone_replay(
+    studio_db,
+    companion_hash_hint: str | None,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id), source_note_id=str(source_note_id)
+    )
+    fields["companion_content_hash"] = companion_hash_hint
+    service._ensure_studio_document(**fields)
+    parent = db.get_note_by_id(str(note_id))
+    assert parent is not None
+    db.soft_delete_note(str(note_id), expected_version=int(parent["version"]))
+    before = dict(
+        db.execute_query(
+            "SELECT * FROM note_studio_documents WHERE note_id=?", (note_id,)
+        ).fetchone()
+    )
+
+    replayed = service._ensure_studio_document(**fields)
+
+    after = dict(
+        db.execute_query(
+            "SELECT * FROM note_studio_documents WHERE note_id=?", (note_id,)
+        ).fetchone()
+    )
+    assert replayed["deleted"] == 1
+    assert after == before
 
 
 def test_upsert_studio_document_rejects_grouped_tombstone_mutation(
@@ -695,6 +759,39 @@ def test_ensure_studio_document_concurrent_identical_creators_converge(
         (note_id,),
     ).fetchone()
     assert rows["total"] == 1
+
+
+@pytest.mark.parametrize(
+    "companion_hash_hint",
+    (None, stable_content_hash("caller supplied non-authoritative content")),
+    ids=("none", "non-authoritative"),
+)
+def test_ensure_studio_document_concurrent_companion_hash_hints_converge(
+    studio_db,
+    companion_hash_hint: str | None,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    fields = _studio_ensure_fields(
+        note_id=str(note_id), source_note_id=str(source_note_id)
+    )
+    fields["companion_content_hash"] = companion_hash_hint
+    barrier = threading.Barrier(2)
+
+    def create() -> dict[str, object]:
+        barrier.wait(timeout=10)
+        return _service(db)._ensure_studio_document(**fields)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(create), pool.submit(create)]
+        results = [future.result(timeout=30) for future in futures]
+
+    assert results[0] == results[1]
+    assert results[0]["companion_content_hash"] == stable_content_hash(
+        "# Study\n\nAccepted companion"
+    )
 
 
 def test_ensure_studio_document_rejects_semantically_different_retry(

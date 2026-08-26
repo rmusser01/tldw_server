@@ -737,7 +737,6 @@ class NoteStore:
                 "excerpt_snapshot",
                 "excerpt_hash",
                 "diagram_manifest_json",
-                "companion_content_hash",
                 "render_version",
             )
         }
