@@ -15,6 +15,10 @@ from pydantic import Field
 from tldw_Server_API.app.api.v1.endpoints import sharing as sharing_endpoints
 from tldw_Server_API.app.api.v1.endpoints.sharing import router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+    SharedWorkspaceAccessService,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -58,6 +62,38 @@ def test_app(test_user):
 @pytest.fixture
 def client(test_app):
     return TestClient(test_app)
+
+
+@pytest.fixture
+def clone_client(test_app, mock_repo, monkeypatch, tmp_path):
+    class _UsersRepo:
+        async def get_user_by_id(self, user_id: int):
+            assert user_id == 1
+            return {"id": user_id, "username": "alice"}
+
+    class _OwnerDb:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "name": workspace_id}
+
+    async def _owner_db(owner_user_id: int):
+        assert owner_user_id == 1
+        return _OwnerDb()
+
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_SHARING", "workspace-clone")
+    monkeypatch.setenv("JOBS_METRICS_GAUGES_ENABLED", "false")
+    manager = JobManager(tmp_path / "sharing-clone-jobs.db")
+    access_service = SharedWorkspaceAccessService(
+        mock_repo,
+        _UsersRepo(),
+        _owner_db,
+    )
+    test_app.dependency_overrides[
+        sharing_endpoints.try_get_job_manager
+    ] = lambda: manager
+    test_app.dependency_overrides[
+        sharing_endpoints.get_shared_workspace_access_service
+    ] = lambda: access_service
+    return TestClient(test_app), manager
 
 
 @pytest.mark.asyncio
@@ -776,57 +812,51 @@ class TestSharedWithMe:
 
 
 class TestClone:
-    def test_clone_shared_workspace(self, client, mock_repo):
+    def test_clone_shared_workspace(self, clone_client, mock_repo):
+        client, manager = clone_client
         create = client.post("/api/v1/sharing/workspaces/ws-clone/share", json={
             "share_scope_type": "team",
             "share_scope_id": 10,
             "allow_clone": True,
         })
         share_id = create.json()["id"]
-        resp = client.post(f"/api/v1/sharing/shared-with-me/{share_id}/clone", json={
-            "new_name": "My Clone",
-        })
-        assert resp.status_code == 200
+        resp = client.post(
+            f"/api/v1/sharing/shared-with-me/{share_id}/clone",
+            headers={"Idempotency-Key": "sharing-clone-test-0001"},
+            json={"name": "My Clone"},
+        )
+        assert resp.status_code == 202
         data = resp.json()
-        assert data["status"] == "pending"
-        assert "job_id" in data
+        assert data["status"] == "queued"
+        assert data["command"] == "shared_workspace_clone"
+        assert data["share_id"] == share_id
+        assert len(manager.list_jobs(domain="sharing", owner_user_id="1")) == 1
 
-    def test_clone_not_allowed(self, client, mock_repo):
+    def test_clone_not_allowed(self, clone_client, mock_repo):
+        client, manager = clone_client
         create = client.post("/api/v1/sharing/workspaces/ws-noclone/share", json={
             "share_scope_type": "team",
             "share_scope_id": 10,
             "allow_clone": False,
         })
         share_id = create.json()["id"]
-        resp = client.post(f"/api/v1/sharing/shared-with-me/{share_id}/clone", json={})
+        resp = client.post(
+            f"/api/v1/sharing/shared-with-me/{share_id}/clone",
+            headers={"Idempotency-Key": "sharing-clone-test-0002"},
+            json={},
+        )
         assert resp.status_code == 403
+        assert manager.list_jobs(domain="sharing") == []
 
-    def test_clone_nonexistent_share(self, client, mock_repo):
-        resp = client.post("/api/v1/sharing/shared-with-me/9999/clone", json={})
+    def test_clone_nonexistent_share(self, clone_client, mock_repo):
+        client, manager = clone_client
+        resp = client.post(
+            "/api/v1/sharing/shared-with-me/9999/clone",
+            headers={"Idempotency-Key": "sharing-clone-test-0003"},
+            json={},
+        )
         assert resp.status_code == 404
-
-    def test_clone_task_failure_log_is_sanitized(self, monkeypatch):
-        from tldw_Server_API.app.api.v1.endpoints import sharing
-
-        async def _fail_get_chacha_db_for_owner(owner_user_id: int):
-            assert owner_user_id == 2
-            raise RuntimeError("clone backend exploded at /private/clone.db")
-
-        fake_logger = MagicMock()
-        monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_owner",
-            _fail_get_chacha_db_for_owner,
-        )
-        monkeypatch.setattr(sharing, "logger", fake_logger)
-
-        sharing._run_clone_task(
-            share={"owner_user_id": 2, "workspace_id": "private-ws"},
-            user_id=1,
-            new_name=None,
-            job_id="job-private-123",
-        )
-
-        fake_logger.error.assert_called_once_with("Clone job failed")
+        assert manager.list_jobs(domain="sharing") == []
 
 
 class TestShareTokens:

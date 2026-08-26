@@ -44,6 +44,24 @@ _ERRORS: dict[str, dict[str, Any]] = {
         "retryable": True,
         "recovery_action": "retry",
     },
+    "clone_not_allowed": {
+        "message": "The workspace owner does not allow copies of this share.",
+        "retryable": False,
+    },
+    "clone_operation_unavailable": {
+        "message": "Workspace copy status is temporarily unavailable.",
+        "retryable": True,
+        "recovery_action": "retry",
+    },
+    "idempotency_key_reused": {
+        "message": "This idempotency key was already used for another copy request.",
+        "retryable": False,
+    },
+    "clone_already_in_progress": {
+        "message": "A workspace copy is already in progress for this share.",
+        "retryable": False,
+        "recovery_action": "refresh",
+    },
     "shared_chat_rate_limited": {
         "message": "Shared chat requests are temporarily rate limited.",
         "retryable": True,

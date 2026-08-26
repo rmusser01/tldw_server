@@ -3096,6 +3096,24 @@ class JobManager:
                 conn.close()
 
     # CRUD / queries
+    def replay_idempotent_operation(
+        self,
+        command: IdempotentOperationCommand,
+    ) -> IdempotentOperationAdmission | None:
+        """Read an exact owner-scoped receipt without applying admission policy."""
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                return _postgres_replay_idempotent_operation(
+                    conn,
+                    self._pg_cursor,
+                    command,
+                )
+            return _sqlite_replay_idempotent_operation(conn, command)
+        finally:
+            conn.close()
+
     def admit_idempotent_operation(
         self,
         command: IdempotentOperationCommand,
@@ -3103,18 +3121,7 @@ class JobManager:
         """Atomically admit or replay one owner-scoped user operation."""
 
         job = command.job
-        replay_conn = self._connect()
-        try:
-            if self.backend == "postgres":
-                replay = _postgres_replay_idempotent_operation(
-                    replay_conn,
-                    self._pg_cursor,
-                    command,
-                )
-            else:
-                replay = _sqlite_replay_idempotent_operation(replay_conn, command)
-        finally:
-            replay_conn.close()
+        replay = self.replay_idempotent_operation(command)
         if replay is not None:
             return replay
 

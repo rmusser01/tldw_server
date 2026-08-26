@@ -36,6 +36,7 @@ class SharedWorkspaceErrorDetail(_RecipientModel):
     retryable: bool
     recovery_action: Literal["retry", "refresh", "reselect_sources"] | None = None
     retry_after_ms: int | None = Field(default=None, ge=0, le=1_800_000)
+    operation_id: UUID | None = None
 
 
 class SharedWorkspaceErrorResponse(_RecipientModel):

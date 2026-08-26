@@ -138,31 +138,31 @@ Commit: `feat(jobs): add scoped terminal operation updates`
 - Consumes: Task 1 admission/projection helpers, `try_get_job_manager`, canonical access service, and the generic receipt API.
 - Produces: canonical POST and GET routes returning `SharedWorkspaceCloneOperationResponse`; no `BackgroundTasks`, old `CloneWorkspaceResponse`, alias, or redirect.
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Cover required header validation, allow-clone authorization, no Jobs typed `503`, created/converged/replayed admission, same-key replay after revocation, mismatch and same-share active conflicts, terminal `200` versus active `202`, owner isolation, neutral malformed/wrong-scope `404`, exact poll href, bounded typed errors, and identical POST/GET envelopes.
 
-- [ ] **Step 2: Write failing OpenAPI and route-ownership tests**
+- [x] **Step 2: Write failing OpenAPI and route-ownership tests**
 
 Assert the exact request/response models and statuses, one POST plus one GET path, no old `CloneWorkspaceResponse`, no `BackgroundTasks` clone runner, and recipient route-class error normalization.
 
-- [ ] **Step 3: Run the API tests red**
+- [x] **Step 3: Run the API tests red**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Sharing/test_shared_workspace_clone_endpoints.py tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py`
 
-- [ ] **Step 4: Replace the endpoint atomically**
+- [x] **Step 4: Replace the endpoint atomically**
 
 Check a receipt replay before current share resolution, resolve access only for new admission, require `allow_clone`, call `admit_idempotent_operation`, emit `share.clone_requested` only for `CREATED`, and map all known conflicts/unavailability to stable typed responses. Status reads use only owner-scoped Jobs data and remain available after revocation.
 
-- [ ] **Step 5: Remove obsolete clone schemas and background execution**
+- [x] **Step 5: Remove obsolete clone schemas and background execution**
 
 Delete `CloneWorkspaceRequest`, `CloneWorkspaceResponse`, `_run_clone_task`, and their imports. Do not preserve compatibility paths.
 
-- [ ] **Step 6: Run API/OpenAPI tests green**
+- [x] **Step 6: Run API/OpenAPI tests green**
 
 Run the Step 3 command and require all tests to pass.
 
-- [ ] **Step 7: Commit the API slice**
+- [x] **Step 7: Commit the API slice**
 
 Commit: `feat(sharing): expose durable clone operations`
 

@@ -1104,7 +1104,7 @@ def test_valid_chat_route_returns_canonical_typed_response(api_factory, monkeypa
     assert captured["recipient_user_id"] == 9
 
 
-def test_recipient_openapi_keeps_typed_models_and_does_not_change_clone_route(api_factory) -> None:
+def test_recipient_openapi_keeps_typed_models_for_clone_route(api_factory) -> None:
     client, _service = api_factory()
 
     schema = client.get("/openapi.json").json()
@@ -1118,7 +1118,7 @@ def test_recipient_openapi_keeps_typed_models_and_does_not_change_clone_route(ap
     assert success_schema["$ref"].endswith("/SharedWorkspaceBootstrapResponse")
     clone = schema["paths"]["/api/v1/sharing/shared-with-me/{share_id}/clone"]["post"]
     assert clone["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
-        "/CloneWorkspaceResponse"
+        "/SharedWorkspaceCloneOperationResponse"
     )
 
 
@@ -1225,6 +1225,8 @@ def test_recipient_routes_have_isolated_permission_and_rate_dependencies() -> No
         "/sharing/shared-with-me/{share_id}/sources/{source_id}/preview": "sharing.read",
         "/sharing/shared-with-me/{share_id}/chat/messages": "sharing.read",
         "/sharing/shared-with-me/{share_id}/chat": "sharing.read",
+        "/sharing/shared-with-me/{share_id}/clone": "sharing.clone",
+        "/sharing/shared-with-me/{share_id}/clone/{operation_id}": "sharing.read",
     }
     routes = {route.path: route for route in sharing.router.routes if hasattr(route, "dependant")}
 
@@ -1244,5 +1246,4 @@ def test_recipient_routes_have_isolated_permission_and_rate_dependencies() -> No
             )
             for dependency in route.dependant.dependencies
         )
-    clone = routes["/sharing/shared-with-me/{share_id}/clone"]
-    assert not isinstance(clone, sharing.SharedWorkspaceRecipientRoute)
+        assert isinstance(route, sharing.SharedWorkspaceRecipientRoute)

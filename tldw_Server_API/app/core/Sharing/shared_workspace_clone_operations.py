@@ -178,7 +178,7 @@ def build_clone_admission_command(
             payload=payload,
             owner_user_id=str(recipient_user_id),
             batch_group=operation_scope,
-            priority=100,
+            priority=10,
             max_retries=0,
         ),
         key_digest=key_digest,

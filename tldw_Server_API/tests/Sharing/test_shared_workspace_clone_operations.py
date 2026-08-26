@@ -156,6 +156,7 @@ def test_admission_command_is_bounded_and_never_persists_raw_key() -> None:
     assert first.job.owner_user_id == "9"
     assert first.job.batch_group == first.operation_scope == "share:42"
     assert first.job.max_retries == 0
+    assert first.job.priority == 10
     assert first.job.idempotency_key is None
     assert first.job.payload == {
         "schema_version": 1,
