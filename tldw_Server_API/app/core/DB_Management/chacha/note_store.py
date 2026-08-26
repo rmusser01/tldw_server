@@ -708,6 +708,45 @@ class NoteStore:
         }
 
     @staticmethod
+    def _studio_retry_fingerprint(document: dict[str, Any]) -> str:
+        """Hash normalized accepted semantics while excluding server acceptance time."""
+        provenance = document.get("accepted_provenance_json")
+        if not isinstance(provenance, dict):
+            provenance = document.get("accepted_provenance")
+        if not isinstance(provenance, dict):
+            provenance = {}
+        semantic = {
+            key: document.get(key)
+            for key in (
+                "note_id",
+                "source_note_id",
+                "payload_json",
+                "template_type",
+                "handwriting_mode",
+                "excerpt_snapshot",
+                "excerpt_hash",
+                "diagram_manifest_json",
+                "companion_content_hash",
+                "render_version",
+                "note_revision",
+                "note_hash",
+            )
+        }
+        semantic["accepted_provenance"] = {
+            key: provenance.get(key)
+            for key in (
+                "kind",
+                "attestation",
+                "provider",
+                "model",
+                "source_revision",
+                "source_hash",
+                "result_hash",
+            )
+        }
+        return hashlib.sha256(canonical_json_bytes(semantic)).hexdigest()
+
+    @staticmethod
     def _studio_envelope_size(
         payload: dict[str, Any],
         *,
@@ -823,6 +862,7 @@ class NoteStore:
         provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None,
         upsert: bool,
+        ensure: bool = False,
     ) -> dict[str, Any]:
         normalized_note_id = str(note_id).strip()
         if not normalized_note_id:
@@ -891,8 +931,10 @@ class NoteStore:
             )
         else:
             owner = str(self._db.client_id)
+            candidate_retry_fingerprint: str | None = None
 
             def _scoped_values(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> tuple[Any, ...]:
+                nonlocal candidate_retry_fingerprint
                 dataset = self._db.resolve_studio_compatibility_dataset_id(
                     owner_user_id=owner,
                     conn=inner_conn,
@@ -1002,6 +1044,14 @@ class NoteStore:
                     deleted=deleted,
                 )
                 parsed_payload = parsed.model_dump(mode="json")
+                candidate_retry_fingerprint = self._studio_retry_fingerprint(
+                    {
+                        **parsed_payload,
+                        "accepted_provenance_json": parsed_payload[
+                            "accepted_provenance"
+                        ],
+                    }
+                )
                 if self._studio_envelope_size(
                     parsed_payload,
                     revision=revision,
@@ -1053,6 +1103,26 @@ class NoteStore:
                     "source_diagnostic_code=excluded.source_diagnostic_code,"
                     "source_diagnostic_hash=excluded.source_diagnostic_hash"
                 )
+            elif ensure:
+                query += " ON CONFLICT(owner_user_id,dataset_id,note_id) DO NOTHING"
+
+        if not self._db._supports_notes_moodboard_studio_v61():
+            candidate_retry_fingerprint = self._studio_retry_fingerprint(
+                {
+                    "note_id": normalized_note_id,
+                    "payload_json": payload_json,
+                    "template_type": template_type,
+                    "handwriting_mode": handwriting_mode,
+                    "source_note_id": source_note_id,
+                    "excerpt_snapshot": excerpt_snapshot,
+                    "excerpt_hash": excerpt_hash,
+                    "diagram_manifest_json": diagram_manifest_json,
+                    "companion_content_hash": companion_content_hash,
+                    "render_version": render_version,
+                }
+            )
+            if ensure:
+                query += " ON CONFLICT(note_id) DO NOTHING"
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
             write_params = (
@@ -1061,10 +1131,17 @@ class NoteStore:
                 else _scoped_values(inner_conn)
             )
             prepared_query, prepared_params = self._db._prepare_backend_statement(query, write_params)
-            inner_conn.execute(prepared_query, prepared_params or ())
+            cursor = inner_conn.execute(prepared_query, prepared_params or ())
             document = self._fetch_note_studio_document_row(normalized_note_id, conn=inner_conn)
             if not document:
                 raise CharactersRAGDBError(f"Failed to read note studio document for note ID '{normalized_note_id}'.")
+            if ensure and cursor.rowcount == 0:
+                if self._studio_retry_fingerprint(document) != candidate_retry_fingerprint:
+                    raise ConflictError(
+                        f"Note Studio document for note ID '{normalized_note_id}' conflicts with the captured retry.",
+                        entity="note_studio_documents",
+                        entity_id=normalized_note_id,
+                    )
             return document
 
         try:
@@ -1129,6 +1206,44 @@ class NoteStore:
             provenance_model=provenance_model,
             conn=conn,
             upsert=False,
+        )
+
+    def ensure_note_studio_document(
+        self,
+        *,
+        note_id: str,
+        payload_json: dict[str, Any],
+        template_type: str,
+        handwriting_mode: str,
+        source_note_id: str | None = None,
+        excerpt_snapshot: str | None = None,
+        excerpt_hash: str | None = None,
+        diagram_manifest_json: dict[str, Any] | None = None,
+        companion_content_hash: str | None = None,
+        render_version: int,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any]:
+        """Create one sidecar or converge an identical concurrent retry."""
+        return self._write_note_studio_document(
+            note_id=note_id,
+            payload_json=payload_json,
+            template_type=template_type,
+            handwriting_mode=handwriting_mode,
+            source_note_id=source_note_id,
+            excerpt_snapshot=excerpt_snapshot,
+            excerpt_hash=excerpt_hash,
+            diagram_manifest_json=diagram_manifest_json,
+            companion_content_hash=companion_content_hash,
+            render_version=render_version,
+            provenance_kind=provenance_kind,
+            provenance_provider=provenance_provider,
+            provenance_model=provenance_model,
+            conn=conn,
+            upsert=False,
+            ensure=True,
         )
 
     def upsert_note_studio_document(

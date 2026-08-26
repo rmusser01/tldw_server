@@ -68,11 +68,18 @@ class NotesStudioService:
 
     @staticmethod
     def _diagram_execution_identity(
-        *, provider: str | None, model: str | None
+        generated: dict[str, Any],
     ) -> tuple[str, str]:
-        if provider and model:
-            return str(provider), str(model)
-        return _LOCAL_STUDIO_PROVIDER, _LOCAL_DIAGRAM_MODEL
+        source = generated.get("source")
+        if source is None:
+            return _LOCAL_STUDIO_PROVIDER, _LOCAL_DIAGRAM_MODEL
+        if source not in {"llm", "deterministic_fallback"}:
+            raise InputError("Notes Studio diagram execution source is invalid.")  # noqa: TRY003
+        executed_provider = generated.get("provider")
+        executed_model = generated.get("model")
+        if not executed_provider or not executed_model:
+            raise InputError("Notes Studio diagram execution identity is incomplete.")  # noqa: TRY003
+        return str(executed_provider), str(executed_model)
 
     async def derive_from_excerpt(
         self,
@@ -415,28 +422,7 @@ class NotesStudioService:
 
     def _ensure_studio_document(self, **fields: Any) -> dict[str, Any]:
         """Create one sidecar, or accept an identical prior write on retry."""
-
-        note_id = str(fields["note_id"])
-        existing = self.db.get_note_studio_document(note_id)
-        if existing is None:
-            return self.db.create_note_studio_document(**fields)
-        comparable = {
-            key: existing.get(key)
-            for key in fields
-            if key not in {"note_id", "conn"}
-        }
-        expected = {
-            key: value
-            for key, value in fields.items()
-            if key not in {"note_id", "conn"}
-        }
-        if comparable != expected:
-            raise ConflictError(
-                f"Note Studio document for note ID '{note_id}' conflicts with the captured retry.",
-                entity="note_studio",
-                entity_id=note_id,
-            )
-        return existing
+        return self.db.ensure_note_studio_document(**fields)
 
     async def update_diagram_manifest(
         self,
@@ -474,8 +460,7 @@ class NotesStudioService:
         if not diagram_code or diagram_result.get("error"):
             raise InputError("Notes Studio diagram generation returned no accepted diagram.")  # noqa: TRY003
         executed_provider, executed_model = self._diagram_execution_identity(
-            provider=provider,
-            model=model,
+            diagram_result,
         )
         render_hash = stable_content_hash(f"{diagram_type}\n{diagram_context['text']}\n{diagram_code}")
         manifest = {

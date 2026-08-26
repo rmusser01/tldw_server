@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -87,6 +89,44 @@ def _derive_note(
             handwriting_mode=handwriting_mode,
         )
     )
+
+
+def _studio_ensure_fields(
+    *,
+    note_id: str,
+    source_note_id: str,
+    content: str = "Accepted canonical content",
+) -> dict[str, object]:
+    return {
+        "note_id": note_id,
+        "payload_json": {
+            "meta": {"title": "Study", "source_note_id": source_note_id},
+            "layout": {
+                "template_type": "lined",
+                "handwriting_mode": "accented",
+                "render_version": 1,
+            },
+            "sections": [
+                {
+                    "id": "notes-custom",
+                    "kind": "notes",
+                    "title": "Notes",
+                    "content": content,
+                }
+            ],
+        },
+        "template_type": "lined",
+        "handwriting_mode": "accented",
+        "source_note_id": source_note_id,
+        "excerpt_snapshot": "Accepted excerpt",
+        "excerpt_hash": "sha256:" + ("0" * 64),
+        "diagram_manifest_json": None,
+        "companion_content_hash": "sha256:" + ("1" * 64),
+        "render_version": 1,
+        "provenance_kind": "derive",
+        "provenance_provider": "openai",
+        "provenance_model": "gpt-test",
+    }
 
 
 def test_derive_creates_derived_note_and_sidecar(studio_db):
@@ -242,6 +282,78 @@ def test_derive_rolls_back_note_when_sidecar_persistence_fails(studio_db, monkey
         )
 
     assert [note["id"] for note in db.list_notes()] == original_note_ids
+
+
+def test_ensure_studio_document_accepts_identical_storage_normalized_retry(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+
+    first = service._ensure_studio_document(**fields)
+    second = service._ensure_studio_document(**fields)
+
+    assert second == first
+    assert second["version"] == 1
+    assert second["canonical_revision"] == 1
+
+
+def test_ensure_studio_document_concurrent_identical_creators_converge(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+    barrier = threading.Barrier(2)
+
+    def create() -> dict[str, object]:
+        barrier.wait(timeout=10)
+        return _service(db)._ensure_studio_document(**fields)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [future.result(timeout=30) for future in [pool.submit(create), pool.submit(create)]]
+
+    assert results[0] == results[1]
+    rows = db.execute_query(
+        "SELECT COUNT(*) AS total FROM note_studio_documents WHERE note_id=?",
+        (note_id,),
+    ).fetchone()
+    assert rows["total"] == 1
+
+
+def test_ensure_studio_document_rejects_semantically_different_retry(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+    service._ensure_studio_document(**fields)
+    changed = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+        content="Different canonical content",
+    )
+
+    with pytest.raises(ConflictError, match="captured retry"):
+        service._ensure_studio_document(**changed)
 
 
 def test_get_state_detects_markdown_drift_and_regenerate_rebuilds_payload_from_current_markdown(studio_db):
@@ -886,7 +998,7 @@ def test_custom_llm_adapter_with_invalid_sections_is_rejected_before_provenance(
 @pytest.mark.parametrize(
     ("provider", "model", "expected"),
     [
-        ("openai", "gpt-test", ("openai", "gpt-test")),
+        ("openai", "gpt-test", ("tldw", "diagram-deterministic-v1")),
         (None, None, ("tldw", "diagram-deterministic-v1")),
         ("openai", None, ("tldw", "diagram-deterministic-v1")),
     ],
@@ -918,6 +1030,77 @@ def test_diagram_stamps_actual_or_deterministic_execution_identity(
             model=model,
         )
     )
+    provenance = result["studio_document"]["accepted_provenance_json"]
+    assert (provenance["provider"], provenance["model"]) == expected
+
+
+@pytest.mark.parametrize(
+    ("adapter_result", "expected", "raises"),
+    [
+        (
+            {
+                "diagram": "flowchart TD\nA --> B",
+                "format": "mermaid",
+                "source": "llm",
+                "provider": "anthropic",
+                "model": "claude-test",
+            },
+            ("anthropic", "claude-test"),
+            None,
+        ),
+        (
+            {
+                "diagram": "flowchart TD\nA --> B",
+                "format": "mermaid",
+                "source": "deterministic_fallback",
+                "provider": "tldw",
+                "model": "diagram-deterministic-v1",
+            },
+            ("tldw", "diagram-deterministic-v1"),
+            None,
+        ),
+        (
+            {
+                "diagram": "flowchart TD\nA --> B",
+                "format": "mermaid",
+                "source": "llm",
+                "provider": "openai",
+            },
+            None,
+            InputError,
+        ),
+    ],
+)
+def test_diagram_stamps_only_returned_execution_identity(
+    studio_db,
+    adapter_result,
+    expected,
+    raises,
+):
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    assert source_note_id is not None
+
+    async def diagram_adapter(_request, _context):
+        return adapter_result
+
+    service = _service(db, diagram_adapter=diagram_adapter)
+    derived = _derive_note(
+        service,
+        source_note_id=source_note_id,
+        excerpt_text="Accepted excerpt",
+    )
+    call = service.update_diagram_manifest(
+        note_id=derived["note"]["id"],
+        diagram_type="flowchart",
+        provider="openai",
+        model="requested-but-not-executed",
+    )
+    if raises is not None:
+        with pytest.raises(raises, match="execution identity"):
+            asyncio.run(call)
+        return
+    result = asyncio.run(call)
     provenance = result["studio_document"]["accepted_provenance_json"]
     assert (provenance["provider"], provenance["model"]) == expected
 

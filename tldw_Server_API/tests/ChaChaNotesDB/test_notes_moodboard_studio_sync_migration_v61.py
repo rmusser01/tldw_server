@@ -785,6 +785,152 @@ def test_v61_rejects_post_copy_data_loss_or_corruption_and_restores_exact_v60(
     assert _database_dump(db_path) == before  # nosec B101
 
 
+def test_v61_streaming_proof_is_batch_independent_and_never_materializes_rows() -> None:
+    rows = [
+        {"id": index, "payload": (chr(65 + index) * 1_000_000)}
+        for index in range(3)
+    ]
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self.offset = 0
+            self.fetchmany_sizes: list[int] = []
+
+        def fetchmany(self, size: int) -> list[dict[str, object]]:
+            self.fetchmany_sizes.append(size)
+            batch = rows[self.offset : self.offset + size]
+            self.offset += len(batch)
+            return batch
+
+        def fetchall(self) -> list[dict[str, object]]:
+            pytest.fail("v61 product proof must not call fetchall")
+
+        def __iter__(self):
+            pytest.fail("v61 product proof must not materialize cursor iteration")
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.cursors: list[_Cursor] = []
+
+        def execute(
+            self,
+            _query: str,
+            _params: tuple[object, ...] = (),
+        ) -> _Cursor:
+            cursor = _Cursor()
+            self.cursors.append(cursor)
+            return cursor
+
+    db = object.__new__(CharactersRAGDB)
+    first = _Connection()
+    second = _Connection()
+    proof_one = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+        first, "SELECT payload FROM product", page_size=1
+    )
+    proof_three = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+        second, "SELECT payload FROM product", page_size=3
+    )
+
+    assert proof_one == proof_three  # nosec B101
+    assert proof_one[0] == 3  # nosec B101
+    assert first.cursors[0].fetchmany_sizes == [1, 1, 1, 1]  # nosec B101
+    assert second.cursors[0].fetchmany_sizes == [3, 3]  # nosec B101
+
+
+def test_sqlite_schema_init_lock_pool_is_bounded_and_same_path_serializes() -> None:
+    locks = {
+        id(CharactersRAGDB._sqlite_schema_init_lock_for_path(f"/tmp/schema-{index}.sqlite"))
+        for index in range(1_000)
+    }
+    assert len(locks) <= 64  # nosec B101
+    assert (  # nosec B101
+        CharactersRAGDB._sqlite_schema_init_lock_for_path("/tmp/same.sqlite")
+        is CharactersRAGDB._sqlite_schema_init_lock_for_path("/tmp/same.sqlite")
+    )
+
+    entered = threading.Event()
+    acquired = threading.Event()
+    same_lock = CharactersRAGDB._sqlite_schema_init_lock_for_path("/tmp/concurrent.sqlite")
+
+    def contender() -> None:
+        entered.set()
+        with CharactersRAGDB._sqlite_schema_init_lock_for_path("/tmp/concurrent.sqlite"):
+            acquired.set()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with same_lock:
+            future = executor.submit(contender)
+            assert entered.wait(timeout=5)  # nosec B101
+            assert not acquired.wait(timeout=0.05)  # nosec B101
+        future.result(timeout=5)
+    assert acquired.is_set()  # nosec B101
+
+
+def test_v61_copy_streams_all_large_product_selects_with_fetchmany(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "stream-copy.sqlite"
+    _prepare_v60_product_database(db_path, board_count=3)
+    original_copy = CharactersRAGDB._copy_notes_moodboard_studio_graph_v61_sqlite
+    streamed_queries: list[str] = []
+
+    class _StreamingCursor:
+        def __init__(self, cursor: sqlite3.Cursor, query: str) -> None:
+            self._cursor = cursor
+            self._query = query
+
+        def fetchmany(self, size: int):
+            streamed_queries.append(self._query)
+            return self._cursor.fetchmany(size)
+
+        def fetchone(self):
+            return self._cursor.fetchone()
+
+        def fetchall(self):
+            pytest.fail("v61 product copy must not call fetchall")
+
+        def __iter__(self):
+            pytest.fail("v61 product copy must not materialize cursor iteration")
+
+        def __getattr__(self, name: str):
+            return getattr(self._cursor, name)
+
+    class _Connection:
+        def __init__(self, conn: sqlite3.Connection) -> None:
+            self._conn = conn
+
+        def execute(self, query: str, params: tuple[object, ...] = ()):
+            cursor = self._conn.execute(query, params)
+            normalized = " ".join(query.lower().split())
+            if normalized.startswith("select") and any(
+                f"from {table}" in normalized
+                for table in (
+                    "note_task_scope_authority",
+                    "moodboards",
+                    "moodboard_notes",
+                    "note_studio_documents",
+                )
+            ) and "order by" in normalized:
+                return _StreamingCursor(cursor, normalized)
+            return cursor
+
+    def tracked_copy(self: CharactersRAGDB, conn: sqlite3.Connection):
+        return original_copy(self, _Connection(conn))
+
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "_copy_notes_moodboard_studio_graph_v61_sqlite",
+        tracked_copy,
+    )
+    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    db.close_all_connections()
+
+    assert any("from moodboards order by id" in query for query in streamed_queries)  # nosec B101
+    assert any("from moodboard_notes order by" in query for query in streamed_queries)  # nosec B101
+    assert any("from note_studio_documents order by" in query for query in streamed_queries)  # nosec B101
+
+
 def test_v61_rejects_ambiguous_placement_owner_without_any_mutation(tmp_path: Path) -> None:
     db_path = tmp_path / "ambiguous-owner.sqlite"
     _prepare_v60_product_database(db_path)
@@ -985,6 +1131,186 @@ def test_bootstrap_pages_require_the_exact_bound_nonlocal_graph_scope(tmp_path: 
             db.page_moodboards_for_sync_bootstrap(
                 owner_user_id=OWNER,
                 dataset_id=DATASET_B,
+            )
+    finally:
+        db.close_all_connections()
+
+
+def test_bootstrap_pages_validate_only_each_returned_page_with_bounded_queries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "bootstrap-pages-bounded.sqlite"), client_id=OWNER)
+    board_ids: list[int] = []
+    note_ids: list[str] = []
+    studio_ids: list[str] = []
+    try:
+        for index in range(7):
+            board_id = db.add_moodboard(f"Board {index}")
+            note_id = db.add_note(f"Placement {index}", f"Placement content {index}")
+            studio_id = db.add_note(f"Studio {index}", f"Studio content {index}")
+            assert board_id is not None and note_id is not None and studio_id is not None  # nosec B101
+            db.link_note_to_moodboard(board_id, note_id)
+            db.create_note_studio_document(
+                note_id=studio_id,
+                payload_json={
+                    "sections": [
+                        {
+                            "id": f"notes-{index}",
+                            "kind": "notes",
+                            "title": "Notes",
+                            "content": f"Studio content {index}",
+                        }
+                    ]
+                },
+                template_type="lined",
+                handwriting_mode="accented",
+                companion_content_hash="sha256:" + "0" * 64,
+                render_version=1,
+            )
+            board_ids.append(board_id)
+            note_ids.append(str(note_id))
+            studio_ids.append(str(studio_id))
+        db.bind_local_moodboard_graph_to_dataset(
+            owner_user_id=OWNER,
+            target_dataset_id=DATASET_A,
+        )
+        db.bind_local_studio_graph_to_dataset(
+            owner_user_id=OWNER,
+            target_dataset_id=DATASET_A,
+        )
+
+        def reject_full_proof(*_args, **_kwargs):
+            pytest.fail("bootstrap reads must not full-prove the graph")
+
+        monkeypatch.setattr(MoodboardSyncStore, "_prove_moodboard_graph", reject_full_proof)
+        monkeypatch.setattr(MoodboardSyncStore, "_prove_studio_graph", reject_full_proof)
+        original_execute = MoodboardSyncStore._execute
+        queries: list[str] = []
+
+        def counted_execute(self, conn, query, params=()):
+            queries.append(" ".join(query.split()))
+            return original_execute(self, conn, query, params)
+
+        monkeypatch.setattr(MoodboardSyncStore, "_execute", counted_execute)
+
+        seen_boards: list[int] = []
+        after_sync_id: str | None = None
+        while True:
+            queries.clear()
+            page = db.page_moodboards_for_sync_bootstrap(
+                owner_user_id=OWNER,
+                dataset_id=DATASET_A,
+                after_sync_id=after_sync_id,
+                limit=3,
+            )
+            assert len(queries) <= 2  # nosec B101
+            if not page:
+                break
+            seen_boards.extend(int(row["id"]) for row in page)
+            after_sync_id = str(page[-1]["sync_id"])
+        assert sorted(seen_boards) == sorted(board_ids)  # nosec B101
+
+        seen_placements: list[str] = []
+        after_board: str | None = None
+        after_note: str | None = None
+        while True:
+            queries.clear()
+            page = db.page_moodboard_placements_for_sync_bootstrap(
+                owner_user_id=OWNER,
+                dataset_id=DATASET_A,
+                after_moodboard_sync_id=after_board,
+                after_note_id=after_note,
+                limit=3,
+            )
+            assert len(queries) <= 2  # nosec B101
+            if not page:
+                break
+            seen_placements.extend(str(row["note_id"]) for row in page)
+            after_board = str(page[-1]["moodboard_sync_id"])
+            after_note = str(page[-1]["note_id"])
+        assert sorted(seen_placements) == sorted(note_ids)  # nosec B101
+
+        seen_studio: list[str] = []
+        after_studio: str | None = None
+        while True:
+            queries.clear()
+            page = db.page_studio_documents_for_sync_bootstrap(
+                owner_user_id=OWNER,
+                dataset_id=DATASET_A,
+                after_note_id=after_studio,
+                limit=3,
+            )
+            assert len(queries) <= 3  # nosec B101
+            if not page:
+                break
+            seen_studio.extend(str(row["note_id"]) for row in page)
+            after_studio = str(page[-1]["note_id"])
+        assert sorted(seen_studio) == sorted(studio_ids)  # nosec B101
+    finally:
+        db.close_all_connections()
+
+
+def test_bootstrap_defers_later_page_tamper_until_that_page_is_read(
+    tmp_path: Path,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "bootstrap-page-tamper.sqlite"), client_id=OWNER)
+    try:
+        for index in range(4):
+            assert db.add_moodboard(f"Board {index}") is not None  # nosec B101
+        db.bind_local_moodboard_graph_to_dataset(
+            owner_user_id=OWNER,
+            target_dataset_id=DATASET_A,
+        )
+        with db.transaction() as conn:
+            rows = list(
+                conn.execute(
+                    "SELECT id,sync_id FROM moodboards WHERE owner_user_id=? "
+                    "AND dataset_id=? ORDER BY sync_id",
+                    (OWNER, DATASET_A),
+                )
+            )
+            conn.execute(
+                "UPDATE moodboards SET canonical_hash=? WHERE id=?",
+                ("sha256:" + "0" * 64, rows[-1]["id"]),
+            )
+        first = db.page_moodboards_for_sync_bootstrap(
+            owner_user_id=OWNER,
+            dataset_id=DATASET_A,
+            limit=2,
+        )
+        assert len(first) == 2  # nosec B101
+        with pytest.raises(ConflictError, match="canonical readiness proof"):
+            db.page_moodboards_for_sync_bootstrap(
+                owner_user_id=OWNER,
+                dataset_id=DATASET_A,
+                after_sync_id=str(first[-1]["sync_id"]),
+                limit=2,
+            )
+    finally:
+        db.close_all_connections()
+
+
+def test_placement_bootstrap_rejects_missing_note_on_returned_page(tmp_path: Path) -> None:
+    db_path = tmp_path / "bootstrap-placement-parent-tamper.sqlite"
+    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    try:
+        board_id = db.add_moodboard("Board")
+        note_id = db.add_note("Placement", "Content")
+        assert board_id is not None and note_id is not None  # nosec B101
+        db.link_note_to_moodboard(board_id, note_id)
+        db.bind_local_moodboard_graph_to_dataset(
+            owner_user_id=OWNER,
+            target_dataset_id=DATASET_A,
+        )
+        with sqlite3.connect(db_path) as raw:
+            raw.execute("PRAGMA foreign_keys=OFF")
+            raw.execute("DELETE FROM notes WHERE id=?", (note_id,))
+
+        with pytest.raises(ConflictError, match="canonical readiness proof"):
+            db.page_moodboard_placements_for_sync_bootstrap(
+                owner_user_id=OWNER,
+                dataset_id=DATASET_A,
             )
     finally:
         db.close_all_connections()

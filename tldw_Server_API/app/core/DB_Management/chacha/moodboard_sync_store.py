@@ -289,75 +289,118 @@ class MoodboardSyncStore:
                 "SELECT * FROM moodboards WHERE owner_user_id=? AND dataset_id=? ORDER BY id",
                 (owner, dataset),
             ).fetchall()
-            sync_ids: dict[int, str] = {}
-            for raw in boards:
-                row = dict(raw)
-                payload = parse_notes_moodboard_tombstone_v1(
-                    {
-                        "moodboard_id": row["sync_id"],
-                        "name": row["name"],
-                        "description": row["description"],
-                        "smart_rule": (
-                            None
-                            if row["smart_rule_json"] is None
-                            else json.loads(row["smart_rule_json"])
-                        ),
-                        "canvas": json.loads(row["canvas_json"]),
-                    }
-                )
-                expected = notes_moodboard_object_hash(
-                    payload,
-                    revision=int(row["canonical_revision"]),
-                    deleted=bool(row["deleted"]),
-                )
-                if payload.smart_rule is not None:
-                    self._db._prove_moodboard_collection_sync_ids_v61(
-                        conn,
-                        owner_user_id=owner,
-                        collection_sync_ids=payload.smart_rule.collection_sync_ids,
-                    )
-                if row["source_diagnostic_code"] is not None or row["canonical_hash"] != expected:
-                    raise ValueError("moodboard lineage mismatch")
-                sync_ids[int(row["id"])] = str(row["sync_id"])
+            sync_ids = self._validate_moodboard_rows(
+                conn,
+                rows=boards,
+                owner=owner,
+                dataset=dataset,
+            )
             placements = self._execute(
                 conn,
                 "SELECT * FROM moodboard_notes WHERE owner_user_id=? AND dataset_id=? "
                 "ORDER BY moodboard_id,note_id",
                 (owner, dataset),
             ).fetchall()
-            for raw in placements:
-                row = dict(raw)
-                moodboard_sync_id = sync_ids.get(int(row["moodboard_id"]))
-                if moodboard_sync_id is None:
-                    raise ValueError("placement parent missing")
-                payload = parse_notes_moodboard_note_tombstone_v1(
-                    {
-                        "moodboard_id": moodboard_sync_id,
-                        "note_id": row["note_id"],
-                        "x": row["x"],
-                        "y": row["y"],
-                        "width": row["width"],
-                        "height": row["height"],
-                        "order_index": row["order_index"],
-                        "display": json.loads(row["display_json"]),
-                    }
-                )
-                expected = notes_moodboard_note_object_hash(
-                    payload,
-                    revision=int(row["canonical_revision"]),
-                    deleted=bool(row["deleted"]),
-                )
-                if (
-                    row["source_diagnostic_code"] is not None
-                    or row["placement_id"] != placement_object_id(payload)
-                    or row["canonical_hash"] != expected
-                ):
-                    raise ValueError("placement lineage mismatch")
+            self._validate_moodboard_placement_rows(
+                placements,
+                owner=owner,
+                dataset=dataset,
+                sync_ids=sync_ids,
+            )
         except (NotesMoodboardStudioContractError, TypeError, ValueError) as exc:
             raise ConflictError(
                 "Moodboard graph binding failed canonical readiness proof.",
                 entity="moodboards",
             ) from exc  # noqa: TRY003
+
+    def _validate_moodboard_rows(
+        self,
+        conn: GraphConnection,
+        *,
+        rows: list[Any],
+        owner: str,
+        dataset: str,
+    ) -> dict[int, str]:
+        sync_ids: dict[int, str] = {}
+        collection_sync_ids: list[str] = []
+        for raw in rows:
+            row = dict(raw)
+            if row["owner_user_id"] != owner or row["dataset_id"] != dataset:
+                raise ValueError("moodboard scope mismatch")
+            payload = parse_notes_moodboard_tombstone_v1(
+                {
+                    "moodboard_id": row["sync_id"],
+                    "name": row["name"],
+                    "description": row["description"],
+                    "smart_rule": (
+                        None
+                        if row["smart_rule_json"] is None
+                        else json.loads(row["smart_rule_json"])
+                    ),
+                    "canvas": json.loads(row["canvas_json"]),
+                }
+            )
+            expected = notes_moodboard_object_hash(
+                payload,
+                revision=int(row["canonical_revision"]),
+                deleted=bool(row["deleted"]),
+            )
+            if row["source_diagnostic_code"] is not None or row["canonical_hash"] != expected:
+                raise ValueError("moodboard lineage mismatch")
+            if payload.smart_rule is not None:
+                collection_sync_ids.extend(payload.smart_rule.collection_sync_ids)
+            sync_ids[int(row["id"])] = str(row["sync_id"])
+        self._db._prove_moodboard_collection_sync_ids_v61(
+            conn,
+            owner_user_id=owner,
+            collection_sync_ids=collection_sync_ids,
+        )
+        return sync_ids
+
+    @staticmethod
+    def _validate_moodboard_placement_rows(
+        rows: list[Any],
+        *,
+        owner: str,
+        dataset: str,
+        sync_ids: dict[int, str] | None = None,
+    ) -> None:
+        for raw in rows:
+            row = dict(raw)
+            if row["owner_user_id"] != owner or row["dataset_id"] != dataset:
+                raise ValueError("placement scope mismatch")
+            if sync_ids is None and row.get("_note_exists") != 1:
+                raise ValueError("placement note missing")
+            moodboard_sync_id = (
+                None if sync_ids is None else sync_ids.get(int(row["moodboard_id"]))
+            )
+            if moodboard_sync_id is None:
+                moodboard_sync_id = row.get("moodboard_sync_id")
+            if not moodboard_sync_id:
+                raise ValueError("placement parent missing")
+            payload = parse_notes_moodboard_note_tombstone_v1(
+                {
+                    "moodboard_id": moodboard_sync_id,
+                    "note_id": row["note_id"],
+                    "x": row["x"],
+                    "y": row["y"],
+                    "width": row["width"],
+                    "height": row["height"],
+                    "order_index": row["order_index"],
+                    "display": json.loads(row["display_json"]),
+                }
+            )
+            expected = notes_moodboard_note_object_hash(
+                payload,
+                revision=int(row["canonical_revision"]),
+                deleted=bool(row["deleted"]),
+            )
+            if (
+                row["source_diagnostic_code"] is not None
+                or row["placement_id"] != placement_object_id(payload)
+                or row["canonical_hash"] != expected
+            ):
+                raise ValueError("placement lineage mismatch")
 
     def _prove_studio_graph(
         self,
@@ -369,98 +412,131 @@ class MoodboardSyncStore:
         try:
             rows = self._execute(
                 conn,
-                "SELECT s.*,n.deleted AS parent_deleted FROM note_studio_documents s "
-                "JOIN notes n ON n.client_id=s.owner_user_id AND n.id=s.note_id "
-                "WHERE s.owner_user_id=? AND s.dataset_id=? ORDER BY s.note_id",
+                "SELECT * FROM note_studio_documents "
+                "WHERE owner_user_id=? AND dataset_id=? ORDER BY note_id",
                 (owner, dataset),
             ).fetchall()
-            for raw in rows:
-                row = dict(raw)
-                if row["source_diagnostic_code"] is not None:
-                    raise ValueError("Studio diagnostic blocker")
-                document = self._db._deserialize_row_fields(
-                    row,
-                    ["payload_json", "diagram_manifest_json", "accepted_provenance_json"],
-                )
-                if document is None:
-                    raise ValueError("Studio row unavailable")
-                parsed = parse_notes_studio_document_tombstone_v1(
-                    self._db.note_store._studio_document_mapping(document)
-                )
-                parent = self._execute(
-                    conn,
-                    "SELECT * FROM notes WHERE client_id=? AND id=?",
-                    (owner, row["note_id"]),
-                ).fetchone()
-                if parent is None:
-                    raise ValueError("Studio parent unavailable")
-                parent_revision, parent_hash = self._db.note_store._notes_note_head(
-                    dict(parent)
-                )
-                if parsed.note_revision > parent_revision:
-                    raise ValueError("Studio parent head mismatch")
-                if parsed.note_revision == parent_revision and (
-                    parsed.note_hash != parent_hash
-                    or parsed.companion_content_hash
-                    != self._db.note_store._normalized_text_hash(parent["content"])
-                ):
-                    raise ValueError("Studio current parent head mismatch")
-                provenance = parsed.accepted_provenance
-                if parsed.source_note_id is None:
-                    if (
-                        provenance.source_revision is not None
-                        or provenance.source_hash is not None
-                    ):
-                        raise ValueError("Studio source lineage mismatch")
-                else:
-                    source = self._execute(
-                        conn,
-                        "SELECT * FROM notes WHERE client_id=? AND id=?",
-                        (owner, parsed.source_note_id),
-                    ).fetchone()
-                    if source is None:
-                        raise ValueError("Studio source unavailable")
-                    source_revision, source_hash = self._db.note_store._notes_note_head(
-                        dict(source)
-                    )
-                    normalized_source = str(source["content"] or "").replace(
-                        "\r\n", "\n"
-                    ).replace("\r", "\n")
-                    if (
-                        provenance.source_revision is None
-                        or provenance.source_revision > source_revision
-                    ):
-                        raise ValueError("Studio source head mismatch")
-                    if provenance.source_revision == source_revision and (
-                        provenance.source_hash != source_hash
-                        or (
-                            parsed.excerpt_snapshot is not None
-                            and parsed.excerpt_snapshot not in normalized_source
-                        )
-                    ):
-                        raise ValueError("Studio current source head mismatch")
-                deleted = bool(row["deleted"])
-                if deleted != bool(row["parent_deleted"]):
-                    raise ValueError("Studio lifecycle differs from parent note")
-                expected = notes_studio_document_object_hash(
-                    parsed,
-                    revision=int(row["canonical_revision"]),
-                    deleted=deleted,
-                )
-                if row["canonical_hash"] != expected:
-                    raise ValueError("Studio lineage mismatch")
-                if self._db.note_store._studio_envelope_size(
-                    parsed.model_dump(mode="json"),
-                    revision=int(row["canonical_revision"]),
-                    deleted=deleted,
-                    object_hash=expected,
-                ) > SYNC_ENVELOPE_MAX_BYTES:
-                    raise ValueError("Studio envelope is oversized")
+            self._validate_studio_rows(
+                conn,
+                rows=rows,
+                owner=owner,
+                dataset=dataset,
+            )
         except (NotesMoodboardStudioContractError, TypeError, ValueError) as exc:
             raise ConflictError(
                 "Studio graph binding failed canonical readiness proof.",
                 entity="note_studio_documents",
             ) from exc  # noqa: TRY003
+
+    def _fetch_notes_for_studio_rows(
+        self,
+        conn: GraphConnection,
+        *,
+        owner: str,
+        note_ids: set[str],
+    ) -> dict[str, dict[str, Any]]:
+        notes: dict[str, dict[str, Any]] = {}
+        ordered = sorted(note_ids)
+        for offset in range(0, len(ordered), 400):
+            batch = ordered[offset : offset + 400]
+            if not batch:
+                continue
+            placeholders = ",".join("?" for _ in batch)
+            rows = self._execute(
+                conn,
+                "SELECT * FROM notes WHERE client_id=? "
+                f"AND id IN ({placeholders})",  # nosec B608 - placeholders only.
+                (owner, *batch),
+            ).fetchall()
+            notes.update((str(row["id"]), dict(row)) for row in rows)
+        return notes
+
+    def _validate_studio_rows(
+        self,
+        conn: GraphConnection,
+        *,
+        rows: list[Any],
+        owner: str,
+        dataset: str,
+    ) -> None:
+        deserialized: list[tuple[dict[str, Any], Any]] = []
+        note_ids: set[str] = set()
+        for raw in rows:
+            row = dict(raw)
+            if row["owner_user_id"] != owner or row["dataset_id"] != dataset:
+                raise ValueError("Studio scope mismatch")
+            if row["source_diagnostic_code"] is not None:
+                raise ValueError("Studio diagnostic blocker")
+            document = self._db._deserialize_row_fields(
+                row,
+                ["payload_json", "diagram_manifest_json", "accepted_provenance_json"],
+            )
+            if document is None:
+                raise ValueError("Studio row unavailable")
+            parsed = parse_notes_studio_document_tombstone_v1(
+                self._db.note_store._studio_document_mapping(document)
+            )
+            note_ids.add(str(row["note_id"]))
+            if parsed.source_note_id is not None:
+                note_ids.add(str(parsed.source_note_id))
+            deserialized.append((row, parsed))
+        notes = self._fetch_notes_for_studio_rows(
+            conn,
+            owner=owner,
+            note_ids=note_ids,
+        )
+        for row, parsed in deserialized:
+            parent = notes.get(str(row["note_id"]))
+            if parent is None:
+                raise ValueError("Studio parent unavailable")
+            parent_revision, parent_hash = self._db.note_store._notes_note_head(parent)
+            if parsed.note_revision > parent_revision:
+                raise ValueError("Studio parent head mismatch")
+            if parsed.note_revision == parent_revision and (
+                parsed.note_hash != parent_hash
+                or parsed.companion_content_hash
+                != self._db.note_store._normalized_text_hash(parent["content"])
+            ):
+                raise ValueError("Studio current parent head mismatch")
+            provenance = parsed.accepted_provenance
+            if parsed.source_note_id is None:
+                if provenance.source_revision is not None or provenance.source_hash is not None:
+                    raise ValueError("Studio source lineage mismatch")
+            else:
+                source = notes.get(str(parsed.source_note_id))
+                if source is None:
+                    raise ValueError("Studio source unavailable")
+                source_revision, source_hash = self._db.note_store._notes_note_head(source)
+                normalized_source = str(source["content"] or "").replace(
+                    "\r\n", "\n"
+                ).replace("\r", "\n")
+                if provenance.source_revision is None or provenance.source_revision > source_revision:
+                    raise ValueError("Studio source head mismatch")
+                if provenance.source_revision == source_revision and (
+                    provenance.source_hash != source_hash
+                    or (
+                        parsed.excerpt_snapshot is not None
+                        and parsed.excerpt_snapshot not in normalized_source
+                    )
+                ):
+                    raise ValueError("Studio current source head mismatch")
+            deleted = bool(row["deleted"])
+            if deleted != bool(parent["deleted"]):
+                raise ValueError("Studio lifecycle differs from parent note")
+            expected = notes_studio_document_object_hash(
+                parsed,
+                revision=int(row["canonical_revision"]),
+                deleted=deleted,
+            )
+            if row["canonical_hash"] != expected:
+                raise ValueError("Studio lineage mismatch")
+            if self._db.note_store._studio_envelope_size(
+                parsed.model_dump(mode="json"),
+                revision=int(row["canonical_revision"]),
+                deleted=deleted,
+                object_hash=expected,
+            ) > SYNC_ENVELOPE_MAX_BYTES:
+                raise ValueError("Studio envelope is oversized")
 
     def bind_local_moodboard_graph_to_dataset(
         self,
@@ -588,12 +664,24 @@ class MoodboardSyncStore:
             flag="moodboard_graph_bound",
         )
         with self._db.transaction() as conn:
-            self._prove_moodboard_graph(conn, owner=owner, dataset=dataset)
-        rows = self._db.execute_query(
-            "SELECT * FROM moodboards WHERE owner_user_id=? AND dataset_id=? "
-            "AND sync_id>? ORDER BY sync_id LIMIT ?",
-            (owner, dataset, after_sync_id or "", max(1, min(int(limit), 500))),
-        ).fetchall()
+            rows = self._execute(
+                conn,
+                "SELECT * FROM moodboards WHERE owner_user_id=? AND dataset_id=? "
+                "AND sync_id>? ORDER BY sync_id LIMIT ?",
+                (owner, dataset, after_sync_id or "", max(1, min(int(limit), 500))),
+            ).fetchall()
+            try:
+                self._validate_moodboard_rows(
+                    conn,
+                    rows=rows,
+                    owner=owner,
+                    dataset=dataset,
+                )
+            except (NotesMoodboardStudioContractError, TypeError, ValueError) as exc:
+                raise ConflictError(
+                    "Moodboard graph binding failed canonical readiness proof.",
+                    entity="moodboards",
+                ) from exc  # noqa: TRY003
         return [dict(row) for row in rows]
 
     def page_moodboard_placements_for_sync_bootstrap(
@@ -611,23 +699,41 @@ class MoodboardSyncStore:
             flag="moodboard_graph_bound",
         )
         with self._db.transaction() as conn:
-            self._prove_moodboard_graph(conn, owner=owner, dataset=dataset)
-        rows = self._db.execute_query(
-            "SELECT p.*,b.sync_id AS moodboard_sync_id FROM moodboard_notes p "
-            "JOIN moodboards b ON b.owner_user_id=p.owner_user_id AND b.dataset_id=p.dataset_id "
-            "AND b.id=p.moodboard_id WHERE p.owner_user_id=? AND p.dataset_id=? "
-            "AND (b.sync_id>? OR (b.sync_id=? AND p.note_id>?)) "
-            "ORDER BY b.sync_id,p.note_id LIMIT ?",
-            (
-                owner,
-                dataset,
-                after_moodboard_sync_id or "",
-                after_moodboard_sync_id or "",
-                after_note_id or "",
-                max(1, min(int(limit), 500)),
-            ),
-        ).fetchall()
-        return [dict(row) for row in rows]
+            rows = self._execute(
+                conn,
+                "SELECT p.*,b.sync_id AS moodboard_sync_id,"
+                "CASE WHEN n.id IS NULL THEN 0 ELSE 1 END AS _note_exists "
+                "FROM moodboard_notes p "
+                "JOIN moodboards b ON b.owner_user_id=p.owner_user_id AND b.dataset_id=p.dataset_id "
+                "AND b.id=p.moodboard_id "
+                "LEFT JOIN notes n ON n.client_id=p.owner_user_id AND n.id=p.note_id "
+                "WHERE p.owner_user_id=? AND p.dataset_id=? "
+                "AND (b.sync_id>? OR (b.sync_id=? AND p.note_id>?)) "
+                "ORDER BY b.sync_id,p.note_id LIMIT ?",
+                (
+                    owner,
+                    dataset,
+                    after_moodboard_sync_id or "",
+                    after_moodboard_sync_id or "",
+                    after_note_id or "",
+                    max(1, min(int(limit), 500)),
+                ),
+            ).fetchall()
+            try:
+                self._validate_moodboard_placement_rows(
+                    rows,
+                    owner=owner,
+                    dataset=dataset,
+                )
+            except (NotesMoodboardStudioContractError, TypeError, ValueError) as exc:
+                raise ConflictError(
+                    "Moodboard graph binding failed canonical readiness proof.",
+                    entity="moodboard_notes",
+                ) from exc  # noqa: TRY003
+        result = [dict(row) for row in rows]
+        for row in result:
+            row.pop("_note_exists", None)
+        return result
 
     def page_studio_documents_for_sync_bootstrap(
         self,
@@ -643,10 +749,22 @@ class MoodboardSyncStore:
             flag="studio_graph_bound",
         )
         with self._db.transaction() as conn:
-            self._prove_studio_graph(conn, owner=owner, dataset=dataset)
-        rows = self._db.execute_query(
-            "SELECT * FROM note_studio_documents WHERE owner_user_id=? AND dataset_id=? "
-            "AND note_id>? ORDER BY note_id LIMIT ?",
-            (owner, dataset, after_note_id or "", max(1, min(int(limit), 500))),
-        ).fetchall()
+            rows = self._execute(
+                conn,
+                "SELECT * FROM note_studio_documents WHERE owner_user_id=? AND dataset_id=? "
+                "AND note_id>? ORDER BY note_id LIMIT ?",
+                (owner, dataset, after_note_id or "", max(1, min(int(limit), 500))),
+            ).fetchall()
+            try:
+                self._validate_studio_rows(
+                    conn,
+                    rows=rows,
+                    owner=owner,
+                    dataset=dataset,
+                )
+            except (NotesMoodboardStudioContractError, TypeError, ValueError) as exc:
+                raise ConflictError(
+                    "Studio graph binding failed canonical readiness proof.",
+                    entity="note_studio_documents",
+                ) from exc  # noqa: TRY003
         return [dict(row) for row in rows]

@@ -281,3 +281,63 @@ def test_moodboard_pagination_and_total_count(moodboard_db: CharactersRAGDB):
         assert row["membership_source"] == "manual"
         preview = row.get("content_preview")
         assert isinstance(preview, str) and len(preview) <= 280
+
+
+@pytest.mark.parametrize("bind_graphs", [False, True])
+def test_smart_and_hybrid_moodboard_reads_are_tenant_scoped(
+    tmp_path,
+    bind_graphs: bool,
+) -> None:
+    db_path = tmp_path / "tenant-scoped-moodboards.db"
+    owner_a = CharactersRAGDB(str(db_path), client_id="moodboard-owner-a")
+    try:
+        smart_a = owner_a.add_note(
+            title="Owner A smart",
+            content="tenant-match owner-a-preview",
+        )
+        manual_a = owner_a.add_note(
+            title="Owner A manual",
+            content="manual-only owner-a-preview",
+        )
+        leaked_b = owner_a.add_note(
+            title="Owner B private title",
+            content="tenant-match owner-b-private-preview",
+        )
+        assert smart_a and manual_a and leaked_b
+        with owner_a.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET client_id=? WHERE id=?",
+                ("moodboard-owner-b", leaked_b),
+            )
+
+        smart_board = owner_a.add_moodboard(
+            name="Smart only",
+            smart_rule={"query": "tenant-match"},
+        )
+        hybrid_board = owner_a.add_moodboard(
+            name="Manual and smart",
+            smart_rule={"query": "tenant-match"},
+        )
+        assert smart_board is not None and hybrid_board is not None
+        assert owner_a.link_note_to_moodboard(hybrid_board, manual_a) is True
+
+        if bind_graphs:
+            owner_a.bind_local_moodboard_graph_to_dataset(
+                owner_user_id="moodboard-owner-a",
+                target_dataset_id="moodboard-dataset-a",
+            )
+        smart_rows = owner_a.list_moodboard_notes(smart_board, limit=20, offset=0)
+        assert owner_a.count_moodboard_notes(smart_board) == 1
+        assert [(row["id"], row["membership_source"]) for row in smart_rows] == [
+            (smart_a, "smart")
+        ]
+
+        hybrid_rows = owner_a.list_moodboard_notes(hybrid_board, limit=20, offset=0)
+        assert owner_a.count_moodboard_notes(hybrid_board) == 2
+        assert {row["id"] for row in hybrid_rows} == {smart_a, manual_a}
+        serialized = repr(smart_rows + hybrid_rows)
+        assert "Owner B private title" not in serialized
+        assert "owner-b-private-preview" not in serialized
+        assert leaked_b not in {row["id"] for row in smart_rows + hybrid_rows}
+    finally:
+        owner_a.close_all_connections()

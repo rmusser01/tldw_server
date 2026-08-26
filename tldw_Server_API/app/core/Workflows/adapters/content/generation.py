@@ -58,6 +58,8 @@ _GENERATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
+_LOCAL_STUDIO_PROVIDER = "tldw"
+_LOCAL_DIAGRAM_MODEL = "diagram-deterministic-v1"
 
 
 def _build_notes_studio_payload(
@@ -146,7 +148,7 @@ def _build_fallback_diagram(content: str, diagram_type: str) -> str:
     lines = [line.strip(" -") for line in str(content or "").splitlines() if line.strip()]
     labels = lines[:3] or ["Key idea", "Supporting detail", "Summary"]
     sanitized = [label.replace('"', "'") for label in labels]
-    mermaid_lines = [f"flowchart TD", f'    A["{sanitized[0]}"]']
+    mermaid_lines = ["flowchart TD", f'    A["{sanitized[0]}"]']
     for index, label in enumerate(sanitized[1:], start=1):
         node_id = chr(ord("A") + index)
         mermaid_lines.append(f'    A --> {node_id}["{label}"]')
@@ -888,7 +890,14 @@ async def run_diagram_generate_adapter(config: dict[str, Any], context: dict[str
     model = config.get("model")
     if not provider or not model:
         diagram = _build_fallback_diagram(str(content), str(diagram_type))
-        return {"diagram": diagram.strip(), "format": output_format, "diagram_type": diagram_type}
+        return {
+            "diagram": diagram.strip(),
+            "format": output_format,
+            "diagram_type": diagram_type,
+            "source": "deterministic_fallback",
+            "provider": _LOCAL_STUDIO_PROVIDER,
+            "model": _LOCAL_DIAGRAM_MODEL,
+        }
 
     try:
         format_examples = {
@@ -930,7 +939,17 @@ Content:
                     cleaned.append(line)
             diagram = "\n".join(cleaned)
 
-        return {"diagram": diagram.strip(), "format": output_format, "diagram_type": diagram_type}
+        accepted_diagram = diagram.strip()
+        if not accepted_diagram:
+            return {"diagram": "", "error": "diagram_generate_error"}
+        return {
+            "diagram": accepted_diagram,
+            "format": output_format,
+            "diagram_type": diagram_type,
+            "source": "llm",
+            "provider": str(provider),
+            "model": str(model),
+        }
 
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Diagram generate error")

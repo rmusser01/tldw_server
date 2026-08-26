@@ -2010,6 +2010,48 @@ class TestDiagramGenerateAdapter:
     """Tests for the diagram generation adapter."""
 
     @pytest.mark.asyncio
+    async def test_diagram_generate_reports_deterministic_execution_identity(
+        self, base_context, sample_long_text
+    ):
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_diagram_generate_adapter
+
+        result = await run_diagram_generate_adapter(
+            {"content": sample_long_text, "diagram_type": "flowchart"},
+            base_context,
+        )
+
+        assert result["source"] == "deterministic_fallback"
+        assert (result["provider"], result["model"]) == (
+            "tldw",
+            "diagram-deterministic-v1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_diagram_generate_reports_actual_llm_execution_identity(
+        self, base_context, sample_long_text
+    ):
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_diagram_generate_adapter
+
+        mock_response = mock_chat_response("flowchart TD\nA --> B")
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await run_diagram_generate_adapter(
+                {
+                    "content": sample_long_text,
+                    "diagram_type": "flowchart",
+                    "provider": "openai",
+                    "model": "gpt-test",
+                },
+                base_context,
+            )
+
+        assert result["source"] == "llm"
+        assert (result["provider"], result["model"]) == ("openai", "gpt-test")
+
+    @pytest.mark.asyncio
     async def test_diagram_generate_mermaid(self, monkeypatch, base_context, sample_long_text):
         """Test diagram generation with mermaid format."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_diagram_generate_adapter

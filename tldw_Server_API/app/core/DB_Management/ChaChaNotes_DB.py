@@ -47,7 +47,7 @@ import time  # noqa: E402
 import unicodedata  # noqa: E402
 import uuid  # noqa: E402
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -718,8 +718,10 @@ class CharactersRAGDB:
         "moodboard_notes",
         "note_studio_documents",
     )
-    _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
-    _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
+    _NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE = 128
+    _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[tuple[threading.RLock, ...]] = tuple(
+        threading.RLock() for _ in range(64)
+    )
     _SQLITE_CORE_SCHEMA_TABLES = frozenset(
         {
             "character_cards",
@@ -12516,16 +12518,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         collection_sync_ids: Iterable[str],
     ) -> None:
         """Require each portable collection identity to resolve once for its owner."""
-        query, _ = self._prepare_backend_statement(
-            "SELECT client_id FROM keyword_collections WHERE sync_id=?",
-            (),
-        )
-        for collection_sync_id in collection_sync_ids:
-            rows = conn.execute(query, (collection_sync_id,)).fetchall()
-            if (
-                len(rows) != 1
-                or str(rows[0]["client_id"]).strip() != owner_user_id
-            ):
+        requested = sorted({str(value).strip() for value in collection_sync_ids})
+        if not requested:
+            return
+        resolved: dict[str, list[str]] = {sync_id: [] for sync_id in requested}
+        for offset in range(0, len(requested), 400):
+            batch = requested[offset : offset + 400]
+            placeholders = ",".join("?" for _ in batch)
+            query, params = self._prepare_backend_statement(
+                "SELECT sync_id,client_id FROM keyword_collections "
+                f"WHERE sync_id IN ({placeholders})",  # nosec B608 - placeholders only.
+                tuple(batch),
+            )
+            for row in conn.execute(query, params or ()).fetchall():
+                sync_id = str(row["sync_id"]).strip()
+                if sync_id in resolved:
+                    resolved[sync_id].append(str(row["client_id"]).strip())
+        for owners in resolved.values():
+            if owners != [owner_user_id]:
                 raise ValueError(
                     "moodboard portable collection identity is unavailable"
                 )
@@ -12659,6 +12669,55 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "Notes task graph does not match existing scope authority."
                 )  # noqa: TRY003
 
+    def _notes_moodboard_studio_v61_streaming_rows_sqlite(
+        self,
+        conn: sqlite3.Connection,
+        query: str,
+        params: tuple[object, ...] = (),
+        *,
+        page_size: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield one bounded page at a time from an ordered migration query."""
+        size = page_size or self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+        if size < 1:
+            raise ValueError("migration page size must be positive")
+        cursor = conn.execute(query, params)
+        while True:
+            batch = cursor.fetchmany(size)
+            if not batch:
+                return
+            for row in batch:
+                yield dict(row)
+
+    def _notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+        self,
+        conn: sqlite3.Connection,
+        query: str,
+        params: tuple[object, ...] = (),
+        *,
+        page_size: int | None = None,
+    ) -> tuple[int, str]:
+        """Return a count and incremental length-framed digest for ordered rows."""
+        digest = hashlib.sha256()
+        count = 0
+        for row in self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+            conn,
+            query,
+            params,
+            page_size=page_size,
+        ):
+            encoded = json.dumps(
+                self._note_task_v60_json_safe(row),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+            count += 1
+        return count, f"sha256:{digest.hexdigest()}"
+
     def _notes_moodboard_studio_v61_data_proof_sqlite(
         self,
         conn: sqlite3.Connection,
@@ -12677,19 +12736,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         proof: dict[str, tuple[int, str]] = {}
         for logical_name, ordering in orderings.items():
             table = f"{logical_name}{suffix}"
-            rows = (
-                [
-                    dict(row)
-                    for row in conn.execute(
-                        f"SELECT * FROM {table} ORDER BY {ordering}"  # nosec B608 - fixed migration tables/orderings.
-                    )
-                ]
-                if table in tables
-                else []
-            )
             proof[logical_name] = (
-                len(rows),
-                self._note_task_v60_hash(self._note_task_v60_json_safe(rows)),
+                self._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+                    conn,
+                    f"SELECT * FROM {table} ORDER BY {ordering}",  # nosec B608 - fixed migration tables/orderings.
+                )
+                if table in tables
+                else (0, f"sha256:{hashlib.sha256().hexdigest()}")
             )
         return proof
 
@@ -12723,10 +12776,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         proof: dict[str, tuple[int, str]] = {}
         for logical_name, query in queries.items():
             table = f"{logical_name}{suffix}"
-            rows = [dict(row) for row in conn.execute(query)] if table in tables else []
             proof[logical_name] = (
-                len(rows),
-                self._note_task_v60_hash(self._note_task_v60_json_safe(rows)),
+                self._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+                    conn, query
+                )
+                if table in tables
+                else (0, f"sha256:{hashlib.sha256().hexdigest()}")
             )
         return proof
 
@@ -12757,75 +12812,72 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "Notes v61 source/target semantic fingerprint copy verification failed."
             )  # noqa: TRY003
 
-        source_authority = {
-            (str(row[0]), str(row[1]))
-            for row in conn.execute(
-                "SELECT owner_user_id,dataset_id FROM note_task_scope_authority"
-            )
-        }
-        target_authority = {
-            (str(row[0]), str(row[1]))
-            for row in conn.execute(
+        relationship_queries = [
+            (
+                "SELECT owner_user_id,dataset_id FROM note_task_scope_authority",
                 "SELECT owner_user_id,dataset_id FROM note_task_scope_authority_v61 "
                 "WHERE task_graph_bound=1 AND moodboard_graph_bound=0 "
-                "AND studio_graph_bound=0"
-            )
-        }
-        source_boards = {
-            (int(row[0]), str(row[1]))
-            for row in conn.execute("SELECT id,client_id FROM moodboards")
-        }
-        target_boards = {
-            (int(row[0]), str(row[1]))
-            for row in conn.execute(
+                "AND studio_graph_bound=0",
+            ),
+            (
+                "SELECT id,client_id FROM moodboards",
                 "SELECT id,owner_user_id FROM moodboards_v61 "
-                "WHERE dataset_id='local-unbound' AND owner_user_id=client_id"
-            )
-        }
-        source_placements = {
-            (int(row[0]), str(row[1]))
-            for row in conn.execute("SELECT moodboard_id,note_id FROM moodboard_notes")
-        }
-        target_placements = {
-            (int(row[0]), str(row[1]))
-            for row in conn.execute(
+                "WHERE dataset_id='local-unbound' AND owner_user_id=client_id",
+            ),
+            (
+                "SELECT moodboard_id,note_id FROM moodboard_notes",
                 "SELECT p.moodboard_id,p.note_id FROM moodboard_notes_v61 p "
                 "JOIN moodboards_v61 b ON b.id=p.moodboard_id "
                 "AND b.owner_user_id=p.owner_user_id AND b.dataset_id=p.dataset_id "
                 "JOIN notes n ON n.id=p.note_id AND n.client_id=p.owner_user_id "
-                "WHERE p.dataset_id='local-unbound'"
+                "WHERE p.dataset_id='local-unbound'",
+            ),
+        ]
+        if "note_studio_documents" in self._sqlite_table_names(conn):
+            relationship_queries.append(
+                (
+                    "SELECT note_id FROM note_studio_documents",
+                    "SELECT s.note_id FROM note_studio_documents_v61 s "
+                    "JOIN notes n ON n.id=s.note_id AND n.client_id=s.owner_user_id "
+                    "WHERE s.dataset_id='local-unbound' AND s.deleted=n.deleted",
+                )
             )
-        }
-        source_studio = (
-            {
-                str(row[0])
-                for row in conn.execute("SELECT note_id FROM note_studio_documents")
-            }
-            if "note_studio_documents" in self._sqlite_table_names(conn)
-            else set()
-        )
-        target_studio = {
-            str(row[0])
-            for row in conn.execute(
-                "SELECT s.note_id FROM note_studio_documents_v61 s "
-                "JOIN notes n ON n.id=s.note_id AND n.client_id=s.owner_user_id "
-                "WHERE s.dataset_id='local-unbound' AND s.deleted=n.deleted"
+        else:
+            relationship_queries.append(
+                (
+                    "SELECT note_id FROM note_studio_documents_v61 WHERE 0",
+                    "SELECT note_id FROM note_studio_documents_v61",
+                )
             )
-        }
-        if (
-            source_authority != target_authority
-            or source_boards != target_boards
-            or source_placements != target_placements
-            or source_studio != target_studio
-        ):
-            raise SchemaError("Notes v61 relationship copy verification failed.")  # noqa: TRY003
+        for source_query, target_query in relationship_queries:
+            source_only = conn.execute(
+                f"SELECT 1 FROM ({source_query} EXCEPT {target_query}) LIMIT 1"  # nosec B608 - fixed migration queries.
+            ).fetchone()
+            target_only = conn.execute(
+                f"SELECT 1 FROM ({target_query} EXCEPT {source_query}) LIMIT 1"  # nosec B608 - fixed migration queries.
+            ).fetchone()
+            if source_only is not None or target_only is not None:
+                raise SchemaError("Notes v61 relationship copy verification failed.")  # noqa: TRY003
 
     def _copy_notes_moodboard_studio_graph_v61_sqlite(
         self, conn: sqlite3.Connection
     ) -> dict[str, tuple[int, str]]:
         local = self._LOCAL_UNBOUND_TASK_DATASET_ID
-        for row in conn.execute(
-            "SELECT owner_user_id,dataset_id FROM note_task_scope_authority ORDER BY owner_user_id"
+        source_counts = {
+            table: (
+                int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])  # nosec B608 - fixed migration tables.
+                if table in self._sqlite_table_names(conn)
+                else 0
+            )
+            for table in (
+                "moodboards",
+                "moodboard_notes",
+                "note_studio_documents",
+            )
+        }
+        for row in self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+            conn,
+            "SELECT owner_user_id,dataset_id FROM note_task_scope_authority ORDER BY owner_user_id",
         ):
             conn.execute(
                 "INSERT INTO note_task_scope_authority_v61("
@@ -12834,11 +12886,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 (row[0], row[1], 1, 0, 0),
             )
 
-        board_rows = [dict(row) for row in conn.execute("SELECT * FROM moodboards ORDER BY id")]
         board_scopes: dict[int, tuple[str, str]] = {}
         board_sync_ids: dict[int, str] = {}
         seen_sync_ids: set[tuple[str, str, str]] = set()
-        for row in board_rows:
+        for row in self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+            conn,
+            "SELECT * FROM moodboards ORDER BY id",
+        ):
             owner = str(row.get("client_id") or "").strip()
             if not owner:
                 raise SchemaError("Notes moodboard v61 migration could not prove board ownership.")  # noqa: TRY003
@@ -12905,14 +12959,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ),
             )
 
-        placement_rows = [
-            dict(row)
-            for row in conn.execute(
-                "SELECT * FROM moodboard_notes ORDER BY moodboard_id,created_at,note_id"
-            )
-        ]
         board_order: Counter[int] = Counter()
-        for row in placement_rows:
+        for row in self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+            conn,
+            "SELECT * FROM moodboard_notes ORDER BY moodboard_id,created_at,note_id",
+        ):
             board_id = int(row["moodboard_id"])
             board_scope = board_scopes.get(board_id)
             note = conn.execute(
@@ -12975,14 +13026,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ),
             )
 
-        studio_rows = (
-            [
-                dict(row)
-                for row in conn.execute("SELECT * FROM note_studio_documents ORDER BY note_id")
-            ]
-            if "note_studio_documents" in self._sqlite_table_names(conn)
-            else []
-        )
+        studio_rows: Iterable[dict[str, Any]] = ()
+        if "note_studio_documents" in self._sqlite_table_names(conn):
+            studio_rows = self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+                conn,
+                "SELECT * FROM note_studio_documents ORDER BY note_id",
+            )
         for row in studio_rows:
             note = conn.execute("SELECT * FROM notes WHERE id=?", (row["note_id"],)).fetchone()
             owner = str(note["client_id"]).strip() if note is not None else ""
@@ -13249,12 +13298,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ),
             )
 
-        expected_counts = {
-            "moodboards": len(board_rows),
-            "moodboard_notes": len(placement_rows),
-            "note_studio_documents": len(studio_rows),
-        }
-        for table, expected_count in expected_counts.items():
+        for table, expected_count in source_counts.items():
             actual_count = int(conn.execute(f"SELECT COUNT(*) FROM {table}_v61").fetchone()[0])  # nosec B608
             if actual_count != expected_count:
                 raise SchemaError(f"Notes v61 source verification failed for {table}.")  # noqa: TRY003
@@ -17135,13 +17179,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @classmethod
     def _sqlite_schema_init_lock_for_path(cls, db_path_str: str) -> threading.RLock:
-        """Return the process-local schema initialization lock for one SQLite DB path."""
-        with cls._SQLITE_SCHEMA_INIT_LOCKS_GUARD:
-            lock = cls._SQLITE_SCHEMA_INIT_LOCKS.get(db_path_str)
-            if lock is None:
-                lock = threading.RLock()
-                cls._SQLITE_SCHEMA_INIT_LOCKS[db_path_str] = lock
-            return lock
+        """Return a stable bounded stripe for one SQLite DB path."""
+        digest = hashlib.blake2b(str(db_path_str).encode("utf-8"), digest_size=8).digest()
+        stripe = int.from_bytes(digest, "big") % len(cls._SQLITE_SCHEMA_INIT_LOCKS)
+        return cls._SQLITE_SCHEMA_INIT_LOCKS[stripe]
 
     def ensure_character_tables_ready(self) -> None:
         """
@@ -30793,6 +30834,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _build_moodboard_smart_rule_sql_parts(
         self,
         smart_rule: dict[str, Any],
+        *,
+        owner_user_id: str,
         note_alias: str = "n",
     ) -> tuple[list[str], list[str], list[Any]]:
         if not isinstance(smart_rule, dict):
@@ -30826,6 +30869,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params: list[Any] = []
         deleted_false = "FALSE" if self.backend_type == BackendType.POSTGRESQL else "0"
         where_clauses.append(f"{note_alias}.deleted = {deleted_false}")
+        where_clauses.append(f"{note_alias}.client_id = ?")
+        params.append(owner_user_id)
 
         if query_text:
             like_value = f"%{query_text.lower()}%"
@@ -30860,6 +30905,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self,
         moodboard_id: int,
         smart_rule: dict[str, Any] | None,
+        *,
+        owner_user_id: str,
+        dataset_id: str | None,
     ) -> tuple[str, tuple[Any, ...]]:
         preview_expr = self._moodboard_content_preview_expr("n")
         deleted_false_value = False if self.backend_type == BackendType.POSTGRESQL else 0
@@ -30871,13 +30919,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "1 AS manual_hit, 0 AS smart_hit "
             "FROM moodboard_notes mn "
             "JOIN notes n ON n.id = mn.note_id "
-            "WHERE mn.moodboard_id = ? AND mn.deleted = 0 AND n.deleted = ?"
+            "WHERE mn.moodboard_id = ? AND mn.deleted = 0 AND n.deleted = ? "
+            "AND n.client_id = ?"
         )
         select_queries: list[str] = [manual_select]
-        params: list[Any] = [moodboard_id, deleted_false_value]
+        params: list[Any] = [moodboard_id, deleted_false_value, owner_user_id]
+        if self._supports_notes_moodboard_studio_v61():
+            manual_select += " AND mn.owner_user_id = ? AND mn.dataset_id = ?"
+            select_queries[0] = manual_select
+            params.extend((owner_user_id, dataset_id))
 
         if isinstance(smart_rule, dict) and smart_rule:
-            joins, where_clauses, smart_params = self._build_moodboard_smart_rule_sql_parts(smart_rule, note_alias="n")
+            joins, where_clauses, smart_params = self._build_moodboard_smart_rule_sql_parts(
+                smart_rule,
+                owner_user_id=owner_user_id,
+                note_alias="n",
+            )
             if where_clauses:
                 smart_select = (
                     "SELECT DISTINCT n.id AS id, n.title AS title, n.last_modified AS last_modified, "
@@ -30893,7 +30950,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return union_query, tuple(params)
 
     def _list_notes_matching_moodboard_rule(self, smart_rule: dict[str, Any]) -> list[dict[str, Any]]:
-        joins, where_clauses, params = self._build_moodboard_smart_rule_sql_parts(smart_rule, note_alias="n")
+        joins, where_clauses, params = self._build_moodboard_smart_rule_sql_parts(
+            smart_rule,
+            owner_user_id=str(self.client_id),
+            note_alias="n",
+        )
         if not where_clauses:
             return []
 
@@ -30913,6 +30974,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         union_query, union_params = self._build_moodboard_note_union_query(
             moodboard_id=moodboard_id,
             smart_rule=moodboard.get("smart_rule"),
+            owner_user_id=str(moodboard.get("owner_user_id") or self.client_id),
+            dataset_id=(
+                None
+                if moodboard.get("dataset_id") is None
+                else str(moodboard["dataset_id"])
+            ),
         )
         count_query = (
             f"WITH combined AS ({union_query}) "  # nosec B608
@@ -30933,6 +31000,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         union_query, union_params = self._build_moodboard_note_union_query(
             moodboard_id=moodboard_id,
             smart_rule=moodboard.get("smart_rule"),
+            owner_user_id=str(moodboard.get("owner_user_id") or self.client_id),
+            dataset_id=(
+                None
+                if moodboard.get("dataset_id") is None
+                else str(moodboard["dataset_id"])
+            ),
         )
         page_query = (
             f"WITH combined AS ({union_query}), "  # nosec B608
@@ -39724,6 +39797,7 @@ for _note_store_method in (
     "get_note_by_id",
     "get_note_studio_document",
     "create_note_studio_document",
+    "ensure_note_studio_document",
     "upsert_note_studio_document",
     "update_note_studio_diagram_manifest",
     "list_notes",
