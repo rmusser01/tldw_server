@@ -746,6 +746,103 @@ class NoteStore:
         }
         return hashlib.sha256(canonical_json_bytes(semantic)).hexdigest()
 
+    def _prove_stored_studio_retry_state(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        document: dict[str, Any],
+    ) -> None:
+        """Fail closed unless an existing retry target is complete canonical state."""
+
+        note_id = str(document.get("note_id") or "")
+
+        def _reject() -> None:
+            raise ConflictError(
+                f"Note Studio stored state for note ID '{note_id}' is not canonical.",
+                entity="note_studio_documents",
+                entity_id=note_id,
+            )
+
+        if (
+            document.get("source_diagnostic_code") is not None
+            or document.get("source_diagnostic_hash") is not None
+        ):
+            _reject()
+        try:
+            parsed = parse_notes_studio_document_tombstone_v1(
+                self._studio_document_mapping(document)
+            )
+            revision = int(document["canonical_revision"])
+            version = int(document["version"])
+            deleted = bool(document["deleted"])
+            if revision < 1 or version != revision:
+                _reject()
+            expected_hash = notes_studio_document_object_hash(
+                parsed,
+                revision=revision,
+                deleted=deleted,
+            )
+            if document.get("canonical_hash") != expected_hash:
+                _reject()
+            parsed_payload = parsed.model_dump(mode="json")
+            result_state = dict(parsed_payload)
+            provenance = result_state.pop("accepted_provenance")
+            if provenance["result_hash"] != studio_result_hash(result_state):
+                _reject()
+            if self._studio_envelope_size(
+                parsed_payload,
+                revision=revision,
+                deleted=deleted,
+                object_hash=expected_hash,
+            ) > SYNC_ENVELOPE_MAX_BYTES:
+                _reject()
+
+            owner = str(self._db.client_id)
+            parent_row = conn.execute(
+                "SELECT * FROM notes WHERE id=? AND client_id=?",
+                (note_id, owner),
+            ).fetchone()
+            if parent_row is None or bool(parent_row["deleted"]) != deleted:
+                _reject()
+            parent = dict(parent_row)
+            parent_revision, parent_hash = self._notes_note_head(parent)
+            if parsed.note_revision > parent_revision:
+                _reject()
+            if parsed.note_revision == parent_revision and (
+                parsed.note_hash != parent_hash
+                or parsed.companion_content_hash
+                != self._normalized_text_hash(parent.get("content"))
+            ):
+                _reject()
+
+            if parsed.source_note_id is not None:
+                source_row = conn.execute(
+                    "SELECT * FROM notes WHERE id=? AND client_id=?",
+                    (parsed.source_note_id, owner),
+                ).fetchone()
+                if source_row is None:
+                    _reject()
+                source = dict(source_row)
+                source_revision, source_hash = self._notes_note_head(source)
+                accepted_source_revision = parsed.accepted_provenance.source_revision
+                if (
+                    accepted_source_revision is None
+                    or accepted_source_revision > source_revision
+                ):
+                    _reject()
+                if accepted_source_revision == source_revision:
+                    if parsed.accepted_provenance.source_hash != source_hash:
+                        _reject()
+                    if parsed.excerpt_snapshot is not None:
+                        source_content = str(source.get("content") or "").replace(
+                            "\r\n", "\n"
+                        ).replace("\r", "\n")
+                        if parsed.excerpt_snapshot not in source_content:
+                            _reject()
+        except ConflictError:
+            raise
+        except (KeyError, TypeError, ValueError, NotesMoodboardStudioContractError):
+            _reject()
+
     @staticmethod
     def _studio_envelope_size(
         payload: dict[str, Any],
@@ -1136,6 +1233,8 @@ class NoteStore:
             if not document:
                 raise CharactersRAGDBError(f"Failed to read note studio document for note ID '{normalized_note_id}'.")
             if ensure and cursor.rowcount == 0:
+                if self._db._supports_notes_moodboard_studio_v61():
+                    self._prove_stored_studio_retry_state(inner_conn, document)
                 if self._studio_retry_fingerprint(document) != candidate_retry_fingerprint:
                     raise ConflictError(
                         f"Note Studio document for note ID '{normalized_note_id}' conflicts with the captured retry.",

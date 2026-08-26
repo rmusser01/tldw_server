@@ -1008,6 +1008,72 @@ def test_v61_rejects_task_authority_mismatch_before_blessing_existing_row(
     assert _database_dump(db_path) == before  # nosec B101
 
 
+def test_v61_copies_valid_existing_task_authority_with_explicit_graph_flags(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "task-authority-copy.sqlite"
+    _prepare_v60_product_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        now = "2026-08-25T00:00:00Z"
+        conn.execute(
+            "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+            (OWNER, DATASET_A),
+        )
+        conn.execute(
+            """
+            INSERT INTO note_tasks(
+              owner_user_id,dataset_id,id,note_id,text,status,metadata_json,
+              projection_status,deleted,created_at,updated_at,completed_at,
+              client_id,version,canonical_revision,canonical_hash,
+              source_diagnostic_code,source_diagnostic_hash
+            ) VALUES (?,?,?,?,?,'open','{}','live',0,?,?,NULL,?,1,1,?,NULL,NULL)
+            """,
+            (
+                OWNER,
+                DATASET_A,
+                "task-with-authority",
+                BOARD_NOTE_ID,
+                "Task",
+                now,
+                now,
+                OWNER,
+                "sha256:" + ("1" * 64),
+            ),
+        )
+
+    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    try:
+        row = db.execute_query(
+            "SELECT dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound "
+            "FROM note_task_scope_authority WHERE owner_user_id=?",
+            (OWNER,),
+        ).fetchone()
+        assert tuple(row) == (DATASET_A, 1, 0, 0)  # nosec B101
+        assert _schema_version(db_path) == 61  # nosec B101
+    finally:
+        db.close_all_connections()
+
+
+def test_v61_rejects_malformed_existing_task_authority_without_mutation(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "malformed-task-authority.sqlite"
+    _prepare_v60_product_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA ignore_check_constraints=ON")
+        conn.execute(
+            "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+            (OWNER, LOCAL_UNBOUND),
+        )
+    before = _database_dump(db_path)
+
+    with pytest.raises(CharactersRAGDBError, match="scope authority is malformed"):
+        CharactersRAGDB(str(db_path), client_id=OWNER)
+
+    assert _schema_version(db_path) == 60  # nosec B101
+    assert _database_dump(db_path) == before  # nosec B101
+
+
 def test_v61_rejects_nonlocal_task_graph_without_an_authority_row(
     tmp_path: Path,
 ) -> None:

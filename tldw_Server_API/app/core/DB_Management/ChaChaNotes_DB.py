@@ -12757,19 +12757,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         queries = {
             "note_task_scope_authority": (
                 "SELECT owner_user_id,dataset_id FROM "
-                f"note_task_scope_authority{suffix} ORDER BY owner_user_id"
+                f"note_task_scope_authority{suffix} ORDER BY owner_user_id"  # nosec B608 - suffix selects a fixed migration table.
             ),
             "moodboards": (
                 "SELECT id,name,description,created_at,last_modified,deleted,client_id,version "
-                f"FROM moodboards{suffix} ORDER BY id"
+                f"FROM moodboards{suffix} ORDER BY id"  # nosec B608 - suffix selects a fixed migration table.
             ),
             "moodboard_notes": (
                 "SELECT moodboard_id,note_id,created_at "
-                f"FROM moodboard_notes{suffix} ORDER BY moodboard_id,created_at,note_id"
+                f"FROM moodboard_notes{suffix} ORDER BY moodboard_id,created_at,note_id"  # nosec B608 - suffix selects a fixed migration table.
             ),
             "note_studio_documents": (
                 "SELECT note_id,template_type,handwriting_mode,source_note_id,render_version,"
-                f"created_at,last_modified FROM note_studio_documents{suffix} ORDER BY note_id"
+                f"created_at,last_modified FROM note_studio_documents{suffix} ORDER BY note_id"  # nosec B608 - suffix selects a fixed migration table.
             ),
         }
         tables = self._sqlite_table_names(conn)
@@ -12883,7 +12883,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "INSERT INTO note_task_scope_authority_v61("
                 "owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound"
                 ") VALUES (?,?,?,?,?)",
-                (row[0], row[1], 1, 0, 0),
+                (row["owner_user_id"], row["dataset_id"], 1, 0, 0),
             )
 
         board_scopes: dict[int, tuple[str, str]] = {}

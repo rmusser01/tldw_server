@@ -286,6 +286,7 @@ def test_derive_rolls_back_note_when_sidecar_persistence_fails(studio_db, monkey
 
 def test_ensure_studio_document_accepts_identical_storage_normalized_retry(
     studio_db,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db = studio_db
     source_note_id = db.add_note(title="Source", content="Accepted excerpt")
@@ -298,9 +299,16 @@ def test_ensure_studio_document_accepts_identical_storage_normalized_retry(
     )
 
     first = service._ensure_studio_document(**fields)
+    first_accepted_at = first["accepted_provenance_json"]["accepted_at"]
+    monkeypatch.setattr(
+        db,
+        "_get_current_utc_timestamp_iso",
+        lambda: "2031-01-02T03:04:05.000000Z",
+    )
     second = service._ensure_studio_document(**fields)
 
     assert second == first
+    assert second["accepted_provenance_json"]["accepted_at"] == first_accepted_at
     assert second["version"] == 1
     assert second["canonical_revision"] == 1
 
@@ -354,6 +362,97 @@ def test_ensure_studio_document_rejects_semantically_different_retry(
 
     with pytest.raises(ConflictError, match="captured retry"):
         service._ensure_studio_document(**changed)
+
+
+@pytest.mark.parametrize(
+    ("update_sql", "params"),
+    [
+        (
+            "UPDATE note_studio_documents SET canonical_hash=? WHERE note_id=?",
+            ("sha256:" + ("0" * 64),),
+        ),
+        (
+            "UPDATE note_studio_documents SET canonical_revision=canonical_revision+1 "
+            "WHERE note_id=?",
+            (),
+        ),
+        (
+            "UPDATE note_studio_documents SET note_hash=? WHERE note_id=?",
+            ("sha256:" + ("0" * 64),),
+        ),
+        (
+            "UPDATE note_studio_documents SET deleted=1 WHERE note_id=?",
+            (),
+        ),
+        (
+            "UPDATE note_studio_documents SET source_diagnostic_code=?,"
+            "source_diagnostic_hash=? WHERE note_id=?",
+            ("stored_studio_state_invalid", "sha256:" + ("0" * 64)),
+        ),
+        (
+            "UPDATE note_studio_documents SET payload_json=? WHERE note_id=?",
+            (json.dumps({"unexpected": True}),),
+        ),
+        (
+            "UPDATE note_studio_documents SET diagram_manifest_json=? WHERE note_id=?",
+            (json.dumps({"unexpected": True}),),
+        ),
+    ],
+    ids=(
+        "canonical-hash",
+        "canonical-revision-lineage",
+        "note-hash-lineage",
+        "parent-lifecycle",
+        "source-diagnostic",
+        "malformed-payload",
+        "malformed-manifest",
+    ),
+)
+def test_ensure_studio_document_rejects_corrupted_identical_retry(
+    studio_db,
+    update_sql: str,
+    params: tuple[object, ...],
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+    service._ensure_studio_document(**fields)
+    with db.transaction() as conn:
+        conn.execute(update_sql, (*params, note_id))
+
+    with pytest.raises(ConflictError, match="stored state"):
+        service._ensure_studio_document(**fields)
+
+
+def test_ensure_studio_document_rejects_corrupted_accepted_result_hash(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+    document = service._ensure_studio_document(**fields)
+    provenance = dict(document["accepted_provenance_json"])
+    provenance["result_hash"] = "sha256:" + ("0" * 64)
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_studio_documents SET accepted_provenance_json=? WHERE note_id=?",
+            (json.dumps(provenance), note_id),
+        )
+
+    with pytest.raises(ConflictError, match="stored state"):
+        service._ensure_studio_document(**fields)
 
 
 def test_get_state_detects_markdown_drift_and_regenerate_rebuilds_payload_from_current_markdown(studio_db):
