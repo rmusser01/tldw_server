@@ -513,6 +513,21 @@ def test_current_postgres_v61_rejects_constraint_and_progress_drift_without_repa
             "WHERE conname='moodboards_unexpected_check') AS drift_present",
         ),
         (
+            (
+                "ALTER TABLE moodboard_notes ADD CONSTRAINT "
+                "moodboards_v61_owner_check "
+                "CHECK(char_length(btrim(owner_user_id))>0)",
+            ),
+            (
+                "ALTER TABLE moodboard_notes DROP CONSTRAINT IF EXISTS "
+                "moodboards_v61_owner_check",
+            ),
+            "constraint catalog drifted",
+            "SELECT EXISTS(SELECT 1 FROM pg_constraint k JOIN pg_class c "
+            "ON c.oid=k.conrelid WHERE c.relname='moodboard_notes' "
+            "AND k.conname='moodboards_v61_owner_check') AS drift_present",
+        ),
+        (
             ("CREATE INDEX idx_moodboards_unexpected ON moodboards(name)",),
             ("DROP INDEX IF EXISTS idx_moodboards_unexpected",),
             "index catalog drifted",
@@ -547,6 +562,7 @@ def test_current_postgres_v61_rejects_constraint_and_progress_drift_without_repa
     ),
     ids=(
         "unexpected-check",
+        "expected-name-on-wrong-table",
         "extra-index",
         "missing-retained-index",
         "drifted-retained-check",
@@ -1041,6 +1057,158 @@ def _restore_large_postgres_v60_fixture(
         )
 
 
+def test_postgres_v61_placement_order_is_board_global_across_resumed_pages(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "960019"
+    first_board_count = 260
+    second_board_count = 5
+    first_board_rank_multiplier = 137
+    backend, db = _open_db(pg_database_config, owner=owner)
+    try:
+        _restore_large_postgres_v60_fixture(db, owner=owner, row_count=2)
+        with db.transaction() as conn:
+            conn.execute("DELETE FROM moodboard_notes")
+            conn.execute("DELETE FROM note_studio_documents")
+            conn.execute("DELETE FROM notes")
+            board_ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM moodboards ORDER BY id"
+                ).fetchall()
+            ]
+            conn.execute(
+                "INSERT INTO notes(id,title,content,client_id) "
+                "SELECT '00000000-0000-4000-8000-' || lpad(i::text,12,'0'),"
+                "'Board one note ' || i::text,'Body',? "
+                "FROM generate_series(1,?) AS i",
+                (owner, first_board_count),
+            )
+            conn.execute(
+                "INSERT INTO moodboard_notes(moodboard_id,note_id,created_at) "
+                "SELECT ?,'00000000-0000-4000-8000-' || lpad(i::text,12,'0'),"
+                "TIMESTAMPTZ '2026-01-01 00:00:00+00' + "
+                "(mod(i * ?, ?) * INTERVAL '1 second') "
+                "FROM generate_series(1,?) AS i",
+                (
+                    board_ids[0],
+                    first_board_rank_multiplier,
+                    first_board_count,
+                    first_board_count,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO notes(id,title,content,client_id) "
+                "SELECT '00000000-0000-4000-8000-' || lpad(i::text,12,'0'),"
+                "'Board two note ' || i::text,'Body',? "
+                "FROM generate_series(1001,?) AS i",
+                (owner, 1000 + second_board_count),
+            )
+            conn.execute(
+                "INSERT INTO moodboard_notes(moodboard_id,note_id,created_at) "
+                "SELECT ?,'00000000-0000-4000-8000-' || lpad(i::text,12,'0'),"
+                "TIMESTAMPTZ '2026-02-01 00:00:00+00' + "
+                "((? - i) * INTERVAL '1 second') "
+                "FROM generate_series(1001,?) AS i",
+                (
+                    board_ids[1],
+                    1000 + second_board_count,
+                    1000 + second_board_count,
+                ),
+            )
+
+        failed = False
+
+        def interrupt_after_first_placement_copy_page(label: str) -> None:
+            nonlocal failed
+            if label == "copy:moodboard_notes:128" and not failed:
+                failed = True
+                raise RuntimeError("injected placement-page interruption")
+
+        monkeypatch.setattr(
+            db,
+            "_notes_moodboard_studio_v61_postgres_checkpoint",
+            interrupt_after_first_placement_copy_page,
+        )
+        with pytest.raises(RuntimeError, match="placement-page interruption"):
+            with db.transaction() as conn:
+                db._migrate_from_v60_to_v61_postgres(conn)
+        assert failed
+        with backend.transaction() as conn:
+            version = db._get_schema_version_postgres(conn)
+            partial = backend.execute(
+                "SELECT copied_count,status FROM chacha_schema_migration_progress "
+                "WHERE migration_id=? AND phase='moodboard_notes'",
+                (db._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID,),
+                connection=conn,
+            ).rows
+        assert version == 60
+        assert partial == [{"copied_count": 128, "status": "running"}]
+
+        monkeypatch.setattr(
+            db,
+            "_notes_moodboard_studio_v61_postgres_checkpoint",
+            lambda _label: None,
+        )
+        with db.transaction() as conn:
+            db._migrate_from_v60_to_v61_postgres(conn)
+
+        with backend.transaction() as conn:
+            placements = backend.execute(
+                "SELECT moodboard_id,note_id,created_at,order_index FROM moodboard_notes "
+                "ORDER BY moodboard_id,created_at,note_id",
+                connection=conn,
+            ).rows
+            fingerprints = backend.execute(
+                "SELECT phase,copied_count,aggregate_fingerprint,status "
+                "FROM chacha_schema_migration_progress WHERE migration_id=? "
+                "AND phase IN ('source_prediction:moodboard_notes',"
+                "'aggregate_verification:moodboard_notes') ORDER BY phase",
+                (db._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID,),
+                connection=conn,
+            ).rows
+
+        first_board = [
+            row for row in placements if row["moodboard_id"] == board_ids[0]
+        ]
+        second_board = [
+            row for row in placements if row["moodboard_id"] == board_ids[1]
+        ]
+        assert [row["order_index"] for row in first_board] == list(
+            range(first_board_count)
+        )
+        assert [row["order_index"] for row in second_board] == list(
+            range(second_board_count)
+        )
+        expected_first_board_note_ids = [
+            f"00000000-0000-4000-8000-{note_number:012d}"
+            for note_number in sorted(
+                range(1, first_board_count + 1),
+                key=lambda value: (
+                    (value * first_board_rank_multiplier) % first_board_count,
+                    f"00000000-0000-4000-8000-{value:012d}",
+                ),
+            )
+        ]
+        assert [row["note_id"] for row in first_board] == expected_first_board_note_ids
+        assert [
+            (row["note_id"], row["order_index"]) for row in first_board
+        ] == [
+            (note_id, order_index)
+            for order_index, note_id in enumerate(expected_first_board_note_ids)
+        ]
+        assert [row["copied_count"] for row in fingerprints] == [
+            first_board_count + second_board_count,
+            first_board_count + second_board_count,
+        ]
+        assert len({row["aggregate_fingerprint"] for row in fingerprints}) == 1
+        assert {row["status"] for row in fingerprints} == {"complete"}
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
 def test_postgres_v61_upgrade_matches_sqlite_rule_and_studio_conversion(
     pg_database_config: DatabaseConfig,
 ) -> None:
@@ -1295,7 +1463,10 @@ def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
                     r"sha256:[0-9a-f]{64}", row["aggregate_fingerprint"]
                 )
                 if row["keyset_cursor"] is not None:
-                    assert len(json.loads(row["keyset_cursor"])) <= 3
+                    cursor = json.loads(row["keyset_cursor"])
+                    assert len(cursor) == (
+                        4 if row["phase"].endswith("moodboard_notes") else 2
+                    )
             if version == 61:
                 break
             assert version == 60

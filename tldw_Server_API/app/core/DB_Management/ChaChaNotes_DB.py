@@ -13733,10 +13733,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ).rows]
             return rows, ([rows[-1]["client_id"], rows[-1]["id"]] if rows else cursor)
         if phase == "moodboard_notes":
-            after_owner, after_board, after_note = (cursor or ["", -1, ""])
+            after_owner, after_board, after_created, after_note = (
+                cursor or ["", -1, "0001-01-01 00:00:00+00", ""]
+            )
             rows = [dict(row) for row in self.backend.execute(
+                "WITH ranked AS ("
                 "SELECT b.client_id AS owner_user_id,p.moodboard_id,p.note_id,p.created_at,"
-                "b.sync_id,ROW_NUMBER() OVER(PARTITION BY p.moodboard_id "
+                "b.sync_id,ROW_NUMBER() OVER(PARTITION BY b.client_id,p.moodboard_id "
                 "ORDER BY p.created_at,p.note_id)-1 AS legacy_order_index,"
                 "p.owner_user_id AS target_owner_user_id,"
                 "p.dataset_id AS target_dataset_id,p.placement_id,p.x,p.y,p.width,"
@@ -13744,12 +13747,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "p.version,p.canonical_revision,p.canonical_hash,"
                 "p.source_diagnostic_code,p.source_diagnostic_hash "
                 "FROM moodboard_notes p JOIN moodboards b ON b.id=p.moodboard_id "
-                "JOIN notes n ON n.id=p.note_id AND n.client_id=b.client_id "
-                "WHERE (b.client_id,p.moodboard_id,p.note_id)>(%s,%s,%s) "
-                "ORDER BY b.client_id,p.moodboard_id,p.note_id LIMIT %s",
-                (after_owner, after_board, after_note, page_size), connection=conn,
+                "JOIN notes n ON n.id=p.note_id AND n.client_id=b.client_id"
+                ") SELECT * FROM ranked "
+                "WHERE (owner_user_id,moodboard_id,created_at,note_id)>(%s,%s,%s::timestamptz,%s) "
+                "ORDER BY owner_user_id,moodboard_id,created_at,note_id LIMIT %s",
+                (after_owner, after_board, after_created, after_note, page_size),
+                connection=conn,
             ).rows]
-            return rows, ([rows[-1]["owner_user_id"], rows[-1]["moodboard_id"], rows[-1]["note_id"]] if rows else cursor)
+            return rows, (
+                [
+                    rows[-1]["owner_user_id"],
+                    rows[-1]["moodboard_id"],
+                    self._legacy_sync_timestamp_v61(rows[-1]["created_at"]),
+                    rows[-1]["note_id"],
+                ]
+                if rows
+                else cursor
+            )
         after_owner, after_note = (cursor or ["", ""])
         rows = [dict(row) for row in self.backend.execute(
             "SELECT s.note_id,s.payload_json,s.template_type,s.handwriting_mode,"
@@ -13780,7 +13794,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if phase == "moodboards":
             return [row["client_id"], row["id"]]
         if phase == "moodboard_notes":
-            return [row["owner_user_id"], row["moodboard_id"], row["note_id"]]
+            return [
+                row["owner_user_id"],
+                row["moodboard_id"],
+                CharactersRAGDB._legacy_sync_timestamp_v61(row["created_at"]),
+                row["note_id"],
+            ]
         return [row["owner_user_id"], row["note_id"]]
 
     def _postgres_v61_fingerprint_phase_page(
@@ -14271,7 +14290,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if phase == "moodboards":
             return rows, [rows[-1]["client_id"], rows[-1]["id"]], source_exhausted
         if phase == "moodboard_notes":
-            return rows, [rows[-1]["owner_user_id"], rows[-1]["moodboard_id"], rows[-1]["note_id"]], source_exhausted
+            return rows, [
+                rows[-1]["owner_user_id"],
+                rows[-1]["moodboard_id"],
+                self._legacy_sync_timestamp_v61(rows[-1]["created_at"]),
+                rows[-1]["note_id"],
+            ], source_exhausted
         return rows, [rows[-1]["owner_user_id"], rows[-1]["note_id"]], source_exhausted
 
     def _migrate_from_v61_to_v62_postgres(self, conn: Any) -> None:
@@ -14991,6 +15015,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """
             SELECT c.relname AS table_name,k.conname AS constraint_name,
                    k.contype AS constraint_type,
+                   pg_get_constraintdef(k.oid,true) AS constraint_definition,
                    pg_get_expr(k.conbin,k.conrelid,false) AS check_expression,
                    referenced.relname AS referenced_table,
                    referenced_namespace.nspname AS referenced_schema,
@@ -15021,7 +15046,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             connection=conn,
         ).rows
         constraints = {
-            str(row["constraint_name"]): row for row in constraint_rows
+            (str(row["table_name"]), str(row["constraint_name"])): row
+            for row in constraint_rows
         }
         expected_checks = {
             "note_task_scope_authority_owner_check": (
@@ -15155,34 +15181,70 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "notes", ("id",), "c", "c",
             ),
         }
-        expected_constraint_names = (
-            set(expected_checks) | set(expected_unique) | set(expected_primary)
-            | set(expected_foreign)
-        )
-        if set(constraints) != expected_constraint_names or any(
+        def _expected_check_table(name: str) -> str:
+            if name.startswith("note_task_scope_authority_"):
+                return "note_task_scope_authority"
+            if name.startswith("moodboard_notes_"):
+                return "moodboard_notes"
+            if name.startswith("moodboards_"):
+                return "moodboards"
+            return "note_studio_documents"
+
+        def _constraint_definition(row: Mapping[str, Any]) -> str:
+            return self._normalize_postgres_catalog_expression(
+                row["constraint_definition"]
+            )
+
+        def _column_definition(columns: tuple[str, ...]) -> str:
+            return ",".join(columns)
+
+        expected_constraint_keys = {
+            (_expected_check_table(name), name) for name in expected_checks
+        } | {
+            (table, name)
+            for name, (table, _columns) in (expected_unique | expected_primary).items()
+        } | {
+            (expected[0], name) for name, expected in expected_foreign.items()
+        }
+        if set(constraints) != expected_constraint_keys or any(
             not bool(row["constraint_validated"]) for row in constraints.values()
         ):
             raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
         for name, expression in expected_checks.items():
-            row = constraints[name]
+            row = constraints[(_expected_check_table(name), name)]
             if (
                 str(row["constraint_type"]) != "c"
                 or self._normalize_postgres_catalog_expression(row["check_expression"])
                 != self._normalize_postgres_catalog_expression(expression)
+                or _constraint_definition(row)
+                != "check" + self._normalize_postgres_catalog_expression(expression)
             ):
                 raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
         for name, (table, columns) in (expected_unique | expected_primary).items():
-            row = constraints[name]
+            row = constraints[(table, name)]
             expected_type = "u" if name in expected_unique else "p"
+            expected_definition = (
+                ("unique" if expected_type == "u" else "primarykey")
+                + _column_definition(columns)
+            )
             if (
                 str(row["constraint_type"]) != expected_type
                 or str(row["table_name"]) != table
                 or _catalog_names(row["local_columns"]) != columns
+                or _constraint_definition(row) != expected_definition
             ):
                 raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
         for name, expected in expected_foreign.items():
             table, columns, parent, parent_columns, delete_action, update_action = expected
-            row = constraints[name]
+            row = constraints[(table, name)]
+            expected_definition = (
+                "foreignkey"
+                + _column_definition(columns)
+                + "references"
+                + parent
+                + _column_definition(parent_columns)
+                + "onupdatecascadeondeletecascade"
+            )
             if (
                 str(row["constraint_type"]) != "f"
                 or str(row["table_name"]) != table
@@ -15193,6 +15255,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 or _catalog_names(row["referenced_columns"]) != parent_columns
                 or str(row["delete_action"]) != delete_action
                 or str(row["update_action"]) != update_action
+                or _constraint_definition(row) != expected_definition
             ):
                 raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
 
