@@ -32140,6 +32140,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 diagnostic_hash,
             )
 
+    def _set_notes_moodboard_studio_v61_dataset_scope(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        dataset_id: str,
+    ) -> None:
+        if (
+            self.backend_type == BackendType.POSTGRESQL
+            and self._supports_notes_moodboard_studio_v61()
+        ):
+            conn.execute(
+                "SELECT set_config('app.current_dataset_id', ?, true)",
+                (str(dataset_id),),
+            )
+
     def add_moodboard(
         self,
         name: str,
@@ -32236,9 +32250,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         scope = ""
         if self._supports_notes_moodboard_studio_v61():
             owner = str(self.client_id)
-            dataset = self.resolve_moodboard_compatibility_dataset_id(owner_user_id=owner)
-            scope = " AND owner_user_id=? AND dataset_id=?"
-            params.extend((owner, dataset))
+            with self.transaction() as conn:
+                dataset = self.resolve_moodboard_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=conn,
+                )
+                scope = " AND owner_user_id=? AND dataset_id=?"
+                scoped_params = [*params, owner, dataset]
+                where_deleted = ""
+                if not include_deleted:
+                    where_deleted = " AND deleted = ?"
+                    scoped_params.append(
+                        False if self.backend_type == BackendType.POSTGRESQL else 0
+                    )
+                query = f"SELECT * FROM moodboards WHERE id = ?{scope}{where_deleted}"  # nosec B608
+                cursor = conn.execute(query, tuple(scoped_params))
+                return self._deserialize_moodboard_row(cursor.fetchone())
         where_deleted = ""
         if not include_deleted:
             where_deleted = " AND deleted = ?"
@@ -32261,9 +32288,33 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params: list[Any] = []
         if self._supports_notes_moodboard_studio_v61():
             owner = str(self.client_id)
-            dataset = self.resolve_moodboard_compatibility_dataset_id(owner_user_id=owner)
-            predicates.extend(("owner_user_id=?", "dataset_id=?"))
-            params.extend((owner, dataset))
+            with self.transaction() as conn:
+                dataset = self.resolve_moodboard_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=conn,
+                )
+                predicates.extend(("owner_user_id=?", "dataset_id=?"))
+                params.extend((owner, dataset))
+                if only_deleted:
+                    predicates.append("deleted = ?")
+                    params.append(
+                        True if self.backend_type == BackendType.POSTGRESQL else 1
+                    )
+                elif not include_deleted:
+                    predicates.append("deleted = ?")
+                    params.append(
+                        False if self.backend_type == BackendType.POSTGRESQL else 0
+                    )
+                where_clause = " WHERE " + " AND ".join(predicates)
+                query = (
+                    f"SELECT * FROM moodboards{where_clause} "  # nosec B608
+                    "ORDER BY last_modified DESC, id DESC "
+                    "LIMIT ? OFFSET ?"
+                )
+                params.extend([limit, offset])
+                cursor = conn.execute(query, tuple(params))
+                rows = cursor.fetchall()
+                return [self._deserialize_moodboard_row(row) for row in rows if row]
         if only_deleted:
             predicates.append("deleted = ?")
             params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
@@ -32291,9 +32342,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params: list[Any] = []
         if self._supports_notes_moodboard_studio_v61():
             owner = str(self.client_id)
-            dataset = self.resolve_moodboard_compatibility_dataset_id(owner_user_id=owner)
-            predicates.extend(("owner_user_id=?", "dataset_id=?"))
-            params.extend((owner, dataset))
+            with self.transaction() as conn:
+                dataset = self.resolve_moodboard_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=conn,
+                )
+                predicates.extend(("owner_user_id=?", "dataset_id=?"))
+                params.extend((owner, dataset))
+                if only_deleted:
+                    predicates.append("deleted = ?")
+                    params.append(
+                        True if self.backend_type == BackendType.POSTGRESQL else 1
+                    )
+                elif not include_deleted:
+                    predicates.append("deleted = ?")
+                    params.append(
+                        False if self.backend_type == BackendType.POSTGRESQL else 0
+                    )
+                where_clause = " WHERE " + " AND ".join(predicates)
+                query = f"SELECT COUNT(*) AS total FROM moodboards{where_clause}"  # nosec B608
+                cursor = conn.execute(query, tuple(params))
+                row = cursor.fetchone()
+                return int(row["total"]) if row and row["total"] is not None else 0
         if only_deleted:
             predicates.append("deleted = ?")
             params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
@@ -32430,8 +32500,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
                 row = conn.execute(
                     "SELECT * FROM moodboards WHERE id=? AND owner_user_id=? "
-                    "AND dataset_id=? AND deleted=0",
-                    (moodboard_id, owner, dataset),
+                    "AND dataset_id=? AND deleted=?",
+                    (
+                        moodboard_id,
+                        owner,
+                        dataset,
+                        False if self.backend_type == BackendType.POSTGRESQL else 0,
+                    ),
                 ).fetchone()
                 if row is None:
                     raise ConflictError(
@@ -32503,7 +32578,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "UPDATE moodboards SET name=?,description=?,smart_rule_json=?,canvas_json=?,"
                     "last_modified=?,version=?,client_id=?,canonical_revision=?,canonical_hash=?,"
                     "source_diagnostic_code=?,source_diagnostic_hash=? "
-                    "WHERE id=? AND owner_user_id=? AND dataset_id=? AND version=? AND deleted=0",
+                    "WHERE id=? AND owner_user_id=? AND dataset_id=? AND version=? AND deleted=?",
                     (
                         name,
                         description,
@@ -32520,6 +32595,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         owner,
                         dataset,
                         expected_version,
+                        False if self.backend_type == BackendType.POSTGRESQL else 0,
                     ),
                 )
                 if cursor.rowcount != 1:
@@ -32608,7 +32684,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 rowcount = conn.execute(
                     "UPDATE moodboards SET deleted = ?, last_modified = ?, version = ?, client_id = ? "
                     f"{lineage_sql} "
-                    f"WHERE id = ?{scope_clause} AND deleted = 0",  # nosec B608
+                    f"WHERE id = ?{scope_clause} AND deleted = ?",  # nosec B608
                     (
                         deleted_val,
                         now,
@@ -32617,6 +32693,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         *lineage_params,
                         moodboard_id,
                         *scope_params,
+                        False if self.backend_type == BackendType.POSTGRESQL else 0,
                     ),
                 ).rowcount
                 return rowcount > 0
@@ -32663,6 +32740,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
         with self.transaction() as conn:
+            self._set_notes_moodboard_studio_v61_dataset_scope(conn, dataset)
             existing = conn.execute(
                 "SELECT * FROM moodboard_notes "
                 "WHERE owner_user_id=? AND dataset_id=? AND moodboard_id=? AND note_id=?",
@@ -32763,6 +32841,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         dataset = str(moodboard["dataset_id"])
         now = self._get_current_utc_timestamp_iso()
         with self.transaction() as conn:
+            self._set_notes_moodboard_studio_v61_dataset_scope(conn, dataset)
             row = conn.execute(
                 "SELECT * FROM moodboard_notes WHERE owner_user_id=? AND dataset_id=? "
                 "AND moodboard_id=? AND note_id=?",
@@ -32786,10 +32865,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     {"domain": "notes.moodboard_note", "source": source, "revision": revision, "deleted": True}
                 )
             cursor = conn.execute(
-                "UPDATE moodboard_notes SET deleted=1,last_modified=?,version=version+1,"
+                "UPDATE moodboard_notes SET deleted=?,last_modified=?,version=version+1,"
                 "canonical_revision=?,canonical_hash=? WHERE owner_user_id=? AND dataset_id=? "
-                "AND moodboard_id=? AND note_id=? AND deleted=0",
-                (now, revision, canonical_hash, owner, dataset, moodboard_id, note_id),
+                "AND moodboard_id=? AND note_id=? AND deleted=?",
+                (
+                    True if self.backend_type == BackendType.POSTGRESQL else 1,
+                    now,
+                    revision,
+                    canonical_hash,
+                    owner,
+                    dataset,
+                    moodboard_id,
+                    note_id,
+                    False if self.backend_type == BackendType.POSTGRESQL else 0,
+                ),
             )
             return cursor.rowcount == 1
 
@@ -32891,11 +32980,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "1 AS manual_hit, 0 AS smart_hit "
             "FROM moodboard_notes mn "
             "JOIN notes n ON n.id = mn.note_id "
-            "WHERE mn.moodboard_id = ? AND mn.deleted = 0 AND n.deleted = ? "
+            "WHERE mn.moodboard_id = ? AND mn.deleted = ? AND n.deleted = ? "
             "AND n.client_id = ?"
         )
         select_queries: list[str] = [manual_select]
-        params: list[Any] = [moodboard_id, deleted_false_value, owner_user_id]
+        params: list[Any] = [
+            moodboard_id,
+            deleted_false_value,
+            deleted_false_value,
+            owner_user_id,
+        ]
         if self._supports_notes_moodboard_studio_v61():
             manual_select += " AND mn.owner_user_id = ? AND mn.dataset_id = ?"
             select_queries[0] = manual_select
@@ -32957,6 +33051,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             f"WITH combined AS ({union_query}) "  # nosec B608
             "SELECT COUNT(DISTINCT id) AS total FROM combined"
         )
+        if self._supports_notes_moodboard_studio_v61():
+            with self.transaction() as conn:
+                dataset = moodboard.get("dataset_id")
+                if dataset is not None:
+                    self._set_notes_moodboard_studio_v61_dataset_scope(
+                        conn,
+                        str(dataset),
+                    )
+                cursor = conn.execute(count_query, union_params)
+                row = cursor.fetchone()
+                return int(row["total"]) if row and row["total"] is not None else 0
         cursor = self.execute_query(count_query, union_params)
         row = cursor.fetchone()
         return int(row["total"]) if row and row["total"] is not None else 0
@@ -33007,8 +33112,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "LIMIT ? OFFSET ?"
         )
         page_params = (*union_params, limit, offset)
-        cursor = self.execute_query(page_query, page_params)
-        paged = [dict(row) for row in cursor.fetchall()]
+        if self._supports_notes_moodboard_studio_v61():
+            with self.transaction() as conn:
+                dataset = moodboard.get("dataset_id")
+                if dataset is not None:
+                    self._set_notes_moodboard_studio_v61_dataset_scope(
+                        conn,
+                        str(dataset),
+                    )
+                cursor = conn.execute(page_query, page_params)
+                paged = [dict(row) for row in cursor.fetchall()]
+        else:
+            cursor = self.execute_query(page_query, page_params)
+            paged = [dict(row) for row in cursor.fetchall()]
 
         note_ids = [str(item.get("id")) for item in paged if item.get("id") is not None]
         keywords_by_note = self.get_keywords_for_notes(note_ids) if note_ids else {}
@@ -41645,6 +41761,46 @@ def _delegate_store_method(store_attr: str, method_name: str) -> Callable[..., A
     return _delegated
 
 
+def _resolve_moodboard_compatibility_dataset_id(
+    self: CharactersRAGDB,
+    *,
+    owner_user_id: str,
+    conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+) -> str:
+    dataset = self.moodboard_sync_store.resolve_moodboard_compatibility_dataset_id(
+        owner_user_id=owner_user_id,
+        conn=conn,
+    )
+    if conn is not None:
+        self._set_notes_moodboard_studio_v61_dataset_scope(conn, dataset)
+    return dataset
+
+
+def _resolve_studio_compatibility_dataset_id(
+    self: CharactersRAGDB,
+    *,
+    owner_user_id: str,
+    conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+) -> str:
+    dataset = self.moodboard_sync_store.resolve_studio_compatibility_dataset_id(
+        owner_user_id=owner_user_id,
+        conn=conn,
+    )
+    if conn is not None:
+        self._set_notes_moodboard_studio_v61_dataset_scope(conn, dataset)
+    return dataset
+
+
+def _get_note_studio_document_v61_scoped(
+    self: CharactersRAGDB,
+    note_id: str,
+) -> dict[str, Any] | None:
+    if not self._supports_notes_moodboard_studio_v61():
+        return self.note_store.get_note_studio_document(note_id)
+    with self.transaction() as conn:
+        return self.note_store._fetch_note_studio_document_row(note_id, conn=conn)
+
+
 def _delegate_conversation_store_method(method_name: str) -> Callable[..., Any]:
     return _delegate_store_method("conversation_store", method_name)
 
@@ -41767,7 +41923,6 @@ for _message_store_method in (
 for _note_store_method in (
     "add_note",
     "get_note_by_id",
-    "get_note_studio_document",
     "create_note_studio_document",
     "ensure_note_studio_document",
     "upsert_note_studio_document",
@@ -41805,6 +41960,8 @@ for _note_store_method in (
         _note_store_method,
         _delegate_store_method("note_store", _note_store_method),
     )
+
+CharactersRAGDB.get_note_studio_document = _get_note_studio_document_v61_scoped  # type: ignore[method-assign]
 
 
 for _task_store_method in (
@@ -41856,6 +42013,9 @@ for _moodboard_sync_store_method in (
         _moodboard_sync_store_method,
         _delegate_store_method("moodboard_sync_store", _moodboard_sync_store_method),
     )
+
+CharactersRAGDB.resolve_moodboard_compatibility_dataset_id = _resolve_moodboard_compatibility_dataset_id  # type: ignore[method-assign]
+CharactersRAGDB.resolve_studio_compatibility_dataset_id = _resolve_studio_compatibility_dataset_id  # type: ignore[method-assign]
 
 
 for _keyword_store_method in (

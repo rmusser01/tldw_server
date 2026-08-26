@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     SchemaError,
 )
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     diagram_render_hash,
     notes_studio_document_object_hash,
@@ -839,6 +840,188 @@ def test_current_postgres_v61_requires_product_owner_to_equal_schema_owner(
         backend.get_pool().close_all()
         if drift_backend is not None:
             drift_backend.get_pool().close_all()
+
+
+def test_postgres_v61_public_moodboard_crud_sets_dataset_guc_transaction_locally(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, db = _open_db(pg_database_config, owner="960020")
+    ident = backend.escape_identifier  # type: ignore[attr-defined]
+    role_name = f"v61_public_crud_{uuid4().hex[:8]}"
+    role_created = False
+    current_user = ""
+    note_id = f"00000000-0000-4000-8000-{uuid4().hex[:12]}"
+    bound_dataset = f"dataset-{uuid4()}"
+    try:
+        with backend.transaction() as conn:
+            current_user = backend.execute(
+                "SELECT current_user AS name",
+                connection=conn,
+            ).rows[0]["name"]
+            backend.execute(
+                f"CREATE ROLE {ident(role_name)} NOLOGIN NOSUPERUSER NOBYPASSRLS",
+                connection=conn,
+            )
+            role_created = True
+            backend.execute(
+                f"GRANT USAGE ON SCHEMA public TO {ident(role_name)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {ident(role_name)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT INSERT,UPDATE,DELETE ON moodboards,moodboard_notes,"
+                f"note_studio_documents TO {ident(role_name)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public "
+                f"TO {ident(role_name)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT {ident(role_name)} TO {ident(current_user)}",
+                connection=conn,
+            )
+        db.add_note("Public CRUD note", "Body", note_id=note_id)
+        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
+            owner_user_id=str(db.client_id),
+            target_dataset_id=bound_dataset,
+        )
+        db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
+            owner_user_id=str(db.client_id),
+            target_dataset_id=bound_dataset,
+        )
+        with backend.transaction() as conn:
+            backend.execute(
+                "INSERT INTO moodboards("
+                "name,client_id,owner_user_id,dataset_id,sync_id,canvas_json,"
+                "deleted,version,canonical_revision,canonical_hash"
+                ") VALUES ('hidden dataset board',?,?,?,?,?,FALSE,1,1,?)",
+                (
+                    str(db.client_id),
+                    str(db.client_id),
+                    f"hidden-{uuid4()}",
+                    str(uuid4()),
+                    "{}",
+                    "sha256:" + "9" * 64,
+                ),
+                connection=conn,
+            )
+        db.close_connection()
+
+        monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_SWITCH", "1")
+        monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_WHITELIST", role_name)
+
+        def assert_dataset_guc_cleared() -> None:
+            with db.transaction() as conn:
+                row = conn.execute(
+                    "SELECT current_setting('app.current_dataset_id', true) "
+                    "AS dataset"
+                ).fetchone()
+            assert row is not None
+            assert row["dataset"] in ("", None)
+
+        with scoped_context(
+            user_id=int(str(db.client_id)),
+            session_role=role_name,
+        ):
+            moodboard_id = db.add_moodboard("Bound board", "scoped")
+            assert isinstance(moodboard_id, int)
+            assert_dataset_guc_cleared()
+
+            created = db.get_moodboard_by_id(moodboard_id)
+            assert created is not None
+            assert created["dataset_id"] == bound_dataset
+            assert created["name"] == "Bound board"
+            assert db.count_moodboards() == 1
+            assert [row["id"] for row in db.list_moodboards()] == [moodboard_id]
+            assert_dataset_guc_cleared()
+
+            assert db.update_moodboard(
+                moodboard_id,
+                {"name": "Renamed bound board"},
+                expected_version=int(created["version"]),
+            )
+            updated = db.get_moodboard_by_id(moodboard_id)
+            assert updated is not None
+            assert updated["name"] == "Renamed bound board"
+            assert int(updated["version"]) == int(created["version"]) + 1
+
+            studio = db.create_note_studio_document(
+                note_id=note_id,
+                payload_json={"sections": []},
+                template_type="lined",
+                handwriting_mode="off",
+                render_version=1,
+            )
+            assert studio["dataset_id"] == bound_dataset
+            assert db.get_note_studio_document(note_id)["dataset_id"] == bound_dataset
+            assert_dataset_guc_cleared()
+
+            assert db.link_note_to_moodboard(moodboard_id, note_id) is True
+            assert db.link_note_to_moodboard(moodboard_id, note_id) is False
+            assert db.count_moodboard_notes(moodboard_id) == 1
+            listed_notes = db.list_moodboard_notes(moodboard_id)
+            assert [row["id"] for row in listed_notes] == [note_id]
+            assert listed_notes[0]["membership_source"] == "manual"
+
+            assert db.unlink_note_from_moodboard(moodboard_id, note_id) is True
+            assert db.unlink_note_from_moodboard(moodboard_id, note_id) is False
+            assert db.count_moodboard_notes(moodboard_id) == 0
+            assert db.list_moodboard_notes(moodboard_id) == []
+            assert db.link_note_to_moodboard(moodboard_id, note_id) is True
+            assert db.count_moodboard_notes(moodboard_id) == 1
+            assert_dataset_guc_cleared()
+
+            assert db.delete_moodboard(
+                moodboard_id,
+                expected_version=int(updated["version"]),
+            )
+            assert db.get_moodboard_by_id(moodboard_id) is None
+            deleted = db.get_moodboard_by_id(moodboard_id, include_deleted=True)
+            assert deleted is not None
+            assert deleted["dataset_id"] == bound_dataset
+            assert bool(deleted["deleted"]) is True
+            assert db.count_moodboards() == 0
+            assert db.count_moodboards(only_deleted=True) == 1
+            assert db.list_moodboards() == []
+            assert [row["id"] for row in db.list_moodboards(only_deleted=True)] == [
+                moodboard_id
+            ]
+            assert_dataset_guc_cleared()
+    finally:
+        if role_created:
+            with backend.transaction() as conn:
+                backend.execute(f"DROP OWNED BY {ident(role_name)}", connection=conn)
+                if current_user:
+                    backend.execute(
+                        f"REVOKE {ident(role_name)} FROM {ident(current_user)}",
+                        connection=conn,
+                    )
+                backend.execute(f"DROP ROLE IF EXISTS {ident(role_name)}", connection=conn)
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_v61_moodboard_public_sql_uses_backend_boolean_values() -> None:
+    sources = "\n".join(
+        inspect.getsource(method)
+        for method in (
+            CharactersRAGDB._update_moodboard_v61,
+            CharactersRAGDB.delete_moodboard,
+            CharactersRAGDB.unlink_note_from_moodboard,
+            CharactersRAGDB._build_moodboard_note_union_query,
+        )
+    )
+
+    assert "deleted=0" not in sources
+    assert "deleted = 0" not in sources
+    assert "deleted=1" not in sources
+    assert "deleted = 1" not in sources
 
 
 def test_postgres_v61_old_authority_insert_defaults_and_first_enrollment_race(
