@@ -60,8 +60,16 @@ def test_postgres_task_operations_do_not_leak_dataset_scope_to_the_session(
 
 
 def _restore_reviewed_postgres_v59_task_source(db: CharactersRAGDB) -> None:
-    """Replace the fresh v60 task graph with the exact reviewed empty v59 source."""
+    """Replace the fresh v61 graph with the exact reviewed empty v59 source."""
     with db.transaction() as conn:
+        for table, constraint in (
+            ("moodboard_notes", "moodboard_notes_v61_note_fk"),
+            ("note_studio_documents", "note_studio_documents_v61_note_fk"),
+        ):
+            db.backend.execute(
+                f"ALTER TABLE {table} DROP CONSTRAINT {constraint}",  # nosec B608
+                connection=conn,
+            )
         for table in (
             "note_task_scope_authority",
             "task_projection_drifts",
@@ -70,6 +78,7 @@ def _restore_reviewed_postgres_v59_task_source(db: CharactersRAGDB) -> None:
             "note_task_reconciliation_state",
             "task_events",
             "note_tasks",
+            "chacha_schema_migration_progress",
         ):
             db.backend.execute(f"DROP TABLE {table}", connection=conn)  # nosec B608
         db.backend.execute("DROP INDEX uq_notes_owner_id", connection=conn)
@@ -418,7 +427,7 @@ def test_postgres_bind_caught_hash_failure_rolls_back_rekey_and_restores_force(
         backend.get_pool().close_all()
 
 
-def test_postgres_note_task_schema_v60_is_authoritative(
+def test_postgres_note_task_schema_remains_authoritative_at_v61(
     pg_database_config: DatabaseConfig,
 ) -> None:
     owner = "950001"
@@ -437,7 +446,7 @@ def test_postgres_note_task_schema_v60_is_authoritative(
                 "ORDER BY tablename, policyname",
                 (list(CharactersRAGDB._NOTE_TASK_V60_RELATIONS),),
             ).fetchall()
-        assert version == 60
+        assert version == 61
         assert [(row["tablename"], row["policyname"]) for row in policy_rows] == [
             (table, f"{table}_tenant_isolation")
             for table in sorted(CharactersRAGDB._NOTE_TASK_V60_RELATIONS)
@@ -1109,6 +1118,12 @@ def test_postgres_populated_v59_upgrade_matches_fresh_v60_catalog(
 
     try:
         fresh_catalog = _postgres_v60_task_catalog_snapshot(db)
+        fresh_catalog["columns"] = [
+            row
+            for row in fresh_catalog["columns"]
+            if row["attname"]
+            not in {"task_graph_bound", "moodboard_graph_bound", "studio_graph_bound"}
+        ]
         _restore_reviewed_postgres_v59_task_source(db)
         note_id, task_id, event_id = _populate_reviewed_postgres_v59_source(db)
         with db.transaction() as conn:
@@ -1232,7 +1247,7 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
         futures = [executor.submit(initialize) for _index in range(2)]
         versions = [future.result(timeout=120) for future in futures]
 
-    assert versions == [60, 60]
+    assert versions == [61, 61]
     assert checkpoints == ["validate", "create", "copy", "index", "verify"]
     assert len(verify_threads) == 2
     assert len(set(verify_threads)) == 2
@@ -1251,7 +1266,7 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
                 ("%_v60",),
                 connection=conn,
             ).rows
-        assert version == 60
+        assert version == 61
         assert remnants == []
     finally:
         check_backend.get_pool().close_all()

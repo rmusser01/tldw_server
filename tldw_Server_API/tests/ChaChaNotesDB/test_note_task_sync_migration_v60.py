@@ -26,7 +26,7 @@ TASK_ID = "22222222-2222-4222-8222-222222222222"
 EVENT_ID = "33333333-3333-4333-8333-333333333333"
 
 
-def test_postgres_initializer_preserves_v60_step_before_current_v62() -> None:
+def test_postgres_initializer_preserves_v60_and_v61_steps_before_current_v62() -> None:
     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 62
     source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
     assert "target_version = self._POSTGRES_SCHEMA_VERSION" in source

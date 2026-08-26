@@ -181,6 +181,44 @@ def test_shared_workspace_chat_rls_checks_recipient_conversation_thread_and_mess
         assert request_policy.count(clause) == 2
 
 
+def test_chacha_rls_includes_exact_moodboard_and_studio_tenant_policies():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    dataset = "current_setting('app.current_dataset_id', true)"
+
+    expected_relationship_checks = {
+        "moodboards": (),
+        "moodboard_notes": (
+            "board.owner_user_id = moodboard_notes.owner_user_id",
+            "board.dataset_id = moodboard_notes.dataset_id",
+            "board.id = moodboard_notes.moodboard_id",
+            "note.id = moodboard_notes.note_id",
+            "note.client_id = moodboard_notes.owner_user_id",
+        ),
+        "note_studio_documents": (
+            "note.id = note_studio_documents.note_id",
+            "note.client_id = note_studio_documents.owner_user_id",
+            "note_studio_documents.source_note_id IS NULL",
+            "source_note.id = note_studio_documents.source_note_id",
+            "source_note.client_id = note_studio_documents.owner_user_id",
+        ),
+    }
+    for table, relationship_checks in expected_relationship_checks.items():
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert policy.count(f"{table}.owner_user_id = {owner}") == 2
+        assert policy.count(f"{table}.dataset_id = {dataset}") == 2
+        assert "USING (" in policy
+        assert "WITH CHECK (" in policy
+        using, with_check = policy.split("WITH CHECK", 1)
+        for clause in relationship_checks:
+            assert clause in using
+            assert clause in with_check
+
+
 def test_chacha_rls_scopes_graph_projection_state_and_allows_unresolved_targets():
     sql = " ".join("\n".join(build_chacha_rls_sql()).split())
 

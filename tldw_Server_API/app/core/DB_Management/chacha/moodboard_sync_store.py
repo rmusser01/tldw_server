@@ -73,11 +73,18 @@ class MoodboardSyncStore:
                 entity="notes",
                 entity_id=owner,
             )  # noqa: TRY003
+        bound_value: bool | int = (
+            True if self._db.backend_type == BackendType.POSTGRESQL else 1
+        )
         query = (
             "SELECT owner_user_id,dataset_id FROM note_task_scope_authority "
-            f"WHERE owner_user_id = ? AND {flag} = 1 LIMIT 2"  # nosec B608 - fixed flag names.
+            f"WHERE owner_user_id = ? AND {flag} = ? LIMIT 2"  # nosec B608 - fixed flag names.
         )
-        cursor = self._db.execute_query(query, (owner,)) if conn is None else self._execute(conn, query, (owner,))
+        cursor = (
+            self._db.execute_query(query, (owner, bound_value))
+            if conn is None
+            else self._execute(conn, query, (owner, bound_value))
+        )
         rows = cursor.fetchall()
         if not rows:
             return self._LOCAL_UNBOUND
@@ -243,12 +250,14 @@ class MoodboardSyncStore:
                 rebound = source
 
             if authority is None:
+                false_value: bool | int = False if postgres else 0
+                true_value: bool | int = True if postgres else 1
                 graph_values = {
-                    "task_graph_bound": 0,
-                    "moodboard_graph_bound": 0,
-                    "studio_graph_bound": 0,
+                    "task_graph_bound": false_value,
+                    "moodboard_graph_bound": false_value,
+                    "studio_graph_bound": false_value,
                 }
-                graph_values[flag] = 1
+                graph_values[flag] = true_value
                 self._execute(
                     transaction_conn,
                     "INSERT INTO note_task_scope_authority("
@@ -263,11 +272,12 @@ class MoodboardSyncStore:
                     ),
                 )
             else:
+                false_value = False if postgres else 0
                 self._execute(
                     transaction_conn,
-                    f"UPDATE note_task_scope_authority SET {flag}=1 "  # nosec B608 - fixed flag names.
-                    f"WHERE owner_user_id=? AND dataset_id=? AND {flag}=0",  # nosec B608
-                    (owner, target),
+                    f"UPDATE note_task_scope_authority SET {flag}=? "  # nosec B608 - fixed flag names.
+                    f"WHERE owner_user_id=? AND dataset_id=? AND {flag}=?",  # nosec B608
+                    (True if postgres else 1, owner, target, false_value),
                 )
             return counts(rebound)
 

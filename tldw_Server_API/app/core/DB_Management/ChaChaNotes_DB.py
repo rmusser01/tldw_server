@@ -719,6 +719,10 @@ class CharactersRAGDB:
         "note_studio_documents",
     )
     _NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE = 128
+    _NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SECONDS = 25.0
+    _NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT = "5s"
+    _NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT = "30s"
+    _NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID = "notes_moodboard_studio_v60_to_v61"
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[tuple[threading.RLock, ...]] = tuple(
         threading.RLock() for _ in range(64)
     )
@@ -13449,6 +13453,1339 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError("Notes moodboard/Studio v63 migration failed version verification.")  # noqa: TRY003
         self._notes_moodboard_studio_v61_migration_checkpoint("version")
 
+    @staticmethod
+    def _notes_moodboard_studio_v61_postgres_checkpoint(_stage: str) -> None:
+        """Fault-injection seam after durable PostgreSQL v61 phase commits."""
+
+    def _begin_notes_moodboard_studio_v61_postgres_transaction(
+        self, conn: Any
+    ) -> int:
+        """Set bounded transaction timeouts and lock schema authority first."""
+        self.backend.execute(
+            "SELECT set_config('lock_timeout',%s,true)",
+            (self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT,),
+            connection=conn,
+        )
+        self.backend.execute(
+            "SELECT set_config('statement_timeout',%s,true)",
+            (self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT,),
+            connection=conn,
+        )
+        return self._get_schema_version_postgres(conn, lock=True)
+
+    @staticmethod
+    def _postgres_v61_progress_fingerprint(
+        previous: str | None, rows: Iterable[Mapping[str, Any]]
+    ) -> tuple[int, str]:
+        """Extend the resumable length-framed aggregate without retaining content."""
+        fingerprint = previous or f"sha256:{hashlib.sha256().hexdigest()}"
+        count = 0
+        for row in rows:
+            encoded = json.dumps(
+                CharactersRAGDB._note_task_v60_json_safe(dict(row)),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+            digest = hashlib.sha256()
+            digest.update(fingerprint.encode("ascii"))
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+            fingerprint = f"sha256:{digest.hexdigest()}"
+            count += 1
+        return count, fingerprint
+
+    def _postgres_v61_progress_row(self, conn: Any, phase: str) -> dict[str, Any]:
+        result = self.backend.execute(
+            "SELECT keyset_cursor,copied_count,aggregate_fingerprint,status "
+            "FROM chacha_schema_migration_progress "
+            "WHERE migration_id=%s AND phase=%s",
+            (self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID, phase),
+            connection=conn,
+        ).rows
+        if not result:
+            return {
+                "keyset_cursor": None,
+                "copied_count": 0,
+                "aggregate_fingerprint": f"sha256:{hashlib.sha256().hexdigest()}",
+                "status": "pending",
+            }
+        return dict(result[0])
+
+    def _upsert_postgres_v61_progress(
+        self,
+        conn: Any,
+        *,
+        phase: str,
+        cursor: object,
+        count: int,
+        fingerprint: str,
+        status: str,
+    ) -> None:
+        cursor_text = None if cursor is None else json.dumps(
+            cursor, ensure_ascii=True, separators=(",", ":")
+        )
+        self.backend.execute(
+            """
+            INSERT INTO chacha_schema_migration_progress(
+              migration_id,phase,keyset_cursor,copied_count,
+              aggregate_fingerprint,status,updated_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP)
+            ON CONFLICT(migration_id,phase) DO UPDATE SET
+              keyset_cursor=EXCLUDED.keyset_cursor,
+              copied_count=EXCLUDED.copied_count,
+              aggregate_fingerprint=EXCLUDED.aggregate_fingerprint,
+              status=EXCLUDED.status,
+              updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID,
+                phase,
+                cursor_text,
+                count,
+                fingerprint,
+                status,
+            ),
+            connection=conn,
+        )
+
+    def _postgres_v61_phase_is_complete(self, conn: Any, phase: str) -> bool:
+        """Return whether a durable metadata or verification phase completed."""
+        return self._postgres_v61_progress_row(conn, phase)["status"] == "complete"
+
+    def _complete_postgres_v61_phase(self, conn: Any, phase: str) -> None:
+        """Record a content-free completion marker in the migration transaction."""
+        self._upsert_postgres_v61_progress(
+            conn,
+            phase=phase,
+            cursor=None,
+            count=0,
+            fingerprint=f"sha256:{hashlib.sha256().hexdigest()}",
+            status="complete",
+        )
+
+    @staticmethod
+    def _notes_moodboard_studio_v61_postgres_schema_sql() -> tuple[str, ...]:
+        """Return additive PostgreSQL v61 structures used before bounded backfill."""
+        return (
+            """
+            CREATE TABLE IF NOT EXISTS chacha_schema_migration_progress(
+              migration_id TEXT NOT NULL,
+              phase TEXT NOT NULL,
+              keyset_cursor TEXT,
+              copied_count BIGINT NOT NULL DEFAULT 0 CHECK(copied_count>=0),
+              aggregate_fingerprint TEXT NOT NULL
+                CHECK(aggregate_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+              status TEXT NOT NULL CHECK(status IN ('pending','running','complete')),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(migration_id,phase)
+            )
+            """,
+            "REVOKE ALL ON TABLE chacha_schema_migration_progress FROM PUBLIC",
+            "ALTER TABLE note_task_scope_authority ADD COLUMN IF NOT EXISTS task_graph_bound BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE note_task_scope_authority ADD COLUMN IF NOT EXISTS moodboard_graph_bound BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE note_task_scope_authority ADD COLUMN IF NOT EXISTS studio_graph_bound BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS owner_user_id TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS dataset_id TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS sync_id TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS canvas_json TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS canonical_revision INTEGER",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS canonical_hash TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS source_diagnostic_code TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS source_diagnostic_hash TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS owner_user_id TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS dataset_id TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS placement_id TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS x BIGINT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS y BIGINT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS width INTEGER",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS height INTEGER",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS order_index BIGINT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS display_json TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS last_modified TIMESTAMPTZ",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS deleted BOOLEAN",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS version INTEGER",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS canonical_revision INTEGER",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS canonical_hash TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS source_diagnostic_code TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS source_diagnostic_hash TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS owner_user_id TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS dataset_id TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS note_revision INTEGER",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS note_hash TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS accepted_provenance_json TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS deleted BOOLEAN",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS version INTEGER",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS canonical_revision INTEGER",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS canonical_hash TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS source_diagnostic_code TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS source_diagnostic_hash TEXT",
+        )
+
+    def _postgres_v61_board_update(self, row: Mapping[str, Any]) -> tuple[Any, ...]:
+        owner = str(row.get("client_id") or "").strip()
+        if not owner:
+            raise SchemaError("Notes moodboard v61 migration could not prove board ownership.")  # noqa: TRY003
+        sync_id = str(uuid.uuid4())
+        canvas = {"layout_mode": "masonry", "metadata": {}}
+        raw_rule = row.get("smart_rule_json")
+        diagnostic_code = diagnostic_hash = None
+        rule = None
+        if raw_rule is not None:
+            try:
+                parsed = json.loads(str(raw_rule))
+                if not isinstance(parsed, Mapping):
+                    raise ValueError("rule is not an object")
+                if parsed.get("collection_ids") or parsed.get("notebook_collection_ids"):
+                    raise ValueError("legacy collection identity needs explicit repair")
+                rule = {
+                    "query": parsed.get("query"),
+                    "keyword_tokens": list(parsed.get("keyword_tokens") or []),
+                    "collection_sync_ids": list(parsed.get("collection_sync_ids") or []),
+                    "sources": list(parsed.get("sources") or []),
+                    "updated": parsed.get("updated") or {
+                        "after": parsed.get("updated_after"),
+                        "before": parsed.get("updated_before"),
+                    },
+                }
+            except (TypeError, ValueError, json.JSONDecodeError):
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    "legacy_moodboard_rule_invalid", {"smart_rule": raw_rule}
+                )
+                diagnostic_code = diagnostic["code"]
+                diagnostic_hash = diagnostic["source_hash"]
+        revision = max(1, int(row.get("version") or 1))
+        try:
+            payload = parse_notes_moodboard_v1(
+                {
+                    "moodboard_id": sync_id,
+                    "name": row["name"],
+                    "description": row.get("description"),
+                    "smart_rule": rule,
+                    "canvas": canvas,
+                }
+            )
+            rule_text = None if payload.smart_rule is None else self._canonical_json_text_v61(
+                payload.smart_rule.model_dump(mode="json")
+            )
+            canonical_hash = notes_moodboard_object_hash(
+                payload, revision=revision, deleted=bool(row.get("deleted"))
+            )
+        except NotesMoodboardStudioContractError:
+            if diagnostic_code is None:
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    "legacy_moodboard_payload_invalid", {"moodboard": dict(row)}
+                )
+                diagnostic_code = diagnostic["code"]
+                diagnostic_hash = diagnostic["source_hash"]
+            rule_text = None if rule is None else self._canonical_json_text_v61(rule)
+            canonical_hash = self._note_task_v60_hash(
+                {"domain": "notes.moodboard", "source": dict(row), "sync_id": sync_id}
+            )
+        return (
+            owner,
+            self._LOCAL_UNBOUND_TASK_DATASET_ID,
+            sync_id,
+            rule_text,
+            self._canonical_json_text_v61(canvas),
+            revision,
+            canonical_hash,
+            diagnostic_code,
+            diagnostic_hash,
+            row["id"],
+        )
+
+    def _postgres_v61_source_page(
+        self, conn: Any, *, phase: str, progress: Mapping[str, Any]
+    ) -> tuple[list[dict[str, Any]], object | None]:
+        """Read one stable legacy-source page for copy or aggregate verification."""
+        page_size = self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+        cursor = json.loads(str(progress["keyset_cursor"])) if progress.get("keyset_cursor") else None
+        if phase == "moodboards":
+            after_owner, after_key = (cursor or ["", -1])
+            rows = [dict(row) for row in self.backend.execute(
+                "SELECT id,name,description,smart_rule_json,created_at,last_modified,"
+                "deleted,client_id,version,owner_user_id AS target_owner_user_id,"
+                "dataset_id AS target_dataset_id,sync_id,canvas_json,"
+                "canonical_revision,canonical_hash,source_diagnostic_code,"
+                "source_diagnostic_hash FROM moodboards "
+                "WHERE (client_id,id)>(%s,%s) ORDER BY client_id,id LIMIT %s",
+                (after_owner, after_key, page_size), connection=conn,
+            ).rows]
+            return rows, ([rows[-1]["client_id"], rows[-1]["id"]] if rows else cursor)
+        if phase == "moodboard_notes":
+            after_owner, after_board, after_note = (cursor or ["", -1, ""])
+            rows = [dict(row) for row in self.backend.execute(
+                "SELECT b.client_id AS owner_user_id,p.moodboard_id,p.note_id,p.created_at,"
+                "b.sync_id,ROW_NUMBER() OVER(PARTITION BY p.moodboard_id "
+                "ORDER BY p.created_at,p.note_id)-1 AS legacy_order_index,"
+                "p.owner_user_id AS target_owner_user_id,"
+                "p.dataset_id AS target_dataset_id,p.placement_id,p.x,p.y,p.width,"
+                "p.height,p.order_index,p.display_json,p.last_modified,p.deleted,"
+                "p.version,p.canonical_revision,p.canonical_hash,"
+                "p.source_diagnostic_code,p.source_diagnostic_hash "
+                "FROM moodboard_notes p JOIN moodboards b ON b.id=p.moodboard_id "
+                "JOIN notes n ON n.id=p.note_id AND n.client_id=b.client_id "
+                "WHERE (b.client_id,p.moodboard_id,p.note_id)>(%s,%s,%s) "
+                "ORDER BY b.client_id,p.moodboard_id,p.note_id LIMIT %s",
+                (after_owner, after_board, after_note, page_size), connection=conn,
+            ).rows]
+            return rows, ([rows[-1]["owner_user_id"], rows[-1]["moodboard_id"], rows[-1]["note_id"]] if rows else cursor)
+        after_owner, after_note = (cursor or ["", ""])
+        rows = [dict(row) for row in self.backend.execute(
+            "SELECT s.note_id,s.payload_json,s.template_type,s.handwriting_mode,"
+            "s.source_note_id,s.excerpt_snapshot,s.excerpt_hash,s.diagram_manifest_json,"
+            "s.companion_content_hash,s.render_version,s.created_at,s.last_modified,"
+            "n.client_id AS owner_user_id,n.title AS note_title,n.content AS note_content,"
+            "n.version AS parent_version,n.last_modified AS parent_modified,"
+            "n.deleted AS parent_deleted,s.owner_user_id AS target_owner_user_id,"
+            "s.dataset_id AS target_dataset_id,s.note_revision,s.note_hash,"
+            "s.accepted_provenance_json,s.deleted,s.version,s.canonical_revision,"
+            "s.canonical_hash,s.source_diagnostic_code,s.source_diagnostic_hash "
+            "FROM note_studio_documents s JOIN notes n ON n.id=s.note_id "
+            "WHERE (n.client_id,s.note_id)>(%s,%s) ORDER BY n.client_id,s.note_id LIMIT %s",
+            (after_owner, after_note, page_size), connection=conn,
+        ).rows]
+        return rows, ([rows[-1]["owner_user_id"], rows[-1]["note_id"]] if rows else cursor)
+
+    def _postgres_v61_copy_page(
+        self, conn: Any, *, phase: str, progress: Mapping[str, Any]
+    ) -> tuple[list[dict[str, Any]], object | None, bool]:
+        """Copy one row- and wall-clock-bounded deterministic legacy page."""
+        selected, original_cursor = self._postgres_v61_source_page(
+            conn, phase=phase, progress=progress
+        )
+        deadline = (
+            time.monotonic()
+            + self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SECONDS
+        )
+        rows: list[dict[str, Any]] = []
+        for row in selected:
+            if rows and time.monotonic() >= deadline:
+                break
+            if phase == "moodboards":
+                update_values = self._postgres_v61_board_update(row)
+                self.backend.execute(
+                    "UPDATE moodboards SET owner_user_id=%s,dataset_id=%s,sync_id=%s,"
+                    "smart_rule_json=%s,canvas_json=%s,canonical_revision=%s,canonical_hash=%s,"
+                    "source_diagnostic_code=%s,source_diagnostic_hash=%s WHERE id=%s",
+                    update_values, connection=conn,
+                )
+                row.update(
+                    target_owner_user_id=update_values[0],
+                    target_dataset_id=update_values[1],
+                    sync_id=update_values[2],
+                    smart_rule_json=update_values[3],
+                    canvas_json=update_values[4],
+                    canonical_revision=update_values[5],
+                    canonical_hash=update_values[6],
+                    source_diagnostic_code=update_values[7],
+                    source_diagnostic_hash=update_values[8],
+                )
+            elif phase == "moodboard_notes":
+                source = {
+                    "moodboard_id": row["sync_id"], "note_id": row["note_id"],
+                    "x": 0, "y": 0, "width": 320, "height": 220,
+                    "order_index": int(row["legacy_order_index"]), "display": {},
+                }
+                diagnostic_code = diagnostic_hash = None
+                try:
+                    payload = parse_notes_moodboard_note_v1(source)
+                    placement_id = placement_object_id(payload)
+                    canonical_hash = notes_moodboard_note_object_hash(
+                        payload, revision=1, deleted=False
+                    )
+                except NotesMoodboardStudioContractError:
+                    diagnostic = moodboard_studio_legacy_source_diagnostic(
+                        "legacy_moodboard_placement_identity_invalid", source
+                    )
+                    diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
+                    placement_id = "notes.moodboard_note:sha256:" + hashlib.sha256(
+                        canonical_moodboard_studio_json_bytes(
+                            {"domain": "notes.moodboard_note", "members": [row["sync_id"], row["note_id"]], "schema_version": 1}
+                        )
+                    ).hexdigest()
+                    canonical_hash = self._note_task_v60_hash({"domain": "notes.moodboard_note", "source": source})
+                self.backend.execute(
+                    "UPDATE moodboard_notes SET owner_user_id=%s,dataset_id=%s,placement_id=%s,"
+                    "x=0,y=0,width=320,height=220,order_index=%s,display_json='{}',"
+                    "last_modified=created_at,deleted=FALSE,version=1,canonical_revision=1,"
+                    "canonical_hash=%s,source_diagnostic_code=%s,source_diagnostic_hash=%s "
+                    "WHERE moodboard_id=%s AND note_id=%s",
+                    (row["owner_user_id"], self._LOCAL_UNBOUND_TASK_DATASET_ID, placement_id,
+                     int(row["legacy_order_index"]), canonical_hash, diagnostic_code, diagnostic_hash,
+                     row["moodboard_id"], row["note_id"]), connection=conn,
+                )
+                row.update(
+                    target_owner_user_id=row["owner_user_id"],
+                    target_dataset_id=self._LOCAL_UNBOUND_TASK_DATASET_ID,
+                    placement_id=placement_id,
+                    x=0,
+                    y=0,
+                    width=320,
+                    height=220,
+                    order_index=int(row["legacy_order_index"]),
+                    display_json="{}",
+                    last_modified=row["created_at"],
+                    deleted=False,
+                    version=1,
+                    canonical_revision=1,
+                    canonical_hash=canonical_hash,
+                    source_diagnostic_code=diagnostic_code,
+                    source_diagnostic_hash=diagnostic_hash,
+                )
+            else:
+                accepted_at = self._legacy_sync_timestamp_v61(row["last_modified"])
+                companion_hash = str(row.get("companion_content_hash") or "")
+                note_hash = self._legacy_note_hash_v61(
+                    {"id": row["note_id"], "title": row["note_title"], "content": row["note_content"],
+                     "version": row["parent_version"], "last_modified": row["parent_modified"],
+                     "deleted": row["parent_deleted"], "client_id": row["owner_user_id"]}
+                )
+                provenance = {
+                    "kind": "legacy_bootstrap", "attestation": "trusted_bootstrap_v1",
+                    "provider": None, "model": None, "accepted_at": accepted_at,
+                    "source_revision": None, "source_hash": None,
+                    "result_hash": self._note_task_v60_hash({"domain": "notes.studio_document.result", "source": row["note_id"]}),
+                }
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    "legacy_studio_lineage_unproven", {"note_id": row["note_id"], "companion_content_hash": companion_hash}
+                )
+                canonical_hash = self._note_task_v60_hash({"domain": "notes.studio_document", "source": row["note_id"]})
+                self.backend.execute(
+                    "UPDATE note_studio_documents SET owner_user_id=%s,dataset_id=%s,note_revision=%s,"
+                    "note_hash=%s,accepted_provenance_json=%s,deleted=%s,version=1,canonical_revision=1,"
+                    "canonical_hash=%s,source_diagnostic_code=%s,source_diagnostic_hash=%s WHERE note_id=%s",
+                    (row["owner_user_id"], self._LOCAL_UNBOUND_TASK_DATASET_ID,
+                     max(1, int(row.get("parent_version") or 1)), note_hash,
+                     self._canonical_json_text_v61(provenance), bool(row["parent_deleted"]),
+                     canonical_hash, diagnostic["code"], diagnostic["source_hash"], row["note_id"]),
+                    connection=conn,
+                )
+                row.update(
+                    target_owner_user_id=row["owner_user_id"],
+                    target_dataset_id=self._LOCAL_UNBOUND_TASK_DATASET_ID,
+                    note_revision=max(1, int(row.get("parent_version") or 1)),
+                    note_hash=note_hash,
+                    accepted_provenance_json=self._canonical_json_text_v61(provenance),
+                    deleted=bool(row["parent_deleted"]),
+                    version=1,
+                    canonical_revision=1,
+                    canonical_hash=canonical_hash,
+                    source_diagnostic_code=diagnostic["code"],
+                    source_diagnostic_hash=diagnostic["source_hash"],
+                )
+            rows.append(row)
+        if not rows:
+            return rows, original_cursor, not selected
+        source_exhausted = (
+            len(selected) < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+            and len(rows) == len(selected)
+        )
+        if phase == "moodboards":
+            return rows, [rows[-1]["client_id"], rows[-1]["id"]], source_exhausted
+        if phase == "moodboard_notes":
+            return rows, [rows[-1]["owner_user_id"], rows[-1]["moodboard_id"], rows[-1]["note_id"]], source_exhausted
+        return rows, [rows[-1]["owner_user_id"], rows[-1]["note_id"]], source_exhausted
+
+    def _migrate_from_v61_to_v62_postgres(self, conn: Any) -> None:
+        """Run the durable bounded PostgreSQL v62 migration, version last."""
+        def begin_phase(label: str) -> bool:
+            version = self._begin_notes_moodboard_studio_v61_postgres_transaction(
+                conn
+            )
+            if version == 62:
+                self._verify_notes_moodboard_studio_schema_postgres(conn)
+                conn.commit()
+                return False
+            if version != 61:
+                raise SchemaError(  # noqa: TRY003
+                    f"Notes moodboard/Studio v62 {label} observed schema version {version}."
+                )
+            return True
+
+        if not begin_phase("schema phase"):
+            return
+        progress_exists = self.backend.table_exists(
+            "chacha_schema_migration_progress", connection=conn
+        )
+        if progress_exists and self._postgres_v61_phase_is_complete(conn, "schema"):
+            conn.commit()
+        else:
+            self.backend.execute(
+                "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
+                "note_studio_documents IN SHARE ROW EXCLUSIVE MODE",
+                connection=conn,
+            )
+            for statement in self._notes_moodboard_studio_v61_postgres_schema_sql():
+                self.backend.execute(statement, connection=conn)
+            self._complete_postgres_v61_phase(conn, "schema")
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint("schema")
+
+        for phase in ("moodboards", "moodboard_notes", "note_studio_documents"):
+            while True:
+                if not begin_phase(f"{phase} copy phase"):
+                    return
+                progress = self._postgres_v61_progress_row(conn, phase)
+                if progress["status"] == "complete":
+                    conn.commit()
+                    break
+                rows, cursor, source_exhausted = self._postgres_v61_copy_page(
+                    conn, phase=phase, progress=progress
+                )
+                added, fingerprint = self._postgres_v61_progress_fingerprint(
+                    str(progress["aggregate_fingerprint"]), rows
+                )
+                total = int(progress["copied_count"]) + added
+                status = "complete" if source_exhausted else "running"
+                self._upsert_postgres_v61_progress(
+                    conn, phase=phase, cursor=cursor, count=total,
+                    fingerprint=fingerprint, status=status,
+                )
+                conn.commit()
+                self._notes_moodboard_studio_v61_postgres_checkpoint(
+                    f"copy:{phase}:{total}"
+                )
+                if status == "complete":
+                    break
+
+        # Prove every durable target field while the migration owner can still
+        # read all legacy tenants; forced RLS is installed only after this
+        # global aggregate succeeds.
+        for source_phase in ("moodboards", "moodboard_notes", "note_studio_documents"):
+            verification_phase = f"aggregate_verification:{source_phase}"
+            while True:
+                if not begin_phase(f"{source_phase} aggregate verification phase"):
+                    return
+                progress = self._postgres_v61_progress_row(conn, verification_phase)
+                if progress["status"] == "complete":
+                    conn.commit()
+                    break
+                rows, cursor = self._postgres_v61_source_page(
+                    conn, phase=source_phase, progress=progress
+                )
+                added, fingerprint = self._postgres_v61_progress_fingerprint(
+                    str(progress["aggregate_fingerprint"]), rows
+                )
+                total = int(progress["copied_count"]) + added
+                status = (
+                    "complete"
+                    if len(rows) < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+                    else "running"
+                )
+                self._upsert_postgres_v61_progress(
+                    conn,
+                    phase=verification_phase,
+                    cursor=cursor,
+                    count=total,
+                    fingerprint=fingerprint,
+                    status=status,
+                )
+                conn.commit()
+                self._notes_moodboard_studio_v61_postgres_checkpoint(
+                    f"{verification_phase}:{total}"
+                )
+                if status == "complete":
+                    break
+
+        if not begin_phase("aggregate verification phase"):
+            return
+        if self._postgres_v61_phase_is_complete(conn, "aggregate_verification"):
+            conn.commit()
+        else:
+            for source_phase in (
+                "moodboards",
+                "moodboard_notes",
+                "note_studio_documents",
+            ):
+                source = self._postgres_v61_progress_row(conn, source_phase)
+                verified = self._postgres_v61_progress_row(
+                    conn, f"aggregate_verification:{source_phase}"
+                )
+                if (
+                    source["status"] != "complete"
+                    or verified["status"] != "complete"
+                    or int(source["copied_count"]) != int(verified["copied_count"])
+                    or source["aggregate_fingerprint"]
+                    != verified["aggregate_fingerprint"]
+                ):
+                    raise SchemaError(
+                        "Notes moodboard/Studio v61 aggregate verification failed."
+                    )  # noqa: TRY003
+            self._complete_postgres_v61_phase(conn, "aggregate_verification")
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint(
+                "aggregate_verification"
+            )
+
+        if not begin_phase("constraint phase"):
+            return
+        run_constraints = not self._postgres_v61_phase_is_complete(
+            conn, "constraints"
+        )
+        if run_constraints:
+            self.backend.execute(
+                "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
+                "note_studio_documents IN SHARE ROW EXCLUSIVE MODE",
+                connection=conn,
+            )
+        constraint_statements = (
+            "ALTER TABLE moodboards ALTER COLUMN owner_user_id SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN dataset_id SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN sync_id SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN canvas_json SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN canonical_revision SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN canonical_hash SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN owner_user_id SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN dataset_id SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN placement_id SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN x SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN y SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN width SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN height SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN order_index SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN display_json SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN last_modified SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN deleted SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN version SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN canonical_revision SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN canonical_hash SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN owner_user_id SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN dataset_id SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN note_revision SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN note_hash SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN accepted_provenance_json SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN deleted SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN version SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN canonical_revision SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN canonical_hash SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN canonical_revision SET DEFAULT 1",
+            "ALTER TABLE moodboard_notes ALTER COLUMN x SET DEFAULT 0",
+            "ALTER TABLE moodboard_notes ALTER COLUMN y SET DEFAULT 0",
+            "ALTER TABLE moodboard_notes ALTER COLUMN width SET DEFAULT 320",
+            "ALTER TABLE moodboard_notes ALTER COLUMN height SET DEFAULT 220",
+            "ALTER TABLE moodboard_notes ALTER COLUMN order_index SET DEFAULT 0",
+            "ALTER TABLE moodboard_notes ALTER COLUMN display_json SET DEFAULT '{}'",
+            "ALTER TABLE moodboard_notes ALTER COLUMN deleted SET DEFAULT FALSE",
+            "ALTER TABLE moodboard_notes ALTER COLUMN version SET DEFAULT 1",
+            "ALTER TABLE moodboard_notes ALTER COLUMN canonical_revision SET DEFAULT 1",
+            "ALTER TABLE note_studio_documents ALTER COLUMN note_revision SET DEFAULT 1",
+            "ALTER TABLE note_studio_documents ALTER COLUMN deleted SET DEFAULT FALSE",
+            "ALTER TABLE note_studio_documents ALTER COLUMN version SET DEFAULT 1",
+            "ALTER TABLE note_studio_documents ALTER COLUMN canonical_revision SET DEFAULT 1",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_scope_sync_unique UNIQUE(owner_user_id,dataset_id,sync_id)",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_scope_id_unique UNIQUE(owner_user_id,dataset_id,id)",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_owner_check CHECK(char_length(btrim(owner_user_id))>0) NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_dataset_check CHECK(char_length(btrim(dataset_id))>0) NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_sync_id_check CHECK(sync_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_canonical_revision_check CHECK(canonical_revision>=1) NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_canonical_hash_check CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_diagnostic_code_check CHECK(source_diagnostic_code IS NULL OR char_length(source_diagnostic_code) BETWEEN 1 AND 64) NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_diagnostic_hash_check CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_scope_placement_unique UNIQUE(owner_user_id,dataset_id,placement_id)",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_owner_check CHECK(char_length(btrim(owner_user_id))>0) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_dataset_check CHECK(char_length(btrim(dataset_id))>0) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_note_id_check CHECK(char_length(btrim(note_id))>0) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_placement_id_check CHECK(placement_id ~ '^notes[.]moodboard_note:sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_width_check CHECK(width BETWEEN 1 AND 1000000) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_height_check CHECK(height BETWEEN 1 AND 1000000) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_version_check CHECK(version>=1) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_canonical_revision_check CHECK(canonical_revision>=1) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_canonical_hash_check CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_diagnostic_code_check CHECK(source_diagnostic_code IS NULL OR char_length(source_diagnostic_code) BETWEEN 1 AND 64) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_diagnostic_hash_check CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_owner_check CHECK(char_length(btrim(owner_user_id))>0) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_dataset_check CHECK(char_length(btrim(dataset_id))>0) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_id_check CHECK(char_length(btrim(note_id))>0) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_revision_check CHECK(note_revision>=1) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_hash_check CHECK(note_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_version_check CHECK(version>=1) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_canonical_revision_check CHECK(canonical_revision>=1) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_canonical_hash_check CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_diagnostic_code_check CHECK(source_diagnostic_code IS NULL OR char_length(source_diagnostic_code) BETWEEN 1 AND 64) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_diagnostic_hash_check CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_board_fk FOREIGN KEY(owner_user_id,dataset_id,moodboard_id) REFERENCES moodboards(owner_user_id,dataset_id,id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_note_fk FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_fk FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID",
+        )
+        if run_constraints:
+            existing_constraints = {
+                str(row["conname"])
+                for row in self.backend.execute(
+                    "SELECT conname FROM pg_constraint k JOIN pg_namespace n ON n.oid=k.connamespace "
+                    "WHERE n.nspname=current_schema()", connection=conn,
+                ).rows
+            }
+            for statement in constraint_statements:
+                match = re.search(r"ADD CONSTRAINT ([a-z0-9_]+)", statement)
+                if match and match.group(1) in existing_constraints:
+                    continue
+                self.backend.execute(statement, connection=conn)
+            self._complete_postgres_v61_phase(conn, "constraints")
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint("constraint")
+        else:
+            conn.commit()
+
+        validation_constraints = tuple(
+            statement.partition("ADD CONSTRAINT ")[2].partition(" ")[0]
+            for statement in constraint_statements
+            if "ADD CONSTRAINT " in statement and " NOT VALID" in statement
+        )
+        for constraint in validation_constraints:
+            if not begin_phase(f"{constraint} validation phase"):
+                return
+            progress_phase = f"constraint_validation:{constraint}"
+            if self._postgres_v61_phase_is_complete(conn, progress_phase):
+                conn.commit()
+                continue
+            table = (
+                "note_studio_documents"
+                if constraint.startswith("note_studio")
+                else "moodboards"
+                if constraint.startswith("moodboards_")
+                else "moodboard_notes"
+            )
+            self.backend.execute(
+                f"ALTER TABLE {table} VALIDATE CONSTRAINT {constraint}",  # nosec B608 - fixed names.
+                connection=conn,
+            )
+            self._complete_postgres_v61_phase(conn, progress_phase)
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint(progress_phase)
+
+        indexes = (
+            "CREATE INDEX IF NOT EXISTS idx_moodboards_scope_page ON moodboards(owner_user_id,dataset_id,deleted,last_modified,id)",
+            "CREATE INDEX IF NOT EXISTS idx_moodboards_scope_sync_id ON moodboards(owner_user_id,dataset_id,sync_id)",
+            "CREATE INDEX IF NOT EXISTS idx_moodboard_notes_scope_board_page ON moodboard_notes(owner_user_id,dataset_id,moodboard_id,deleted,order_index,placement_id)",
+            "CREATE INDEX IF NOT EXISTS idx_moodboard_notes_scope_note ON moodboard_notes(owner_user_id,dataset_id,note_id,deleted,moodboard_id)",
+            "CREATE INDEX IF NOT EXISTS idx_moodboard_notes_scope_placement ON moodboard_notes(owner_user_id,dataset_id,placement_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_scope_page ON note_studio_documents(owner_user_id,dataset_id,deleted,last_modified,note_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_scope_note ON note_studio_documents(owner_user_id,dataset_id,note_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_scope_source ON note_studio_documents(owner_user_id,dataset_id,source_note_id)",
+        )
+        for index, statement in enumerate(indexes):
+            if not begin_phase(f"index {index} phase"):
+                return
+            progress_phase = f"index:{index}"
+            if self._postgres_v61_phase_is_complete(conn, progress_phase):
+                conn.commit()
+                continue
+            self.backend.execute(statement, connection=conn)
+            self._complete_postgres_v61_phase(conn, progress_phase)
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint(progress_phase)
+
+        if not begin_phase("RLS phase"):
+            return
+        if self._postgres_v61_phase_is_complete(conn, "rls"):
+            conn.commit()
+        else:
+            self.backend.execute(
+                "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
+                "note_studio_documents IN SHARE ROW EXCLUSIVE MODE",
+                connection=conn,
+            )
+            for statement in build_chacha_rls_sql():
+                if any(table in statement for table in self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS):
+                    self.backend.execute(statement, connection=conn)
+            self._complete_postgres_v61_phase(conn, "rls")
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint("rls")
+
+        if not begin_phase("version phase"):
+            return
+        self.backend.execute(
+            "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
+            "note_studio_documents IN SHARE MODE",
+            connection=conn,
+        )
+        self._verify_notes_moodboard_studio_schema_postgres(conn, migrating=True)
+        self._upsert_postgres_v61_progress(
+            conn, phase="migration", cursor=None, count=0,
+            fingerprint=f"sha256:{hashlib.sha256().hexdigest()}", status="complete",
+        )
+        self._set_schema_version_postgres(conn, 62)
+        conn.commit()
+        self._notes_moodboard_studio_v61_postgres_checkpoint("version")
+
+    def _verify_notes_moodboard_studio_schema_postgres(
+        self, conn: Any, *, migrating: bool = False
+    ) -> None:
+        """Reject PostgreSQL v61 catalog, relationship, or forced-RLS drift."""
+        progress_state = self.backend.execute(
+            """
+            SELECT c.relowner=current_user::regrole AS is_table_owner,
+                   pg_has_role(current_user,n.nspowner,'USAGE') AS is_schema_owner,
+                   has_table_privilege('public',c.oid,'SELECT') AS public_select,
+                   has_table_privilege('public',c.oid,'INSERT') AS public_insert,
+                   has_table_privilege('public',c.oid,'UPDATE') AS public_update,
+                   has_table_privilege('public',c.oid,'DELETE') AS public_delete
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname=current_schema() AND c.relkind IN ('r','p')
+               AND c.relname='chacha_schema_migration_progress'
+            """,
+            connection=conn,
+        ).rows
+        if len(progress_state) != 1 or any(
+            not bool(progress_state[0][key])
+            for key in ("is_table_owner", "is_schema_owner")
+        ) or any(
+            bool(progress_state[0][key])
+            for key in ("public_select", "public_insert", "public_update", "public_delete")
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+
+        progress_columns = self.backend.execute(
+            """
+            SELECT a.attname AS column_name,
+                   format_type(a.atttypid,a.atttypmod) AS data_type,
+                   a.attnotnull AS is_not_null,
+                   pg_get_expr(d.adbin,d.adrelid,false) AS default_expression
+              FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+              JOIN pg_namespace n ON n.oid=c.relnamespace
+              LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
+             WHERE n.nspname=current_schema()
+               AND c.relname='chacha_schema_migration_progress'
+               AND a.attnum>0 AND NOT a.attisdropped
+             ORDER BY a.attnum
+            """,
+            connection=conn,
+        ).rows
+        expected_progress_columns = (
+            ("migration_id", "text", True, None),
+            ("phase", "text", True, None),
+            ("keyset_cursor", "text", False, None),
+            ("copied_count", "bigint", True, "0"),
+            ("aggregate_fingerprint", "text", True, None),
+            ("status", "text", True, None),
+            ("updated_at", "timestamp with time zone", True, "current_timestamp"),
+        )
+        actual_progress_columns = tuple(
+            (
+                str(row["column_name"]),
+                str(row["data_type"]),
+                bool(row["is_not_null"]),
+                None
+                if row["default_expression"] is None
+                else str(row["default_expression"]).lower(),
+            )
+            for row in progress_columns
+        )
+        if actual_progress_columns != expected_progress_columns:
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+
+        progress_constraints = self.backend.execute(
+            """
+            SELECT k.conname AS constraint_name,k.contype AS constraint_type,
+                   pg_get_expr(k.conbin,k.conrelid,false) AS check_expression,
+                   ARRAY(SELECT a.attname
+                           FROM unnest(k.conkey) WITH ORDINALITY key_row(attnum,ordinality)
+                           JOIN pg_attribute a
+                             ON a.attrelid=c.oid AND a.attnum=key_row.attnum
+                          ORDER BY key_row.ordinality) AS local_columns,
+                   k.convalidated AS constraint_validated
+              FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
+              JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname=current_schema()
+               AND c.relname='chacha_schema_migration_progress'
+               AND k.contype<>'n'
+            """,
+            connection=conn,
+        ).rows
+
+        def _catalog_names(value: Any) -> tuple[str, ...]:
+            if value is None:
+                return ()
+            if isinstance(value, str):
+                return tuple(part for part in value.strip("{}").split(",") if part)
+            return tuple(str(part) for part in value)
+
+        progress_constraint_map = {
+            str(row["constraint_name"]): row for row in progress_constraints
+        }
+        expected_progress_checks = {
+            "chacha_schema_migration_progress_copied_count_check": "copied_count>=0",
+            "chacha_schema_migration_progress_aggregate_fingerprint_check": (
+                "aggregate_fingerprint~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "chacha_schema_migration_progress_status_check": (
+                "status=any(array['pending','running','complete'])"
+            ),
+        }
+        expected_progress_names = set(expected_progress_checks) | {
+            "chacha_schema_migration_progress_pkey"
+        }
+        if set(progress_constraint_map) != expected_progress_names or any(
+            not bool(row["constraint_validated"])
+            for row in progress_constraint_map.values()
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+        for name, expression in expected_progress_checks.items():
+            row = progress_constraint_map[name]
+            if (
+                str(row["constraint_type"]) != "c"
+                or self._normalize_postgres_catalog_expression(row["check_expression"])
+                != self._normalize_postgres_catalog_expression(expression)
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+        progress_primary = progress_constraint_map[
+            "chacha_schema_migration_progress_pkey"
+        ]
+        if (
+            str(progress_primary["constraint_type"]) != "p"
+            or _catalog_names(progress_primary["local_columns"])
+            != ("migration_id", "phase")
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+
+        relations = self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS
+        states = self.backend.execute(
+            """
+            SELECT c.relname AS table_name,c.relrowsecurity,c.relforcerowsecurity,
+                   c.relowner=current_user::regrole AS is_table_owner,
+                   pg_has_role(current_user,n.nspowner,'USAGE') AS is_schema_owner
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname=current_schema() AND c.relkind IN ('r','p')
+               AND c.relname=ANY(%s)
+             ORDER BY c.relname
+            """,
+            (list(relations),),
+            connection=conn,
+        ).rows
+        if {str(row["table_name"]) for row in states} != set(relations):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL relation catalog drifted.")  # noqa: TRY003
+        if any(
+            not bool(row["is_table_owner"])
+            or not bool(row["is_schema_owner"])
+            or not bool(row["relrowsecurity"])
+            or not bool(row["relforcerowsecurity"])
+            for row in states
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL ownership or RLS drifted.")  # noqa: TRY003
+
+        expected_columns = {
+            "note_task_scope_authority": (
+                "owner_user_id", "dataset_id", "task_graph_bound",
+                "moodboard_graph_bound", "studio_graph_bound",
+            ),
+            "moodboards": (
+                "id", "name", "description", "smart_rule_json", "created_at",
+                "last_modified", "deleted", "client_id", "version",
+                "owner_user_id", "dataset_id", "sync_id", "canvas_json",
+                "canonical_revision", "canonical_hash", "source_diagnostic_code",
+                "source_diagnostic_hash",
+            ),
+            "moodboard_notes": (
+                "moodboard_id", "note_id", "created_at", "owner_user_id", "dataset_id",
+                "placement_id", "x", "y", "width", "height", "order_index",
+                "display_json", "last_modified", "deleted", "version",
+                "canonical_revision", "canonical_hash", "source_diagnostic_code",
+                "source_diagnostic_hash",
+            ),
+            "note_studio_documents": (
+                "note_id", "payload_json", "template_type", "handwriting_mode",
+                "source_note_id", "excerpt_snapshot", "excerpt_hash",
+                "diagram_manifest_json", "companion_content_hash", "render_version",
+                "created_at", "last_modified", "owner_user_id", "dataset_id",
+                "note_revision", "note_hash", "accepted_provenance_json", "deleted",
+                "version", "canonical_revision", "canonical_hash",
+                "source_diagnostic_code", "source_diagnostic_hash",
+            ),
+        }
+        column_rows = self.backend.execute(
+            """
+            SELECT c.relname AS table_name,a.attname AS column_name,
+                   format_type(a.atttypid,a.atttypmod) AS data_type,
+                   a.attnotnull AS is_not_null,
+                   pg_get_expr(d.adbin,d.adrelid,false) AS default_expression,
+                   a.attnum
+              FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+              JOIN pg_namespace n ON n.oid=c.relnamespace
+              LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
+             WHERE n.nspname=current_schema() AND c.relname=ANY(%s)
+               AND a.attnum>0 AND NOT a.attisdropped
+             ORDER BY c.relname,a.attnum
+            """,
+            (list(relations),), connection=conn,
+        ).rows
+        actual: dict[str, list[str]] = {table: [] for table in relations}
+        metadata: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in column_rows:
+            table = str(row["table_name"])
+            column = str(row["column_name"])
+            actual[table].append(column)
+            metadata[(table, column)] = row
+        if any(tuple(actual[table]) != expected_columns[table] for table in relations):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL column catalog drifted.")  # noqa: TRY003
+        required_not_null = {
+            (table, column)
+            for table, columns in expected_columns.items()
+            for column in columns
+            if column not in {
+                "description", "smart_rule_json", "source_diagnostic_code",
+                "source_diagnostic_hash", "source_note_id", "excerpt_snapshot",
+                "excerpt_hash", "diagram_manifest_json", "companion_content_hash",
+            }
+        }
+        if any(not bool(metadata[key]["is_not_null"]) for key in required_not_null):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL nullability drifted.")  # noqa: TRY003
+        expected_types = {
+            ("note_task_scope_authority", "task_graph_bound"): "boolean",
+            ("note_task_scope_authority", "moodboard_graph_bound"): "boolean",
+            ("note_task_scope_authority", "studio_graph_bound"): "boolean",
+            ("moodboards", "sync_id"): "text",
+            ("moodboards", "canonical_revision"): "integer",
+            ("moodboards", "canvas_json"): "text",
+            ("moodboards", "canonical_hash"): "text",
+            ("moodboard_notes", "x"): "bigint",
+            ("moodboard_notes", "y"): "bigint",
+            ("moodboard_notes", "width"): "integer",
+            ("moodboard_notes", "height"): "integer",
+            ("moodboard_notes", "order_index"): "bigint",
+            ("moodboard_notes", "deleted"): "boolean",
+            ("moodboard_notes", "version"): "integer",
+            ("moodboard_notes", "canonical_revision"): "integer",
+            ("note_studio_documents", "note_revision"): "integer",
+            ("note_studio_documents", "deleted"): "boolean",
+            ("note_studio_documents", "version"): "integer",
+            ("note_studio_documents", "canonical_revision"): "integer",
+        }
+        if any(str(metadata[key]["data_type"]) != expected for key, expected in expected_types.items()):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL type catalog drifted.")  # noqa: TRY003
+        expected_defaults = {
+            ("note_task_scope_authority", "task_graph_bound"): "true",
+            ("note_task_scope_authority", "moodboard_graph_bound"): "false",
+            ("note_task_scope_authority", "studio_graph_bound"): "false",
+            ("moodboards", "canonical_revision"): "1",
+            ("moodboard_notes", "x"): "0",
+            ("moodboard_notes", "y"): "0",
+            ("moodboard_notes", "width"): "320",
+            ("moodboard_notes", "height"): "220",
+            ("moodboard_notes", "order_index"): "0",
+            ("moodboard_notes", "display_json"): "'{}'",
+            ("moodboard_notes", "deleted"): "false",
+            ("moodboard_notes", "version"): "1",
+            ("moodboard_notes", "canonical_revision"): "1",
+            ("note_studio_documents", "note_revision"): "1",
+            ("note_studio_documents", "deleted"): "false",
+            ("note_studio_documents", "version"): "1",
+            ("note_studio_documents", "canonical_revision"): "1",
+        }
+        if any(
+            self._normalize_postgres_catalog_expression(metadata[key]["default_expression"])
+            != value
+            for key, value in expected_defaults.items()
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL default catalog drifted.")  # noqa: TRY003
+
+        constraint_rows = self.backend.execute(
+            """
+            SELECT c.relname AS table_name,k.conname AS constraint_name,
+                   k.contype AS constraint_type,
+                   pg_get_expr(k.conbin,k.conrelid,false) AS check_expression,
+                   referenced.relname AS referenced_table,
+                   referenced_namespace.nspname AS referenced_schema,
+                   referenced_namespace.nspname=current_schema()
+                     AS referenced_in_current_schema,
+                   ARRAY(SELECT a.attname
+                           FROM unnest(k.conkey) WITH ORDINALITY key_row(attnum,ordinality)
+                           JOIN pg_attribute a
+                             ON a.attrelid=c.oid AND a.attnum=key_row.attnum
+                          ORDER BY key_row.ordinality) AS local_columns,
+                   CASE WHEN k.confrelid=0 THEN NULL ELSE
+                     ARRAY(SELECT a.attname
+                             FROM unnest(k.confkey) WITH ORDINALITY key_row(attnum,ordinality)
+                             JOIN pg_attribute a
+                               ON a.attrelid=referenced.oid AND a.attnum=key_row.attnum
+                            ORDER BY key_row.ordinality) END AS referenced_columns,
+                   k.convalidated AS constraint_validated,
+                   k.confdeltype AS delete_action,k.confupdtype AS update_action
+              FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
+              JOIN pg_namespace n ON n.oid=c.relnamespace
+              LEFT JOIN pg_class referenced ON referenced.oid=k.confrelid
+              LEFT JOIN pg_namespace referenced_namespace
+                ON referenced_namespace.oid=referenced.relnamespace
+             WHERE n.nspname=current_schema() AND c.relname=ANY(%s)
+               AND (k.conname LIKE '%%\\_v61\\_%%' ESCAPE '\\'
+                    OR k.conname=ANY(%s))
+            """,
+            (list(relations), [
+                "moodboards_pkey", "moodboard_notes_pkey",
+                "note_studio_documents_pkey", "note_task_scope_authority_pkey",
+            ]),
+            connection=conn,
+        ).rows
+        constraints = {
+            str(row["constraint_name"]): row for row in constraint_rows
+        }
+        expected_checks = {
+            "moodboards_v61_owner_check": "char_length(btrim(owner_user_id))>0",
+            "moodboards_v61_dataset_check": "char_length(btrim(dataset_id))>0",
+            "moodboards_v61_sync_id_check": (
+                "sync_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+                "[89ab][0-9a-f]{3}-[0-9a-f]{12}$'"
+            ),
+            "moodboards_v61_canonical_revision_check": "canonical_revision>=1",
+            "moodboards_v61_canonical_hash_check": (
+                "canonical_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "moodboards_v61_diagnostic_code_check": (
+                "source_diagnostic_codeisnullor"
+                "char_length(source_diagnostic_code)>=1and"
+                "char_length(source_diagnostic_code)<=64"
+            ),
+            "moodboards_v61_diagnostic_hash_check": (
+                "source_diagnostic_hashisnullor"
+                "source_diagnostic_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "moodboard_notes_v61_owner_check": "char_length(btrim(owner_user_id))>0",
+            "moodboard_notes_v61_dataset_check": "char_length(btrim(dataset_id))>0",
+            "moodboard_notes_v61_note_id_check": "char_length(btrim(note_id))>0",
+            "moodboard_notes_v61_placement_id_check": (
+                "placement_id~'^notes[.]moodboard_note:sha256:[0-9a-f]{64}$'"
+            ),
+            "moodboard_notes_v61_width_check": "width>=1andwidth<=1000000",
+            "moodboard_notes_v61_height_check": "height>=1andheight<=1000000",
+            "moodboard_notes_v61_version_check": "version>=1",
+            "moodboard_notes_v61_canonical_revision_check": "canonical_revision>=1",
+            "moodboard_notes_v61_canonical_hash_check": (
+                "canonical_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "moodboard_notes_v61_diagnostic_code_check": (
+                "source_diagnostic_codeisnullor"
+                "char_length(source_diagnostic_code)>=1and"
+                "char_length(source_diagnostic_code)<=64"
+            ),
+            "moodboard_notes_v61_diagnostic_hash_check": (
+                "source_diagnostic_hashisnullor"
+                "source_diagnostic_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "note_studio_documents_v61_owner_check": (
+                "char_length(btrim(owner_user_id))>0"
+            ),
+            "note_studio_documents_v61_dataset_check": (
+                "char_length(btrim(dataset_id))>0"
+            ),
+            "note_studio_documents_v61_note_id_check": "char_length(btrim(note_id))>0",
+            "note_studio_documents_v61_note_revision_check": "note_revision>=1",
+            "note_studio_documents_v61_note_hash_check": (
+                "note_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "note_studio_documents_v61_version_check": "version>=1",
+            "note_studio_documents_v61_canonical_revision_check": (
+                "canonical_revision>=1"
+            ),
+            "note_studio_documents_v61_canonical_hash_check": (
+                "canonical_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "note_studio_documents_v61_diagnostic_code_check": (
+                "source_diagnostic_codeisnullor"
+                "char_length(source_diagnostic_code)>=1and"
+                "char_length(source_diagnostic_code)<=64"
+            ),
+            "note_studio_documents_v61_diagnostic_hash_check": (
+                "source_diagnostic_hashisnullor"
+                "source_diagnostic_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+        }
+        expected_unique = {
+            "moodboards_v61_scope_sync_unique": (
+                "moodboards", ("owner_user_id", "dataset_id", "sync_id")
+            ),
+            "moodboards_v61_scope_id_unique": (
+                "moodboards", ("owner_user_id", "dataset_id", "id")
+            ),
+            "moodboard_notes_v61_scope_placement_unique": (
+                "moodboard_notes", ("owner_user_id", "dataset_id", "placement_id")
+            ),
+        }
+        expected_primary = {
+            "moodboards_pkey": ("moodboards", ("id",)),
+            "moodboard_notes_pkey": (
+                "moodboard_notes", ("moodboard_id", "note_id")
+            ),
+            "note_studio_documents_pkey": ("note_studio_documents", ("note_id",)),
+            "note_task_scope_authority_pkey": (
+                "note_task_scope_authority", ("owner_user_id",)
+            ),
+        }
+        expected_foreign = {
+            "moodboard_notes_v61_board_fk": (
+                "moodboard_notes", ("owner_user_id", "dataset_id", "moodboard_id"),
+                "moodboards", ("owner_user_id", "dataset_id", "id"), "c", "c",
+            ),
+            "moodboard_notes_v61_note_fk": (
+                "moodboard_notes", ("owner_user_id", "note_id"),
+                "notes", ("client_id", "id"), "c", "c",
+            ),
+            "note_studio_documents_v61_note_fk": (
+                "note_studio_documents", ("owner_user_id", "note_id"),
+                "notes", ("client_id", "id"), "c", "c",
+            ),
+        }
+        expected_constraint_names = (
+            set(expected_checks) | set(expected_unique) | set(expected_primary)
+            | set(expected_foreign)
+        )
+        if set(constraints) != expected_constraint_names or any(
+            not bool(row["constraint_validated"]) for row in constraints.values()
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
+        for name, expression in expected_checks.items():
+            row = constraints[name]
+            if (
+                str(row["constraint_type"]) != "c"
+                or self._normalize_postgres_catalog_expression(row["check_expression"])
+                != self._normalize_postgres_catalog_expression(expression)
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
+        for name, (table, columns) in (expected_unique | expected_primary).items():
+            row = constraints[name]
+            expected_type = "u" if name in expected_unique else "p"
+            if (
+                str(row["constraint_type"]) != expected_type
+                or str(row["table_name"]) != table
+                or _catalog_names(row["local_columns"]) != columns
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
+        for name, expected in expected_foreign.items():
+            table, columns, parent, parent_columns, delete_action, update_action = expected
+            row = constraints[name]
+            if (
+                str(row["constraint_type"]) != "f"
+                or str(row["table_name"]) != table
+                or _catalog_names(row["local_columns"]) != columns
+                or str(row["referenced_table"]) != parent
+                or not bool(row["referenced_in_current_schema"])
+                or not str(row["referenced_schema"] or "")
+                or _catalog_names(row["referenced_columns"]) != parent_columns
+                or str(row["delete_action"]) != delete_action
+                or str(row["update_action"]) != update_action
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
+
+        required_indexes = {
+            "idx_moodboards_scope_page",
+            "idx_moodboards_scope_sync_id",
+            "idx_moodboard_notes_scope_board_page",
+            "idx_moodboard_notes_scope_note",
+            "idx_moodboard_notes_scope_placement",
+            "idx_note_studio_documents_scope_page",
+            "idx_note_studio_documents_scope_note",
+            "idx_note_studio_documents_scope_source",
+        }
+        index_rows = self.backend.execute(
+            "SELECT i.relname AS index_name,x.indisvalid,x.indisready,"
+            "pg_get_indexdef(x.indexrelid,0,true) AS definition "
+            "FROM pg_index x JOIN pg_class t ON t.oid=x.indrelid "
+            "JOIN pg_class i ON i.oid=x.indexrelid JOIN pg_namespace n ON n.oid=t.relnamespace "
+            "WHERE n.nspname=current_schema() AND t.relname=ANY(%s)",
+            (list(relations),), connection=conn,
+        ).rows
+        indexes = {str(row["index_name"]): row for row in index_rows}
+        expected_index_definitions = {
+            "idx_moodboards_scope_page": "CREATE INDEX idx_moodboards_scope_page ON moodboards USING btree (owner_user_id, dataset_id, deleted, last_modified, id)",
+            "idx_moodboards_scope_sync_id": "CREATE INDEX idx_moodboards_scope_sync_id ON moodboards USING btree (owner_user_id, dataset_id, sync_id)",
+            "idx_moodboard_notes_scope_board_page": "CREATE INDEX idx_moodboard_notes_scope_board_page ON moodboard_notes USING btree (owner_user_id, dataset_id, moodboard_id, deleted, order_index, placement_id)",
+            "idx_moodboard_notes_scope_note": "CREATE INDEX idx_moodboard_notes_scope_note ON moodboard_notes USING btree (owner_user_id, dataset_id, note_id, deleted, moodboard_id)",
+            "idx_moodboard_notes_scope_placement": "CREATE INDEX idx_moodboard_notes_scope_placement ON moodboard_notes USING btree (owner_user_id, dataset_id, placement_id)",
+            "idx_note_studio_documents_scope_page": "CREATE INDEX idx_note_studio_documents_scope_page ON note_studio_documents USING btree (owner_user_id, dataset_id, deleted, last_modified, note_id)",
+            "idx_note_studio_documents_scope_note": "CREATE INDEX idx_note_studio_documents_scope_note ON note_studio_documents USING btree (owner_user_id, dataset_id, note_id)",
+            "idx_note_studio_documents_scope_source": "CREATE INDEX idx_note_studio_documents_scope_source ON note_studio_documents USING btree (owner_user_id, dataset_id, source_note_id)",
+        }
+        if not required_indexes.issubset(indexes) or any(
+            not bool(indexes[name]["indisvalid"]) or not bool(indexes[name]["indisready"])
+            or " ".join(str(indexes[name]["definition"]).split())
+            != expected_index_definitions[name]
+            for name in required_indexes
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL index catalog drifted.")  # noqa: TRY003
+
+        policies = self.backend.execute(
+            "SELECT tablename,policyname,permissive,roles::text,cmd,qual,with_check "
+            "FROM pg_policies WHERE schemaname=current_schema() AND tablename=ANY(%s) "
+            "ORDER BY tablename,policyname",
+            (list(relations),), connection=conn,
+        ).rows
+        if len(policies) != len(relations):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL policy catalog drifted.")  # noqa: TRY003
+        expected_policy_expressions = {
+            "note_task_scope_authority": (
+                "note_task_scope_authority.owner_user_id = "
+                "current_setting('app.current_user_id', true)"
+            ),
+            "moodboards": (
+                "moodboards.owner_user_id = current_setting('app.current_user_id', true) "
+                "AND moodboards.dataset_id = current_setting('app.current_dataset_id', true)"
+            ),
+            "moodboard_notes": (
+                "moodboard_notes.owner_user_id = current_setting('app.current_user_id', true) "
+                "AND moodboard_notes.dataset_id = current_setting('app.current_dataset_id', true) "
+                "AND EXISTS (SELECT 1 FROM moodboards board WHERE "
+                "board.owner_user_id=moodboard_notes.owner_user_id AND "
+                "board.dataset_id=moodboard_notes.dataset_id AND "
+                "board.id=moodboard_notes.moodboard_id) AND EXISTS (SELECT 1 FROM notes note "
+                "WHERE note.id=moodboard_notes.note_id AND "
+                "note.client_id=moodboard_notes.owner_user_id)"
+            ),
+            "note_studio_documents": (
+                "note_studio_documents.owner_user_id = current_setting('app.current_user_id', true) "
+                "AND note_studio_documents.dataset_id = current_setting('app.current_dataset_id', true) "
+                "AND EXISTS (SELECT 1 FROM notes note WHERE "
+                "note.id=note_studio_documents.note_id AND "
+                "note.client_id=note_studio_documents.owner_user_id) AND "
+                "(note_studio_documents.source_note_id IS NULL OR EXISTS (SELECT 1 FROM notes source_note "
+                "WHERE source_note.id=note_studio_documents.source_note_id AND "
+                "source_note.client_id=note_studio_documents.owner_user_id))"
+            ),
+        }
+        for policy in policies:
+            table = str(policy["tablename"])
+            expected_expression = self._normalize_postgres_catalog_expression(
+                expected_policy_expressions[table]
+            ).replace(f"{table}.", "")
+            actual_qual = self._normalize_postgres_catalog_expression(
+                policy["qual"]
+            ).replace(f"{table}.", "")
+            actual_with_check = self._normalize_postgres_catalog_expression(
+                policy["with_check"]
+            ).replace(f"{table}.", "")
+            if (
+                str(policy["policyname"]) != f"{table}_tenant_isolation"
+                or str(policy["permissive"]) != "PERMISSIVE"
+                or str(policy["roles"]) != "{public}"
+                or str(policy["cmd"]) != "ALL"
+                or policy["qual"] is None
+                or policy["with_check"] is None
+                or actual_qual != expected_expression
+                or actual_with_check != expected_expression
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL policy catalog drifted.")  # noqa: TRY003
+
+        relationship_failures = self.backend.execute(
+            "SELECT 1 FROM moodboard_notes p LEFT JOIN moodboards b "
+            "ON b.owner_user_id=p.owner_user_id AND b.dataset_id=p.dataset_id AND b.id=p.moodboard_id "
+            "LEFT JOIN notes n ON n.client_id=p.owner_user_id AND n.id=p.note_id "
+            "WHERE b.id IS NULL OR n.id IS NULL LIMIT 1",
+            connection=conn,
+        ).rows
+        studio_failures = self.backend.execute(
+            "SELECT 1 FROM note_studio_documents s LEFT JOIN notes n "
+            "ON n.client_id=s.owner_user_id AND n.id=s.note_id "
+            "LEFT JOIN notes source ON source.client_id=s.owner_user_id AND source.id=s.source_note_id "
+            "WHERE n.id IS NULL OR (s.source_note_id IS NOT NULL AND source.id IS NULL) LIMIT 1",
+            connection=conn,
+        ).rows
+        if relationship_failures or studio_failures:
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL relationship catalog drifted.")  # noqa: TRY003
+
+        progress = self._postgres_v61_progress_row(conn, "migration")
+        if not migrating and progress["status"] != "complete":
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL migration progress is incomplete.")  # noqa: TRY003
+
     def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""
 
@@ -13916,6 +15253,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError("Notes task v60 PostgreSQL ownership or RLS catalog drifted.")  # noqa: TRY003
 
         expected_columns = self._note_task_v60_postgres_columns()
+        if self._get_schema_version_postgres(conn) >= 61 or self.backend.table_exists(
+            "chacha_schema_migration_progress", connection=conn
+        ):
+            expected_columns = dict(expected_columns)
+            expected_columns["note_task_scope_authority"] = (
+                *expected_columns["note_task_scope_authority"],
+                ("task_graph_bound", "boolean", True, "true"),
+                ("moodboard_graph_bound", "boolean", True, "false"),
+                ("studio_graph_bound", "boolean", True, "false"),
+            )
         column_rows = backend.execute(
             """
             SELECT table_row.relname AS table_name, column_row.attnum,
@@ -15455,12 +16802,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._verify_notes_moodboard_studio_schema_sqlite(conn)
 
     def _ensure_note_studio_schema_postgres(self, conn: Any) -> None:
-        """Retain the legacy v60 sidecar until PostgreSQL v61 is implemented."""
-        if self._POSTGRES_SCHEMA_VERSION >= 61:
-            verifier = getattr(self, "_verify_notes_moodboard_studio_schema_postgres", None)
-            if verifier is None:
-                raise SchemaError("Notes Studio PostgreSQL v61 verifier is unavailable.")  # noqa: TRY003
-            verifier(conn)
+        """Create only the legacy v60 sidecar or verify schema-owned v61 state."""
+        if self._get_schema_version_postgres(conn) >= 61:
+            self._verify_notes_moodboard_studio_schema_postgres(conn)
             return
         statements = (
             """
@@ -15486,9 +16830,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self.backend.execute(statement, connection=conn)
 
     def _supports_notes_moodboard_studio_v61(self) -> bool:
-        """Return the product catalog supported by this backend, not SQLite's global target."""
+        """Return whether this database instance has the v61 product catalog."""
         if self.backend_type == BackendType.POSTGRESQL:
-            return self._POSTGRES_SCHEMA_VERSION >= 61
+            cached = getattr(self, "_runtime_schema_version", None)
+            if cached is not None:
+                return int(cached) >= 61
+            return self._get_schema_version_postgres(None) >= 61
         return self._CURRENT_SCHEMA_VERSION >= 61
 
     def _ensure_web_clipper_schema_sqlite(self, conn: sqlite3.Connection) -> None:
@@ -21793,6 +23140,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             elif current_version >= 60:
                 self._verify_note_attachment_schema_postgres(conn)
                 self._verify_note_task_schema_postgres(conn)
+                if current_version >= 62:
+                    self._verify_notes_moodboard_studio_schema_postgres(conn)
 
             if current_version < 36:
                 self._ensure_postgres_workspaces_table_base(conn)
@@ -22003,6 +23352,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 62:
                 self._migrate_from_v61_to_v62_postgres(conn)
                 current_version = 62
+            self._runtime_schema_version = current_version
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -30739,17 +32089,32 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         {"domain": "notes.moodboard_note", "source": placement_source, "revision": revision}
                     )
                 conn.execute(
-                    "UPDATE moodboard_notes SET deleted=0,last_modified=?,version=?,canonical_revision=?,canonical_hash=? "
-                    "WHERE owner_user_id=? AND dataset_id=? AND moodboard_id=? AND note_id=? AND deleted=1",
-                    (now, version, revision, canonical_hash, owner, dataset, moodboard_id, note_id),
+                    "UPDATE moodboard_notes SET deleted=?,last_modified=?,version=?,canonical_revision=?,canonical_hash=? "
+                    "WHERE owner_user_id=? AND dataset_id=? AND moodboard_id=? AND note_id=? AND deleted=?",
+                    (
+                        False,
+                        now,
+                        version,
+                        revision,
+                        canonical_hash,
+                        owner,
+                        dataset,
+                        moodboard_id,
+                        note_id,
+                        True,
+                    ),
                 )
                 return True
+            order_row = conn.execute(
+                "SELECT COALESCE(MAX(order_index),-1)+1 AS next_order_index "
+                "FROM moodboard_notes "
+                "WHERE owner_user_id=? AND dataset_id=? AND moodboard_id=?",
+                (owner, dataset, moodboard_id),
+            ).fetchone()
             order_index = int(
-                conn.execute(
-                    "SELECT COALESCE(MAX(order_index),-1)+1 FROM moodboard_notes "
-                    "WHERE owner_user_id=? AND dataset_id=? AND moodboard_id=?",
-                    (owner, dataset, moodboard_id),
-                ).fetchone()[0]
+                order_row["next_order_index"]
+                if isinstance(order_row, Mapping)
+                else order_row[0]
             )
             placement_source["order_index"] = order_index
             try:
@@ -30764,7 +32129,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "owner_user_id,dataset_id,moodboard_id,note_id,placement_id,x,y,width,height,order_index,"
                 "display_json,created_at,last_modified,deleted,version,canonical_revision,canonical_hash,"
                 "source_diagnostic_code,source_diagnostic_hash"
-                ") VALUES(?,?,?,?,?,0,0,320,220,?,'{}',?,?,0,1,1,?,?,?)",
+                ") VALUES(?,?,?,?,?,0,0,320,220,?,'{}',?,?,?,1,1,?,?,?)",
                 (
                     owner,
                     dataset,
@@ -30774,6 +32139,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     order_index,
                     now,
                     now,
+                    False,
                     canonical_hash,
                     diagnostic_code,
                     diagnostic_hash,

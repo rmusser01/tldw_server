@@ -64,7 +64,7 @@ def test_compatibility_resolver_is_one_indexed_authority_lookup() -> None:
 
     assert "note_task_scope_authority" in source
     assert "SELECT dataset_id FROM note_task_scope_authority" in source
-    assert "task_graph_bound = 1" in source
+    assert "task_graph_bound = ?" in source
     for forbidden in (
         "ACCESS EXCLUSIVE",
         "ROW LEVEL SECURITY",

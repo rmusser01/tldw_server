@@ -135,12 +135,13 @@ class TaskStore:
         flag_aware = self._db._supports_notes_moodboard_studio_v61()
         authority_query = (
             "SELECT dataset_id FROM note_task_scope_authority "
-            "WHERE owner_user_id = ? AND task_graph_bound = 1"
+            "WHERE owner_user_id = ? AND task_graph_bound = ?"
             if flag_aware
             else "SELECT owner_user_id,dataset_id FROM note_task_scope_authority "
             "WHERE owner_user_id = ? LIMIT 2"
         )
-        rows = self._read(authority_query, (owner_user_id,), conn=conn).fetchall()
+        authority_params = (owner_user_id, True) if flag_aware else (owner_user_id,)
+        rows = self._read(authority_query, authority_params, conn=conn).fetchall()
         if not rows:
             if dataset_id == self._LOCAL_UNBOUND:
                 self._set_postgres_dataset_scope(conn, dataset_id)
@@ -3790,12 +3791,13 @@ class TaskStore:
         flag_aware = self._db._supports_notes_moodboard_studio_v61()
         authority_query = (
             "SELECT dataset_id FROM note_task_scope_authority "
-            "WHERE owner_user_id = ? AND task_graph_bound = 1"
+            "WHERE owner_user_id = ? AND task_graph_bound = ?"
             if flag_aware
             else "SELECT owner_user_id,dataset_id FROM note_task_scope_authority "
             "WHERE owner_user_id = ? LIMIT 2"
         )
-        rows = self._read(authority_query, (owner,), conn=conn).fetchall()
+        authority_params = (owner, True) if flag_aware else (owner,)
+        rows = self._read(authority_query, authority_params, conn=conn).fetchall()
         if not rows:
             return self._LOCAL_UNBOUND
         if len(rows) != 1:
@@ -4095,8 +4097,8 @@ class TaskStore:
                             transaction_conn,
                             "INSERT INTO note_task_scope_authority("
                             "owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound"
-                            ") VALUES (?,?,1,0,0)",
-                            (owner, target),
+                            ") VALUES (?,?,?,?,?)",
+                            (owner, target, True, False, False),
                         )
                     else:
                         self._execute(
@@ -4108,9 +4110,9 @@ class TaskStore:
                 elif authority_dataset == target and flag_aware:
                     self._execute(
                         transaction_conn,
-                        "UPDATE note_task_scope_authority SET task_graph_bound=1 "
-                        "WHERE owner_user_id=? AND dataset_id=? AND task_graph_bound=0",
-                        (owner, target),
+                        "UPDATE note_task_scope_authority SET task_graph_bound=? "
+                        "WHERE owner_user_id=? AND dataset_id=? AND task_graph_bound=?",
+                        (True, owner, target, False),
                     )
                 elif authority_dataset != target:
                     raise ConflictError(
