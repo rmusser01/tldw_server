@@ -235,7 +235,7 @@ Expected: only the preflight, result-contract documentation, and focused tests c
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
 python -m bandit -r \
   tldw_Server_API/app/core/Scheduled_Tasks/agent_task_jobs.py \
-  -f json -o /tmp/bandit_task_13113.json
+  -f json -o /tmp/bandit_task_13127.json
 ```
 
 Expected: exit 0 with no new findings in the changed code.

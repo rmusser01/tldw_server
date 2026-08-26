@@ -4,7 +4,7 @@ title: Normalize Scheduled Tasks Phase 4D Backlog identities
 status: Done
 assignee: []
 created_date: 2026-08-26 16:18
-updated_date: 2026-08-26 19:52
+updated_date: 2026-08-26 19:57
 labels:
 - scheduled-tasks
 - phase-4d
@@ -64,6 +64,8 @@ Audit current dev, allocate a collision-free contiguous ID block, rename only th
 2026-08-26 closeout: rebased onto origin/dev 15d1d2ed9a and opened PR #2826. Verification passed: replacement IDs TASK-13126 through TASK-13133 each occur exactly once in Backlog frontmatter; all eight replacement paths exist; all eight old Phase 4D paths are absent; no stale old-ID reference remains in the operational Phase 4D spec, plans, or task records; all eight renamed task bodies match their origin/dev predecessors after the fixed ID mapping; all 14 touched Markdown files have balanced fenced-code markers; and git diff --check passes. Bandit is not applicable because this review unit changes only Markdown documentation and Backlog metadata.
 
 2026-08-26 merge-gate update: the requester supplied the required human-authored Change summary for PR #2826. The summary is recorded verbatim in the PR body, so the project policy gate is satisfied and the PR can proceed through CI and review.
+
+2026-08-26 review remediation: Qodo identified two stale Bandit output filenames in the prerequisite and feasibility plans. Updated /tmp/bandit_task_13113.json to /tmp/bandit_task_13127.json and /tmp/bandit_task_13117.json to /tmp/bandit_task_13129.json so generated evidence uses the normalized task identities. Re-ran the scoped and artifact-name stale-ID scans plus git diff --check.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

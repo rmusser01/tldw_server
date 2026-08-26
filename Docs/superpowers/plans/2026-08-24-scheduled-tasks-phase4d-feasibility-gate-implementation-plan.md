@@ -619,7 +619,7 @@ python -m bandit -r \
   tldw_Server_API/app/core/Scheduled_Tasks/agent_task_jobs.py \
   tldw_Server_API/app/api/v1/endpoints/scheduled_tasks_control_plane.py \
   Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py \
-  -f json -o /tmp/bandit_task_13117.json
+  -f json -o /tmp/bandit_task_13129.json
 ```
 
 Expected: compile and lint exit 0; Bandit reports no new findings in touched Python.
