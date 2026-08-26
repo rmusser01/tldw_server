@@ -15,6 +15,7 @@ _ASSERTION_STATUSES = frozenset(
     {"passed", "failed", "skipped", "pending", "todo", "disabled"}
 )
 _TEST_RESULT_STATUSES = frozenset({"passed", "failed"})
+_SUITE_STATUS_RANK = {"pending": 0, "passed": 1, "failed": 2}
 _STRICT_COUNTERS = (
     "numTotalTestSuites",
     "numPassedTestSuites",
@@ -207,6 +208,7 @@ def _load_failures(
 
     failures: list[FailedTest] = []
     assertion_status_counts: Counter[str] = Counter()
+    suite_statuses: dict[tuple[str, ...], str] = {}
     for test_result in test_results:
         if not isinstance(test_result, dict):
             raise RatchetError(f"Vitest report {report_path} has an invalid test result")
@@ -223,7 +225,11 @@ def _load_failures(
                 f"Vitest result {relative_path} is missing assertionResults"
             )
         if strict:
-            file_message = test_result.get("message", "")
+            if "message" not in test_result:
+                raise RatchetError(
+                    f"Vitest result {relative_path} is missing file-level message"
+                )
+            file_message = test_result["message"]
             if not isinstance(file_message, str):
                 raise RatchetError(
                     f"Vitest result {relative_path} has an invalid file-level message"
@@ -246,6 +252,38 @@ def _load_failures(
                     f"{assertion_status!r}"
                 )
             assertion_status_counts[assertion_status] += 1
+            if strict:
+                ancestor_titles = assertion.get("ancestorTitles")
+                if (
+                    not isinstance(ancestor_titles, list)
+                    or any(
+                        not isinstance(title, str) or not title.strip()
+                        for title in ancestor_titles
+                    )
+                ):
+                    raise RatchetError(
+                        f"Vitest result {relative_path} has invalid ancestorTitles"
+                    )
+                suite_status = (
+                    "failed"
+                    if assertion_status == "failed"
+                    else "passed"
+                    if assertion_status == "passed"
+                    else "pending"
+                )
+                suite_keys = [(relative_path,)]
+                suite_keys.extend(
+                    (relative_path, *ancestor_titles[:depth])
+                    for depth in range(1, len(ancestor_titles) + 1)
+                )
+                for suite_key in suite_keys:
+                    current_status = suite_statuses.get(suite_key)
+                    if (
+                        current_status is None
+                        or _SUITE_STATUS_RANK[suite_status]
+                        > _SUITE_STATUS_RANK[current_status]
+                    ):
+                        suite_statuses[suite_key] = suite_status
             if assertion_status == "failed":
                 failed_assertions.append(assertion)
 
@@ -300,6 +338,24 @@ def _load_failures(
                 raise RatchetError(
                     f"Vitest report {report_path} counter {counter_name} does not "
                     f"match assertionResults"
+                )
+        observed_suite_counts = {
+            "numTotalTestSuites": len(suite_statuses),
+            "numPassedTestSuites": sum(
+                status == "passed" for status in suite_statuses.values()
+            ),
+            "numFailedTestSuites": sum(
+                status == "failed" for status in suite_statuses.values()
+            ),
+            "numPendingTestSuites": sum(
+                status == "pending" for status in suite_statuses.values()
+            ),
+        }
+        for counter_name, observed_count in observed_suite_counts.items():
+            if counters[counter_name] != observed_count:
+                raise RatchetError(
+                    f"Vitest report {report_path} suite counter {counter_name} "
+                    "does not match assertion hierarchy"
                 )
         if safety_report_path is None:
             raise RatchetError("strict Vitest validation requires a safety report")
@@ -408,7 +464,27 @@ def compare_reports(
     head_safety_report_path: Path | None = None,
     base_safety_report_path: Path | None = None,
 ) -> RatchetResult:
-    """Classify head failures, blocking new or test-file-modified failures."""
+    """Classify head failures, blocking new or test-file-modified failures.
+
+    Args:
+        head_report: Vitest JSON report produced from the pull-request head.
+        base_report: Vitest JSON report produced from the base revision.
+        head_package_root: Package root used to normalize head test paths.
+        base_package_root: Package root used to normalize base test paths.
+        package_repo_path: Repository-relative path to the tested package.
+        changed_files_path: File containing repository-relative changed paths.
+        strict: Require complete reports, exact failure fingerprints, and
+            NUL-delimited changed paths.
+        head_safety_report_path: Reporter lifecycle evidence for the head run.
+        base_safety_report_path: Reporter lifecycle evidence for the base run.
+
+    Returns:
+        The inherited failures and blocking regressions from the head report.
+
+    Raises:
+        RatchetError: If a report, path list, or strict safety contract is
+            missing, malformed, incomplete, or inconsistent.
+    """
 
     head_failures = _load_failures(
         head_report,

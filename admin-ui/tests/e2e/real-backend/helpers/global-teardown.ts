@@ -11,10 +11,22 @@ export default async function globalTeardown(): Promise<void> {
     return;
   }
 
+  const cleanupErrors: unknown[] = [];
   for (const projectName of requestedRealBackendProjects) {
     if (!shouldManageBackend(projectName)) {
       continue;
     }
-    await stopManagedBackend(getProjectEnv(projectName)).catch(() => undefined);
+    try {
+      await stopManagedBackend(getProjectEnv(projectName));
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      cleanupErrors,
+      `Failed to stop ${cleanupErrors.length} managed real-backend process${cleanupErrors.length === 1 ? '' : 'es'}`,
+    );
   }
 }

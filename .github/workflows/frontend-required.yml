@@ -149,14 +149,12 @@ jobs:
       - name: Run package-owned frontend unit tests
         working-directory: apps
         shell: bash
+        env:
+          RATCHET_BASE_SHA: ${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || inputs.base_sha }}
         run: |
           set -uo pipefail
 
-          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "workflow_run" ]]; then
-            BASE_SHA="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}"
-          else
-            BASE_SHA="${{ inputs.base_sha }}"
-          fi
+          BASE_SHA="$RATCHET_BASE_SHA"
 
           if [[ ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ || "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
             echo "A nonzero 40-character base SHA is required for the frontend failure ratchet." >&2
@@ -184,8 +182,11 @@ jobs:
           BASE_WORKTREE="${RUNNER_TEMP}/frontend-unit-base-${{ matrix.shard }}"
           BASE_READY=0
           RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"
-          EXPECTED_RATCHET_SHA256="b74fdd14d915134458bc0334c4db2e992497f00bc07ab8c9353967c7169f3ede"
-          if ! printf '%s  %s\n' "$EXPECTED_RATCHET_SHA256" "$RATCHET_SCRIPT" | sha256sum --check --status; then
+          EXPECTED_RATCHET_SHA256="cdb398d906152e741fe01636a18c4ac1f1bfec59ff78bad7b21d02212fcd1a9f"
+          verify_ratchet_script() {
+            printf '%s  %s\n' "$EXPECTED_RATCHET_SHA256" "$RATCHET_SCRIPT" | sha256sum --check --status
+          }
+          if ! verify_ratchet_script; then
             echo "The frontend Vitest ratchet helper does not match the workflow-pinned digest." >&2
             exit 1
           fi
@@ -226,10 +227,11 @@ jobs:
               esac
             done < "$CHANGED_FILES_PATH"
             if (( DIRECT_TEST_COUNT == 0 )); then
-              echo "No directly changed frontend tests were found for a pathological dependency expansion." >&2
-              exit 1
+              USE_DIRECT_TESTS=0
+              echo "Dependency impact expanded to ${IMPACTED_TEST_COUNT} tests with no directly changed frontend tests; retaining the sharded dependency-impact set."
+            else
+              echo "Dependency impact expanded to ${IMPACTED_TEST_COUNT} tests; sharding ${DIRECT_TEST_COUNT} directly changed frontend tests instead."
             fi
-            echo "Dependency impact expanded to ${IMPACTED_TEST_COUNT} tests; sharding ${DIRECT_TEST_COUNT} directly changed frontend tests instead."
           else
             echo "Sharding ${IMPACTED_TEST_COUNT} dependency-impacted frontend tests from ${BASE_SHA}."
           fi
@@ -317,6 +319,10 @@ jobs:
             ) || head_status=$?
 
             if (( head_status == 0 )); then
+              if ! verify_ratchet_script; then
+                echo "The frontend Vitest ratchet helper changed during the test run." >&2
+                return 1
+              fi
               python3 "$RATCHET_SCRIPT" validate-success \
                 --report "$head_report" \
                 --package-root "$head_package_root"
@@ -324,6 +330,10 @@ jobs:
             fi
 
             echo "${label} failed on the PR head; replaying only its failed test files at ${BASE_SHA}."
+            if ! verify_ratchet_script; then
+              echo "The frontend Vitest ratchet helper changed during the test run." >&2
+              return 1
+            fi
             if ! python3 "$RATCHET_SCRIPT" extract \
               --report "$head_report" \
               --package-root "$head_package_root" \
@@ -356,6 +366,10 @@ jobs:
             ) || base_status=$?
             echo "${label} exact-base replay exited with status ${base_status}."
 
+            if ! verify_ratchet_script; then
+              echo "The frontend Vitest ratchet helper changed before comparison." >&2
+              return 1
+            fi
             python3 "$RATCHET_SCRIPT" compare \
               --head-report "$head_report" \
               --base-report "$base_report" \
@@ -377,7 +391,7 @@ jobs:
           fi
 
   frontend-required:
-    name: frontend-required
+    name: ${{ github.event_name == 'workflow_dispatch' && 'frontend-required-diagnostic' || 'frontend-required' }}
     runs-on: ubuntu-latest
     needs: [changes, admission, frontend-unit-tests]
     if: >-
@@ -562,19 +576,12 @@ jobs:
       - name: Run admin-ui unit tests
         if: needs.changes.outputs.admin_ui_changed == 'true'
         shell: bash
+        env:
+          RATCHET_BASE_SHA: ${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || inputs.base_sha }}
         run: |
           set -uo pipefail
 
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            BASE_SHA="${{ needs.admission.outputs.base_sha }}"
-          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            if ! BASE_SHA="$(python3 -c 'import json, os; print(json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8"))["pull_request"]["base"]["sha"])')"; then
-              echo "Unable to read the pull-request base SHA from ${GITHUB_EVENT_PATH}." >&2
-              exit 1
-            fi
-          else
-            BASE_SHA="${{ inputs.base_sha }}"
-          fi
+          BASE_SHA="$RATCHET_BASE_SHA"
 
           if [[ ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ || "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
             echo "A nonzero 40-character base SHA is required for the admin UI failure ratchet." >&2
@@ -613,14 +620,14 @@ jobs:
           FAILED_FILES_PATH="${RUNNER_TEMP}/admin-ui-unit-failed-files.txt"
           RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"
           SAFETY_REPORTER="${GITHUB_WORKSPACE}/admin-ui/scripts/ci/vitest-safety-reporter.mjs"
-          EXPECTED_RATCHET_SHA256="b74fdd14d915134458bc0334c4db2e992497f00bc07ab8c9353967c7169f3ede"
+          EXPECTED_RATCHET_SHA256="cdb398d906152e741fe01636a18c4ac1f1bfec59ff78bad7b21d02212fcd1a9f"
           EXPECTED_SAFETY_REPORTER_SHA256="433e8ab9a163694775fa4a50ceae2f7722358331d1f8f4426ec7ec31e36e93f3"
-          if ! printf '%s  %s\n' "$EXPECTED_RATCHET_SHA256" "$RATCHET_SCRIPT" | sha256sum --check --status; then
-            echo "The admin UI Vitest ratchet helper does not match the workflow-pinned digest." >&2
-            exit 1
-          fi
-          if ! printf '%s  %s\n' "$EXPECTED_SAFETY_REPORTER_SHA256" "$SAFETY_REPORTER" | sha256sum --check --status; then
-            echo "The admin UI Vitest safety reporter does not match the workflow-pinned digest." >&2
+          verify_ratchet_artifacts() {
+            printf '%s  %s\n' "$EXPECTED_RATCHET_SHA256" "$RATCHET_SCRIPT" | sha256sum --check --status &&
+              printf '%s  %s\n' "$EXPECTED_SAFETY_REPORTER_SHA256" "$SAFETY_REPORTER" | sha256sum --check --status
+          }
+          if ! verify_ratchet_artifacts; then
+            echo "The admin UI Vitest ratchet artifacts do not match their workflow-pinned digests." >&2
             exit 1
           fi
           VITEST_ARGS=(
@@ -640,6 +647,10 @@ jobs:
           ) || HEAD_STATUS=$?
 
           if (( HEAD_STATUS == 0 )); then
+            if ! verify_ratchet_artifacts; then
+              echo "The admin UI Vitest ratchet artifacts changed during the test run." >&2
+              exit 1
+            fi
             python3 "$RATCHET_SCRIPT" validate-success \
               --strict \
               --report "$HEAD_REPORT" \
@@ -653,6 +664,10 @@ jobs:
           fi
 
           echo "Admin UI tests failed on the head; replaying only failed files at ${BASE_SHA}."
+          if ! verify_ratchet_artifacts; then
+            echo "The admin UI Vitest ratchet artifacts changed during the test run." >&2
+            exit 1
+          fi
           if ! python3 "$RATCHET_SCRIPT" extract \
             --strict \
             --report "$HEAD_REPORT" \
@@ -694,6 +709,10 @@ jobs:
           fi
 
           BASE_STATUS=0
+          if ! verify_ratchet_artifacts; then
+            echo "The admin UI Vitest ratchet artifacts changed before base replay." >&2
+            exit 1
+          fi
           (
             cd "$BASE_ROOT" &&
             TLDW_VITEST_SAFETY_REPORT="$BASE_SAFETY_REPORT" \
@@ -705,6 +724,10 @@ jobs:
             exit 1
           fi
 
+          if ! verify_ratchet_artifacts; then
+            echo "The admin UI Vitest ratchet artifacts changed before comparison." >&2
+            exit 1
+          fi
           python3 "$RATCHET_SCRIPT" compare \
             --strict \
             --head-report "$HEAD_REPORT" \

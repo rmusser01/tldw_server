@@ -46,14 +46,15 @@ def test_admin_ui_unit_gate_uses_fail_closed_exact_base_ratchet() -> None:
     assert unit_step["shell"] == "bash"
     assert unit_step.get("continue-on-error") is not True
     assert "working-directory" not in unit_step
+    assert unit_step["env"]["RATCHET_BASE_SHA"] == (
+        "${{ needs.admission.outputs.base_sha || "
+        "github.event.pull_request.base.sha || inputs.base_sha }}"
+    )
 
     run_script = str(unit_step["run"])
     required_contracts = (
         "set -uo pipefail",
-        'BASE_SHA="${{ needs.admission.outputs.base_sha }}"',
-        "GITHUB_EVENT_PATH",
-        '["pull_request"]["base"]["sha"]',
-        'BASE_SHA="${{ inputs.base_sha }}"',
+        'BASE_SHA="$RATCHET_BASE_SHA"',
         '[[ ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$',
         'git diff --name-only -z --diff-filter=ACMRT "$BASE_SHA" "$HEAD_SHA"',
         'git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"',
@@ -62,7 +63,7 @@ def test_admin_ui_unit_gate_uses_fail_closed_exact_base_ratchet() -> None:
         'SAFETY_REPORTER="${GITHUB_WORKSPACE}/admin-ui/scripts/ci/vitest-safety-reporter.mjs"',
         'EXPECTED_RATCHET_SHA256=',
         'EXPECTED_SAFETY_REPORTER_SHA256=',
-        'sha256sum --check --status',
+        "verify_ratchet_artifacts()",
         '"--passWithNoTests=false"',
         '"--reporter=default"',
         '"--reporter=json"',
@@ -89,6 +90,8 @@ def test_admin_ui_unit_gate_uses_fail_closed_exact_base_ratchet() -> None:
     assert not missing, f"admin UI Vitest ratchet contracts missing: {missing}"
     assert "bun run test" not in run_script
     assert "HEAD^" not in run_script
+    assert "${{ inputs.base_sha }}" not in run_script
+    assert run_script.count("verify_ratchet_artifacts") >= 5
 
     hash_contracts = dict(
         re.findall(
@@ -197,11 +200,17 @@ def test_package_ratchet_uses_required_base_and_trusted_helper() -> None:
     )
     run_script = str(unit_step["run"])
 
-    assert 'BASE_SHA="${{ inputs.base_sha }}"' in run_script
+    assert unit_step["env"]["RATCHET_BASE_SHA"] == (
+        "${{ needs.admission.outputs.base_sha || "
+        "github.event.pull_request.base.sha || inputs.base_sha }}"
+    )
+    assert 'BASE_SHA="$RATCHET_BASE_SHA"' in run_script
+    assert "${{ inputs.base_sha }}" not in run_script
     assert "HEAD^" not in run_script
     assert '[[ ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$' in run_script
     assert 'EXPECTED_RATCHET_SHA256="' in run_script
-    assert "sha256sum --check --status" in run_script
+    assert "verify_ratchet_script()" in run_script
+    assert run_script.count("verify_ratchet_script") >= 4
 
     expected_hash = re.search(
         r'^EXPECTED_RATCHET_SHA256="([0-9a-f]{64})"$',
@@ -213,6 +222,20 @@ def test_package_ratchet_uses_required_base_and_trusted_helper() -> None:
         Path("Helper_Scripts/ci/vitest_base_ratchet.py").read_bytes()
     ).hexdigest()
     assert expected_hash.group(1) == actual_hash
+
+
+@pytest.mark.unit
+def test_manual_dispatch_cannot_publish_the_required_check_name() -> None:
+    """Keep diagnostic manual ratchets from satisfying branch protection."""
+
+    workflow = yaml.safe_load(
+        Path(".github/workflows/frontend-required.yml").read_text(encoding="utf-8")
+    )
+
+    assert workflow["jobs"]["frontend-required"]["name"] == (
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "'frontend-required-diagnostic' || 'frontend-required' }}"
+    )
 
 
 @pytest.mark.unit

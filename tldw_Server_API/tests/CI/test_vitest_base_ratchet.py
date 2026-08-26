@@ -33,6 +33,7 @@ def _write_report(
                     {
                         "fullName": full_name,
                         "status": "failed",
+                        "ancestorTitles": [],
                         "failureMessages": [
                             messages[index]
                             if messages is not None
@@ -90,6 +91,7 @@ def _write_success_report(path: Path, package_root: Path) -> None:
                     {
                         "fullName": "suite passes",
                         "status": "passed",
+                        "ancestorTitles": [],
                         "failureMessages": [],
                     }
                 ],
@@ -268,6 +270,74 @@ def test_strict_validate_success_report_rejects_counter_mismatch(
     _write_safety_report(safety_path, reason="passed", test_count=1)
 
     with pytest.raises(RatchetError, match="counter"):
+        validate_success_report(
+            report_path,
+            package_root,
+            strict=True,
+            safety_report_path=safety_path,
+        )
+
+
+def test_strict_validate_success_report_rejects_suite_hierarchy_mismatch(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "head" / "admin-ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["numTotalTestSuites"] = 2
+    payload["numPassedTestSuites"] = 2
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(safety_path, reason="passed", test_count=1)
+
+    with pytest.raises(RatchetError, match="suite.*assertion hierarchy"):
+        validate_success_report(
+            report_path,
+            package_root,
+            strict=True,
+            safety_report_path=safety_path,
+        )
+
+
+def test_strict_validate_success_report_accepts_nested_suite_hierarchy(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "head" / "admin-ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["testResults"][0]["assertionResults"][0]["ancestorTitles"] = [
+        "outer suite",
+        "inner suite",
+    ]
+    payload["numTotalTestSuites"] = 3
+    payload["numPassedTestSuites"] = 3
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(safety_path, reason="passed", test_count=1)
+
+    validate_success_report(
+        report_path,
+        package_root,
+        strict=True,
+        safety_report_path=safety_path,
+    )
+
+
+def test_strict_validate_success_report_requires_file_message(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "head" / "admin-ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    del payload["testResults"][0]["message"]
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(safety_path, reason="passed", test_count=1)
+
+    with pytest.raises(RatchetError, match="missing file-level message"):
         validate_success_report(
             report_path,
             package_root,
