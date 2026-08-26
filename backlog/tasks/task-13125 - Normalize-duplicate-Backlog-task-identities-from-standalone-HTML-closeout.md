@@ -15,11 +15,12 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/2578
 - https://github.com/rmusser01/tldw_server/pull/2814
 - legacy:TASK-13116 (standalone HTML identity housekeeping)
+- https://github.com/rmusser01/tldw_server/pull/2825
 modified_files:
 - backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md
 - backlog/tasks/task-13125 - Normalize-duplicate-Backlog-task-identities-from-standalone-HTML-closeout.md
 - backlog/tasks/task-13126 - Make-chat-focus-mode-truly-fullscreen.md
-updated_date: 2026-08-26 16:16
+updated_date: 2026-08-26 16:31
 ---
 
 ## Description
@@ -51,7 +52,10 @@ Created during the standalone HTML rollout closeout and implemented as an indepe
 Identity map: standalone HTML remains TASK-12115; this housekeeping record moved from the accidental TASK-13116 identity to TASK-13125; historical chat-focus work moved from the duplicate TASK-12115 identity to TASK-13126. The legitimate Scheduled Tasks TASK-13116 record is deliberately untouched.
 
 Backlog MCP and CLI expose semantic editing but no task-ID/path rename or delete operation. The user explicitly approved apply_patch for only the two path/frontmatter ID moves; all semantic changes use the official Backlog MCP.
+
 Verification: exact filesystem ID counts are one each for TASK-12115, TASK-13116, TASK-13125, and TASK-13126; Backlog task_view/task_search returned one exact path for each ID; stale historical paths and stale TASK-13116 housekeeping wording are absent; end-of-file-fixer and trailing-whitespace hooks pass on all three resulting records; git diff --check passes. Bandit and product tests were not run because this change touches Backlog Markdown only.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2825 (target: dev). Merge remains gated on the requester’s human-written Change summary.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
