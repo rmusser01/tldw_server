@@ -121,7 +121,7 @@ def _context(**overrides: Any) -> SharedWorkspaceAccessContext:
                 "allowed": False,
                 "reason_code": "shared_write_not_available",
             },
-            "clone_workspace": {"allowed": False, "reason_code": "clone_deferred"},
+            "clone_workspace": {"allowed": False, "reason_code": "owner_disabled"},
         },
     }
     values.update(overrides)

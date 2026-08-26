@@ -581,6 +581,7 @@ class JobManager:
         "reading": ("reading-digest",),
         "vn_assets": ("generation",),
         "persona_visuals": ("generation",),
+        "sharing": ("workspace-clone",),
         "writing": ("writing-review", "writing-ai"),
         "scheduled_tasks": ("scheduled-tasks",),
     }

@@ -39,7 +39,7 @@ class SharedWorkspaceAccessContext:
     policy_actions: dict[str, dict[str, Any]]
 
 
-def _recipient_policy_actions() -> dict[str, dict[str, Any]]:
+def _recipient_policy_actions(*, allow_clone: bool) -> dict[str, dict[str, Any]]:
     """Return the current fail-closed recipient capability policy."""
     return {
         "inspect_sources": {"allowed": True, "reason_code": None},
@@ -52,7 +52,10 @@ def _recipient_policy_actions() -> dict[str, dict[str, Any]]:
             "allowed": False,
             "reason_code": "shared_write_not_available",
         },
-        "clone_workspace": {"allowed": False, "reason_code": "clone_deferred"},
+        "clone_workspace": {
+            "allowed": allow_clone,
+            "reason_code": None if allow_clone else "owner_disabled",
+        },
     }
 
 
@@ -139,6 +142,7 @@ class SharedWorkspaceAccessService:
 
         shared_at_raw = share.get("created_at")
         shared_at = str(shared_at_raw) if shared_at_raw is not None else None
+        allow_clone = _is_truthy(share.get("allow_clone"))
         return SharedWorkspaceAccessContext(
             share_id=resolved_share_id,
             workspace_id=workspace_id,
@@ -147,9 +151,9 @@ class SharedWorkspaceAccessService:
             share_scope_type=scope_type,
             share_scope_id=scope_id,
             access_level=str(share.get("access_level") or ""),
-            allow_clone=bool(share.get("allow_clone")),
+            allow_clone=allow_clone,
             owner_display_name=owner_display_name,
             shared_at=shared_at,
             workspace=dict(workspace),
-            policy_actions=_recipient_policy_actions(),
+            policy_actions=_recipient_policy_actions(allow_clone=allow_clone),
         )

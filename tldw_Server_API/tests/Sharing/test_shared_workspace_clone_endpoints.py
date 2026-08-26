@@ -31,6 +31,27 @@ pytestmark = pytest.mark.integration
 IDEMPOTENCY_KEY = "clone-request-0001"
 
 
+def test_workspace_clone_queue_is_builtin_without_environment_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("JOBS_ALLOWED_QUEUES", raising=False)
+    monkeypatch.delenv("JOBS_ALLOWED_QUEUES_SHARING", raising=False)
+    manager = JobManager(tmp_path / "clone-default-queue.db")
+
+    admission = manager.admit_idempotent_operation(
+        build_clone_admission_command(
+            share_id=42,
+            recipient_user_id=9,
+            requested_name=None,
+            idempotency_key=IDEMPOTENCY_KEY,
+        )
+    )
+
+    assert admission.job["domain"] == "sharing"
+    assert admission.job["queue"] == "workspace-clone"
+
+
 def _context(*, allow_clone: bool = True) -> SharedWorkspaceAccessContext:
     return SharedWorkspaceAccessContext(
         share_id=42,

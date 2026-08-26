@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Sharing import (
+    shared_workspace_clone_jobs_worker as clone_worker_module,
+)
 from tldw_Server_API.app.core.Sharing.clone_models import (
     CloneCancelled,
     CloneCopyCounts,
@@ -24,8 +28,10 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
 from tldw_Server_API.app.core.Sharing.shared_workspace_clone_jobs_worker import (
     SharedWorkspaceCloneJobError,
     SharedWorkspaceCloneRuntime,
+    _build_default_runtime,
     _build_worker_config,
     handle_shared_workspace_clone_job,
+    run_shared_workspace_clone_jobs_worker,
 )
 from tldw_Server_API.app.core.Sharing.shared_workspace_clone_operations import (
     build_clone_admission_command,
@@ -45,6 +51,96 @@ def test_worker_config_uses_safe_completion_timeout_fallback(
     config = _build_worker_config()
 
     assert config.completion_callback_timeout_seconds == 30.0
+
+
+@pytest.mark.asyncio
+async def test_default_runtime_uses_unified_audit_and_authoritative_share_repo(
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps, DB_Deps
+    from tldw_Server_API.app.core.AuthNZ import database
+    from tldw_Server_API.app.core.AuthNZ.repos import shared_workspace_repo, users_repo
+
+    pool = MagicMock(name="pool")
+    share_repo = MagicMock(name="share_repo")
+    users = MagicMock(name="users")
+    access_service = MagicMock(name="access_service")
+    audit_service = MagicMock(name="audit_service")
+    share_repo_factory = MagicMock(return_value=share_repo)
+    users_repo_factory = MagicMock(return_value=users)
+    access_service_factory = MagicMock(return_value=access_service)
+    audit_service_factory = MagicMock(return_value=audit_service)
+    load_chacha = AsyncMock()
+    media_session_factory = MagicMock()
+
+    monkeypatch.setattr(database, "get_db_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr(
+        shared_workspace_repo,
+        "SharedWorkspaceRepo",
+        share_repo_factory,
+    )
+    monkeypatch.setattr(users_repo, "AuthnzUsersRepo", users_repo_factory)
+    monkeypatch.setattr(
+        ChaCha_Notes_DB_Deps,
+        "get_chacha_db_for_owner",
+        load_chacha,
+    )
+    monkeypatch.setattr(
+        DB_Deps,
+        "managed_media_db_for_owner",
+        media_session_factory,
+    )
+    monkeypatch.setattr(
+        clone_worker_module,
+        "SharedWorkspaceAccessService",
+        access_service_factory,
+    )
+    monkeypatch.setattr(
+        clone_worker_module,
+        "ShareAuditService",
+        audit_service_factory,
+    )
+
+    runtime = await _build_default_runtime(jobs=MagicMock())
+
+    audit_service_factory.assert_called_once_with()
+    assert runtime.share_repo is share_repo
+    assert runtime.audit_service is audit_service
+
+
+@pytest.mark.asyncio
+async def test_worker_shutdown_stops_owned_audit_service(monkeypatch) -> None:
+    jobs = MagicMock(name="jobs")
+    audit_service = MagicMock(name="audit_service")
+    audit_service.stop = AsyncMock()
+    runtime = SharedWorkspaceCloneRuntime(
+        jobs=jobs,
+        access_service=MagicMock(),
+        load_chacha_db=AsyncMock(),
+        media_session_factory=MagicMock(),
+        audit_service=audit_service,
+    )
+
+    async def _build_runtime(*, jobs: Any, stop_event: asyncio.Event):
+        runtime.jobs = jobs
+        runtime.stop_event = stop_event
+        return runtime
+
+    class _WorkerSDK:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.stop = MagicMock()
+
+        async def run(self, **_kwargs) -> None:
+            assert runtime.stop_event is not None
+            runtime.stop_event.set()
+
+    monkeypatch.setattr(clone_worker_module, "jobs_manager_from_env", lambda: jobs)
+    monkeypatch.setattr(clone_worker_module, "_build_default_runtime", _build_runtime)
+    monkeypatch.setattr(clone_worker_module, "WorkerSDK", _WorkerSDK)
+
+    await run_shared_workspace_clone_jobs_worker()
+
+    audit_service.stop.assert_awaited_once_with()
 
 
 def _context(*, allow_clone: bool = True) -> SharedWorkspaceAccessContext:

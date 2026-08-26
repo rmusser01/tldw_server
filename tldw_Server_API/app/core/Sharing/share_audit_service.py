@@ -5,8 +5,8 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import AuditLogError
 from tldw_Server_API.app.core.AuthNZ.repos.shared_workspace_repo import SharedWorkspaceRepo
+from tldw_Server_API.app.core.exceptions import AuditLogError
 from tldw_Server_API.app.core.Sharing.unified_share_audit import UnifiedShareAuditWriter
 
 # Standard event types
@@ -14,7 +14,9 @@ SHARE_CREATED = "share.created"
 SHARE_UPDATED = "share.updated"
 SHARE_REVOKED = "share.revoked"
 SHARE_ACCESSED = "share.accessed"
+SHARE_CLONE_REQUESTED = "share.clone_requested"
 SHARE_CLONED = "share.cloned"
+SHARE_CLONE_FAILED = "share.clone_failed"
 TOKEN_CREATED = "token.created"  # nosec B105
 TOKEN_USED = "token.used"  # nosec B105
 TOKEN_REVOKED = "token.revoked"  # nosec B105

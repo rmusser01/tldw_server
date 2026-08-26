@@ -161,14 +161,14 @@ async def test_resolve_authorizes_before_loading_owner_data_and_projects_recipie
             "allowed": False,
             "reason_code": "shared_write_not_available",
         },
-        "clone_workspace": {"allowed": False, "reason_code": "clone_deferred"},
+        "clone_workspace": {"allowed": True, "reason_code": None},
     }
 
 
 @pytest.mark.asyncio
 async def test_owner_uses_same_deny_by_default_recipient_projection() -> None:
     service, _events = _service(
-        share=_share(),
+        share=_share(allow_clone=False),
         user={"id": 7, "username": "owner"},
         workspace={"id": "workspace-alpha", "archived": False},
     )
@@ -182,7 +182,7 @@ async def test_owner_uses_same_deny_by_default_recipient_projection() -> None:
     }
     assert context.policy_actions["clone_workspace"] == {
         "allowed": False,
-        "reason_code": "clone_deferred",
+        "reason_code": "owner_disabled",
     }
 
 

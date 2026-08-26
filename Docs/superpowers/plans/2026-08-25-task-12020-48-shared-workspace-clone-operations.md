@@ -215,38 +215,43 @@ Commit: `feat(sharing): execute clone jobs safely`
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sharing/shared_workspace_access_service.py`
 - Modify: `tldw_Server_API/app/core/Sharing/share_audit_service.py`
+- Modify: `tldw_Server_API/app/core/Sharing/shared_workspace_clone_jobs_worker.py`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/sharing.py`
+- Modify: `tldw_Server_API/app/core/Jobs/manager.py`
 - Modify: `tldw_Server_API/app/services/startup_primary_jobs_pollers.py`
 - Modify: `tldw_Server_API/tests/Sharing/test_shared_workspace_access_service.py`
 - Modify: `tldw_Server_API/tests/Sharing/test_sharing_endpoints.py`
 - Modify: `tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py`
+- Modify: `tldw_Server_API/tests/Sharing/test_shared_workspace_clone_endpoints.py`
 - Modify: `tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py`
 - Modify: `tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py`
+- Modify: `apps/tldw-frontend/e2e/workflows/research-workspace.shared-recipient.spec.ts`
 
 **Interfaces:**
 - Consumes: Task 4 single worker runner.
 - Produces: authoritative `clone_workspace` capability, `SHARE_CLONE_REQUESTED`/`SHARE_CLONED`/`SHARE_CLONE_FAILED` constants, and one `shared_workspace_clone_jobs_task` worker spec.
 
-- [ ] **Step 1: Write failing capability and audit-order tests**
+- [x] **Step 1: Write failing capability and audit-order tests**
 
 Expect `allowed=true` when `allow_clone=true`, `owner_disabled` when false, no `clone_deferred`, requested audit only after created admission, cloned only after successful finalization, failed only after durable failure, and bounded audit metadata without content/error text.
 
-- [ ] **Step 2: Write failing lifecycle tests**
+- [x] **Step 2: Write failing lifecycle tests**
 
 Assert the sharing queue is allowed without an env override, worker flag defaults true, explicit false disables, Sharing route disabled prevents startup, sidecar mode prevents application ownership, phase is `JOB_POLLER_QUIESCE`, the spec appears exactly once in the catalog, and legacy handles/start functions do not own it.
 
-- [ ] **Step 3: Run the focused tests red**
+- [x] **Step 3: Run the focused tests red**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Sharing/test_shared_workspace_access_service.py tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py`
 
-- [ ] **Step 4: Implement policy, audit constants, queue, and declarative worker spec**
+- [x] **Step 4: Implement policy, audit constants, queue, and declarative worker spec**
 
 Use a dedicated predicate combining `SHARED_WORKSPACE_CLONE_JOBS_WORKER_ENABLED`, route key `sharing`, and `not context.sidecar_mode`; add only the lazy service delegate required by `stop_event_worker_spec`.
 
-- [ ] **Step 5: Run capability/audit/lifecycle tests green**
+- [x] **Step 5: Run capability/audit/lifecycle tests green**
 
 Run the Step 3 command plus `tldw_Server_API/tests/Sharing/test_sharing_endpoints.py`.
 
-- [ ] **Step 6: Commit the integration slice**
+- [x] **Step 6: Commit the integration slice**
 
 Commit: `feat(sharing): register clone worker lifecycle`
 

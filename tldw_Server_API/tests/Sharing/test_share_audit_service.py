@@ -15,6 +15,16 @@ from tldw_Server_API.app.core.Sharing.share_audit_service import (
 pytestmark = pytest.mark.unit
 
 
+def test_clone_audit_event_names_are_canonical() -> None:
+    assert getattr(share_audit_service_module, "SHARE_CLONE_REQUESTED", None) == (
+        "share.clone_requested"
+    )
+    assert getattr(share_audit_service_module, "SHARE_CLONED", None) == "share.cloned"
+    assert getattr(share_audit_service_module, "SHARE_CLONE_FAILED", None) == (
+        "share.clone_failed"
+    )
+
+
 class _LoggerStub:
     def __init__(self) -> None:
         self.error_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []

@@ -2033,9 +2033,13 @@ async def clone_shared_workspace(
         recipient_user_id=user.id,
     )
     if admission.disposition is IdempotentOperationDisposition.CREATED:
+        from tldw_Server_API.app.core.Sharing.share_audit_service import (
+            SHARE_CLONE_REQUESTED,
+        )
+
         await _audit_log_best_effort(
             _get_audit_service(),
-            "share.clone_requested",
+            SHARE_CLONE_REQUESTED,
             resource_type="workspace",
             resource_id=context.workspace_id,
             owner_user_id=context.owner_user_id,

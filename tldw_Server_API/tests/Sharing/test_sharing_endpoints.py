@@ -738,7 +738,7 @@ class TestSharedWithMe:
                         },
                         "clone_workspace": {
                             "allowed": False,
-                            "reason_code": "clone_deferred",
+                            "reason_code": "owner_disabled",
                         },
                     },
                 )

@@ -38,6 +38,11 @@ from tldw_Server_API.app.core.Sharing.clone_models import (
     WorkspaceCloneResult,
 )
 from tldw_Server_API.app.core.Sharing.clone_service import CloneService
+from tldw_Server_API.app.core.Sharing.share_audit_service import (
+    SHARE_CLONE_FAILED,
+    SHARE_CLONED,
+    ShareAuditService,
+)
 from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
     SharedWorkspaceAccessContext,
     SharedWorkspaceAccessService,
@@ -82,6 +87,14 @@ _TERMINAL_FAILURE_STATUSES = ("failed", "cancelled", "quarantined")
 _TERMINAL_STATUSES = frozenset({"completed", *_TERMINAL_FAILURE_STATUSES})
 _FAILURE_CODE_RE = re.compile(r"[a-z][a-z0-9_.-]{0,127}\Z")
 _RECONCILIATION_LIMIT = 100
+_CLONE_COUNT_FIELDS = frozenset(
+    {
+        f"{kind}_{field}"
+        for kind in ("sources", "notes", "artifacts", "media")
+        for field in ("attempted", "copied", "failed")
+    }
+    | {"operation_owned_media_count"}
+)
 
 
 class SharedWorkspaceCloneJobError(RuntimeError):
@@ -177,6 +190,8 @@ class SharedWorkspaceCloneRuntime:
     access_service: Any
     load_chacha_db: Callable[[int], Awaitable[Any]]
     media_session_factory: Callable[[int], AbstractContextManager[Any]]
+    share_repo: Any | None = None
+    audit_service: Any | None = None
     clone_service_factory: Callable[..., Any] = CloneService
     vector_retrieval_configured: bool = False
     authorization_timeout_seconds: float = 5.0
@@ -737,7 +752,7 @@ async def _patch_completed_clone_result(
     runtime: SharedWorkspaceCloneRuntime,
     current_result: Mapping[str, Any],
     replacement_result: Mapping[str, Any],
-) -> bool:
+) -> TerminalOperationResultPatchOutcome:
     command = TerminalOperationResultPatchCommand(
         job_uuid=identity.operation_id,
         owner_user_id=str(identity.recipient_user_id),
@@ -749,14 +764,136 @@ async def _patch_completed_clone_result(
         expected_result_fingerprint=terminal_operation_result_fingerprint(dict(current_result)),
         replacement_result=dict(replacement_result),
     )
-    outcome = await asyncio.to_thread(
+    return await asyncio.to_thread(
         runtime.jobs.patch_terminal_operation_result,
         command,
     )
+
+
+def _terminal_patch_succeeded(outcome: TerminalOperationResultPatchOutcome) -> bool:
     return outcome in {
         TerminalOperationResultPatchOutcome.APPLIED,
         TerminalOperationResultPatchOutcome.IDEMPOTENT,
     }
+
+
+def _bounded_failure_code(value: Any) -> str:
+    candidate = str(value or "").strip()
+    return candidate if _FAILURE_CODE_RE.fullmatch(candidate) else "clone_failed"
+
+
+def _bounded_clone_counts(result: Mapping[str, Any]) -> dict[str, int]:
+    counts = _mapping(result.get("counts"))
+    return {
+        field: int(counts[field])
+        for field in sorted(_CLONE_COUNT_FIELDS)
+        if isinstance(counts.get(field), int) and not isinstance(counts.get(field), bool)
+    }
+
+
+async def _resolve_clone_audit_attribution(
+    identity: _CloneIdentity,
+    *,
+    runtime: SharedWorkspaceCloneRuntime,
+) -> tuple[str, int] | None:
+    share_repo = runtime.share_repo
+    if share_repo is None:
+        return None
+    try:
+        share = _mapping(await share_repo.get_share(identity.share_id))
+        share_id = _positive_integer(share.get("id"), "share_id")
+        owner_user_id = _positive_integer(
+            share.get("owner_user_id"),
+            "owner_user_id",
+        )
+        workspace_id = share.get("workspace_id")
+        if (
+            share_id != identity.share_id
+            or not isinstance(workspace_id, str)
+            or not workspace_id
+        ):
+            return None
+        return workspace_id, owner_user_id
+    except Exception as exc:  # noqa: BLE001 - audit attribution is best effort
+        logger.bind(exception_type=type(exc).__name__).warning(
+            "Shared Workspace clone audit attribution failed"
+        )
+        return None
+
+
+async def _audit_clone_transition(
+    identity: _CloneIdentity,
+    *,
+    runtime: SharedWorkspaceCloneRuntime,
+    event_type: str,
+    metadata: dict[str, Any],
+) -> None:
+    audit_service = runtime.audit_service
+    if audit_service is None:
+        return
+    attribution = await _resolve_clone_audit_attribution(
+        identity,
+        runtime=runtime,
+    )
+    if attribution is None:
+        return
+    source_workspace_id, source_owner_user_id = attribution
+    try:
+        await audit_service.log(
+            event_type,
+            resource_type="workspace",
+            resource_id=source_workspace_id,
+            owner_user_id=source_owner_user_id,
+            actor_user_id=identity.recipient_user_id,
+            share_id=identity.share_id,
+            metadata={
+                **metadata,
+                "target_workspace_id": identity.target_workspace_id,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - audit is best effort after durable CAS
+        logger.bind(exception_type=type(exc).__name__).warning(
+            "Shared Workspace clone audit emission failed"
+        )
+
+
+async def _audit_clone_succeeded(
+    identity: _CloneIdentity,
+    *,
+    runtime: SharedWorkspaceCloneRuntime,
+    result: Mapping[str, Any],
+) -> None:
+    outcome = result.get("outcome")
+    if outcome not in {"complete", "partial"}:
+        outcome = "complete"
+    await _audit_clone_transition(
+        identity,
+        runtime=runtime,
+        event_type=SHARE_CLONED,
+        metadata={
+            "operation_id": identity.operation_id,
+            "outcome": outcome,
+            "counts": _bounded_clone_counts(result),
+        },
+    )
+
+
+async def _audit_clone_failed(
+    identity: _CloneIdentity,
+    *,
+    runtime: SharedWorkspaceCloneRuntime,
+    failure_code: Any,
+) -> None:
+    await _audit_clone_transition(
+        identity,
+        runtime=runtime,
+        event_type=SHARE_CLONE_FAILED,
+        metadata={
+            "operation_id": identity.operation_id,
+            "failure_code": _bounded_failure_code(failure_code),
+            "cleanup_state": "complete",
+        },
+    )
 
 
 async def _compensate_completed_clone(
@@ -770,12 +907,13 @@ async def _compensate_completed_clone(
         failure_code,
         cleanup_state="pending",
     )
-    if not await _patch_completed_clone_result(
+    aborting_outcome = await _patch_completed_clone_result(
         identity,
         runtime=runtime,
         current_result=current_result,
         replacement_result=aborting,
-    ):
+    )
+    if not _terminal_patch_succeeded(aborting_outcome):
         return CloneFinalizationOutcome.DEFERRED
     cleaned = await _run_target_resource_action(
         identity,
@@ -792,13 +930,20 @@ async def _compensate_completed_clone(
         failure_code,
         cleanup_state="complete",
     )
-    if not await _patch_completed_clone_result(
+    aborted_outcome = await _patch_completed_clone_result(
         identity,
         runtime=runtime,
         current_result=aborting,
         replacement_result=replacement,
-    ):
+    )
+    if not _terminal_patch_succeeded(aborted_outcome):
         return CloneFinalizationOutcome.DEFERRED
+    if aborted_outcome is TerminalOperationResultPatchOutcome.APPLIED:
+        await _audit_clone_failed(
+            identity,
+            runtime=runtime,
+            failure_code=failure_code,
+        )
     return CloneFinalizationOutcome.COMPENSATED
 
 
@@ -853,13 +998,20 @@ async def finalize_shared_workspace_clone(
                     publication_abort[0],
                     cleanup_state="complete",
                 )
-                if not await _patch_completed_clone_result(
+                aborted_outcome = await _patch_completed_clone_result(
                     identity,
                     runtime=runtime,
                     current_result=stored_result,
                     replacement_result=completed_abort,
-                ):
+                )
+                if not _terminal_patch_succeeded(aborted_outcome):
                     return CloneFinalizationOutcome.DEFERRED
+                if aborted_outcome is TerminalOperationResultPatchOutcome.APPLIED:
+                    await _audit_clone_failed(
+                        identity,
+                        runtime=runtime,
+                        failure_code=publication_abort[0],
+                    )
             return CloneFinalizationOutcome.COMPENSATED
         if clone_result is None:
             return CloneFinalizationOutcome.DEFERRED
@@ -890,12 +1042,13 @@ async def finalize_shared_workspace_clone(
                         failure_code=exc.failure_code,
                     )
                 return CloneFinalizationOutcome.DEFERRED
-            if not await _patch_completed_clone_result(
+            checkpoint_outcome = await _patch_completed_clone_result(
                 identity,
                 runtime=runtime,
                 current_result=stored_result,
                 replacement_result=checkpoint,
-            ):
+            )
+            if not _terminal_patch_succeeded(checkpoint_outcome):
                 return CloneFinalizationOutcome.DEFERRED
         published = await _run_target_resource_action(
             identity,
@@ -909,13 +1062,20 @@ async def finalize_shared_workspace_clone(
         if not published:
             return CloneFinalizationOutcome.DEFERRED
         confirmed_result = {**clone_result, "publication_confirmed": True}
-        if not await _patch_completed_clone_result(
+        confirmation_outcome = await _patch_completed_clone_result(
             identity,
             runtime=runtime,
             current_result=checkpoint,
             replacement_result=confirmed_result,
-        ):
+        )
+        if not _terminal_patch_succeeded(confirmation_outcome):
             return CloneFinalizationOutcome.DEFERRED
+        if confirmation_outcome is TerminalOperationResultPatchOutcome.APPLIED:
+            await _audit_clone_succeeded(
+                identity,
+                runtime=runtime,
+                result=confirmed_result,
+            )
         return CloneFinalizationOutcome.PUBLISHED
     except asyncio.CancelledError:
         raise
@@ -1035,10 +1195,15 @@ async def cleanup_shared_workspace_clone(
             runtime.jobs.patch_terminal_operation_result,
             command,
         )
-        return outcome in {
-            TerminalOperationResultPatchOutcome.APPLIED,
-            TerminalOperationResultPatchOutcome.IDEMPOTENT,
-        }
+        if not _terminal_patch_succeeded(outcome):
+            return False
+        if outcome is TerminalOperationResultPatchOutcome.APPLIED:
+            await _audit_clone_failed(
+                identity,
+                runtime=runtime,
+                failure_code=stored.get("error_code"),
+            )
+        return True
     except asyncio.CancelledError:
         raise
     except SharedWorkspaceCloneJobError:
@@ -1232,8 +1397,9 @@ async def _build_default_runtime(
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 
     pool = await get_db_pool()
+    share_repo = SharedWorkspaceRepo(db_pool=pool)
     access_service = SharedWorkspaceAccessService(
-        SharedWorkspaceRepo(db_pool=pool),
+        share_repo,
         AuthnzUsersRepo(db_pool=pool),
         get_chacha_db_for_owner,
     )
@@ -1242,6 +1408,8 @@ async def _build_default_runtime(
         access_service=access_service,
         load_chacha_db=get_chacha_db_for_owner,
         media_session_factory=managed_media_db_for_owner,
+        share_repo=share_repo,
+        audit_service=ShareAuditService(),
         vector_retrieval_configured=_truthy(os.getenv("SHARED_WORKSPACE_CLONE_VECTOR_RETRIEVAL_CONFIGURED")),
         authorization_timeout_seconds=_coerce_positive_float(
             os.getenv("SHARED_WORKSPACE_CLONE_AUTHORIZATION_TIMEOUT_SECONDS"),
@@ -1388,6 +1556,13 @@ async def run_shared_workspace_clone_jobs_worker(
         for task in (stop_task, worker_task, reconciliation_task):
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        if runtime.audit_service is not None:
+            try:
+                await runtime.audit_service.stop()
+            except Exception as exc:  # noqa: BLE001 - shutdown remains best effort
+                logger.bind(exception_type=type(exc).__name__).warning(
+                    "Shared Workspace clone audit shutdown failed"
+                )
         logger.info("Shared Workspace clone Jobs worker stopped")
 
 

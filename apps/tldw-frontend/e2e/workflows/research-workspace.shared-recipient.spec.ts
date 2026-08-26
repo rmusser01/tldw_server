@@ -140,7 +140,7 @@ const bootstrap = (state: StubState) => ({
       allowed: false,
       reason_code: "shared_write_not_available"
     },
-    clone_workspace: { allowed: false, reason_code: "clone_deferred" }
+    clone_workspace: { allowed: false, reason_code: "owner_disabled" }
   },
   generation_default: {
     provider: "openai",

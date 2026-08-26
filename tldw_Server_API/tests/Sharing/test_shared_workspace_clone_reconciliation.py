@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,6 +15,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     TerminalOperationResultPatchOutcome,
+)
+from tldw_Server_API.app.core.Sharing.share_audit_service import (
+    SHARE_CLONE_FAILED,
+    SHARE_CLONED,
+    ShareAuditService,
 )
 from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
     SharedWorkspaceAccessContext,
@@ -31,6 +36,9 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_clone_operations import (
     build_clone_publication_checkpoint,
     clone_request_fingerprint,
     target_workspace_id,
+)
+from tldw_Server_API.app.core.Sharing.unified_share_audit import (
+    UnifiedShareAuditWriter,
 )
 
 pytestmark = pytest.mark.integration
@@ -124,6 +132,17 @@ class _AccessService:
         return outcome
 
 
+class _ShareRepo:
+    async def get_share(self, share_id: int) -> dict[str, Any] | None:
+        assert share_id == 42
+        return {
+            "id": 42,
+            "workspace_id": "workspace-alpha",
+            "owner_user_id": 7,
+            "revoked_at": "2026-08-25T12:00:00+00:00",
+        }
+
+
 def _runtime(
     jobs: Any,
     resources: _Resources,
@@ -144,6 +163,33 @@ def _runtime(
         access_service=access_service or _AccessService(),
         load_chacha_db=_load_chacha,
         media_session_factory=_media,
+    )
+
+
+def _runtime_with_audit(
+    jobs: Any,
+    resources: _Resources,
+    audit_service: Any,
+    *,
+    access_service: _AccessService | None = None,
+    share_repo: Any | None = None,
+) -> SharedWorkspaceCloneRuntime:
+    async def _load_chacha(owner_user_id: int):
+        assert owner_user_id == 9
+        return resources.chacha
+
+    @contextmanager
+    def _media(owner_user_id: int):
+        assert owner_user_id == 9
+        yield resources.media
+
+    return SharedWorkspaceCloneRuntime(
+        jobs=jobs,
+        access_service=access_service or _AccessService(),
+        load_chacha_db=_load_chacha,
+        media_session_factory=_media,
+        share_repo=share_repo or _ShareRepo(),
+        audit_service=audit_service,
     )
 
 
@@ -210,6 +256,158 @@ async def test_completed_job_exposes_owned_media_before_workspace() -> None:
     )
     assert checkpoint_command.replacement_result["publication_state"] == "authorized"
     assert confirmation_command.replacement_result["publication_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_success_audit_is_emitted_only_by_confirmed_result_cas_winner() -> None:
+    result = _result()
+    result["outcome"] = "partial"
+    job = _job() | {"result": result}
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.side_effect = [
+        TerminalOperationResultPatchOutcome.APPLIED,
+        TerminalOperationResultPatchOutcome.APPLIED,
+    ]
+    resources = _pending_resources()
+    audit = MagicMock()
+    audit.log = AsyncMock()
+
+    finalized = await finalize_shared_workspace_clone(
+        job,
+        result,
+        runtime=_runtime_with_audit(jobs, resources, audit),
+    )
+
+    assert finalized is CloneFinalizationOutcome.PUBLISHED
+    audit.log.assert_awaited_once_with(
+        SHARE_CLONED,
+        resource_type="workspace",
+        resource_id="workspace-alpha",
+        owner_user_id=7,
+        actor_user_id=9,
+        share_id=42,
+        metadata={
+            "operation_id": OPERATION_ID,
+            "target_workspace_id": TARGET_ID,
+            "outcome": "partial",
+            "counts": result["counts"],
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_success_audit_is_not_duplicated_for_idempotent_confirmation() -> None:
+    job = _job()
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.side_effect = [
+        TerminalOperationResultPatchOutcome.APPLIED,
+        TerminalOperationResultPatchOutcome.IDEMPOTENT,
+    ]
+    resources = _pending_resources()
+    audit = MagicMock()
+    audit.log = AsyncMock()
+
+    finalized = await finalize_shared_workspace_clone(
+        job,
+        _result(),
+        runtime=_runtime_with_audit(jobs, resources, audit),
+    )
+
+    assert finalized is CloneFinalizationOutcome.PUBLISHED
+    audit.log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_success_audit_failure_does_not_change_publication_outcome() -> None:
+    job = _job()
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.side_effect = [
+        TerminalOperationResultPatchOutcome.APPLIED,
+        TerminalOperationResultPatchOutcome.APPLIED,
+    ]
+    resources = _pending_resources()
+    audit = MagicMock()
+    audit.log = AsyncMock(side_effect=RuntimeError("private audit backend detail"))
+
+    finalized = await finalize_shared_workspace_clone(
+        job,
+        _result(),
+        runtime=_runtime_with_audit(jobs, resources, audit),
+    )
+
+    assert finalized is CloneFinalizationOutcome.PUBLISHED
+
+
+@pytest.mark.asyncio
+async def test_share_lookup_failure_skips_audit_without_reverting_publication() -> None:
+    job = _job()
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.side_effect = [
+        TerminalOperationResultPatchOutcome.APPLIED,
+        TerminalOperationResultPatchOutcome.APPLIED,
+    ]
+    resources = _pending_resources()
+    audit = MagicMock()
+    audit.log = AsyncMock()
+    share_repo = MagicMock()
+    share_repo.get_share = AsyncMock(
+        side_effect=RuntimeError("private authorization database detail")
+    )
+
+    finalized = await finalize_shared_workspace_clone(
+        job,
+        _result(),
+        runtime=_runtime_with_audit(
+            jobs,
+            resources,
+            audit,
+            share_repo=share_repo,
+        ),
+    )
+
+    assert finalized is CloneFinalizationOutcome.PUBLISHED
+    audit.log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_terminal_clone_event_is_queryable_from_unified_audit_store(
+    tmp_path,
+) -> None:
+    writer = UnifiedShareAuditWriter(db_path=str(tmp_path / "clone-audit.db"))
+    audit = ShareAuditService(writer=writer)
+    job = _job()
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.side_effect = [
+        TerminalOperationResultPatchOutcome.APPLIED,
+        TerminalOperationResultPatchOutcome.APPLIED,
+    ]
+    resources = _pending_resources()
+
+    try:
+        finalized = await finalize_shared_workspace_clone(
+            job,
+            _result(),
+            runtime=_runtime_with_audit(jobs, resources, audit),
+        )
+        events = await audit.query(
+            owner_user_id=7,
+            resource_type="workspace",
+            resource_id="workspace-alpha",
+        )
+    finally:
+        await writer.stop()
+
+    assert finalized is CloneFinalizationOutcome.PUBLISHED
+    assert len(events) == 1
+    assert events[0]["event_type"] == SHARE_CLONED
+    assert events[0]["share_id"] == 42
+    assert events[0]["actor_user_id"] == 9
+    assert events[0]["metadata"]["target_workspace_id"] == TARGET_ID
 
 
 @pytest.mark.asyncio
@@ -293,11 +491,18 @@ async def test_revocation_before_publication_cleans_and_compensates() -> None:
     ]
     resources = _pending_resources()
     access = _AccessService([SharedWorkspaceNotFound()])
+    audit = MagicMock()
+    audit.log = AsyncMock()
 
     finalized = await finalize_shared_workspace_clone(
         job,
         _result(),
-        runtime=_runtime(jobs, resources, access_service=access),
+        runtime=_runtime_with_audit(
+            jobs,
+            resources,
+            audit,
+            access_service=access,
+        ),
     )
 
     assert finalized is CloneFinalizationOutcome.COMPENSATED
@@ -318,6 +523,20 @@ async def test_revocation_before_publication_cleans_and_compensates() -> None:
         "failure_code": "clone_access_revoked",
         "cleanup_state": "complete",
     }
+    audit.log.assert_awaited_once_with(
+        SHARE_CLONE_FAILED,
+        resource_type="workspace",
+        resource_id="workspace-alpha",
+        owner_user_id=7,
+        actor_user_id=9,
+        share_id=42,
+        metadata={
+            "operation_id": OPERATION_ID,
+            "target_workspace_id": TARGET_ID,
+            "failure_code": "clone_access_revoked",
+            "cleanup_state": "complete",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -372,6 +591,63 @@ async def test_cleanup_deletes_only_enumerated_owned_media_and_exact_target() ->
         "schema_version": 1,
         "cleanup_state": "complete",
     }
+
+
+@pytest.mark.asyncio
+async def test_failure_audit_is_emitted_only_by_cleanup_result_cas_winner() -> None:
+    job = _job(status="failed") | {"error_code": "clone_persistence_failed"}
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.return_value = (
+        TerminalOperationResultPatchOutcome.APPLIED
+    )
+    resources = _pending_resources()
+    audit = MagicMock()
+    audit.log = AsyncMock()
+
+    cleaned = await cleanup_shared_workspace_clone(
+        job,
+        runtime=_runtime_with_audit(jobs, resources, audit),
+        patch_terminal_result=True,
+    )
+
+    assert cleaned is True
+    audit.log.assert_awaited_once_with(
+        SHARE_CLONE_FAILED,
+        resource_type="workspace",
+        resource_id="workspace-alpha",
+        owner_user_id=7,
+        actor_user_id=9,
+        share_id=42,
+        metadata={
+            "operation_id": OPERATION_ID,
+            "target_workspace_id": TARGET_ID,
+            "failure_code": "clone_persistence_failed",
+            "cleanup_state": "complete",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_failure_audit_is_not_duplicated_for_idempotent_cleanup() -> None:
+    job = _job(status="failed") | {"error_code": "clone_persistence_failed"}
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.return_value = (
+        TerminalOperationResultPatchOutcome.IDEMPOTENT
+    )
+    resources = _pending_resources()
+    audit = MagicMock()
+    audit.log = AsyncMock()
+
+    cleaned = await cleanup_shared_workspace_clone(
+        job,
+        runtime=_runtime_with_audit(jobs, resources, audit),
+        patch_terminal_result=True,
+    )
+
+    assert cleaned is True
+    audit.log.assert_not_awaited()
 
 
 @pytest.mark.asyncio
