@@ -17,9 +17,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Notes.studio_markdown import stable_content_hash
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     StudioSectionsV1,
+    diagram_render_hash,
 )
 
 pytestmark = pytest.mark.unit
@@ -119,9 +121,11 @@ def _studio_ensure_fields(
         "handwriting_mode": "accented",
         "source_note_id": source_note_id,
         "excerpt_snapshot": "Accepted excerpt",
-        "excerpt_hash": "sha256:" + ("0" * 64),
+        "excerpt_hash": stable_content_hash("Accepted excerpt"),
         "diagram_manifest_json": None,
-        "companion_content_hash": "sha256:" + ("1" * 64),
+        "companion_content_hash": stable_content_hash(
+            "# Study\n\nAccepted companion"
+        ),
         "render_version": 1,
         "provenance_kind": "derive",
         "provenance_provider": "openai",
@@ -311,6 +315,206 @@ def test_ensure_studio_document_accepts_identical_storage_normalized_retry(
     assert second["accepted_provenance_json"]["accepted_at"] == first_accepted_at
     assert second["version"] == 1
     assert second["canonical_revision"] == 1
+
+
+def test_ensure_studio_document_returns_exact_stored_state_after_parent_edit(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    original_companion = "# Study\n\nAccepted companion"
+    note_id = db.add_note(title="Study", content=original_companion)
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+    fields["excerpt_hash"] = stable_content_hash("Accepted excerpt")
+    fields["companion_content_hash"] = stable_content_hash(original_companion)
+    stored = service._ensure_studio_document(**fields)
+    parent = db.get_note_by_id(str(note_id))
+    assert parent is not None
+    db.update_note(
+        note_id=str(note_id),
+        update_data={"title": "Study edited", "content": "Ordinary later edit"},
+        expected_version=int(parent["version"]),
+    )
+
+    replayed = service._ensure_studio_document(**fields)
+
+    assert replayed == stored
+
+
+def test_ensure_studio_document_returns_exact_stored_state_after_source_tombstone(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    original_companion = "# Study\n\nAccepted companion"
+    note_id = db.add_note(title="Study", content=original_companion)
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+    fields["excerpt_hash"] = stable_content_hash("Accepted excerpt")
+    fields["companion_content_hash"] = stable_content_hash(original_companion)
+    stored = service._ensure_studio_document(**fields)
+    source = db.get_note_by_id(str(source_note_id))
+    assert source is not None
+    db.soft_delete_note(str(source_note_id), expected_version=int(source["version"]))
+
+    replayed = service._ensure_studio_document(**fields)
+
+    assert replayed == stored
+
+
+def test_ensure_studio_document_rejects_different_payload_after_parent_edit(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    original_companion = "# Study\n\nAccepted companion"
+    note_id = db.add_note(title="Study", content=original_companion)
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+    fields["excerpt_hash"] = stable_content_hash("Accepted excerpt")
+    fields["companion_content_hash"] = stable_content_hash(original_companion)
+    service._ensure_studio_document(**fields)
+    parent = db.get_note_by_id(str(note_id))
+    assert parent is not None
+    db.update_note(
+        note_id=str(note_id),
+        update_data={"content": "Ordinary later edit"},
+        expected_version=int(parent["version"]),
+    )
+    changed = dict(fields)
+    changed["payload_json"] = {
+        "sections": [
+            {
+                "id": "notes-custom",
+                "kind": "notes",
+                "title": "Notes",
+                "content": "Different canonical content",
+            }
+        ]
+    }
+
+    with pytest.raises(ConflictError, match="captured retry"):
+        service._ensure_studio_document(**changed)
+
+
+@pytest.mark.parametrize(
+    "difference",
+    ("source", "excerpt", "manifest", "provenance", "companion"),
+)
+def test_ensure_studio_document_rejects_other_different_accepted_semantics(
+    studio_db,
+    difference: str,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+    service._ensure_studio_document(**fields)
+    changed = dict(fields)
+    if difference == "source":
+        other_source_id = db.add_note(title="Other source", content="Other excerpt")
+        assert other_source_id
+        changed["source_note_id"] = str(other_source_id)
+        changed["excerpt_snapshot"] = "Other excerpt"
+        changed["excerpt_hash"] = stable_content_hash("Other excerpt")
+        changed["payload_json"] = {
+            **dict(fields["payload_json"]),
+            "meta": {"title": "Study", "source_note_id": str(other_source_id)},
+        }
+    elif difference == "excerpt":
+        changed["excerpt_snapshot"] = "Accepted"
+        changed["excerpt_hash"] = stable_content_hash("Accepted")
+    elif difference == "manifest":
+        diagram = "graph TD; A-->B"
+        context = "Notes\nAccepted canonical content"
+        changed["diagram_manifest_json"] = {
+            "diagram_type": "flowchart",
+            "source_section_ids": ["notes-custom"],
+            "source_graph": [
+                {
+                    "id": "notes-custom",
+                    "title": "Notes",
+                    "kind": "notes",
+                    "content": "Accepted canonical content",
+                }
+            ],
+            "diagram": diagram,
+            "format": "mermaid",
+            "status": "ready",
+            "render_hash": diagram_render_hash(
+                diagram_type="flowchart", context=context, diagram=diagram
+            ),
+        }
+    elif difference == "provenance":
+        changed["provenance_model"] = "gpt-different"
+    else:
+        changed["companion_content_hash"] = stable_content_hash("Different companion")
+
+    with pytest.raises(ConflictError, match="captured retry"):
+        service._ensure_studio_document(**changed)
+
+
+def test_ensure_studio_document_returns_exact_parent_tombstone_lifecycle(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+    )
+    live = service._ensure_studio_document(**fields)
+    parent = db.get_note_by_id(str(note_id))
+    assert parent is not None
+    db.soft_delete_note(str(note_id), expected_version=int(parent["version"]))
+    tombstone = db.get_note_studio_document(str(note_id))
+    assert tombstone is not None and tombstone["deleted"] == 1
+
+    replayed = service._ensure_studio_document(**fields)
+
+    assert replayed == tombstone
+    assert replayed["canonical_hash"] != live["canonical_hash"]
+
+
+def test_ensure_new_studio_document_still_rejects_tombstoned_source(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    source = db.get_note_by_id(str(source_note_id))
+    assert source is not None
+    db.soft_delete_note(str(source_note_id), expected_version=int(source["version"]))
+
+    with pytest.raises(ConflictError, match="Source note not found or not live"):
+        _service(db)._ensure_studio_document(
+            **_studio_ensure_fields(
+                note_id=str(note_id), source_note_id=str(source_note_id)
+            )
+        )
+    assert db.get_note_studio_document(str(note_id)) is None
 
 
 def test_ensure_studio_document_concurrent_identical_creators_converge(

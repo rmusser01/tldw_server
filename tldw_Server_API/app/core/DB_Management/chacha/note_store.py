@@ -26,6 +26,8 @@ from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_p
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     SYNC_ENVELOPE_MAX_BYTES,
     NotesMoodboardStudioContractError,
+    StudioDiagramManifestV1,
+    StudioSectionsV1,
     canonical_json_bytes,
     diagram_render_hash,
     notes_studio_document_object_hash,
@@ -616,7 +618,7 @@ class NoteStore:
     def _normalize_studio_compatibility_payload(
         payload_json: dict[str, Any],
         *,
-        note: dict[str, Any],
+        note: dict[str, Any] | None,
         source_note_id: str | None,
         template_type: str,
         handwriting_mode: str,
@@ -628,10 +630,19 @@ class NoteStore:
             if not isinstance(meta, dict) or set(meta) - {"title", "source_note_id"}:
                 raise InputError("Studio payload meta is not a supported compatibility alias.")  # noqa: TRY003
             expected_meta = {
-                "title": str(note.get("title") or ""),
                 "source_note_id": source_note_id,
             }
-            if any(meta[key] != expected_meta[key] for key in meta):
+            if "source_note_id" in meta and meta["source_note_id"] != expected_meta[
+                "source_note_id"
+            ]:
+                raise InputError("Studio payload meta conflicts with authoritative outer state.")  # noqa: TRY003
+            if "title" in meta and (
+                not isinstance(meta["title"], str)
+                or (
+                    note is not None
+                    and meta["title"] != str(note.get("title") or "")
+                )
+            ):
                 raise InputError("Studio payload meta conflicts with authoritative outer state.")  # noqa: TRY003
         layout = payload.pop("layout", None)
         if layout is not None:
@@ -709,7 +720,7 @@ class NoteStore:
 
     @staticmethod
     def _studio_retry_fingerprint(document: dict[str, Any]) -> str:
-        """Hash normalized accepted semantics while excluding server acceptance time."""
+        """Hash submitted accepted semantics without derived binding or acceptance facts."""
         provenance = document.get("accepted_provenance_json")
         if not isinstance(provenance, dict):
             provenance = document.get("accepted_provenance")
@@ -728,8 +739,6 @@ class NoteStore:
                 "diagram_manifest_json",
                 "companion_content_hash",
                 "render_version",
-                "note_revision",
-                "note_hash",
             )
         }
         semantic["accepted_provenance"] = {
@@ -739,12 +748,86 @@ class NoteStore:
                 "attestation",
                 "provider",
                 "model",
-                "source_revision",
-                "source_hash",
-                "result_hash",
             )
         }
         return hashlib.sha256(canonical_json_bytes(semantic)).hexdigest()
+
+    def _normalized_studio_retry_input(
+        self,
+        *,
+        note_id: str,
+        payload_json: dict[str, Any],
+        template_type: str,
+        handwriting_mode: str,
+        source_note_id: str | None,
+        excerpt_snapshot: str | None,
+        diagram_manifest_json: dict[str, Any] | None,
+        companion_content_hash: str | None,
+        render_version: int,
+        provenance_kind: str,
+        provenance_provider: str | None,
+        provenance_model: str | None,
+    ) -> dict[str, Any]:
+        """Normalize retry input without consulting mutable Notes heads."""
+
+        normalized_source_id = (
+            None if source_note_id is None else str(source_note_id).strip()
+        )
+        normalized_excerpt = (
+            None
+            if excerpt_snapshot is None
+            else str(excerpt_snapshot).replace("\r\n", "\n").replace("\r", "\n")
+        )
+        if normalized_source_id is None and normalized_excerpt is not None:
+            raise InputError("Studio excerpt requires a source note.")  # noqa: TRY003
+        normalized_payload = self._normalize_studio_compatibility_payload(
+            payload_json,
+            note=None,
+            source_note_id=normalized_source_id,
+            template_type=template_type,
+            handwriting_mode=handwriting_mode,
+            render_version=render_version,
+        )
+        normalized_manifest = self._normalize_studio_manifest(diagram_manifest_json)
+        try:
+            parsed_sections = StudioSectionsV1.model_validate(
+                normalized_payload, strict=True
+            ).model_dump(mode="json")
+            parsed_manifest = (
+                None
+                if normalized_manifest is None
+                else StudioDiagramManifestV1.model_validate(
+                    normalized_manifest, strict=True
+                ).model_dump(mode="json")
+            )
+        except ValueError as exc:
+            raise InputError("Studio retry input is not canonical v1 state.") from exc  # noqa: TRY003
+        return {
+            "note_id": note_id,
+            "source_note_id": normalized_source_id,
+            "payload_json": parsed_sections,
+            "template_type": template_type,
+            "handwriting_mode": handwriting_mode,
+            "excerpt_snapshot": normalized_excerpt,
+            "excerpt_hash": (
+                None
+                if normalized_excerpt is None
+                else self._normalized_text_hash(normalized_excerpt)
+            ),
+            "diagram_manifest_json": parsed_manifest,
+            "companion_content_hash": (
+                None
+                if companion_content_hash is None
+                else str(companion_content_hash).strip()
+            ),
+            "render_version": render_version,
+            "accepted_provenance": {
+                "kind": provenance_kind,
+                "attestation": "server",
+                "provider": provenance_provider,
+                "model": provenance_model,
+            },
+        }
 
     def _prove_stored_studio_retry_state(
         self,
@@ -1028,10 +1111,28 @@ class NoteStore:
             )
         else:
             owner = str(self._db.client_id)
-            candidate_retry_fingerprint: str | None = None
+            input_retry_fingerprint = (
+                self._studio_retry_fingerprint(
+                    self._normalized_studio_retry_input(
+                        note_id=normalized_note_id,
+                        payload_json=payload_json,
+                        template_type=template_type,
+                        handwriting_mode=handwriting_mode,
+                        source_note_id=source_note_id,
+                        excerpt_snapshot=excerpt_snapshot,
+                        diagram_manifest_json=diagram_manifest_json,
+                        companion_content_hash=companion_content_hash,
+                        render_version=render_version,
+                        provenance_kind=provenance_kind,
+                        provenance_provider=provenance_provider,
+                        provenance_model=provenance_model,
+                    )
+                )
+                if ensure
+                else None
+            )
 
             def _scoped_values(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> tuple[Any, ...]:
-                nonlocal candidate_retry_fingerprint
                 dataset = self._db.resolve_studio_compatibility_dataset_id(
                     owner_user_id=owner,
                     conn=inner_conn,
@@ -1141,14 +1242,6 @@ class NoteStore:
                     deleted=deleted,
                 )
                 parsed_payload = parsed.model_dump(mode="json")
-                candidate_retry_fingerprint = self._studio_retry_fingerprint(
-                    {
-                        **parsed_payload,
-                        "accepted_provenance_json": parsed_payload[
-                            "accepted_provenance"
-                        ],
-                    }
-                )
                 if self._studio_envelope_size(
                     parsed_payload,
                     revision=revision,
@@ -1222,6 +1315,22 @@ class NoteStore:
                 query += " ON CONFLICT(note_id) DO NOTHING"
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            if ensure and self._db._supports_notes_moodboard_studio_v61():
+                existing = self._fetch_note_studio_document_row(
+                    normalized_note_id, conn=inner_conn
+                )
+                if existing is not None:
+                    self._prove_stored_studio_retry_state(inner_conn, existing)
+                    if (
+                        self._studio_retry_fingerprint(existing)
+                        != input_retry_fingerprint
+                    ):
+                        raise ConflictError(
+                            f"Note Studio document for note ID '{normalized_note_id}' conflicts with the captured retry.",
+                            entity="note_studio_documents",
+                            entity_id=normalized_note_id,
+                        )
+                    return existing
             write_params = (
                 params
                 if not self._db._supports_notes_moodboard_studio_v61()
@@ -1235,7 +1344,10 @@ class NoteStore:
             if ensure and cursor.rowcount == 0:
                 if self._db._supports_notes_moodboard_studio_v61():
                     self._prove_stored_studio_retry_state(inner_conn, document)
-                if self._studio_retry_fingerprint(document) != candidate_retry_fingerprint:
+                    expected_retry_fingerprint = input_retry_fingerprint
+                else:
+                    expected_retry_fingerprint = candidate_retry_fingerprint
+                if self._studio_retry_fingerprint(document) != expected_retry_fingerprint:
                     raise ConflictError(
                         f"Note Studio document for note ID '{normalized_note_id}' conflicts with the captured retry.",
                         entity="note_studio_documents",
