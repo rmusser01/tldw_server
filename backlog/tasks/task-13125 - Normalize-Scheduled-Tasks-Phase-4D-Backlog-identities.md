@@ -4,7 +4,7 @@ title: Normalize Scheduled Tasks Phase 4D Backlog identities
 status: Done
 assignee: []
 created_date: 2026-08-26 16:18
-updated_date: 2026-08-26 17:57
+updated_date: 2026-08-26 19:52
 labels:
 - scheduled-tasks
 - phase-4d
@@ -58,18 +58,17 @@ Audit current dev, allocate a collision-free contiguous ID block, rename only th
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-26: Audited current dev 3f6c5ae903. Phase 4D records collided at TASK-13112, TASK-13113, and TASK-13116; TASK-13117 also conflicts with an active concurrent workstream visible to the project index. Reserved contiguous IDs TASK-13126 through TASK-13133 and applied the fixed mapping documented in the normalization plan. Unrelated records using the collided IDs are out of scope and remain unchanged.
+
+2026-08-26 closeout: rebased onto origin/dev 15d1d2ed9a and opened PR #2826. Verification passed: replacement IDs TASK-13126 through TASK-13133 each occur exactly once in Backlog frontmatter; all eight replacement paths exist; all eight old Phase 4D paths are absent; no stale old-ID reference remains in the operational Phase 4D spec, plans, or task records; all eight renamed task bodies match their origin/dev predecessors after the fixed ID mapping; all 14 touched Markdown files have balanced fenced-code markers; and git diff --check passes. Bandit is not applicable because this review unit changes only Markdown documentation and Backlog metadata.
+
+2026-08-26 merge-gate update: the requester supplied the required human-authored Change summary for PR #2826. The summary is recorded verbatim in the PR body, so the project policy gate is satisfied and the PR can proceed through CI and review.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
-2026-08-26 closeout: rebased onto origin/dev 15d1d2ed9a and opened draft PR #2826. Verification passed: replacement IDs TASK-13126 through TASK-13133 each occur exactly once in Backlog frontmatter; all eight replacement paths exist; all eight old Phase 4D paths are absent; no stale old-ID reference remains in the operational Phase 4D spec, plans, or task records; all eight renamed task bodies match their origin/dev predecessors after the fixed ID mapping; all 14 touched Markdown files have balanced fenced-code markers; and git diff --check passes. Bandit is not applicable because this review unit changes only Markdown documentation and Backlog metadata. Merge remains gated on the requester-authored Change summary required by project policy.
-<!-- SECTION:NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Normalized the eight Scheduled Tasks Phase 4D Backlog records to collision-free IDs TASK-13126 through TASK-13133, updated their semantic references in the approved spec and implementation plans, and preserved task scope, status, history, and dependency order. Unrelated duplicate records remain unchanged. The focused change is rebased on current dev and published as draft PR #2826; its required human-authored Change summary is still pending.
+Normalized the eight Scheduled Tasks Phase 4D Backlog records to collision-free IDs TASK-13126 through TASK-13133, updated their semantic references in the approved spec and implementation plans, and preserved task scope, status, history, and dependency order. Unrelated duplicate records remain unchanged. The focused change is rebased on current dev and published as PR #2826. The requester supplied the required human-authored Change summary, satisfying the project merge-policy gate.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
