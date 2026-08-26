@@ -185,7 +185,9 @@ class PostgreSQLConnectionPool(ConnectionPool):
             try:
                 self._apply_scope_settings(conn)
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-                logger.debug(f"Scope config failed for pooled connection: {scope_exc}")
+                logger.bind(exception_type=type(scope_exc).__name__).debug(
+                    "Scope config failed for pooled connection"
+                )
             return conn
         # Fallback minimal pool
         managed_slot = False
@@ -223,7 +225,9 @@ class PostgreSQLConnectionPool(ConnectionPool):
         try:
             self._apply_scope_settings(conn)
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-            logger.debug(f"Scope config failed for fallback connection: {scope_exc}")
+            logger.bind(exception_type=type(scope_exc).__name__).debug(
+                "Scope config failed for fallback connection"
+            )
         return conn
 
     def return_connection(self, connection: Any) -> None:
@@ -384,7 +388,112 @@ class PostgreSQLBackend(DatabaseBackend):
             if connection is not None:
                 self._apply_scope_settings(connection)
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"apply_scope: unable to apply scope settings: {exc}")
+            logger.bind(exception_type=type(exc).__name__).debug(
+                "apply_scope: unable to apply scope settings"
+            )
+
+    def apply_and_verify_scope(
+        self,
+        connection: Any,
+        *,
+        fallback_user_id: str | int | None = None,
+    ) -> None:
+        """Strictly establish and verify snapshot RLS scope on one connection."""
+        try:
+            scope = get_scope()
+            user_id = fallback_user_id
+            org_ids: list[Any] = []
+            team_ids: list[Any] = []
+            is_admin = False
+            session_role: str | None = None
+            if scope is not None:
+                if scope.user_id is not None:
+                    user_id = scope.user_id
+                org_ids = list(scope.org_ids or [])
+                team_ids = list(scope.team_ids or [])
+                is_admin = bool(scope.is_admin)
+                session_role = getattr(scope, "session_role", None) or None
+
+            expected = {
+                "current_user_id": "" if user_id is None else str(user_id),
+                "user_id": "" if user_id is None else str(user_id),
+                "org_ids": ",".join(str(value) for value in org_ids),
+                "team_ids": ",".join(str(value) for value in team_ids),
+                "is_admin": "1" if is_admin else "0",
+                "row_security": "on",
+            }
+
+            role_switch = os.getenv("TLDW_CONTENT_PG_ROLE_SWITCH", "").strip().lower()
+            allowed_roles = {
+                role.strip()
+                for role in os.getenv("TLDW_CONTENT_PG_ROLE_WHITELIST", "").split(",")
+                if role.strip()
+            }
+            if not (
+                session_role
+                and role_switch
+                and is_truthy(role_switch)
+                and (not allowed_roles or session_role in allowed_roles)
+            ):
+                session_role = None
+
+            with connection.cursor() as cursor:
+                if session_role is not None:
+                    escaped_role = session_role.replace('"', '""')
+                    cursor.execute(f'SET ROLE "{escaped_role}"')
+                else:
+                    cursor.execute("RESET ROLE")
+                    cursor.execute("RESET SESSION AUTHORIZATION")
+                cursor.execute("SET row_security = on")
+                cursor.execute(
+                    "SELECT set_config('app.current_user_id', %s, false)",
+                    (expected["current_user_id"],),
+                )
+                cursor.execute(
+                    "SELECT set_config('app.user_id', %s, false)",
+                    (expected["user_id"],),
+                )
+                cursor.execute(
+                    "SELECT set_config('app.org_ids', %s, false)",
+                    (expected["org_ids"],),
+                )
+                cursor.execute(
+                    "SELECT set_config('app.team_ids', %s, false)",
+                    (expected["team_ids"],),
+                )
+                cursor.execute(
+                    "SELECT set_config('app.is_admin', %s, false)",
+                    (expected["is_admin"],),
+                )
+
+            rows = self.execute(
+                "SELECT current_setting('app.current_user_id', true) AS current_user_id, "
+                "current_setting('app.user_id', true) AS user_id, "
+                "current_setting('app.org_ids', true) AS org_ids, "
+                "current_setting('app.team_ids', true) AS team_ids, "
+                "current_setting('app.is_admin', true) AS is_admin, "
+                "current_setting('row_security', true) AS row_security, "
+                "current_role::text AS current_role, session_user::text AS session_user",
+                connection=connection,
+                log_errors=False,
+            ).rows
+            if len(rows) != 1:
+                raise DatabaseError("PostgreSQL scope verification failed")
+            observed = rows[0]
+            if any(str(observed.get(key, "")) != value for key, value in expected.items()):
+                raise DatabaseError("PostgreSQL scope verification failed")
+            expected_role = session_role or str(observed.get("session_user", ""))
+            if str(observed.get("current_role", "")) != expected_role:
+                raise DatabaseError("PostgreSQL scope verification failed")
+            connection.commit()
+        except BaseException as exc:  # noqa: BLE001 - preserve non-Exception signals
+            if not isinstance(exc, Exception):
+                raise
+            logger.bind(
+                exception_type=type(exc).__name__,
+                context="clone_snapshot_scope",
+            ).warning("PostgreSQL snapshot scope setup failed")
+            raise DatabaseError("PostgreSQL scope verification failed") from None
 
     def _apply_scope_settings(self, connection: Any) -> None:
         """Apply scope-related GUC settings for row-level security.
@@ -489,13 +598,17 @@ class PostgreSQLBackend(DatabaseBackend):
                     try:
                         connection.execute(sql_stmt, params)
                     except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as cfg_exc:
-                        logger.debug(f"Unable to apply scope settings via execute: {cfg_exc}")
+                        logger.bind(exception_type=type(cfg_exc).__name__).debug(
+                            "Unable to apply scope settings via execute"
+                        )
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
             # If we failed (e.g., transaction aborted), rollback and try once more
             try:
                 connection.rollback()
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:
-                logger.debug("Rollback while configuring scope failed: {}", rollback_exc)
+                logger.bind(exception_type=type(rollback_exc).__name__).debug(
+                    "Rollback while configuring scope failed"
+                )
             try:
                 if cursor_factory:
                     with cursor_factory() as cur:
@@ -518,9 +631,13 @@ class PostgreSQLBackend(DatabaseBackend):
                         try:
                             connection.execute(sql_stmt, params)
                         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as cfg_exc:
-                            logger.debug(f"Unable to apply scope settings via execute (after rollback): {cfg_exc}")
+                            logger.bind(exception_type=type(cfg_exc).__name__).debug(
+                                "Unable to apply scope settings via execute after rollback"
+                            )
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as final_exc:
-                logger.debug(f"Failed to configure session scope settings: {final_exc}")
+                logger.bind(exception_type=type(final_exc).__name__).debug(
+                    "Failed to configure session scope settings"
+                )
 
     def _tx_depth(self, connection: Any) -> int:
         return self._managed_tx_depths.get(id(connection), 0)

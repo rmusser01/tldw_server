@@ -32,6 +32,10 @@ CompletionCallback = Callable[
     [dict[str, Any], dict[str, Any]],
     Awaitable[None],
 ]
+FailureCallback = Callable[
+    [dict[str, Any], Exception],
+    Awaitable[None],
+]
 _SLIDES_JOBS_KEY_RE = re.compile(r"slides:v1:[0-9a-f]{64}\Z")
 
 
@@ -153,9 +157,9 @@ class WorkerSDK:
 
     async def _invoke_completion_callback(
         self,
-        callback: CompletionCallback,
+        callback: CompletionCallback | FailureCallback,
         job: dict[str, Any],
-        result: dict[str, Any],
+        callback_value: dict[str, Any] | Exception,
         *,
         callback_name: str,
     ) -> None:
@@ -180,7 +184,7 @@ class WorkerSDK:
             return
 
         async def invoke() -> None:
-            await callback(job, result)
+            await callback(job, callback_value)  # type: ignore[arg-type]
 
         callback_task = asyncio.create_task(invoke())
         try:
@@ -299,6 +303,7 @@ class WorkerSDK:
         job_type: str | None = None,
         on_completed: CompletionCallback | None = None,
         on_completion_rejected: CompletionCallback | None = None,
+        on_failed: FailureCallback | None = None,
     ) -> None:
         """Run the worker loop until stop() is called.
 
@@ -336,17 +341,20 @@ class WorkerSDK:
             lease_id_str = str(lease_id) if lease_id is not None else None
             # Only start auto-renew after we know we will actually handle the job
             renew_task = None
+            failure_job_items = tuple(job.items())
 
-            def _finalize_failure(
+            async def _finalize_failure(
                 exc: Exception,
                 job_id: int = job_id,
                 lease_id_str: str | None = lease_id_str,
+                job_items: tuple[tuple[str, Any], ...] = failure_job_items,
             ) -> None:
+                job_row = dict(job_items)
                 retryable = self.cfg.retry_on_exception and bool(getattr(exc, "retryable", True))
                 backoff_s = int(getattr(exc, "backoff_seconds", self.cfg.retry_backoff_seconds))
                 error_code = str(getattr(exc, "failure_code", "worker_exception") or "worker_exception")
                 try:
-                    self.jm.fail_job(
+                    finalized = self.jm.fail_job(
                         job_id,
                         error=str(exc),
                         retryable=retryable,
@@ -360,6 +368,39 @@ class WorkerSDK:
                     )
                 except _WORKER_SDK_NONCRITICAL_EXCEPTIONS:
                     logger.debug(f"Fail finalize error for job {job_id}")
+                    return
+                if not finalized or on_failed is None:
+                    return
+                try:
+                    stored = self.jm.get_job_or_archived_by_uuid(
+                        str(job_row.get("uuid") or ""),
+                        domain=str(job_row.get("domain") or ""),
+                        owner_user_id=str(job_row.get("owner_user_id") or ""),
+                    )
+                except _WORKER_SDK_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("Failed to verify durable failure for job {}", job_id)
+                    return
+                exact_terminal_failure = bool(
+                    stored
+                    and stored.get("uuid") == job_row.get("uuid")
+                    and stored.get("owner_user_id") == job_row.get("owner_user_id")
+                    and stored.get("domain") == job_row.get("domain")
+                    and stored.get("queue") == job_row.get("queue")
+                    and stored.get("job_type") == job_row.get("job_type")
+                    and stored.get("batch_group") == job_row.get("batch_group")
+                    and stored.get("status") in {"failed", "quarantined"}
+                    and (
+                        stored.get("archived")
+                        or stored.get("id") == job_row.get("id")
+                    )
+                )
+                if exact_terminal_failure:
+                    await self._invoke_completion_callback(
+                        on_failed,
+                        job_row,
+                        exc,
+                        callback_name="failed",
+                    )
 
             try:
                 if acquire_guard is not None:
@@ -414,7 +455,7 @@ class WorkerSDK:
                     raise
                 except Exception as exc:
                     # Handler failures are expected control-flow for retry/fail semantics.
-                    _finalize_failure(exc)
+                    await _finalize_failure(exc)
                     continue
                 if isinstance(result, WorkerTerminalOutcome):
                     try:
@@ -502,7 +543,7 @@ class WorkerSDK:
             except WorkerTerminalizationConflict:
                 raise
             except _WORKER_SDK_NONCRITICAL_EXCEPTIONS as e:
-                _finalize_failure(e)
+                await _finalize_failure(e)
             finally:
                 if renew_task is not None:
                     renew_task.cancel()

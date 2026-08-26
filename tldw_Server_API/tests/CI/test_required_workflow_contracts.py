@@ -1345,8 +1345,11 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         # into an auth/db shard (e.g. persona-adjacent API tests living under
         # a feature directory rather than a DB-specific one).
         auth_db_extra_files = {
+            "tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_context_api.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_job_status.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py",

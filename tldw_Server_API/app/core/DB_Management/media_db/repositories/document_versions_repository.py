@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
 
+
 class DocumentVersionsRepository:
     """Repository for document version persistence and lookup."""
 
@@ -19,7 +20,7 @@ class DocumentVersionsRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "DocumentVersionsRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> DocumentVersionsRepository:
         return cls(session=db)
 
     def create(
@@ -48,7 +49,8 @@ class DocumentVersionsRepository:
                     return db._fetchone_with_connection(conn, query, params)
 
                 media_info = _fetchone(
-                    "SELECT uuid FROM Media WHERE id = ? AND deleted = 0",
+                    "SELECT uuid FROM Media WHERE id = ? AND deleted = 0 "
+                    "AND system_operation_id IS NULL",
                     (media_id,),
                 )
                 if not media_info:
@@ -251,7 +253,8 @@ class DocumentVersionsRepository:
             params: list[Any] = [media_id]
             query_base = (
                 "FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id "
-                "WHERE dv.media_id = ? AND dv.deleted = 0 AND m.deleted = 0"
+                "WHERE dv.media_id = ? AND dv.deleted = 0 AND m.deleted = 0 "
+                "AND m.system_operation_id IS NULL"
             )
             order_limit = ""
             if version_number is None:
@@ -330,7 +333,11 @@ class DocumentVersionsRepository:
             select_clause = ", ".join(select_cols_list)
 
             params: list[Any] = [media_id]
-            where_conditions = ["dv.media_id = ?", "m.deleted = 0"]
+            where_conditions = [
+                "dv.media_id = ?",
+                "m.deleted = 0",
+                "m.system_operation_id IS NULL",
+            ]
             if not include_deleted:
                 where_conditions.append("dv.deleted = 0")
 
@@ -389,7 +396,8 @@ class DocumentVersionsRepository:
                     "SELECT dv.id, dv.media_id, dv.version, m.uuid as media_uuid "
                     "FROM DocumentVersions dv "
                     "JOIN Media m ON dv.media_id = m.id "
-                    "WHERE dv.uuid = ? AND dv.deleted = 0",
+                    "WHERE dv.uuid = ? AND dv.deleted = 0 "
+                    "AND m.system_operation_id IS NULL",
                     (version_uuid,),
                 )
                 if not version_info:

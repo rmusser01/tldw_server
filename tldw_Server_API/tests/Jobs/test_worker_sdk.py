@@ -40,8 +40,44 @@ class DummySleep:
         await self._orig_sleep(0)
 
 
+class _TerminalWorkerError(RuntimeError):
+    retryable = False
+    failure_code = "clone_failed"
+
+
+class _RetryableWorkerError(RuntimeError):
+    retryable = True
+
+
 def _slides_jobs_key(character: str) -> str:
     return "slides:v1:" + character * 64
+
+
+def _failure_test_worker(tmp_path, name: str, *, max_retries: int = 0):
+    db_path = tmp_path / f"{name}.db"
+    ensure_jobs_tables(db_path)
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="failure-callback",
+        payload={},
+        owner_user_id="u",
+        max_retries=max_retries,
+    )
+    sdk = WorkerSDK(
+        manager,
+        WorkerConfig(
+            domain="chatbooks",
+            queue="default",
+            worker_id=f"worker-{name}",
+            lease_seconds=5,
+            renew_threshold_seconds=1,
+            renew_jitter_seconds=0,
+            retry_on_exception=max_retries > 0,
+        ),
+    )
+    return manager, job, sdk
 
 
 @pytest.mark.asyncio
@@ -556,6 +592,163 @@ async def test_run_calls_on_completed_after_durable_completion(tmp_path):
     )
 
     assert observed == [(int(job["id"]), {"ok": True}, "completed")]
+
+
+@pytest.mark.asyncio
+async def test_run_calls_on_failed_only_after_durable_terminal_failure(tmp_path):
+    manager, job, sdk = _failure_test_worker(tmp_path, "terminal-failure")
+    observed: list[tuple[int, str, str]] = []
+
+    async def handler(_job_row):
+        raise _TerminalWorkerError("bounded failure")
+
+    async def on_failed(job_row, exc):
+        stored = manager.get_job(int(job_row["id"])) or {}
+        observed.append(
+            (int(job_row["id"]), type(exc).__name__, str(stored.get("status")))
+        )
+        sdk.stop()
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, on_failed=on_failed),
+        timeout=1,
+    )
+
+    assert observed == [(int(job["id"]), "_TerminalWorkerError", "failed")]
+
+
+@pytest.mark.asyncio
+async def test_on_failed_uses_acquired_identity_snapshot_when_handler_mutates_row(
+    tmp_path,
+):
+    _manager, job, sdk = _failure_test_worker(tmp_path, "mutated-row")
+    observed_uuids: list[str] = []
+
+    async def handler(job_row):
+        job_row["uuid"] = "mutated"
+        raise _TerminalWorkerError("bounded failure")
+
+    async def on_failed(job_row, _exc):
+        observed_uuids.append(str(job_row["uuid"]))
+        sdk.stop()
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, on_failed=on_failed),
+        timeout=1,
+    )
+
+    assert observed_uuids == [str(job["uuid"])]
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_call_on_failed_when_retry_is_scheduled(
+    monkeypatch,
+    tmp_path,
+):
+    manager, job, sdk = _failure_test_worker(
+        tmp_path,
+        "retry-failure",
+        max_retries=1,
+    )
+    observed: list[int] = []
+    original_fail = manager.fail_job
+
+    def stop_after_fail(*args, **kwargs):
+        result = original_fail(*args, **kwargs)
+        sdk.stop()
+        return result
+
+    monkeypatch.setattr(manager, "fail_job", stop_after_fail)
+
+    async def handler(_job_row):
+        raise _RetryableWorkerError("retry this")
+
+    async def on_failed(job_row, _exc):
+        observed.append(int(job_row["id"]))
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, on_failed=on_failed),
+        timeout=1,
+    )
+
+    assert observed == []
+    assert (manager.get_job(int(job["id"])) or {})["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_call_on_failed_when_terminalization_is_rejected(
+    monkeypatch,
+    tmp_path,
+):
+    _manager, _job, sdk = _failure_test_worker(tmp_path, "rejected-failure")
+    observed: list[int] = []
+
+    def reject_failure(*_args, **_kwargs):
+        sdk.stop()
+        return False
+
+    monkeypatch.setattr(sdk.jm, "fail_job", reject_failure)
+
+    async def handler(_job_row):
+        raise _TerminalWorkerError("stale lease")
+
+    async def on_failed(job_row, _exc):
+        observed.append(int(job_row["id"]))
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, on_failed=on_failed),
+        timeout=1,
+    )
+
+    assert observed == []
+
+
+@pytest.mark.asyncio
+async def test_on_failed_error_is_isolated_without_refinalizing_job(
+    monkeypatch,
+    tmp_path,
+):
+    manager, job, sdk = _failure_test_worker(tmp_path, "callback-error")
+    fail_calls: list[int] = []
+    original_fail = manager.fail_job
+
+    def spy_fail(job_id, **kwargs):
+        fail_calls.append(int(job_id))
+        return original_fail(job_id, **kwargs)
+
+    monkeypatch.setattr(manager, "fail_job", spy_fail)
+
+    async def handler(_job_row):
+        raise _TerminalWorkerError("bounded failure")
+
+    async def on_failed(_job_row, _exc):
+        sdk.stop()
+        raise RuntimeError("audit sink unavailable")
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, on_failed=on_failed),
+        timeout=1,
+    )
+
+    assert fail_calls == [int(job["id"])]
+    assert (manager.get_job(int(job["id"])) or {})["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_on_failed_does_not_suppress_callback_cancellation(tmp_path):
+    _manager, _job, sdk = _failure_test_worker(tmp_path, "callback-cancel")
+
+    async def handler(_job_row):
+        raise _TerminalWorkerError("bounded failure")
+
+    async def on_failed(_job_row, _exc):
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(
+            sdk.run(handler=handler, on_failed=on_failed),
+            timeout=1,
+        )
 
 
 @pytest.mark.asyncio

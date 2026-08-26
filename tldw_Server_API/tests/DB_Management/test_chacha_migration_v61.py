@@ -135,7 +135,7 @@ def test_sqlite_v61_fresh_schema_has_composite_keys_foreign_keys_and_indexes(
             "PRAGMA foreign_key_list(shared_workspace_chat_requests)"
         ).fetchall()
 
-    assert version == 61
+    assert version == 62
     assert thread_columns["recipient_user_id"] == ("TEXT", 1, 1)
     assert thread_columns["share_id"] == ("INTEGER", 1, 2)
     assert thread_columns["owner_user_id"][:2] == ("TEXT", 1)
@@ -294,21 +294,14 @@ def test_sqlite_v61_enforces_unique_conversation_composite_receipts_and_cascades
 
 def test_sqlite_v60_upgrade_matches_fresh_schema_and_initializer_is_rerunnable(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fresh_path = tmp_path / "chacha-v61-fresh.sqlite"
     upgrade_path = tmp_path / "chacha-v60-upgrade.sqlite"
     _initialize(fresh_path)
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 60)
     _initialize(upgrade_path)
-
-    with sqlite3.connect(upgrade_path) as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute("DROP TABLE IF EXISTS shared_workspace_chat_requests")
-        conn.execute("DROP TABLE IF EXISTS shared_workspace_chat_threads")
-        conn.execute(
-            "UPDATE db_schema_version SET version = 60 WHERE schema_name = ?",
-            (CharactersRAGDB._SCHEMA_NAME,),
-        )
-
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 62)
     _initialize(upgrade_path)
     _initialize(upgrade_path)
 
@@ -317,5 +310,5 @@ def test_sqlite_v60_upgrade_matches_fresh_schema_and_initializer_is_rerunnable(
         assert upgraded.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
             (CharactersRAGDB._SCHEMA_NAME,),
-        ).fetchone()[0] == 61
+        ).fetchone()[0] == 62
         assert upgraded.execute("PRAGMA foreign_key_check").fetchall() == []

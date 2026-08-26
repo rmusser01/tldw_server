@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
 
+
 class KeywordsRepository:
     """Repository for keyword rows and media-keyword links."""
 
@@ -21,7 +22,7 @@ class KeywordsRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "KeywordsRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> KeywordsRepository:
         return cls(session=db)
 
     def fetch_for_media(self, media_id: int) -> list[str]:
@@ -31,6 +32,7 @@ class KeywordsRepository:
             "JOIN MediaKeywords mk ON k.id = mk.keyword_id "
             "JOIN Media m ON mk.media_id = m.id "
             "WHERE mk.media_id = ? AND k.deleted = ? AND m.deleted = ? "
+            "AND m.system_operation_id IS NULL "
             f"ORDER BY {order_expr}"
         )
         try:
@@ -160,7 +162,8 @@ class KeywordsRepository:
         try:
             media_info = db._fetchone_with_connection(
                 connection,
-                "SELECT uuid FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid FROM Media WHERE id = ? AND deleted = 0 "
+                "AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_info:
@@ -302,7 +305,9 @@ class KeywordsRepository:
 
                 linked_cursor = db._execute_with_connection(
                     conn,
-                    "SELECT mk.media_id, m.uuid AS media_uuid FROM MediaKeywords mk JOIN Media m ON mk.media_id = m.id WHERE mk.keyword_id = ? AND m.deleted = 0",
+                    "SELECT mk.media_id, m.uuid AS media_uuid FROM MediaKeywords mk "
+                    "JOIN Media m ON mk.media_id = m.id WHERE mk.keyword_id = ? "
+                    "AND m.deleted = 0 AND m.system_operation_id IS NULL",
                     (keyword_id,),
                 )
                 media_to_unlink = linked_cursor.fetchall()

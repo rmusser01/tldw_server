@@ -697,3 +697,70 @@ async def test_empty_media_trash_sanitizes_outer_failure_log(monkeypatch):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to empty media trash"
     _assert_sanitized_error_log(logger_stub, "Error emptying media trash")
+
+
+async def test_empty_media_trash_excludes_staged_clone_rows() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+
+    db = MediaDatabase(db_path=":memory:", client_id="trash-owner")
+    try:
+        now = db._get_current_utc_timestamp_str()
+        ordinary_cursor = db.execute_query(
+            "INSERT INTO Media "
+            "(uuid, title, type, content_hash, last_modified, client_id, is_trash, deleted) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1, 0)",
+            (
+                "ordinary-trash-uuid",
+                "ordinary trash",
+                "text",
+                "ordinary-trash-content",
+                now,
+                db.client_id,
+            ),
+            commit=True,
+        )
+        staged_cursor = db.execute_query(
+            "INSERT INTO Media "
+            "(uuid, title, type, content_hash, last_modified, client_id, is_trash, deleted, "
+            "system_operation_id, system_operation_kind, system_source_identity, "
+            "system_content_hash) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)",
+            (
+                "staged-trash-uuid",
+                "staged trash",
+                "text",
+                "staged-trash-content",
+                now,
+                db.client_id,
+                "trash-operation",
+                "shared_workspace_clone",
+                "trash-source",
+                "a" * 64,
+            ),
+            commit=True,
+        )
+        ordinary_id = int(ordinary_cursor.lastrowid)
+        staged_id = int(staged_cursor.lastrowid)
+
+        result = await listing_endpoints.empty_media_trash_endpoint(
+            response=Response(),
+            db=db,
+            current_user=type("User", (), {"id": 1})(),
+        )
+
+        assert result == {
+            "deleted_count": 1,
+            "failed_count": 0,
+            "failed_ids": [],
+            "remaining_count": 0,
+        }
+        assert db.execute_query(
+            "SELECT COUNT(*) AS count FROM Media WHERE id = ?",
+            (ordinary_id,),
+        ).fetchone()["count"] == 0
+        assert db.execute_query(
+            "SELECT COUNT(*) AS count FROM Media WHERE id = ?",
+            (staged_id,),
+        ).fetchone()["count"] == 1
+    finally:
+        db.close_connection()

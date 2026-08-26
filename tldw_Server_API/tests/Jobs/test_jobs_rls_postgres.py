@@ -101,6 +101,7 @@ def _seed(dsn):
     with psycopg.connect(dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
             # Minimal cleanup to keep test deterministic
+            cur.execute("DELETE FROM job_idempotency_receipts")
             cur.execute("DELETE FROM job_events")
             cur.execute("DELETE FROM jobs")
             cur.execute("DELETE FROM job_counters")
@@ -131,6 +132,62 @@ def _seed(dsn):
                 "(NULL,'chatbooks','default','export','jobs.seed','{}'::jsonb,'u1',NOW()),"
                 "(NULL,'web','crawler','fetch','jobs.seed','{}'::jsonb,'u2',NOW())"
             )
+
+
+def test_rls_scopes_idempotency_receipt_reads_and_inserts(monkeypatch):
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM job_idempotency_receipts")
+            cur.execute(
+                "INSERT INTO job_idempotency_receipts "
+                "(domain, queue, job_type, owner_user_id, key_digest, "
+                "request_fingerprint, operation_scope, job_uuid, job_id, "
+                "created_at, expires_at) VALUES "
+                "('chatbooks', 'default', 'export', 'u1', %s, %s, "
+                "'share:1', 'job-1', 1, NOW(), NOW() + INTERVAL '30 days'), "
+                "('chatbooks', 'default', 'export', 'u2', %s, %s, "
+                "'share:2', 'job-2', 2, NOW(), NOW() + INTERVAL '30 days')",
+                ("a" * 64, "b" * 64, "c" * 64, "d" * 64),
+            )
+
+    manager = JobManager(backend="postgres", db_url=rls_dsn)
+    JobManager.set_rls_context(
+        is_admin=False,
+        domain_allowlist="chatbooks",
+        owner_user_id="u1",
+    )
+    connection = manager._connect()
+    try:
+        with manager._pg_cursor(connection) as cur:
+            cur.execute(
+                "SELECT owner_user_id FROM job_idempotency_receipts "
+                "ORDER BY owner_user_id"
+            )
+            assert [row["owner_user_id"] for row in cur.fetchall()] == ["u1"]
+            cur.execute(
+                "INSERT INTO job_idempotency_receipts "
+                "(domain, queue, job_type, owner_user_id, key_digest, "
+                "request_fingerprint, operation_scope, job_uuid, job_id, "
+                "created_at, expires_at) VALUES "
+                "('chatbooks', 'default', 'export', 'u1', %s, %s, "
+                "'share:3', 'job-3', 3, NOW(), NOW() + INTERVAL '30 days')",
+                ("e" * 64, "f" * 64),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+        JobManager.clear_rls_context()
+
+    with psycopg.connect(admin_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM job_idempotency_receipts "
+                "WHERE owner_user_id = 'u1'"
+            )
+            assert cur.fetchone()[0] == 2
 
 
 def _seed_processing_job(dsn: str, *, owner_user_id: str) -> int:

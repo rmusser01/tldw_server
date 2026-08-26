@@ -20,11 +20,12 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from loguru import logger
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -35,10 +36,13 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     rbac_rate_limit,
     require_permissions,
 )
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas import (
     SharedWorkspaceBootstrapResponse,
     SharedWorkspaceChatRequest,
     SharedWorkspaceChatResponse,
+    SharedWorkspaceCloneOperationResponse,
+    SharedWorkspaceCloneRequest,
     SharedWorkspaceErrorResponse,
     SharedWorkspaceMessage,
     SharedWorkspaceMessagePage,
@@ -65,6 +69,12 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 from tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store import (
     SharedWorkspaceCursorInputError,
 )
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    IdempotentOperationConflict,
+    IdempotentOperationConflictReason,
+    IdempotentOperationDisposition,
+    IdempotentOperationUnavailableError,
+)
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     provider_requires_api_key,
 )
@@ -73,13 +83,17 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_chat_service import (
     SharedWorkspaceChatServiceError,
     SharedWorkspaceSourceChanged,
 )
+from tldw_Server_API.app.core.Sharing.shared_workspace_clone_operations import (
+    CloneOperationNotFound,
+    CloneOperationUnavailable,
+    build_clone_admission_command,
+    project_clone_operation,
+)
 
 from ..schemas.sharing_schemas import (
     AdminShareListResponse,
     AuditEventResponse,
     AuditLogResponse,
-    CloneWorkspaceRequest,
-    CloneWorkspaceResponse,
     CreateTokenRequest,
     PrototypeLinkExchangeRequest,
     PrototypeLinkExchangeResponse,
@@ -98,6 +112,11 @@ from ..schemas.sharing_schemas import (
     VerifyPasswordRequest,
     VerifyPasswordResponse,
 )
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+        SharedWorkspaceAccessContext,
+    )
 from ..utils.prototype_error_contract import (
     PROTOTYPE_LINK_ERROR_RESPONSES,
     prototype_http_error,
@@ -112,6 +131,7 @@ recipient_router = APIRouter(
 _RECIPIENT_PERMISSION_DETAIL = recipient_error_detail("sharing_permission_required")
 _RECIPIENT_READ_RATE_DETAIL = recipient_error_detail("shared_workspace_rate_limited")
 _RECIPIENT_CHAT_RATE_DETAIL = recipient_error_detail("shared_chat_rate_limited")
+_RECIPIENT_CLONE_RATE_DETAIL = recipient_error_detail("shared_workspace_rate_limited")
 _RECIPIENT_READ_DEPENDENCIES = [
     Depends(require_permissions("sharing.read", detail=_RECIPIENT_PERMISSION_DETAIL)),
     Depends(rbac_rate_limit("sharing.read", detail=_RECIPIENT_READ_RATE_DETAIL)),
@@ -119,6 +139,10 @@ _RECIPIENT_READ_DEPENDENCIES = [
 _RECIPIENT_CHAT_DEPENDENCIES = [
     Depends(require_permissions("sharing.read", detail=_RECIPIENT_PERMISSION_DETAIL)),
     Depends(rbac_rate_limit("sharing.read", detail=_RECIPIENT_CHAT_RATE_DETAIL)),
+]
+_RECIPIENT_CLONE_DEPENDENCIES = [
+    Depends(require_permissions("sharing.read", detail=_RECIPIENT_PERMISSION_DETAIL)),
+    Depends(rbac_rate_limit("sharing.clone", detail=_RECIPIENT_CLONE_RATE_DETAIL)),
 ]
 
 
@@ -149,6 +173,13 @@ _RECIPIENT_CHAT_ERROR_RESPONSES = _recipient_error_responses(
 _RECIPIENT_CHAT_ERROR_RESPONSES[409] = {
     "model": SharedWorkspaceErrorResponse,
     "description": "The shared chat receipt or source scope conflicts.",
+}
+_RECIPIENT_CLONE_ERROR_RESPONSES = _recipient_error_responses(
+    unavailable_description="Workspace copy status is temporarily unavailable."
+)
+_RECIPIENT_CLONE_ERROR_RESPONSES[409] = {
+    "model": SharedWorkspaceErrorResponse,
+    "description": "The idempotency key or active copy conflicts with this request.",
 }
 
 
@@ -427,10 +458,16 @@ def _recipient_http_error(
     code: str,
     *,
     retry_after_ms: int | None = None,
+    operation_id: str | None = None,
 ) -> HTTPException:
     detail = recipient_error_detail(code)
     if retry_after_ms is not None:
         detail["retry_after_ms"] = max(0, min(1_800_000, int(retry_after_ms)))
+    if operation_id is not None:
+        try:
+            detail["operation_id"] = str(UUID(operation_id))
+        except (TypeError, ValueError, AttributeError):
+            pass
     return HTTPException(status_code=status_code, detail=detail)
 
 
@@ -467,6 +504,32 @@ async def _resolve_recipient_access(
             share_id=share_id,
             recipient_user_id=recipient_user_id,
         )
+    except SharedWorkspaceNotFound as exc:
+        raise _recipient_http_error(404, "shared_workspace_not_found") from exc
+    except SharedWorkspaceUnavailable as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+
+
+async def _resolve_recipient_clone_access(
+    service: Any,
+    *,
+    share_id: int,
+    recipient_user_id: int,
+) -> SharedWorkspaceAccessContext:
+    """Resolve current clone permission and map domain failures to HTTP errors."""
+    from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+        SharedWorkspaceCloneNotAllowed,
+        SharedWorkspaceNotFound,
+        SharedWorkspaceUnavailable,
+    )
+
+    try:
+        return await service.resolve_clone(
+            share_id=share_id,
+            recipient_user_id=recipient_user_id,
+        )
+    except SharedWorkspaceCloneNotAllowed as exc:
+        raise _recipient_http_error(403, "clone_not_allowed") from exc
     except SharedWorkspaceNotFound as exc:
         raise _recipient_http_error(404, "shared_workspace_not_found") from exc
     except SharedWorkspaceUnavailable as exc:
@@ -1891,104 +1954,183 @@ async def get_shared_workspace(
         raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
 
 
-@router.post(
-    "/shared-with-me/{share_id}/clone",
-    response_model=CloneWorkspaceResponse,
-    dependencies=[Depends(rbac_rate_limit("sharing.clone"))],
-    summary="Clone a shared workspace into your own account",
+def _clone_operation_response_status(
+    operation: SharedWorkspaceCloneOperationResponse,
+) -> int:
+    return 200 if operation.status in {"succeeded", "failed"} else 202
+
+
+def _project_clone_job(
+    job: dict[str, Any],
+    *,
+    share_id: int,
+    recipient_user_id: int,
+) -> SharedWorkspaceCloneOperationResponse:
+    try:
+        return project_clone_operation(
+            job,
+            share_id=share_id,
+            recipient_user_id=recipient_user_id,
+        )
+    except CloneOperationNotFound as exc:
+        raise _recipient_http_error(404, "shared_workspace_not_found") from exc
+    except CloneOperationUnavailable as exc:
+        raise _recipient_http_error(503, "clone_operation_unavailable") from exc
+
+
+def _clone_conflict_http_error(exc: IdempotentOperationConflict) -> HTTPException:
+    code = (
+        "idempotency_key_reused"
+        if exc.reason is IdempotentOperationConflictReason.KEY_REUSED
+        else "clone_already_in_progress"
+    )
+    return _recipient_http_error(
+        409,
+        code,
+        operation_id=exc.job_uuid,
+    )
+
+
+@recipient_router.post(
+    "/clone",
+    response_model=SharedWorkspaceCloneOperationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        **_RECIPIENT_CLONE_ERROR_RESPONSES,
+        200: {
+            "model": SharedWorkspaceCloneOperationResponse,
+            "description": "An existing clone operation is terminal.",
+        },
+    },
+    dependencies=_RECIPIENT_CLONE_DEPENDENCIES,
+    summary="Copy a shared workspace into the current user's account",
 )
 async def clone_shared_workspace(
     share_id: int,
-    body: CloneWorkspaceRequest,
+    body: SharedWorkspaceCloneRequest,
     request: Request,
-    background_tasks: BackgroundTasks,
+    response: Response,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
     user: User = Depends(get_request_user),
-):
-    repo = await _maybe_await(_get_repo())
-    audit = _get_audit_service()
+    service: Any = Depends(get_shared_workspace_access_service),
+    job_manager: Any = Depends(try_get_job_manager),
+) -> SharedWorkspaceCloneOperationResponse:
+    """Admit or replay a durable recipient-owned Shared Workspace clone.
 
-    share = await repo.get_share(share_id)
-    if not share or share.get("is_revoked"):
-        raise HTTPException(status_code=404, detail="Share not found or revoked")
-
-    # [CRITICAL FIX #2] Validate the user belongs to the share's scope
-    await _validate_user_has_share_access(share, user)
-
-    if not share.get("allow_clone"):
-        raise HTTPException(status_code=403, detail="Cloning is not allowed for this share")
-
-    # Generate a job ID for async clone tracking
-    import uuid as _uuid
-
-    job_id = str(_uuid.uuid4())
-
-    await _audit_log_best_effort(
-        audit,
-        "share.cloned",
-        resource_type="workspace",
-        resource_id=share["workspace_id"],
-        owner_user_id=share["owner_user_id"],
-        actor_user_id=user.id,
-        share_id=share_id,
-        metadata={"job_id": job_id, "new_name": body.new_name},
-        ip_address=_client_ip(request),
-    )
-
-    background_tasks.add_task(
-        _run_clone_task,
-        share=share,
-        user_id=user.id,
-        new_name=body.new_name,
-        job_id=job_id,
-    )
-
-    return CloneWorkspaceResponse(
-        job_id=job_id,
-        status="pending",
-        message="Clone job created. Use the job_id to track progress.",
-    )
-
-
-def _run_clone_task(
-    share: dict[str, Any],
-    user_id: int,
-    new_name: str | None,
-    job_id: str,
-) -> None:
-    """Background task that performs the actual workspace clone."""
-    import asyncio
-
-    async def _do_clone() -> None:
-        from ....core.Sharing.clone_service import CloneService
-        from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner, get_chacha_db_for_user_id
-        from ..API_Deps.DB_Deps import managed_media_db_for_owner
-
-        owner_id = share["owner_user_id"]
-        workspace_id = share["workspace_id"]
-
-        try:
-            src_chacha = await get_chacha_db_for_owner(owner_id)
-            tgt_chacha = await get_chacha_db_for_user_id(user_id)
-            with managed_media_db_for_owner(owner_id) as src_media, managed_media_db_for_owner(user_id) as tgt_media:
-                svc = CloneService(
-                    source_chacha_db=src_chacha,
-                    source_media_db=src_media,
-                    target_chacha_db=tgt_chacha,
-                    target_media_db=tgt_media,
-                )
-                result = svc.clone_workspace(workspace_id, new_name=new_name)
-            logger.info(f"Clone job {job_id} completed: {result.get('workspace_id')}")
-        except Exception:
-            logger.error("Clone job failed")
+    The required idempotency key identifies one normalized clone request. The
+    response is the canonical owner-scoped operation projection; stable 4xx/5xx
+    recipient error codes cover invalid input, denied access, conflicts, and
+    unavailable Jobs persistence.
+    """
+    if job_manager is None:
+        raise _recipient_http_error(503, "clone_operation_unavailable")
+    try:
+        command = build_clone_admission_command(
+            share_id=share_id,
+            recipient_user_id=user.id,
+            requested_name=body.name,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise _recipient_http_error(422, "invalid_shared_workspace_request") from exc
 
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(_do_clone())
-        else:
-            loop.run_until_complete(_do_clone())
-    except RuntimeError:
-        asyncio.run(_do_clone())
+        replay = await run_in_threadpool(
+            job_manager.replay_idempotent_operation,
+            command,
+        )
+    except IdempotentOperationConflict as exc:
+        raise _clone_conflict_http_error(exc) from exc
+    except Exception as exc:
+        raise _recipient_http_error(503, "clone_operation_unavailable") from exc
+    if replay is not None:
+        operation = _project_clone_job(
+            replay.job,
+            share_id=share_id,
+            recipient_user_id=user.id,
+        )
+        response.status_code = _clone_operation_response_status(operation)
+        return operation
+
+    context = await _resolve_recipient_clone_access(
+        service,
+        share_id=share_id,
+        recipient_user_id=user.id,
+    )
+    if not context.allow_clone:
+        raise _recipient_http_error(403, "clone_not_allowed")
+    try:
+        admission = await run_in_threadpool(
+            job_manager.admit_idempotent_operation,
+            command,
+        )
+    except IdempotentOperationConflict as exc:
+        raise _clone_conflict_http_error(exc) from exc
+    except (IdempotentOperationUnavailableError, ValueError) as exc:
+        raise _recipient_http_error(503, "clone_operation_unavailable") from exc
+    except Exception as exc:
+        raise _recipient_http_error(503, "clone_operation_unavailable") from exc
+
+    operation = _project_clone_job(
+        admission.job,
+        share_id=share_id,
+        recipient_user_id=user.id,
+    )
+    if admission.disposition is IdempotentOperationDisposition.CREATED:
+        from tldw_Server_API.app.core.Sharing.share_audit_service import (
+            SHARE_CLONE_REQUESTED,
+        )
+
+        await _audit_log_best_effort(
+            _get_audit_service(),
+            SHARE_CLONE_REQUESTED,
+            resource_type="workspace",
+            resource_id=context.workspace_id,
+            owner_user_id=context.owner_user_id,
+            actor_user_id=user.id,
+            share_id=share_id,
+            metadata={"operation_id": operation.operation_id},
+            ip_address=_client_ip(request),
+        )
+    response.status_code = _clone_operation_response_status(operation)
+    return operation
+
+
+@recipient_router.get(
+    "/clone/{operation_id}",
+    response_model=SharedWorkspaceCloneOperationResponse,
+    responses=_RECIPIENT_CLONE_ERROR_RESPONSES,
+    dependencies=_RECIPIENT_READ_DEPENDENCIES,
+    summary="Read a shared workspace copy operation",
+)
+async def get_shared_workspace_clone_operation(
+    share_id: int,
+    operation_id: str,
+    user: User = Depends(get_request_user),
+    job_manager: Any = Depends(try_get_job_manager),
+) -> SharedWorkspaceCloneOperationResponse:
+    if job_manager is None:
+        raise _recipient_http_error(503, "clone_operation_unavailable")
+    try:
+        normalized_operation_id = str(UUID(operation_id))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise _recipient_http_error(404, "shared_workspace_not_found") from exc
+    try:
+        job = await run_in_threadpool(
+            job_manager.get_job_or_archived_by_uuid,
+            normalized_operation_id,
+            domain="sharing",
+            owner_user_id=str(user.id),
+        )
+    except Exception as exc:
+        raise _recipient_http_error(503, "clone_operation_unavailable") from exc
+    if job is None:
+        raise _recipient_http_error(404, "shared_workspace_not_found")
+    return _project_clone_job(
+        job,
+        share_id=share_id,
+        recipient_user_id=user.id,
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

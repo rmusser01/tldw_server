@@ -12,6 +12,15 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
+    confirm_operation_owned_clone_media,
+    delete_operation_owned_clone_media,
+    insert_operation_owned_clone_media,
+    list_operation_owned_clone_media,
+    read_media_clone_snapshots,
+    read_operation_owned_clone_media_publication_state,
+    read_operation_owned_clone_media_readiness,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.audio_preset_ops import (
     count_audio_presets,
     create_audio_preset,
@@ -456,11 +465,17 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.pos
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_mediafiles import (
     run_postgres_migrate_to_v11,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_operation_owned_clone_media import (
+    run_postgres_migrate_to_v25,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_sequence_sync import (
     run_postgres_migrate_to_v18,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_source_hash import (
     run_postgres_migrate_to_v16,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+    run_postgres_migrate_to_v26,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_structure_visual_indexes import (
     run_postgres_migrate_to_v21,
@@ -522,7 +537,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate
 class MediaDatabase:
     """Canonical package-native Media DB runtime class."""
 
-    _CURRENT_SCHEMA_VERSION = 24  # Claims analytics export Jobs linkage and snapshot metadata
+    _CURRENT_SCHEMA_VERSION = 26  # Final staged shared Workspace clone persistence
 
     # <<< Schema Definition (Version 1) >>>
 
@@ -565,7 +580,38 @@ class MediaDatabase:
         client_id TEXT NOT NULL,
         deleted BOOLEAN NOT NULL DEFAULT 0,
         prev_version INTEGER,
-        merge_parent_uuid TEXT
+        merge_parent_uuid TEXT,
+        system_operation_id TEXT,
+        system_operation_kind TEXT,
+        system_source_identity TEXT,
+        system_content_hash TEXT,
+        CONSTRAINT ck_media_system_operation_ownership CHECK (
+            (
+                system_operation_id IS NULL
+                AND system_operation_kind IS NULL
+                AND system_source_identity IS NULL
+                AND system_content_hash IS NULL
+            )
+            OR
+            (
+                system_operation_id IS NOT NULL
+                AND length(system_operation_id) BETWEEN 1 AND 255
+                AND system_operation_kind IS NOT NULL
+                AND system_operation_kind = 'shared_workspace_clone'
+                AND system_source_identity IS NOT NULL
+                AND length(system_source_identity) BETWEEN 1 AND 255
+                AND system_content_hash IS NOT NULL
+                AND length(system_content_hash) = 64
+                AND system_content_hash = lower(system_content_hash)
+                AND replace(replace(replace(replace(replace(replace(replace(replace(
+                    replace(replace(replace(replace(replace(replace(replace(replace(
+                        system_content_hash,
+                        '0', ''), '1', ''), '2', ''), '3', ''),
+                        '4', ''), '5', ''), '6', ''), '7', ''),
+                        '8', ''), '9', ''), 'a', ''), 'b', ''),
+                        'c', ''), 'd', ''), 'e', ''), 'f', '') = ''
+            )
+        )
     );
 
     -- Keywords Table --
@@ -589,6 +635,20 @@ class MediaDatabase:
         UNIQUE (media_id, keyword_id),
         FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
         FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
+    );
+
+    -- Operation-owned clone pending Keyword values --
+    CREATE TABLE IF NOT EXISTS OperationOwnedCloneKeywords (
+        media_id INTEGER NOT NULL,
+        keyword TEXT NOT NULL CHECK (
+            length(keyword) BETWEEN 1 AND 255
+            AND keyword = lower(trim(keyword))
+        ),
+        operation_id TEXT NOT NULL CHECK (length(operation_id) BETWEEN 1 AND 255),
+        source_identity TEXT NOT NULL CHECK (length(source_identity) BETWEEN 1 AND 255),
+        client_id TEXT NOT NULL CHECK (length(client_id) BETWEEN 1 AND 255),
+        PRIMARY KEY (media_id, keyword),
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
     );
 
     -- Transcripts Table --
@@ -791,6 +851,9 @@ class MediaDatabase:
     CREATE INDEX IF NOT EXISTS idx_media_owner_user_id ON Media(owner_user_id);
     CREATE INDEX IF NOT EXISTS idx_media_latest_transcription_run_id ON Media(latest_transcription_run_id);
     CREATE INDEX IF NOT EXISTS idx_media_next_transcription_run_id ON Media(next_transcription_run_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_media_system_operation_source
+        ON Media(system_operation_kind, system_operation_id, system_source_identity)
+        WHERE system_operation_id IS NOT NULL;
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_uuid ON Keywords(uuid);
     CREATE INDEX IF NOT EXISTS idx_keywords_last_modified ON Keywords(last_modified);
@@ -800,6 +863,10 @@ class MediaDatabase:
 
     CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id);
     CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id);
+    CREATE INDEX IF NOT EXISTS idx_owned_clone_keywords_keyword
+        ON OperationOwnedCloneKeywords(keyword);
+    CREATE INDEX IF NOT EXISTS idx_owned_clone_keywords_operation
+        ON OperationOwnedCloneKeywords(operation_id, source_identity);
 
     CREATE INDEX IF NOT EXISTS idx_transcripts_media_id ON Transcripts(media_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_transcripts_uuid ON Transcripts(uuid);
@@ -1757,7 +1824,8 @@ class MediaDatabase:
             with self.transaction() as conn:
                 media_row = self._fetchone_with_connection(
                     conn,
-                    "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0",
+                    "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0 "
+                    "AND system_operation_id IS NULL",
                     (media_id,),
                 )
                 if not media_row:
@@ -1773,6 +1841,7 @@ class MediaDatabase:
                     UPDATE Media
                        SET vector_embedding = ?, last_modified = ?, version = ?, client_id = ?
                      WHERE id = ? AND version = ? AND deleted = 0
+                       AND system_operation_id IS NULL
                     """,
                     (
                         vector_bytes,
@@ -1791,7 +1860,7 @@ class MediaDatabase:
                     )
                 updated_row = self._fetchone_with_connection(
                     conn,
-                    "SELECT * FROM Media WHERE id = ?",
+                    "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL",
                     (media_id,),
                 ) or {}
                 self._log_sync_event(
@@ -1926,6 +1995,8 @@ MediaDatabase._postgres_migrate_to_v21 = run_postgres_migrate_to_v21
 MediaDatabase._postgres_migrate_to_v22 = run_postgres_migrate_to_v22
 MediaDatabase._postgres_migrate_to_v23 = run_postgres_migrate_to_v23
 MediaDatabase._postgres_migrate_to_v24 = run_postgres_migrate_to_v24
+MediaDatabase._postgres_migrate_to_v25 = run_postgres_migrate_to_v25
+MediaDatabase._postgres_migrate_to_v26 = run_postgres_migrate_to_v26
 MediaDatabase._get_db_version = get_db_version
 MediaDatabase._update_schema_version_postgres = update_schema_version_postgres
 MediaDatabase._sync_postgres_sequences = sync_postgres_sequences
@@ -2197,6 +2268,17 @@ MediaDatabase.get_audio_preset = get_audio_preset
 MediaDatabase.update_audio_preset = update_audio_preset
 MediaDatabase.soft_delete_audio_preset = soft_delete_audio_preset
 MediaDatabase.get_connection = get_connection
+MediaDatabase.read_media_clone_snapshots = read_media_clone_snapshots
+MediaDatabase.read_operation_owned_clone_media_readiness = (
+    read_operation_owned_clone_media_readiness
+)
+MediaDatabase.read_operation_owned_clone_media_publication_state = (
+    read_operation_owned_clone_media_publication_state
+)
+MediaDatabase.insert_operation_owned_clone_media = insert_operation_owned_clone_media
+MediaDatabase.delete_operation_owned_clone_media = delete_operation_owned_clone_media
+MediaDatabase.list_operation_owned_clone_media = list_operation_owned_clone_media
+MediaDatabase.confirm_operation_owned_clone_media = confirm_operation_owned_clone_media
 MediaDatabase.close_connection = close_connection
 MediaDatabase.release_context_connection = release_context_connection
 MediaDatabase._execute_with_connection = _execute_with_connection

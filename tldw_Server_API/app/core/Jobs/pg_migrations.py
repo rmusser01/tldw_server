@@ -354,6 +354,38 @@ CREATE INDEX IF NOT EXISTS idx_jobs_archive_migration
     COALESCE(uuid, '')
   );
 
+-- Immutable correlation for user-facing idempotent operations. Job state,
+-- progress, result, and errors remain exclusively in jobs/jobs_archive.
+CREATE TABLE IF NOT EXISTS job_idempotency_receipts (
+  receipt_id BIGSERIAL PRIMARY KEY,
+  domain TEXT NOT NULL CHECK (LENGTH(domain) BETWEEN 1 AND 64),
+  queue TEXT NOT NULL CHECK (LENGTH(queue) BETWEEN 1 AND 64),
+  job_type TEXT NOT NULL CHECK (LENGTH(job_type) BETWEEN 1 AND 128),
+  owner_user_id TEXT NOT NULL CHECK (LENGTH(owner_user_id) BETWEEN 1 AND 200),
+  key_digest TEXT NOT NULL CHECK (
+    LENGTH(key_digest) = 64 AND key_digest ~ '^[0-9a-f]{64}$'
+  ),
+  request_fingerprint TEXT NOT NULL CHECK (
+    LENGTH(request_fingerprint) = 64
+    AND request_fingerprint ~ '^[0-9a-f]{64}$'
+  ),
+  operation_scope TEXT NOT NULL CHECK (LENGTH(operation_scope) BETWEEN 1 AND 200),
+  job_uuid TEXT NOT NULL CHECK (LENGTH(job_uuid) BETWEEN 1 AND 64),
+  job_id INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_idempotency_receipts_owner_key
+  ON job_idempotency_receipts(
+    domain, queue, job_type, owner_user_id, key_digest
+  );
+CREATE INDEX IF NOT EXISTS idx_job_idempotency_receipts_job_uuid
+  ON job_idempotency_receipts(job_uuid);
+CREATE INDEX IF NOT EXISTS idx_job_idempotency_receipts_job_id
+  ON job_idempotency_receipts(job_id);
+CREATE INDEX IF NOT EXISTS idx_job_idempotency_receipts_scope
+  ON job_idempotency_receipts(operation_scope, owner_user_id, expires_at);
+
 CREATE OR REPLACE FUNCTION enforce_slides_generation_uuid_immutable()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -492,6 +524,9 @@ def _pg_archive_batch_read_index_state(
         "i.indexprs IS NULL, am.amname, i.indnkeyatts, "
         "ARRAY(SELECT pg_get_indexdef(i.indexrelid, key_position, true) "
         "FROM generate_series(1, i.indnkeyatts) AS key_position "
+        "ORDER BY key_position), "
+        "ARRAY(SELECT i.indoption[key_position - 1]::integer "
+        "FROM generate_series(1, i.indnkeyatts) AS key_position "
         "ORDER BY key_position), con.conname "
         "FROM pg_class idx "
         "JOIN pg_namespace ns ON ns.oid = idx.relnamespace "
@@ -510,6 +545,12 @@ def _pg_archive_batch_read_index_ready(
 ) -> bool:
     """Return whether one PostgreSQL archive lookup index is canonical."""
 
+    expected_names = tuple(
+        column.removesuffix(" DESC") for column in expected_columns
+    )
+    expected_options = tuple(
+        3 if column.endswith(" DESC") else 0 for column in expected_columns
+    )
     return bool(
         state is not None
         and state[0]
@@ -520,8 +561,9 @@ def _pg_archive_batch_read_index_ready(
         and state[5]
         and str(state[6]) == "btree"
         and int(state[7]) == len(expected_columns)
-        and tuple(state[8]) == expected_columns
-        and state[9] is None
+        and tuple(state[8]) == expected_names
+        and tuple(int(option) for option in state[9]) == expected_options
+        and state[10] is None
     )
 
 
@@ -541,7 +583,7 @@ def _ensure_pg_archive_batch_read_indexes(cur: Any) -> None:
             state = _pg_archive_batch_read_index_state(cur, index_name)
             if state is not None and not state[0]:
                 raise RuntimeError(f"{index_name} belongs to another table")
-            if state is not None and state[9] is not None:
+            if state is not None and state[10] is not None:
                 raise RuntimeError(
                     f"{index_name} is a misdefined constraint-backed index"
                 )
@@ -1302,6 +1344,10 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                         _p.execute("ALTER TABLE job_dependencies ENABLE ROW LEVEL SECURITY")
                     with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                         _p.execute("ALTER TABLE jobs_archive ENABLE ROW LEVEL SECURITY")
+                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
+                        _p.execute(
+                            "ALTER TABLE job_idempotency_receipts ENABLE ROW LEVEL SECURITY"
+                        )
         except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
             # Ignore in environments without permissions or when tables don't exist yet
             pass
@@ -1462,6 +1508,24 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             psycopg.sql.Identifier(role),
                         )
                     )
+                    cur.execute(
+                        _sql.SQL(
+                            "GRANT INSERT ON TABLE "
+                            "{}.job_idempotency_receipts TO {}"
+                        ).format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
+                    cur.execute(
+                        _sql.SQL(
+                            "GRANT USAGE, SELECT ON SEQUENCE "
+                            "{}.job_idempotency_receipts_receipt_id_seq TO {}"
+                        ).format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                     pass
 
@@ -1480,6 +1544,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 "job_sla_policies",
                 "job_attachments",
                 "job_dependencies",
+                "job_idempotency_receipts",
             ):
                 _enable_rls(_table)
             admin_expr = "COALESCE(NULLIF(current_setting('app.is_admin', true), ''), '') = 'true'"
@@ -1505,6 +1570,44 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 f"""
                     CREATE POLICY jobs_domain_modify ON jobs FOR ALL
                     USING (
+                      {admin_expr} OR (
+                        {domain_filter}
+                        AND {owner_filter}
+                      )
+                    )
+                    """
+            )
+            cur.execute(
+                "DROP POLICY IF EXISTS job_idempotency_receipts_select "
+                "ON job_idempotency_receipts"
+            )
+            cur.execute(
+                f"""
+                    CREATE POLICY job_idempotency_receipts_select
+                    ON job_idempotency_receipts FOR SELECT
+                    USING (
+                      {admin_expr} OR (
+                        {domain_filter}
+                        AND {owner_filter}
+                      )
+                    )
+                    """
+            )
+            cur.execute(
+                "DROP POLICY IF EXISTS job_idempotency_receipts_modify "
+                "ON job_idempotency_receipts"
+            )
+            cur.execute(
+                f"""
+                    CREATE POLICY job_idempotency_receipts_modify
+                    ON job_idempotency_receipts FOR ALL
+                    USING (
+                      {admin_expr} OR (
+                        {domain_filter}
+                        AND {owner_filter}
+                      )
+                    )
+                    WITH CHECK (
                       {admin_expr} OR (
                         {domain_filter}
                         AND {owner_filter}
@@ -1727,7 +1830,8 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             WHERE schemaname = current_schema()
                               AND tablename IN (
                                 'jobs','job_events','job_counters','job_queue_controls',
-                                'job_attachments','job_sla_policies','job_dependencies','jobs_archive'
+                                'job_attachments','job_sla_policies','job_dependencies','jobs_archive',
+                                'job_idempotency_receipts'
                               )
                             ORDER BY tablename, polname
                             """

@@ -87,6 +87,34 @@ def test_chacha_rls_includes_workspace_resource_memberships_tenant_policy():
     assert "client_id = current_setting('app.current_user_id', true)" in sql
 
 
+def test_chacha_rls_isolates_clone_visible_workspace_graph_by_parent_owner():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+
+    assert "CREATE POLICY workspaces_tenant_isolation ON workspaces" in sql
+    assert f"workspaces.client_id = {owner}" in sql
+    for table in (
+        "workspace_sources",
+        "workspace_notes",
+        "workspace_artifacts",
+        "workspace_artifact_versions",
+    ):
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in sql
+        assert f"workspace.id = {table}.workspace_id" in sql
+        assert f"workspace.client_id = {owner}" in sql
+
+    membership_policy = sql.split(
+        "CREATE POLICY workspace_resource_memberships_tenant_isolation "
+        "ON workspace_resource_memberships",
+        1,
+    )[1].split(";", 1)[0]
+    assert f"workspace_resource_memberships.client_id = {owner}" in membership_policy
+    assert "workspace.id = workspace_resource_memberships.workspace_id" in membership_policy
+    assert f"workspace.client_id = {owner}" in membership_policy
+
+
 def test_shared_workspace_chat_rls_is_guarded_forced_and_canonical() -> None:
     policy_statements = rls_module.build_shared_workspace_chat_rls_sql()
     policy_sql = " ".join("\n".join(policy_statements).split())

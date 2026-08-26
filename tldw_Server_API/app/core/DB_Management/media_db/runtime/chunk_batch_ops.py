@@ -181,7 +181,8 @@ def process_chunks(
     conn_for_check = self.get_connection()
     parent_exists = self._fetchone_with_connection(
         conn_for_check,
-        "SELECT 1 FROM Media WHERE id = ? AND deleted = 0",
+        "SELECT 1 FROM Media WHERE id = ? AND deleted = 0 "
+        "AND system_operation_id IS NULL",
         (media_id,),
     )
     if not parent_exists:

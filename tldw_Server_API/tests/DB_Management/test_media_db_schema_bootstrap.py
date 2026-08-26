@@ -6,10 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.media_db.schema import bootstrap as bootstrap_module
 from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import postgres as postgres_backend_module
@@ -2267,7 +2268,7 @@ def test_fresh_sqlite_bootstrap_includes_transcript_run_history_columns_and_inde
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='Transcripts'"
         ).fetchone()[0]
 
-        assert db._CURRENT_SCHEMA_VERSION == 24
+        assert db._CURRENT_SCHEMA_VERSION == 26
         assert {
             "latest_transcription_run_id",
             "next_transcription_run_id",
@@ -2671,7 +2672,7 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
                     "PRAGMA index_list(claims_monitoring_events)"
                 ).fetchall()
             }
-            assert version_row["version"] == 24
+            assert version_row["version"] == 26
             assert event_index_columns["idx_claims_monitoring_events_user_created_id"] == [
                 "user_id",
                 "created_at",
@@ -2913,8 +2914,8 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
             "SELECT version FROM schema_version LIMIT 1"
         ).fetchone()[0]
 
-        assert version == 24
-        assert db._CURRENT_SCHEMA_VERSION == 24
+        assert version == 26
+        assert db._CURRENT_SCHEMA_VERSION == 26
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3008,7 +3009,7 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()["version"]
 
-        assert version == 24
+        assert version == 26
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3334,7 +3335,7 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
                 ).fetchone()
             )
 
-        assert version == 24
+        assert version == 26
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3358,3 +3359,1141 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
         }
     finally:
         db.close_connection()
+
+
+_INVALID_OPERATION_OWNERSHIP_MARKERS = (
+    ("operation-only", None, None, None),
+    ("operation-null-kind", None, "source-null-kind", "a" * 64),
+    ("", "shared_workspace_clone", "source-empty-operation", "a" * 64),
+    ("o" * 256, "shared_workspace_clone", "source-long-operation", "a" * 64),
+    ("operation-empty-source", "shared_workspace_clone", "", "a" * 64),
+    ("operation-long-source", "shared_workspace_clone", "s" * 256, "a" * 64),
+    ("operation-wrong-kind", "other_kind", "source-wrong-kind", "a" * 64),
+    ("operation-uppercase-hash", "shared_workspace_clone", "source-hash", "A" * 64),
+)
+
+
+def _assert_sqlite_rejects_invalid_operation_markers(
+    connection: sqlite3.Connection,
+    *,
+    client_id: str,
+) -> None:
+    for index, marker_set in enumerate(_INVALID_OPERATION_OWNERSHIP_MARKERS):
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id, "
+                "system_operation_id, system_operation_kind, system_source_identity, "
+                "system_content_hash) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    f"invalid owned media {index}",
+                    "text",
+                    f"invalid-{index}",
+                    client_id,
+                    *marker_set,
+                ),
+            )
+
+
+@pytest.mark.integration
+def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v26() -> None:
+    db = MediaDatabase(db_path=":memory:", client_id="owned-media-v26-bootstrap")
+    try:
+        conn = db.get_connection()
+        columns = {
+            row[1]: {"type": row[2], "notnull": row[3]}
+            for row in conn.execute("PRAGMA table_info(Media)").fetchall()
+        }
+        index_rows = {
+            row[1]: {"unique": row[2], "partial": row[4]}
+            for row in conn.execute("PRAGMA index_list(Media)").fetchall()
+        }
+        index_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'ux_media_system_operation_source'"
+        ).fetchone()[0]
+        hold_columns = {
+            row[1]: {"type": row[2], "notnull": row[3], "pk": row[5]}
+            for row in conn.execute(
+                "PRAGMA table_info(OperationOwnedCloneKeywords)"
+            ).fetchall()
+        }
+        version = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()[0]
+
+        assert version == 26
+        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert {
+            "system_operation_id",
+            "system_operation_kind",
+            "system_source_identity",
+            "system_content_hash",
+        }.issubset(columns)
+        assert all(
+            columns[column] == {"type": "TEXT", "notnull": 0}
+            for column in (
+                "system_operation_id",
+                "system_operation_kind",
+                "system_source_identity",
+                "system_content_hash",
+            )
+        )
+        assert index_rows["ux_media_system_operation_source"] == {
+            "unique": 1,
+            "partial": 1,
+        }
+        assert "WHERE system_operation_id IS NOT NULL" in index_sql
+        assert set(hold_columns) == {
+            "media_id",
+            "keyword",
+            "operation_id",
+            "source_identity",
+            "client_id",
+        }
+        assert hold_columns["keyword"] == {
+            "type": "TEXT",
+            "notnull": 1,
+            "pk": 2,
+        }
+
+        now = db._get_current_utc_timestamp_str()
+        conn.execute(
+            "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), "ordinary", "text", "ordinary-hash", now, db.client_id),
+        )
+        _assert_sqlite_rejects_invalid_operation_markers(
+            conn,
+            client_id=db.client_id,
+        )
+        conn.execute(
+            "INSERT INTO Media (uuid, title, type, content_hash, last_modified, client_id, "
+            "system_operation_id, system_operation_kind, system_source_identity, "
+            "system_content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                "owned",
+                "text",
+                "owned-hash",
+                now,
+                db.client_id,
+                "operation-valid",
+                "shared_workspace_clone",
+                "source-valid",
+                "a" * 64,
+            ),
+        )
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+def test_fresh_postgres_v26_enforces_media_markers_and_pending_keyword_shape(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            for index, marker_set in enumerate(_INVALID_OPERATION_OWNERSHIP_MARKERS):
+                with pytest.raises(BackendDatabaseError):
+                    with db.transaction() as connection:
+                        backend.execute(
+                            "INSERT INTO Media (uuid, title, type, content_hash, last_modified, "
+                            "client_id, system_operation_id, system_operation_kind, "
+                            "system_source_identity, system_content_hash) VALUES "
+                            "(%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s)",
+                            (
+                                str(uuid.uuid4()),
+                                f"invalid owned media {index}",
+                                "text",
+                                f"invalid-{index}",
+                                "901",
+                                *marker_set,
+                            ),
+                            connection=connection,
+                        )
+
+            with db.transaction() as connection:
+                media_id = backend.execute(
+                    "INSERT INTO Media (uuid, title, type, content_hash, last_modified, "
+                    "client_id, is_trash, system_operation_id, system_operation_kind, "
+                    "system_source_identity, system_content_hash) VALUES "
+                    "(%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, TRUE, %s, %s, %s, %s) "
+                    "RETURNING id",
+                    (
+                        str(uuid.uuid4()),
+                        "valid owned media",
+                        "text",
+                        "valid-content",
+                        "901",
+                        "operation-valid",
+                        "shared_workspace_clone",
+                        "source-valid",
+                        "a" * 64,
+                    ),
+                    connection=connection,
+                ).rows[0]["id"]
+
+            invalid_pending_rows = (
+                ("Uppercase", "operation-valid", "source-valid", "901"),
+                ("valid", "", "source-valid", "901"),
+                ("valid", "operation-valid", "s" * 256, "901"),
+                ("valid", "operation-valid", "source-valid", ""),
+            )
+            for keyword, operation_id, source_identity, client_id in invalid_pending_rows:
+                with pytest.raises(BackendDatabaseError):
+                    with db.transaction() as connection:
+                        backend.execute(
+                            "INSERT INTO OperationOwnedCloneKeywords "
+                            "(media_id, keyword, operation_id, source_identity, client_id) "
+                            "VALUES (%s, %s, %s, %s, %s)",
+                            (media_id, keyword, operation_id, source_identity, client_id),
+                            connection=connection,
+                        )
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
+def _create_minimal_media_v24_database(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE schema_version (version INTEGER PRIMARY KEY NOT NULL);
+            INSERT INTO schema_version(version) VALUES (24);
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_at TIMESTAMP NOT NULL,
+                execution_time REAL NOT NULL,
+                success BOOLEAN NOT NULL DEFAULT 1,
+                error_message TEXT
+            );
+            INSERT INTO schema_migrations (
+                version, name, checksum, applied_at, execution_time, success
+            ) VALUES (24, 'claims_analytics_export_jobs', 'test-v24', CURRENT_TIMESTAMP, 0, 1);
+            CREATE TABLE Media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT UNIQUE,
+                title TEXT NOT NULL,
+                type TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                uuid TEXT UNIQUE NOT NULL,
+                last_modified TEXT NOT NULL,
+                client_id TEXT NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                is_trash INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE Keywords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                uuid TEXT UNIQUE NOT NULL,
+                last_modified TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                client_id TEXT NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO Media (
+                url, title, type, content_hash, uuid, last_modified, client_id
+            ) VALUES (
+                'https://ordinary.example.test/v24', 'ordinary v24', 'text',
+                'ordinary-v24-hash', 'ordinary-v24-uuid', CURRENT_TIMESTAMP, 'client-v24'
+            );
+            """
+        )
+
+
+@pytest.mark.integration
+def test_sqlite_migration_v25_recovers_partial_ddl_and_preserves_ordinary_rows(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    db_path = tmp_path / "media-v24-operation-owned-partial.sqlite"
+    _create_minimal_media_v24_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE Media ADD COLUMN system_operation_id TEXT")
+        conn.execute("ALTER TABLE Media ADD COLUMN system_operation_kind TEXT")
+
+    migrator = DatabaseMigrator(str(db_path))
+    result = migrator.migrate_to_version(25, create_backup=False)
+
+    assert result["status"] == "success"
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(Media)")}
+        indexes = {row["name"] for row in conn.execute("PRAGMA index_list(Media)")}
+        hold_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'OperationOwnedCloneKeywords'"
+        ).fetchone()
+        version = conn.execute("SELECT version FROM schema_version").fetchone()[0]
+        migration = dict(
+            conn.execute(
+                "SELECT version, name, success FROM schema_migrations WHERE version = 25"
+            ).fetchone()
+        )
+        ordinary = dict(
+            conn.execute(
+                "SELECT title, system_operation_id, system_operation_kind, "
+                "system_source_identity, system_content_hash FROM Media WHERE id = 1"
+            ).fetchone()
+        )
+        _assert_sqlite_rejects_invalid_operation_markers(
+            conn,
+            client_id="client-v24",
+        )
+
+    assert version == 25
+    assert {
+        "system_operation_id",
+        "system_operation_kind",
+        "system_source_identity",
+        "system_content_hash",
+    }.issubset(columns)
+    assert "ux_media_system_operation_source" in indexes
+    assert hold_table is not None
+    assert migration == {
+        "version": 25,
+        "name": "operation_owned_clone_media",
+        "success": 1,
+    }
+    assert ordinary == {
+        "title": "ordinary v24",
+        "system_operation_id": None,
+        "system_operation_kind": None,
+        "system_source_identity": None,
+        "system_content_hash": None,
+    }
+
+
+@pytest.mark.integration
+def test_sqlite_migration_v25_does_not_advance_version_when_ddl_rolls_back(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import (
+        DatabaseMigrator,
+        MigrationError,
+    )
+
+    db_path = tmp_path / "media-v24-operation-owned-interrupted.sqlite"
+    _create_minimal_media_v24_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TRIGGER reject_media_v25_version
+            BEFORE UPDATE ON schema_version
+            WHEN NEW.version = 25
+            BEGIN
+                SELECT RAISE(ABORT, 'simulated version write interruption');
+            END;
+            """
+        )
+
+    migrator = DatabaseMigrator(str(db_path))
+    with pytest.raises(MigrationError):
+        migrator.migrate_to_version(25, create_backup=False)
+
+    with sqlite3.connect(db_path) as conn:
+        columns_after_failure = {
+            row[1] for row in conn.execute("PRAGMA table_info(Media)").fetchall()
+        }
+        version_after_failure = conn.execute(
+            "SELECT version FROM schema_version"
+        ).fetchone()[0]
+        conn.execute("DROP TRIGGER reject_media_v25_version")
+
+    assert version_after_failure == 24
+    assert "system_operation_id" not in columns_after_failure
+
+    result = migrator.migrate_to_version(25, create_backup=False)
+    assert result["status"] == "success"
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 25
+        assert "system_content_hash" in {
+            row[1] for row in conn.execute("PRAGMA table_info(Media)").fetchall()
+        }
+
+
+@pytest.mark.integration
+def test_sqlite_migration_v24_to_v26_repairs_partial_v25_and_preserves_rows(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    db_path = tmp_path / "media-v24-to-v26.sqlite"
+    _create_minimal_media_v24_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE Media ADD COLUMN system_operation_id TEXT")
+
+    result = DatabaseMigrator(str(db_path)).migrate_to_version(26, create_backup=False)
+
+    assert result["status"] == "success"
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 26
+        assert conn.execute("SELECT title FROM Media WHERE id = 1").fetchone()[0] == "ordinary v24"
+        assert {row["name"] for row in conn.execute(
+            "PRAGMA table_info(OperationOwnedCloneKeywords)"
+        )} == {"media_id", "keyword", "operation_id", "source_identity", "client_id"}
+        _assert_sqlite_rejects_invalid_operation_markers(conn, client_id="client-v24")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("with_old_keyword_holds", [False, True])
+def test_sqlite_migration_v25_variants_to_v26_preserve_pending_values(
+    tmp_path: Path,
+    with_old_keyword_holds: bool,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    db_path = tmp_path / f"media-v25-variant-{int(with_old_keyword_holds)}.sqlite"
+    _create_minimal_media_v24_database(db_path)
+    migrator = DatabaseMigrator(str(db_path))
+    assert migrator.migrate_to_version(25, create_backup=False)["status"] == "success"
+
+    with sqlite3.connect(db_path) as conn:
+        if with_old_keyword_holds:
+            conn.executescript(
+                """
+                INSERT INTO Keywords (
+                    keyword, uuid, last_modified, client_id
+                ) VALUES (' Pending Value ', 'pending-keyword-uuid', CURRENT_TIMESTAMP, 'client-v25');
+                INSERT INTO Media (
+                    title, type, content_hash, uuid, last_modified, client_id, is_trash,
+                    system_operation_id, system_operation_kind,
+                    system_source_identity, system_content_hash
+                ) VALUES (
+                    'pending v25', 'text', 'pending-content', 'pending-media-uuid',
+                    CURRENT_TIMESTAMP, 'client-v25', 1, 'operation-v25',
+                    'shared_workspace_clone', 'source-v25',
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                );
+                INSERT INTO OperationOwnedCloneKeywords (
+                    media_id, keyword_id, operation_id, source_identity, created_by_clone
+                ) VALUES (2, 1, 'operation-v25', 'source-v25', 1);
+                """
+            )
+        else:
+            conn.execute("DROP TABLE OperationOwnedCloneKeywords")
+
+    assert migrator.migrate_to_version(26, create_backup=False)["status"] == "success"
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        columns = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(OperationOwnedCloneKeywords)"
+        )}
+        pending = [dict(row) for row in conn.execute(
+            "SELECT media_id, keyword, operation_id, source_identity, client_id "
+            "FROM OperationOwnedCloneKeywords"
+        )]
+        assert columns == {"media_id", "keyword", "operation_id", "source_identity", "client_id"}
+        assert pending == ([{
+            "media_id": 2,
+            "keyword": "pending value",
+            "operation_id": "operation-v25",
+            "source_identity": "source-v25",
+            "client_id": "client-v25",
+        }] if with_old_keyword_holds else [])
+
+
+@pytest.mark.integration
+def test_sqlite_migration_v26_rolls_back_and_retries_after_interruption(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import (
+        DatabaseMigrator,
+        MigrationError,
+    )
+
+    db_path = tmp_path / "media-v25-to-v26-interrupted.sqlite"
+    _create_minimal_media_v24_database(db_path)
+    migrator = DatabaseMigrator(str(db_path))
+    assert migrator.migrate_to_version(25, create_backup=False)["status"] == "success"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TRIGGER reject_media_v26_version
+            BEFORE UPDATE ON schema_version
+            WHEN NEW.version = 26
+            BEGIN
+                SELECT RAISE(ABORT, 'simulated v26 version write interruption');
+            END;
+            """
+        )
+
+    with pytest.raises(MigrationError):
+        migrator.migrate_to_version(26, create_backup=False)
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 25
+        assert "keyword_id" in {
+            row[1] for row in conn.execute("PRAGMA table_info(OperationOwnedCloneKeywords)")
+        }
+        conn.execute("DROP TRIGGER reject_media_v26_version")
+
+    assert migrator.migrate_to_version(26, create_backup=False)["status"] == "success"
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 26
+        assert "keyword" in {
+            row[1] for row in conn.execute("PRAGMA table_info(OperationOwnedCloneKeywords)")
+        }
+
+
+@pytest.mark.integration
+def test_sqlite_migration_v26_replays_after_committed_script_missing_bookkeeping(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    db_path = tmp_path / "media-v26-committed-script-replay.sqlite"
+    _create_minimal_media_v24_database(db_path)
+    migrator = DatabaseMigrator(str(db_path))
+    assert migrator.migrate_to_version(25, create_backup=False)["status"] == "success"
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE MediaKeywords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                keyword_id INTEGER NOT NULL,
+                UNIQUE (media_id, keyword_id),
+                FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+                FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
+            );
+            INSERT INTO Keywords (
+                keyword, uuid, last_modified, client_id
+            ) VALUES (' Replay Pending ', 'replay-keyword-uuid', CURRENT_TIMESTAMP, 'client-v25');
+            INSERT INTO Media (
+                title, type, content_hash, uuid, last_modified, client_id, is_trash,
+                system_operation_id, system_operation_kind,
+                system_source_identity, system_content_hash
+            ) VALUES (
+                'replay pending v25', 'text', 'replay-content', 'replay-media-uuid',
+                CURRENT_TIMESTAMP, 'client-v25', 1, 'operation-replay-v25',
+                'shared_workspace_clone', 'source-replay-v25',
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            );
+            INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (2, 1);
+            INSERT INTO OperationOwnedCloneKeywords (
+                media_id, keyword_id, operation_id, source_identity, created_by_clone
+            ) VALUES (2, 1, 'operation-replay-v25', 'source-replay-v25', 0);
+            """
+        )
+
+    migration = next(item for item in migrator.load_migrations() if item.version == 26)
+    migrator.execute_migration(migration)
+
+    def read_v26_state() -> dict[str, object]:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return {
+                "version": conn.execute(
+                    "SELECT version FROM schema_version"
+                ).fetchone()[0],
+                "pending": [
+                    dict(row)
+                    for row in conn.execute(
+                        "SELECT media_id, keyword, operation_id, source_identity, client_id "
+                        "FROM OperationOwnedCloneKeywords ORDER BY media_id, keyword"
+                    )
+                ],
+                "media": dict(
+                    conn.execute(
+                        "SELECT system_operation_id, system_operation_kind, "
+                        "system_source_identity, system_content_hash "
+                        "FROM Media WHERE id = 2"
+                    ).fetchone()
+                ),
+                "links": conn.execute(
+                    "SELECT COUNT(*) FROM MediaKeywords WHERE media_id = 2"
+                ).fetchone()[0],
+                "keywords": [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT keyword FROM Keywords ORDER BY id"
+                    )
+                ],
+                "indexes": [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'index' "
+                        "AND name IN (?, ?) ORDER BY name",
+                        (
+                            "idx_owned_clone_keywords_keyword",
+                            "idx_owned_clone_keywords_operation",
+                        ),
+                    )
+                ],
+                "triggers": [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'trigger' "
+                        "AND name IN (?, ?) ORDER BY name",
+                        (
+                            "media_validate_system_operation_insert_v26",
+                            "media_validate_system_operation_update_v26",
+                        ),
+                    )
+                ],
+            }
+
+    state_after_first_run = read_v26_state()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM schema_migrations WHERE version = 26")
+        conn.commit()
+
+    migrator.execute_migration(migration)
+
+    assert read_v26_state() == state_after_first_run
+    assert state_after_first_run == {
+        "version": 26,
+        "pending": [
+            {
+                "media_id": 2,
+                "keyword": "replay pending",
+                "operation_id": "operation-replay-v25",
+                "source_identity": "source-replay-v25",
+                "client_id": "client-v25",
+            }
+        ],
+        "media": {
+            "system_operation_id": "operation-replay-v25",
+            "system_operation_kind": "shared_workspace_clone",
+            "system_source_identity": "source-replay-v25",
+            "system_content_hash": "a" * 64,
+        },
+        "links": 0,
+        "keywords": [" Replay Pending "],
+        "indexes": [
+            "idx_owned_clone_keywords_keyword",
+            "idx_owned_clone_keywords_operation",
+        ],
+        "triggers": [
+            "media_validate_system_operation_insert_v26",
+            "media_validate_system_operation_update_v26",
+        ],
+    }
+
+
+@pytest.mark.unit
+def test_sqlite_migration_025_loads_as_idempotent(tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    migrator = DatabaseMigrator(str(tmp_path / "migration-v25-loader.sqlite"))
+    migration = next(item for item in migrator.load_migrations() if item.version == 25)
+
+    assert migration.name == "operation_owned_clone_media"
+    assert migration.idempotent is True
+
+
+@pytest.mark.unit
+def test_sqlite_migration_026_loads_as_atomic_non_idempotent_script(tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+
+    migrator = DatabaseMigrator(str(tmp_path / "migration-v26-loader.sqlite"))
+    migration = next(item for item in migrator.load_migrations() if item.version == 26)
+
+    assert migration.name == "finalize_staged_clone_persistence"
+    assert migration.idempotent is False
+
+
+@pytest.mark.unit
+def test_postgres_migration_v25_body_adds_owned_media_columns_constraint_and_index() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_operation_owned_clone_media import (
+        run_postgres_migrate_to_v25,
+    )
+
+    statements: list[str] = []
+
+    class Backend:
+        @staticmethod
+        def escape_identifier(name: str) -> str:
+            return f'"{name}"'
+
+        @staticmethod
+        def execute(query: str, params=None, *, connection) -> None:
+            del params, connection
+            statements.append(query)
+
+    run_postgres_migrate_to_v25(SimpleNamespace(backend=Backend()), object())
+
+    combined_sql = "\n".join(statements)
+    assert sum("ADD COLUMN IF NOT EXISTS" in query for query in statements) == 4
+    assert any("ck_media_system_operation_ownership" in query for query in statements)
+    assert any("ux_media_system_operation_source" in query for query in statements)
+    assert any("operationownedclonekeywords" in query.lower() for query in statements)
+    assert '"system_content_hash" IS NOT NULL' in combined_sql
+    assert "^[0-9a-f]{64}$" in combined_sql
+
+
+@pytest.mark.unit
+def test_postgres_migration_v26_body_repairs_markers_and_pending_keywords() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+        run_postgres_migrate_to_v26,
+    )
+
+    statements: list[str] = []
+
+    class Backend:
+        @staticmethod
+        def escape_identifier(name: str) -> str:
+            return f'"{name}"'
+
+        @staticmethod
+        def execute(query: str, params=None, *, connection):
+            del params, connection
+            statements.append(query)
+            normalized = " ".join(query.split()).lower()
+            if "select index_row.relname as index_name" in normalized:
+                return SimpleNamespace(rows=[])
+            if "as table_name" in normalized and "from pg_class" in normalized:
+                return SimpleNamespace(
+                    rows=[
+                        {
+                            "table_name": name,
+                            "rls_enabled": name in {"media", "operationownedclonekeywords"},
+                            "rls_forced": name in {"media", "operationownedclonekeywords"},
+                            "is_table_owner": True,
+                            "is_schema_owner": True,
+                        }
+                        for name in (
+                            "media",
+                            "keywords",
+                            "mediakeywords",
+                            "operationownedclonekeywords",
+                        )
+                    ]
+                )
+            if "select table_row.relname" in normalized:
+                return SimpleNamespace(
+                    rows=[
+                        {"relname": name}
+                        for name in (
+                            "media",
+                            "keywords",
+                            "mediakeywords",
+                            "operationownedclonekeywords",
+                        )
+                    ]
+                )
+            if "select column_name" in normalized:
+                return SimpleNamespace(
+                    rows=[
+                        {"column_name": name}
+                        for name in (
+                            "media_id",
+                            "keyword_id",
+                            "operation_id",
+                            "source_identity",
+                            "created_by_clone",
+                        )
+                    ]
+                )
+            if "select count(*) as count" in normalized:
+                return SimpleNamespace(rows=[{"count": 0}])
+            return SimpleNamespace(rows=[])
+
+    run_postgres_migrate_to_v26(SimpleNamespace(backend=Backend()), object())
+
+    combined_sql = "\n".join(statements).lower()
+    assert "operationownedclonekeywords_v25" in combined_sql
+    assert "join \"keywords\"" in combined_sql
+    assert '"keyword" text not null' in combined_sql
+    assert '"client_id" text not null' in combined_sql
+    assert "drop constraint if exists" in combined_sql
+    assert "ck_media_system_operation_ownership" in combined_sql
+    assert "^[0-9a-f]{64}$" in combined_sql
+    assert "in access exclusive mode" in combined_sql
+    assert "no force row level security" in combined_sql
+    assert "force row level security" in combined_sql
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("with_old_keyword_holds", [False, True])
+def test_postgres_migration_v26_repairs_both_committed_v25_shapes(
+    pg_database_config: DatabaseConfig,
+    with_old_keyword_holds: bool,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+        run_postgres_migrate_to_v26,
+    )
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    pending_rows: list[dict[str, object]] = []
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            with db.transaction() as connection:
+                backend.execute(
+                    "DROP TABLE operationownedclonekeywords CASCADE",
+                    connection=connection,
+                )
+                if with_old_keyword_holds:
+                    backend.execute(
+                        """
+                        CREATE TABLE operationownedclonekeywords (
+                            media_id BIGINT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                            keyword_id BIGINT NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+                            operation_id TEXT NOT NULL,
+                            source_identity TEXT NOT NULL,
+                            created_by_clone BOOLEAN NOT NULL,
+                            PRIMARY KEY (media_id, keyword_id)
+                        )
+                        """,
+                        connection=connection,
+                    )
+                    backend.execute(
+                        "CREATE INDEX idx_owned_clone_keywords_keyword "
+                        "ON operationownedclonekeywords (keyword_id)",
+                        connection=connection,
+                    )
+                    backend.execute(
+                        "CREATE INDEX idx_owned_clone_keywords_operation "
+                        "ON operationownedclonekeywords (operation_id, source_identity)",
+                        connection=connection,
+                    )
+                    media_row = backend.execute(
+                        "INSERT INTO Media (title, type, content_hash, uuid, last_modified, "
+                        "client_id, is_trash, system_operation_id, system_operation_kind, "
+                        "system_source_identity, system_content_hash) VALUES "
+                        "(%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, TRUE, %s, %s, %s, %s) "
+                        "RETURNING id",
+                        (
+                            "pending pg v25",
+                            "text",
+                            "pending-content",
+                            str(uuid.uuid4()),
+                            "901",
+                            "operation-pg-v25",
+                            "shared_workspace_clone",
+                            "source-pg-v25",
+                            "a" * 64,
+                        ),
+                        connection=connection,
+                    ).rows[0]
+                    keyword_row = backend.execute(
+                        "INSERT INTO Keywords (keyword, uuid, last_modified, client_id, deleted) "
+                        "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, FALSE) RETURNING id",
+                        (" Pending PG Value ", str(uuid.uuid4()), "901"),
+                        connection=connection,
+                    ).rows[0]
+                    backend.execute(
+                        "INSERT INTO operationownedclonekeywords "
+                        "(media_id, keyword_id, operation_id, source_identity, created_by_clone) "
+                        "VALUES (%s, %s, %s, %s, TRUE)",
+                        (
+                            media_row["id"],
+                            keyword_row["id"],
+                            "operation-pg-v25",
+                            "source-pg-v25",
+                        ),
+                        connection=connection,
+                    )
+
+                run_postgres_migrate_to_v26(db, connection)
+                columns = {
+                    row["column_name"]
+                    for row in backend.execute(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = current_schema() "
+                        "AND table_name = 'operationownedclonekeywords'",
+                        connection=connection,
+                    ).rows
+                }
+                pending_rows = backend.execute(
+                    "SELECT media_id, keyword, operation_id, source_identity, client_id "
+                    "FROM operationownedclonekeywords",
+                    connection=connection,
+                ).rows
+                index_owners = {
+                    row["index_name"]: row["table_name"]
+                    for row in backend.execute(
+                        "SELECT index_row.relname AS index_name, "
+                        "indexed_table.relname AS table_name "
+                        "FROM pg_class AS index_row "
+                        "JOIN pg_namespace AS namespace_row "
+                        "ON namespace_row.oid = index_row.relnamespace "
+                        "JOIN pg_index AS index_meta "
+                        "ON index_meta.indexrelid = index_row.oid "
+                        "JOIN pg_class AS indexed_table "
+                        "ON indexed_table.oid = index_meta.indrelid "
+                        "WHERE namespace_row.nspname = current_schema() "
+                        "AND index_row.relname = ANY(%s)",
+                        (
+                            [
+                                "idx_owned_clone_keywords_keyword",
+                                "idx_owned_clone_keywords_operation",
+                            ],
+                        ),
+                        connection=connection,
+                    ).rows
+                }
+
+            assert columns == {
+                "media_id",
+                "keyword",
+                "operation_id",
+                "source_identity",
+                "client_id",
+            }
+            assert pending_rows == ([{
+                "media_id": media_row["id"],
+                "keyword": "pending pg value",
+                "operation_id": "operation-pg-v25",
+                "source_identity": "source-pg-v25",
+                "client_id": "901",
+            }] if with_old_keyword_holds else [])
+            assert index_owners == {
+                "idx_owned_clone_keywords_keyword": "operationownedclonekeywords",
+                "idx_owned_clone_keywords_operation": "operationownedclonekeywords",
+            }
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+def test_postgres_v26_migration_releases_real_v25_keyword_graph(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_staged_clone_persistence import (
+        run_postgres_migrate_to_v26,
+    )
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            with db.transaction() as connection:
+                backend.execute(
+                    "DROP TABLE operationownedclonekeywords CASCADE",
+                    connection=connection,
+                )
+                backend.execute(
+                    """
+                    CREATE TABLE operationownedclonekeywords (
+                        media_id BIGINT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                        keyword_id BIGINT NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+                        operation_id TEXT NOT NULL,
+                        source_identity TEXT NOT NULL,
+                        created_by_clone BOOLEAN NOT NULL,
+                        PRIMARY KEY (media_id, keyword_id)
+                    )
+                    """,
+                    connection=connection,
+                )
+                staged_id = backend.execute(
+                    "INSERT INTO Media (title, type, content_hash, uuid, last_modified, "
+                    "client_id, is_trash, system_operation_id, system_operation_kind, "
+                    "system_source_identity, system_content_hash) VALUES "
+                    "(%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, TRUE, %s, %s, %s, %s) "
+                    "RETURNING id",
+                    (
+                        "pending pg fix1 v25",
+                        "text",
+                        "pending-content",
+                        str(uuid.uuid4()),
+                        "901",
+                        "operation-pg-fix1-v25",
+                        "shared_workspace_clone",
+                        "source-pg-fix1-v25",
+                        "a" * 64,
+                    ),
+                    connection=connection,
+                ).rows[0]["id"]
+                ordinary_id = backend.execute(
+                    "INSERT INTO Media (title, type, content_hash, uuid, last_modified, client_id) "
+                    "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s) RETURNING id",
+                    ("ordinary keyword owner", "text", "ordinary", str(uuid.uuid4()), "901"),
+                    connection=connection,
+                ).rows[0]["id"]
+                keyword_ids: dict[str, int] = {}
+                for keyword in ("clone-orphan-pg", "recipient-existing-pg", "clone-shared-pg"):
+                    keyword_ids[keyword] = int(
+                        backend.execute(
+                            "INSERT INTO Keywords "
+                            "(keyword, uuid, last_modified, client_id, deleted) "
+                            "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, FALSE) RETURNING id",
+                            (keyword, str(uuid.uuid4()), "901"),
+                            connection=connection,
+                        ).rows[0]["id"]
+                    )
+                for keyword, created_by_clone in (
+                    ("clone-orphan-pg", True),
+                    ("recipient-existing-pg", False),
+                    ("clone-shared-pg", True),
+                ):
+                    backend.execute(
+                        "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (%s, %s)",
+                        (staged_id, keyword_ids[keyword]),
+                        connection=connection,
+                    )
+                    backend.execute(
+                        "INSERT INTO operationownedclonekeywords "
+                        "(media_id, keyword_id, operation_id, source_identity, created_by_clone) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (
+                            staged_id,
+                            keyword_ids[keyword],
+                            "operation-pg-fix1-v25",
+                            "source-pg-fix1-v25",
+                            created_by_clone,
+                        ),
+                        connection=connection,
+                    )
+                backend.execute(
+                    "INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (%s, %s)",
+                    (ordinary_id, keyword_ids["clone-shared-pg"]),
+                    connection=connection,
+                )
+
+                run_postgres_migrate_to_v26(db, connection)
+
+                assert {
+                    row["keyword"]
+                    for row in backend.execute(
+                        "SELECT keyword FROM operationownedclonekeywords WHERE media_id = %s",
+                        (staged_id,),
+                        connection=connection,
+                    ).rows
+                } == {"clone-orphan-pg", "recipient-existing-pg", "clone-shared-pg"}
+                assert backend.execute(
+                    "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = %s",
+                    (staged_id,),
+                    connection=connection,
+                ).rows[0]["count"] == 0
+                assert {
+                    row["keyword"]
+                    for row in backend.execute(
+                        "SELECT keyword FROM Keywords WHERE keyword = ANY(%s)",
+                        (["clone-orphan-pg", "recipient-existing-pg", "clone-shared-pg"],),
+                        connection=connection,
+                    ).rows
+                } == {"recipient-existing-pg", "clone-shared-pg"}
+                assert backend.execute(
+                    "SELECT COUNT(*) AS count FROM MediaKeywords "
+                    "WHERE media_id = %s AND keyword_id = %s",
+                    (ordinary_id, keyword_ids["clone-shared-pg"]),
+                    connection=connection,
+                ).rows[0]["count"] == 1
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.timeout(120)
+def test_postgres_v26_migration_clears_weak_v25_partial_null_markers(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    partial_rows = [
+        (str(uuid.uuid4()), "partial-operation", None, None, None),
+        (str(uuid.uuid4()), None, "shared_workspace_clone", None, "a" * 64),
+        (str(uuid.uuid4()), "partial-operation", None, "partial-source", "b" * 64),
+    ]
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            with db.transaction() as connection:
+                backend.execute(
+                    "ALTER TABLE Media DROP CONSTRAINT ck_media_system_operation_ownership",
+                    connection=connection,
+                )
+                backend.execute(
+                    """
+                    ALTER TABLE Media
+                    ADD CONSTRAINT ck_media_system_operation_ownership
+                    CHECK (
+                        (
+                            system_operation_id IS NULL
+                            AND system_operation_kind IS NULL
+                            AND system_source_identity IS NULL
+                            AND system_content_hash IS NULL
+                        )
+                        OR
+                        (
+                            system_operation_kind = 'shared_workspace_clone'
+                            AND system_content_hash ~ '^[0-9a-f]{64}$'
+                        )
+                    )
+                    """,
+                    connection=connection,
+                )
+                for index, marker_row in enumerate(partial_rows):
+                    backend.execute(
+                        "INSERT INTO Media "
+                        "(uuid, title, type, content_hash, last_modified, client_id, "
+                        "system_operation_id, system_operation_kind, "
+                        "system_source_identity, system_content_hash) VALUES "
+                        "(%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s)",
+                        (
+                            marker_row[0],
+                            f"weak v25 partial markers {index}",
+                            "text",
+                            f"partial-content-{index}",
+                            "901",
+                            *marker_row[1:],
+                        ),
+                        connection=connection,
+                    )
+                backend.execute(
+                    "UPDATE schema_version SET version = 25",
+                    connection=connection,
+                )
+
+            db._initialize_schema()
+
+            with db.transaction() as connection:
+                rows = backend.execute(
+                    "SELECT system_operation_id, system_operation_kind, "
+                    "system_source_identity, system_content_hash "
+                    "FROM Media WHERE uuid = ANY(%s)",
+                    ([row[0] for row in partial_rows],),
+                    connection=connection,
+                ).rows
+                version = int(
+                    backend.execute(
+                        "SELECT version FROM schema_version LIMIT 1",
+                        connection=connection,
+                    ).scalar
+                )
+                constraint_validated = backend.execute(
+                    "SELECT convalidated FROM pg_constraint "
+                    "WHERE conname = 'ck_media_system_operation_ownership' "
+                    "AND conrelid = 'media'::regclass",
+                    connection=connection,
+                ).rows[0]["convalidated"]
+
+            assert len(rows) == len(partial_rows)
+            assert all(
+                row
+                == {
+                    "system_operation_id": None,
+                    "system_operation_kind": None,
+                    "system_source_identity": None,
+                    "system_content_hash": None,
+                }
+                for row in rows
+            )
+            assert version == 26
+            assert constraint_validated is True
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()

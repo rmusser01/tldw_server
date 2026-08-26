@@ -53,7 +53,7 @@ class MediaLookupRepository:
         if not isinstance(media_id, int):
             raise InputError("media_id must be an integer.")  # noqa: TRY003
 
-        query = "SELECT * FROM Media WHERE id = ?"
+        query = "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL"
         params = [media_id]
         if not include_deleted:
             query += " AND deleted = 0"
@@ -91,7 +91,7 @@ class MediaLookupRepository:
         query = (
             "SELECT id, uuid, title, type, url, chunking_status, vector_processing, "
             "CASE WHEN content IS NOT NULL AND content <> '' THEN 1 ELSE 0 END AS has_content "
-            "FROM Media WHERE id = ?"
+            "FROM Media WHERE id = ? AND system_operation_id IS NULL"
         )
         params = [media_id]
         if not include_deleted:
@@ -234,6 +234,7 @@ class MediaLookupRepository:
                 )
              AND dv.deleted = {false_literal}
             WHERE m.id = ?
+              AND m.system_operation_id IS NULL
               AND m.deleted = {false_literal}
               AND m.is_trash = {false_literal}
               {owner_clause}
@@ -280,7 +281,7 @@ class MediaLookupRepository:
         if not media_uuid:
             raise InputError("media_uuid cannot be empty.")  # noqa: TRY003
 
-        query = "SELECT * FROM Media WHERE uuid = ?"
+        query = "SELECT * FROM Media WHERE uuid = ? AND system_operation_id IS NULL"
         params = [media_uuid]
         if not include_deleted:
             query += " AND deleted = 0"
@@ -319,11 +320,11 @@ class MediaLookupRepository:
             raise InputError("url cannot be empty or None.")  # noqa: TRY003
 
         if len(url_candidates) == 1:
-            query = "SELECT * FROM Media WHERE url = ?"
+            query = "SELECT * FROM Media WHERE url = ? AND system_operation_id IS NULL"
             params = [url_candidates[0]]
         else:
             placeholders = ", ".join(["?"] * len(url_candidates))
-            query = f"SELECT * FROM Media WHERE url IN ({placeholders})"  # nosec B608
+            query = f"SELECT * FROM Media WHERE url IN ({placeholders}) AND system_operation_id IS NULL"  # nosec B608
             params = list(url_candidates)
 
         if not include_deleted:
@@ -359,7 +360,7 @@ class MediaLookupRepository:
         if not content_hash:
             raise InputError("content_hash cannot be empty or None.")  # noqa: TRY003
 
-        query = "SELECT * FROM Media WHERE content_hash = ?"
+        query = "SELECT * FROM Media WHERE content_hash = ? AND system_operation_id IS NULL"
         params = [content_hash]
         if not include_deleted:
             query += " AND deleted = 0"
@@ -394,7 +395,7 @@ class MediaLookupRepository:
         if not title:
             raise InputError("title cannot be empty or None.")  # noqa: TRY003
 
-        query = "SELECT * FROM Media WHERE title = ?"
+        query = "SELECT * FROM Media WHERE title = ? AND system_operation_id IS NULL"
         params = [title]
         if not include_deleted:
             query += " AND deleted = 0"
@@ -425,7 +426,7 @@ class MediaLookupRepository:
         include_deleted: bool = False,
         include_trash: bool = False,
     ) -> list[str]:
-        conditions = ["type IS NOT NULL AND type != ''"]
+        conditions = ["system_operation_id IS NULL", "type IS NOT NULL AND type != ''"]
         if not include_deleted:
             conditions.append("deleted = 0")
         if not include_trash:
@@ -463,7 +464,8 @@ class MediaLookupRepository:
         db = self.session
         try:
             count_cursor = db.execute_query(
-                "SELECT COUNT(*) AS total_items FROM Media WHERE deleted = 0 AND is_trash = 0"
+                "SELECT COUNT(*) AS total_items FROM Media WHERE deleted = 0 AND is_trash = 0 "
+                "AND system_operation_id IS NULL"
             )
             count_result = count_cursor.fetchone()
             total_items = count_result["total_items"] if count_result else 0
@@ -498,6 +500,7 @@ class MediaLookupRepository:
                     ) latest_source_metadata ON latest_source_metadata.media_id = m.id
                     WHERE m.deleted = 0
                       AND m.is_trash = 0
+                      AND m.system_operation_id IS NULL
                     ORDER BY m.last_modified DESC, m.id DESC
                     LIMIT ? OFFSET ?
                     """,
@@ -535,7 +538,8 @@ class MediaLookupRepository:
         db = self.session
         try:
             count_cursor = db.execute_query(
-                "SELECT COUNT(*) AS total_items FROM Media WHERE deleted = 0 AND is_trash = 1"
+                "SELECT COUNT(*) AS total_items FROM Media WHERE deleted = 0 "
+                "AND is_trash = 1 AND system_operation_id IS NULL"
             )
             count_row = count_cursor.fetchone()
             total_items = count_row["total_items"] if count_row else 0
@@ -548,6 +552,7 @@ class MediaLookupRepository:
                     FROM Media
                     WHERE deleted = 0
                       AND is_trash = 1
+                      AND system_operation_id IS NULL
                     ORDER BY trash_date DESC, last_modified DESC, id DESC
                     LIMIT ? OFFSET ?
                     """,

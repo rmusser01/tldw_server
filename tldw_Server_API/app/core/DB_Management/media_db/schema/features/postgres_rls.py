@@ -60,8 +60,29 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
         f"AND {ident('media')}.org_id IS NOT NULL "
         f"AND {ident('media')}.org_id = ANY({org_array}))"
     )
+    marked_clone_predicate = (
+        f"({ident('media')}.system_operation_kind = 'shared_workspace_clone' "
+        f"AND {ident('media')}.system_operation_id IS NOT NULL "
+        f"AND length({ident('media')}.system_operation_id) BETWEEN 1 AND 255 "
+        f"AND {ident('media')}.system_source_identity IS NOT NULL "
+        f"AND length({ident('media')}.system_source_identity) BETWEEN 1 AND 255 "
+        f"AND {ident('media')}.system_content_hash ~ '^[0-9a-f]{{64}}$')"
+    )
     media_access_predicate = (
-        f"({is_admin} OR ({not_deleted_predicate} AND ({personal_predicate} OR {team_predicate} OR {org_predicate})))"
+        f"({is_admin} OR "
+        f"({not_deleted_predicate} AND "
+        f"({personal_predicate} OR {team_predicate} OR {org_predicate})) OR "
+        f"({personal_predicate} AND {marked_clone_predicate}))"
+    )
+    pending_keyword_predicate = (
+        "(EXISTS ("
+        f"SELECT 1 FROM {ident('media')} AS owned_media "  # nosec B608
+        f"WHERE owned_media.id = {ident('operationownedclonekeywords')}.media_id "
+        f"AND COALESCE(owned_media.owner_user_id::TEXT, owned_media.client_id) = {current_user} "
+        "AND owned_media.system_operation_kind = 'shared_workspace_clone' "
+        "AND owned_media.system_operation_id IS NOT NULL "
+        "AND owned_media.system_source_identity IS NOT NULL "
+        "AND owned_media.system_content_hash IS NOT NULL))"
     )
 
     policy_sets = {
@@ -79,6 +100,9 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
                 "sync_scope_team",
                 f"{ident('sync_log')}.team_id IS NOT NULL AND {ident('sync_log')}.team_id = ANY({team_array})",
             ),
+        ],
+        "operationownedclonekeywords": [
+            ("owned_clone_pending_keyword_access", pending_keyword_predicate),
         ],
     }
 
@@ -133,6 +157,40 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
             )
         except BackendDatabaseError as exc:
             logger.warning(f"Skipping creation of media policy '{policy_name}': {exc}")
+
+    pending_table = ident("operationownedclonekeywords")
+    try:
+        backend.execute(
+            f"ALTER TABLE {pending_table} ENABLE ROW LEVEL SECURITY",
+            connection=conn,
+        )
+        backend.execute(
+            f"ALTER TABLE {pending_table} FORCE ROW LEVEL SECURITY",
+            connection=conn,
+        )
+    except BackendDatabaseError as exc:
+        logger.warning(f"Could not enable RLS for pending clone keywords: {exc}")
+
+    for policy_name, predicate in policy_sets["operationownedclonekeywords"]:
+        try:
+            backend.execute(
+                f"DROP POLICY IF EXISTS {backend.escape_identifier(policy_name)} "
+                f"ON {pending_table}",
+                connection=conn,
+            )
+            backend.execute(
+                f"""
+                CREATE POLICY {backend.escape_identifier(policy_name)} ON {pending_table}
+                FOR ALL
+                USING ({predicate})
+                WITH CHECK ({predicate})
+                """,
+                connection=conn,
+            )
+        except BackendDatabaseError as exc:
+            logger.warning(
+                f"Skipping creation of pending clone keyword policy '{policy_name}': {exc}"
+            )
 
     try:
         backend.execute(

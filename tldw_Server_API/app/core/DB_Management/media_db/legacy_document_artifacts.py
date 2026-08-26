@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
 
 from loguru import logger
 
@@ -30,7 +29,8 @@ def get_specific_analysis(
         query = (
             "SELECT dv.analysis_content FROM DocumentVersions dv "
             "JOIN Media m ON dv.media_id = m.id "
-            "WHERE dv.uuid = ? AND dv.deleted = 0 AND m.deleted = 0"
+            "WHERE dv.uuid = ? AND dv.deleted = 0 AND m.deleted = 0 "
+            "AND m.system_operation_id IS NULL"
         )
         with db_instance.transaction() as conn:
             result = db_instance._fetchone_with_connection(conn, query, (version_uuid,))
@@ -58,7 +58,9 @@ def clear_specific_analysis(
         with db_instance.transaction() as conn:
             info = db_instance._fetchone_with_connection(
                 conn,
-                "SELECT id, version FROM DocumentVersions WHERE uuid = ? AND deleted = 0",
+                "SELECT dv.id, dv.version FROM DocumentVersions dv "
+                "JOIN Media m ON m.id = dv.media_id WHERE dv.uuid = ? "
+                "AND dv.deleted = 0 AND m.system_operation_id IS NULL",
                 (version_uuid,),
             )
             if not info:
@@ -78,7 +80,9 @@ def clear_specific_analysis(
 
             payload = db_instance._fetchone_with_connection(
                 conn,
-                "SELECT dv.*, m.uuid as media_uuid FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id WHERE dv.id = ?",
+                "SELECT dv.*, m.uuid as media_uuid FROM DocumentVersions dv "
+                "JOIN Media m ON dv.media_id = m.id WHERE dv.id = ? "
+                "AND m.system_operation_id IS NULL",
                 (version_id,),
             ) or {}
             db_instance._log_sync_event(
@@ -119,7 +123,9 @@ def clear_specific_prompt(
         with db_instance.transaction() as conn:
             info = db_instance._fetchone_with_connection(
                 conn,
-                "SELECT id, version FROM DocumentVersions WHERE uuid = ? AND deleted = 0",
+                "SELECT dv.id, dv.version FROM DocumentVersions dv "
+                "JOIN Media m ON m.id = dv.media_id WHERE dv.uuid = ? "
+                "AND dv.deleted = 0 AND m.system_operation_id IS NULL",
                 (version_uuid,),
             )
             if not info:
@@ -139,7 +145,9 @@ def clear_specific_prompt(
 
             payload = db_instance._fetchone_with_connection(
                 conn,
-                "SELECT dv.*, m.uuid as media_uuid FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id WHERE dv.id = ?",
+                "SELECT dv.*, m.uuid as media_uuid FROM DocumentVersions dv "
+                "JOIN Media m ON dv.media_id = m.id WHERE dv.id = ? "
+                "AND m.system_operation_id IS NULL",
                 (version_id,),
             ) or {}
             db_instance._log_sync_event(
@@ -174,7 +182,8 @@ def get_chunk_text(
         query = (
             "SELECT c.chunk_text FROM UnvectorizedMediaChunks c "
             "JOIN Media m ON c.media_id = m.id "
-            "WHERE c.uuid = ? AND c.deleted = 0 AND m.deleted = 0"
+            "WHERE c.uuid = ? AND c.deleted = 0 AND m.deleted = 0 "
+            "AND m.system_operation_id IS NULL"
         )
         cursor = db_instance.execute_query(query, (chunk_uuid,))
         result = cursor.fetchone()

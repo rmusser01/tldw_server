@@ -348,6 +348,38 @@ CREATE INDEX IF NOT EXISTS idx_jobs_archive_migration
     COALESCE(uuid, '')
   );
 
+-- Immutable correlation for user-facing idempotent operations. Job state,
+-- progress, result, and errors remain exclusively in jobs/jobs_archive.
+CREATE TABLE IF NOT EXISTS job_idempotency_receipts (
+  receipt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain TEXT NOT NULL CHECK (LENGTH(domain) BETWEEN 1 AND 64),
+  queue TEXT NOT NULL CHECK (LENGTH(queue) BETWEEN 1 AND 64),
+  job_type TEXT NOT NULL CHECK (LENGTH(job_type) BETWEEN 1 AND 128),
+  owner_user_id TEXT NOT NULL CHECK (LENGTH(owner_user_id) BETWEEN 1 AND 200),
+  key_digest TEXT NOT NULL CHECK (
+    LENGTH(key_digest) = 64 AND key_digest NOT GLOB '*[^0-9a-f]*'
+  ),
+  request_fingerprint TEXT NOT NULL CHECK (
+    LENGTH(request_fingerprint) = 64
+    AND request_fingerprint NOT GLOB '*[^0-9a-f]*'
+  ),
+  operation_scope TEXT NOT NULL CHECK (LENGTH(operation_scope) BETWEEN 1 AND 200),
+  job_uuid TEXT NOT NULL CHECK (LENGTH(job_uuid) BETWEEN 1 AND 64),
+  job_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_idempotency_receipts_owner_key
+  ON job_idempotency_receipts(
+    domain, queue, job_type, owner_user_id, key_digest
+  );
+CREATE INDEX IF NOT EXISTS idx_job_idempotency_receipts_job_uuid
+  ON job_idempotency_receipts(job_uuid);
+CREATE INDEX IF NOT EXISTS idx_job_idempotency_receipts_job_id
+  ON job_idempotency_receipts(job_id);
+CREATE INDEX IF NOT EXISTS idx_job_idempotency_receipts_scope
+  ON job_idempotency_receipts(operation_scope, owner_user_id, expires_at);
+
 -- Source-free standalone-HTML digest-key metadata. Secrets and digests never
 -- belong in the shared Jobs store.
 CREATE TABLE IF NOT EXISTS slides_standalone_key_registry (

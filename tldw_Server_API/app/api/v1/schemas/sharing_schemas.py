@@ -154,18 +154,6 @@ class PrototypeLinkExchangeResponse(BaseModel):
     runtime_policy_profile: str
 
 
-# ── Clone ──
-
-class CloneWorkspaceRequest(BaseModel):
-    new_name: str | None = Field(None, max_length=255, description="Name for the cloned workspace")
-
-
-class CloneWorkspaceResponse(BaseModel):
-    job_id: str
-    status: str = "pending"
-    message: str = "Clone job created"
-
-
 # ── Admin ──
 
 class AdminShareListResponse(BaseModel):

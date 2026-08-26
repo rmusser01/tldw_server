@@ -4,8 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, SchemaError
-
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
+    DatabaseError,
+    SchemaError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -39,6 +41,10 @@ EXPECTED_MEDIA_COLUMNS = {
     "deleted",
     "prev_version",
     "merge_parent_uuid",
+    "system_operation_id",
+    "system_operation_kind",
+    "system_source_identity",
+    "system_content_hash",
 }
 
 
@@ -262,6 +268,7 @@ def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_t
         "media",
         "keywords",
         "mediakeywords",
+        "operationownedclonekeywords",
         "transcripts",
         "mediachunks",
         "unvectorizedmediachunks",

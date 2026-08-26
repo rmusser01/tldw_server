@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
-from loguru import logger as logging
 import sqlite3
 from typing import Any
+
+from loguru import logger as logging
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
@@ -119,7 +120,7 @@ def _update_fts_media(
                     "WHEN deleted IS FALSE THEN "
                     " setweight(to_tsvector('english', synonyms_expand(coalesce(title, ''))),'A') || "
                     " setweight(to_tsvector('english', synonyms_expand(coalesce(content, ''))),'C') "
-                    "ELSE NULL END WHERE id = ?"
+                    "ELSE NULL END WHERE id = ? AND system_operation_id IS NULL"
                 )
             else:
                 sql = (
@@ -127,7 +128,7 @@ def _update_fts_media(
                     "WHEN deleted IS FALSE THEN "
                     " setweight(to_tsvector('english', coalesce(title, '')),'A') || "
                     " setweight(to_tsvector('english', coalesce(content, '')),'C') "
-                    "ELSE NULL END WHERE id = ?"
+                    "ELSE NULL END WHERE id = ? AND system_operation_id IS NULL"
                 )
             self._execute_with_connection(conn, sql, (media_id,))
             logging.debug("Updated PostgreSQL FTS vector for Media ID {}", media_id)
@@ -165,7 +166,8 @@ def _delete_fts_media(
         try:
             self._execute_with_connection(
                 conn,
-                "UPDATE media SET media_fts_tsv = NULL WHERE id = ?",
+                "UPDATE media SET media_fts_tsv = NULL "
+                "WHERE id = ? AND system_operation_id IS NULL",
                 (media_id,),
             )
             logging.debug("Cleared PostgreSQL FTS vector for Media ID {}", media_id)
@@ -278,7 +280,8 @@ def sync_refresh_fts_for_entity(
     if entity == "Media":
         row = self._fetchone_with_connection(
             conn,
-            "SELECT id, title, content, deleted FROM Media WHERE uuid = ?",
+            "SELECT id, title, content, deleted FROM Media WHERE uuid = ? "
+            "AND system_operation_id IS NULL",
             (entity_uuid,),
         )
         if not row:
@@ -345,7 +348,8 @@ def sync_get_media_fts_values(
 
     row = self._fetchone_with_connection(
         conn,
-        "SELECT title, content FROM Media WHERE uuid = ?",
+        "SELECT title, content FROM Media WHERE uuid = ? "
+        "AND system_operation_id IS NULL",
         (entity_uuid,),
     )
     if row is None:

@@ -197,8 +197,9 @@ shares.
 - Workspace metadata, shared source metadata, source previews, and source
   content remain authoritative in the owner's databases.
 - Recipient chat transcripts, citations, and request receipts are stored in the
-  recipient's database. Owner notes and chats are never exposed or used as a
-  recipient persistence target.
+  recipient's database. In shared mode, owner notes and chats are never exposed
+  or used as a recipient persistence target. The separately authorized clone
+  operation is described below.
 - Shared mode cannot read a recipient's local workspaces or use Studio, notes,
   artifacts, MCP, ACP, sandbox, or extension writable destinations.
 - Recipients have read and chat access only. They cannot mutate shared sources.
@@ -224,11 +225,55 @@ already delivered or saved before revocation.
 | `GET` | `/api/v1/sharing/shared-with-me/{share_id}/sources/{source_id}/preview` | Preview a shared source |
 | `GET` | `/api/v1/sharing/shared-with-me/{share_id}/chat/messages` | Read the recipient's shared chat transcript |
 | `POST` | `/api/v1/sharing/shared-with-me/{share_id}/chat` | Ask against the frozen shared source scope |
+| `POST` | `/api/v1/sharing/shared-with-me/{share_id}/clone` | Start or replay a durable recipient-owned workspace copy |
+| `GET` | `/api/v1/sharing/shared-with-me/{share_id}/clone/{operation_id}` | Read the bounded copy-operation status |
 
-These are the recipient shared Research Workspace data-plane operations. The
-separate clone operation is outside this data-plane set and remains governed by
-the share's clone policy. There is no redirect,
-alias, local fallback, or raw full-media recipient operation.
+The read and chat rows are the recipient shared Research Workspace data plane.
+The clone rows expose a separate durable operation governed by the share's
+clone policy. There is no redirect, alias, local fallback, or raw full-media
+recipient operation.
+
+### Copying a Shared Workspace
+
+When the owner enables `allow_clone`, a recipient may create a point-in-time,
+recipient-owned copy. This is different from the read-only shared view: the
+copy persists independently in the recipient's workspace storage and may
+include the shared workspace's sources, notes, artifacts, and operation-owned
+media snapshot. Owners should enable cloning only when recipients may retain
+that material after the share is revoked.
+
+Start a copy with a client-generated idempotency key:
+
+```bash
+curl -X POST \
+  http://localhost:8000/api/v1/sharing/shared-with-me/42/clone \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: clone-request-2026-08-25-0001" \
+  -d '{"name": "Evidence review copy"}'
+```
+
+`Idempotency-Key` is required and must contain 16-200 ASCII characters from
+`A-Z`, `a-z`, `0-9`, `.`, `_`, `~`, or `-`. Repeating the same key and request
+returns the same operation, including after archival; reusing the key with a
+different normalized name returns `409`. The raw key is not stored. Its
+server-side receipt expires after 31 days.
+
+The POST response is `202` while queued or running and `200` when an idempotent
+replay is already terminal. Poll the exact `poll_href` returned by the server.
+Operation states are `queued`, `running`, `succeeded`, and `failed`. A
+successful result reports copied counts and separate text-search, citation,
+and vector-search readiness. `vector_search: needs_indexing` means the copy is
+available but vector retrieval is not yet ready; it must not be treated as full
+retrieval readiness. A single copy supports at most 10,000 unique Media records;
+larger source snapshots fail before Media loading or target creation begins.
+
+New requests recheck the current share and clone policy. Existing operation
+status remains recipient-owned and pollable after revocation, but revocation
+before publication prevents the hidden copy from becoming visible. Failures
+contain bounded error codes and cleanup state rather than source content,
+paths, credentials, or raw server exceptions. Automatic retries are disabled;
+use a new idempotency key only when the response marks a failure retryable.
 
 ## Searching Shared Content
 

@@ -9,6 +9,97 @@ from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 
+def test_sqlite_schema_persists_owner_scoped_idempotency_receipts(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "jobs_receipts.db")
+    conn = sqlite3.connect(db_path)
+    try:
+        columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(job_idempotency_receipts)"
+            ).fetchall()
+        }
+        assert columns == {
+            "receipt_id",
+            "domain",
+            "queue",
+            "job_type",
+            "owner_user_id",
+            "key_digest",
+            "request_fingerprint",
+            "operation_scope",
+            "job_uuid",
+            "job_id",
+            "created_at",
+            "expires_at",
+        }
+        assert not {"idempotency_key", "raw_key", "client_key"} & columns
+
+        indexes = {
+            row[1]: tuple(
+                column[2]
+                for column in conn.execute(
+                    f"PRAGMA index_info('{row[1]}')"
+                ).fetchall()
+            )
+            for row in conn.execute(
+                "PRAGMA index_list('job_idempotency_receipts')"
+            ).fetchall()
+        }
+        assert indexes["idx_job_idempotency_receipts_owner_key"] == (
+            "domain",
+            "queue",
+            "job_type",
+            "owner_user_id",
+            "key_digest",
+        )
+        assert indexes["idx_job_idempotency_receipts_job_uuid"] == ("job_uuid",)
+        assert indexes["idx_job_idempotency_receipts_job_id"] == ("job_id",)
+        assert indexes["idx_job_idempotency_receipts_scope"] == (
+            "operation_scope",
+            "owner_user_id",
+            "expires_at",
+        )
+
+        values = (
+            "sharing",
+            "workspace-clone",
+            "workspace_clone",
+            "recipient-1",
+            "a" * 64,
+            "b" * 64,
+            "share:share-1",
+            "job-1",
+            1,
+            "2026-08-25T00:00:00+00:00",
+            "2026-09-24T00:00:00+00:00",
+        )
+        conn.execute(
+            "INSERT INTO job_idempotency_receipts "
+            "(domain, queue, job_type, owner_user_id, key_digest, "
+            "request_fingerprint, operation_scope, job_uuid, job_id, "
+            "created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            values,
+        )
+        conn.execute(
+            "INSERT INTO job_idempotency_receipts "
+            "(domain, queue, job_type, owner_user_id, key_digest, "
+            "request_fingerprint, operation_scope, job_uuid, job_id, "
+            "created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (*values[:3], "recipient-2", *values[4:7], "job-2", 2, *values[9:]),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO job_idempotency_receipts "
+                "(domain, queue, job_type, owner_user_id, key_digest, "
+                "request_fingerprint, operation_scope, job_uuid, job_id, "
+                "created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (*values[:7], "job-3", 3, *values[9:]),
+            )
+    finally:
+        conn.close()
+
+
 def test_sqlite_schema_has_expected_columns_and_indexes(tmp_path):
 
 

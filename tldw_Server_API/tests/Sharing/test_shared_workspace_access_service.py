@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+    SharedWorkspaceAccessError,
     SharedWorkspaceAccessService,
     SharedWorkspaceNotFound,
     SharedWorkspaceUnavailable,
@@ -161,14 +162,14 @@ async def test_resolve_authorizes_before_loading_owner_data_and_projects_recipie
             "allowed": False,
             "reason_code": "shared_write_not_available",
         },
-        "clone_workspace": {"allowed": False, "reason_code": "clone_deferred"},
+        "clone_workspace": {"allowed": True, "reason_code": None},
     }
 
 
 @pytest.mark.asyncio
 async def test_owner_uses_same_deny_by_default_recipient_projection() -> None:
     service, _events = _service(
-        share=_share(),
+        share=_share(allow_clone=False),
         user={"id": 7, "username": "owner"},
         workspace={"id": "workspace-alpha", "archived": False},
     )
@@ -182,8 +183,23 @@ async def test_owner_uses_same_deny_by_default_recipient_projection() -> None:
     }
     assert context.policy_actions["clone_workspace"] == {
         "allowed": False,
-        "reason_code": "clone_deferred",
+        "reason_code": "owner_disabled",
     }
+
+
+@pytest.mark.asyncio
+async def test_resolve_clone_denies_before_loading_owner_data() -> None:
+    service, events = _service(
+        share=_share(allow_clone=False),
+        user={"id": 7, "username": "must-not-load"},
+        workspace={"id": "workspace-alpha", "archived": False},
+    )
+
+    with pytest.raises(SharedWorkspaceAccessError) as exc_info:
+        await service.resolve_clone(share_id=42, recipient_user_id=9)
+
+    assert type(exc_info.value).__name__ == "SharedWorkspaceCloneNotAllowed"
+    assert events == ["share:42:9"]
 
 
 @pytest.mark.asyncio

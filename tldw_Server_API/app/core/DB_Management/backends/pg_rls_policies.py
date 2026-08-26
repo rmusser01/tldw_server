@@ -594,6 +594,47 @@ def build_chacha_rls_sql() -> list[str]:
         """.strip(),
     )
 
+    workspace_owner = """
+    workspaces.client_id = current_setting('app.current_user_id', true)
+    """.strip()
+    add_tenant_policy("workspaces", workspace_owner)
+
+    workspace_child_owners = {
+        "workspace_sources": """
+            EXISTS (
+              SELECT 1 FROM workspaces AS workspace
+              WHERE workspace.id = workspace_sources.workspace_id
+                AND workspace.client_id = current_setting('app.current_user_id', true)
+            )
+        """.strip(),
+        "workspace_notes": """
+            EXISTS (
+              SELECT 1 FROM workspaces AS workspace
+              WHERE workspace.id = workspace_notes.workspace_id
+                AND workspace.client_id = current_setting('app.current_user_id', true)
+            )
+        """.strip(),
+        "workspace_artifacts": """
+            EXISTS (
+              SELECT 1 FROM workspaces AS workspace
+              WHERE workspace.id = workspace_artifacts.workspace_id
+                AND workspace.client_id = current_setting('app.current_user_id', true)
+            )
+        """.strip(),
+        "workspace_artifact_versions": """
+            EXISTS (
+              SELECT 1 FROM workspaces AS workspace
+              WHERE workspace.id = workspace_artifact_versions.workspace_id
+                AND workspace.client_id = current_setting('app.current_user_id', true)
+            )
+        """.strip(),
+    }
+    for table, predicate in workspace_child_owners.items():
+        add_tenant_policy(
+            table,
+            predicate,
+        )
+
     for table in ("chacha_keywords", "keyword_collections", "note_folders"):
         add_tenant_policy(
             table,
@@ -721,15 +762,16 @@ def build_chacha_rls_sql() -> list[str]:
         """
     )
 
-    # Workspace resource memberships
-    add("ALTER TABLE IF EXISTS workspace_resource_memberships ENABLE ROW LEVEL SECURITY;")
-    add("ALTER TABLE IF EXISTS workspace_resource_memberships FORCE ROW LEVEL SECURITY;")
-    add("DROP POLICY IF EXISTS workspace_resource_memberships_tenant_isolation ON workspace_resource_memberships;")
-    add(
+    add_tenant_policy(
+        "workspace_resource_memberships",
         """
-        CREATE POLICY workspace_resource_memberships_tenant_isolation ON workspace_resource_memberships
-          USING (client_id = current_setting('app.current_user_id', true));
-        """
+        workspace_resource_memberships.client_id = current_setting('app.current_user_id', true)
+        AND EXISTS (
+          SELECT 1 FROM workspaces AS workspace
+          WHERE workspace.id = workspace_resource_memberships.workspace_id
+            AND workspace.client_id = current_setting('app.current_user_id', true)
+        )
+        """.strip(),
     )
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
