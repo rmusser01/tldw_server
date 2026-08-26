@@ -66,10 +66,10 @@
 **Goal:** Prove the migration is complete and reviewable.
 **Success Criteria:** Replacement IDs are unique, no Phase 4D old-ID references remain, Markdown and whitespace checks pass, and a focused PR targets `dev`.
 **Tests:** Duplicate-ID scan, stale-reference scan, path existence checks, `git diff --check`, and Backlog MCP task lookup.
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Verify all eight replacement IDs occur exactly once as frontmatter IDs.
 - [x] Verify all renamed task paths exist and all old Phase 4D task paths are absent.
 - [x] Verify no stale old-ID reference remains in the scoped Phase 4D files.
 - [x] Review `git diff --check` and the complete diff.
-- [ ] Mark `TASK-13125` Done with final evidence, commit, push, and open a PR against `dev`.
+- [x] Mark `TASK-13125` Done with final evidence, commit, push, and open PR #2826 against `dev`.
