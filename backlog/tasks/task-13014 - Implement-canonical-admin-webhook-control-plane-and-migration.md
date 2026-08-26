@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: '2026-08-21 20:41'
-updated_date: '2026-08-26 02:04'
+updated_date: '2026-08-26 02:30'
 labels:
   - admin
   - webhooks
@@ -176,6 +176,12 @@ Independent review of 7168164 identified and local probes validated the followin
 Final local verification at 517d7b0160: Python ratchet/workflow contracts 34 passed; reporter/routing/health/teardown matrix 5 files/21 passed; all 22 embedded Bash steps passed bash -n; Ruff, diff checks, typecheck, package lint (0 errors/41 inherited warnings), and normal Next build (49/49 routes) passed. Full Node 20 head report was 41 failed/728 passed across 769 tests, 146 files, and 346 derived suites with all safety counters zero. Exact 9ee0b5a base replay was 41 failed/89 passed across 130 tests and 43 suites; strict compare reported inherited=41 regressions=0. Exact real-backend runs passed JWT 26/1 expected skip and single-user 1/26 expected skips using the dependency-complete shared Python environment; the worktree-local .venv lacks uvicorn and was recorded as an environment-only failed attempt. Local actionlint was unavailable; PyYAML contracts and bash -n passed, so GitHub exact-head workflow validation remains mandatory.
 
 The previous remote-head hosted run passed all non-frontend gates but all eight frontend shards exited on the workflow policy that rejected dependency impact above 500 when no frontend test file was directly changed. The workflow now retains and shards the full dependency-impact set for that case. Remaining gates: commit this evidence/task update, push both commits to PR #2806, request fresh Qodo agentic review at the exact head, monitor all exact-head hosted checks, audit/resolve review threads, and only then complete TASK-13014. The two unrelated untracked watchlist templates remain excluded.
+
+2026-08-26 exact-head Qodo follow-up: review at c97460d31b reported one bug and two testability findings. The missing direct unit markers on three new Python tests and the readiness test assertion against an internal helper were valid; test-only commit 7253450461a58f0724fba77de84c97e5ec26b548 adds the markers and asserts the observable trusted URL passed to fetch. Focused verification: 34 Python contracts, 13 routing/health tests, route-only 7/7, targeted ESLint, Ruff, and typecheck all pass.
+
+The claimed nested-suite bug is factually incorrect and was not implemented. Real Node 20/Vitest 4.0.18 output reports 346 suites across 146 files; independent derivation from each file root plus every ancestorTitles prefix also yields 346. Vitest 4.0.18 JsonReporter.onTestRunEnd calculates numTotalTestSuites from getSuites(files), not files.length. Treating files as suites would break the actual strict report. The nested-suite regression now states this contract and proves a one-file fixture reports three suites (file root plus two nested describes). This evidence must be included when asking Qodo to reconsider the finding. A fresh full strict report/compare, documentation commit, push, Qodo refresh, and exact-head CI remain pending; TASK-13014 stays In Progress.
+
+2026-08-26 post-commit Qodo follow-up verification complete: full Node 20 run at test source 7253450461 remained 41 failed/728 passed across 769 tests and 346 suites, with 146 modules and zero unhandled/module/hook errors. Exact-base strict comparison remained inherited=41 regressions=0. The 17 failed files are unchanged by this follow-up. Documentation commit and push are next.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

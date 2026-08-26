@@ -12,11 +12,13 @@
   `dac56c2004b859103ceef393f023927014a988da`
 - Latest Qodo and independent-review remediation source commit:
   `517d7b016089e220fa55eab3483f212031b6f5cb`
+- Exact-head Qodo follow-up test commit:
+  `7253450461a58f0724fba77de84c97e5ec26b548`
 - Rebased onto: `origin/dev` at
   `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
 - Final ratchet comparison base: `origin/dev` at
   `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
-- Final verification timestamp: `2026-08-26T01:51:37Z`
+- Final verification timestamp: `2026-08-26T02:17:51Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -58,6 +60,7 @@ This evidence file is a documentation-only follow-up to those source trees.
 | Two-project real-backend Playwright | PASS: JWT 26 passed/1 expected skip; single-user 1 passed/26 expected skips |
 | Post-ratchet review remediation | PASS locally: 4 Qodo findings and 7 independent-review findings closed |
 | Credential destination proof | PASS: hostile request Host never received the single-user API key |
+| Exact-head Qodo follow-up | 2 valid test findings fixed; incorrect suite-count claim refuted with Vitest runtime/source evidence |
 
 PR 1 remains default-off. These results do not authorize outbound webhook
 delivery or canonical activation.
@@ -608,7 +611,9 @@ exact-base ratchet. Reviewer-remediated source
 `dac56c2004b859103ceef393f023927014a988da` closed the initial report,
 provenance, and runner gaps. Latest remediation source
 `517d7b016089e220fa55eab3483f212031b6f5cb` closes the subsequent Qodo,
-independent-review, and old-head CI findings. The workflow now:
+independent-review, and old-head CI findings. Test-only source
+`7253450461a58f0724fba77de84c97e5ec26b548` closes the valid findings from
+the next exact-head Qodo pass. The workflow now:
 
 1. installs frozen head dependencies and runs the complete head suite with
    human-readable, JSON, and minimal safety reporters;
@@ -688,6 +693,21 @@ A production build/start proof used JWT and single-user overrides on ports
 `Host: attacker.example:3102` plus an API-key cookie. The UI returned 200 while
 the mock backend recorded `GET /api/v1/users/me`, the API-key header, and
 `Host: 127.0.0.1:9102`. The hostile hostname received no request or credential.
+
+Qodo's exact-head pass at `c97460d31b` then reported one bug and two testability
+findings. The two testability findings were valid and are fixed in
+`7253450461`: all three new Python helper tests now carry direct `unit` markers,
+and the readiness-route test asserts the observable trusted URL passed to
+`fetch` rather than an internal helper call.
+
+The reported suite-count bug was not valid. The actual Node 20/Vitest 4.0.18
+report contains 346 suites across 146 files, while independently deriving each
+file root and every `ancestorTitles` prefix also yields exactly 346. Treating
+files as suites would therefore reject the real report. Vitest's own
+`JsonReporter.onTestRunEnd` computes these counters from `getSuites(files)`, not
+from `files.length`. The nested-suite regression now states that semantic
+contract explicitly and also proves its fixture contains one file but three
+suites: the file root, outer describe, and inner describe.
 
 TDD and final verification:
 
@@ -784,7 +804,7 @@ clean suite; they are governed by the strict exact-base ratchet.
 ## Final Safety Checks
 
 - `git diff --check`: PASS at tested source commit
-  `517d7b016089e220fa55eab3483f212031b6f5cb`.
+  `7253450461a58f0724fba77de84c97e5ec26b548`.
 - Exact-base admin UI comparison: PASS with 41 inherited failures and 0
   regressions; head and base unhandled/module/hook safety counters are all zero.
 - Real-backend admin UI: PASS in sequential JWT and single-user processes;
