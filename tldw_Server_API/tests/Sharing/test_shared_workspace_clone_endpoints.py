@@ -6,6 +6,7 @@ import inspect
 import json
 import sqlite3
 from datetime import datetime, timezone
+from threading import get_ident
 from typing import Any
 from uuid import uuid4
 
@@ -88,6 +89,7 @@ class _AccessService:
         self.error: Exception | None = None
         self.calls: list[tuple[int, int]] = []
         self.clone_calls: list[tuple[int, int]] = []
+        self.clone_thread_ids: list[int] = []
 
     async def resolve(self, *, share_id: int, recipient_user_id: int):
         self.calls.append((share_id, recipient_user_id))
@@ -97,9 +99,32 @@ class _AccessService:
 
     async def resolve_clone(self, *, share_id: int, recipient_user_id: int):
         self.clone_calls.append((share_id, recipient_user_id))
+        self.clone_thread_ids.append(get_ident())
         if self.error is not None:
             raise self.error
         return self.context
+
+
+class _ThreadRecordingJobManager:
+    def __init__(self, manager: JobManager) -> None:
+        self.manager = manager
+        self.thread_ids: dict[str, list[int]] = {
+            "replay": [],
+            "admit": [],
+            "get": [],
+        }
+
+    def replay_idempotent_operation(self, command):
+        self.thread_ids["replay"].append(get_ident())
+        return self.manager.replay_idempotent_operation(command)
+
+    def admit_idempotent_operation(self, command):
+        self.thread_ids["admit"].append(get_ident())
+        return self.manager.admit_idempotent_operation(command)
+
+    def get_job_or_archived_by_uuid(self, job_uuid: str, **kwargs: Any):
+        self.thread_ids["get"].append(get_ident())
+        return self.manager.get_job_or_archived_by_uuid(job_uuid, **kwargs)
 
 
 @pytest.fixture
@@ -266,6 +291,19 @@ def test_clone_post_admits_one_durable_operation_and_audits_requested(clone_api)
     }
 
 
+def test_clone_post_offloads_synchronous_jobs_io_from_event_loop(clone_api) -> None:
+    client, manager, service, _audit_events, app = clone_api
+    recording_manager = _ThreadRecordingJobManager(manager)
+    app.dependency_overrides[sharing.try_get_job_manager] = lambda: recording_manager
+
+    response = _post(client)
+
+    assert response.status_code == 202
+    event_loop_thread = service.clone_thread_ids[-1]
+    assert recording_manager.thread_ids["replay"][-1] != event_loop_thread
+    assert recording_manager.thread_ids["admit"][-1] != event_loop_thread
+
+
 def test_same_key_replays_after_revocation_without_resolving_share(clone_api) -> None:
     client, _manager, service, audit_events, _app = clone_api
     first = _post(client)
@@ -322,6 +360,26 @@ def test_terminal_post_replay_returns_200_and_matches_get(clone_api) -> None:
     assert replay.json() == status_response.json()
     assert replay.json()["status"] == "succeeded"
     assert replay.json()["result"]["readiness"]["vector_search"] == "needs_indexing"
+
+
+def test_clone_get_offloads_synchronous_jobs_io_from_event_loop(clone_api) -> None:
+    client, manager, _service, _audit, app = clone_api
+    operation = _post(client).json()
+    recording_manager = _ThreadRecordingJobManager(manager)
+    event_loop_threads: list[int] = []
+    original_user_dependency = app.dependency_overrides[sharing.get_request_user]
+
+    async def _tracked_user():
+        event_loop_threads.append(get_ident())
+        return await original_user_dependency()
+
+    app.dependency_overrides[sharing.get_request_user] = _tracked_user
+    app.dependency_overrides[sharing.try_get_job_manager] = lambda: recording_manager
+
+    response = client.get(operation["poll_href"])
+
+    assert response.status_code == 200
+    assert recording_manager.thread_ids["get"][-1] != event_loop_threads[-1]
 
 
 def test_clone_get_is_owner_scoped_and_share_scoped(clone_api) -> None:
@@ -420,3 +478,9 @@ def test_clone_routes_use_canonical_models_and_recipient_route_contract(clone_ap
     source = inspect.getsource(sharing)
     assert "BackgroundTasks" not in source
     assert "_run_clone_task" not in source
+    assert inspect.getdoc(sharing._resolve_recipient_clone_access)
+    assert (
+        inspect.signature(sharing._resolve_recipient_clone_access).return_annotation
+        == "SharedWorkspaceAccessContext"
+    )
+    assert inspect.getdoc(sharing.clone_shared_workspace)

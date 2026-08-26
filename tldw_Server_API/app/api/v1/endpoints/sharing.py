@@ -20,7 +20,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -112,6 +112,11 @@ from ..schemas.sharing_schemas import (
     VerifyPasswordRequest,
     VerifyPasswordResponse,
 )
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+        SharedWorkspaceAccessContext,
+    )
 from ..utils.prototype_error_contract import (
     PROTOTYPE_LINK_ERROR_RESPONSES,
     prototype_http_error,
@@ -510,7 +515,8 @@ async def _resolve_recipient_clone_access(
     *,
     share_id: int,
     recipient_user_id: int,
-):
+) -> SharedWorkspaceAccessContext:
+    """Resolve current clone permission and map domain failures to HTTP errors."""
     from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
         SharedWorkspaceCloneNotAllowed,
         SharedWorkspaceNotFound,
@@ -2009,6 +2015,13 @@ async def clone_shared_workspace(
     service: Any = Depends(get_shared_workspace_access_service),
     job_manager: Any = Depends(try_get_job_manager),
 ) -> SharedWorkspaceCloneOperationResponse:
+    """Admit or replay a durable recipient-owned Shared Workspace clone.
+
+    The required idempotency key identifies one normalized clone request. The
+    response is the canonical owner-scoped operation projection; stable 4xx/5xx
+    recipient error codes cover invalid input, denied access, conflicts, and
+    unavailable Jobs persistence.
+    """
     if job_manager is None:
         raise _recipient_http_error(503, "clone_operation_unavailable")
     try:
@@ -2022,7 +2035,10 @@ async def clone_shared_workspace(
         raise _recipient_http_error(422, "invalid_shared_workspace_request") from exc
 
     try:
-        replay = job_manager.replay_idempotent_operation(command)
+        replay = await run_in_threadpool(
+            job_manager.replay_idempotent_operation,
+            command,
+        )
     except IdempotentOperationConflict as exc:
         raise _clone_conflict_http_error(exc) from exc
     except Exception as exc:
@@ -2044,7 +2060,10 @@ async def clone_shared_workspace(
     if not context.allow_clone:
         raise _recipient_http_error(403, "clone_not_allowed")
     try:
-        admission = job_manager.admit_idempotent_operation(command)
+        admission = await run_in_threadpool(
+            job_manager.admit_idempotent_operation,
+            command,
+        )
     except IdempotentOperationConflict as exc:
         raise _clone_conflict_http_error(exc) from exc
     except (IdempotentOperationUnavailableError, ValueError) as exc:
@@ -2097,7 +2116,8 @@ async def get_shared_workspace_clone_operation(
     except (TypeError, ValueError, AttributeError) as exc:
         raise _recipient_http_error(404, "shared_workspace_not_found") from exc
     try:
-        job = job_manager.get_job_or_archived_by_uuid(
+        job = await run_in_threadpool(
+            job_manager.get_job_or_archived_by_uuid,
             normalized_operation_id,
             domain="sharing",
             owner_user_id=str(user.id),
