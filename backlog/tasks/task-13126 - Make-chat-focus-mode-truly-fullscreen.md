@@ -1,16 +1,21 @@
 ---
-id: TASK-12115
+id: TASK-13126
 title: Make chat focus mode truly fullscreen
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-03 02:07'
+updated_date: 2026-08-26 15:51
 labels:
-  - webui
-  - chat
-  - ux
+- webui
+- chat
+- ux
 dependencies: []
 priority: high
+references:
+- https://github.com/rmusser01/tldw_server/pull/2578
+- TASK-13125
+- TASK-12115
+- legacy:TASK-12115 (chat focus mode)
 ---
 
 ## Description
@@ -28,7 +33,7 @@ Update chat focus mode so it hides the app shell/header/sidebar and cockpit rail
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-07-03-chat-focus-fullscreen.md
 
 Verification: targeted Vitest passed: bun run test:run ../packages/ui/src/components/Layouts/__tests__/Layout.shell-overrides.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx (23 tests passed after adding the shell cleanup regression).
@@ -44,8 +49,8 @@ Bandit: skipped because this change only touches frontend TypeScript/TSX tests a
 PR: https://github.com/rmusser01/tldw_server/pull/2578
 
 Review follow-up: rebased on latest dev and addressed PR review comments for shell cleanup, focus accessibility/test coverage, and task marker structure. The Qodo broad-typecheck comment was evaluated against latest dev; the remaining typecheck failures are pre-existing, unrelated baseline errors and are not changed by this PR.
-<!-- SECTION:NOTES:END -->
-
+Identity normalization (TASK-13125): this completed record was originally created and merged as TASK-12115 in PR #2578. Its canonical ID is now TASK-13126. TASK-12115 now deterministically identifies the standalone HTML presentation rollout; no implementation or completion evidence was removed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
