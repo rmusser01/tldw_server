@@ -159,6 +159,19 @@ def _moodboard_studio_cursor_regressed(
     current: object,
     requested: object,
 ) -> bool:
+    """Return whether a canonical moodboard or Studio cursor moved backward.
+
+    Args:
+        readiness_key: Domain-specific readiness metadata key.
+        current: Current parsed UUID cursor or placement UUID pair.
+        requested: Requested parsed UUID cursor or placement UUID pair.
+
+    Returns:
+        ``True`` when the requested cursor sorts before the current cursor.
+
+    Raises:
+        SyncStoreError: If the domain or either cursor shape is invalid.
+    """
     if readiness_key in {"notes_moodboard_v1", "notes_studio_document_v1"}:
         if not isinstance(current, UUID) or not isinstance(requested, UUID):
             raise SyncStoreError("notes_moodboard_studio_readiness_cursor_invalid")
@@ -5083,6 +5096,18 @@ class SyncDatabase:
         metadata: Mapping[str, Any],
         readiness_key: str,
     ) -> NotesMoodboardStudioReadinessRecord:
+        """Parse one readiness record, defaulting absent domains to unenrolled.
+
+        Args:
+            metadata: Dataset metadata containing readiness records.
+            readiness_key: Moodboard or Studio readiness domain key.
+
+        Returns:
+            The validated readiness record.
+
+        Raises:
+            SyncStoreError: If an existing record is malformed.
+        """
         if readiness_key not in metadata:
             return default_notes_moodboard_studio_readiness_record()
         result = parse_notes_moodboard_studio_readiness_record(
@@ -5105,6 +5130,30 @@ class SyncDatabase:
         moodboard_capture_enabled: bool | None = None,
         studio_document_capture_enabled: bool | None = None,
     ) -> SyncDataset:
+        """Apply one atomic compare-and-set transition across readiness records.
+
+        Capture remains disabled throughout bootstrap readiness. The method
+        locks the owned dataset row, validates its personal Chatbook scope, and
+        commits all requested domain transitions together.
+
+        Args:
+            dataset_id: Target Sync dataset ID.
+            owner_user_id: Authenticated dataset owner.
+            source_dataset_id: Source scope, which must equal ``dataset_id``.
+            records: Domain transition tuples containing expected and requested
+                state plus source progress evidence.
+            moodboard_capture_enabled: Optional capture guard; only ``False``
+                or ``None`` is accepted.
+            studio_document_capture_enabled: Optional capture guard; only
+                ``False`` or ``None`` is accepted.
+
+        Returns:
+            The updated dataset after the transaction commits.
+
+        Raises:
+            SyncStoreError: If ownership, scope, metadata, capture state,
+                compare-and-set state, or source progress is invalid.
+        """
         if (
             not isinstance(source_dataset_id, str)
             or source_dataset_id != dataset_id
@@ -5232,6 +5281,25 @@ class SyncDatabase:
         source_fingerprint: str | None,
         reason_code: str | None,
     ) -> NotesMoodboardStudioReadinessRecord:
+        """Build and validate one readiness compare-and-set transition.
+
+        Args:
+            readiness_key: Domain-specific readiness metadata key.
+            current: Current validated readiness record.
+            expected_state: State the caller expects to replace.
+            state: Requested next state.
+            source_cursor: Requested canonical bootstrap cursor.
+            source_count: Requested processed-object count.
+            source_fingerprint: Requested source snapshot fingerprint.
+            reason_code: Optional domain-specific blocked reason.
+
+        Returns:
+            The validated requested readiness record.
+
+        Raises:
+            SyncStoreError: If the compare-and-set fails, the transition is
+                illegal, or source progress changes or regresses.
+        """
         if current.state != expected_state:
             raise SyncStoreError(
                 "notes_moodboard_studio_readiness_compare_and_set_failed"
@@ -5319,6 +5387,17 @@ class SyncDatabase:
         current: NotesMoodboardStudioReadinessRecord,
         requested: NotesMoodboardStudioReadinessRecord,
     ) -> None:
+        """Validate monotonic cursor, count, and fingerprint progress.
+
+        Args:
+            readiness_key: Domain-specific readiness metadata key.
+            current: Current validated readiness record.
+            requested: Requested validated readiness record.
+
+        Raises:
+            SyncStoreError: If progress regresses or source identity changes
+                without a corresponding cursor and count advance.
+        """
         if requested.source_count < current.source_count:
             raise SyncStoreError(
                 "notes_moodboard_studio_readiness_progress_regressed"

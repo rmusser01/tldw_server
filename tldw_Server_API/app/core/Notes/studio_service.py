@@ -60,6 +60,20 @@ class NotesStudioService:
         provider: str | None,
         model: str | None,
     ) -> tuple[str, str]:
+        """Resolve the provider and model that executed Studio derivation.
+
+        Args:
+            generated: Adapter response containing its execution source.
+            provider: Requested LLM provider, when an LLM executed the request.
+            model: Requested LLM model, when an LLM executed the request.
+
+        Returns:
+            The executed ``(provider, model)`` identity, using deterministic
+            local identifiers for non-LLM derivation.
+
+        Raises:
+            InputError: If an LLM result lacks provider or model identity.
+        """
         if generated.get("source") == "llm":
             if not provider or not model:
                 raise InputError("Notes Studio LLM execution identity is incomplete.")  # noqa: TRY003
@@ -70,6 +84,19 @@ class NotesStudioService:
     def _diagram_execution_identity(
         generated: dict[str, Any],
     ) -> tuple[str, str]:
+        """Resolve and validate the provider and model for diagram generation.
+
+        Args:
+            generated: Diagram adapter response containing execution metadata.
+
+        Returns:
+            The executed ``(provider, model)`` identity, using deterministic
+            local identifiers only when the adapter omits an execution source.
+
+        Raises:
+            InputError: If the execution source is invalid or a reported
+                execution lacks provider or model identity.
+        """
         source = generated.get("source")
         if source is None:
             return _LOCAL_STUDIO_PROVIDER, _LOCAL_DIAGRAM_MODEL

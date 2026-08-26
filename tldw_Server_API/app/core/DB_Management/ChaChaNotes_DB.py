@@ -700,7 +700,7 @@ class CharactersRAGDB:
         db_path_str (str): String representation of the database path for SQLite connection.
     """
     _CURRENT_SCHEMA_VERSION = 63  # Schema v63 scopes moodboards and Studio after clone v62
-    _POSTGRES_SCHEMA_VERSION = 62
+    _POSTGRES_SCHEMA_VERSION = 63
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -14299,19 +14299,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ], source_exhausted
         return rows, [rows[-1]["owner_user_id"], rows[-1]["note_id"]], source_exhausted
 
-    def _migrate_from_v61_to_v62_postgres(self, conn: Any) -> None:
-        """Run the durable bounded PostgreSQL v62 migration, version last."""
+    def _migrate_from_v62_to_v63_postgres(self, conn: Any) -> None:
+        """Run the durable bounded PostgreSQL v63 migration, version last."""
         def begin_phase(label: str) -> bool:
             version = self._begin_notes_moodboard_studio_v61_postgres_transaction(
                 conn
             )
-            if version == 62:
+            if version == 63:
                 self._verify_notes_moodboard_studio_schema_postgres(conn)
                 conn.commit()
                 return False
-            if version != 61:
+            if version != 62:
                 raise SchemaError(  # noqa: TRY003
-                    f"Notes moodboard/Studio v62 {label} observed schema version {version}."
+                    f"Notes moodboard/Studio v63 {label} observed schema version {version}."
                 )
             return True
 
@@ -14684,7 +14684,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn, phase="migration", cursor=None, count=0,
             fingerprint=f"sha256:{hashlib.sha256().hexdigest()}", status="complete",
         )
-        self._set_schema_version_postgres(conn, 62)
+        self._set_schema_version_postgres(conn, 63)
         conn.commit()
         self._notes_moodboard_studio_v61_postgres_checkpoint("version")
 
@@ -15841,7 +15841,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if {str(row.get("table_name")) for row in table_rows} != set(authority_relations):
             raise SchemaError("Notes task v60 PostgreSQL relation catalog drifted.")  # noqa: TRY003
         v61_authority_owner = (
-            self._get_schema_version_postgres(conn) >= 61
+            self._get_schema_version_postgres(conn) >= 63
             or self.backend.table_exists(
                 "chacha_schema_migration_progress", connection=conn
             )
@@ -17403,13 +17403,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _ensure_note_studio_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Verify the schema-version-owned Studio relation without repairing drift."""
-        if self._get_db_version(conn) < 61:
+        if self._get_db_version(conn) < 63:
             return
         self._verify_notes_moodboard_studio_schema_sqlite(conn)
 
     def _ensure_note_studio_schema_postgres(self, conn: Any) -> None:
-        """Create only the legacy v60 sidecar or verify schema-owned v61 state."""
-        if self._get_schema_version_postgres(conn) >= 61:
+        """Create the legacy sidecar before v63 or verify schema-owned v63 state."""
+        if self._get_schema_version_postgres(conn) >= 63:
             self._verify_notes_moodboard_studio_schema_postgres(conn)
             return
         statements = (
@@ -17436,13 +17436,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self.backend.execute(statement, connection=conn)
 
     def _supports_notes_moodboard_studio_v61(self) -> bool:
-        """Return whether this database instance has the v61 product catalog."""
+        """Return whether this database instance has the v61 product catalog revision."""
         if self.backend_type == BackendType.POSTGRESQL:
             cached = getattr(self, "_runtime_schema_version", None)
             if cached is not None:
-                return int(cached) >= 61
-            return self._get_schema_version_postgres(None) >= 61
-        return self._CURRENT_SCHEMA_VERSION >= 61
+                return int(cached) >= 63
+            return self._get_schema_version_postgres(None) >= 63
+        return self._CURRENT_SCHEMA_VERSION >= 63
 
     def _ensure_web_clipper_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure the web clipper sidecar tables exist for SQLite deployments."""
@@ -19294,10 +19294,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = 0
                         current_initial_version = 0
                     else:
-                        if target_version >= 60:
-                            self._verify_note_task_schema_sqlite(conn)
                         if target_version >= 63:
                             self._verify_notes_moodboard_studio_schema_sqlite(conn)
+                        elif target_version >= 60:
+                            self._verify_note_task_schema_sqlite(conn)
                         logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
                         # Ensure helpful indexes that may have been introduced post-creation
                         try:
@@ -20010,10 +20010,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if final_version_check != target_version:
                     raise SchemaError(  # noqa: TRY003, TRY301
                         f"Schema migration process completed, but final DB version is {final_version_check}, expected {target_version}. Manual check required.")
-                if final_version_check >= 60:
-                    self._verify_note_task_schema_sqlite(conn)
-                if final_version_check >= 62:
+                if final_version_check >= 63:
                     self._verify_notes_moodboard_studio_schema_sqlite(conn)
+                elif final_version_check >= 60:
+                    self._verify_note_task_schema_sqlite(conn)
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
@@ -23747,7 +23747,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             elif current_version >= 60:
                 self._verify_note_attachment_schema_postgres(conn)
                 self._verify_note_task_schema_postgres(conn)
-                if current_version >= 62:
+                if current_version >= 63:
                     self._verify_notes_moodboard_studio_schema_postgres(conn)
 
             if current_version < 36:
@@ -23959,6 +23959,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 62:
                 self._migrate_from_v61_to_v62_postgres(conn)
                 current_version = 62
+            if current_version < 63:
+                self._ensure_note_studio_schema_postgres(conn)
+                self._migrate_from_v62_to_v63_postgres(conn)
+                current_version = 63
             self._runtime_schema_version = current_version
 
             if current_version > target_version:

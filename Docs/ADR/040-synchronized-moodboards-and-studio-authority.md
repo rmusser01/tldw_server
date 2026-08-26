@@ -249,6 +249,13 @@ preserve local-unbound compatibility, canonicalize legacy rows, consolidate Stud
 schema authority, enforce direct scope and RLS, and surface malformed state without
 silently discarding it.
 
+Schema-version allocation is an integration detail, not a change to this authority
+decision. Shared-workspace chat occupies ChaChaNotes schema v61 and durable workspace
+clone lifecycle occupies v62 on the integration base, so the moodboard and Studio
+catalog lands in schema v63 through a linear v62-to-v63 migration. Existing v61
+storage-revision labels remain stable internal names where renaming them would add
+churn without changing persisted semantics.
+
 The default Sync envelope size becomes a user-visible activation constraint for
 large Studio state. Active writes fail before product mutation and oversized
 legacy rows block readiness until repaired or reduced.

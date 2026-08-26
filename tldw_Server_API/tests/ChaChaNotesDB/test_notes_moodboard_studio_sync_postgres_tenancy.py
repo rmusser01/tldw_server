@@ -1,4 +1,4 @@
-"""Required-live PostgreSQL v61 catalog and tenancy proofs."""
+"""Required-live PostgreSQL schema-v63 catalog and tenancy proofs."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from uuid import uuid4
@@ -208,8 +209,8 @@ def _seed_local_unbound_moodboard_studio_graph(
     return moodboard_id
 
 
-def test_postgres_v61_migration_contract_is_bounded_and_version_last() -> None:
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v60_to_v61_postgres)
+def test_postgres_v63_migration_contract_is_bounded_and_version_last() -> None:
+    source = inspect.getsource(CharactersRAGDB._migrate_from_v62_to_v63_postgres)
     fingerprint_source = inspect.getsource(
         CharactersRAGDB._postgres_v61_fingerprint_phase_page
     )
@@ -224,7 +225,7 @@ def test_postgres_v61_migration_contract_is_bounded_and_version_last() -> None:
     )
     initializer_source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
 
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 61
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 63
     assert "lock_timeout" in configure_source
     assert "statement_timeout" in configure_source
     assert "lock=True" in begin_source
@@ -347,13 +348,13 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
     }
 
 
-def test_fresh_postgres_schema_is_exact_v61_with_forced_rls(
+def test_fresh_postgres_schema_is_exact_v63_with_forced_rls(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend, db = _open_db(pg_database_config)
     try:
         with db.transaction() as conn:
-            assert db._get_schema_version_postgres(conn) == 61
+            assert db._get_schema_version_postgres(conn) == 63
             db._verify_notes_moodboard_studio_schema_postgres(conn)
             rows = conn.execute(
                 "SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,"
@@ -1369,6 +1370,121 @@ def test_postgres_v61_old_authority_insert_defaults_and_first_enrollment_race(
         backend_b.get_pool().close_all()
 
 
+def test_postgres_studio_diagram_update_rejects_stale_writer_after_lock_wait(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject a stale Studio writer after a concurrent update releases its row lock."""
+    owner = "960021"
+    note_id = f"00000000-0000-4000-8000-{uuid4().hex[:12]}"
+    backend_a, db_a = _open_db(pg_database_config, owner=owner)
+    backend_b, db_b = _open_db(pg_database_config, owner=owner)
+    observer_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    sections = [
+        {
+            "id": "notes-1",
+            "kind": "notes",
+            "title": "Notes",
+            "content": "Accepted content",
+        }
+    ]
+    source_graph = [
+        {
+            "id": "notes-1",
+            "title": "Notes",
+            "kind": "notes",
+            "content": "Accepted content",
+        }
+    ]
+    winner_diagram = "graph TD; A-->winner"
+    loser_diagram = "graph TD; A-->loser"
+    winner_manifest = {
+        "diagram_type": "flowchart",
+        "source_section_ids": ["notes-1"],
+        "source_graph": source_graph,
+        "diagram": winner_diagram,
+        "format": "mermaid",
+        "status": "ready",
+        "render_hash": diagram_render_hash(
+            diagram_type="flowchart",
+            context="Notes\nAccepted content",
+            diagram=winner_diagram,
+        ),
+    }
+    loser_manifest = {
+        **winner_manifest,
+        "diagram": loser_diagram,
+        "render_hash": diagram_render_hash(
+            diagram_type="flowchart",
+            context="Notes\nAccepted content",
+            diagram=loser_diagram,
+        ),
+    }
+    try:
+        db_a.add_note("Studio race", "Accepted content", note_id=note_id)
+        before = db_a.create_note_studio_document(
+            note_id=note_id,
+            payload_json={"sections": sections},
+            template_type="lined",
+            handwriting_mode="off",
+            render_version=1,
+        )
+        monkeypatch.setattr(
+            db_a,
+            "_get_current_utc_timestamp_iso",
+            lambda: "2099-01-01T00:00:01.000000+00:00",
+        )
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with db_a.transaction() as winner_conn:
+                winner = db_a.update_note_studio_diagram_manifest(
+                    note_id=note_id,
+                    diagram_manifest_json=winner_manifest,
+                    expected_companion_content_hash=before["companion_content_hash"],
+                    expected_render_version=int(before["render_version"]),
+                    expected_last_modified=before["last_modified"],
+                    conn=winner_conn,
+                )
+                loser_future = pool.submit(
+                    db_b.update_note_studio_diagram_manifest,
+                    note_id=note_id,
+                    diagram_manifest_json=loser_manifest,
+                    expected_companion_content_hash=before["companion_content_hash"],
+                    expected_render_version=int(before["render_version"]),
+                    expected_last_modified=before["last_modified"],
+                )
+                waiting_on_lock = False
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and not loser_future.done():
+                    with observer_backend.transaction() as observer_conn:
+                        row = observer_backend.execute(
+                            "SELECT EXISTS(SELECT 1 FROM pg_stat_activity "
+                            "WHERE datname=current_database() AND pid<>pg_backend_pid() "
+                            "AND wait_event_type='Lock' "
+                            "AND query ILIKE '%note_studio_documents%') AS waiting",
+                            connection=observer_conn,
+                        ).rows[0]
+                    waiting_on_lock = bool(row["waiting"])
+                    if waiting_on_lock:
+                        break
+                    time.sleep(0.02)
+                assert waiting_on_lock is True
+
+            with pytest.raises(ConflictError, match="changed concurrently"):
+                loser_future.result(timeout=20)
+
+        stored = db_a.get_note_studio_document(note_id)
+        assert stored is not None
+        assert stored["diagram_manifest_json"]["diagram"] == winner_diagram
+        assert stored["canonical_revision"] == winner["canonical_revision"]
+    finally:
+        db_a.close_all_connections()
+        db_b.close_all_connections()
+        backend_a.get_pool().close_all()
+        backend_b.get_pool().close_all()
+        observer_backend.get_pool().close_all()
+
+
 def test_postgres_v61_conflicting_first_enrollment_has_one_winner_and_rolls_back_loser(
     pg_database_config: DatabaseConfig,
 ) -> None:
@@ -1435,13 +1551,13 @@ def test_postgres_v61_conflicting_first_enrollment_has_one_winner_and_rolls_back
         backend_b.get_pool().close_all()
 
 
-def _restore_large_postgres_v60_fixture(
+def _restore_large_postgres_v62_fixture(
     db: CharactersRAGDB,
     *,
     owner: str,
     row_count: int,
 ) -> None:
-    """Replace an empty fresh v61 product graph with a large exact-shape v60 fixture."""
+    """Replace a fresh product graph with the exact-shape v62 predecessor."""
     board_columns = (
         "owner_user_id", "dataset_id", "sync_id", "canvas_json",
         "canonical_revision", "canonical_hash", "source_diagnostic_code",
@@ -1491,7 +1607,7 @@ def _restore_large_postgres_v60_fixture(
             for column in columns:
                 conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")  # nosec B608
         conn.execute("DROP TABLE chacha_schema_migration_progress")
-        db._set_schema_version_postgres(conn, 60)
+        db._set_schema_version_postgres(conn, 62)
 
         conn.execute("SELECT set_config('app.current_user_id', ?, true)", (owner,))
         conn.execute(
@@ -1531,7 +1647,7 @@ def test_postgres_v61_placement_order_is_board_global_across_resumed_pages(
     first_board_rank_multiplier = 137
     backend, db = _open_db(pg_database_config, owner=owner)
     try:
-        _restore_large_postgres_v60_fixture(db, owner=owner, row_count=2)
+        _restore_large_postgres_v62_fixture(db, owner=owner, row_count=2)
         with db.transaction() as conn:
             conn.execute("DELETE FROM moodboard_notes")
             conn.execute("DELETE FROM note_studio_documents")
@@ -1597,7 +1713,7 @@ def test_postgres_v61_placement_order_is_board_global_across_resumed_pages(
         )
         with pytest.raises(RuntimeError, match="placement-page interruption"):
             with db.transaction() as conn:
-                db._migrate_from_v60_to_v61_postgres(conn)
+                db._migrate_from_v62_to_v63_postgres(conn)
         assert failed
         with backend.transaction() as conn:
             version = db._get_schema_version_postgres(conn)
@@ -1607,7 +1723,7 @@ def test_postgres_v61_placement_order_is_board_global_across_resumed_pages(
                 (db._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID,),
                 connection=conn,
             ).rows
-        assert version == 60
+        assert version == 62
         assert partial == [{"copied_count": 128, "status": "running"}]
 
         monkeypatch.setattr(
@@ -1616,7 +1732,7 @@ def test_postgres_v61_placement_order_is_board_global_across_resumed_pages(
             lambda _label: None,
         )
         with db.transaction() as conn:
-            db._migrate_from_v60_to_v61_postgres(conn)
+            db._migrate_from_v62_to_v63_postgres(conn)
 
         with backend.transaction() as conn:
             placements = backend.execute(
@@ -1683,7 +1799,7 @@ def test_postgres_v61_upgrade_matches_sqlite_rule_and_studio_conversion(
     source_note_id = str(uuid4())
     backend, db = _open_db(pg_database_config, owner=owner)
     try:
-        _restore_large_postgres_v60_fixture(db, owner=owner, row_count=4)
+        _restore_large_postgres_v62_fixture(db, owner=owner, row_count=4)
         with db.transaction() as conn:
             conn.execute(
                 "UPDATE notes SET id=? WHERE id='legacy-note-0001'", (valid_note_id,)
@@ -1804,7 +1920,7 @@ def test_postgres_v61_upgrade_matches_sqlite_rule_and_studio_conversion(
             )
 
         with db.transaction() as conn:
-            db._migrate_from_v60_to_v61_postgres(conn)
+            db._migrate_from_v62_to_v63_postgres(conn)
 
         with backend.transaction() as conn:
             boards = backend.execute(
@@ -1889,7 +2005,7 @@ def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
             raise InjectedFailure(stage)
 
     try:
-        _restore_large_postgres_v60_fixture(db, owner=owner, row_count=row_count)
+        _restore_large_postgres_v62_fixture(db, owner=owner, row_count=row_count)
         monkeypatch.setattr(
             db,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
@@ -1899,7 +2015,7 @@ def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
         for _attempt in range(100):
             try:
                 with db.transaction() as conn:
-                    db._migrate_from_v60_to_v61_postgres(conn)
+                    db._migrate_from_v62_to_v63_postgres(conn)
             except InjectedFailure:
                 pass
             with backend.transaction() as conn:
@@ -1931,15 +2047,15 @@ def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
                     assert len(cursor) == (
                         4 if row["phase"].endswith("moodboard_notes") else 2
                     )
-            if version == 61:
+            if version == 63:
                 break
-            assert version == 60
+            assert version == 62
             assert not any(
                 row["phase"] == "migration" and row["status"] == "complete"
                 for row in progress
             )
         else:
-            pytest.fail("PostgreSQL v61 migration did not converge after fault injection")
+            pytest.fail("PostgreSQL v62-to-v63 migration did not converge after fault injection")
 
         with db.transaction() as conn:
             db._verify_notes_moodboard_studio_schema_postgres(conn)
@@ -2014,7 +2130,7 @@ def test_postgres_v61_aggregate_rejects_valid_looking_target_tampering(
             raise CopyFinished
 
     try:
-        _restore_large_postgres_v60_fixture(db, owner=owner, row_count=1)
+        _restore_large_postgres_v62_fixture(db, owner=owner, row_count=1)
         monkeypatch.setattr(
             db,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
@@ -2022,7 +2138,7 @@ def test_postgres_v61_aggregate_rejects_valid_looking_target_tampering(
         )
         with pytest.raises(CopyFinished):
             with db.transaction() as conn:
-                db._migrate_from_v60_to_v61_postgres(conn)
+                db._migrate_from_v62_to_v63_postgres(conn)
 
         with backend.transaction() as conn:
             backend.execute(
@@ -2037,10 +2153,10 @@ def test_postgres_v61_aggregate_rejects_valid_looking_target_tampering(
         )
         with pytest.raises(SchemaError, match="aggregate verification failed"):
             with db.transaction() as conn:
-                db._migrate_from_v60_to_v61_postgres(conn)
+                db._migrate_from_v62_to_v63_postgres(conn)
 
         with backend.transaction() as conn:
-            assert db._get_schema_version_postgres(conn) == 60
+            assert db._get_schema_version_postgres(conn) == 62
             migration = backend.execute(
                 "SELECT status FROM chacha_schema_migration_progress "
                 "WHERE migration_id=? AND phase='migration'",
@@ -2068,7 +2184,7 @@ def test_postgres_v61_source_prediction_rejects_consistently_wrong_conversion(
             raise PredictionFinished
 
     try:
-        _restore_large_postgres_v60_fixture(db, owner=owner, row_count=1)
+        _restore_large_postgres_v62_fixture(db, owner=owner, row_count=1)
         monkeypatch.setattr(
             db,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
@@ -2076,7 +2192,7 @@ def test_postgres_v61_source_prediction_rejects_consistently_wrong_conversion(
         )
         with pytest.raises(PredictionFinished):
             with db.transaction() as conn:
-                db._migrate_from_v60_to_v61_postgres(conn)
+                db._migrate_from_v62_to_v63_postgres(conn)
 
         original_expected_row = db._postgres_v61_expected_row
 
@@ -2098,9 +2214,9 @@ def test_postgres_v61_source_prediction_rejects_consistently_wrong_conversion(
         )
         with pytest.raises(SchemaError, match="aggregate verification failed"):
             with db.transaction() as conn:
-                db._migrate_from_v60_to_v61_postgres(conn)
+                db._migrate_from_v62_to_v63_postgres(conn)
         with backend.transaction() as conn:
-            assert db._get_schema_version_postgres(conn) == 60
+            assert db._get_schema_version_postgres(conn) == 62
             predictions = backend.execute(
                 "SELECT phase,status FROM chacha_schema_migration_progress "
                 "WHERE migration_id=? AND phase LIKE 'source_prediction:%%' "

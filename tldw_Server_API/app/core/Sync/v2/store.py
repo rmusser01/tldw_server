@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Core-facing Sync v2 store facade."""
+
+from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -423,7 +423,7 @@ class SyncV2Store:
         moodboard_reason_code: str | None = None,
         placement_reason_code: str | None = None,
         moodboard_capture_enabled: bool | None = None,
-    ):
+    ) -> SyncDataset:
         """Delegate coupled dormant moodboard/placement readiness transition."""
 
         return self.db.transition_notes_moodboard_graph_readiness(
@@ -456,7 +456,7 @@ class SyncV2Store:
         source_fingerprint: str | None,
         reason_code: str | None = None,
         studio_document_capture_enabled: bool | None = None,
-    ):
+    ) -> SyncDataset:
         """Delegate independent dormant Studio readiness transition."""
 
         return self.db.transition_notes_studio_document_readiness(

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Pure validation helpers for dormant moodboard and Studio readiness metadata."""
+
+from __future__ import annotations
 
 import re
 from collections.abc import Mapping

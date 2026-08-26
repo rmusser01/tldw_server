@@ -26,13 +26,14 @@ TASK_ID = "22222222-2222-4222-8222-222222222222"
 EVENT_ID = "33333333-3333-4333-8333-333333333333"
 
 
-def test_postgres_initializer_preserves_v60_and_v61_steps_before_current_v62() -> None:
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 62
+def test_postgres_initializer_preserves_v60_v61_and_v62_steps_before_current_v63() -> None:
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 63
     source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
     assert "target_version = self._POSTGRES_SCHEMA_VERSION" in source
     assert "_migrate_from_v59_to_v60_postgres" in source
     assert "_migrate_from_v60_to_v61_postgres" in source
     assert "_migrate_from_v61_to_v62_postgres" in source
+    assert "_migrate_from_v62_to_v63_postgres" in source
     assert "_verify_note_task_schema_postgres" in source
 
 

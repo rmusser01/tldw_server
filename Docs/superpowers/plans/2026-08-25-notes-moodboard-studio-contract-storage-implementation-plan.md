@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Establish strict dormant contracts and schema-v61 tenant-scoped product storage for moodboards, manual placements, Studio sidecars, and per-graph scope authority without exposing any new public Sync capability.
+**Goal:** Establish strict dormant contracts and schema-v63 tenant-scoped product storage for moodboards, manual placements, Studio sidecars, and per-graph scope authority without exposing any new public Sync capability.
 
-**Architecture:** ChaChaNotes remains product authority. Schema v61 transactionally upgrades the legacy moodboard, placement, Studio, and scope-authority relations; legacy product rows remain owner-proven in `local-unbound` scope until an explicit graph binder rekeys them. One frozen contract module owns canonical JSON, identifiers, hashes, limits, and legacy diagnostics, while one readiness module validates private metadata and all public supported/writable maps continue to omit the three domains.
+**Architecture:** ChaChaNotes remains product authority. Schema v63 transactionally upgrades the legacy moodboard, placement, Studio, and scope-authority relations after the integration base's shared-workspace-chat v61 and durable-clone v62 migrations; legacy product rows remain owner-proven in `local-unbound` scope until an explicit graph binder rekeys them. One frozen contract module owns canonical JSON, identifiers, hashes, limits, and legacy diagnostics, while one readiness module validates private metadata and all public supported/writable maps continue to omit the three domains.
 
 **Tech Stack:** Python 3.11, Pydantic v2, SQLite, PostgreSQL forced RLS, FastAPI Sync v2 models, pytest, Ruff, Bandit.
 
@@ -26,12 +26,12 @@
 - `tldw_Server_API/app/core/Sync/v2/notes_moodboard_studio_readiness.py` — pure parsing/redaction for three private readiness records and coupled moodboard readiness.
 - `tldw_Server_API/app/core/DB_Management/chacha/moodboard_sync_store.py` — scoped storage/binding primitives used by later adapters, bootstrap, and repair without moving legacy REST methods.
 - `tldw_Server_API/tests/Sync/test_sync_v2_notes_moodboard_studio_contract.py` — exact cross-runtime vectors, field bounds, identity, lineage, and dormant capability tests.
-- `tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py` — SQLite fresh/60→61/rollback/catalog/legacy conversion proof.
+- `tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py` — SQLite fresh/60→61→62→63/rollback/catalog/legacy conversion proof; the filename retains the stable feature storage-revision label.
 - `tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py` — required live PostgreSQL RLS, catalog, race, and plan proof.
 
 **Modify**
 
-- `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` — schema v61 DDL, resumable PostgreSQL migration progress, bounded conversion, catalog verification, runtime Studio helper demotion, and moodboard sync-store composition.
+- `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` — schema v63 DDL, resumable PostgreSQL migration progress, bounded conversion, catalog verification, runtime Studio helper demotion, and moodboard sync-store composition.
 - `tldw_Server_API/app/core/DB_Management/chacha/task_store.py` — flag-aware sole authority lookup and atomic task-graph binding.
 - `tldw_Server_API/app/core/DB_Management/chacha/note_store.py` — scoped Studio row reads/writes and canonical lineage columns while retaining REST compatibility.
 - `tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py` — exact owner/dataset product policies and owner-only authority policy.
@@ -69,7 +69,7 @@ Expected: TASK-13007.1 is In Progress, links ADR-040 and the approved design, an
 ```bash
 backlog task edit 13007.1 \
   --doc Docs/superpowers/plans/2026-08-25-notes-moodboard-studio-contract-storage-implementation-plan.md \
-  --plan $'1. Lock strict dormant v1 contracts and capability exclusion.\n2. Upgrade SQLite product storage and per-graph scope authority to schema v61.\n3. Enforce exact PostgreSQL catalog and forced-RLS tenancy.\n4. Add private readiness and demote the runtime Studio schema helper.\n5. Prove REST compatibility and run the required PR gate.\n\nADR required: no\nADR path: Docs/ADR/040-synchronized-moodboards-and-studio-authority.md\nReason: ADR-040 already governs this child.'
+  --plan $'1. Lock strict dormant v1 contracts and capability exclusion.\n2. Upgrade SQLite product storage and per-graph scope authority from schema v62 to v63.\n3. Enforce exact PostgreSQL catalog and forced-RLS tenancy.\n4. Add private readiness and demote the runtime Studio schema helper.\n5. Prove REST compatibility and run the required PR gate.\n\nADR required: no\nADR path: Docs/ADR/040-synchronized-moodboards-and-studio-authority.md\nReason: ADR-040 already governs this child; the integration base allocates v61 to shared-workspace chat and v62 to durable clone lifecycle, so this feature uses the next linear migration.'
 ```
 
 ### Task 1: Lock canonical v1 contracts and dormant catalog entries
@@ -170,11 +170,11 @@ git add tldw_Server_API/app/core/Sync/v2/notes_moodboard_studio_contract.py \
 git commit -m "feat(sync): define dormant moodboard Studio contracts"
 ```
 
-### Task 2: Upgrade SQLite product storage and sole scope authority to v61
+### Task 2: Upgrade SQLite product storage and sole scope authority to v63
 
 - [ ] **Step 1: Write fresh/upgrade/rollback RED tests**
 
-Assert current schema 61, fresh/60→61 catalog parity, exact moodboard/placement/Studio columns, scoped unique keys, parent consistency, Boolean storage, indexes, local-unbound conversion, canonical lineage, diagnostics, version-last behavior, and rollback at every create/copy/index/verify checkpoint.
+Assert current schema 63, fresh/60→61→62→63 catalog parity, exact moodboard/placement/Studio columns, scoped unique keys, parent consistency, Boolean storage, indexes, local-unbound conversion, canonical lineage, diagnostics, version-last behavior, and rollback at every create/copy/index/verify checkpoint.
 
 Add exact authority tests for:
 
@@ -197,9 +197,9 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 
 Expected: schema remains 60 and graph flags/scoped product columns are absent.
 
-- [ ] **Step 3: Implement fixed SQLite v61 migration**
+- [ ] **Step 3: Implement fixed SQLite v63 migration**
 
-Add `_migrate_from_v60_to_v61_sqlite(conn)` using create/copy/verify/swap/index/version-last ordering. Generate UUIDv4 moodboard IDs once during conversion, derive placement identity in Python, retain legacy rows and diagnostics, default existing canvases to masonry, retain Studio sidecars, and never fabricate historically deleted links.
+Add `_migrate_from_v62_to_v63_sqlite(conn)` using create/copy/verify/swap/index/version-last ordering after the shared-workspace-chat v60-to-v61 and durable-clone v61-to-v62 migrations. Generate UUIDv4 moodboard IDs once during conversion, derive placement identity in Python, retain legacy rows and diagnostics, default existing canvases to masonry, retain Studio sidecars, and never fabricate historically deleted links.
 
 The migration must reject ambiguous owner proof, duplicate portable IDs, malformed/oversized canonical state, incompatible Studio nested authority, or task-graph mismatch before blessing readiness.
 
@@ -217,7 +217,7 @@ Add moodboard and Studio graph bind helpers that lock the authority row, insert 
 
 - [ ] **Step 5: Demote the runtime Studio schema helper**
 
-Change `_ensure_note_studio_schema_*` from competing `CREATE TABLE IF NOT EXISTS` authority to exact current-schema verification/delegation. Current v61 startup fails closed on drift instead of silently creating a legacy table.
+Change `_ensure_note_studio_schema_*` from competing `CREATE TABLE IF NOT EXISTS` authority to exact current-schema verification/delegation. Current v63 startup fails closed on drift instead of silently creating a legacy table.
 
 - [ ] **Step 6: Run GREEN and commit**
 
@@ -244,13 +244,13 @@ git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py \
 git commit -m "feat(notes): add scoped moodboard Studio storage"
 ```
 
-### Task 3: Run a bounded resumable PostgreSQL v61 migration and enforce exact RLS
+### Task 3: Run a bounded resumable PostgreSQL v63 migration and enforce exact RLS
 
 - [ ] **Step 1: Write server-free catalog and required-live RED tests**
 
 Cover fixed lock order, explicit `lock_timeout`/`statement_timeout`, columns/defaults/types/nullability, PK/FK/check/index definitions, table/schema owner, ENABLE+FORCE RLS, exact `USING` and `WITH CHECK`, extra-policy rejection, two-owner/same-ID coexistence, wrong-dataset denial, relationship injection, old-binder inserts, first-enrollment races, and indexed keyset plans using a non-table-owner role.
 
-Seed a large legacy fixture and inject failure after every schema, bounded-copy page, index, constraint-validation, RLS, aggregate-verification, and version step. Assert each retry resumes from durable privacy-safe migration progress, never recopies a completed page incompatibly, and never exposes a partially blessed v61 catalog.
+Seed a large legacy fixture and inject failure after every schema, bounded-copy page, index, constraint-validation, RLS, aggregate-verification, and version step. Assert each retry resumes from durable privacy-safe migration progress, never recopies a completed page incompatibly, and never exposes a partially blessed v63 catalog.
 
 - [ ] **Step 2: Run RED with PostgreSQL required**
 
@@ -260,13 +260,13 @@ TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q -
   tldw_Server_API/tests/DB_Management/test_pg_rls_policies_contract.py
 ```
 
-Expected: fail, never skip; v61 PostgreSQL schema, resumable progress protocol, and policies do not exist.
+Expected: fail, never skip; v63 PostgreSQL schema, resumable progress protocol, and policies do not exist.
 
-- [ ] **Step 3: Implement the bounded resumable PostgreSQL v61 algorithm**
+- [ ] **Step 3: Implement the bounded resumable PostgreSQL v63 algorithm**
 
 Acquire the schema-version row lock first and fixed relation locks only for each short metadata transition. Set bounded lock and statement timeouts on every transaction. Create additive target structures plus a private `chacha_schema_migration_progress` record keyed by migration/phase; it stores only keyset cursor, count, aggregate fingerprint, status, and update time.
 
-Copy/rekey legacy rows in deterministic `(owner_user_id, legacy_primary_key)` pages under explicit row and wall-clock budgets, committing progress with each page. Resume from the last verified cursor after interruption. After source count/fingerprint and target postconditions match, build/verify indexes, add or validate constraints, install forced RLS, run exact catalog verification, mark progress complete, and bump schema version last. Current-v61 startup verifies rather than repairs drift. Every phase is idempotent so a timeout or crash is a safe retry, not an instruction to restart an unbounded copy.
+Copy/rekey legacy rows in deterministic `(owner_user_id, legacy_primary_key)` pages under explicit row and wall-clock budgets, committing progress with each page. Resume from the last verified cursor after interruption. After source count/fingerprint and target postconditions match, build/verify indexes, add or validate constraints, install forced RLS, run exact catalog verification, mark progress complete, and bump schema version last. Current-v63 startup verifies rather than repairs drift. Every phase is idempotent so a timeout or crash is a safe retry, not an instruction to restart an unbounded copy.
 
 - [ ] **Step 4: Install exact policies and parent-scope enforcement**
 
@@ -288,7 +288,7 @@ git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py \
 git commit -m "feat(notes): enforce moodboard Studio tenancy"
 ```
 
-Expected: the required-live large upgrade executes multiple pages, survives every injected boundary failure, resumes from stored progress, observes the configured timeouts, and finishes with exact v61 catalog/RLS/version state.
+Expected: the required-live large upgrade executes multiple pages, survives every injected boundary failure, resumes from stored progress, observes the configured timeouts, and finishes with exact v63 catalog/RLS/version state.
 
 ### Task 4: Persist private readiness without capability exposure
 

@@ -1,3 +1,5 @@
+"""Tenant-scoped moodboard and Studio graph binding and bootstrap storage."""
+
 from __future__ import annotations
 
 import json
@@ -129,6 +131,20 @@ class MoodboardSyncStore:
         owner_user_id: str,
         conn: GraphConnection | None = None,
     ) -> str:
+        """Resolve the immutable dataset scope for the owner's moodboard graph.
+
+        Args:
+            owner_user_id: Owner whose compatibility scope should be resolved.
+            conn: Optional caller-owned transaction connection.
+
+        Returns:
+            The bound dataset ID, or ``local-unbound`` before binding or on a
+            schema that predates moodboard synchronization.
+
+        Raises:
+            InputError: If the owner ID is empty or invalid.
+            ConflictError: If stored graph authority is inconsistent.
+        """
         return self._resolve_graph_dataset(
             owner_user_id=owner_user_id,
             flag="moodboard_graph_bound",
@@ -141,6 +157,20 @@ class MoodboardSyncStore:
         owner_user_id: str,
         conn: GraphConnection | None = None,
     ) -> str:
+        """Resolve the immutable dataset scope for the owner's Studio graph.
+
+        Args:
+            owner_user_id: Owner whose compatibility scope should be resolved.
+            conn: Optional caller-owned transaction connection.
+
+        Returns:
+            The bound dataset ID, or ``local-unbound`` before binding or on a
+            schema that predates Studio synchronization.
+
+        Raises:
+            InputError: If the owner ID is empty or invalid.
+            ConflictError: If stored graph authority is inconsistent.
+        """
         return self._resolve_graph_dataset(
             owner_user_id=owner_user_id,
             flag="studio_graph_bound",
@@ -625,6 +655,25 @@ class MoodboardSyncStore:
         target_dataset_id: str,
         conn: GraphConnection | None = None,
     ) -> dict[str, int]:
+        """Bind and verify the complete local moodboard graph atomically.
+
+        The operation rekeys only ``local-unbound`` moodboards and explicit
+        placements. When ``conn`` is supplied, the caller owns the surrounding
+        transaction; otherwise this method opens and commits one transaction.
+
+        Args:
+            owner_user_id: Owner of the local moodboard graph.
+            target_dataset_id: Permanent personal dataset scope to bind.
+            conn: Optional caller-owned transaction connection.
+
+        Returns:
+            Row counts keyed by each moodboard graph table name.
+
+        Raises:
+            InputError: If either scope identifier is invalid.
+            ConflictError: If binding is unavailable, unauthorized, collides
+                with existing scope, or fails canonical completeness proofs.
+        """
         def prove(
             transaction_conn: GraphConnection,
             owner: str,
@@ -686,6 +735,25 @@ class MoodboardSyncStore:
         target_dataset_id: str,
         conn: GraphConnection | None = None,
     ) -> dict[str, int]:
+        """Bind and verify the complete local Studio graph atomically.
+
+        The operation rekeys only ``local-unbound`` Studio documents. When
+        ``conn`` is supplied, the caller owns the surrounding transaction;
+        otherwise this method opens and commits one transaction.
+
+        Args:
+            owner_user_id: Owner of the local Studio graph.
+            target_dataset_id: Permanent personal dataset scope to bind.
+            conn: Optional caller-owned transaction connection.
+
+        Returns:
+            Row counts keyed by the Studio graph table name.
+
+        Raises:
+            InputError: If either scope identifier is invalid.
+            ConflictError: If binding is unavailable, unauthorized, collides
+                with existing scope, or fails canonical completeness proofs.
+        """
         def prove(
             transaction_conn: GraphConnection,
             owner: str,
@@ -738,6 +806,22 @@ class MoodboardSyncStore:
         after_sync_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        """Page canonically verified moodboards from an already-bound scope.
+
+        Args:
+            owner_user_id: Owner of the bound moodboard graph.
+            dataset_id: Dataset to expose for bootstrap.
+            after_sync_id: Exclusive moodboard sync-ID cursor.
+            limit: Requested page size, clamped to the range 1 through 500.
+
+        Returns:
+            Moodboard rows ordered by sync ID.
+
+        Raises:
+            InputError: If a scope identifier is invalid.
+            ConflictError: If the graph is unbound or canonical validation
+                detects corrupt or inconsistent rows.
+        """
         owner, dataset = self._require_bootstrap_scope(
             owner_user_id=owner_user_id,
             dataset_id=dataset_id,
@@ -774,6 +858,23 @@ class MoodboardSyncStore:
         after_note_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        """Page verified explicit moodboard placements from a bound scope.
+
+        Args:
+            owner_user_id: Owner of the bound moodboard graph.
+            dataset_id: Dataset to expose for bootstrap.
+            after_moodboard_sync_id: Exclusive primary placement cursor.
+            after_note_id: Exclusive secondary cursor within a moodboard.
+            limit: Requested page size, clamped to the range 1 through 500.
+
+        Returns:
+            Placement rows ordered by moodboard sync ID and note ID.
+
+        Raises:
+            InputError: If a scope identifier is invalid.
+            ConflictError: If the graph is unbound or canonical validation
+                detects missing parents or inconsistent rows.
+        """
         owner, dataset = self._require_bootstrap_scope(
             owner_user_id=owner_user_id,
             dataset_id=dataset_id,
@@ -825,6 +926,22 @@ class MoodboardSyncStore:
         after_note_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        """Page canonically verified Studio documents from a bound scope.
+
+        Args:
+            owner_user_id: Owner of the bound Studio graph.
+            dataset_id: Dataset to expose for bootstrap.
+            after_note_id: Exclusive note-ID cursor.
+            limit: Requested page size, clamped to the range 1 through 500.
+
+        Returns:
+            Studio document rows ordered by note ID.
+
+        Raises:
+            InputError: If a scope identifier is invalid.
+            ConflictError: If the graph is unbound or canonical validation
+                detects corrupt or inconsistent rows.
+        """
         owner, dataset = self._require_bootstrap_scope(
             owner_user_id=owner_user_id,
             dataset_id=dataset_id,

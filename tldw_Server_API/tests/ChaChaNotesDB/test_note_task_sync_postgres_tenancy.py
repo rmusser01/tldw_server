@@ -427,7 +427,7 @@ def test_postgres_bind_caught_hash_failure_rolls_back_rekey_and_restores_force(
         backend.get_pool().close_all()
 
 
-def test_postgres_note_task_schema_remains_authoritative_at_v61(
+def test_postgres_note_task_schema_remains_authoritative_at_v63(
     pg_database_config: DatabaseConfig,
 ) -> None:
     owner = "950001"
@@ -446,7 +446,7 @@ def test_postgres_note_task_schema_remains_authoritative_at_v61(
                 "ORDER BY tablename, policyname",
                 (list(CharactersRAGDB._NOTE_TASK_V60_RELATIONS),),
             ).fetchall()
-        assert version == 61
+        assert version == 63
         assert [(row["tablename"], row["policyname"]) for row in policy_rows] == [
             (table, f"{table}_tenant_isolation")
             for table in sorted(CharactersRAGDB._NOTE_TASK_V60_RELATIONS)
@@ -1247,7 +1247,7 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
         futures = [executor.submit(initialize) for _index in range(2)]
         versions = [future.result(timeout=120) for future in futures]
 
-    assert versions == [61, 61]
+        assert versions == [63, 63]
     assert checkpoints == ["validate", "create", "copy", "index", "verify"]
     assert len(verify_threads) == 2
     assert len(set(verify_threads)) == 2
@@ -1266,7 +1266,7 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
                 ("%_v60",),
                 connection=conn,
             ).rows
-        assert version == 61
+        assert version == 63
         assert remnants == []
     finally:
         check_backend.get_pool().close_all()

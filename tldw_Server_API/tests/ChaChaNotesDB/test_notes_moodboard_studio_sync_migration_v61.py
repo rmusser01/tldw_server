@@ -1,4 +1,4 @@
-"""SQLite schema-v61 contracts for scoped moodboards and Studio sidecars."""
+"""SQLite schema-v63 contracts for the v61 moodboard/Studio storage revision."""
 
 from __future__ import annotations
 
@@ -234,6 +234,30 @@ def _prepare_v60_product_database(
         CharactersRAGDB._CURRENT_SCHEMA_VERSION = original
 
 
+def _advance_product_database_to_v62(db_path: Path) -> None:
+    """Apply the integration base's shared-chat and clone migrations only."""
+
+    original = CharactersRAGDB._CURRENT_SCHEMA_VERSION
+    CharactersRAGDB._CURRENT_SCHEMA_VERSION = 62
+    try:
+        db = CharactersRAGDB(str(db_path), client_id=OWNER)
+        db.close_all_connections()
+    finally:
+        CharactersRAGDB._CURRENT_SCHEMA_VERSION = original
+
+
+def _prepare_v62_product_database(
+    db_path: Path,
+    *,
+    board_count: int = 1,
+) -> list[int]:
+    """Create the exact v62 predecessor for v62-to-v63 migration tests."""
+
+    board_ids = _prepare_v60_product_database(db_path, board_count=board_count)
+    _advance_product_database_to_v62(db_path)
+    return board_ids
+
+
 def _legacy_diagram_manifest() -> dict[str, object]:
     diagram = "graph TD; A-->B"
     source_graph = [
@@ -264,20 +288,20 @@ def _relevant_catalog(db: CharactersRAGDB) -> dict[str, object]:
         return db._notes_moodboard_studio_catalog_snapshot_sqlite(conn)
 
 
-def test_sqlite_schema_authority_is_v61_and_version_update_is_last() -> None:
-    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 61
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v60_to_v61_sqlite)
+def test_sqlite_schema_authority_is_v63_and_version_update_is_last() -> None:
+    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 63
+    source = inspect.getsource(CharactersRAGDB._migrate_from_v62_to_v63_sqlite)
     for operation in (
         "_create_notes_moodboard_studio_schema_v61_sqlite",
         "_copy_notes_moodboard_studio_graph_v61_sqlite",
         "_create_notes_moodboard_studio_indexes_v61_sqlite",
         "_verify_notes_moodboard_studio_schema_sqlite",
     ):
-        assert source.index(operation) < source.index("SET version=61")
-    assert "WHERE schema_name=? AND version=60" in source
+        assert source.index(operation) < source.index("SET version=63")
+    assert "WHERE schema_name=? AND version=62" in source
 
 
-def test_fresh_and_v60_upgrade_have_exact_v61_catalog_parity(tmp_path: Path) -> None:
+def test_fresh_and_v60_upgrade_have_exact_v63_catalog_parity(tmp_path: Path) -> None:
     upgrade_path = tmp_path / "upgrade.sqlite"
     _prepare_v60_product_database(upgrade_path)
     upgraded = CharactersRAGDB(str(upgrade_path), client_id=OWNER)
@@ -285,7 +309,7 @@ def test_fresh_and_v60_upgrade_have_exact_v61_catalog_parity(tmp_path: Path) -> 
     try:
         assert _relevant_catalog(upgraded) == _relevant_catalog(fresh)  # nosec B101
         with fresh.transaction() as conn:
-            assert fresh._get_db_version(conn) == 61  # nosec B101
+            assert fresh._get_db_version(conn) == 63  # nosec B101
             assert _table_columns(conn, "note_task_scope_authority") == EXPECTED_AUTHORITY_COLUMNS  # nosec B101
             assert _table_columns(conn, "moodboards") == EXPECTED_MOODBOARD_COLUMNS  # nosec B101
             assert _table_columns(conn, "moodboard_notes") == EXPECTED_PLACEMENT_COLUMNS  # nosec B101
@@ -475,7 +499,7 @@ def test_v61_legacy_studio_oversized_envelope_is_blocked_before_binding(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "legacy-studio-oversized.sqlite"
-    _prepare_v60_product_database(db_path)
+    _prepare_v62_product_database(db_path)
     sections = [
         {
             "id": f"section-{index}",
@@ -495,7 +519,7 @@ def test_v61_legacy_studio_oversized_envelope_is_blocked_before_binding(
     with pytest.raises(CharactersRAGDBError):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    assert _schema_version(db_path) == 60  # nosec B101
+    assert _schema_version(db_path) == 62  # nosec B101
     assert _database_dump(db_path) == before  # nosec B101
 
 
@@ -721,13 +745,13 @@ def test_v61_legacy_diagnostic_is_bounded_and_privacy_safe(tmp_path: Path) -> No
     "stage",
     ("create", "copy", "copy_verify", "index", "verify", "version"),
 )
-def test_v61_injected_failure_rolls_back_complete_v60_catalog_data_and_version(
+def test_v61_injected_failure_rolls_back_complete_v61_catalog_data_and_version(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     stage: str,
 ) -> None:
     db_path = tmp_path / f"rollback-{stage}.sqlite"
-    _prepare_v60_product_database(db_path)
+    _prepare_v62_product_database(db_path)
     before = _database_dump(db_path)
 
     def fail_at_stage(self: CharactersRAGDB, current_stage: str) -> None:
@@ -743,7 +767,7 @@ def test_v61_injected_failure_rolls_back_complete_v60_catalog_data_and_version(
     with pytest.raises(CharactersRAGDBError, match=f"injected v61 {stage} failure"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    assert _schema_version(db_path) == 60  # nosec B101
+    assert _schema_version(db_path) == 62  # nosec B101
     assert _database_dump(db_path) == before  # nosec B101
 
 
@@ -754,13 +778,13 @@ def test_v61_injected_failure_rolls_back_complete_v60_catalog_data_and_version(
         "UPDATE moodboards_v61 SET description='corrupted-after-copy'",
     ),
 )
-def test_v61_rejects_post_copy_data_loss_or_corruption_and_restores_exact_v60(
+def test_v61_rejects_post_copy_data_loss_or_corruption_and_restores_exact_v61(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     corrupt_copy: str,
 ) -> None:
     db_path = tmp_path / "copy-proof-corruption.sqlite"
-    _prepare_v60_product_database(db_path)
+    _prepare_v62_product_database(db_path)
     before = _database_dump(db_path)
     original_copy = CharactersRAGDB._copy_notes_moodboard_studio_graph_v61_sqlite
 
@@ -781,7 +805,7 @@ def test_v61_rejects_post_copy_data_loss_or_corruption_and_restores_exact_v60(
     with pytest.raises(CharactersRAGDBError, match="copy verification"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    assert _schema_version(db_path) == 60  # nosec B101
+    assert _schema_version(db_path) == 62  # nosec B101
     assert _database_dump(db_path) == before  # nosec B101
 
 
@@ -933,7 +957,7 @@ def test_v61_copy_streams_all_large_product_selects_with_fetchmany(
 
 def test_v61_rejects_ambiguous_placement_owner_without_any_mutation(tmp_path: Path) -> None:
     db_path = tmp_path / "ambiguous-owner.sqlite"
-    _prepare_v60_product_database(db_path)
+    _prepare_v62_product_database(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "UPDATE moodboards SET client_id=?", (OTHER_OWNER,)
@@ -943,7 +967,7 @@ def test_v61_rejects_ambiguous_placement_owner_without_any_mutation(tmp_path: Pa
     with pytest.raises(CharactersRAGDBError, match="placement owner"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    assert _schema_version(db_path) == 60  # nosec B101
+    assert _schema_version(db_path) == 62  # nosec B101
     assert _database_dump(db_path) == before  # nosec B101
 
 
@@ -952,7 +976,7 @@ def test_v61_rejects_duplicate_generated_portable_ids_without_any_mutation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = tmp_path / "duplicate-sync-id.sqlite"
-    _prepare_v60_product_database(db_path, board_count=2)
+    _prepare_v62_product_database(db_path, board_count=2)
     before = _database_dump(db_path)
 
     import tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB as chacha_module
@@ -965,7 +989,7 @@ def test_v61_rejects_duplicate_generated_portable_ids_without_any_mutation(
     with pytest.raises(CharactersRAGDBError, match="portable moodboard identity"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    assert _schema_version(db_path) == 60  # nosec B101
+    assert _schema_version(db_path) == 62  # nosec B101
     assert _database_dump(db_path) == before  # nosec B101
 
 
@@ -999,12 +1023,13 @@ def test_v61_rejects_task_authority_mismatch_before_blessing_existing_row(
         db.close_all_connections()
     finally:
         CharactersRAGDB._CURRENT_SCHEMA_VERSION = original
+    _advance_product_database_to_v62(db_path)
     before = _database_dump(db_path)
 
     with pytest.raises(CharactersRAGDBError, match="task graph.*authority"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    assert _schema_version(db_path) == 60  # nosec B101
+    assert _schema_version(db_path) == 62  # nosec B101
     assert _database_dump(db_path) == before  # nosec B101
 
 
@@ -1012,7 +1037,7 @@ def test_v61_copies_valid_existing_task_authority_with_explicit_graph_flags(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "task-authority-copy.sqlite"
-    _prepare_v60_product_database(db_path)
+    _prepare_v62_product_database(db_path)
     with sqlite3.connect(db_path) as conn:
         now = "2026-08-25T00:00:00Z"
         conn.execute(
@@ -1049,7 +1074,7 @@ def test_v61_copies_valid_existing_task_authority_with_explicit_graph_flags(
             (OWNER,),
         ).fetchone()
         assert tuple(row) == (DATASET_A, 1, 0, 0)  # nosec B101
-        assert _schema_version(db_path) == 61  # nosec B101
+        assert _schema_version(db_path) == 63  # nosec B101
     finally:
         db.close_all_connections()
 
@@ -1065,12 +1090,13 @@ def test_v61_rejects_malformed_existing_task_authority_without_mutation(
             "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
             (OWNER, LOCAL_UNBOUND),
         )
+    _advance_product_database_to_v62(db_path)
     before = _database_dump(db_path)
 
     with pytest.raises(CharactersRAGDBError, match="scope authority is malformed"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    assert _schema_version(db_path) == 60  # nosec B101
+    assert _schema_version(db_path) == 62  # nosec B101
     assert _database_dump(db_path) == before  # nosec B101
 
 
@@ -1078,7 +1104,7 @@ def test_v61_rejects_nonlocal_task_graph_without_an_authority_row(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "task-without-authority.sqlite"
-    _prepare_v60_product_database(db_path)
+    _prepare_v62_product_database(db_path)
     with sqlite3.connect(db_path) as conn:
         now = "2026-08-25T00:00:00Z"
         conn.execute(
@@ -1107,7 +1133,7 @@ def test_v61_rejects_nonlocal_task_graph_without_an_authority_row(
     with pytest.raises(CharactersRAGDBError, match="task graph.*authority"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    assert _schema_version(db_path) == 60  # nosec B101
+    assert _schema_version(db_path) == 62  # nosec B101
     assert _database_dump(db_path) == before  # nosec B101
 
 
@@ -1793,7 +1819,7 @@ def test_interleaved_first_enrollment_has_one_dataset_winner_without_partial_sco
         reopened.close_all_connections()
 
 
-def test_current_v61_studio_helper_verifies_drift_instead_of_repairing(
+def test_current_v63_studio_helper_verifies_drift_instead_of_repairing(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "studio-drift.sqlite"

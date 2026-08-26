@@ -47,6 +47,11 @@ def test_postgres_initializer_routes_schema_v61_through_v62(
     monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 61)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(
+        db,
+        "_configure_notes_moodboard_studio_v61_postgres_transaction",
+        lambda _conn: None,
+    )
 
     def _reached_v62(_conn: object) -> None:
         raise _ReachedV62

@@ -54,6 +54,11 @@ def test_postgres_initializer_routes_schema_v60_through_v61(
     monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 60)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(
+        db,
+        "_configure_notes_moodboard_studio_v61_postgres_transaction",
+        lambda _conn: None,
+    )
 
     def _reached_v61(_conn: object) -> None:
         raise _ReachedV61
@@ -785,7 +790,7 @@ def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
         )
         relations, policies = _policy_catalog(backend)
 
-        assert int(version) == 62
+        assert int(version) == 63
         types = {(row["table_name"], row["column_name"]): row["data_type"] for row in columns}
         assert types[("shared_workspace_chat_threads", "recipient_user_id")] == "text"
         assert types[("shared_workspace_chat_threads", "owner_user_id")] == "text"
@@ -852,7 +857,7 @@ def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
             (CharactersRAGDB._SCHEMA_NAME,),
         ).scalar
         rerun_relations, rerun_policies = _policy_catalog(backend)
-        assert int(rerun_version) == 62
+        assert int(rerun_version) == 63
         assert len(rerun_relations) == 2
         assert all(row["relrowsecurity"] is True for row in rerun_relations)
         assert all(row["relforcerowsecurity"] is True for row in rerun_relations)

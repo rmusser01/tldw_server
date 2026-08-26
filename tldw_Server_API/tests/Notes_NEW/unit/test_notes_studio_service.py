@@ -133,6 +133,43 @@ def _studio_ensure_fields(
     }
 
 
+def test_derive_execution_identity_distinguishes_local_and_llm_runs() -> None:
+    """Return truthful derive identities and reject incomplete LLM metadata."""
+    assert NotesStudioService._derive_execution_identity(
+        {"source": "deterministic_fallback"},
+        provider=None,
+        model=None,
+    ) == ("tldw", "notes-studio-deterministic-v1")
+    assert NotesStudioService._derive_execution_identity(
+        {"source": "llm"},
+        provider="provider-a",
+        model="model-a",
+    ) == ("provider-a", "model-a")
+    with pytest.raises(InputError, match="identity is incomplete"):
+        NotesStudioService._derive_execution_identity(
+            {"source": "llm"},
+            provider="provider-a",
+            model=None,
+        )
+
+
+def test_diagram_execution_identity_validates_reported_execution_source() -> None:
+    """Return truthful diagram identities and reject invalid adapter metadata."""
+    assert NotesStudioService._diagram_execution_identity({}) == (
+        "tldw",
+        "diagram-deterministic-v1",
+    )
+    assert NotesStudioService._diagram_execution_identity(
+        {"source": "llm", "provider": "provider-b", "model": "model-b"}
+    ) == ("provider-b", "model-b")
+    with pytest.raises(InputError, match="source is invalid"):
+        NotesStudioService._diagram_execution_identity({"source": "unknown"})
+    with pytest.raises(InputError, match="identity is incomplete"):
+        NotesStudioService._diagram_execution_identity(
+            {"source": "llm", "provider": "provider-b"}
+        )
+
+
 def test_derive_creates_derived_note_and_sidecar(studio_db):
     db = studio_db
     source_note_id = db.add_note(

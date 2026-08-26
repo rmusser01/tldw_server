@@ -1,3 +1,5 @@
+"""Persistence operations for notes, keywords, and Notes Studio sidecars."""
+
 from __future__ import annotations
 
 import hashlib
@@ -600,6 +602,14 @@ class NoteStore:
 
     @staticmethod
     def _notes_note_head(note: dict[str, Any]) -> tuple[int, str]:
+        """Return the canonical revision and payload hash for a note row.
+
+        Args:
+            note: Deserialized authoritative note row.
+
+        Returns:
+            A ``(revision, sha256 payload hash)`` tuple for Studio lineage.
+        """
         payload = validate_notes_note_upsert_payload(
             {
                 "title": note.get("title"),
@@ -624,6 +634,23 @@ class NoteStore:
         handwriting_mode: str,
         render_version: int,
     ) -> dict[str, Any]:
+        """Remove verified legacy aliases from a Studio payload.
+
+        Args:
+            payload_json: Submitted Studio payload.
+            note: Optional authoritative companion note.
+            source_note_id: Authoritative source-note reference.
+            template_type: Authoritative template selection.
+            handwriting_mode: Authoritative handwriting selection.
+            render_version: Authoritative renderer version.
+
+        Returns:
+            A copy containing only canonical Studio payload fields.
+
+        Raises:
+            InputError: If a legacy alias is malformed or conflicts with the
+                authoritative outer document state.
+        """
         payload = dict(payload_json)
         meta = payload.pop("meta", None)
         if meta is not None:
@@ -665,6 +692,18 @@ class NoteStore:
     def _normalize_studio_manifest(
         manifest_value: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
+        """Canonicalize a diagram manifest and rebuild its derived render hash.
+
+        Args:
+            manifest_value: Submitted diagram manifest, or ``None``.
+
+        Returns:
+            A canonical manifest copy without cache or legacy alias fields, or
+            ``None`` when no manifest was supplied.
+
+        Raises:
+            InputError: If a legacy alias conflicts with its canonical field.
+        """
         if manifest_value is None:
             return None
         manifest = dict(manifest_value)
@@ -702,6 +741,7 @@ class NoteStore:
 
     @staticmethod
     def _studio_document_mapping(document: dict[str, Any]) -> dict[str, Any]:
+        """Map a stored Studio row to the canonical contract payload."""
         return {
             "note_id": document["note_id"],
             "source_note_id": document.get("source_note_id"),
@@ -933,6 +973,17 @@ class NoteStore:
         deleted: bool,
         object_hash: str,
     ) -> int:
+        """Return the serialized canonical Sync envelope size in bytes.
+
+        Args:
+            payload: Canonical Studio document payload.
+            revision: Canonical object revision.
+            deleted: Whether the envelope represents a tombstone.
+            object_hash: Canonical object payload hash.
+
+        Returns:
+            UTF-8 byte length of the canonical Sync envelope.
+        """
         operation = "tombstone" if deleted else "upsert"
         return len(
             canonical_json_bytes(
@@ -1283,9 +1334,14 @@ class NoteStore:
                 "canonical_revision,canonical_hash,source_diagnostic_code,source_diagnostic_hash"
                 ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             )
+            conflict_target = (
+                "(note_id)"
+                if self._db.backend_type == BackendType.POSTGRESQL
+                else "(owner_user_id,dataset_id,note_id)"
+            )
             if upsert:
                 query += (
-                    " ON CONFLICT(owner_user_id,dataset_id,note_id) DO UPDATE SET "
+                    f" ON CONFLICT{conflict_target} DO UPDATE SET "  # nosec B608 - fixed backend catalog target.
                     "payload_json=excluded.payload_json,template_type=excluded.template_type,"
                     "handwriting_mode=excluded.handwriting_mode,source_note_id=excluded.source_note_id,"
                     "excerpt_snapshot=excluded.excerpt_snapshot,excerpt_hash=excluded.excerpt_hash,"
@@ -1299,7 +1355,7 @@ class NoteStore:
                     "source_diagnostic_hash=excluded.source_diagnostic_hash"
                 )
             elif ensure:
-                query += " ON CONFLICT(owner_user_id,dataset_id,note_id) DO NOTHING"
+                query += f" ON CONFLICT{conflict_target} DO NOTHING"  # nosec B608 - fixed backend catalog target.
 
         if not self._db._supports_notes_moodboard_studio_v61():
             candidate_retry_fingerprint = self._studio_retry_fingerprint(
@@ -1511,6 +1567,7 @@ class NoteStore:
         provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> dict[str, Any]:
+        """Atomically replace a Studio diagram when the expected state still matches."""
         normalized_note_id = str(note_id).strip()
         if not normalized_note_id:
             raise InputError("note_id cannot be empty.")  # noqa: TRY003
@@ -1551,25 +1608,25 @@ class NoteStore:
                 )
                 guard_query = (
                     "SELECT 1 FROM note_studio_documents "
-                    "WHERE note_id=? AND owner_user_id=? AND dataset_id=? "
-                    "AND ((? IS NULL AND companion_content_hash IS NULL) OR companion_content_hash=?) "
-                    "AND (? IS NULL OR render_version=?) "
-                    "AND (? IS NULL OR last_modified=?)"
+                    "WHERE note_id=? AND owner_user_id=? AND dataset_id=?"
                 )
-                guard_params = (
-                    normalized_note_id,
-                    owner,
-                    dataset,
-                    expected_companion_content_hash,
-                    expected_companion_content_hash,
-                    expected_render_version,
-                    expected_render_version,
-                    expected_last_modified,
-                    expected_last_modified,
-                )
+                guard_params: list[Any] = [normalized_note_id, owner, dataset]
+                if expected_companion_content_hash is None:
+                    guard_query += " AND companion_content_hash IS NULL"
+                else:
+                    guard_query += " AND companion_content_hash=?"
+                    guard_params.append(expected_companion_content_hash)
+                if expected_render_version is not None:
+                    guard_query += " AND render_version=?"
+                    guard_params.append(expected_render_version)
+                if expected_last_modified is not None:
+                    guard_query += " AND last_modified=?"
+                    guard_params.append(expected_last_modified)
+                if self._db.backend_type == BackendType.POSTGRESQL:
+                    guard_query += " FOR UPDATE"
                 prepared_guard, prepared_guard_params = self._db._prepare_backend_statement(
                     guard_query,
-                    guard_params,
+                    tuple(guard_params),
                 )
                 if inner_conn.execute(prepared_guard, prepared_guard_params or ()).fetchone() is None:
                     current_document = self._fetch_note_studio_document_row(

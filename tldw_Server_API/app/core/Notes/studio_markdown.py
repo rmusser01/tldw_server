@@ -205,6 +205,7 @@ def _iter_sections(sections: Any) -> Iterable[dict[str, Any]]:
 def _try_canonical_studio_sections(
     sections: Any,
 ) -> list[dict[str, Any]] | None:
+    """Return canonical Studio sections, or ``None`` for invalid input."""
     try:
         return canonical_studio_sections(sections)
     except (TypeError, ValueError):
