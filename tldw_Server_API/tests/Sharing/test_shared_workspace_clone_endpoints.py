@@ -87,9 +87,16 @@ class _AccessService:
         self.context = context or _context()
         self.error: Exception | None = None
         self.calls: list[tuple[int, int]] = []
+        self.clone_calls: list[tuple[int, int]] = []
 
     async def resolve(self, *, share_id: int, recipient_user_id: int):
         self.calls.append((share_id, recipient_user_id))
+        if self.error is not None:
+            raise self.error
+        return self.context
+
+    async def resolve_clone(self, *, share_id: int, recipient_user_id: int):
+        self.clone_calls.append((share_id, recipient_user_id))
         if self.error is not None:
             raise self.error
         return self.context
@@ -251,7 +258,8 @@ def test_clone_post_admits_one_durable_operation_and_audits_requested(clone_api)
     assert len(jobs) == 1
     assert jobs[0]["idempotency_key"] is None
     assert IDEMPOTENCY_KEY not in json.dumps(jobs[0])
-    assert service.calls == [(42, 9)]
+    assert service.calls == []
+    assert service.clone_calls == [(42, 9)]
     assert [event for event, _metadata in audit_events] == ["share.clone_requested"]
     assert audit_events[0][1]["metadata"] == {
         "operation_id": operation["operation_id"],
@@ -267,7 +275,8 @@ def test_same_key_replays_after_revocation_without_resolving_share(clone_api) ->
 
     assert replay.status_code == 202
     assert replay.json() == first.json()
-    assert service.calls == [(42, 9)]
+    assert service.calls == []
+    assert service.clone_calls == [(42, 9)]
     assert len(audit_events) == 1
 
 

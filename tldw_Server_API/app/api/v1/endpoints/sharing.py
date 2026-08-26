@@ -505,6 +505,31 @@ async def _resolve_recipient_access(
         raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
 
 
+async def _resolve_recipient_clone_access(
+    service: Any,
+    *,
+    share_id: int,
+    recipient_user_id: int,
+):
+    from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+        SharedWorkspaceCloneNotAllowed,
+        SharedWorkspaceNotFound,
+        SharedWorkspaceUnavailable,
+    )
+
+    try:
+        return await service.resolve_clone(
+            share_id=share_id,
+            recipient_user_id=recipient_user_id,
+        )
+    except SharedWorkspaceCloneNotAllowed as exc:
+        raise _recipient_http_error(403, "clone_not_allowed") from exc
+    except SharedWorkspaceNotFound as exc:
+        raise _recipient_http_error(404, "shared_workspace_not_found") from exc
+    except SharedWorkspaceUnavailable as exc:
+        raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
+
+
 async def _load_recipient_workspace_sources(context: Any) -> list[dict[str, Any]]:
     """Open the authorized owner's workspace DB only after access resolution."""
     from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
@@ -2011,7 +2036,7 @@ async def clone_shared_workspace(
         response.status_code = _clone_operation_response_status(operation)
         return operation
 
-    context = await _resolve_recipient_access(
+    context = await _resolve_recipient_clone_access(
         service,
         share_id=share_id,
         recipient_user_id=user.id,

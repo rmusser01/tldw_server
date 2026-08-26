@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.exceptions import (
     SharedWorkspaceAccessError as SharedWorkspaceAccessError,
 )
 from tldw_Server_API.app.core.exceptions import (
+    SharedWorkspaceCloneNotAllowed,
     SharedWorkspaceNotFound,
     SharedWorkspaceUnavailable,
 )
@@ -97,6 +98,39 @@ class SharedWorkspaceAccessService:
         recipient_user_id: int,
     ) -> SharedWorkspaceAccessContext:
         """Authorize current membership, then resolve the active owner workspace."""
+        share = await self._resolve_active_share(
+            share_id=share_id,
+            recipient_user_id=recipient_user_id,
+        )
+        return await self._resolve_context(
+            share,
+            recipient_user_id=recipient_user_id,
+        )
+
+    async def resolve_clone(
+        self,
+        *,
+        share_id: int,
+        recipient_user_id: int,
+    ) -> SharedWorkspaceAccessContext:
+        """Authorize clone policy before resolving any owner data."""
+        share = await self._resolve_active_share(
+            share_id=share_id,
+            recipient_user_id=recipient_user_id,
+        )
+        if not _is_truthy(share.get("allow_clone")):
+            raise SharedWorkspaceCloneNotAllowed()
+        return await self._resolve_context(
+            share,
+            recipient_user_id=recipient_user_id,
+        )
+
+    async def _resolve_active_share(
+        self,
+        *,
+        share_id: int,
+        recipient_user_id: int,
+    ) -> dict[str, Any]:
         try:
             share = await self._share_repo.get_active_share_for_user(
                 int(share_id),
@@ -106,6 +140,16 @@ class SharedWorkspaceAccessService:
             raise SharedWorkspaceUnavailable() from exc
         if share is None:
             raise SharedWorkspaceNotFound()
+
+        return dict(share)
+
+    async def _resolve_context(
+        self,
+        share: dict[str, Any],
+        *,
+        recipient_user_id: int,
+    ) -> SharedWorkspaceAccessContext:
+        """Resolve owner metadata and workspace from an authorized share row."""
 
         try:
             owner_user_id = int(share["owner_user_id"])

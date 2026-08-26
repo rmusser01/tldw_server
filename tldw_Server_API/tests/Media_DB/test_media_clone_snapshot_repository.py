@@ -684,6 +684,53 @@ def test_operation_owned_clone_stays_hidden_until_exact_confirmation(
         operation_id=operation_id,
         limit=100,
     ) == []
+    publication = media_db.read_operation_owned_clone_media_publication_state(
+        operation_id=operation_id,
+        limit=100,
+    )
+    assert publication.total_count == 1
+    assert publication.pending_count == 0
+    assert publication.pending == ()
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_publication_state_counts_pending_and_promoted_rows(
+    media_db: MediaDatabase,
+) -> None:
+    operation_id = "clone-operation-publication-proof"
+    first_snapshot = _operation_snapshot(content="first source content")
+    second_snapshot = _operation_snapshot(content="second source content")
+    first_hash = media_db_api.hash_media_clone_snapshot(first_snapshot)
+    second_hash = media_db_api.hash_media_clone_snapshot(second_snapshot)
+    first = media_db.insert_operation_owned_clone_media(
+        snapshot=first_snapshot,
+        operation_id=operation_id,
+        source_identity="workspace-source-first",
+        expected_content_hash=first_hash,
+    )
+    media_db.insert_operation_owned_clone_media(
+        snapshot=second_snapshot,
+        operation_id=operation_id,
+        source_identity="workspace-source-second",
+        expected_content_hash=second_hash,
+    )
+
+    assert media_db.confirm_operation_owned_clone_media(
+        operation_id=operation_id,
+        source_identity="workspace-source-first",
+        expected_content_hash=first_hash,
+    ) == 1
+
+    publication = media_db.read_operation_owned_clone_media_publication_state(
+        operation_id=operation_id,
+        limit=100,
+    )
+
+    assert publication.total_count == 2
+    assert publication.pending_count == 1
+    assert len(publication.pending) == 1
+    assert publication.pending[0].media_id != first.media_id
+    assert publication.pending[0].source_identity == "workspace-source-second"
 
 
 @pytest.mark.unit
@@ -1347,6 +1394,15 @@ def test_operation_owned_clone_insert_isolated_from_url_and_content_collisions(
     assert provenance == {
         "clone_provenance": {
             "source_url": source_url,
+            "publication_proof": {
+                "operation_sha256": hashlib.sha256(
+                    operation_id.encode("utf-8")
+                ).hexdigest(),
+                "source_sha256": hashlib.sha256(
+                    source_identity.encode("utf-8")
+                ).hexdigest(),
+                "content_sha256": expected_hash,
+            },
         }
     }
 

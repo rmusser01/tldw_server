@@ -49,7 +49,7 @@ The replacement must use the existing Jobs subsystem, keep authorization server-
 Clone work uses:
 
 - domain: `sharing`
-- queue: configurable, default `workspace-clone`
+- queue: fixed `workspace-clone`
 - job type: `workspace_clone`
 - owner: recipient user ID
 - batch group: a bounded share correlation value
@@ -58,7 +58,12 @@ Clone work uses:
 
 The Job payload contains only bounded identifiers and normalized request data: schema version, share ID, recipient user ID, requested name, and canonical request fingerprint. It does not contain copied content, credentials, authorization claims, source titles, or owner database paths.
 
-`JobManager.DOMAIN_ALLOWED_QUEUES` adds `"sharing": ("workspace-clone",)`. Configuration and operator documentation list the queue and worker flag explicitly.
+One clone may contain at most 10,000 unique Media records. Snapshot preparation
+rejects a larger source before reading Media content or reserving the target, so
+the durable publication-proof bound cannot strand an oversized completed Job in
+finalization.
+
+`JobManager.DOMAIN_ALLOWED_QUEUES` adds `"sharing": ("workspace-clone",)`. Operator documentation lists the fixed queue and worker flag explicitly; deployments may tune worker concurrency and polling, but do not rename the protocol queue.
 
 ### Durable Idempotency Receipt
 

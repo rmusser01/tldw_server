@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+    SharedWorkspaceAccessError,
     SharedWorkspaceAccessService,
     SharedWorkspaceNotFound,
     SharedWorkspaceUnavailable,
@@ -184,6 +185,21 @@ async def test_owner_uses_same_deny_by_default_recipient_projection() -> None:
         "allowed": False,
         "reason_code": "owner_disabled",
     }
+
+
+@pytest.mark.asyncio
+async def test_resolve_clone_denies_before_loading_owner_data() -> None:
+    service, events = _service(
+        share=_share(allow_clone=False),
+        user={"id": 7, "username": "must-not-load"},
+        workspace={"id": "workspace-alpha", "archived": False},
+    )
+
+    with pytest.raises(SharedWorkspaceAccessError) as exc_info:
+        await service.resolve_clone(share_id=42, recipient_user_id=9)
+
+    assert type(exc_info.value).__name__ == "SharedWorkspaceCloneNotAllowed"
+    assert events == ["share:42:9"]
 
 
 @pytest.mark.asyncio

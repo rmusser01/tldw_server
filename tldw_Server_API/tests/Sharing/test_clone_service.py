@@ -11,6 +11,7 @@ from uuid import UUID
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
+    MAX_OPERATION_OWNED_CLONE_MEDIA,
     OperationOwnedMediaReadiness,
     OperationOwnedMediaResult,
 )
@@ -471,6 +472,31 @@ def _make_service(
     return service, source_chacha, source_media, target_chacha, target_media
 
 
+def test_clone_rejects_media_above_publication_proof_limit_before_loading_media():
+    snapshot = _workspace_snapshot(
+        memberships=[
+            {
+                "resource_type": "media",
+                "resource_id": str(media_id),
+                "deleted": 0,
+            }
+            for media_id in range(1, MAX_OPERATION_OWNED_CLONE_MEDIA + 2)
+        ]
+    )
+    service, _source_chacha, source_media, target_chacha, _target_media = (
+        _make_service(snapshot)
+    )
+
+    with pytest.raises(CloneSnapshotUnavailable):
+        service.clone_workspace(
+            _request(),
+            should_cancel=lambda: False,
+        )
+
+    source_media.read_media_clone_snapshots.assert_not_called()
+    target_chacha.reserve_clone_target.assert_not_called()
+
+
 def _warning_counts(result: WorkspaceCloneResult) -> dict[str, int]:
     return {warning.code: warning.count for warning in result.warnings}
 
@@ -925,7 +951,7 @@ def test_source_response_loss_with_mismatched_row_fails_closed():
     target_chacha.publish_clone_target.assert_not_called()
 
 
-def test_replayed_media_counts_as_copied_but_not_newly_operation_owned():
+def test_replayed_pending_media_counts_as_operation_owned():
     snapshot = _workspace_snapshot(
         sources=[{"id": "source-1", "media_id": 7, "source_type": "media"}]
     )
@@ -946,7 +972,7 @@ def test_replayed_media_counts_as_copied_but_not_newly_operation_owned():
     assert result.counts.media_attempted == 1
     assert result.counts.media_copied == 1
     assert result.counts.media_failed == 0
-    assert result.counts.operation_owned_media_count == 0
+    assert result.counts.operation_owned_media_count == 1
 
 
 def test_media_response_loss_retries_exact_insert_and_accepts_replay():
@@ -973,7 +999,7 @@ def test_media_response_loss_retries_exact_insert_and_accepts_replay():
     assert result.outcome == "complete"
     assert result.counts.media_copied == 1
     assert result.counts.media_failed == 0
-    assert result.counts.operation_owned_media_count == 0
+    assert result.counts.operation_owned_media_count == 1
 
 
 @pytest.mark.parametrize("deleted", (0, 1))

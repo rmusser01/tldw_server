@@ -37,6 +37,54 @@ Connector sync jobs are not only deduped at Jobs level. They also reserve a sour
 - workers renew their Jobs lease and update source sync state while running
 - file-hosting sync jobs report `processed`, `skipped`, `failed`, and `degraded` counts in the job result
 
+## Shared Workspace Clone Domain
+
+Shared Workspace cloning uses Jobs as the sole operation-status authority while
+the recipient-facing API projects a bounded Workspace operation envelope.
+
+- Domain: `sharing`
+- Queue: `workspace-clone`
+- Job type: `workspace_clone`
+- Owner: authenticated recipient user ID
+- Automatic retries: disabled (`max_retries=0`)
+- Durable replay: an owner-scoped receipt retains the accepted operation
+  correlation for 31 days across active and archived Jobs
+
+Recipients use only
+`POST /api/v1/sharing/shared-with-me/{share_id}/clone` and the returned
+`poll_href`; generic Jobs administration rows are not part of the recipient
+contract. The worker keeps staged media and the target Workspace hidden until
+fenced Job completion and final publication. A bounded reconciliation loop
+finishes publication or cleanup after a process exit. Copy success reports
+text, citation, and vector readiness independently; `needs_indexing` is a
+successful copy with incomplete vector readiness, not an indexing success.
+Each copy supports at most 10,000 unique Media records and rejects a larger
+snapshot before Media loading or target reservation.
+
+The in-process worker is enabled by default when the Sharing route is enabled,
+unless `SHARED_WORKSPACE_CLONE_JOBS_WORKER_ENABLED=false` or
+`TLDW_WORKERS_SIDECAR_MODE=true`. In sidecar mode run exactly one standalone
+consumer:
+
+```bash
+python -m tldw_Server_API.app.core.Sharing.shared_workspace_clone_jobs_worker
+```
+
+Operational tuning uses `SHARED_WORKSPACE_CLONE_JOBS_WORKER_ID`,
+`SHARED_WORKSPACE_CLONE_JOBS_LEASE_SECONDS`,
+`SHARED_WORKSPACE_CLONE_JOBS_RENEW_JITTER_SECONDS`,
+`SHARED_WORKSPACE_CLONE_JOBS_RENEW_THRESHOLD_SECONDS`,
+`SHARED_WORKSPACE_CLONE_JOBS_BACKOFF_BASE_SECONDS`,
+`SHARED_WORKSPACE_CLONE_JOBS_BACKOFF_MAX_SECONDS`,
+`SHARED_WORKSPACE_CLONE_COMPLETION_TIMEOUT_SECONDS`,
+`SHARED_WORKSPACE_CLONE_AUTHORIZATION_TIMEOUT_SECONDS`, and
+`SHARED_WORKSPACE_CLONE_RECONCILE_SECONDS`.
+`SHARED_WORKSPACE_CLONE_VECTOR_RETRIEVAL_CONFIGURED=true` tells the result
+projection that vector retrieval is expected, so a copied workspace without
+vectors reports `needs_indexing`; it does not enqueue or perform indexing. The
+queue name is fixed; do not configure a second queue or run both application
+and sidecar consumers.
+
 ## Audio Studio Domain
 
 Audio Studio uses Jobs for user-visible audio asset work.

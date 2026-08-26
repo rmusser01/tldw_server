@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
+    OperationOwnedMediaPublicationState,
     OperationOwnedMediaReference,
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
@@ -47,19 +48,28 @@ OPERATION_ID = "496504b4-85ec-53eb-a0f2-172a67d5434e"
 TARGET_ID = target_workspace_id(OPERATION_ID)
 
 
-def _result(*, publication_confirmed: bool = False) -> dict[str, Any]:
+def _result(
+    *,
+    publication_confirmed: bool = False,
+    operation_owned_media_count: int = 1,
+) -> dict[str, Any]:
+    counts = {
+        f"{kind}_{field}": 0
+        for kind in ("sources", "notes", "artifacts", "media")
+        for field in ("attempted", "copied", "failed")
+    }
+    counts.update(
+        media_attempted=operation_owned_media_count,
+        media_copied=operation_owned_media_count,
+        operation_owned_media_count=operation_owned_media_count,
+    )
     return {
         "schema_version": 1,
         "outcome": "complete",
         "workspace_id": TARGET_ID,
         "name": "Recipient copy",
         "publication_confirmed": publication_confirmed,
-        "counts": {
-            f"{kind}_{field}": 0
-            for kind in ("sources", "notes", "artifacts", "media")
-            for field in ("attempted", "copied", "failed")
-        }
-        | {"operation_owned_media_count": 0},
+        "counts": counts,
         "readiness": {
             "text_search": "ready",
             "citations": "ready",
@@ -130,6 +140,12 @@ class _AccessService:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+    async def resolve_clone(self, *, share_id: int, recipient_user_id: int):
+        return await self.resolve(
+            share_id=share_id,
+            recipient_user_id=recipient_user_id,
+        )
 
 
 class _ShareRepo:
@@ -203,8 +219,15 @@ def _pending_resources() -> _Resources:
         source_identity="source-12",
         expected_content_hash="b" * 64,
     )
-    media.list_operation_owned_clone_media.side_effect = [[reference], []]
     media.confirm_operation_owned_clone_media.side_effect = lambda **_kwargs: events.append("media") or 1
+    media.read_operation_owned_clone_media_publication_state.side_effect = (
+        lambda **_kwargs: OperationOwnedMediaPublicationState(
+            total_count=1,
+            pending_count=0 if "media" in events else 1,
+            pending=() if "media" in events else (reference,),
+        )
+    )
+    media.list_operation_owned_clone_media.return_value = [reference]
     media.delete_operation_owned_clone_media.side_effect = lambda **_kwargs: events.append("delete-media") or 1
     chacha.list_clone_targets_for_reconciliation.return_value = [
         {
@@ -212,6 +235,11 @@ def _pending_resources() -> _Resources:
             "system_operation_id": OPERATION_ID,
             "system_operation_kind": "shared_workspace_clone",
             "system_operation_state": "publication_pending",
+            "system_request_fingerprint": clone_request_fingerprint(
+                share_id=42,
+                recipient_user_id=9,
+                requested_name="Recipient copy",
+            ),
             "deleted": 0,
         }
     ]
@@ -256,6 +284,105 @@ async def test_completed_job_exposes_owned_media_before_workspace() -> None:
     )
     assert checkpoint_command.replacement_result["publication_state"] == "authorized"
     assert confirmation_command.replacement_result["publication_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_publication_rejects_pending_target_with_wrong_request_fingerprint() -> None:
+    job = _job()
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.side_effect = [
+        TerminalOperationResultPatchOutcome.APPLIED,
+    ]
+    resources = _pending_resources()
+    resources.chacha.list_clone_targets_for_reconciliation.return_value[0][
+        "system_request_fingerprint"
+    ] = "different-request-fingerprint"
+
+    finalized = await finalize_shared_workspace_clone(
+        job,
+        _result(),
+        runtime=_runtime(jobs, resources),
+    )
+
+    assert finalized is CloneFinalizationOutcome.DEFERRED
+    resources.media.confirm_operation_owned_clone_media.assert_not_called()
+    resources.chacha.confirm_clone_target_publication.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_publication_resumes_after_one_media_row_was_already_promoted() -> None:
+    job = _job()
+    result = _result(operation_owned_media_count=2)
+    job["result"] = result
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.side_effect = [
+        TerminalOperationResultPatchOutcome.APPLIED,
+        TerminalOperationResultPatchOutcome.APPLIED,
+    ]
+    resources = _pending_resources()
+    pending_reference = OperationOwnedMediaReference(
+        media_id=13,
+        media_uuid="media-13",
+        source_identity="source-13",
+        expected_content_hash="c" * 64,
+    )
+    resources.media.read_operation_owned_clone_media_publication_state.side_effect = [
+        OperationOwnedMediaPublicationState(
+            total_count=2,
+            pending_count=1,
+            pending=(pending_reference,),
+        ),
+        OperationOwnedMediaPublicationState(
+            total_count=2,
+            pending_count=0,
+            pending=(),
+        ),
+    ]
+
+    finalized = await finalize_shared_workspace_clone(
+        job,
+        result,
+        runtime=_runtime(jobs, resources),
+    )
+
+    assert finalized is CloneFinalizationOutcome.PUBLISHED
+    resources.media.confirm_operation_owned_clone_media.assert_called_once_with(
+        operation_id=OPERATION_ID,
+        source_identity="source-13",
+        expected_content_hash="c" * 64,
+    )
+    resources.chacha.confirm_clone_target_publication.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_publication_defers_when_media_proof_count_does_not_match_result() -> None:
+    job = _job()
+    jobs = MagicMock()
+    jobs.get_job_or_archived_by_uuid.return_value = job
+    jobs.patch_terminal_operation_result.side_effect = [
+        TerminalOperationResultPatchOutcome.APPLIED,
+    ]
+    resources = _pending_resources()
+    resources.media.read_operation_owned_clone_media_publication_state.side_effect = None
+    resources.media.read_operation_owned_clone_media_publication_state.return_value = (
+        OperationOwnedMediaPublicationState(
+            total_count=0,
+            pending_count=0,
+            pending=(),
+        )
+    )
+
+    finalized = await finalize_shared_workspace_clone(
+        job,
+        _result(),
+        runtime=_runtime(jobs, resources),
+    )
+
+    assert finalized is CloneFinalizationOutcome.DEFERRED
+    resources.media.confirm_operation_owned_clone_media.assert_not_called()
+    resources.chacha.confirm_clone_target_publication.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -419,7 +546,14 @@ async def test_publication_replay_requires_re_read_of_public_target() -> None:
     jobs.patch_terminal_operation_result.return_value = TerminalOperationResultPatchOutcome.APPLIED
     resources = _pending_resources()
     access = _AccessService()
-    resources.media.list_operation_owned_clone_media.side_effect = [[]]
+    resources.media.read_operation_owned_clone_media_publication_state.side_effect = None
+    resources.media.read_operation_owned_clone_media_publication_state.return_value = (
+        OperationOwnedMediaPublicationState(
+            total_count=1,
+            pending_count=0,
+            pending=(),
+        )
+    )
     resources.chacha.list_clone_targets_for_reconciliation.return_value = []
     resources.chacha.get_workspace.return_value = {
         "id": TARGET_ID,

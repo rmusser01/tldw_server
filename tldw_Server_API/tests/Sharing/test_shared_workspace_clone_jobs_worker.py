@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_clone_jobs_worker import 
 )
 from tldw_Server_API.app.core.Sharing.shared_workspace_clone_operations import (
     build_clone_admission_command,
+    clone_request_fingerprint,
     target_workspace_id,
 )
 
@@ -168,9 +169,17 @@ class _AccessService:
     def __init__(self, contexts: list[Any] | None = None) -> None:
         self.contexts = contexts or [_context()]
         self.calls: list[tuple[int, int, int]] = []
+        self.clone_calls: list[tuple[int, int, int]] = []
 
     async def resolve(self, *, share_id: int, recipient_user_id: int):
         self.calls.append((share_id, recipient_user_id, threading.get_ident()))
+        value = self.contexts.pop(0) if len(self.contexts) > 1 else self.contexts[0]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    async def resolve_clone(self, *, share_id: int, recipient_user_id: int):
+        self.clone_calls.append((share_id, recipient_user_id, threading.get_ident()))
         value = self.contexts.pop(0) if len(self.contexts) > 1 else self.contexts[0]
         if isinstance(value, Exception):
             raise value
@@ -268,6 +277,11 @@ def _runtime(
             "system_operation_id": operation_ids[0],
             "system_operation_kind": "shared_workspace_clone",
             "system_operation_state": "publication_pending",
+            "system_request_fingerprint": clone_request_fingerprint(
+                share_id=42,
+                recipient_user_id=9,
+                requested_name=None,
+            ),
             "deleted": 0,
         }
     ]
@@ -370,6 +384,8 @@ async def test_handler_authorizes_before_loading_owner_databases(acquired_job) -
 
     assert raised.value.failure_code == "clone_permission_removed"
     assert raised.value.cleanup_state == "complete"
+    assert access.calls == []
+    assert len(access.clone_calls) == 1
     assert loaded == []
 
 
@@ -460,8 +476,11 @@ async def test_thread_bridge_rechecks_access_on_event_loop(acquired_job) -> None
 
     await handle_shared_workspace_clone_job(job, runtime=runtime)
 
-    assert len(access.calls) == 2
-    assert {thread_id for _share, _recipient, thread_id in access.calls} == {event_loop_thread}
+    assert access.calls == []
+    assert len(access.clone_calls) == 2
+    assert {thread_id for _share, _recipient, thread_id in access.clone_calls} == {
+        event_loop_thread
+    }
 
 
 @pytest.mark.asyncio

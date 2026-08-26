@@ -16,10 +16,12 @@ from tldw_Server_API.app.core.DB_Management.media_db import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
+    MAX_OPERATION_OWNED_CLONE_MEDIA,
     CloneSnapshotRepository,
     DocumentVersionsRepository,
     KeywordsRepository,
     MediaRepository,
+    OperationOwnedMediaPublicationState,
     OperationOwnedMediaReadiness,
     OperationOwnedMediaReference,
     OperationOwnedMediaResult,
@@ -218,6 +220,22 @@ def read_operation_owned_clone_media_readiness(
     ).read_operation_owned_clone_media_readiness(
         operation_id=operation_id,
         items=items,
+    )
+
+
+def read_operation_owned_clone_media_publication_state(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    limit: int = 100,
+) -> OperationOwnedMediaPublicationState:
+    """Read durable pending/promoted clone Media publication proof."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).read_operation_owned_clone_media_publication_state(
+        operation_id=operation_id,
+        limit=limit,
     )
 
 
@@ -1301,8 +1319,10 @@ __all__ = [
     "MediaDbSession",
     "MediaDbReadLike",
     "MediaWriterLike",
+    "MAX_OPERATION_OWNED_CLONE_MEDIA",
     "MediaRepository",
     "OperationOwnedMediaReadiness",
+    "OperationOwnedMediaPublicationState",
     "OperationOwnedMediaReference",
     "OperationOwnedMediaResult",
     "confirm_operation_owned_clone_media",
@@ -1340,6 +1360,7 @@ __all__ = [
     "permanently_delete_item",
     "read_media_clone_snapshots",
     "read_operation_owned_clone_media_readiness",
+    "read_operation_owned_clone_media_publication_state",
     "get_media_by_id",
     "get_media_source_projection",
     "get_media_status_by_id",

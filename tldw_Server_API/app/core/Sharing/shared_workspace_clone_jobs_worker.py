@@ -46,6 +46,7 @@ from tldw_Server_API.app.core.Sharing.share_audit_service import (
 from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
     SharedWorkspaceAccessContext,
     SharedWorkspaceAccessService,
+    SharedWorkspaceCloneNotAllowed,
     SharedWorkspaceNotFound,
     SharedWorkspaceUnavailable,
 )
@@ -320,10 +321,15 @@ async def _authorize_clone(
     runtime: SharedWorkspaceCloneRuntime,
 ) -> SharedWorkspaceAccessContext:
     try:
-        context = await runtime.access_service.resolve(
+        context = await runtime.access_service.resolve_clone(
             share_id=identity.share_id,
             recipient_user_id=identity.recipient_user_id,
         )
+    except SharedWorkspaceCloneNotAllowed as exc:
+        raise SharedWorkspaceCloneJobError(
+            "clone_permission_removed",
+            cleanup_state="complete",
+        ) from exc
     except SharedWorkspaceNotFound as exc:
         raise SharedWorkspaceCloneJobError(
             "clone_access_revoked",
@@ -398,10 +404,12 @@ async def _cancellation_reason(
     if current.get("cancel_requested_at"):
         return "clone_cancelled"
     try:
-        context = await runtime.access_service.resolve(
+        context = await runtime.access_service.resolve_clone(
             share_id=identity.share_id,
             recipient_user_id=identity.recipient_user_id,
         )
+    except SharedWorkspaceCloneNotAllowed:
+        return "clone_permission_removed"
     except SharedWorkspaceNotFound:
         return "clone_access_revoked"
     except SharedWorkspaceUnavailable:
@@ -433,6 +441,10 @@ def _is_exact_pending_target(
         and str(row.get("system_operation_id") or "") == identity.operation_id
         and str(row.get("system_operation_kind") or "") == "shared_workspace_clone"
         and str(row.get("system_operation_state") or "") == "publication_pending"
+        and hmac.compare_digest(
+            str(row.get("system_request_fingerprint") or ""),
+            identity.request_fingerprint,
+        )
         and not bool(row.get("deleted"))
     )
 
@@ -660,27 +672,8 @@ def _publish_clone_resources(
     *,
     target_chacha: Any,
     target_media: Any,
+    expected_media_count: int,
 ) -> bool:
-    references = target_media.list_operation_owned_clone_media(
-        operation_id=identity.operation_id,
-        limit=_RECONCILIATION_LIMIT,
-    )
-    for reference in references:
-        changed = target_media.confirm_operation_owned_clone_media(
-            operation_id=identity.operation_id,
-            source_identity=reference.source_identity,
-            expected_content_hash=reference.expected_content_hash,
-        )
-        if changed != 1:
-            return False
-    if len(references) == _RECONCILIATION_LIMIT:
-        remaining = target_media.list_operation_owned_clone_media(
-            operation_id=identity.operation_id,
-            limit=_RECONCILIATION_LIMIT,
-        )
-        if remaining:
-            return False
-
     pending = target_chacha.list_clone_targets_for_reconciliation(
         operation_ids=[identity.operation_id],
         limit=2,
@@ -690,16 +683,44 @@ def _publish_clone_resources(
     if pending:
         if not _is_exact_pending_target(pending[0], identity):
             return False
+    elif not _public_target_is_exact(
+        target_chacha.get_workspace(identity.target_workspace_id),
+        identity,
+    ):
+        return False
+
+    publication = target_media.read_operation_owned_clone_media_publication_state(
+        operation_id=identity.operation_id,
+        limit=_RECONCILIATION_LIMIT,
+    )
+    if publication.total_count != expected_media_count:
+        return False
+    for reference in publication.pending:
+        changed = target_media.confirm_operation_owned_clone_media(
+            operation_id=identity.operation_id,
+            source_identity=reference.source_identity,
+            expected_content_hash=reference.expected_content_hash,
+        )
+        if changed != 1:
+            return False
+    verified_media = target_media.read_operation_owned_clone_media_publication_state(
+        operation_id=identity.operation_id,
+        limit=_RECONCILIATION_LIMIT,
+    )
+    if (
+        verified_media.total_count != expected_media_count
+        or verified_media.pending_count != 0
+    ):
+        return False
+
+    if pending:
         published = target_chacha.confirm_clone_target_publication(
             workspace_id=identity.target_workspace_id,
             operation_id=identity.operation_id,
         )
         if _mapping(published).get("id") == identity.target_workspace_id:
             return True
-    return _public_target_is_exact(
-        target_chacha.get_workspace(identity.target_workspace_id),
-        identity,
-    )
+    return True
 
 
 def _published_clone_resources_are_exact(
@@ -707,12 +728,16 @@ def _published_clone_resources_are_exact(
     *,
     target_chacha: Any,
     target_media: Any,
+    expected_media_count: int,
 ) -> bool:
-    references = target_media.list_operation_owned_clone_media(
+    publication = target_media.read_operation_owned_clone_media_publication_state(
         operation_id=identity.operation_id,
-        limit=1,
+        limit=_RECONCILIATION_LIMIT,
     )
-    if references:
+    if (
+        publication.total_count != expected_media_count
+        or publication.pending_count != 0
+    ):
         return False
     pending = target_chacha.list_clone_targets_for_reconciliation(
         operation_ids=[identity.operation_id],
@@ -1015,6 +1040,12 @@ async def finalize_shared_workspace_clone(
             return CloneFinalizationOutcome.COMPENSATED
         if clone_result is None:
             return CloneFinalizationOutcome.DEFERRED
+        expected_media_count = int(
+            _mapping(clone_result.get("counts")).get(
+                "operation_owned_media_count",
+                -1,
+            )
+        )
         if state == "published":
             verified = await _run_target_resource_action(
                 identity,
@@ -1023,6 +1054,7 @@ async def finalize_shared_workspace_clone(
                     identity,
                     target_chacha=target_chacha,
                     target_media=target_media,
+                    expected_media_count=expected_media_count,
                 ),
             )
             return CloneFinalizationOutcome.PUBLISHED if verified else CloneFinalizationOutcome.DEFERRED
@@ -1057,6 +1089,7 @@ async def finalize_shared_workspace_clone(
                 identity,
                 target_chacha=target_chacha,
                 target_media=target_media,
+                expected_media_count=expected_media_count,
             ),
         )
         if not published:

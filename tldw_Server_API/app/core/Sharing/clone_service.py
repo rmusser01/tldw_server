@@ -11,6 +11,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
+    MAX_OPERATION_OWNED_CLONE_MEDIA,
     OperationOwnedMediaReadiness,
     OperationOwnedMediaResult,
     hash_media_clone_snapshot,
@@ -353,6 +354,8 @@ class CloneService:
             media_ids, source_media_ids, membership_media_ids = self._collect_media_ids(
                 workspace
             )
+            if len(media_ids) > MAX_OPERATION_OWNED_CLONE_MEDIA:
+                raise CloneSnapshotUnavailable(cleanup_state="complete")
             media_snapshots = self._src_media.read_media_clone_snapshots(media_ids)
         except _FatalClone:
             raise
@@ -1071,9 +1074,7 @@ class CloneService:
     ) -> WorkspaceCloneResult:
         media_copied = len(state.tracked_media)
         media_failed = len(prepared.media_ids) - media_copied
-        operation_owned_media = sum(
-            1 for tracked in state.tracked_media.values() if tracked.result.created
-        )
+        operation_owned_media = media_copied
 
         if not self._vector_retrieval_configured:
             vector_readiness = "not_configured"

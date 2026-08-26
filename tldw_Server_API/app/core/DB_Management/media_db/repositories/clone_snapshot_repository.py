@@ -43,6 +43,7 @@ _CANONICAL_MAX_CONTAINER_ITEMS = 1_000_000
 _CANONICAL_MAX_STRING_LENGTH = 1_000_000
 _KEYWORD_MAX_LENGTH = 255
 _OPERATION_OWNED_READINESS_MAX_ITEMS = 10_000
+MAX_OPERATION_OWNED_CLONE_MEDIA = 10_000
 _CANONICAL_HASH_DOMAIN = b"tldw.media-clone-snapshot.v2\x00"
 _LOGICAL_COPY_PROJECTION_VERSION = 2
 
@@ -83,6 +84,35 @@ class OperationOwnedMediaReference:
             raise ValueError("media_uuid must be a non-empty string")
         _validate_identifier(self.source_identity, "source_identity")
         _validate_sha256(self.expected_content_hash, "expected_content_hash")
+
+
+@dataclass(frozen=True, slots=True)
+class OperationOwnedMediaPublicationState:
+    """Bounded durable proof for pending and already-promoted clone Media."""
+
+    total_count: int
+    pending_count: int
+    pending: tuple[OperationOwnedMediaReference, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.total_count, bool)
+            or not isinstance(self.total_count, int)
+            or not 0 <= self.total_count <= MAX_OPERATION_OWNED_CLONE_MEDIA
+        ):
+            raise ValueError("total_count is outside the publication proof bound")
+        if (
+            isinstance(self.pending_count, bool)
+            or not isinstance(self.pending_count, int)
+            or not 0 <= self.pending_count <= self.total_count
+        ):
+            raise ValueError("pending_count must be bounded by total_count")
+        pending = tuple(self.pending)
+        if len(pending) > self.pending_count or any(
+            not isinstance(item, OperationOwnedMediaReference) for item in pending
+        ):
+            raise ValueError("pending must contain a bounded reference subset")
+        object.__setattr__(self, "pending", pending)
 
 
 @dataclass(frozen=True, slots=True)
@@ -553,10 +583,14 @@ class CloneSnapshotRepository:
         return result
 
     @staticmethod
-    def _storage_url(operation_id: str, source_identity: str) -> str:
+    def _storage_url_prefix(operation_id: str) -> str:
         operation_digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        return f"tldw-clone://workspace/{operation_digest}/"
+
+    @classmethod
+    def _storage_url(cls, operation_id: str, source_identity: str) -> str:
         source_digest = hashlib.sha256(source_identity.encode("utf-8")).hexdigest()
-        return f"tldw-clone://workspace/{operation_digest}/{source_digest}"
+        return f"{cls._storage_url_prefix(operation_id)}{source_digest}"
 
     def _owned_candidates(
         self,
@@ -955,11 +989,27 @@ class CloneSnapshotRepository:
         media_id: int,
         content: str,
         source_url: Any,
+        operation_id: str,
+        source_identity: str,
+        expected_content_hash: str,
         now: str,
     ) -> None:
         bounded_source_url = _bounded_source_url(source_url)
         safe_metadata = json.dumps(
-            {"clone_provenance": {"source_url": bounded_source_url}},
+            {
+                "clone_provenance": {
+                    "source_url": bounded_source_url,
+                    "publication_proof": {
+                        "operation_sha256": hashlib.sha256(
+                            operation_id.encode("utf-8")
+                        ).hexdigest(),
+                        "source_sha256": hashlib.sha256(
+                            source_identity.encode("utf-8")
+                        ).hexdigest(),
+                        "content_sha256": expected_content_hash,
+                    },
+                }
+            },
             ensure_ascii=True,
             separators=(",", ":"),
             sort_keys=True,
@@ -1154,6 +1204,9 @@ class CloneSnapshotRepository:
                         else str(snapshot.media["content"])
                     ),
                     source_url=snapshot.media.get("url"),
+                    operation_id=operation_id,
+                    source_identity=source_identity,
+                    expected_content_hash=expected_content_hash,
                     now=now,
                 )
                 self._insert_pending_keywords(
@@ -1296,6 +1349,116 @@ class CloneSnapshotRepository:
             )
             for row in rows
         ]
+
+    def read_operation_owned_clone_media_publication_state(
+        self,
+        *,
+        operation_id: str,
+        limit: int = 100,
+    ) -> OperationOwnedMediaPublicationState:
+        """Read durable proof across pending and already-promoted clone Media."""
+        operation_id = _validate_identifier(operation_id, "operation_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise InputError("limit must be an integer between 1 and 100")
+        operation_digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        storage_prefix = self._storage_url_prefix(operation_id)
+        with self.session.transaction() as connection:
+            rows = self.session._fetchall_with_connection(
+                connection,
+                "SELECT m.id, m.url, m.uuid, m.client_id, m.deleted, m.is_trash, "
+                "m.system_operation_id, m.system_operation_kind, "
+                "m.system_source_identity, m.system_content_hash, d.safe_metadata "
+                "FROM Media m JOIN DocumentVersions d ON d.media_id = m.id "
+                "AND d.version_number = 1 AND d.deleted = ? "
+                "WHERE m.url LIKE ? ORDER BY m.id ASC LIMIT ?",
+                (
+                    self._active_value(),
+                    f"{storage_prefix}%",
+                    MAX_OPERATION_OWNED_CLONE_MEDIA + 1,
+                ),
+            )
+        if len(rows) > MAX_OPERATION_OWNED_CLONE_MEDIA:
+            raise _operation_conflict()
+
+        pending_count = 0
+        pending: list[OperationOwnedMediaReference] = []
+        seen_media_ids: set[int] = set()
+        for raw_row in rows:
+            row = dict(raw_row)
+            media_id = int(row["id"])
+            url = str(row.get("url") or "")
+            source_digest = url.removeprefix(storage_prefix)
+            if (
+                media_id in seen_media_ids
+                or not url.startswith(storage_prefix)
+                or _SHA256_PATTERN.fullmatch(source_digest) is None
+                or str(row.get("client_id")) != str(self.session.client_id)
+                or bool(row.get("deleted"))
+            ):
+                raise _operation_conflict()
+            seen_media_ids.add(media_id)
+
+            metadata = self._decode_json_value(row.get("safe_metadata"))
+            clone_provenance = (
+                metadata.get("clone_provenance") if isinstance(metadata, Mapping) else None
+            )
+            proof = (
+                clone_provenance.get("publication_proof")
+                if isinstance(clone_provenance, Mapping)
+                else None
+            )
+            expected_content_hash = (
+                proof.get("content_sha256") if isinstance(proof, Mapping) else None
+            )
+            if (
+                not isinstance(proof, Mapping)
+                or proof.get("operation_sha256") != operation_digest
+                or proof.get("source_sha256") != source_digest
+                or not isinstance(expected_content_hash, str)
+                or _SHA256_PATTERN.fullmatch(expected_content_hash) is None
+            ):
+                raise _operation_conflict()
+
+            marker_values = (
+                row.get("system_operation_id"),
+                row.get("system_operation_kind"),
+                row.get("system_source_identity"),
+                row.get("system_content_hash"),
+            )
+            if all(value is None for value in marker_values):
+                if bool(row.get("is_trash")):
+                    raise _operation_conflict()
+                continue
+
+            source_identity = row.get("system_source_identity")
+            if (
+                bool(row.get("is_trash")) is not True
+                or row.get("system_operation_id") != operation_id
+                or row.get("system_operation_kind") != _CLONE_OPERATION_KIND
+                or not isinstance(source_identity, str)
+                or self._storage_url(operation_id, source_identity) != url
+                or not hmac.compare_digest(
+                    str(row.get("system_content_hash") or ""),
+                    expected_content_hash,
+                )
+            ):
+                raise _operation_conflict()
+            pending_count += 1
+            if len(pending) < limit:
+                pending.append(
+                    OperationOwnedMediaReference(
+                        media_id=media_id,
+                        media_uuid=str(row["uuid"]),
+                        source_identity=source_identity,
+                        expected_content_hash=expected_content_hash,
+                    )
+                )
+
+        return OperationOwnedMediaPublicationState(
+            total_count=len(rows),
+            pending_count=pending_count,
+            pending=tuple(pending),
+        )
 
     def _promote_pending_keywords(
         self,
@@ -1575,6 +1738,21 @@ def read_operation_owned_clone_media_readiness(
     )
 
 
+def read_operation_owned_clone_media_publication_state(
+    self: MediaDbLike,
+    *,
+    operation_id: str,
+    limit: int = 100,
+) -> OperationOwnedMediaPublicationState:
+    """MediaDatabase binding for durable clone Media publication proof."""
+    return CloneSnapshotRepository.from_legacy_db(
+        self
+    ).read_operation_owned_clone_media_publication_state(
+        operation_id=operation_id,
+        limit=limit,
+    )
+
+
 def insert_operation_owned_clone_media(
     self: MediaDbLike,
     *,
@@ -1637,6 +1815,8 @@ def confirm_operation_owned_clone_media(
 
 __all__ = [
     "CloneSnapshotRepository",
+    "MAX_OPERATION_OWNED_CLONE_MEDIA",
+    "OperationOwnedMediaPublicationState",
     "OperationOwnedMediaReference",
     "OperationOwnedMediaResult",
     "confirm_operation_owned_clone_media",
@@ -1645,4 +1825,5 @@ __all__ = [
     "insert_operation_owned_clone_media",
     "list_operation_owned_clone_media",
     "read_media_clone_snapshots",
+    "read_operation_owned_clone_media_publication_state",
 ]

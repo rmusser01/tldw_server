@@ -1248,6 +1248,13 @@ class SharedWorkspaceUnavailable(SharedWorkspaceAccessError):
         super().__init__("Shared workspace is temporarily unavailable")
 
 
+class SharedWorkspaceCloneNotAllowed(SharedWorkspaceAccessError):
+    """Raised when the authoritative share policy disables recipient cloning."""
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace cloning is not allowed")
+
+
 class SharedWorkspaceChatServiceError(RuntimeError):
     """Base shared-chat error with a stable code and disclosure-safe message."""
 
