@@ -16,11 +16,15 @@ def _write_report(
     failures: dict[str, list[str]],
     *,
     collection_failures: tuple[str, ...] = (),
+    failure_messages: dict[str, list[str]] | None = None,
 ) -> None:
     test_results = []
     failed_test_count = 0
     for relative_path, full_names in failures.items():
         failed_test_count += len(full_names)
+        messages = (failure_messages or {}).get(relative_path)
+        if messages is not None and len(messages) != len(full_names):
+            raise ValueError("failure message count must match failed assertion count")
         test_results.append(
             {
                 "name": str(package_root / relative_path),
@@ -29,10 +33,15 @@ def _write_report(
                     {
                         "fullName": full_name,
                         "status": "failed",
-                        "failureMessages": ["expected true to be false"],
+                        "failureMessages": [
+                            messages[index]
+                            if messages is not None
+                            else "expected true to be false"
+                        ],
                     }
-                    for full_name in full_names
+                    for index, full_name in enumerate(full_names)
                 ],
+                "message": "",
             }
         )
     for relative_path in collection_failures:
@@ -47,10 +56,74 @@ def _write_report(
 
     payload = {
         "success": not test_results,
+        "numTotalTestSuites": len(test_results),
+        "numPassedTestSuites": 0,
+        "numFailedTestSuites": len(test_results),
+        "numPendingTestSuites": 0,
+        "numTotalTests": failed_test_count,
+        "numPassedTests": 0,
         "numFailedTests": failed_test_count,
+        "numPendingTests": 0,
+        "numTodoTests": 0,
         "testResults": test_results,
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_success_report(path: Path, package_root: Path) -> None:
+    payload = {
+        "success": True,
+        "numTotalTestSuites": 1,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numPendingTestSuites": 0,
+        "numTotalTests": 1,
+        "numPassedTests": 1,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numTodoTests": 0,
+        "testResults": [
+            {
+                "name": str(package_root / "src/passed.test.ts"),
+                "status": "passed",
+                "assertionResults": [
+                    {
+                        "fullName": "suite passes",
+                        "status": "passed",
+                        "failureMessages": [],
+                    }
+                ],
+                "message": "",
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_safety_report(
+    path: Path,
+    *,
+    reason: str,
+    test_count: int,
+    module_count: int = 1,
+    unhandled_error_count: int = 0,
+    module_error_count: int = 0,
+    hook_error_count: int = 0,
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "reason": reason,
+                "moduleCount": module_count,
+                "testCount": test_count,
+                "unhandledErrorCount": unhandled_error_count,
+                "moduleErrorCount": module_error_count,
+                "hookErrorCount": hook_error_count,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_failing_test_files_normalizes_and_sorts_package_paths(tmp_path: Path) -> None:
@@ -159,6 +232,87 @@ def test_validate_success_report_rejects_unknown_assertion_status(
 
     with pytest.raises(RatchetError, match="assertion status"):
         validate_success_report(report_path, package_root)
+
+
+def test_strict_validate_success_report_rejects_zero_tests(tmp_path: Path) -> None:
+    package_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_report(report_path, package_root, {})
+    _write_safety_report(
+        safety_path,
+        reason="passed",
+        test_count=0,
+        module_count=0,
+    )
+
+    with pytest.raises(RatchetError, match="zero tests"):
+        validate_success_report(
+            report_path,
+            package_root,
+            strict=True,
+            safety_report_path=safety_path,
+        )
+
+
+def test_strict_validate_success_report_rejects_counter_mismatch(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["numTotalTests"] = 2
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(safety_path, reason="passed", test_count=1)
+
+    with pytest.raises(RatchetError, match="counter"):
+        validate_success_report(
+            report_path,
+            package_root,
+            strict=True,
+            safety_report_path=safety_path,
+        )
+
+
+@pytest.mark.parametrize(
+    "safety_field",
+    ("unhandledErrorCount", "moduleErrorCount", "hookErrorCount"),
+)
+def test_strict_validate_success_report_rejects_safety_errors(
+    tmp_path: Path,
+    safety_field: str,
+) -> None:
+    package_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    safety_counts = {
+        "unhandled_error_count": 0,
+        "module_error_count": 0,
+        "hook_error_count": 0,
+    }
+    argument_by_field = {
+        "unhandledErrorCount": "unhandled_error_count",
+        "moduleErrorCount": "module_error_count",
+        "hookErrorCount": "hook_error_count",
+    }
+    safety_counts[argument_by_field[safety_field]] = 1
+    _write_safety_report(
+        safety_path,
+        reason="passed",
+        test_count=1,
+        **safety_counts,
+    )
+
+    with pytest.raises(RatchetError, match=safety_field):
+        validate_success_report(
+            report_path,
+            package_root,
+            strict=True,
+            safety_report_path=safety_path,
+        )
 
 
 def test_failing_test_files_rejects_passed_result_with_failed_assertion(
@@ -280,3 +434,168 @@ def test_compare_reports_rejects_inherited_failure_in_modified_test_file(
         "same inherited test name"
     ]
     assert result.inherited == ()
+
+
+def test_strict_compare_rejects_changed_failure_cause(tmp_path: Path) -> None:
+    head_root = tmp_path / "head" / "admin-ui"
+    base_root = tmp_path / "base" / "admin-ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_safety = tmp_path / "head-safety.json"
+    base_safety = tmp_path / "base-safety.json"
+    changed_files = tmp_path / "changed.bin"
+    failures = {"src/route.test.ts": ["route stays protected"]}
+    _write_report(
+        head_report,
+        head_root,
+        failures,
+        failure_messages={
+            "src/route.test.ts": [f"expected 403 at {head_root}, received 500"]
+        },
+    )
+    _write_report(
+        base_report,
+        base_root,
+        failures,
+        failure_messages={
+            "src/route.test.ts": [f"expected 403 at {base_root}, received 401"]
+        },
+    )
+    _write_safety_report(head_safety, reason="failed", test_count=1)
+    _write_safety_report(base_safety, reason="failed", test_count=1)
+    changed_files.write_bytes(b"admin-ui/src/runtime.ts\0")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("admin-ui"),
+        changed_files_path=changed_files,
+        strict=True,
+        head_safety_report_path=head_safety,
+        base_safety_report_path=base_safety,
+    )
+
+    assert not result.passes
+    assert len(result.regressions) == 1
+    assert result.regressions[0].failure_messages == (
+        "expected 403 at <PACKAGE_ROOT>, received 500",
+    )
+
+
+def test_strict_compare_accepts_same_cause_after_package_root_normalization(
+    tmp_path: Path,
+) -> None:
+    head_root = tmp_path / "head" / "admin-ui"
+    base_root = tmp_path / "base" / "admin-ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_safety = tmp_path / "head-safety.json"
+    base_safety = tmp_path / "base-safety.json"
+    changed_files = tmp_path / "changed.bin"
+    failures = {"src/route.test.ts": ["route stays protected"]}
+    _write_report(
+        head_report,
+        head_root,
+        failures,
+        failure_messages={"src/route.test.ts": [f"failure at {head_root}/src"]},
+    )
+    _write_report(
+        base_report,
+        base_root,
+        failures,
+        failure_messages={"src/route.test.ts": [f"failure at {base_root}/src"]},
+    )
+    _write_safety_report(head_safety, reason="failed", test_count=1)
+    _write_safety_report(base_safety, reason="failed", test_count=1)
+    changed_files.write_bytes(b"admin-ui/src/runtime.ts\0")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("admin-ui"),
+        changed_files_path=changed_files,
+        strict=True,
+        head_safety_report_path=head_safety,
+        base_safety_report_path=base_safety,
+    )
+
+    assert result.passes
+    assert len(result.inherited) == 1
+
+
+def test_strict_compare_preserves_duplicate_failure_multiplicity(
+    tmp_path: Path,
+) -> None:
+    head_root = tmp_path / "head" / "admin-ui"
+    base_root = tmp_path / "base" / "admin-ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_safety = tmp_path / "head-safety.json"
+    base_safety = tmp_path / "base-safety.json"
+    changed_files = tmp_path / "changed.bin"
+    _write_report(
+        head_report,
+        head_root,
+        {"src/duplicate.test.ts": ["same name", "same name"]},
+    )
+    _write_report(
+        base_report,
+        base_root,
+        {"src/duplicate.test.ts": ["same name"]},
+    )
+    _write_safety_report(head_safety, reason="failed", test_count=2)
+    _write_safety_report(base_safety, reason="failed", test_count=1)
+    changed_files.write_bytes(b"admin-ui/src/runtime.ts\0")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("admin-ui"),
+        changed_files_path=changed_files,
+        strict=True,
+        head_safety_report_path=head_safety,
+        base_safety_report_path=base_safety,
+    )
+
+    assert len(result.inherited) == 1
+    assert len(result.regressions) == 1
+
+
+def test_strict_compare_rejects_file_error_hidden_beside_assertion(
+    tmp_path: Path,
+) -> None:
+    head_root = tmp_path / "head" / "admin-ui"
+    base_root = tmp_path / "base" / "admin-ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_safety = tmp_path / "head-safety.json"
+    base_safety = tmp_path / "base-safety.json"
+    changed_files = tmp_path / "changed.bin"
+    failures = {"src/setup.test.ts": ["ordinary assertion"]}
+    _write_report(head_report, head_root, failures)
+    _write_report(base_report, base_root, failures)
+    payload = json.loads(head_report.read_text(encoding="utf-8"))
+    payload["testResults"][0]["message"] = "afterAll cleanup failed"
+    head_report.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(head_safety, reason="failed", test_count=1)
+    _write_safety_report(base_safety, reason="failed", test_count=1)
+    changed_files.write_bytes(b"admin-ui/src/runtime.ts\0")
+
+    with pytest.raises(RatchetError, match="file-level error"):
+        compare_reports(
+            head_report=head_report,
+            base_report=base_report,
+            head_package_root=head_root,
+            base_package_root=base_root,
+            package_repo_path=Path("admin-ui"),
+            changed_files_path=changed_files,
+            strict=True,
+            head_safety_report_path=head_safety,
+            base_safety_report_path=base_safety,
+        )

@@ -12,12 +12,14 @@ const withSentryConfig = process.env.NEXT_PUBLIC_SENTRY_DSN
   : (config) => config;
 
 const isDev = process.env.NODE_ENV !== 'production';
+const isRealBackendE2eBuild =
+  process.env.TLDW_ADMIN_E2E_REAL_BACKEND === 'true';
 const configDirectory = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
+  output: isRealBackendE2eBuild ? undefined : 'standalone',
   outputFileTracingRoot: resolve(configDirectory, '..'),
   poweredByHeader: false,
 

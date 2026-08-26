@@ -9,10 +9,19 @@ on:
     workflows: [Frontend License Gate Audit]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Exact base commit for failure-ratchet comparison
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+# DIGEST_TRUST_BOUNDARY:
+# - workflow_run uses the default-branch workflow definition as the trust boundary.
+# - pull_request is a same-workflow consistency check because the PR controls both.
+# - workflow_dispatch follows the selected workflow ref and inherits that ref's trust.
 concurrency:
   group: frontend-required-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
@@ -146,15 +155,11 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "workflow_run" ]]; then
             BASE_SHA="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}"
           else
-            BASE_SHA="${{ github.event.before }}"
+            BASE_SHA="${{ inputs.base_sha }}"
           fi
 
-          if [[ -z "${BASE_SHA:-}" || "${BASE_SHA:-}" == "0000000000000000000000000000000000000000" ]]; then
-            BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
-          fi
-
-          if [[ -z "${BASE_SHA:-}" ]]; then
-            echo "No base SHA is available for the frontend failure ratchet." >&2
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ || "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            echo "A nonzero 40-character base SHA is required for the frontend failure ratchet." >&2
             exit 1
           fi
 
@@ -179,6 +184,11 @@ jobs:
           BASE_WORKTREE="${RUNNER_TEMP}/frontend-unit-base-${{ matrix.shard }}"
           BASE_READY=0
           RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"
+          EXPECTED_RATCHET_SHA256="b74fdd14d915134458bc0334c4db2e992497f00bc07ab8c9353967c7169f3ede"
+          if ! printf '%s  %s\n' "$EXPECTED_RATCHET_SHA256" "$RATCHET_SCRIPT" | sha256sum --check --status; then
+            echo "The frontend Vitest ratchet helper does not match the workflow-pinned digest." >&2
+            exit 1
+          fi
 
           common_vitest_args=(
             "--shard=${{ matrix.shard }}/8"
@@ -563,14 +573,11 @@ jobs:
               exit 1
             fi
           else
-            BASE_SHA="${{ github.event.before }}"
+            BASE_SHA="${{ inputs.base_sha }}"
           fi
 
-          if [[ -z "${BASE_SHA:-}" || "${BASE_SHA:-}" == "0000000000000000000000000000000000000000" ]]; then
-            BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
-          fi
-          if [[ -z "${BASE_SHA:-}" ]]; then
-            echo "No base SHA is available for the admin UI failure ratchet." >&2
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ || "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            echo "A nonzero 40-character base SHA is required for the admin UI failure ratchet." >&2
             exit 1
           fi
 
@@ -591,7 +598,7 @@ jobs:
           fi
 
           CHANGED_FILES_PATH="${RUNNER_TEMP}/admin-ui-unit-changed-files.txt"
-          if ! git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"; then
+          if ! git diff --name-only -z --diff-filter=ACMRT "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"; then
             echo "Unable to identify files changed from ${BASE_SHA} to ${HEAD_SHA}." >&2
             exit 1
           fi
@@ -601,25 +608,43 @@ jobs:
           BASE_ROOT="${BASE_WORKTREE}/admin-ui"
           HEAD_REPORT="${RUNNER_TEMP}/admin-ui-unit-head.json"
           BASE_REPORT="${RUNNER_TEMP}/admin-ui-unit-base.json"
+          HEAD_SAFETY_REPORT="${RUNNER_TEMP}/admin-ui-unit-head-safety.json"
+          BASE_SAFETY_REPORT="${RUNNER_TEMP}/admin-ui-unit-base-safety.json"
           FAILED_FILES_PATH="${RUNNER_TEMP}/admin-ui-unit-failed-files.txt"
           RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"
+          SAFETY_REPORTER="${GITHUB_WORKSPACE}/admin-ui/scripts/ci/vitest-safety-reporter.mjs"
+          EXPECTED_RATCHET_SHA256="b74fdd14d915134458bc0334c4db2e992497f00bc07ab8c9353967c7169f3ede"
+          EXPECTED_SAFETY_REPORTER_SHA256="433e8ab9a163694775fa4a50ceae2f7722358331d1f8f4426ec7ec31e36e93f3"
+          if ! printf '%s  %s\n' "$EXPECTED_RATCHET_SHA256" "$RATCHET_SCRIPT" | sha256sum --check --status; then
+            echo "The admin UI Vitest ratchet helper does not match the workflow-pinned digest." >&2
+            exit 1
+          fi
+          if ! printf '%s  %s\n' "$EXPECTED_SAFETY_REPORTER_SHA256" "$SAFETY_REPORTER" | sha256sum --check --status; then
+            echo "The admin UI Vitest safety reporter does not match the workflow-pinned digest." >&2
+            exit 1
+          fi
           VITEST_ARGS=(
             "--maxWorkers=1"
             "--testTimeout=15000"
+            "--passWithNoTests=false"
             "--reporter=default"
             "--reporter=json"
+            "--reporter=${SAFETY_REPORTER}"
           )
 
           HEAD_STATUS=0
           (
             cd "$HEAD_ROOT" &&
-            bunx vitest run "${VITEST_ARGS[@]}" "--outputFile.json=${HEAD_REPORT}"
+            TLDW_VITEST_SAFETY_REPORT="$HEAD_SAFETY_REPORT" \
+              bunx vitest run "${VITEST_ARGS[@]}" "--outputFile.json=${HEAD_REPORT}"
           ) || HEAD_STATUS=$?
 
           if (( HEAD_STATUS == 0 )); then
             python3 "$RATCHET_SCRIPT" validate-success \
+              --strict \
               --report "$HEAD_REPORT" \
-              --package-root "$HEAD_ROOT"
+              --package-root "$HEAD_ROOT" \
+              --safety-report "$HEAD_SAFETY_REPORT"
             exit $?
           fi
           if (( HEAD_STATUS != 1 )); then
@@ -629,8 +654,10 @@ jobs:
 
           echo "Admin UI tests failed on the head; replaying only failed files at ${BASE_SHA}."
           if ! python3 "$RATCHET_SCRIPT" extract \
+            --strict \
             --report "$HEAD_REPORT" \
             --package-root "$HEAD_ROOT" \
+            --safety-report "$HEAD_SAFETY_REPORT" \
             --output "$FAILED_FILES_PATH"; then
             exit 1
           fi
@@ -654,6 +681,10 @@ jobs:
           FAILED_FILES=()
           while IFS= read -r test_file; do
             if [[ -n "$test_file" ]]; then
+              if ! git diff --quiet --no-ext-diff "$BASE_SHA" "$HEAD_SHA" -- "admin-ui/${test_file}"; then
+                echo "Refusing to ratchet changed admin UI test file: ${test_file}." >&2
+                exit 1
+              fi
               FAILED_FILES+=("./${test_file}")
             fi
           done < "$FAILED_FILES_PATH"
@@ -665,7 +696,8 @@ jobs:
           BASE_STATUS=0
           (
             cd "$BASE_ROOT" &&
-            bunx vitest run "${FAILED_FILES[@]}" "${VITEST_ARGS[@]}" "--outputFile.json=${BASE_REPORT}"
+            TLDW_VITEST_SAFETY_REPORT="$BASE_SAFETY_REPORT" \
+              bunx vitest run "${FAILED_FILES[@]}" "${VITEST_ARGS[@]}" "--outputFile.json=${BASE_REPORT}"
           ) || BASE_STATUS=$?
           echo "Admin UI exact-base replay exited with status ${BASE_STATUS}."
           if (( BASE_STATUS != 1 )); then
@@ -674,8 +706,11 @@ jobs:
           fi
 
           python3 "$RATCHET_SCRIPT" compare \
+            --strict \
             --head-report "$HEAD_REPORT" \
             --base-report "$BASE_REPORT" \
+            --head-safety-report "$HEAD_SAFETY_REPORT" \
+            --base-safety-report "$BASE_SAFETY_REPORT" \
             --head-package-root "$HEAD_ROOT" \
             --base-package-root "$BASE_ROOT" \
             --package-repo-path admin-ui \
@@ -686,7 +721,7 @@ jobs:
         working-directory: admin-ui
         env:
           TLDW_ADMIN_E2E_PYTHON: python
-        run: bun run test:real-backend -- --project=chromium-real-jwt --project=chromium-real-single-user --reporter=line
+        run: bun run test:real-backend
 
       - name: Run admin-ui build
         if: needs.changes.outputs.admin_ui_changed == 'true'

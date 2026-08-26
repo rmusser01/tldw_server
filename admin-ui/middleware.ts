@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildApiUrl } from '@/lib/api-config';
+import { buildApiUrlForRequest } from '@/lib/api-config';
 import { generateRequestId } from '@/lib/correlation-id';
 
 const AUTH_COOKIE_NAMES = ['access_token', 'x_api_key', 'x-api-key'] as const;
@@ -221,7 +221,11 @@ const verifyJwtLocally = async (
   return { ok: true, expMs: payload.exp * 1000 };
 };
 
-const verifyTokenWithApi = async (token: string, kind: AuthTokenKind): Promise<boolean> => {
+const verifyTokenWithApi = async (
+  token: string,
+  kind: AuthTokenKind,
+  request: NextRequest,
+): Promise<boolean> => {
   const headers = new Headers();
   if (kind === 'apiKey') {
     headers.set('X-API-KEY', token);
@@ -233,7 +237,7 @@ const verifyTokenWithApi = async (token: string, kind: AuthTokenKind): Promise<b
   const timeoutId = setTimeout(() => controller.abort(), 2000);
 
   try {
-    const response = await fetch(buildApiUrl('/users/me'), {
+    const response = await fetch(buildApiUrlForRequest(request, '/users/me'), {
       method: 'GET',
       headers,
       cache: 'no-store',
@@ -247,7 +251,11 @@ const verifyTokenWithApi = async (token: string, kind: AuthTokenKind): Promise<b
   }
 };
 
-const verifyAuthToken = async (token: string, kind: AuthTokenKind): Promise<boolean> => {
+const verifyAuthToken = async (
+  token: string,
+  kind: AuthTokenKind,
+  request: NextRequest,
+): Promise<boolean> => {
   const cacheKey = await buildAuthCacheKey(kind, token);
   const cached = cacheKey ? getCachedAuth(cacheKey) : null;
   if (cached !== null) return cached;
@@ -266,10 +274,10 @@ const verifyAuthToken = async (token: string, kind: AuthTokenKind): Promise<bool
         );
       }
     } else {
-      ok = await verifyTokenWithApi(token, kind);
+      ok = await verifyTokenWithApi(token, kind, request);
     }
   } else {
-    ok = await verifyTokenWithApi(token, kind);
+    ok = await verifyTokenWithApi(token, kind, request);
   }
 
   if (cacheKey) {
@@ -278,13 +286,18 @@ const verifyAuthToken = async (token: string, kind: AuthTokenKind): Promise<bool
   return ok;
 };
 
-const validateBearerToken = async (token: string): Promise<boolean> =>
-  verifyAuthToken(token, 'jwt');
+const validateBearerToken = async (
+  token: string,
+  request: NextRequest,
+): Promise<boolean> => verifyAuthToken(token, 'jwt', request);
 
-const validateApiKey = async (apiKey: string): Promise<boolean> => {
+const validateApiKey = async (
+  apiKey: string,
+  request: NextRequest,
+): Promise<boolean> => {
   const normalized = apiKey.trim();
   if (!normalized || !isValidApiKeyFormat(normalized)) return false;
-  return verifyAuthToken(normalized, 'apiKey');
+  return verifyAuthToken(normalized, 'apiKey', request);
 };
 
 const hasAuthCookie = async (request: NextRequest): Promise<boolean> => {
@@ -299,7 +312,7 @@ const hasAuthCookie = async (request: NextRequest): Promise<boolean> => {
     if (kind === 'apiKey' && !isValidApiKeyFormat(token)) {
       continue;
     }
-    if (await verifyAuthToken(token, kind)) {
+    if (await verifyAuthToken(token, kind, request)) {
       return true;
     }
   }
@@ -310,12 +323,12 @@ const hasAuthHeader = async (request: NextRequest): Promise<boolean> => {
   const authorization = request.headers.get('authorization');
   if (authorization) {
     const token = parseBearerHeader(authorization);
-    if (token && (await validateBearerToken(token))) {
+    if (token && (await validateBearerToken(token, request))) {
       return true;
     }
   }
   const apiKey = request.headers.get('x-api-key');
-  if (apiKey && (await validateApiKey(apiKey))) {
+  if (apiKey && (await validateApiKey(apiKey, request))) {
     return true;
   }
   return false;
