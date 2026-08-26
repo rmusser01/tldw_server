@@ -7242,13 +7242,10 @@ async def get_chat_settings(
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
         settings_row = db.get_conversation_settings(chat_id)
-        if not settings_row:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat settings not found")
-
-        settings = settings_row.get("settings") or {}
+        settings = (settings_row.get("settings") or {}) if settings_row else {}
         # Internal bootstrap metadata alone should not count as user-visible settings.
         if settings and set(settings.keys()) <= {"greetingsChecksum"}:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat settings not found")
+            settings = {}
 
         settings = _validate_chat_settings_payload(
             settings,
@@ -7292,7 +7289,7 @@ async def get_chat_settings(
         return ChatSettingsResponse(
             conversation_id=chat_id,
             settings=settings,
-            last_modified=settings_row.get("last_modified") or datetime.now(timezone.utc),
+            last_modified=(settings_row or {}).get("last_modified") or datetime.now(timezone.utc),
             warnings=warnings or None,
         )
     except HTTPException:

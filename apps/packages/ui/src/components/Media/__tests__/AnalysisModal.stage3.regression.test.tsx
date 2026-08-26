@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   setSelectedModel: vi.fn()
 }))
 
+const state = vi.hoisted(() => ({
+  selectedModel: undefined as string | undefined
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
@@ -56,6 +60,7 @@ vi.mock('antd', async (importOriginal) => {
   const SelectComponent = ({ value, onChange, children, ...rest }: any) => (
     <select
       aria-label={rest['aria-label'] || 'Model'}
+      data-selected-value={value || ''}
       value={value || ''}
       onChange={(event) => onChange?.(event.target.value)}
     >
@@ -98,7 +103,7 @@ vi.mock('@plasmohq/storage', () => ({
 }))
 
 vi.mock('@plasmohq/storage/hook', () => ({
-  useStorage: () => [undefined, mocks.setSelectedModel]
+  useStorage: () => [state.selectedModel, mocks.setSelectedModel]
 }))
 
 vi.mock('@/services/background-proxy', () => ({
@@ -139,9 +144,111 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     mocks.messageWarning.mockReset()
     mocks.messageInfo.mockReset()
     mocks.setSelectedModel.mockReset()
+    state.selectedModel = undefined
 
     mocks.getChatModels.mockResolvedValue([{ id: 'test-model', name: 'Test model' }])
     mocks.resolveApiProviderForModel.mockResolvedValue(undefined)
+  })
+
+  it('uses the persisted selected model while the catalog is still loading', async () => {
+    state.selectedModel = 'tldw:custom-openai-api:local-uat-chat'
+    mocks.getChatModels.mockImplementation(() => new Promise(() => undefined))
+    mocks.bgStream.mockImplementation(() =>
+      (async function* () {
+        yield streamChunk('Generated analysis')
+        yield 'data: [DONE]'
+      })()
+    )
+    mocks.bgRequest.mockResolvedValue({ processing: { analysis: 'Generated analysis' } })
+
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="media body"
+        onAnalysisGenerated={vi.fn()}
+      />
+    )
+
+    const generateButton = screen.getByRole('button', {
+      name: 'Generate Analysis'
+    })
+    expect(generateButton).not.toBeDisabled()
+    fireEvent.click(generateButton)
+
+    await waitFor(() => {
+      expect(mocks.bgStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            model: 'custom-openai-api:local-uat-chat'
+          })
+        })
+      )
+    })
+  })
+
+  it('normalizes a JSON-serialized persisted model before generation', async () => {
+    state.selectedModel = '"tldw:custom-openai-api:local-uat-chat"'
+    mocks.getChatModels.mockImplementation(() => new Promise(() => undefined))
+    mocks.resolveApiProviderForModel.mockResolvedValue('custom-openai-api')
+    mocks.bgStream.mockImplementation(() =>
+      (async function* () {
+        yield streamChunk('Generated analysis')
+        yield 'data: [DONE]'
+      })()
+    )
+    mocks.bgRequest.mockResolvedValue({ processing: { analysis: 'Generated analysis' } })
+
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="media body"
+        onAnalysisGenerated={vi.fn()}
+      />
+    )
+
+    expect(screen.getByLabelText('Model')).toHaveAttribute(
+      'data-selected-value',
+      'tldw:custom-openai-api:local-uat-chat'
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate Analysis' })
+    )
+
+    await waitFor(() => {
+      expect(mocks.resolveApiProviderForModel).toHaveBeenCalledWith({
+        modelId: 'tldw:custom-openai-api:local-uat-chat'
+      })
+      expect(mocks.bgStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            model: 'custom-openai-api:local-uat-chat',
+            api_provider: 'custom-openai-api'
+          })
+        })
+      )
+    })
+  })
+
+  it('waits for the catalog when no persisted model is selected', () => {
+    mocks.getChatModels.mockImplementation(() => new Promise(() => undefined))
+
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="media body"
+        onAnalysisGenerated={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole('button', { name: 'Generate Analysis' })
+    ).toBeDisabled()
   })
 
   it('preserves preset/custom prompt behavior and sends expected request body', async () => {
@@ -154,7 +261,7 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     )
 
     mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
-      if (request.path === '/api/v1/media/42' && request.method === 'GET') {
+      if (request.path === '/api/v1/media/42/versions' && request.method === 'POST') {
         return { analysis: 'Generated analysis output' }
       }
       return {}
@@ -218,10 +325,11 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     await waitFor(() => {
       expect(mocks.bgRequest).toHaveBeenCalledWith(
         expect.objectContaining({
-          path: '/api/v1/media/42',
-          method: 'PUT',
+          path: '/api/v1/media/42/versions',
+          method: 'POST',
           body: expect.objectContaining({
-            analysis: 'Generated analysis output',
+            content: 'media body',
+            analysis_content: 'Generated analysis output',
             prompt: expect.stringContaining('Act as a critical reviewer.')
           })
         })
@@ -232,11 +340,148 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('notifies consumers only after the generated analysis is persisted', async () => {
+    let resolveVersionSave: (() => void) | null = null
+    const versionSavePending = new Promise<void>((resolve) => {
+      resolveVersionSave = resolve
+    })
+    mocks.bgStream.mockImplementation(() =>
+      (async function* () {
+        yield streamChunk('Persisted analysis')
+        yield 'data: [DONE]'
+      })()
+    )
+    mocks.bgRequest.mockImplementation(
+      async (request: { path?: string; method?: string }) => {
+        if (request.path === '/api/v1/media/42/versions' && request.method === 'POST') {
+          await versionSavePending
+          return { analysis: 'Persisted analysis' }
+        }
+        return {}
+      }
+    )
+
+    const onAnalysisGenerated = vi.fn()
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="media body"
+        onAnalysisGenerated={onAnalysisGenerated}
+      />
+    )
+
+    const generateButton = await screen.findByRole('button', {
+      name: 'Generate Analysis'
+    })
+    await waitFor(() => expect(generateButton).not.toBeDisabled())
+    fireEvent.click(generateButton)
+
+    await waitFor(() => {
+      expect(mocks.bgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: '/api/v1/media/42/versions',
+          method: 'POST'
+        })
+      )
+    })
+    expect(onAnalysisGenerated).not.toHaveBeenCalled()
+
+    resolveVersionSave?.()
+    await waitFor(() => {
+      expect(onAnalysisGenerated).toHaveBeenCalledWith(
+        'Persisted analysis',
+        expect.any(String)
+      )
+    })
+    expect(mocks.bgRequest).not.toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'PUT' })
+    )
+  })
+
+  it('does not accept a stale prior analysis as persistence evidence', async () => {
+    mocks.bgStream.mockImplementation(() =>
+      (async function* () {
+        yield streamChunk('Fresh analysis')
+        yield 'data: [DONE]'
+      })()
+    )
+    mocks.bgRequest.mockImplementation(
+      async (request: { path?: string; method?: string }) => {
+        if (request.path === '/api/v1/media/42/versions' && request.method === 'POST') {
+          return { analysis: 'Prior analysis' }
+        }
+        if (request.path === '/api/v1/media/42' && request.method === 'GET') {
+          return { analysis: 'Prior analysis' }
+        }
+        return {}
+      }
+    )
+
+    const onAnalysisGenerated = vi.fn()
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="media body"
+        onAnalysisGenerated={onAnalysisGenerated}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Generate Analysis' })).not.toBeDisabled()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Analysis' }))
+
+    await waitFor(() => {
+      expect(mocks.messageError).toHaveBeenCalledWith('Failed to save analysis to media item')
+    })
+    expect(onAnalysisGenerated).not.toHaveBeenCalled()
+  })
+
+  it('recovers missing media content from a cache-busted detail request', async () => {
+    mocks.bgRequest.mockImplementation(
+      async (request: { path?: string; method?: string }) => {
+        if (
+          request.method === 'GET' &&
+          request.path?.startsWith('/api/v1/media/42?include_content=true')
+        ) {
+          return { content: { text: 'Recovered media body' } }
+        }
+        return {}
+      }
+    )
+
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent=""
+        onAnalysisGenerated={vi.fn()}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Generate Analysis' })).not.toBeDisabled()
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        path: expect.stringMatching(
+          /^\/api\/v1\/media\/42\?include_content=true&include_versions=false&cache_bust=\d+$/
+        )
+      })
+    )
+  })
+
   it('shows provider recovery copy when generation fails without a provider', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     mocks.bgStream.mockImplementation(() =>
       (async function* () {
-        throw new Error('Error: Analysis API provider is required.')
+        yield Promise.reject(new Error('Error: Analysis API provider is required.'))
       })()
     )
     mocks.bgRequest.mockRejectedValueOnce(new Error('Error: Analysis API provider is required.'))

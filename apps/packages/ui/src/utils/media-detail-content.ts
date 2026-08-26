@@ -26,6 +26,40 @@ const extractNestedContent = (value: unknown): string => {
   )
 }
 
+const extractAnalysisEntry = (value: unknown): string => {
+  if (typeof value === "string") return value.trim()
+  if (!isRecord(value)) return ""
+
+  return firstNonEmptyString(
+    value.content,
+    value.text,
+    value.summary,
+    value.analysis_content,
+    value.analysisContent,
+    value.analysis
+  )
+}
+
+const getVersionNumber = (value: UnknownRecord): number => {
+  const raw = value.version_number ?? value.versionNumber ?? value.version ?? value.id
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
+}
+
+const findLatestVersion = (detail: UnknownRecord): UnknownRecord | null => {
+  if (isRecord(detail.latest_version)) return detail.latest_version
+  if (isRecord(detail.latestVersion)) return detail.latestVersion
+
+  const versions = Array.isArray(detail.versions)
+    ? detail.versions.filter(isRecord)
+    : []
+  if (versions.length === 0) return null
+
+  return versions.reduce((latest, candidate) =>
+    getVersionNumber(candidate) > getVersionNumber(latest) ? candidate : latest
+  )
+}
+
 export const extractMediaDetailContent = (detail: unknown): string => {
   if (typeof detail === "string") return detail.trim()
   if (!isRecord(detail)) return ""
@@ -79,4 +113,36 @@ export const extractMediaDetailContent = (detail: unknown): string => {
   }
 
   return ""
+}
+
+export const extractMediaDetailAnalysis = (detail: unknown): string => {
+  if (!isRecord(detail)) return ""
+
+  const processing = isRecord(detail.processing) ? detail.processing : null
+  const fromRoot = firstNonEmptyString(
+    processing?.analysis,
+    detail.analysis,
+    detail.analysis_content,
+    detail.analysisContent
+  )
+  if (fromRoot) return fromRoot
+
+  if (Array.isArray(detail.analyses)) {
+    for (const entry of detail.analyses) {
+      const analysis = extractAnalysisEntry(entry)
+      if (analysis) return analysis
+    }
+  }
+
+  const latestVersion = findLatestVersion(detail)
+  if (latestVersion) {
+    const fromVersion = firstNonEmptyString(
+      latestVersion.analysis_content,
+      latestVersion.analysisContent,
+      latestVersion.analysis
+    )
+    if (fromVersion) return fromVersion
+  }
+
+  return firstNonEmptyString(detail.summary)
 }

@@ -724,6 +724,51 @@ async def test_account_restore_delegates_ordered_profile_updates_to_command_serv
 
 
 @pytest.mark.asyncio
+async def test_account_restore_skips_unchanged_synthetic_single_user_email(monkeypatch):
+    """An idempotent restore must not revalidate the bootstrap-only .local email."""
+    from tldw_Server_API.app.core.AuthNZ import database as database_module
+    from tldw_Server_API.app.core.AuthNZ.repos import users_repo as users_repo_module
+    from tldw_Server_API.app.core.UserProfiles import command_service as command_service_module
+
+    class _Pool:
+        @asynccontextmanager
+        async def transaction(self):
+            yield object()
+
+    pool = _Pool()
+
+    async def _get_pool():
+        return pool
+
+    class _Repo:
+        def __init__(self, *, db_pool):
+            assert db_pool is pool
+
+        async def get_user_by_id(self, user_id):
+            return {"id": user_id, "email": "single_user@example.local"}
+
+    class _CommandService:
+        def __init__(self, *, db_pool):
+            raise AssertionError("unchanged profile values must not be sent for validation")
+
+    monkeypatch.setattr(database_module, "get_db_pool", _get_pool)
+    monkeypatch.setattr(users_repo_module, "AuthnzUsersRepo", _Repo)
+    monkeypatch.setattr(command_service_module, "ProfileCommandService", _CommandService)
+
+    service = SimpleNamespace(user_id_int=1)
+    result = await ChatbookService._restore_account_state_payloads(
+        service,
+        {
+            "account_profile": {
+                "profile": {"identity.email": "single_user@example.local"},
+            }
+        },
+    )
+
+    assert result == {"account_profile": 1, "account_settings": 0}
+
+
+@pytest.mark.asyncio
 async def test_embedding_import_skip_does_not_overwrite_existing_chroma_ids(tmp_path, monkeypatch):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     db = CharactersRAGDB(db_path=str(tmp_path / "embedding_conflict.db"), client_id="embedding-conflict")

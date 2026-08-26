@@ -2,6 +2,14 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 
+import {
+  REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED,
+  createRealServerWorkflowTldwConfig,
+  createRealServerWorkflowStorageSeed,
+  resolveRunnableChatModel,
+  toSelectedModelId
+} from "../../test-utils/real-server-workflows"
+
 const readSource = (relativePath: string) =>
   readFileSync(path.join(process.cwd(), relativePath), "utf8")
 
@@ -36,7 +44,8 @@ describe("e2e harness readiness contracts", () => {
     const helperSource = readSource("e2e/utils/journey-helpers.ts")
 
     expect(helperSource).toContain("wizard-results-step")
-    expect(helperSource).toContain("quick-ingest-complete")
+    expect(helperSource).toContain("completed items")
+    expect(helperSource).toContain("error items")
     expect(helperSource).toContain("/api/v1/media/ingest/jobs/")
     expect(helperSource).toContain("article[aria-label*='Assistant message']")
     expect(helperSource).toContain("Generating response")
@@ -193,7 +202,299 @@ describe("e2e harness readiness contracts", () => {
     const interactiveReviewSource = readSource("e2e/interactive-review.ts")
 
     expect(interactiveReviewSource).toContain("waitForAppShell")
-    expect(interactiveReviewSource).not.toContain("waitForLoadState('networkidle'")
-    expect(interactiveReviewSource).not.toContain('waitForLoadState("networkidle"')
+    expect(interactiveReviewSource).not.toContain(
+      "waitForLoadState('networkidle'"
+    )
+    expect(interactiveReviewSource).not.toContain(
+      'waitForLoadState("networkidle"'
+    )
+  })
+
+  it("coverage maps every legacy real-server workflow and keeps only honest live cases", () => {
+    const workflowSource = readSource("../test-utils/real-server-workflows.ts")
+    const coverageMap = readSource(
+      "../../Docs/superpowers/reviews/2026-08-25-real-server-workflow-coverage-map.md"
+    )
+    const rows = coverageMap
+      .split("\n")
+      .filter((line) => /^\|\s*\d+\s*\|/.test(line))
+      .map((line) => line.split("|").map((cell) => cell.trim()))
+
+    expect(rows).toHaveLength(17)
+    const mappedTitles = rows.map((cells) => cells[2])
+    expect(new Set(mappedTitles).size).toBe(17)
+    const decisions = rows.map((cells) => cells[6])
+    expect(
+      decisions.every((decision) =>
+        ["delete-redundant", "move-to-tier", "retain-live-gate"].includes(
+          decision
+        )
+      )
+    ).toBe(true)
+
+    const inventoryMatch = workflowSource.match(
+      /export const LEGACY_REAL_SERVER_WORKFLOW_TITLES = \[([\s\S]*?)\] as const/
+    )
+    expect(inventoryMatch).not.toBeNull()
+    const inventoryTitles = Array.from(
+      (inventoryMatch?.[1] ?? "").matchAll(/"([^"]+)"/g),
+      (match) => match[1]
+    )
+    expect(inventoryTitles).toEqual(mappedTitles)
+
+    const registrations = Array.from(
+      workflowSource.matchAll(/^\s*test\(\s*\n?\s*"([^"]+)"/gm)
+    )
+    const registeredTitles = registrations.map((match) => match[1])
+    const retainedTitles = rows
+      .filter((cells) => cells[6] === "retain-live-gate")
+      .map((cells) => cells[2])
+    expect(registeredTitles).toEqual(retainedTitles)
+
+    const mutationMarkers: Record<string, string> = {
+      "chat -> save to notes -> open linked conversation":
+        "createCharacterByName(",
+      "chat -> save to flashcards -> review card": "createCharacterByName(",
+      "media trash -> delete -> restore": ".setInputFiles(",
+      "media ingestion -> analysis -> review -> re-analyze": ".setInputFiles("
+    }
+    for (const title of retainedTitles) {
+      const registrationIndex = registrations.findIndex(
+        (match) => match[1] === title
+      )
+      expect(registrationIndex).toBeGreaterThanOrEqual(0)
+      const start = registrations[registrationIndex]?.index ?? -1
+      expect(start).toBeGreaterThanOrEqual(0)
+      const nextTest = registrations[registrationIndex + 1]?.index ?? -1
+      const block = workflowSource.slice(
+        start,
+        nextTest >= 0 ? nextTest : workflowSource.length
+      )
+      const marker = mutationMarkers[title]
+      const mutation = block.indexOf(marker)
+      expect(mutation).toBeGreaterThanOrEqual(0)
+      const afterMutation = block.slice(mutation)
+      expect(afterMutation).not.toContain("skipOrThrow(")
+      expect(afterMutation).not.toContain("test.skip(")
+      expect(block).not.toMatch(/catch\s*\{\s*\}/)
+      if (title.startsWith("chat ->")) {
+        expect(block).toContain("selectTrackedCharacterFromRuntimeRail(")
+        expect(block).not.toContain("setSelectedCharacterInStorage(")
+      }
+    }
+
+    expect(workflowSource).toContain("resolveRunnableChatModel")
+    expect(workflowSource).toContain('getByTestId("chat-character-controls-trigger")')
+    expect(workflowSource).toContain('getByTestId("chat-character-controls-sheet")')
+    expect(workflowSource).toContain('name: "Start tracked character chat"')
+    expect(workflowSource).toContain('getByTestId("assistant-select-panel")')
+    expect(workflowSource).toContain('getByTestId("media-search-input")')
+    expect(workflowSource).toContain('expected_version=')
+    expect(workflowSource).toContain(
+      '`/media?id=${encodeURIComponent(String(mediaId))}`'
+    )
+    expect(workflowSource).not.toContain("getFirstModelId")
+    expect(workflowSource).not.toContain("void waitForQuickIngestCompletion")
+    expect(workflowSource).toContain('getByTestId("wizard-results-step")')
+    expect(workflowSource).toContain(
+      'getByRole("button", { name: "Next", exact: true })'
+    )
+    expect(workflowSource).toContain(
+      'getByRole("heading", { name: /^Processing$/i })'
+    )
+    expect(workflowSource).not.toContain("const getRunState")
+    expect(workflowSource).not.toContain(
+      "if (/use defaults|start processing"
+    )
+    expect(workflowSource).toContain('[aria-current="step"]')
+    expect(workflowSource).not.toContain(".test(clickedLabel)")
+    expect(workflowSource).toContain('name: "Quick preset"')
+    expect(workflowSource).toContain("selectQuickIngestQuickPreset(modal)")
+    expect(workflowSource).toContain("await configureButton.click()")
+    expect(workflowSource).toContain("closeQuickIngestModal(modal)")
+    expect(workflowSource).toContain(
+      'getByText("Moved to trash", { exact: true })'
+    )
+    expect(workflowSource).toContain(
+      "getByText(expectedTitle, { exact: true })"
+    )
+    expect(workflowSource).toContain(
+      'getByRole("dialog", { name: /^Generate$/i })'
+    )
+    expect(workflowSource).not.toContain("name: /Generate Analysis/i")
+    expect(workflowSource).toContain("pollForPersistedMediaAnalysis(")
+    expect(workflowSource).toContain(
+      'getByText("Pending save", { exact: true })'
+    )
+    expect(workflowSource).not.toContain("getByText(token)")
+    expect(workflowSource).not.toContain(
+      'name: /Use defaults & process/i'
+    )
+    expect(workflowSource).not.toContain(
+      "Use defaults & process|Start Processing|Run quick ingest|Configure|Review|Process|Ingest"
+    )
+    expect(workflowSource).toContain("Checking chat model readiness")
+    expect(workflowSource).toContain("Composer did not dispatch the chat request")
+    expect(workflowSource).toContain("first_message")
+  })
+
+  it("selects an explicitly configured chat provider using its callable provider key", () => {
+    const selected = resolveRunnableChatModel({
+      providers: [
+        {
+          name: "openai",
+          chat_provider: "openai",
+          is_configured: false,
+          models: ["gpt-4.1-mini"]
+        },
+        {
+          name: "custom_openai_api",
+          chat_provider: "custom-openai-api",
+          is_configured: true,
+          models: ["local-uat-chat"]
+        }
+      ]
+    })
+
+    expect(selected).toEqual({
+      id: "local-uat-chat",
+      provider: "custom-openai-api"
+    })
+    expect(selected && toSelectedModelId(selected)).toBe(
+      "tldw:custom-openai-api:local-uat-chat"
+    )
+  })
+
+  it("opens linked notes conversations through the current overflow action", () => {
+    const workflowSource = readSource("../test-utils/real-server-workflows.ts")
+
+    expect(workflowSource).toContain('getByTestId("notes-overflow-menu-button")')
+    expect(workflowSource).toMatch(
+      /getByRole\("menuitem",\s*\{\s*name:\s*\/Open linked conversation\|Open conversation\/i/
+    )
+    expect(workflowSource).not.toContain(
+      'getByRole("button", {\n          name: /Open conversation/i'
+    )
+  })
+
+  it("runs the extension background liveness probe only on the extension surface", () => {
+    const workflowSource = readSource("../test-utils/real-server-workflows.ts")
+
+    expect(workflowSource).toMatch(
+      /const waitForConnected = async \(\s*page: Page,\s*label: string,\s*surface: WorkflowDriver\["kind"\]\s*\)/
+    )
+    expect(workflowSource).toMatch(
+      /if \(surface === "extension"\) \{[\s\S]*?pingBackgroundScript\(page\)/
+    )
+    expect(workflowSource).toContain(
+      'waitForConnected(chatPage, "workflow-chat-notes", driver.kind)'
+    )
+    expect(workflowSource).toContain(
+      'waitForConnected(page, "workflow-media-trash-view", driver.kind)'
+    )
+    expect(workflowSource).not.toMatch(
+      /waitForConnected\([^\n]*"workflow-[^"]+"\)/
+    )
+  })
+
+  it("opens retained media workflows from the media surface without an onboarding fallback", () => {
+    const workflowSource = readSource("../test-utils/real-server-workflows.ts")
+
+    expect(
+      workflowSource.match(/await driver\.goto\(page, "\/media", \{/g)
+    ).toHaveLength(2)
+    expect(workflowSource).toContain("__tldwPendingQuickIngestOpen")
+    expect(workflowSource).not.toContain("workflow-media-trash-ingest-fallback")
+    expect(workflowSource).not.toContain("workflow-analysis-ingest-fallback")
+  })
+
+  it("saves chat flashcards through the visible message overflow action", () => {
+    const workflowSource = readSource("../test-utils/real-server-workflows.ts")
+
+    expect(workflowSource).toContain("clickMessageOverflowAction(")
+    expect(workflowSource).toContain('getByRole("tab", { name: /^Manage$/i })')
+    expect(workflowSource).toContain('getByRole("tab", { name: /^Study$/i })')
+    expect(workflowSource).toContain('getByTestId("flashcards-review-all-due")')
+    expect(workflowSource).toContain("cleanupFlashcard(")
+    expect(workflowSource).not.toMatch(
+      /assistantMessage\.getByRole\("button",\s*\{\s*name:\s*\/Save to Flashcards\/i/
+    )
+    expect(workflowSource).not.toContain(
+      'getByRole("tab", { name: /Cards/i })'
+    )
+    expect(workflowSource).not.toContain(
+      'getByRole("tab", { name: /Review/i })'
+    )
+  })
+
+  it("shares intentional first-run and tour dismissal state across both live wrappers", () => {
+    const storageSeed = createRealServerWorkflowStorageSeed(123)
+
+    expect(storageSeed).toMatchObject({
+      __tldw_first_run_complete: true,
+      assistant_setup_dismissed: true,
+      tldw_skip_landing_hub: true,
+      quickIngestInspectorIntroDismissed: true,
+      quickIngestOnboardingDismissed: true,
+      "tldw:workflow:landing-config": {
+        dismissedAt: 123
+      }
+    })
+    expect(REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED).toHaveProperty(
+      "playground-tour-completed",
+      "true"
+    )
+    expect(REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED).toHaveProperty(
+      "notes-tutorial-shown",
+      "1"
+    )
+    expect(REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED).toHaveProperty(
+      "tldw-tutorials"
+    )
+
+    const webWrapper = readSource("e2e/real-server-workflows.spec.ts")
+    const extensionWrapper = readSource(
+      "../extension/tests/e2e/real-server-workflows.spec.ts"
+    )
+    for (const wrapper of [webWrapper, extensionWrapper]) {
+      expect(wrapper).toContain("createRealServerWorkflowStorageSeed")
+      expect(wrapper).toContain("REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED")
+    }
+  })
+
+  it("seeds a complete manual credential record on every live browser document", () => {
+    expect(
+      createRealServerWorkflowTldwConfig(
+        "http://127.0.0.1:8000/",
+        "test-api-key"
+      )
+    ).toEqual({
+      serverUrl: "http://127.0.0.1:8000",
+      apiKey: "test-api-key",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "http://127.0.0.1:8000"
+    })
+
+    const webWrapper = readSource("e2e/real-server-workflows.spec.ts")
+    const extensionWrapper = readSource(
+      "../extension/tests/e2e/real-server-workflows.spec.ts"
+    )
+    for (const wrapper of [webWrapper, extensionWrapper]) {
+      expect(wrapper).toContain("createRealServerWorkflowTldwConfig")
+    }
+  })
+
+  it("quiesces the WebUI page before disposable workflow fixtures are deleted", () => {
+    const webWrapper = readSource("e2e/real-server-workflows.spec.ts")
+    const extensionWrapper = readSource(
+      "../extension/tests/e2e/real-server-workflows.spec.ts"
+    )
+
+    expect(webWrapper).toContain("await page.close()")
+    expect(webWrapper).not.toContain("about:blank")
+    expect(extensionWrapper).not.toContain("about:blank")
   })
 })

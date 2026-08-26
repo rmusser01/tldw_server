@@ -3545,7 +3545,9 @@ class ChatbookService:
             if not isinstance(profile, dict):
                 raise ValidationError("Account profile payload is invalid")
             email = profile.get("identity.email")
-            if email is not None:
+            destination_email = str(destination_user.get("email") or "").strip().casefold()
+            restored_email = str(email or "").strip().casefold()
+            if email is not None and restored_email != destination_email:
                 updates.append(("identity.email", email))
         if settings_payload:
             overrides = settings_payload.get("overrides") or {}

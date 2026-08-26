@@ -12,6 +12,17 @@ const detectCharacterMoodMock = vi.hoisted(() =>
 const resolveCharacterMoodImageUrlMock = vi.hoisted(() => vi.fn(() => ""))
 const initializeMock = vi.hoisted(() => vi.fn(async () => undefined))
 const saveChatKnowledgeMock = vi.hoisted(() => vi.fn(async () => undefined))
+const staticMessageMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn()
+}))
+const contextMessageMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn()
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -43,11 +54,10 @@ vi.mock("antd", () => ({
     open?: boolean
     children: React.ReactNode
   }) => (open ? <div>{children}</div> : null),
-  message: {
-    success: vi.fn(),
-    error: vi.fn(),
-    warning: vi.fn()
-  }
+  App: {
+    useApp: () => ({ message: contextMessageMock })
+  },
+  message: staticMessageMock
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -305,6 +315,10 @@ describe("PlaygroundMessage routing fallback integration", () => {
     storageOverrides.clear()
     initializeMock.mockClear()
     saveChatKnowledgeMock.mockClear()
+    staticMessageMock.success.mockClear()
+    staticMessageMock.error.mockClear()
+    contextMessageMock.success.mockClear()
+    contextMessageMock.error.mockClear()
     resolveCharacterMoodImageUrlMock.mockReset()
     resolveCharacterMoodImageUrlMock.mockReturnValue("")
     detectCharacterMoodMock.mockReset()
@@ -533,5 +547,7 @@ describe("PlaygroundMessage routing fallback integration", () => {
         }
       )
     )
+    expect(contextMessageMock.success).toHaveBeenCalledWith("Saved to Notes")
+    expect(staticMessageMock.success).not.toHaveBeenCalled()
   })
 })

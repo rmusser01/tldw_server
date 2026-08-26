@@ -11,6 +11,7 @@ describe("explicit request cancellation classification", () => {
     "AbortError",
     "REQUEST_ABORTED",
     "The operation was aborted.",
+    "signal is aborted without reason",
     "Request aborted",
     { message: "The user aborted a request." },
   ])("recognizes established cancellation shape %#", (value) => {

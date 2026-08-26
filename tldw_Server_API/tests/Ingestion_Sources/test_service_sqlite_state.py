@@ -3,6 +3,7 @@ from __future__ import annotations
 import aiosqlite
 import json
 import pytest
+import sqlite3
 
 
 @pytest.mark.asyncio
@@ -44,6 +45,57 @@ async def test_create_source_persists_state_row(tmp_path):
         assert state_row["source_id"] == row["id"]
         assert state_row["active_job_id"] is None
         assert state_row["last_successful_snapshot_id"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_create_source_works_through_guarded_authnz_transaction(tmp_path):
+    from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        ProfileUserWriteRejected,
+    )
+    from tldw_Server_API.app.core.Ingestion_Sources.service import (
+        create_source,
+        ensure_ingestion_sources_schema,
+    )
+
+    db_path = tmp_path / "authnz.sqlite3"
+    with sqlite3.connect(db_path) as setup:
+        setup.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL)"
+        )
+        setup.execute("INSERT INTO users (id, email) VALUES (1, 'before@example.test')")
+
+    pool = DatabasePool.__new__(DatabasePool)
+    pool.pool = None
+    pool.db_path = str(db_path)
+    pool._sqlite_uri = False
+    pool._initialized = True
+
+    async with pool.transaction() as db:
+        await ensure_ingestion_sources_schema(db)
+        source = await create_source(
+            db,
+            user_id=1,
+            payload={
+                "source_type": "local_directory",
+                "sink_type": "media",
+                "policy": "canonical",
+                "config": {"path": "/allowed/project/docs"},
+            },
+        )
+        with pytest.raises(ProfileUserWriteRejected):
+            await db.execute("UPDATE users SET email = 'changed@example.test' WHERE id = 1")
+
+    with sqlite3.connect(db_path) as verify:
+        source_row = verify.execute(
+            "SELECT user_id, source_type FROM ingestion_sources WHERE id = ?",
+            (source["id"],),
+        ).fetchone()
+        user_email = verify.execute("SELECT email FROM users WHERE id = 1").fetchone()[0]
+
+    assert source_row == (1, "local_directory")
+    assert user_email == "before@example.test"
 
 
 @pytest.mark.asyncio

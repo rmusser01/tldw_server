@@ -30,6 +30,7 @@
     "e2e:onboarding": "playwright test e2e/workflows/onboarding-ingestion-first.spec.ts --reporter=line",
     "e2e:onboarding:uat": "node scripts/onboarding-uat/run.mjs",
     "uat:dev-runtime": "node scripts/dev-runtime-uat.mjs",
+    "uat:live-tiers": "node scripts/live-tier-uat/run.mjs",
     "e2e:skills:certify": "node scripts/skills-certification/run.mjs",
     "e2e:research-workspace:parity": "playwright test e2e/workflows/research-workspace.parity.spec.ts --reporter=line",
     "e2e:research-workspace:real": "playwright test e2e/workflows/research-workspace.real-backend.spec.ts --reporter=line",

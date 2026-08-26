@@ -346,6 +346,21 @@ def test_audit_db_singleton_updates_explicit_retention(monkeypatch):
         monkeypatch.setattr(audit_db_module, "_audit_db", None)
 
 
+def test_audit_db_path_env_override_and_explicit_precedence(monkeypatch, tmp_path):
+    """ACP audit persistence stays profile-owned unless a caller passes a path."""
+    from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import ACPAuditDB
+
+    env_path = tmp_path / "profile" / "acp_audit.db"
+    explicit_path = tmp_path / "explicit" / "acp_audit.db"
+    monkeypatch.setenv("ACP_AUDIT_DB_PATH", str(env_path))
+
+    env_db = ACPAuditDB()
+    explicit_db = ACPAuditDB(db_path=str(explicit_path))
+
+    assert env_db._db_path == str(env_path.resolve())
+    assert explicit_db._db_path == str(explicit_path.resolve())
+
+
 def test_audit_db_singleton_clamps_negative_explicit_retention(monkeypatch):
     """Explicit singleton retention overrides cannot remain negative."""
     import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_module

@@ -18,6 +18,7 @@ import {
 import { buildMediaTrashHandoffSearch } from "@/components/Review/mediaPermalink"
 import { buildMediaSearchPayload } from "@/components/Review/mediaSearchRequest"
 import { downloadBlob } from "@/utils/download-blob"
+import { extractMediaDetailAnalysis } from "@/utils/media-detail-content"
 import {
   type MediaItem,
   type MediaDetail,
@@ -800,12 +801,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       const exportItems: MediaMultiBatchExportItem[] = selectedIds.map((id) => {
         const row = currentResults.find((candidate) => idsEqual(candidate.id, id))
         const detail = details[id]
-        const analysisText =
-          detail?.summary ||
-          (detail as any)?.analysis ||
-          (detail as any)?.analysis_content ||
-          (detail as any)?.analysisContent ||
-          ""
+        const analysisText = extractMediaDetailAnalysis(detail)
         return {
           id,
           title: detail?.title || row?.title || `${t("mediaPage.media", "Media")} ${id}`,

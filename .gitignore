@@ -293,6 +293,8 @@ errors.log
 !apps/packages/voice-assistant-sdk/tsconfig.json
 !apps/packages/ui/src/assets/locale/**/*.json
 !apps/packages/ui/src/public/_locales/**/*.json
+!apps/tldw-frontend/e2e/onboarding-uat/mock-openai/responses/chat/analysis-one.json
+!apps/tldw-frontend/e2e/onboarding-uat/mock-openai/responses/chat/analysis-two.json
 !apps/packages/ui/src/assets/locale/*/settings.json
 !apps/packages/ui/src/assets/locale/*/sidepanel.json
 !Docs/Product/WebUI/M1_4_Alias_Rollup_Week3_Natural_2026_02_13.json

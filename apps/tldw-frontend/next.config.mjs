@@ -20,6 +20,15 @@ const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const backendRuntimeWatchIgnoreSource = backendRuntimeWatchIgnoreRoots
   .map((root) => `^${escapeRegExp(root)}(?:/|$)`)
   .join('|');
+const liveTierDistDir = process.env.TLDW_NEXT_DIST_DIR;
+if (
+  liveTierDistDir &&
+  !/^\.next-live-tier-[A-Za-z0-9._-]+$/.test(liveTierDistDir)
+) {
+  throw new Error(
+    'TLDW_NEXT_DIST_DIR must be a direct .next-live-tier-* child directory'
+  );
+}
 const {
   deploymentMode,
   internalApiOrigin: validatedInternalApiOrigin
@@ -81,6 +90,7 @@ const contentSecurityPolicy = [
 const nextConfig = {
   reactStrictMode: true,
   reactCompiler: false,
+  ...(liveTierDistDir ? { distDir: liveTierDistDir } : {}),
   // Preserve backend API paths exactly in quickstart mode. FastAPI routes such as
   // POST /api/v1/chats/ are slash-sensitive and otherwise bounce through redirects
   // before the same-origin rewrite reaches the real backend.

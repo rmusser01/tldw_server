@@ -20,6 +20,34 @@ def db():
         instance.close()
 
 
+def test_default_database_path_uses_environment_override(tmp_path, monkeypatch):
+    environment_path = tmp_path / "environment" / "acp_sessions.db"
+    monkeypatch.setenv("ACP_SESSIONS_DB_PATH", str(environment_path))
+
+    instance = ACPSessionsDB()
+    try:
+        instance.list_sessions(user_id=1)
+        assert instance._db_path == str(environment_path.resolve())
+        assert environment_path.exists()
+    finally:
+        instance.close()
+
+
+def test_explicit_database_path_precedes_environment_override(tmp_path, monkeypatch):
+    environment_path = tmp_path / "environment" / "acp_sessions.db"
+    explicit_path = tmp_path / "explicit" / "acp_sessions.db"
+    monkeypatch.setenv("ACP_SESSIONS_DB_PATH", str(environment_path))
+
+    instance = ACPSessionsDB(db_path=str(explicit_path))
+    try:
+        instance.list_sessions(user_id=1)
+        assert instance._db_path == str(explicit_path.resolve())
+        assert explicit_path.exists()
+        assert not environment_path.exists()
+    finally:
+        instance.close()
+
+
 class TestSessionCRUD:
     def test_register_and_get_session(self, db):
         row = db.register_session(

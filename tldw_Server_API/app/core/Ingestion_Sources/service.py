@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
@@ -99,8 +100,7 @@ def normalize_source_payload(data: dict[str, Any]) -> dict[str, Any]:
 
 
 async def ensure_ingestion_sources_schema(db) -> None:
-    await db.executescript(
-        """
+    schema_script = """
         CREATE TABLE IF NOT EXISTS ingestion_sources (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -191,7 +191,15 @@ async def ensure_ingestion_sources_schema(db) -> None:
         CREATE INDEX IF NOT EXISTS idx_ingestion_item_events_source_item
             ON ingestion_item_events(source_id, item_path, id DESC);
         """
-    )
+    statement_lines: list[str] = []
+    for line in schema_script.splitlines():
+        statement_lines.append(line)
+        statement = "\n".join(statement_lines).strip()
+        if statement and sqlite3.complete_statement(statement):
+            await db.execute(statement)
+            statement_lines.clear()
+    if any(line.strip() for line in statement_lines):
+        raise RuntimeError("Incomplete ingestion sources schema statement")
     await _ensure_sqlite_column(
         db,
         table_name="ingestion_source_items",

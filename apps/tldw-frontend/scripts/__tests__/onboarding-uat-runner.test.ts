@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { EventEmitter } from "node:events"
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -47,6 +55,8 @@ const configFiles = [
 ]
 
 const responseFiles = [
+  "chat/analysis-one.json",
+  "chat/analysis-two.json",
   "chat/default.json",
   "chat/source-summary.json",
   "embeddings/default.json",
@@ -75,6 +85,75 @@ function modelIds(config: { models?: Array<{ id?: string }> }) {
 }
 
 describe("onboarding UAT static fixtures", () => {
+  it("scrubs copied provider secrets and redirects provider endpoints to the mock", () => {
+    const fixtureRoot = mkdtempSync(path.join(tmpdir(), "tldw-hostile-profile-"))
+    const fixtureRepo = path.join(fixtureRoot, "repo")
+    const fixtureFrontend = path.join(fixtureRepo, "apps/tldw-frontend")
+    const configDir = path.join(fixtureRepo, "tldw_Server_API/Config_Files")
+    mkdirSync(configDir, { recursive: true })
+    mkdirSync(fixtureFrontend, { recursive: true })
+    writeFileSync(
+      path.join(configDir, "config.txt"),
+      [
+        "[Setup]",
+        "enable_first_time_setup = false",
+        "setup_completed = true",
+        "",
+        "[AuthNZ]",
+        "auth_mode = multi_user",
+        "single_user_api_key = copied-auth-key",
+        "database_url = postgresql://host-user:host-password@db.example.test/app",
+        "",
+        "[Providers]",
+        "OPENAI_API_KEY = host-provider-secret",
+        "service token = host-service-token",
+        "database.password = host-database-password",
+        "byok_encryption_key = host-encryption-key",
+        "tts_history_hash_key = host-hash-key",
+        "llama_api_IP = http://192.168.2.235:5000/v1",
+        "custom_openai_api_ip = https://api.example.test/v1",
+        "web_scraper_api_url = https://scraper.example.test/api",
+        "provider_name = retained-provider",
+        "",
+      ].join("\n"),
+      "utf8"
+    )
+
+    try {
+      const profile = createRuntimeProfile({
+        repoRoot: fixtureRepo,
+        frontendRoot: fixtureFrontend,
+        runId: "hostile-source",
+        mockPort: 18195,
+        baseTmpDir: fixtureRoot,
+      })
+      const config = readFileSync(profile.configPath, "utf8")
+      const mockBaseUrl = "http://127.0.0.1:18195/v1"
+
+      expect(config).toContain(`llama_api_IP = ${mockBaseUrl}`)
+      expect(config).toContain(`custom_openai_api_ip = ${mockBaseUrl}`)
+      expect(config).toContain(`web_scraper_api_url = ${mockBaseUrl}`)
+      expect(config).toContain(`database_url = sqlite:///${profile.usersDbPath}`)
+      expect(config).toContain("provider_name = retained-provider")
+      for (const forbidden of [
+        "copied-auth-key",
+        "host-provider-secret",
+        "host-service-token",
+        "host-database-password",
+        "host-encryption-key",
+        "host-hash-key",
+        "192.168.2.235",
+        "api.example.test",
+        "scraper.example.test",
+        "db.example.test",
+      ]) {
+        expect(config).not.toContain(forbidden)
+      }
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
   it("provides mock OpenAI config files with the expected scenario shapes", () => {
     const configs = Object.fromEntries(
       configFiles.map((file) => [file, readJson(`configs/${file}`)])
@@ -197,6 +276,20 @@ describe("onboarding UAT static fixtures", () => {
     }
   })
 
+  it("keeps every referenced response fixture eligible for source control", () => {
+    for (const file of ["chat/analysis-one.json", "chat/analysis-two.json"]) {
+      const fixturePath = path.join(mockOpenAiRoot, "responses", file)
+
+      expect(() =>
+        execFileSync(
+          "git",
+          ["check-ignore", "--no-index", "--quiet", fixturePath],
+          { cwd: repoRoot, stdio: "ignore" }
+        )
+      ).toThrow()
+    }
+  })
+
   it("keeps JSON fixtures static, synthetic, and free of obvious real-secret markers", () => {
     for (const file of [
       ...configFiles.map((name) => `configs/${name}`),
@@ -212,12 +305,19 @@ describe("onboarding UAT static fixtures", () => {
   })
 
   it("provides stable chat and embedding responses for future UAT assertions", () => {
+    const analysisOne = readJson("responses/chat/analysis-one.json")
+    const analysisTwo = readJson("responses/chat/analysis-two.json")
     const defaultChat = readJson("responses/chat/default.json")
     const sourceSummary = readJson("responses/chat/source-summary.json")
     const embeddings = readJson("responses/embeddings/default.json")
 
     expect(defaultChat.choices?.[0]?.message?.content).toContain(
       "onboarding UAT ready"
+    )
+    expect(analysisOne.choices?.[0]?.message?.content).toBe("LIVE_TIER_ANALYSIS_ONE")
+    expect(analysisTwo.choices?.[0]?.message?.content).toBe("LIVE_TIER_ANALYSIS_TWO")
+    expect(analysisOne.choices?.[0]?.message?.content).not.toBe(
+      analysisTwo.choices?.[0]?.message?.content
     )
     expect(sourceSummary.choices?.[0]?.message?.content).toContain(
       "short first-run wizard"
@@ -557,6 +657,16 @@ describe("onboarding UAT runner helpers", () => {
     }
   })
 
+  it("aborts HTTP readiness waits when the runner is interrupted", async () => {
+    const controller = new AbortController()
+    controller.abort(new Error("test interruption"))
+
+    await expect(waitForHttpOk("http://127.0.0.1:1/health", {
+      timeoutMs: 1_000,
+      signal: controller.signal,
+    })).rejects.toThrow(/test interruption/)
+  })
+
   it("writes redacted child process output to logs", async () => {
     const artifacts = createRunArtifacts({
       frontendRoot,
@@ -690,6 +800,39 @@ describe("onboarding UAT runner helpers", () => {
 
     expect(child.signals).toEqual(["SIGTERM"])
     expect(child.exitCode).toBe(0)
+  })
+
+  it("terminates a surviving detached process group after its parent exits", async () => {
+    class ExitedDetachedChild extends EventEmitter {
+      pid = 123460
+      exitCode = 0
+      signalCode: string | null = null
+      spawnfile = process.execPath
+    }
+
+    const child = new ExitedDetachedChild()
+    const signals: Array<[number, string | number]> = []
+    let groupAlive = true
+    const killProcess = (target: number, signal: string | number) => {
+      signals.push([target, signal])
+      if (signal === 0) {
+        if (groupAlive) return true
+        throw Object.assign(new Error("process group is gone"), { code: "ESRCH" })
+      }
+      if (signal === "SIGTERM") groupAlive = false
+      return true
+    }
+
+    await stopProcessTree(child, {
+      platform: "darwin",
+      timeoutMs: 0,
+      killProcess,
+      wait: async () => undefined,
+    })
+
+    expect(signals).toContainEqual([-child.pid, "SIGTERM"])
+    expect(signals).toContainEqual([-child.pid, 0])
+    expect(groupAlive).toBe(false)
   })
 
   it("uses taskkill tree termination and verifies parent exit on Windows", async () => {

@@ -83,6 +83,11 @@ async def test_session_prompt(client):
         {"sessionId": session_id, "prompt": "Hello"},
     )
     assert result.result["stopReason"] == "end"
+    assert result.result["taskCompletion"] == {
+        "status": "completed",
+        "summary": "Deterministic ACP stub completed the requested task.",
+        "artifacts": [],
+    }
 
 
 async def test_session_cancel(client):

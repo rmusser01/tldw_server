@@ -26,6 +26,32 @@ def jobs_db(tmp_path):
     yield db_path
 
 
+def test_ensure_jobs_tables_uses_environment_path_when_no_path_is_passed(
+    tmp_path, monkeypatch
+):
+    environment_path = tmp_path / "environment" / "jobs.db"
+    monkeypatch.setenv("JOBS_DB_PATH", str(environment_path))
+
+    resolved_path = ensure_jobs_tables()
+
+    assert resolved_path == environment_path
+    assert environment_path.exists()
+
+
+def test_ensure_jobs_tables_explicit_path_precedes_environment_path(
+    tmp_path, monkeypatch
+):
+    environment_path = tmp_path / "environment" / "jobs.db"
+    explicit_path = tmp_path / "explicit" / "jobs.db"
+    monkeypatch.setenv("JOBS_DB_PATH", str(environment_path))
+
+    resolved_path = ensure_jobs_tables(explicit_path)
+
+    assert resolved_path == explicit_path
+    assert explicit_path.exists()
+    assert not environment_path.exists()
+
+
 def test_sqlite_archive_collision_queries_live_in_db_management(jobs_db):
     from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
         fetch_slides_archive_collision_rows,

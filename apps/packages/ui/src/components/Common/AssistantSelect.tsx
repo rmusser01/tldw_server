@@ -33,6 +33,10 @@ type Props = {
   variant?: "inline" | "dropdown"
   labelOverride?: string
   selectionModePreference?: "tracked" | "overlay"
+  initialTab?: AssistantSelectTab
+  onSelectionComplete?: (
+    selection: AssistantSelection
+  ) => void | Promise<void>
 }
 
 type CharacterSummary = Record<string, unknown> & {
@@ -114,7 +118,9 @@ export const AssistantSelect: React.FC<Props> = ({
   showLabel = true,
   variant = "inline",
   labelOverride,
-  selectionModePreference = "tracked"
+  selectionModePreference = "tracked",
+  initialTab,
+  onSelectionComplete
 }) => {
   const { t } = useTranslation(["option", "common"])
   const [selectedAssistant, setSelectedAssistant] =
@@ -159,8 +165,11 @@ export const AssistantSelect: React.FC<Props> = ({
     selectionModePreference
   )
   const [activeTab, setActiveTab] = React.useState<"character" | "persona">(
-    selectedAssistant?.kind ?? "character"
+    initialTab ?? selectedAssistant?.kind ?? "character"
   )
+  React.useEffect(() => {
+    if (initialTab) setActiveTab(initialTab)
+  }, [initialTab])
   const [characters, setCharacters] = React.useState<CharacterSummary[]>([])
   const [personas, setPersonas] = React.useState<PersonaInfo[]>([])
   const [charactersLoading, setCharactersLoading] = React.useState(true)
@@ -380,6 +389,8 @@ export const AssistantSelect: React.FC<Props> = ({
   )
 
   React.useEffect(() => {
+    if (variant !== "inline" && !open) return
+
     let cancelled = false
     const isCancelled = () => cancelled
 
@@ -388,7 +399,7 @@ export const AssistantSelect: React.FC<Props> = ({
     return () => {
       cancelled = true
     }
-  }, [loadCharacters, loadPersonas])
+  }, [loadCharacters, loadPersonas, open, variant])
 
   const characterEntries = React.useMemo(
     () =>
@@ -563,10 +574,12 @@ export const AssistantSelect: React.FC<Props> = ({
           )
         }
       }
+      await onSelectionComplete?.(nextEntry)
     },
     [
       effectiveAssistantState.mode,
       clearActiveServerChat,
+      onSelectionComplete,
       restoreReturnFocus,
       selectionModePreference,
       serverChatId,
