@@ -20,10 +20,14 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import GreetingSele
     ],
 )
 async def test_get_chat_settings_returns_empty_settings_without_user_overrides(
-    settings_row,
-):
+    settings_row: dict[str, object] | None,
+) -> None:
+    """Bootstrap-only settings are omitted from the user override response."""
     class _StubDB:
+        """Return a known chat with the parametrized settings row."""
+
         def get_conversation_by_id(self, chat_id: str) -> dict[str, object]:
+            """Return the requested global conversation."""
             return {
                 "id": chat_id,
                 "client_id": "1",
@@ -31,10 +35,16 @@ async def test_get_chat_settings_returns_empty_settings_without_user_overrides(
                 "character_id": None,
             }
 
-        def get_conversation_settings(self, chat_id: str):
+        def get_conversation_settings(
+            self,
+            chat_id: str,
+        ) -> dict[str, object] | None:
+            """Return the configured persisted settings row."""
             return settings_row
 
     class _StubUser:
+        """Represent the owner of the stub conversation."""
+
         id = "1"
 
     response = await sessions.get_chat_settings(
@@ -50,12 +60,18 @@ async def test_get_chat_settings_returns_empty_settings_without_user_overrides(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_chat_settings_keeps_unknown_chat_not_found():
+async def test_get_chat_settings_keeps_unknown_chat_not_found() -> None:
+    """A missing conversation remains a 404 instead of an empty response."""
     class _StubDB:
-        def get_conversation_by_id(self, chat_id: str):
+        """Return no conversation for the requested identifier."""
+
+        def get_conversation_by_id(self, chat_id: str) -> None:
+            """Report that the conversation does not exist."""
             return None
 
     class _StubUser:
+        """Represent the caller of the missing-chat request."""
+
         id = "1"
 
     with pytest.raises(HTTPException) as exc_info:

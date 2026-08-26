@@ -9,7 +9,10 @@ import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import { DEFAULT_ANALYSIS_SUMMARY_PROMPT } from "@/utils/default-prompts"
-import { extractMediaDetailContent } from "@/utils/media-detail-content"
+import {
+  extractMediaDetailAnalysis,
+  extractMediaDetailContent
+} from "@/utils/media-detail-content"
 
 interface AnalysisTimeoutConfig {
   chatRequestTimeoutMs?: number
@@ -38,13 +41,6 @@ const LOCAL_TIMEOUT_STORAGE = createSafeStorage({ area: 'local' })
 const toPositiveNumber = (value: unknown): number => {
   const num = Number(value)
   return Number.isFinite(num) && num > 0 ? num : 0
-}
-
-const firstNonEmptyString = (...vals: unknown[]): string => {
-  for (const v of vals) {
-    if (typeof v === 'string' && v.trim().length > 0) return v
-  }
-  return ''
 }
 
 const normalizePersistedModelSelection = (value: unknown): string => {
@@ -154,6 +150,12 @@ export function AnalysisModal({
       ? normalizedSelectedModel
       : `tldw:${normalizedSelectedModel}`
   }, [normalizedSelectedModel])
+  const effectiveModelKey = useMemo(() => {
+    if (models.length === 0) return selectedModelKey
+    return models.some((model) => model.id === selectedModelKey)
+      ? selectedModelKey
+      : models[0]?.id
+  }, [models, selectedModelKey])
   const effectiveMediaContent = mediaContent.trim()
     ? mediaContent
     : recoveredMediaContent
@@ -319,7 +321,7 @@ export function AnalysisModal({
       return
     }
 
-    const effectiveModel = selectedModelKey || models[0]?.id
+    const effectiveModel = effectiveModelKey
     if (!effectiveModel) {
       messageApi.warning(
         t(
@@ -346,29 +348,6 @@ export function AnalysisModal({
     timerRef.current = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000))
     }, 1000)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped API response with deeply nested optional fields
-    const extractPersistedAnalysis = (detail: Record<string, any>): string => {
-      if (!detail || typeof detail !== 'object') return ''
-      const fromProcessing = firstNonEmptyString(detail?.processing?.analysis)
-      if (fromProcessing) return fromProcessing
-      const fromRoot = firstNonEmptyString(
-        detail?.analysis,
-        detail?.analysis_content,
-        detail?.analysisContent
-      )
-      if (fromRoot) return fromRoot
-      if (Array.isArray(detail?.analyses)) {
-        for (const entry of detail.analyses) {
-          const text = typeof entry === 'string'
-            ? entry
-            : (entry?.content || entry?.text || entry?.summary || entry?.analysis_content || '')
-          const resolved = firstNonEmptyString(text)
-          if (resolved) return resolved
-        }
-      }
-      return ''
-    }
-
     const saveAsVersion = async (analysisText: string) => {
       if (!mediaId) return false
       if (!effectiveMediaContent || !effectiveMediaContent.trim()) return false
@@ -383,13 +362,13 @@ export function AnalysisModal({
             prompt: systemPrompt
           }
         })
-        let persistedAnalysis = extractPersistedAnalysis(savedDetail)
+        let persistedAnalysis = extractMediaDetailAnalysis(savedDetail)
         if (persistedAnalysis.trim() !== analysisText.trim()) {
           const refreshedDetail = await bgRequest<any>({
             path: `/api/v1/media/${mediaId}`,
             method: 'GET'
           })
-          persistedAnalysis = extractPersistedAnalysis(refreshedDetail)
+          persistedAnalysis = extractMediaDetailAnalysis(refreshedDetail)
         }
         return persistedAnalysis.trim() === analysisText.trim()
       } catch (err) {
@@ -534,7 +513,7 @@ export function AnalysisModal({
           disabled={
             !effectiveMediaContent ||
             !effectiveMediaContent.trim() ||
-            (!selectedModelKey && models.length === 0)
+            !effectiveModelKey
           }
         >
           {t('mediaPage.generateAnalysis', 'Generate Analysis')}
@@ -586,7 +565,7 @@ export function AnalysisModal({
           <Select
             id="media-analysis-model"
             aria-label={t('mediaPage.model', 'Model')}
-            value={selectedModelKey}
+            value={effectiveModelKey}
             onChange={setSelectedModel}
             className="w-full"
             placeholder={t('mediaPage.selectModel', 'Select a model')}

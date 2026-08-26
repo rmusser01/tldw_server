@@ -75,6 +75,7 @@ const connectionState = vi.hoisted(() => ({
     isChecking: false,
     lastCheckedAt: 100 as number | null,
     checksSinceConfigChange: 1,
+    consecutiveFailures: 0,
   },
 }));
 
@@ -391,6 +392,7 @@ vi.mock('@/hooks/useConnectionState', () => ({
     isChecking: connectionState.value.isChecking,
     lastCheckedAt: connectionState.value.lastCheckedAt,
     checksSinceConfigChange: connectionState.value.checksSinceConfigChange,
+    consecutiveFailures: connectionState.value.consecutiveFailures,
   }),
   useConnectionUxState: () => ({
     isChecking: connectionState.value.isChecking,
@@ -433,6 +435,7 @@ describe('WebLayout /chat scroll contract', () => {
     connectionState.value.isChecking = false;
     connectionState.value.lastCheckedAt = 100;
     connectionState.value.checksSinceConfigChange = 1;
+    connectionState.value.consecutiveFailures = 0;
   });
 
   afterEach(() => {
@@ -554,6 +557,37 @@ describe('WebLayout /chat scroll contract', () => {
     rerender(<OptionLayout>{route}</OptionLayout>);
 
     expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
+  });
+
+  it('shows diagnostics when a forced check fails inside the connection grace window', async () => {
+    const check = deferred();
+    connectionState.value.checkOnce = vi.fn(() => check.promise);
+    const route = <div data-testid="route-content">Research workspace route</div>;
+    const { rerender } = render(<OptionLayout>{route}</OptionLayout>);
+
+    await act(async () => undefined);
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('tldw:backend-unreachable', {
+          detail: {
+            method: 'GET',
+            path: '/api/v1/llm/models/metadata',
+            message: 'Failed to fetch',
+            source: 'direct',
+            timestamp: Date.now(),
+          },
+        })
+      );
+    });
+
+    connectionState.value.lastCheckedAt = 101;
+    connectionState.value.checksSinceConfigChange = 2;
+    connectionState.value.consecutiveFailures = 1;
+    check.resolve();
+    await act(async () => check.promise);
+    rerender(<OptionLayout>{route}</OptionLayout>);
+
+    expect(screen.getByTestId('backend-unavailable-modal')).toBeInTheDocument();
   });
 
   it('ignores an older forced check that settles after a newer recovery', async () => {

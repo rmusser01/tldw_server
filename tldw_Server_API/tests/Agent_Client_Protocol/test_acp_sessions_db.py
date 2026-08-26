@@ -4,6 +4,7 @@ import os
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -20,7 +21,12 @@ def db():
         instance.close()
 
 
-def test_default_database_path_uses_environment_override(tmp_path, monkeypatch):
+@pytest.mark.unit
+def test_default_database_path_uses_environment_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The profile-owned environment path is used when no path is explicit."""
     environment_path = tmp_path / "environment" / "acp_sessions.db"
     monkeypatch.setenv("ACP_SESSIONS_DB_PATH", str(environment_path))
 
@@ -33,7 +39,12 @@ def test_default_database_path_uses_environment_override(tmp_path, monkeypatch):
         instance.close()
 
 
-def test_explicit_database_path_precedes_environment_override(tmp_path, monkeypatch):
+@pytest.mark.unit
+def test_explicit_database_path_precedes_environment_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit ACP sessions path takes precedence over the environment."""
     environment_path = tmp_path / "environment" / "acp_sessions.db"
     explicit_path = tmp_path / "explicit" / "acp_sessions.db"
     monkeypatch.setenv("ACP_SESSIONS_DB_PATH", str(environment_path))

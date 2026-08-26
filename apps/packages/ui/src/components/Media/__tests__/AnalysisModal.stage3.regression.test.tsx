@@ -251,6 +251,45 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     ).toBeDisabled()
   })
 
+  it('falls back to the live catalog when a persisted model is no longer available', async () => {
+    state.selectedModel = 'tldw:removed-model'
+    mocks.getChatModels.mockResolvedValue([{ id: 'available-model', name: 'Available model' }])
+    mocks.bgStream.mockImplementation(() =>
+      (async function* () {
+        yield streamChunk('Generated analysis')
+        yield 'data: [DONE]'
+      })()
+    )
+    mocks.bgRequest.mockResolvedValue({ analysis: 'Generated analysis' })
+
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="media body"
+        onAnalysisGenerated={vi.fn()}
+      />
+    )
+
+    await waitFor(() => {
+      expect(mocks.getChatModels).toHaveBeenCalled()
+      expect(screen.getByRole('button', { name: 'Generate Analysis' })).not.toBeDisabled()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Analysis' }))
+
+    await waitFor(() => {
+      expect(mocks.resolveApiProviderForModel).toHaveBeenCalledWith({
+        modelId: 'tldw:available-model'
+      })
+      expect(mocks.bgStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({ model: 'available-model' })
+        })
+      )
+    })
+  })
+
   it('preserves preset/custom prompt behavior and sends expected request body', async () => {
     mocks.bgStream.mockImplementation(() =>
       (async function* () {
@@ -439,6 +478,59 @@ describe('AnalysisModal stage 3 regression coverage', () => {
       expect(mocks.messageError).toHaveBeenCalledWith('Failed to save analysis to media item')
     })
     expect(onAnalysisGenerated).not.toHaveBeenCalled()
+  })
+
+  it('accepts a generated analysis returned only through media versions', async () => {
+    mocks.bgStream.mockImplementation(() =>
+      (async function* () {
+        yield streamChunk('Versioned analysis')
+        yield 'data: [DONE]'
+      })()
+    )
+    mocks.bgRequest.mockImplementation(
+      async (request: { path?: string; method?: string }) => {
+        if (request.path === '/api/v1/media/42/versions' && request.method === 'POST') {
+          return {}
+        }
+        if (request.path === '/api/v1/media/42' && request.method === 'GET') {
+          return {
+            versions: [
+              {
+                version_number: 2,
+                analysis_content: 'Versioned analysis'
+              }
+            ]
+          }
+        }
+        return {}
+      }
+    )
+
+    const onAnalysisGenerated = vi.fn()
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="media body"
+        onAnalysisGenerated={onAnalysisGenerated}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Generate Analysis' })).not.toBeDisabled()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Analysis' }))
+
+    await waitFor(() => {
+      expect(onAnalysisGenerated).toHaveBeenCalledWith(
+        'Versioned analysis',
+        expect.any(String)
+      )
+    })
+    expect(mocks.messageError).not.toHaveBeenCalledWith(
+      'Failed to save analysis to media item'
+    )
   })
 
   it('recovers missing media content from a cache-busted detail request', async () => {

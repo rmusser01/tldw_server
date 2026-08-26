@@ -9,12 +9,15 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.Ingestion_Sources_DB import (
     update_ingestion_source_record,
 )
+from tldw_Server_API.app.core.exceptions import (
+    IngestionSourceSchemaError,
+    IngestionSourceValidationError,
+)
 from tldw_Server_API.app.core.Ingestion_Sources.models import (
     SINK_TYPES,
     SOURCE_POLICIES,
     SOURCE_TYPES,
 )
-from tldw_Server_API.app.core.exceptions import IngestionSourceValidationError
 
 _SQLITE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -199,7 +202,9 @@ async def ensure_ingestion_sources_schema(db) -> None:
             await db.execute(statement)
             statement_lines.clear()
     if any(line.strip() for line in statement_lines):
-        raise RuntimeError("Incomplete ingestion sources schema statement")
+        raise IngestionSourceSchemaError(
+            "Incomplete ingestion sources schema statement"
+        )
     await _ensure_sqlite_column(
         db,
         table_name="ingestion_source_items",

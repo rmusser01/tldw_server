@@ -5,6 +5,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -26,9 +27,12 @@ def jobs_db(tmp_path):
     yield db_path
 
 
+@pytest.mark.unit
 def test_ensure_jobs_tables_uses_environment_path_when_no_path_is_passed(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jobs migrations use the profile environment path by default."""
     environment_path = tmp_path / "environment" / "jobs.db"
     monkeypatch.setenv("JOBS_DB_PATH", str(environment_path))
 
@@ -38,9 +42,12 @@ def test_ensure_jobs_tables_uses_environment_path_when_no_path_is_passed(
     assert environment_path.exists()
 
 
+@pytest.mark.unit
 def test_ensure_jobs_tables_explicit_path_precedes_environment_path(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit jobs path takes precedence over the environment path."""
     environment_path = tmp_path / "environment" / "jobs.db"
     explicit_path = tmp_path / "explicit" / "jobs.db"
     monkeypatch.setenv("JOBS_DB_PATH", str(environment_path))

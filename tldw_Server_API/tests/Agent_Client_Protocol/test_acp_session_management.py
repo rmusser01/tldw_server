@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -346,7 +347,10 @@ def test_audit_db_singleton_updates_explicit_retention(monkeypatch):
         monkeypatch.setattr(audit_db_module, "_audit_db", None)
 
 
-def test_audit_db_path_env_override_and_explicit_precedence(monkeypatch, tmp_path):
+def test_audit_db_path_env_override_and_explicit_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """ACP audit persistence stays profile-owned unless a caller passes a path."""
     from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import ACPAuditDB
 

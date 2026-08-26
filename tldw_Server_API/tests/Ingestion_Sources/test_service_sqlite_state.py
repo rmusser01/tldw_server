@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import aiosqlite
 import json
-import pytest
 import sqlite3
+from pathlib import Path
+
+import aiosqlite
+import pytest
 
 
 @pytest.mark.asyncio
@@ -49,7 +51,10 @@ async def test_create_source_persists_state_row(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_create_source_works_through_guarded_authnz_transaction(tmp_path):
+async def test_create_source_works_through_guarded_authnz_transaction(
+    tmp_path: Path,
+) -> None:
+    """Source writes coexist with the AuthNZ profile-user write guard."""
     from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
     from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
         ProfileUserWriteRejected,

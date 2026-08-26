@@ -97,6 +97,7 @@ type BackendUnavailableCandidate = {
   sequence: number;
   baselineLastCheckedAt: number | null;
   baselineChecksSinceConfigChange: number;
+  baselineConsecutiveFailures: number;
 };
 
 const SHORTCUT_LOADING_MIN_MS = 0;
@@ -142,6 +143,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     isChecking,
     lastCheckedAt,
     checksSinceConfigChange,
+    consecutiveFailures,
   } = useConnectionState();
   const { checkOnce } = useConnectionActions();
   const { fatalBackendRecoveryActive } = useBackendRecoveryUi();
@@ -234,6 +236,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
         sequence,
         baselineLastCheckedAt: lastCheckedAt,
         baselineChecksSinceConfigChange: checksSinceConfigChange,
+        baselineConsecutiveFailures: consecutiveFailures,
       });
       setSettledBackendUnavailableSequence(null);
       setBackendUnavailableDetail(null);
@@ -245,7 +248,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           }
         });
     },
-    [checkOnce, checksSinceConfigChange, lastCheckedAt]
+    [checkOnce, checksSinceConfigChange, consecutiveFailures, lastCheckedAt]
   );
 
   React.useEffect(() => {
@@ -275,19 +278,23 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
       return;
     }
 
-    if (isConnected && phase === ConnectionPhase.CONNECTED) {
+    const forcedCheckFailed =
+      consecutiveFailures > backendUnavailableCandidate.baselineConsecutiveFailures;
+
+    if (!forcedCheckFailed && isConnected && phase === ConnectionPhase.CONNECTED) {
       setBackendUnavailableCandidate(null);
       setBackendUnavailableDetail(null);
       return;
     }
 
-    if (!isConnected && phase === ConnectionPhase.ERROR) {
+    if (forcedCheckFailed || (!isConnected && phase === ConnectionPhase.ERROR)) {
       setBackendUnavailableDetail(backendUnavailableCandidate.detail);
     }
     setBackendUnavailableCandidate(null);
   }, [
     backendUnavailableCandidate,
     checksSinceConfigChange,
+    consecutiveFailures,
     isChecking,
     isConnected,
     lastCheckedAt,

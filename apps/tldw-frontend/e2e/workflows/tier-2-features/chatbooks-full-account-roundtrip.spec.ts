@@ -236,23 +236,25 @@ if (liveTierEnabled) {
   test.describe("Chatbooks full-account browser round trip", () => {
     const externalAuth = { apiUrl: apiUrl!, accessToken }
 
-    test("exports the source account through Backup all", async ({ page }) => {
-      test.skip(phase !== "export", "Import phase invocation")
-      test.setTimeout(360_000)
-      await exportArchive(
-        page,
-        externalAuth,
-        archivePath!,
-        "Browser UAT full account backup",
-      )
-    })
+    if (phase === "export") {
+      test("exports the source account through Backup all", async ({ page }) => {
+        test.setTimeout(360_000)
+        await exportArchive(
+          page,
+          externalAuth,
+          archivePath!,
+          "Browser UAT full account backup",
+        )
+      })
+    }
 
-    test("imports the exact browser archive into the clean destination", async ({
-      page,
-    }) => {
-      test.skip(phase !== "import", "Export phase invocation")
-      test.setTimeout(360_000)
-      await importArchive(page, externalAuth, archivePath!, true)
-    })
+    if (phase === "import") {
+      test("imports the exact browser archive into the clean destination", async ({
+        page,
+      }) => {
+        test.setTimeout(360_000)
+        await importArchive(page, externalAuth, archivePath!, true)
+      })
+    }
   })
 }

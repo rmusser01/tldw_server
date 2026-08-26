@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import zipfile
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -724,31 +725,44 @@ async def test_account_restore_delegates_ordered_profile_updates_to_command_serv
 
 
 @pytest.mark.asyncio
-async def test_account_restore_skips_unchanged_synthetic_single_user_email(monkeypatch):
+async def test_account_restore_skips_unchanged_synthetic_single_user_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An idempotent restore must not revalidate the bootstrap-only .local email."""
     from tldw_Server_API.app.core.AuthNZ import database as database_module
     from tldw_Server_API.app.core.AuthNZ.repos import users_repo as users_repo_module
     from tldw_Server_API.app.core.UserProfiles import command_service as command_service_module
 
     class _Pool:
+        """Provide the transaction context used by account restoration."""
+
         @asynccontextmanager
-        async def transaction(self):
+        async def transaction(self) -> AsyncIterator[object]:
+            """Yield a stand-in database connection."""
             yield object()
 
     pool = _Pool()
 
-    async def _get_pool():
+    async def _get_pool() -> _Pool:
+        """Return the stubbed AuthNZ database pool."""
         return pool
 
     class _Repo:
-        def __init__(self, *, db_pool):
+        """Return the existing synthetic single-user identity."""
+
+        def __init__(self, *, db_pool: object) -> None:
+            """Validate that restoration uses the expected pool."""
             assert db_pool is pool
 
-        async def get_user_by_id(self, user_id):
+        async def get_user_by_id(self, user_id: int) -> dict[str, object]:
+            """Return the unchanged bootstrap account."""
             return {"id": user_id, "email": "single_user@example.local"}
 
     class _CommandService:
-        def __init__(self, *, db_pool):
+        """Fail if unchanged values reach profile validation."""
+
+        def __init__(self, *, db_pool: object) -> None:
+            """Reject construction because no profile command is expected."""
             raise AssertionError("unchanged profile values must not be sent for validation")
 
     monkeypatch.setattr(database_module, "get_db_pool", _get_pool)

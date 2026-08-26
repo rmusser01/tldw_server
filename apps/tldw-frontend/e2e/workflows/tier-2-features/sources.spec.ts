@@ -145,56 +145,57 @@ test.describe("Sources & Connectors", () => {
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("should fire sync API when 'Sync now' is clicked on a source card", async ({
-      authedPage,
-      serverInfo,
-      diagnostics,
-    }) => {
-      skipIfServerUnavailable(serverInfo)
+    if (
+      process.env.TLDW_E2E_INGESTION_SOURCE_ROOT ||
+      process.env.TLDW_LIVE_TIER_UAT === "1"
+    ) {
+      test("should fire sync API when 'Sync now' is clicked on a source card", async ({
+        authedPage,
+        serverInfo,
+        diagnostics,
+      }) => {
+        skipIfServerUnavailable(serverInfo)
 
-      const sourceRoot = process.env.TLDW_E2E_INGESTION_SOURCE_ROOT
-      if (!sourceRoot && process.env.TLDW_LIVE_TIER_UAT !== "1") {
-        test.skip(true, "Run through the isolated live-tier UAT runner")
-        return
-      }
-      expect(sourceRoot, "live-tier runner must expose an allowed source root").toBeTruthy()
+        const sourceRoot = process.env.TLDW_E2E_INGESTION_SOURCE_ROOT
+        expect(sourceRoot, "live-tier runner must expose an allowed source root").toBeTruthy()
 
-      const label = `Live Tier source ${Date.now()}`
-      const createResponse = await fetchWithApiKey(
-        `${TEST_CONFIG.serverUrl}/api/v1/ingestion-sources/`,
-        TEST_CONFIG.apiKey,
-        {
+        const label = `Live Tier source ${Date.now()}`
+        const createResponse = await fetchWithApiKey(
+          `${TEST_CONFIG.serverUrl}/api/v1/ingestion-sources/`,
+          TEST_CONFIG.apiKey,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              source_type: "local_directory",
+              sink_type: "notes",
+              policy: "canonical",
+              enabled: true,
+              config: { path: sourceRoot, label },
+            }),
+          }
+        )
+        expect(createResponse.status).toBe(201)
+
+        sources = new SourcesPage(authedPage)
+        await sources.goto()
+        await sources.assertPageReady()
+        const sourceCard = authedPage.locator(".ant-card").filter({ hasText: label })
+        await expect(sourceCard).toBeVisible({ timeout: 15_000 })
+        const syncButton = sourceCard.getByRole("button", { name: /^Sync now$/i })
+        await expect(syncButton).toBeVisible()
+
+        const apiCall = expectApiCall(authedPage, {
+          url: /\/api\/v1\/ingestion-sources\/.*\/sync/,
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            source_type: "local_directory",
-            sink_type: "notes",
-            policy: "canonical",
-            enabled: true,
-            config: { path: sourceRoot, label },
-          }),
-        }
-      )
-      expect(createResponse.status).toBe(201)
+        }, 15_000)
 
-      sources = new SourcesPage(authedPage)
-      await sources.goto()
-      await sources.assertPageReady()
-      const sourceCard = authedPage.locator(".ant-card").filter({ hasText: label })
-      await expect(sourceCard).toBeVisible({ timeout: 15_000 })
-      const syncButton = sourceCard.getByRole("button", { name: /^Sync now$/i })
-      await expect(syncButton).toBeVisible()
+        await syncButton.click()
+        const { response } = await apiCall
+        expect(response.status()).toBeLessThan(500)
 
-      const apiCall = expectApiCall(authedPage, {
-        url: /\/api\/v1\/ingestion-sources\/.*\/sync/,
-        method: "POST",
-      }, 15_000)
-
-      await syncButton.click()
-      const { response } = await apiCall
-      expect(response.status()).toBeLessThan(500)
-
-      await assertNoCriticalErrors(diagnostics)
-    })
+        await assertNoCriticalErrors(diagnostics)
+      })
+    }
   })
 })

@@ -11,6 +11,8 @@ import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved
 const savedViewHarness = vi.hoisted(() => ({
   hookInvocations: vi.fn(),
   paneControllers: [] as unknown[],
+  controllerIds: new WeakMap<object, number>(),
+  nextControllerId: 1,
   rows: [] as WorkspaceSourceSavedViewResponse[],
   nextId: 1,
   upsertWorkspace: vi.fn(),
@@ -297,6 +299,19 @@ vi.mock("../SourcesPane", async () => {
       if (props.sourceSavedViewsController) {
         savedViewHarness.paneControllers.push(props.sourceSavedViewsController)
       }
+      const controllerId = props.sourceSavedViewsController
+        ? savedViewHarness.controllerIds.get(props.sourceSavedViewsController) ??
+          savedViewHarness.nextControllerId++
+        : null
+      if (
+        props.sourceSavedViewsController &&
+        !savedViewHarness.controllerIds.has(props.sourceSavedViewsController)
+      ) {
+        savedViewHarness.controllerIds.set(
+          props.sourceSavedViewsController,
+          controllerId!
+        )
+      }
       return (
         <div
         data-testid="workspace-sources-pane"
@@ -355,7 +370,10 @@ vi.mock("../SourcesPane", async () => {
               onOpenOverlay={props.onOpenSourceViewOverlay}
             />
           )}
-        <div data-testid="saved-view-controller-identity">
+        <div
+          data-testid="saved-view-controller-identity"
+          data-controller-id={controllerId ?? ""}
+        >
           {props.sourceSavedViewsController ? "captured" : "missing"}
         </div>
       </div>
@@ -442,6 +460,8 @@ describe("ResearchWorkspace source list view state", () => {
     savedViewHarness.nextId = 1
     savedViewHarness.rows = []
     savedViewHarness.paneControllers = []
+    savedViewHarness.controllerIds = new WeakMap<object, number>()
+    savedViewHarness.nextControllerId = 1
     savedViewHarness.hookInvocations.mockClear()
     savedViewHarness.upsertWorkspace.mockImplementation(
       async (workspaceId: string) => ({ id: workspaceId })
@@ -632,17 +652,21 @@ describe("ResearchWorkspace source list view state", () => {
     ).toBe(true)
     await user.click(screen.getByRole("button", { name: "Toggle sources" }))
 
-    savedViewHarness.hookInvocations.mockClear()
-    savedViewHarness.paneControllers = []
     testState.isMobile = false
     rerender(<ResearchWorkspace />)
 
-    const panes = await screen.findAllByTestId("workspace-sources-pane")
+    const controllerIdentities = await screen.findAllByTestId(
+      "saved-view-controller-identity"
+    )
+    expect(controllerIdentities).toHaveLength(2)
+    const panes = screen.getAllByTestId("workspace-sources-pane")
     expect(panes).toHaveLength(2)
-    expect(savedViewHarness.hookInvocations).toHaveBeenCalledTimes(1)
-    const simultaneousControllers = savedViewHarness.paneControllers.slice(-2)
-    expect(simultaneousControllers).toHaveLength(2)
-    expect(simultaneousControllers[0]).toBe(simultaneousControllers[1])
+    const simultaneousControllerIds = controllerIdentities.map((identity) =>
+      identity.getAttribute("data-controller-id")
+    )
+    expect(new Set(simultaneousControllerIds)).toEqual(
+      new Set([simultaneousControllerIds[0]])
+    )
     expect(screen.getAllByTestId("source-view-overlay-host")).toHaveLength(1)
 
     const invokers = screen.getAllByRole("button", { name: "Save source view" })
