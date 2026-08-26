@@ -497,6 +497,45 @@ def test_ensure_studio_document_returns_exact_parent_tombstone_lifecycle(
     assert replayed["canonical_hash"] != live["canonical_hash"]
 
 
+def test_ensure_new_studio_document_rejects_tombstoned_parent(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    parent = db.get_note_by_id(str(note_id))
+    assert parent is not None
+    db.soft_delete_note(str(note_id), expected_version=int(parent["version"]))
+
+    with pytest.raises(ConflictError, match="Studio parent note not found or not live"):
+        _service(db)._ensure_studio_document(
+            **_studio_ensure_fields(
+                note_id=str(note_id), source_note_id=str(source_note_id)
+            )
+        )
+
+    assert db.get_note_studio_document(str(note_id)) is None
+
+
+def test_ensure_new_studio_document_creates_live_state_for_live_parent(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+
+    document = _service(db)._ensure_studio_document(
+        **_studio_ensure_fields(
+            note_id=str(note_id), source_note_id=str(source_note_id)
+        )
+    )
+
+    assert document["deleted"] == 0
+    assert document["canonical_revision"] == 1
+
+
 def test_ensure_new_studio_document_still_rejects_tombstoned_source(
     studio_db,
 ) -> None:

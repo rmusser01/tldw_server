@@ -1146,6 +1146,17 @@ class NoteStore:
                         "Note not found.", entity="notes", entity_id=normalized_note_id
                     )  # noqa: TRY003
                 note = dict(note_row)
+                previous = inner_conn.execute(
+                    "SELECT * FROM note_studio_documents "
+                    "WHERE owner_user_id=? AND dataset_id=? AND note_id=?",
+                    (owner, dataset, normalized_note_id),
+                ).fetchone()
+                if previous is None and bool(note.get("deleted")):
+                    raise ConflictError(
+                        "Studio parent note not found or not live.",
+                        entity="notes",
+                        entity_id=normalized_note_id,
+                    )
                 note_revision, note_hash = self._notes_note_head(note)
                 normalized_source_id = (
                     None if source_note_id is None else str(source_note_id).strip()
@@ -1228,11 +1239,6 @@ class NoteStore:
                     )
                 except NotesMoodboardStudioContractError as exc:
                     raise InputError("Studio document is not canonical v1 state.") from exc  # noqa: TRY003
-                previous = inner_conn.execute(
-                    "SELECT * FROM note_studio_documents "
-                    "WHERE owner_user_id=? AND dataset_id=? AND note_id=?",
-                    (owner, dataset, normalized_note_id),
-                ).fetchone()
                 version = 1 if previous is None else int(previous["version"]) + 1
                 revision = 1 if previous is None else int(previous["canonical_revision"]) + 1
                 deleted = bool(note.get("deleted"))
