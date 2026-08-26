@@ -8,11 +8,13 @@
   `ca304f4b00536593a70844db268a7baa14886d7f`
 - Final exact-base CI-ratchet source commit:
   `a53fe714f9610c6b908504381838409a039051ba`
+- Final reviewer-remediated CI/E2E source commit:
+  `dac56c2004b859103ceef393f023927014a988da`
 - Rebased onto: `origin/dev` at
   `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
-- Ratchet comparison base: `origin/dev` at
-  `b1d0aed671dcf45bbe4211a9690022c083c99feb`
-- Final verification timestamp: `2026-08-25T06:00:09Z`
+- Final ratchet comparison base: `origin/dev` at
+  `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
+- Final verification timestamp: `2026-08-26T00:16:51Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -49,9 +51,9 @@ This evidence file is a documentation-only follow-up to those source trees.
 | Production admin UI build | PASS |
 | Chromium control-plane journey | PASS: 1 passed |
 | UI persistence/console sink scan | PASS |
-| Package-wide admin UI tests | RATCHET PASS: 41 inherited failures, 0 regressions; synthetic regression rejected |
+| Package-wide admin UI tests | STRICT RATCHET PASS: 41 inherited failures, 0 regressions; all safety counters zero |
 | Package-wide admin UI lint | PASS: 0 errors, 41 unchanged warnings |
-| Two-project real-backend Playwright | KNOWN UPSTREAM RUNNER FAILURE: Next 16 `.next/dev` lock collision before tests |
+| Two-project real-backend Playwright | PASS: JWT 26 passed/1 expected skip; single-user 1 passed/26 expected skips |
 
 PR 1 remains default-off. These results do not authorize outbound webhook
 delivery or canonical activation.
@@ -597,57 +599,67 @@ failed files. The 16 focused webhook page tests, package lint, typecheck,
 frontend unit shards, backend/security checks, CodeQL, and the reported E2E
 smoke and onboarding/UX checks passed in that hosted run.
 
-Source commit `a53fe714f9610c6b908504381838409a039051ba` replaces the
-unbounded aggregate failure with a fail-closed exact-base ratchet. The workflow
-now:
+Source commit `a53fe714f9610c6b908504381838409a039051ba` introduced the
+exact-base ratchet. Final reviewer-remediated source
+`dac56c2004b859103ceef393f023927014a988da` closes the remaining report,
+provenance, and runner gaps. The workflow now:
 
-1. installs head dependencies with the frozen lockfile and runs the complete
-   head suite with both human-readable and JSON reporters;
-2. accepts a clean run only after validating the success report;
-3. for assertion failures only, extracts the failed files from the validated
-   head report and creates a detached worktree at the exact admitted or PR
-   base SHA;
-4. installs that base with its frozen lockfile and replays only the failed head
-   files, with replay paths prefixed by `./` so filenames cannot become CLI
-   options;
-5. permits only identical assertion identities in unchanged test files and
-   rejects malformed reports, collection/import/setup failures, unexpected
-   process exits, changed failing tests, or assertions absent from the base.
+1. installs frozen head dependencies and runs the complete head suite with
+   human-readable, JSON, and minimal safety reporters;
+2. rejects zero-test runs, inconsistent JSON counters, unhandled errors,
+   module/suite errors, and failed or inconsistent hook lifecycles;
+3. fingerprints each failed assertion by package-relative file, full name,
+   normalized failure messages, and duplicate multiplicity;
+4. extracts only validated failed files, rejects every changed failed-test
+   file, and replays those files from a detached worktree at the exact base;
+5. uses NUL-delimited repository-relative changed paths and `./`-prefixed
+   replay paths, then permits only exact unchanged base failure fingerprints;
+6. pins the checked-out helper and safety reporter to workflow constants with
+   SHA-256 and rejects any mismatch.
 
-The exact comparison used Node 20.19.5, Bun 1.3.2, and current base
-`b1d0aed671dcf45bbe4211a9690022c083c99feb`:
+The digest check has an event-dependent trust boundary. A default-branch
+`workflow_run` authenticates the checked-out head artifacts against the
+default-branch workflow definition. A direct `pull_request` run is only a
+same-workflow consistency check because the PR controls the workflow, digest
+constants, and checked-out artifacts. A manual `workflow_dispatch` inherits
+the trust of the selected workflow ref. The final pinned digests are:
 
 ```text
-full head:                 41 failed, 713 passed, 17 failed files
-full exact base:           48 failed, 652 passed, 18 failed files
-first base subset replay:  42 failed,  88 passed, 17 failed files, exit 1
-final base subset replay:  41 failed,  89 passed, 17 failed files, exit 1
-ratchet comparison:        inherited=41 regressions=0, exit 0
-synthetic changed test:    inherited=39 regressions=2, exit 1
+ratchet helper:  b74fdd14d915134458bc0334c4db2e992497f00bc07ab8c9353967c7169f3ede
+safety reporter: 433e8ab9a163694775fa4a50ceae2f7722358331d1f8f4426ec7ec31e36e93f3
 ```
 
-The one-test variation between base subset replays is an inherited timing
-fluctuation. It does not weaken the comparison: every head failure had to match
-an exact base assertion identity, while extra base failures are irrelevant.
-The synthetic run marked `admin-ui/lib/navigation.test.ts` as changed and
-proved that the same failing assertions are blocking when their test file is
-part of the PR.
-
-TDD and structural verification:
+The final exact comparison used Node 20.19.5, Bun 1.3.2, and base
+`9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`:
 
 ```text
-old aggregate workflow contract:          RED
-dedicated canonical shard contract:       RED before ownership correction
-final ratchet/shard contracts:             2 passed
-ratchet helper suite:                     10 passed
-focused contract/helper matrix:           13 passed
-embedded Bash syntax:                     PASS
-direct webhook pytest marker policy:      PASS
-shard coverage:                           783 shards, 0 newly uncovered files
-Ruff and git diff --check:                 PASS
-admin package lint:                       PASS, 0 errors, 41 baseline warnings
-admin package typecheck:                  PASS
-admin production build:                   PASS, 49/49 pages
+full head:             41 failed, 720 passed, 761 total, 17 failed files
+head safety:           modules=145, unhandled=0, module=0, hook=0
+exact-base replay:     41 failed,  89 passed, 130 total, 17 failed files
+base safety:           modules=17,  unhandled=0, module=0, hook=0
+ratchet comparison:    inherited=41 regressions=0, exit 0
+```
+
+The final failed-file list exactly matched the prior strict run. None of those
+17 test files is changed by the PR. Earlier synthetic verification marked
+`admin-ui/lib/navigation.test.ts` as changed and was rejected with two
+regressions, proving that an otherwise inherited failure becomes blocking when
+its owning test file changes.
+
+TDD and final verification:
+
+```text
+real failed-beforeEach lifecycle regression:  RED before hook accounting
+reporter lifecycle regression:                 4 passed
+reporter/project-routing/middleware matrix:    10 passed
+ratchet helper/workflow contracts:             24 passed
+strict exact-base comparison:                  inherited=41 regressions=0
+Ruff and git diff --check:                     PASS
+admin package lint:                            PASS, 0 errors, 41 baseline warnings
+admin package typecheck:                       PASS
+admin production build:                       PASS, 49/49 pages
+real-backend JWT project:                      26 passed, 1 expected skip
+real-backend single-user project:              1 passed, 26 expected skips
 ```
 
 The complete local `tests/CI` collection finished with 225 passed and two
@@ -696,35 +708,39 @@ The warnings are unchanged upstream debt. Targeted ESLint across every changed
 TypeScript/TSX file, including `middleware.ts` and the Playwright helpers,
 passed with zero findings.
 
-The required two-project real-backend command was also run exactly as CI
-invokes it:
+An earlier two-project invocation attempted to start concurrent Next 16 dev
+servers from one `admin-ui` tree and failed on the shared `.next/dev` lock
+before browser tests. Final source `dac56c2004b859103ceef393f023927014a988da`
+resolves that runner defect. `bun run test:real-backend` now creates one
+production-mode E2E build, then runs the JWT and single-user Playwright
+projects sequentially in separate `next start` processes. Each process starts
+only its requested Python backend and UI server. Standalone output is disabled
+only for that E2E build; the normal production build retains standalone output.
 
-```bash
-bun run test:real-backend -- \
-  --project=chromium-real-jwt \
-  --project=chromium-real-single-user \
-  --reporter=line
+The one-build runner exposed and fixed a separate routing defect: single-user
+login used the request-mapped backend on port 8102, but middleware cookie
+revalidation used the build-time port 8101. Middleware now resolves the backend
+from each request while preserving the existing production fallback outside
+the explicit real-backend E2E mode. Final results were:
+
+```text
+JWT process:         26 passed, 1 expected project skip
+single-user process:  1 passed, 26 expected project skips
+normal build:         49/49 pages
 ```
 
-It did not reach any browser test. Playwright starts multiple Next 16 dev
-servers from the same `admin-ui` directory, and they collide on the shared
-`.next/dev` lock with `Another next dev server is already running`. The same
-multi-server structure exists at the exact PR base. The PR's Playwright change
-only prevents unrelated mocked invocations from starting these real-backend
-servers. No process remained after the failed attempt.
-
-These historical package failures are not represented as a clean suite; they
-are now governed by the exact-base ratchet above. The real-backend runner issue
-remains explicit upstream debt pending a separate remediation decision. The
-focused tests, typecheck, production build, and webhook browser journey
-establish the scoped PR behavior.
+Build and both project runs left tracked `next-env.d.ts` and `tsconfig.json`
+unchanged. The historical package failures above are not represented as a
+clean suite; they are governed by the strict exact-base ratchet.
 
 ## Final Safety Checks
 
 - `git diff --check`: PASS at tested source commit
-  `a53fe714f9610c6b908504381838409a039051ba`.
+  `dac56c2004b859103ceef393f023927014a988da`.
 - Exact-base admin UI comparison: PASS with 41 inherited failures and 0
-  regressions; synthetic changed-test comparison rejected 2 regressions.
+  regressions; head and base unhandled/module/hook safety counters are all zero.
+- Real-backend admin UI: PASS in sequential JWT and single-user processes;
+  normal standalone production build generated all 49 pages.
 - Canonical Admin Webhooks tests have a dedicated shard in all five full-suite
   matrices; shard coverage reports 0 newly uncovered files.
 - OpenAPI evaluation-webhook schema isolation: PASS.
