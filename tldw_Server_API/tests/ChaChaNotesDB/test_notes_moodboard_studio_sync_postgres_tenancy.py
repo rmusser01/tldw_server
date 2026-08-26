@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBack
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
+    ConflictError,
     SchemaError,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
@@ -116,6 +117,95 @@ V61_CONSTRAINTS = (
 def _open_db(config: DatabaseConfig, *, owner: str = "960001") -> tuple[Any, CharactersRAGDB]:
     backend = DatabaseBackendFactory.create_backend(config)
     return backend, CharactersRAGDB(":memory:", client_id=owner, backend=backend)
+
+
+def _postgres_force_rls_flags(backend: Any) -> dict[str, bool]:
+    with backend.transaction() as conn:
+        rows = backend.execute(
+            "SELECT relname, relforcerowsecurity FROM pg_class "
+            "WHERE relname IN (?,?,?,?)",
+            V61_TABLES,
+            connection=conn,
+        ).rows
+    return {str(row["relname"]): bool(row["relforcerowsecurity"]) for row in rows}
+
+
+def _postgres_v61_scope_state(
+    backend: Any,
+    *,
+    owner: str,
+) -> dict[str, Any]:
+    tables = (
+        "moodboards",
+        "moodboard_notes",
+        "note_studio_documents",
+        "note_task_scope_authority",
+    )
+    with backend.transaction() as conn:
+        for table in tables:
+            backend.execute(
+                f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY",  # nosec B608 - fixed test table names.
+                connection=conn,
+            )
+        try:
+            counts: dict[str, dict[str, int]] = {}
+            for table in ("moodboards", "moodboard_notes", "note_studio_documents"):
+                rows = backend.execute(
+                    f"SELECT dataset_id, COUNT(*) AS count FROM {table} "  # nosec B608 - fixed test table names.
+                    "WHERE owner_user_id=? GROUP BY dataset_id ORDER BY dataset_id",
+                    (owner,),
+                    connection=conn,
+                ).rows
+                counts[table] = {
+                    str(row["dataset_id"]): int(row["count"])
+                    for row in rows
+                }
+            authority = backend.execute(
+                "SELECT dataset_id,task_graph_bound,moodboard_graph_bound,"
+                "studio_graph_bound FROM note_task_scope_authority "
+                "WHERE owner_user_id=? ORDER BY dataset_id",
+                (owner,),
+                connection=conn,
+            ).rows
+        finally:
+            for table in reversed(tables):
+                backend.execute(
+                    f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",  # nosec B608 - fixed test table names.
+                    connection=conn,
+                )
+    return {
+        **counts,
+        "authority": [
+            {
+                "dataset_id": row["dataset_id"],
+                "task_graph_bound": bool(row["task_graph_bound"]),
+                "moodboard_graph_bound": bool(row["moodboard_graph_bound"]),
+                "studio_graph_bound": bool(row["studio_graph_bound"]),
+            }
+            for row in authority
+        ],
+    }
+
+
+def _seed_local_unbound_moodboard_studio_graph(
+    db: CharactersRAGDB,
+    *,
+    note_id: str,
+) -> int:
+    db.add_note("Local unbound seed", "Body", note_id=note_id)
+    moodboard_id = db.add_moodboard("Local board", "seed")
+    assert isinstance(moodboard_id, int)
+    assert db.link_note_to_moodboard(moodboard_id, note_id) is True
+    studio = db.create_note_studio_document(
+        note_id=note_id,
+        payload_json={"sections": []},
+        template_type="lined",
+        handwriting_mode="off",
+        render_version=1,
+    )
+    assert studio["dataset_id"] == "local-unbound"
+    db.close_connection()
+    return moodboard_id
 
 
 def test_postgres_v61_migration_contract_is_bounded_and_version_last() -> None:
@@ -854,6 +944,33 @@ def test_postgres_v61_public_moodboard_crud_sets_dataset_guc_transaction_locally
     note_id = f"00000000-0000-4000-8000-{uuid4().hex[:12]}"
     bound_dataset = f"dataset-{uuid4()}"
     try:
+        db.add_note("Public CRUD note", "Body", note_id=note_id)
+        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
+            owner_user_id=str(db.client_id),
+            target_dataset_id=bound_dataset,
+        )
+        db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
+            owner_user_id=str(db.client_id),
+            target_dataset_id=bound_dataset,
+        )
+        with backend.transaction() as conn:
+            backend.execute(
+                "INSERT INTO moodboards("
+                "name,client_id,owner_user_id,dataset_id,sync_id,canvas_json,"
+                "deleted,version,canonical_revision,canonical_hash"
+                ") VALUES ('hidden dataset board',?,?,?,?,?,FALSE,1,1,?)",
+                (
+                    str(db.client_id),
+                    str(db.client_id),
+                    f"hidden-{uuid4()}",
+                    str(uuid4()),
+                    "{}",
+                    "sha256:" + "9" * 64,
+                ),
+                connection=conn,
+            )
+        db.close_connection()
+
         with backend.transaction() as conn:
             current_user = backend.execute(
                 "SELECT current_user AS name",
@@ -886,32 +1003,6 @@ def test_postgres_v61_public_moodboard_crud_sets_dataset_guc_transaction_locally
                 f"GRANT {ident(role_name)} TO {ident(current_user)}",
                 connection=conn,
             )
-        db.add_note("Public CRUD note", "Body", note_id=note_id)
-        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
-            owner_user_id=str(db.client_id),
-            target_dataset_id=bound_dataset,
-        )
-        db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
-            owner_user_id=str(db.client_id),
-            target_dataset_id=bound_dataset,
-        )
-        with backend.transaction() as conn:
-            backend.execute(
-                "INSERT INTO moodboards("
-                "name,client_id,owner_user_id,dataset_id,sync_id,canvas_json,"
-                "deleted,version,canonical_revision,canonical_hash"
-                ") VALUES ('hidden dataset board',?,?,?,?,?,FALSE,1,1,?)",
-                (
-                    str(db.client_id),
-                    str(db.client_id),
-                    f"hidden-{uuid4()}",
-                    str(uuid4()),
-                    "{}",
-                    "sha256:" + "9" * 64,
-                ),
-                connection=conn,
-            )
-        db.close_connection()
 
         monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_SWITCH", "1")
         monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_WHITELIST", role_name)
@@ -1022,6 +1113,196 @@ def test_postgres_v61_moodboard_public_sql_uses_backend_boolean_values() -> None
     assert "deleted = 0" not in sources
     assert "deleted=1" not in sources
     assert "deleted = 1" not in sources
+
+
+def test_postgres_v61_binders_rekey_local_unbound_under_force_rls_without_dataset_guc(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner = "960021"
+    target = f"dataset-{uuid4()}"
+    backend, db = _open_db(pg_database_config, owner=owner)
+    note_id = f"00000000-0000-4000-8000-{uuid4().hex[:12]}"
+    try:
+        _seed_local_unbound_moodboard_studio_graph(db, note_id=note_id)
+        assert all(_postgres_force_rls_flags(backend).values())
+        with db.transaction() as conn:
+            row = conn.execute(
+                "SELECT current_setting('app.current_dataset_id', true) AS dataset"
+            ).fetchone()
+        assert row is not None
+        assert row["dataset"] in ("", None)
+
+        moodboard_counts = db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
+            owner_user_id=owner,
+            target_dataset_id=target,
+        )
+        studio_counts = db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
+            owner_user_id=owner,
+            target_dataset_id=target,
+        )
+
+        assert moodboard_counts == {"moodboards": 1, "moodboard_notes": 1}
+        assert studio_counts == {"note_studio_documents": 1}
+        state = _postgres_v61_scope_state(backend, owner=owner)
+        assert state["moodboards"] == {target: 1}
+        assert state["moodboard_notes"] == {target: 1}
+        assert state["note_studio_documents"] == {target: 1}
+        assert state["authority"] == [
+            {
+                "dataset_id": target,
+                "task_graph_bound": False,
+                "moodboard_graph_bound": True,
+                "studio_graph_bound": True,
+            }
+        ]
+        assert all(_postgres_force_rls_flags(backend).values())
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_v61_moodboard_bind_failure_rolls_back_rekey_and_force_rls(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "960022"
+    target = f"dataset-{uuid4()}"
+    backend, db = _open_db(pg_database_config, owner=owner)
+    note_id = f"00000000-0000-4000-8000-{uuid4().hex[:12]}"
+    try:
+        _seed_local_unbound_moodboard_studio_graph(db, note_id=note_id)
+        original_prove = db.moodboard_sync_store._prove_moodboard_graph
+
+        def fail_after_rekey(conn: Any, *, owner: str, dataset: str) -> None:
+            original_prove(conn, owner=owner, dataset=dataset)
+            if dataset == target:
+                raise ConflictError(
+                    "injected bind failure",
+                    entity="moodboards",
+                    entity_id=target,
+                )
+
+        monkeypatch.setattr(
+            db.moodboard_sync_store,
+            "_prove_moodboard_graph",
+            fail_after_rekey,
+        )
+        with db.transaction() as conn:
+            with pytest.raises(ConflictError, match="injected bind failure"):
+                db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
+                    owner_user_id=owner,
+                    target_dataset_id=target,
+                    conn=conn,
+                )
+            db._verify_notes_moodboard_studio_schema_postgres(conn)
+
+        state = _postgres_v61_scope_state(backend, owner=owner)
+        assert state["moodboards"] == {"local-unbound": 1}
+        assert state["moodboard_notes"] == {"local-unbound": 1}
+        assert state["authority"] == []
+        assert all(_postgres_force_rls_flags(backend).values())
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_v61_bootstrap_pages_set_dataset_guc_for_nobypassrls_role(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "960023"
+    target = f"dataset-{uuid4()}"
+    role_name = f"v61_bootstrap_{uuid4().hex[:8]}"
+    backend, db = _open_db(pg_database_config, owner=owner)
+    ident = backend.escape_identifier  # type: ignore[attr-defined]
+    role_created = False
+    current_user = ""
+    note_id = f"00000000-0000-4000-8000-{uuid4().hex[:12]}"
+    try:
+        _seed_local_unbound_moodboard_studio_graph(db, note_id=note_id)
+        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
+            owner_user_id=owner,
+            target_dataset_id=target,
+        )
+        db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
+            owner_user_id=owner,
+            target_dataset_id=target,
+        )
+        db.close_connection()
+
+        with backend.transaction() as conn:
+            current_user = backend.execute(
+                "SELECT current_user AS name",
+                connection=conn,
+            ).rows[0]["name"]
+            backend.execute(
+                f"CREATE ROLE {ident(role_name)} NOLOGIN NOSUPERUSER NOBYPASSRLS",
+                connection=conn,
+            )
+            role_created = True
+            backend.execute(
+                f"GRANT USAGE ON SCHEMA public TO {ident(role_name)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {ident(role_name)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT {ident(role_name)} TO {ident(current_user)}",
+                connection=conn,
+            )
+
+        monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_SWITCH", "1")
+        monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_WHITELIST", role_name)
+
+        def assert_dataset_guc_cleared() -> None:
+            with db.transaction() as conn:
+                row = conn.execute(
+                    "SELECT current_setting('app.current_dataset_id', true) "
+                    "AS dataset"
+                ).fetchone()
+            assert row is not None
+            assert row["dataset"] in ("", None)
+
+        with scoped_context(user_id=int(owner), session_role=role_name):
+            boards = db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
+                owner_user_id=owner,
+                dataset_id=target,
+            )
+            assert len(boards) == 1
+            assert boards[0]["dataset_id"] == target
+            assert_dataset_guc_cleared()
+
+            placements = db.moodboard_sync_store.page_moodboard_placements_for_sync_bootstrap(
+                owner_user_id=owner,
+                dataset_id=target,
+            )
+            assert len(placements) == 1
+            assert placements[0]["dataset_id"] == target
+            assert placements[0]["note_id"] == note_id
+            assert_dataset_guc_cleared()
+
+            studio_documents = db.moodboard_sync_store.page_studio_documents_for_sync_bootstrap(
+                owner_user_id=owner,
+                dataset_id=target,
+            )
+            assert len(studio_documents) == 1
+            assert studio_documents[0]["dataset_id"] == target
+            assert studio_documents[0]["note_id"] == note_id
+            assert_dataset_guc_cleared()
+    finally:
+        if role_created:
+            with backend.transaction() as conn:
+                backend.execute(f"DROP OWNED BY {ident(role_name)}", connection=conn)
+                if current_user:
+                    backend.execute(
+                        f"REVOKE {ident(role_name)} FROM {ident(current_user)}",
+                        connection=conn,
+                    )
+                backend.execute(f"DROP ROLE IF EXISTS {ident(role_name)}", connection=conn)
+        db.close_all_connections()
+        backend.get_pool().close_all()
 
 
 def test_postgres_v61_old_authority_insert_defaults_and_first_enrollment_race(

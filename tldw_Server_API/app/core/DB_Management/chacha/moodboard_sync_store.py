@@ -34,6 +34,13 @@ class MoodboardSyncStore:
     """Scoped product reads and one-way graph authority binding."""
 
     _LOCAL_UNBOUND = "local-unbound"
+    _POSTGRES_BIND_LOCK_TABLES = (
+        "note_task_scope_authority",
+        "notes",
+        "moodboards",
+        "moodboard_notes",
+        "note_studio_documents",
+    )
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
@@ -46,6 +53,18 @@ class MoodboardSyncStore:
     ) -> Any:
         prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
         return conn.execute(prepared_query, prepared_params or ())
+
+    def _set_postgres_dataset_scope(
+        self,
+        conn: GraphConnection,
+        dataset_id: str,
+    ) -> None:
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            self._execute(
+                conn,
+                "SELECT set_config('app.current_dataset_id', ?, true)",
+                (dataset_id,),
+            )
 
     @staticmethod
     def _validated_scope(owner_user_id: str, target_dataset_id: str) -> tuple[str, str]:
@@ -197,9 +216,41 @@ class MoodboardSyncStore:
         def counts(state: dict[str, tuple[int, str]]) -> dict[str, int]:
             return {table: count for table, (count, _digest) in state.items()}
 
+        def prepare_postgres_bind(transaction_conn: GraphConnection) -> None:
+            if not postgres:
+                return
+            version = self._db._get_schema_version_postgres(transaction_conn, lock=True)
+            if version != self._db._POSTGRES_SCHEMA_VERSION:
+                raise ConflictError(
+                    "Graph binding requires the current PostgreSQL schema.",
+                    entity="notes",
+                    entity_id=target,
+                )  # noqa: TRY003
+            self._execute(
+                transaction_conn,
+                "LOCK TABLE "
+                + ",".join(self._POSTGRES_BIND_LOCK_TABLES)
+                + " IN ACCESS EXCLUSIVE MODE",
+            )
+            self._db._verify_notes_moodboard_studio_schema_postgres(transaction_conn)
+            for table, _ordering in tables:
+                self._execute(
+                    transaction_conn,
+                    f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY",  # nosec B608 - fixed graph table names.
+                )
+
+        def finish_postgres_bind(transaction_conn: GraphConnection) -> None:
+            if not postgres:
+                return
+            for table, _ordering in tables:
+                self._execute(
+                    transaction_conn,
+                    f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",  # nosec B608 - fixed graph table names.
+                )
+            self._db._verify_notes_moodboard_studio_schema_postgres(transaction_conn)
+
         def bind(transaction_conn: GraphConnection) -> dict[str, int]:
-            if postgres:
-                self._execute(transaction_conn, "LOCK TABLE note_task_scope_authority IN EXCLUSIVE MODE")
+            prepare_postgres_bind(transaction_conn)
             lock = " FOR UPDATE" if postgres else ""
             authority_rows = self._execute(
                 transaction_conn,
@@ -235,7 +286,9 @@ class MoodboardSyncStore:
                 if any(counts(source).values()) or datasets - {target}:
                     raise ConflictError("Graph authority conflicts with product scope.", entity="notes", entity_id=target)  # noqa: TRY003
                 prove(transaction_conn, owner, target)
-                return counts(target_state)
+                result = counts(target_state)
+                finish_postgres_bind(transaction_conn)
+                return result
             if any(counts(target_state).values()):
                 raise ConflictError("Graph binding target collision.", entity="notes", entity_id=target)  # noqa: TRY003
 
@@ -246,6 +299,7 @@ class MoodboardSyncStore:
                 rebound = snapshot(transaction_conn, target)
                 if any(counts(remaining).values()) or rebound != source:
                     raise ConflictError("Graph binding failed complete-set verification.", entity="notes", entity_id=target)  # noqa: TRY003
+                prove(transaction_conn, owner, target)
             else:
                 rebound = source
 
@@ -279,12 +333,28 @@ class MoodboardSyncStore:
                     f"WHERE owner_user_id=? AND dataset_id=? AND {flag}=?",  # nosec B608
                     (True if postgres else 1, owner, target, false_value),
                 )
-            return counts(rebound)
+            result = counts(rebound)
+            finish_postgres_bind(transaction_conn)
+            return result
+
+        def bind_with_savepoint(transaction_conn: GraphConnection) -> dict[str, int]:
+            if not postgres:
+                return bind(transaction_conn)
+            self._execute(transaction_conn, "SAVEPOINT bind_local_moodboard_studio_graph")
+            try:
+                result = bind(transaction_conn)
+            except Exception:  # noqa: BLE001 - rollback must restore FORCE RLS/catalog on every failed bind.
+                self._execute(transaction_conn, "ROLLBACK TO SAVEPOINT bind_local_moodboard_studio_graph")
+                self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_moodboard_studio_graph")
+                self._db._verify_notes_moodboard_studio_schema_postgres(transaction_conn)
+                raise
+            self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_moodboard_studio_graph")
+            return result
 
         if conn is not None:
-            return bind(conn)
+            return bind_with_savepoint(conn)
         with self._db.transaction() as transaction_conn:
-            return bind(transaction_conn)
+            return bind_with_savepoint(transaction_conn)
 
     def _prove_moodboard_graph(
         self,
@@ -674,6 +744,7 @@ class MoodboardSyncStore:
             flag="moodboard_graph_bound",
         )
         with self._db.transaction() as conn:
+            self._set_postgres_dataset_scope(conn, dataset)
             rows = self._execute(
                 conn,
                 "SELECT * FROM moodboards WHERE owner_user_id=? AND dataset_id=? "
@@ -709,6 +780,7 @@ class MoodboardSyncStore:
             flag="moodboard_graph_bound",
         )
         with self._db.transaction() as conn:
+            self._set_postgres_dataset_scope(conn, dataset)
             rows = self._execute(
                 conn,
                 "SELECT p.*,b.sync_id AS moodboard_sync_id,"
@@ -759,6 +831,7 @@ class MoodboardSyncStore:
             flag="studio_graph_bound",
         )
         with self._db.transaction() as conn:
+            self._set_postgres_dataset_scope(conn, dataset)
             rows = self._execute(
                 conn,
                 "SELECT * FROM note_studio_documents WHERE owner_user_id=? AND dataset_id=? "
