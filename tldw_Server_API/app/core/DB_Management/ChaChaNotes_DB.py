@@ -27786,7 +27786,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 redaction_json=redaction_json,
                 created_at=now,
             )
-        return self._get_workspace_artifact(workspace_id, artifact_id)  # type: ignore[return-value]
+            row = conn.execute(
+                "SELECT * FROM workspace_artifacts WHERE workspace_id = ? AND id = ?",
+                (workspace_id, artifact_id),
+            ).fetchone()
+            artifact = self._normalize_workspace_artifact_row(row)
+            if artifact is None:
+                raise CharactersRAGDBError("Workspace artifact insert could not be verified.")  # noqa: TRY003
+        return artifact
 
     def _get_workspace_artifact(
         self,
@@ -28100,9 +28107,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             now,
         )
         with self.transaction() as conn:
-            cursor = conn.execute(query, params)
-            note_id = cursor.lastrowid
-        return self._get_workspace_note(workspace_id, note_id)  # type: ignore[return-value]
+            if self.backend_type == BackendType.POSTGRESQL:
+                cursor = conn.execute(query + " RETURNING id", params)
+                inserted = cursor.fetchone()
+                note_id = int(inserted["id"]) if inserted else None
+            else:
+                cursor = conn.execute(query, params)
+                note_id = cursor.lastrowid
+            if note_id is None:
+                raise CharactersRAGDBError("Workspace note insert ID was unavailable.")  # noqa: TRY003
+            row = conn.execute(
+                "SELECT * FROM workspace_notes WHERE workspace_id = ? AND id = ?",
+                (workspace_id, note_id),
+            ).fetchone()
+            if row is None:
+                raise CharactersRAGDBError("Workspace note insert could not be verified.")  # noqa: TRY003
+            note = dict(row)
+        return note
 
     def _get_workspace_note(
         self,

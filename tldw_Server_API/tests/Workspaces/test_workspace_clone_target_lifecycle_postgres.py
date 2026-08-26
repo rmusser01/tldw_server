@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from uuid import uuid4
 
 import pytest
 
@@ -212,6 +213,117 @@ def test_postgres_workspace_clone_snapshot_rolls_back_and_returns_on_failure(
 
     assert len(acquired_connections) == 1
     assert returned_connections == [(acquired_connections[0], "IDLE")]
+
+
+def test_postgres_workspace_clone_graph_is_tenant_isolated(
+    postgres_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_workspace_snapshot(postgres_db)
+    other_user_db = CharactersRAGDB(
+        ":memory:",
+        client_id="user-2",
+        backend=postgres_db.backend,
+    )
+    backend = postgres_db.backend
+    role_name = f"workspace_clone_reader_{uuid4().hex[:12]}"
+    ident = backend.escape_identifier
+    role_created = False
+    try:
+        other_user_db.upsert_workspace("workspace-user-2", "User 2 Workspace")
+        with backend.transaction() as connection:
+            backend.execute(
+                f"CREATE ROLE {ident(role_name)} NOLOGIN NOSUPERUSER NOBYPASSRLS",
+                connection=connection,
+            )
+            backend.execute(
+                f"GRANT USAGE ON SCHEMA public TO {ident(role_name)}",
+                connection=connection,
+            )
+            backend.execute(
+                "GRANT SELECT ON workspaces, workspace_sources, workspace_notes, "
+                "workspace_artifacts, workspace_artifact_versions, "
+                f"workspace_resource_memberships TO {ident(role_name)}",
+                connection=connection,
+            )
+            backend.execute(
+                f"GRANT {ident(role_name)} TO CURRENT_USER",
+                connection=connection,
+            )
+        role_created = True
+        monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_SWITCH", "1")
+        monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_WHITELIST", role_name)
+
+        for database, user_id in (
+            (postgres_db, "user-1"),
+            (other_user_db, "user-2"),
+        ):
+            database.close_connection()
+            connection = database.get_connection()
+            cursor = connection.cursor()
+            cursor.execute(f"SET ROLE {ident(role_name)}")
+            cursor.execute("SET row_security = on")
+            cursor.execute(
+                "SELECT set_config('app.current_user_id', %s, false)",
+                (user_id,),
+            )
+            connection.commit()
+
+        assert other_user_db.get_workspace("workspace-source") is None
+        assert {row["id"] for row in other_user_db.list_workspaces()} == {
+            "workspace-user-2"
+        }
+        assert other_user_db.list_workspace_sources("workspace-source") == []
+        assert other_user_db.list_workspace_notes("workspace-source") == []
+        assert other_user_db.list_workspace_artifacts("workspace-source") == []
+        assert other_user_db.list_workspace_artifact_versions(
+            "workspace-source",
+            "artifact-1",
+        ) == []
+        assert other_user_db.list_workspace_resource_memberships(
+            "workspace-source"
+        ) == []
+        with scoped_context(
+            user_id="user-2",
+            org_ids=[],
+            team_ids=[],
+            is_admin=False,
+            session_role=role_name,
+        ):
+            with pytest.raises(CloneSnapshotUnavailable):
+                other_user_db.read_workspace_clone_snapshot("workspace-source")
+
+        assert postgres_db.get_workspace("workspace-user-2") is None
+        assert {row["id"] for row in postgres_db.list_workspaces()} == {
+            "workspace-source"
+        }
+    finally:
+        try:
+            for database in (postgres_db, other_user_db):
+                connection = database.get_connection()
+                cursor = connection.cursor()
+                cursor.execute("RESET ROLE")
+                cursor.execute("RESET row_security")
+                cursor.execute("RESET app.current_user_id")
+                connection.commit()
+        finally:
+            try:
+                if role_created:
+                    with backend.transaction() as connection:
+                        backend.execute(
+                            f"REVOKE {ident(role_name)} FROM CURRENT_USER",
+                            connection=connection,
+                        )
+                        backend.execute(
+                            f"DROP OWNED BY {ident(role_name)}",
+                            connection=connection,
+                        )
+                        backend.execute(
+                            f"DROP ROLE {ident(role_name)}",
+                            connection=connection,
+                        )
+            finally:
+                other_user_db.close_connection()
 
 
 @pytest.mark.parametrize(

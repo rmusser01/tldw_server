@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot
     insert_operation_owned_clone_media,
     list_operation_owned_clone_media,
     read_media_clone_snapshots,
+    read_operation_owned_clone_media_readiness,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.audio_preset_ops import (
     count_audio_presets,
@@ -2267,6 +2268,9 @@ MediaDatabase.update_audio_preset = update_audio_preset
 MediaDatabase.soft_delete_audio_preset = soft_delete_audio_preset
 MediaDatabase.get_connection = get_connection
 MediaDatabase.read_media_clone_snapshots = read_media_clone_snapshots
+MediaDatabase.read_operation_owned_clone_media_readiness = (
+    read_operation_owned_clone_media_readiness
+)
 MediaDatabase.insert_operation_owned_clone_media = insert_operation_owned_clone_media
 MediaDatabase.delete_operation_owned_clone_media = delete_operation_owned_clone_media
 MediaDatabase.list_operation_owned_clone_media = list_operation_owned_clone_media

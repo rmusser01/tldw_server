@@ -1417,6 +1417,129 @@ def test_operation_owned_clone_insert_isolated_from_url_and_content_collisions(
 
 
 @pytest.mark.unit
+def test_operation_owned_clone_is_readable_for_target_readiness(
+    media_db: MediaDatabase,
+) -> None:
+    snapshot = _operation_snapshot()
+    operation_id = "clone-readiness-operation"
+    source_identity = "workspace-source-readiness"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    created = media_db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_hash,
+    )
+
+    persisted = media_db.read_operation_owned_clone_media_readiness(
+        operation_id=operation_id,
+        items=((source_identity, expected_hash),),
+    )
+
+    assert set(persisted) == {source_identity}
+    assert persisted[source_identity].source_identity == source_identity
+    assert persisted[source_identity].media_id == created.media_id
+    assert persisted[source_identity].has_chunks is True
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_readiness_rejects_duplicate_source_identities(
+    media_db: MediaDatabase,
+) -> None:
+    expected_hash = hashlib.sha256(b"readiness-duplicate").hexdigest()
+
+    with pytest.raises(InputError):
+        media_db.read_operation_owned_clone_media_readiness(
+            operation_id="clone-readiness-duplicate",
+            items=(
+                ("workspace-source-duplicate", expected_hash),
+                ("workspace-source-duplicate", expected_hash),
+            ),
+        )
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_readiness_rejects_content_hash_mismatch(
+    media_db: MediaDatabase,
+) -> None:
+    snapshot = _operation_snapshot()
+    operation_id = "clone-readiness-hash-mismatch"
+    source_identity = "workspace-source-hash-mismatch"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    media_db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity=source_identity,
+        expected_content_hash=expected_hash,
+    )
+
+    with pytest.raises(CloneSnapshotUnavailable):
+        media_db.read_operation_owned_clone_media_readiness(
+            operation_id=operation_id,
+            items=((source_identity, hashlib.sha256(b"wrong").hexdigest()),),
+        )
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_readiness_rejects_foreign_row_in_operation(
+    media_db: MediaDatabase,
+) -> None:
+    snapshot = _operation_snapshot()
+    operation_id = "clone-readiness-foreign-row"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    media_db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity="workspace-source-owned",
+        expected_content_hash=expected_hash,
+    )
+    foreign = media_db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id=operation_id,
+        source_identity="workspace-source-foreign",
+        expected_content_hash=expected_hash,
+    )
+    media_db.execute_query(
+        "UPDATE Media SET client_id = ?, version = version + 1, last_modified = ? "
+        "WHERE id = ?",
+        (
+            "different-owner",
+            "2026-08-25T16:00:00+00:00",
+            foreign.media_id,
+        ),
+        commit=True,
+    )
+
+    with pytest.raises(CloneSnapshotUnavailable):
+        media_db.read_operation_owned_clone_media_readiness(
+            operation_id=operation_id,
+            items=(("workspace-source-owned", expected_hash),),
+        )
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_readiness_rejects_unrequested_row_in_operation(
+    media_db: MediaDatabase,
+) -> None:
+    snapshot = _operation_snapshot()
+    operation_id = "clone-readiness-extra-row"
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    for source_identity in ("workspace-source-requested", "workspace-source-extra"):
+        media_db.insert_operation_owned_clone_media(
+            snapshot=snapshot,
+            operation_id=operation_id,
+            source_identity=source_identity,
+            expected_content_hash=expected_hash,
+        )
+
+    with pytest.raises(CloneSnapshotUnavailable):
+        media_db.read_operation_owned_clone_media_readiness(
+            operation_id=operation_id,
+            items=(("workspace-source-requested", expected_hash),),
+        )
+
+
+@pytest.mark.unit
 def test_operation_owned_clone_preserves_nullable_media_content(
     media_db: MediaDatabase,
 ) -> None:
@@ -1828,6 +1951,12 @@ def test_operation_owned_clone_package_facade_exposes_insert_and_cleanup(
     )
 
     assert result.created is True
+    readiness = media_db_api.read_operation_owned_clone_media_readiness(
+        media_db,
+        operation_id="clone-operation-facade",
+        items=(("workspace-source-facade", expected_hash),),
+    )
+    assert readiness["workspace-source-facade"].media_id == result.media_id
     assert media_db_api.delete_operation_owned_clone_media(
         media_db,
         operation_id="clone-operation-facade",
@@ -3533,6 +3662,12 @@ def test_postgres_operation_owned_clone_insert_replay_collision_and_cleanup(
             assert created.created is True
             assert replayed.replayed is True
             assert replayed.media_id == created.media_id
+            readiness = db.read_operation_owned_clone_media_readiness(
+                operation_id=operation_id,
+                items=((source_identity, expected_hash),),
+            )
+            assert readiness[source_identity].media_id == created.media_id
+            assert readiness[source_identity].has_chunks is True
             stored = db.execute_query(
                 "SELECT m.content AS media_content, dv.content AS document_content "
                 "FROM Media m JOIN DocumentVersions dv ON dv.media_id = m.id "

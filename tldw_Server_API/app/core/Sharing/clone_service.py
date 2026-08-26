@@ -11,6 +11,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
+    OperationOwnedMediaReadiness,
     OperationOwnedMediaResult,
     hash_media_clone_snapshot,
 )
@@ -148,6 +149,7 @@ class _CopyState:
     tracked_media: dict[int, _TrackedMedia] = field(default_factory=dict)
     media_failed_once: set[int] = field(default_factory=set)
     copied_source_ids: set[str] = field(default_factory=set)
+    copied_source_media_ids: dict[str, int] = field(default_factory=dict)
     copied_artifact_ids: set[str] = field(default_factory=set)
     note_id_map: dict[str, str] = field(default_factory=dict)
     successful_source_media_ids: set[int] = field(default_factory=set)
@@ -265,8 +267,14 @@ class CloneService:
             )
             self._copy_memberships(request, prepared, state)
             self._validate_copy_state(prepared, state)
+            text_ready = self._read_target_text_readiness(request, state)
 
-            result = self._build_result(request, prepared, state)
+            result = self._build_result(
+                request,
+                prepared,
+                state,
+                text_ready=text_ready,
+            )
             reporter.emit("finalizing", 0.95)
             self._cancel_if_requested(should_cancel)
             try:
@@ -557,6 +565,9 @@ class CloneService:
                 raise _FatalClone("clone_validation_failed")
 
             state.copied_source_ids.add(source_key)
+            state.copied_source_media_ids[source_key] = (
+                tracked.result.media_id if tracked is not None else 0
+            )
             state.sources_copied += 1
             if tracked is not None:
                 tracked.reference_count += 1
@@ -615,34 +626,96 @@ class CloneService:
         reporter.emit("notes", 0.65 if notes else 0.75)
         for index, note in enumerate(notes):
             self._cancel_if_requested(should_cancel)
+            source_key = self._resource_key(note.get("id"))
+            if source_key is None:
+                raise _FatalClone("clone_validation_failed")
             try:
                 payload = {
                     "title": note.get("title", ""),
                     "content": note.get("content", ""),
                     "keywords": self._decode_note_keywords(note),
                 }
-                copied = self._tgt_chacha.add_workspace_note(
-                    request.target_workspace_id,
-                    payload,
-                )
-                source_key = self._resource_key(note.get("id"))
-                target_key = (
-                    self._resource_key(copied.get("id"))
-                    if isinstance(copied, Mapping)
-                    else None
-                )
-                if source_key is None or target_key is None:
-                    raise _FatalClone("clone_validation_failed")
-            except _FatalClone:
-                raise
             except Exception as exc:
                 state.notes_failed += 1
                 state.warn("note_copy_failed")
                 self._log_failure("Workspace clone note copy failed", request, exc)
-            else:
-                state.note_id_map[source_key] = target_key
-                state.notes_copied += 1
+                reporter.emit("notes", 0.65 + 0.1 * ((index + 1) / len(notes)))
+                continue
+            try:
+                copied = self._tgt_chacha.add_workspace_note(
+                    request.target_workspace_id,
+                    payload,
+                )
+            except Exception as exc:
+                self._log_failure(
+                    "Workspace clone note write response unavailable",
+                    request,
+                    exc,
+                )
+                copied = self._reconcile_note_write(
+                    request,
+                    payload,
+                    claimed_target_ids=set(state.note_id_map.values()),
+                )
+                if copied is None:
+                    state.notes_failed += 1
+                    state.warn("note_copy_failed")
+                    reporter.emit("notes", 0.65 + 0.1 * ((index + 1) / len(notes)))
+                    continue
+            target_key = (
+                self._resource_key(copied.get("id"))
+                if isinstance(copied, Mapping)
+                else None
+            )
+            if target_key is None or not self._note_copy_matches(copied, payload):
+                raise _FatalClone("clone_validation_failed")
+            state.note_id_map[source_key] = target_key
+            state.notes_copied += 1
             reporter.emit("notes", 0.65 + 0.1 * ((index + 1) / len(notes)))
+
+    def _reconcile_note_write(
+        self,
+        request: WorkspaceCloneRequest,
+        payload: Mapping[str, Any],
+        *,
+        claimed_target_ids: set[str],
+    ) -> Mapping[str, Any] | None:
+        try:
+            rows = self._tgt_chacha.list_workspace_notes(request.target_workspace_id)
+        except Exception as exc:
+            self._log_failure("Workspace clone note reconciliation failed", request, exc)
+            raise _FatalClone("clone_validation_failed", exc) from None
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise _FatalClone("clone_validation_failed")
+
+        unclaimed: list[Mapping[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise _FatalClone("clone_validation_failed")
+            target_key = self._resource_key(row.get("id"))
+            if target_key is None:
+                raise _FatalClone("clone_validation_failed")
+            if target_key not in claimed_target_ids:
+                unclaimed.append(row)
+        if not unclaimed:
+            return None
+        if len(unclaimed) != 1 or not self._note_copy_matches(unclaimed[0], payload):
+            raise _FatalClone("clone_validation_failed")
+        return unclaimed[0]
+
+    @classmethod
+    def _note_copy_matches(cls, copied: Any, payload: Mapping[str, Any]) -> bool:
+        if not isinstance(copied, Mapping) or copied.get("deleted") in (True, 1):
+            return False
+        try:
+            copied_keywords = cls._decode_note_keywords(copied)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        return (
+            copied.get("title", "") == payload.get("title", "")
+            and copied.get("content", "") == payload.get("content", "")
+            and copied_keywords == payload.get("keywords", [])
+        )
 
     @staticmethod
     def _decode_note_keywords(note: Mapping[str, Any]) -> list[str]:
@@ -684,18 +757,44 @@ class CloneService:
                     payload,
                 )
             except Exception as exc:
-                state.artifacts_failed += 1
-                state.warn("artifact_copy_failed")
-                self._log_failure("Workspace clone artifact copy failed", request, exc)
-            else:
-                if (
-                    not isinstance(copied, Mapping)
-                    or self._resource_key(copied.get("id")) != artifact_id
-                ):
-                    raise _FatalClone("clone_validation_failed")
-                state.copied_artifact_ids.add(artifact_id)
-                state.artifacts_copied += 1
+                self._log_failure(
+                    "Workspace clone artifact write response unavailable",
+                    request,
+                    exc,
+                )
+                try:
+                    copied = self._tgt_chacha.get_workspace_artifact(
+                        request.target_workspace_id,
+                        artifact_id,
+                    )
+                except Exception as lookup_exc:
+                    self._log_failure(
+                        "Workspace clone artifact reconciliation failed",
+                        request,
+                        lookup_exc,
+                    )
+                    raise _FatalClone("clone_validation_failed", lookup_exc) from None
+                if copied is None:
+                    state.artifacts_failed += 1
+                    state.warn("artifact_copy_failed")
+                    reporter.emit(
+                        "artifacts",
+                        0.8 + 0.1 * ((index + 1) / len(artifacts)),
+                    )
+                    continue
+            if not self._artifact_copy_matches(copied, payload):
+                raise _FatalClone("clone_validation_failed")
+            state.copied_artifact_ids.add(artifact_id)
+            state.artifacts_copied += 1
             reporter.emit("artifacts", 0.8 + 0.1 * ((index + 1) / len(artifacts)))
+
+    @classmethod
+    def _artifact_copy_matches(cls, copied: Any, payload: Mapping[str, Any]) -> bool:
+        if not isinstance(copied, Mapping):
+            return False
+        if cls._resource_key(copied.get("id")) != cls._resource_key(payload.get("id")):
+            return False
+        return all(copied.get(field_name) == expected for field_name, expected in payload.items())
 
     def _copy_memberships(
         self,
@@ -770,11 +869,29 @@ class CloneService:
                     payload,
                 )
             except Exception as exc:
-                state.warn("membership_skipped")
-                self._log_failure("Workspace clone membership copy failed", request, exc)
-                if tracked is not None and tracked.reference_count == 0:
-                    self._delete_unreferenced_media(request, state, tracked)
-                continue
+                self._log_failure(
+                    "Workspace clone membership write response unavailable",
+                    request,
+                    exc,
+                )
+                try:
+                    copied = self._tgt_chacha.get_workspace_resource_membership(
+                        request.target_workspace_id,
+                        resource_type,
+                        mapped_resource_id,
+                    )
+                except Exception as lookup_exc:
+                    self._log_failure(
+                        "Workspace clone membership reconciliation failed",
+                        request,
+                        lookup_exc,
+                    )
+                    raise _FatalClone("clone_validation_failed", lookup_exc) from None
+                if copied is None:
+                    state.warn("membership_skipped")
+                    if tracked is not None and tracked.reference_count == 0:
+                        self._delete_unreferenced_media(request, state, tracked)
+                    continue
             if not self._membership_copy_matches(copied, payload):
                 raise _FatalClone("clone_validation_failed")
             if tracked is not None:
@@ -791,6 +908,7 @@ class CloneService:
             and copied.get("label") == payload.get("label")
             and copied.get("transfer_policy") == "copy"
             and copied.get("provenance") == payload.get("provenance")
+            and copied.get("metadata") == payload.get("metadata")
         )
 
     def _ensure_media(
@@ -948,25 +1066,20 @@ class CloneService:
         request: WorkspaceCloneRequest,
         prepared: _PreparedSnapshot,
         state: _CopyState,
+        *,
+        text_ready: bool,
     ) -> WorkspaceCloneResult:
         media_copied = len(state.tracked_media)
         media_failed = len(prepared.media_ids) - media_copied
         operation_owned_media = sum(
             1 for tracked in state.tracked_media.values() if tracked.result.created
         )
-        text_ready = any(
-            media_id in state.tracked_media
-            and bool(prepared.media_snapshots[media_id].chunks)
-            for media_id in state.successful_source_media_ids
-        )
 
         if not self._vector_retrieval_configured:
             vector_readiness = "not_configured"
-        elif media_copied:
+        else:
             vector_readiness = "needs_indexing"
             state.warn("vector_index_not_generated")
-        else:
-            vector_readiness = "ready"
 
         counts = CloneCopyCounts(
             sources_attempted=len(prepared.workspace.sources),
@@ -1007,6 +1120,87 @@ class CloneService:
                 vector_search=vector_readiness,
             ),
             warnings=warnings,
+        )
+
+    def _read_target_text_readiness(
+        self,
+        request: WorkspaceCloneRequest,
+        state: _CopyState,
+    ) -> bool:
+        try:
+            rows = self._tgt_chacha.list_workspace_sources(request.target_workspace_id)
+        except Exception as exc:
+            self._log_failure("Workspace clone target source validation failed", request, exc)
+            raise _FatalClone("clone_validation_failed", exc) from None
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise _FatalClone("clone_validation_failed")
+
+        target_source_media_ids: dict[str, int] = {}
+        tracked_target_media_ids = {
+            tracked.result.media_id for tracked in state.tracked_media.values()
+        }
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise _FatalClone("clone_validation_failed")
+            source_id = self._resource_key(row.get("id"))
+            if source_id is None or source_id in target_source_media_ids:
+                raise _FatalClone("clone_validation_failed")
+            try:
+                raw_media_id = row.get("media_id")
+                if isinstance(raw_media_id, bool):
+                    raise ValueError
+                media_id = int(raw_media_id or 0)
+            except (TypeError, ValueError):
+                raise _FatalClone("clone_validation_failed") from None
+            if media_id < 0 or (media_id and media_id not in tracked_target_media_ids):
+                raise _FatalClone("clone_validation_failed")
+            target_source_media_ids[source_id] = media_id
+
+        if target_source_media_ids != state.copied_source_media_ids:
+            raise _FatalClone("clone_validation_failed")
+
+        ordered_source_media_ids = tuple(sorted(state.tracked_media))
+        expected_by_source_identity = {
+            state.tracked_media[source_media_id].source_identity: state.tracked_media[
+                source_media_id
+            ].result.media_id
+            for source_media_id in ordered_source_media_ids
+        }
+        if len(expected_by_source_identity) != len(ordered_source_media_ids):
+            raise _FatalClone("clone_validation_failed")
+        readiness_items = tuple(
+            (
+                state.tracked_media[source_media_id].source_identity,
+                state.tracked_media[source_media_id].content_hash,
+            )
+            for source_media_id in ordered_source_media_ids
+        )
+        try:
+            readiness = self._tgt_media.read_operation_owned_clone_media_readiness(
+                operation_id=request.operation_id,
+                items=readiness_items,
+            )
+        except Exception as exc:
+            self._log_failure("Workspace clone target media validation failed", request, exc)
+            raise _FatalClone("clone_validation_failed", exc) from None
+        if not isinstance(readiness, Mapping) or set(readiness) != set(
+            expected_by_source_identity
+        ):
+            raise _FatalClone("clone_validation_failed")
+        for source_identity, item in readiness.items():
+            if (
+                not isinstance(item, OperationOwnedMediaReadiness)
+                or item.source_identity != source_identity
+                or item.media_id != expected_by_source_identity[source_identity]
+            ):
+                raise _FatalClone("clone_validation_failed")
+        source_readiness_identities = {
+            state.tracked_media[source_media_id].source_identity
+            for source_media_id in state.successful_source_media_ids
+        }
+        return any(
+            readiness[source_identity].has_chunks
+            for source_identity in source_readiness_identities
         )
 
     def _cleanup(

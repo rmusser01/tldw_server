@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
     DocumentVersionsRepository,
     KeywordsRepository,
     MediaRepository,
+    OperationOwnedMediaReadiness,
     OperationOwnedMediaReference,
     OperationOwnedMediaResult,
 )
@@ -202,6 +203,22 @@ def read_media_clone_snapshots(
         error_message="db must expose the Media DB clone snapshot read contract.",
     )
     return reader.read_media_clone_snapshots(media_ids)
+
+
+def read_operation_owned_clone_media_readiness(
+    db: MediaDbLike,
+    *,
+    operation_id: str,
+    items: Sequence[tuple[str, str]],
+) -> dict[str, OperationOwnedMediaReadiness]:
+    """Read canonical readiness for exact pending clone Media identities."""
+    db_instance = unwrap_media_database_like(db)
+    return CloneSnapshotRepository.from_legacy_db(
+        db_instance
+    ).read_operation_owned_clone_media_readiness(
+        operation_id=operation_id,
+        items=items,
+    )
 
 
 def hash_media_clone_snapshot(snapshot: "MediaCloneSnapshot") -> str:
@@ -1285,6 +1302,7 @@ __all__ = [
     "MediaDbReadLike",
     "MediaWriterLike",
     "MediaRepository",
+    "OperationOwnedMediaReadiness",
     "OperationOwnedMediaReference",
     "OperationOwnedMediaResult",
     "confirm_operation_owned_clone_media",
@@ -1321,6 +1339,7 @@ __all__ = [
     "check_media_exists",
     "permanently_delete_item",
     "read_media_clone_snapshots",
+    "read_operation_owned_clone_media_readiness",
     "get_media_by_id",
     "get_media_source_projection",
     "get_media_status_by_id",

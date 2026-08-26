@@ -42,6 +42,7 @@ _CANONICAL_MAX_DEPTH = 64
 _CANONICAL_MAX_CONTAINER_ITEMS = 1_000_000
 _CANONICAL_MAX_STRING_LENGTH = 1_000_000
 _KEYWORD_MAX_LENGTH = 255
+_OPERATION_OWNED_READINESS_MAX_ITEMS = 10_000
 _CANONICAL_HASH_DOMAIN = b"tldw.media-clone-snapshot.v2\x00"
 _LOGICAL_COPY_PROJECTION_VERSION = 2
 
@@ -82,6 +83,22 @@ class OperationOwnedMediaReference:
             raise ValueError("media_uuid must be a non-empty string")
         _validate_identifier(self.source_identity, "source_identity")
         _validate_sha256(self.expected_content_hash, "expected_content_hash")
+
+
+@dataclass(frozen=True, slots=True)
+class OperationOwnedMediaReadiness:
+    """Canonical readiness facts for one exact pending clone Media row."""
+
+    source_identity: str
+    media_id: int
+    has_chunks: bool
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.source_identity, "source_identity")
+        if isinstance(self.media_id, bool) or not isinstance(self.media_id, int) or self.media_id <= 0:
+            raise ValueError("media_id must be a positive integer")
+        if not isinstance(self.has_chunks, bool):
+            raise TypeError("has_chunks must be a boolean")
 
 
 def _canonical_frame(tag: bytes, payload: bytes) -> bytes:
@@ -730,17 +747,116 @@ class CloneSnapshotRepository:
         operation_id: str,
         source_identity: str,
         expected_content_hash: str,
-    ) -> None:
-        persisted_hash = _hash_logical_copy_projection(
-            self._persisted_logical_copy_projection(
-                connection,
-                media_id=media_id,
-                operation_id=operation_id,
-                source_identity=source_identity,
-            )
+    ) -> Mapping[str, Any]:
+        projection = self._persisted_logical_copy_projection(
+            connection,
+            media_id=media_id,
+            operation_id=operation_id,
+            source_identity=source_identity,
         )
+        persisted_hash = _hash_logical_copy_projection(projection)
         if not hmac.compare_digest(persisted_hash, expected_content_hash):
             raise _operation_conflict()
+        return projection
+
+    @staticmethod
+    def _validate_readiness_items(
+        items: Sequence[tuple[str, str]],
+    ) -> tuple[tuple[str, str], ...]:
+        if isinstance(items, (str, bytes, bytearray)) or not isinstance(items, Sequence):
+            raise InputError("items must be a bounded sequence of source identity and hash pairs")
+        normalized = tuple(items)
+        if len(normalized) > _OPERATION_OWNED_READINESS_MAX_ITEMS:
+            raise InputError("items exceeds the operation-owned readiness item bound")
+
+        validated: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for item in normalized:
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise InputError("items must contain source identity and hash pairs")
+            source_identity = _validate_identifier(item[0], "source_identity")
+            expected_content_hash = _validate_sha256(
+                item[1],
+                "expected_content_hash",
+            )
+            if source_identity in seen:
+                raise InputError("items must contain unique source identities")
+            seen.add(source_identity)
+            validated.append((source_identity, expected_content_hash))
+        return tuple(validated)
+
+    def read_operation_owned_clone_media_readiness(
+        self,
+        *,
+        operation_id: str,
+        items: Sequence[tuple[str, str]],
+    ) -> dict[str, OperationOwnedMediaReadiness]:
+        """Read exact pending clone Media readiness through one target snapshot."""
+        operation_id = _validate_identifier(operation_id, "operation_id")
+        normalized_items = self._validate_readiness_items(items)
+
+        def materialize(_backend: Any, connection: Any) -> dict[str, OperationOwnedMediaReadiness]:
+            operation_rows = [
+                dict(row)
+                for row in self.session._fetchall_with_connection(
+                    connection,
+                    "SELECT id, url, uuid, client_id, deleted, is_trash, "
+                    "system_operation_id, system_operation_kind, system_source_identity, "
+                    "system_content_hash FROM Media WHERE system_operation_id = ?",
+                    (operation_id,),
+                )
+            ]
+            candidates_by_source: dict[str, Mapping[str, Any]] = {}
+            for row in operation_rows:
+                source_identity = row.get("system_source_identity")
+                if (
+                    row.get("system_operation_kind") != _CLONE_OPERATION_KIND
+                    or not isinstance(source_identity, str)
+                    or row.get("url") != self._storage_url(operation_id, source_identity)
+                    or str(row.get("client_id")) != str(self.session.client_id)
+                    or not isinstance(row.get("system_content_hash"), str)
+                    or _SHA256_PATTERN.fullmatch(row["system_content_hash"]) is None
+                    or source_identity in candidates_by_source
+                ):
+                    raise _operation_conflict()
+                candidates_by_source[source_identity] = row
+
+            requested_identities = {
+                source_identity for source_identity, _ in normalized_items
+            }
+            if set(candidates_by_source) != requested_identities:
+                raise _operation_conflict()
+
+            readiness: dict[str, OperationOwnedMediaReadiness] = {}
+            for source_identity, expected_content_hash in normalized_items:
+                storage_url = self._storage_url(operation_id, source_identity)
+                candidate = candidates_by_source[source_identity]
+                verified = self._verify_owned_candidate(
+                    (candidate,),
+                    storage_url=storage_url,
+                    operation_id=operation_id,
+                    source_identity=source_identity,
+                    expected_content_hash=expected_content_hash,
+                    require_pending=True,
+                )
+                if verified is None:
+                    raise _operation_conflict()
+                media_id = int(verified["id"])
+                projection = self._verify_persisted_logical_copy(
+                    connection,
+                    media_id=media_id,
+                    operation_id=operation_id,
+                    source_identity=source_identity,
+                    expected_content_hash=expected_content_hash,
+                )
+                readiness[source_identity] = OperationOwnedMediaReadiness(
+                    source_identity=source_identity,
+                    media_id=media_id,
+                    has_chunks=bool(projection["chunks"]),
+                )
+            return readiness
+
+        return self._run_snapshot(materialize)
 
     def _insert_media_row(
         self,
@@ -1442,6 +1558,21 @@ def read_media_clone_snapshots(
 ) -> dict[int, MediaCloneSnapshot]:
     """MediaDatabase binding for repeatable clone source reads."""
     return CloneSnapshotRepository.from_legacy_db(self).read(media_ids)
+
+
+def read_operation_owned_clone_media_readiness(
+    self: MediaDbLike,
+    *,
+    operation_id: str,
+    items: Sequence[tuple[str, str]],
+) -> dict[str, OperationOwnedMediaReadiness]:
+    """MediaDatabase binding for exact pending clone Media readiness."""
+    return CloneSnapshotRepository.from_legacy_db(
+        self
+    ).read_operation_owned_clone_media_readiness(
+        operation_id=operation_id,
+        items=items,
+    )
 
 
 def insert_operation_owned_clone_media(

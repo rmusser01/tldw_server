@@ -47,7 +47,7 @@
 - Consumes: source Workspace, source membership, media, chunk, transcript, note, and artifact records.
 - Produces: `WorkspaceCloneRequest`, `WorkspaceCloneSnapshot`, `MediaCloneSnapshot`, `CloneCopyCounts`, `CloneRetrievalReadiness`, `WorkspaceCloneResult`, `CloneCancelled`, and `CloneSnapshotUnavailable`.
 
-- [ ] **Step 1: Write failing immutability and bounds tests**
+- [x] **Step 1: Write failing immutability and bounds tests**
 
 ```python
 def test_clone_result_rejects_unbounded_warnings():
@@ -69,15 +69,15 @@ def test_snapshot_defensively_copies_mutable_rows():
     assert snapshot.sources[0]["title"] == "Original"
 ```
 
-- [ ] **Step 2: Run tests and verify missing contracts**
+- [x] **Step 2: Run tests and verify missing contracts**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_clone_service.py -k 'contract or snapshot' -v`
 
-- [ ] **Step 3: Add frozen contracts and controlled errors**
+- [x] **Step 3: Add frozen contracts and controlled errors**
 
 `WorkspaceCloneRequest` contains `source_workspace_id`, `target_workspace_id`, `operation_id`, `request_fingerprint`, and normalized `name`. `WorkspaceCloneResult` contains attempted/copied/failed counts by item class, operation-owned media count, readiness, at most eight stable warnings, and `publication_confirmed`. Validate all identifiers and warning codes as bounded ASCII; never store source titles, URLs, paths, content, or exception strings in result diagnostics.
 
-- [ ] **Step 4: Run focused tests and commit**
+- [x] **Step 4: Run focused tests and commit**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_clone_service.py -k 'contract or snapshot' -v`
 
@@ -96,19 +96,19 @@ git commit -m "feat(sharing): define immutable clone snapshot contracts"
 - Consumes: deterministic target ID, operation ID, request fingerprint, normalized Workspace fields.
 - Produces: `reserve_clone_target`, `publish_clone_target`, `confirm_clone_target_publication`, `discard_clone_target`, and `list_clone_targets_for_reconciliation`.
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Cover first reservation, idempotent same-operation reservation, collision with an ordinary Workspace, collision with another operation, staged target exclusion from `list_workspaces`, publish-to-pending, confirmation marker clearing, operation-fenced discard, and failed/cancelled reconciliation lookup.
 
-- [ ] **Step 2: Run tests and verify missing methods**
+- [x] **Step 2: Run tests and verify missing methods**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py -v`
 
-- [ ] **Step 3: Forward-migrate explicit operation marker fields**
+- [x] **Step 3: Forward-migrate explicit operation marker fields**
 
 Add nullable `system_operation_id`, `system_operation_kind`, `system_operation_state`, and `system_request_fingerprint` fields to `workspaces`, with allowed states `staged` and `publication_pending` and an index on `(system_operation_kind, system_operation_state, system_operation_id)`. These are internal ownership metadata, not a second operation status store.
 
-- [ ] **Step 4: Implement fenced lifecycle methods**
+- [x] **Step 4: Implement fenced lifecycle methods**
 
 Add these exact methods:
 
@@ -119,11 +119,11 @@ Add these exact methods:
 
 Reservation inserts `archived=true` and `system_operation_state=staged`. Publication verifies exact ownership, sets `archived=false`, and transitions to `publication_pending`. Confirmation clears all system marker fields. Discard soft-deletes only an exact operation-owned row. Ordinary list methods add `system_operation_state IS NULL`; direct internal reads may opt into staged rows explicitly.
 
-- [ ] **Step 5: Run Workspace regression tests**
+- [x] **Step 5: Run Workspace regression tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -v`
 
-- [ ] **Step 6: Commit staged lifecycle**
+- [x] **Step 6: Commit staged lifecycle**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
@@ -144,23 +144,23 @@ git commit -m "feat(workspaces): add fenced clone target lifecycle"
 - Consumes: source Workspace ID and the media IDs referenced by its membership snapshot.
 - Produces: `CharactersRAGDB.read_workspace_clone_snapshot(workspace_id: str) -> WorkspaceCloneSnapshot` and `MediaDatabase.read_media_clone_snapshots(media_ids: Sequence[int]) -> dict[int, MediaCloneSnapshot]`.
 
-- [ ] **Step 1: Write consistency tests with concurrent source edits**
+- [x] **Step 1: Write consistency tests with concurrent source edits**
 
 Start the snapshot read, mutate source Workspace/media state from a second connection, and assert every returned collection belongs to one transaction snapshot. Simulate a backend that cannot establish repeatable read and assert `CloneSnapshotUnavailable` before any target reservation.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py -k snapshot -v`
 
-- [ ] **Step 3: Implement repository-owned read transactions**
+- [x] **Step 3: Implement repository-owned read transactions**
 
 For SQLite, open a read-only connection where supported, issue `BEGIN`, execute all Workspace or media/chunk/transcript reads through that same connection, materialize immutable snapshot objects, then commit/close. For PostgreSQL, use a read-only `REPEATABLE READ` transaction. Any transaction setup failure, missing referenced media row, or snapshot loss raises `CloneSnapshotUnavailable`; never fall back to ordinary fresh reads.
 
-- [ ] **Step 4: Verify no source handle leaks**
+- [x] **Step 4: Verify no source handle leaks**
 
 Add tests for success and exception paths that prove snapshot connections close and no transaction remains open.
 
-- [ ] **Step 5: Run repository suites and commit**
+- [x] **Step 5: Run repository suites and commit**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py -v`
 
@@ -182,27 +182,27 @@ git commit -m "feat(sharing): read clone sources from repeatable snapshots"
 - Consumes: `MediaCloneSnapshot`, operation ID, source media identity, and expected SHA-256 content hash.
 - Produces: `insert_operation_owned_clone_media(self, *, snapshot: MediaCloneSnapshot, operation_id: str, source_identity: str, expected_content_hash: str) -> OperationOwnedMediaResult` and `delete_operation_owned_clone_media(self, *, operation_id: str, source_identity: str, expected_content_hash: str) -> int`.
 
-- [ ] **Step 1: Write collision and cleanup tests**
+- [x] **Step 1: Write collision and cleanup tests**
 
 Seed recipient media with the same original URL and separately with identical content. Assert clone insertion creates a new deterministic operation-owned row and does not change either existing row's version, timestamp, chunks, or transcripts. Assert same-operation replay returns only the matching owned row after hash validation; ownership/hash mismatch fails closed. Assert cleanup removes exact operation-owned rows and cannot delete unrelated media.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py -k 'owned or collision or cleanup' -v`
 
-- [ ] **Step 3: Add first-class media ownership metadata**
+- [x] **Step 3: Add first-class media ownership metadata**
 
 Forward-migrate nullable `system_operation_id`, `system_operation_kind`, `system_source_identity`, and `system_content_hash` fields on `Media`, plus a unique partial index for `(system_operation_kind, system_operation_id, system_source_identity)` when the operation ID is present. Mirror schema behavior for SQLite and PostgreSQL.
 
-- [ ] **Step 4: Implement the isolated insert**
+- [x] **Step 4: Implement the isolated insert**
 
 Build storage URL `tldw-clone://workspace/{operation_digest}/{source_digest}` from bounded digests; preserve the original URL only in safe provenance and the Workspace source row. Insert Media, document version, keywords, chunks, and transcripts in one target Media DB transaction. Do not call `add_media_with_keywords`; do not invoke topic monitoring or ingestion side effects.
 
-- [ ] **Step 5: Implement ownership-fenced cleanup**
+- [x] **Step 5: Implement ownership-fenced cleanup**
 
 Delete only rows matching operation kind, operation ID, source identity, and expected content hash. Return the exact count and raise a controlled conflict if any candidate's marker/hash differs.
 
-- [ ] **Step 6: Run Media DB parity tests and commit**
+- [x] **Step 6: Run Media DB parity tests and commit**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py -v`
 
@@ -221,35 +221,35 @@ git commit -m "feat(media): isolate operation-owned clone snapshots"
 - Consumes: `WorkspaceCloneRequest`, immutable source snapshots, `should_cancel: Callable[[], bool]`, and `on_progress: Callable[[str, float], None] | None`.
 - Produces: `CloneService.clone_workspace(request: WorkspaceCloneRequest, *, should_cancel: Callable[[], bool], on_progress: Callable[[str, float], None] | None = None) -> WorkspaceCloneResult`.
 
-- [ ] **Step 1: Replace stale tests with deterministic-target behavior tests**
+- [x] **Step 1: Replace stale tests with deterministic-target behavior tests**
 
 Assert the caller-provided target ID is used, the nonexistent `create_workspace` path is never called, operation-owned media persistence is used, source IDs map to exact created media, and warning/count bounds remain truthful.
 
-- [ ] **Step 2: Add cancellation and publication tests**
+- [x] **Step 2: Add cancellation and publication tests**
 
 Check cancellation before reservation, between each source/note/artifact, and before publication. Assert controlled cancellation discards the staged Workspace and operation-owned media. Assert item-level failures produce `outcome=partial`; fatal snapshot/publication failures never return success.
 
-- [ ] **Step 3: Add readiness tests**
+- [x] **Step 3: Add readiness tests**
 
 Verify text/citation readiness from copied target chunks/source state. When vectors are configured but absent, return `vector_search=needs_indexing`, partial outcome, and one `vector_index_not_generated` warning. When vector retrieval is disabled, return `not_configured` without warning that indexing happened.
 
-- [ ] **Step 4: Run tests and verify old implementation fails**
+- [x] **Step 4: Run tests and verify old implementation fails**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_clone_service.py -v`
 
-- [ ] **Step 5: Implement the new orchestration**
+- [x] **Step 5: Implement the new orchestration**
 
 Load both source snapshots before target writes; reserve deterministically; copy each top-level item through operation-owned repository methods; invoke `should_cancel()` and the later worker-supplied authorization callback at every required boundary; validate target state; transition to `publication_pending`; and return `publication_confirmed=False`. `TASK-12020.48` completes the fenced Job and then calls `confirm_clone_target_publication`, after which its public result sets `publication_confirmed=true`.
 
-- [ ] **Step 6: Remove obsolete random-ID and dedupe paths**
+- [x] **Step 6: Remove obsolete random-ID and dedupe paths**
 
 Remove internal `uuid.uuid4()` target/source identity generation and `_copy_media_item` usage of `add_media_with_keywords(overwrite=False)`. Preserve only bounded exception-class logging.
 
-- [ ] **Step 7: Run Sharing and repository regressions**
+- [x] **Step 7: Run Sharing and repository regressions**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_clone_service.py tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py -v`
 
-- [ ] **Step 8: Commit service refactor**
+- [x] **Step 8: Commit service refactor**
 
 ```bash
 git add tldw_Server_API/app/core/Sharing/clone_service.py tldw_Server_API/tests/Sharing/test_clone_service.py
@@ -266,33 +266,43 @@ git commit -m "fix(sharing): make workspace clones deterministic and isolated"
 - Consumes: Tasks 1-5.
 - Produces: the snapshot/copy foundation consumed by `TASK-12020.48`.
 
-- [ ] **Step 1: Run all focused tests**
+- [x] **Step 1: Run all focused tests**
 
-Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_clone_service.py tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py -v`
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_clone_service.py tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py tldw_Server_API/tests/DB_Management/test_pg_rls_policies_contract.py tldw_Server_API/tests/Media/test_media_debug_schema.py tldw_Server_API/tests/CI/test_required_workflow_contracts.py -q`
 
-- [ ] **Step 2: Run static and security checks**
+Result: `368 passed, 8 warnings`; the matrix includes the PostgreSQL operation-owned integration path and exact readiness-reader assertion.
+
+- [x] **Step 2: Run static and security checks**
 
 Run: `source .venv/bin/activate && python -m ruff check tldw_Server_API/app/core/Sharing/clone_models.py tldw_Server_API/app/core/Sharing/clone_service.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/media_db/repositories/clone_snapshot_repository.py`
 
 Run: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sharing tldw_Server_API/app/core/DB_Management/media_db/repositories/clone_snapshot_repository.py -f json -o /tmp/bandit_task_12020_47.json`
 
-- [ ] **Step 3: Verify shard coverage**
+Result: Ruff passed every touched file outside `ChaChaNotes_DB.py`; its 16 findings are pre-existing and outside changed lines 27789 and 28110-28126. Bandit scanned the complete touched production scope (`45,747` LOC) with zero findings or scan errors. Compileall and the public API/repository/native binding smoke test passed.
+
+- [x] **Step 3: Verify shard coverage**
 
 Run: `source .venv/bin/activate && python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.yml`
 
 Add only uncovered new modules to their existing Sharing, Workspaces, and Media DB shards.
 
-- [ ] **Step 4: Self-review ownership fences**
+Result: `shards=785 test_files=4401 ignored=4 baseline=130 new_uncovered=0`.
+
+- [x] **Step 4: Self-review ownership fences**
 
 Search: `rg -n "add_media_with_keywords|uuid\.uuid4|create_workspace" tldw_Server_API/app/core/Sharing/clone_service.py`
 
 Expected: no ordinary media dedupe, random target identity, or nonexistent Workspace creation call remains. Review every delete/update to ensure both operation marker and expected identity are in the predicate.
 
-- [ ] **Step 5: Check the patch and close the task**
+Result: the forbidden-path scan returned no matches. Exact target readiness now uses an operation/source/hash-fenced repository read, rejects extra or missing same-operation rows, verifies exact source-to-media bindings and the persisted logical-copy projection, and limits source retrieval readiness to successfully copied Workspace sources. Independent follow-up review found no remaining actionable issues.
+
+- [x] **Step 5: Check the patch and close the task**
 
 Run: `git diff --check && git status --short`
 
 Record exact verification, Bandit output, PostgreSQL fixture availability, and any residual hard-exit cleanup limitation in `TASK-12020.47`; leave worker reconciliation implementation to `TASK-12020.48`.
+
+Result: `git diff --check` passed. `TASK-12020.48` remains responsible for Jobs admission, supplying canonical authorization state through the service callback, publication confirmation, public API projection, audit emission, and scheduled reconciliation after hard process termination; this foundation deliberately leaves successful targets in `publication_pending` until that fenced worker completes.
 
 ```bash
 git add .github/workflows/ci.yml backlog/tasks/task-12020.47\ -\ Make-shared-workspace-cloning-snapshot-isolated-and-cleanup-safe.md

@@ -5,12 +5,13 @@ from dataclasses import FrozenInstanceError, is_dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from types import MappingProxyType
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 from uuid import UUID
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
+    OperationOwnedMediaReadiness,
     OperationOwnedMediaResult,
 )
 from tldw_Server_API.app.core.Sharing import clone_models as clone_models_module
@@ -373,27 +374,33 @@ def _make_service(
         description=snapshot.workspace.get("description"),
         workspace_profile=snapshot.workspace.get("workspace_profile") or "research",
     )
+    target_source_rows: list[dict] = []
 
     def add_source(workspace_id: str, data: dict) -> dict:
-        return {
+        row = {
             **data,
             "workspace_id": workspace_id,
             "reviewed_at": None,
             "reviewed_by_user_id": None,
         }
+        target_source_rows.append(row)
+        return row
 
     target_chacha.add_workspace_source.side_effect = add_source
     target_chacha.get_workspace_source.return_value = None
+    target_chacha.list_workspace_sources.return_value = target_source_rows
     next_note_id = iter(range(1001, 2000))
     target_chacha.add_workspace_note.side_effect = lambda workspace_id, data: {
         **data,
         "workspace_id": workspace_id,
         "id": next(next_note_id),
     }
+    target_chacha.list_workspace_notes.return_value = []
     target_chacha.add_workspace_artifact.side_effect = lambda workspace_id, data: {
         **data,
         "workspace_id": workspace_id,
     }
+    target_chacha.get_workspace_artifact.return_value = None
     target_chacha.add_workspace_resource_membership.side_effect = (
         lambda workspace_id, data: {**data, "workspace_id": workspace_id}
     )
@@ -420,6 +427,38 @@ def _make_service(
 
     target_media.insert_operation_owned_clone_media.side_effect = insert_media
     target_media.delete_operation_owned_clone_media.return_value = 1
+
+    def read_target_readiness(
+        *,
+        operation_id: str,
+        items: tuple[tuple[str, str], ...],
+    ) -> dict[str, OperationOwnedMediaReadiness]:
+        assert operation_id == "operation-1"
+        source_rows = {str(source.get("id")): source for source in snapshot.sources}
+        target_rows = target_chacha.list_workspace_sources.return_value
+        readiness: dict[str, OperationOwnedMediaReadiness] = {}
+        for source_identity, _ in items:
+            source_media_id = int(source_identity.removeprefix("media:"))
+            target_media_ids = {
+                int(target_row["media_id"])
+                for target_row in target_rows
+                if str(target_row.get("id")) in source_rows
+                and int(source_rows[str(target_row["id"])].get("media_id") or 0)
+                == source_media_id
+            }
+            if not target_media_ids:
+                target_media_ids = {1000 + source_media_id}
+            assert len(target_media_ids) == 1
+            readiness[source_identity] = OperationOwnedMediaReadiness(
+                source_identity=source_identity,
+                media_id=target_media_ids.pop(),
+                has_chunks=bool(media_snapshots[source_media_id].chunks),
+            )
+        return readiness
+
+    target_media.read_operation_owned_clone_media_readiness.side_effect = (
+        read_target_readiness
+    )
     target_chacha.discard_clone_target.return_value = True
 
     service = CloneService(
@@ -757,12 +796,14 @@ def test_source_link_failure_deletes_unreferenced_media_and_later_source_recreat
         add_attempt += 1
         if add_attempt == 1:
             raise RuntimeError("first source insert failed")
-        return {
+        row = {
             **data,
             "workspace_id": workspace_id,
             "reviewed_at": None,
             "reviewed_by_user_id": None,
         }
+        target_chacha.list_workspace_sources.return_value.append(row)
+        return row
 
     target_chacha.add_workspace_source.side_effect = add_source
     target_chacha.get_workspace_source.return_value = None
@@ -808,6 +849,9 @@ def test_source_response_loss_accepts_exact_persisted_row_without_deleting_media
         "reviewed_at": None,
         "reviewed_by_user_id": None,
     }
+    target_chacha.list_workspace_sources.return_value = [
+        target_chacha.get_workspace_source.return_value
+    ]
 
     result = service.clone_workspace(_request(), should_cancel=lambda: False)
 
@@ -1117,6 +1161,79 @@ def test_memberships_map_supported_resources_reset_review_and_aggregate_skips():
     assert _warning_counts(result) == {"membership_skipped": 2}
 
 
+def test_membership_write_response_loss_reconciles_exact_composite_row():
+    snapshot = _workspace_snapshot(
+        memberships=[
+            {"resource_type": "media", "resource_id": "7", "role": "context"}
+        ]
+    )
+    service, _, _, target_chacha, target_media = _make_service(
+        snapshot,
+        media_snapshots={7: _media_snapshot(7)},
+    )
+    target_chacha.add_workspace_resource_membership.side_effect = RuntimeError(
+        "response lost"
+    )
+    target_chacha.get_workspace_resource_membership.return_value = {
+        "workspace_id": "target-ws",
+        "resource_type": "media",
+        "resource_id": "1007",
+        "role": "context",
+        "label": None,
+        "transfer_policy": "copy",
+        "provenance": {
+            "kind": "shared_workspace_clone",
+            "operation_id": "operation-1",
+            "source_workspace_id": "source-ws",
+        },
+        "metadata": {},
+        "deleted": 0,
+    }
+
+    result = service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    assert result.outcome == "complete"
+    assert result.warnings == ()
+    target_media.delete_operation_owned_clone_media.assert_not_called()
+
+
+def test_membership_write_response_loss_with_mismatch_fails_closed():
+    snapshot = _workspace_snapshot(
+        memberships=[
+            {"resource_type": "media", "resource_id": "7", "role": "context"}
+        ]
+    )
+    service, _, _, target_chacha, target_media = _make_service(
+        snapshot,
+        media_snapshots={7: _media_snapshot(7)},
+    )
+    target_chacha.add_workspace_resource_membership.side_effect = RuntimeError(
+        "response lost"
+    )
+    target_chacha.get_workspace_resource_membership.return_value = {
+        "workspace_id": "target-ws",
+        "resource_type": "media",
+        "resource_id": "1007",
+        "role": "different",
+        "label": None,
+        "transfer_policy": "copy",
+        "provenance": {},
+        "metadata": {},
+        "deleted": 0,
+    }
+
+    with pytest.raises(Exception) as exc_info:
+        service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    _assert_persistence_error(
+        exc_info.value,
+        code="clone_validation_failed",
+        cleanup_state="complete",
+    )
+    target_media.delete_operation_owned_clone_media.assert_called_once()
+    target_chacha.publish_clone_target.assert_not_called()
+
+
 def test_item_failures_aggregate_stable_warnings_and_truthful_final_counts():
     snapshot = _workspace_snapshot(
         sources=[
@@ -1165,6 +1282,188 @@ def test_item_failures_aggregate_stable_warnings_and_truthful_final_counts():
     assert len(result.warnings) <= 8
 
 
+def test_malformed_note_keywords_remain_a_partial_item_failure():
+    snapshot = _workspace_snapshot(
+        notes=[
+            {
+                "id": 41,
+                "title": "Malformed note",
+                "content": "Body",
+                "keywords_json": "{bad-json",
+            }
+        ]
+    )
+    service, _, _, target_chacha, _ = _make_service(snapshot)
+
+    result = service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    assert result.outcome == "partial"
+    assert result.counts.notes_copied == 0
+    assert result.counts.notes_failed == 1
+    assert _warning_counts(result) == {"note_copy_failed": 1}
+    target_chacha.add_workspace_note.assert_not_called()
+    target_chacha.publish_clone_target.assert_called_once()
+
+
+def test_note_write_response_loss_reconciles_one_exact_unclaimed_row():
+    snapshot = _workspace_snapshot(
+        notes=[
+            {
+                "id": 41,
+                "title": "Committed note",
+                "content": "Body",
+                "keywords_json": '["one"]',
+            }
+        ],
+        memberships=[
+            {
+                "resource_type": "workspace_note",
+                "resource_id": "41",
+                "role": "reference",
+            }
+        ],
+    )
+    service, _, _, target_chacha, _ = _make_service(snapshot)
+    target_chacha.add_workspace_note.side_effect = RuntimeError("response lost")
+    target_chacha.list_workspace_notes.return_value = [
+        {
+            "id": 904,
+            "workspace_id": "target-ws",
+            "title": "Committed note",
+            "content": "Body",
+            "keywords_json": '["one"]',
+            "deleted": 0,
+        }
+    ]
+
+    result = service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    assert result.counts.notes_copied == 1
+    assert result.counts.notes_failed == 0
+    membership = target_chacha.add_workspace_resource_membership.call_args.args[1]
+    assert membership["resource_type"] == "workspace_note"
+    assert membership["resource_id"] == "904"
+
+
+def test_note_write_response_loss_with_multiple_unclaimed_rows_fails_closed():
+    snapshot = _workspace_snapshot(
+        notes=[{"id": 41, "title": "Same", "content": "Body", "keywords_json": "[]"}]
+    )
+    service, _, _, target_chacha, _ = _make_service(snapshot)
+    target_chacha.add_workspace_note.side_effect = RuntimeError("response lost")
+    target_chacha.list_workspace_notes.return_value = [
+        {"id": 904, "title": "Same", "content": "Body", "keywords_json": "[]"},
+        {"id": 905, "title": "Same", "content": "Body", "keywords_json": "[]"},
+    ]
+
+    with pytest.raises(Exception) as exc_info:
+        service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    _assert_persistence_error(
+        exc_info.value,
+        code="clone_validation_failed",
+        cleanup_state="complete",
+    )
+    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.discard_clone_target.assert_called_once()
+
+
+def test_membership_write_response_loss_with_metadata_mismatch_fails_closed():
+    snapshot = _workspace_snapshot(
+        memberships=[
+            {"resource_type": "media", "resource_id": "7", "role": "context"}
+        ]
+    )
+    service, _, _, target_chacha, _ = _make_service(
+        snapshot,
+        media_snapshots={7: _media_snapshot(7)},
+    )
+    target_chacha.add_workspace_resource_membership.side_effect = RuntimeError(
+        "response lost"
+    )
+    target_chacha.get_workspace_resource_membership.return_value = {
+        "workspace_id": "target-ws",
+        "resource_type": "media",
+        "resource_id": "1007",
+        "role": "context",
+        "label": None,
+        "transfer_policy": "copy",
+        "provenance": {
+            "kind": "shared_workspace_clone",
+            "operation_id": "operation-1",
+            "source_workspace_id": "source-ws",
+        },
+        "metadata": {"unexpected": True},
+        "deleted": 0,
+    }
+
+    with pytest.raises(Exception) as exc_info:
+        service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    _assert_persistence_error(
+        exc_info.value,
+        code="clone_validation_failed",
+        cleanup_state="complete",
+    )
+    target_chacha.publish_clone_target.assert_not_called()
+
+
+def test_artifact_write_response_loss_reconciles_exact_deterministic_row():
+    snapshot = _workspace_snapshot(
+        artifacts=[
+            {
+                "id": "artifact-1",
+                "artifact_type": "report",
+                "title": "Committed artifact",
+                "content": "Body",
+            }
+        ]
+    )
+    service, _, _, target_chacha, _ = _make_service(snapshot)
+    target_chacha.add_workspace_artifact.side_effect = RuntimeError("response lost")
+    target_chacha.get_workspace_artifact.return_value = {
+        "id": "artifact-1",
+        "artifact_type": "report",
+        "title": "Committed artifact",
+        "content": "Body",
+    }
+
+    result = service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    assert result.counts.artifacts_copied == 1
+    assert result.counts.artifacts_failed == 0
+
+
+def test_artifact_write_response_loss_with_mismatch_fails_closed():
+    snapshot = _workspace_snapshot(
+        artifacts=[
+            {
+                "id": "artifact-1",
+                "artifact_type": "report",
+                "title": "Expected",
+            }
+        ]
+    )
+    service, _, _, target_chacha, _ = _make_service(snapshot)
+    target_chacha.add_workspace_artifact.side_effect = RuntimeError("response lost")
+    target_chacha.get_workspace_artifact.return_value = {
+        "id": "artifact-1",
+        "artifact_type": "report",
+        "title": "Different",
+    }
+
+    with pytest.raises(Exception) as exc_info:
+        service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    _assert_persistence_error(
+        exc_info.value,
+        code="clone_validation_failed",
+        cleanup_state="complete",
+    )
+    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.discard_clone_target.assert_called_once()
+
+
 @pytest.mark.parametrize(
     ("configured", "expected_vector", "expected_outcome", "expected_warning"),
     (
@@ -1198,7 +1497,7 @@ def test_vector_readiness_uses_explicit_deployment_configuration(
         assert warning_codes.count(expected_warning) == 1
 
 
-def test_configured_vectors_are_ready_without_retained_media_and_need_no_warning():
+def test_configured_vectors_without_canonical_confirmation_need_indexing():
     service, _, source_media, _, _ = _make_service(
         vector_retrieval_configured=True,
     )
@@ -1206,9 +1505,121 @@ def test_configured_vectors_are_ready_without_retained_media_and_need_no_warning
     result = service.clone_workspace(_request(), should_cancel=lambda: False)
 
     source_media.read_media_clone_snapshots.assert_called_once_with(())
-    assert result.readiness == CloneRetrievalReadiness("unavailable", "unavailable", "ready")
-    assert result.outcome == "complete"
-    assert result.warnings == ()
+    assert result.readiness == CloneRetrievalReadiness(
+        "unavailable",
+        "unavailable",
+        "needs_indexing",
+    )
+    assert result.outcome == "partial"
+    assert _warning_counts(result) == {"vector_index_not_generated": 1}
+
+
+def test_text_readiness_uses_canonical_target_chunks_after_copy():
+    snapshot = _workspace_snapshot(
+        sources=[{"id": "source-1", "media_id": 7, "source_type": "media"}]
+    )
+    service, _, _, target_chacha, target_media = _make_service(
+        snapshot,
+        media_snapshots={7: _media_snapshot(7)},
+    )
+    target_chacha.list_workspace_sources.return_value = [
+        {"id": "source-1", "workspace_id": "target-ws", "media_id": 1007}
+    ]
+    target_media.read_operation_owned_clone_media_readiness.return_value = {
+        "media:7": OperationOwnedMediaReadiness(
+            source_identity="media:7",
+            media_id=1007,
+            has_chunks=False,
+        )
+    }
+    target_media.read_operation_owned_clone_media_readiness.side_effect = None
+
+    result = service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    assert result.readiness.text_search == "unavailable"
+    assert result.readiness.citations == "unavailable"
+    target_media.read_operation_owned_clone_media_readiness.assert_called_once_with(
+        operation_id="operation-1",
+        items=(("media:7", ANY),),
+    )
+
+
+def test_target_source_binding_swap_fails_before_publication():
+    snapshot = _workspace_snapshot(
+        sources=[
+            {"id": "source-1", "media_id": 7, "source_type": "media"},
+            {"id": "source-2", "media_id": 9, "source_type": "media"},
+        ]
+    )
+    service, _, _, target_chacha, target_media = _make_service(
+        snapshot,
+        media_snapshots={7: _media_snapshot(7), 9: _media_snapshot(9)},
+    )
+    target_chacha.list_workspace_sources.return_value = [
+        {"id": "source-1", "workspace_id": "target-ws", "media_id": 1009},
+        {"id": "source-2", "workspace_id": "target-ws", "media_id": 1007},
+    ]
+    target_media.read_operation_owned_clone_media_readiness.return_value = {
+        "media:7": OperationOwnedMediaReadiness("media:7", 1007, True),
+        "media:9": OperationOwnedMediaReadiness("media:9", 1009, True),
+    }
+    target_media.read_operation_owned_clone_media_readiness.side_effect = None
+
+    with pytest.raises(Exception) as exc_info:
+        service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    _assert_persistence_error(
+        exc_info.value,
+        code="clone_validation_failed",
+        cleanup_state="complete",
+    )
+    target_chacha.publish_clone_target.assert_not_called()
+
+
+def test_membership_only_media_chunks_do_not_make_source_retrieval_ready():
+    snapshot = _workspace_snapshot(
+        memberships=[
+            {"resource_type": "media", "resource_id": "7", "role": "context"}
+        ]
+    )
+    service, _, _, _, target_media = _make_service(
+        snapshot,
+        media_snapshots={7: _media_snapshot(7)},
+    )
+    target_media.read_operation_owned_clone_media_readiness.return_value = {
+        "media:7": OperationOwnedMediaReadiness("media:7", 1007, True)
+    }
+    target_media.read_operation_owned_clone_media_readiness.side_effect = None
+
+    result = service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    assert result.readiness.text_search == "unavailable"
+    assert result.readiness.citations == "unavailable"
+    target_media.read_operation_owned_clone_media_readiness.assert_called_once_with(
+        operation_id="operation-1",
+        items=(("media:7", ANY),),
+    )
+
+
+def test_missing_canonical_target_source_fails_before_publication():
+    snapshot = _workspace_snapshot(
+        sources=[{"id": "source-1", "media_id": 7, "source_type": "media"}]
+    )
+    service, _, _, target_chacha, _ = _make_service(
+        snapshot,
+        media_snapshots={7: _media_snapshot(7)},
+    )
+    target_chacha.list_workspace_sources.return_value = []
+
+    with pytest.raises(Exception) as exc_info:
+        service.clone_workspace(_request(), should_cancel=lambda: False)
+
+    _assert_persistence_error(
+        exc_info.value,
+        code="clone_validation_failed",
+        cleanup_state="complete",
+    )
+    target_chacha.publish_clone_target.assert_not_called()
 
 
 def test_text_and_citations_require_a_copied_source_with_copied_chunks():
