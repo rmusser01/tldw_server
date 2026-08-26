@@ -1,11 +1,16 @@
 import type { NextRequest } from 'next/server';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockBuildApiUrlForRequest } = vi.hoisted(() => ({
-  mockBuildApiUrlForRequest: vi.fn(
-    (_request: unknown, path: string) => `http://localhost:8000/api/v1${path}`,
-  ),
-}));
+const originalRealBackendMode = process.env.TLDW_ADMIN_E2E_REAL_BACKEND;
+const originalSingleUserApiUrl = process.env.TLDW_ADMIN_E2E_SINGLE_USER_API_URL;
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -17,18 +22,20 @@ vi.mock('next/server', () => ({
   },
 }));
 
-vi.mock('@/lib/api-config', () => ({
-  buildApiUrl: (path: string) => `http://localhost:8000/api/v1${path}`,
-  buildApiUrlForRequest: mockBuildApiUrlForRequest,
-}));
-
-const request = { url: 'http://127.0.0.1:3102/api/health/ready' } as NextRequest;
+const request = { url: 'http://attacker.example:3102/api/health/ready' } as NextRequest;
 
 describe('GET /api/health/ready', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.restoreAllMocks();
-    mockBuildApiUrlForRequest.mockClear();
+    process.env.TLDW_ADMIN_E2E_REAL_BACKEND = 'true';
+    process.env.TLDW_ADMIN_E2E_SINGLE_USER_API_URL = 'http://127.0.0.1:9102';
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    restoreEnv('TLDW_ADMIN_E2E_REAL_BACKEND', originalRealBackendMode);
+    restoreEnv('TLDW_ADMIN_E2E_SINGLE_USER_API_URL', originalSingleUserApiUrl);
   });
 
   it('returns 200 ready when backend is reachable', async () => {
@@ -85,12 +92,16 @@ describe('GET /api/health/ready', () => {
     expect(response.body).not.toHaveProperty('backend_error');
   });
 
-  it('selects the backend health URL from the incoming UI request', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+  it('uses the configured project backend without trusting the request hostname', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
     const { GET } = await import('../route');
 
     await GET(request);
 
-    expect(mockBuildApiUrlForRequest).toHaveBeenCalledWith(request, '/health');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:9102/api/v1/health',
+      expect.objectContaining({ method: 'GET', cache: 'no-store' }),
+    );
   });
 });

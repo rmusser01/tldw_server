@@ -278,9 +278,12 @@ def test_strict_validate_success_report_rejects_counter_mismatch(
         )
 
 
+@pytest.mark.unit
 def test_strict_validate_success_report_rejects_suite_hierarchy_mismatch(
     tmp_path: Path,
 ) -> None:
+    """Reject suite counters that disagree with the assertion hierarchy."""
+
     package_root = tmp_path / "head" / "admin-ui"
     report_path = tmp_path / "head.json"
     safety_path = tmp_path / "head-safety.json"
@@ -300,9 +303,12 @@ def test_strict_validate_success_report_rejects_suite_hierarchy_mismatch(
         )
 
 
+@pytest.mark.unit
 def test_strict_validate_success_report_accepts_nested_suite_hierarchy(
     tmp_path: Path,
 ) -> None:
+    """Match Vitest JSON semantics for a file root with nested describes."""
+
     package_root = tmp_path / "head" / "admin-ui"
     report_path = tmp_path / "head.json"
     safety_path = tmp_path / "head-safety.json"
@@ -314,6 +320,7 @@ def test_strict_validate_success_report_accepts_nested_suite_hierarchy(
     ]
     payload["numTotalTestSuites"] = 3
     payload["numPassedTestSuites"] = 3
+    assert len(payload["testResults"]) == 1
     report_path.write_text(json.dumps(payload), encoding="utf-8")
     _write_safety_report(safety_path, reason="passed", test_count=1)
 
@@ -325,9 +332,12 @@ def test_strict_validate_success_report_accepts_nested_suite_hierarchy(
     )
 
 
+@pytest.mark.unit
 def test_strict_validate_success_report_requires_file_message(
     tmp_path: Path,
 ) -> None:
+    """Require file-level collection diagnostics in strict reports."""
+
     package_root = tmp_path / "head" / "admin-ui"
     report_path = tmp_path / "head.json"
     safety_path = tmp_path / "head-safety.json"
