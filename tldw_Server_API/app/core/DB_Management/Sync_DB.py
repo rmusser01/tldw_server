@@ -90,6 +90,14 @@ from tldw_Server_API.app.core.Sync.v2.models import (
 from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
     SYNC_MUTATION_GROUP_MAX_SIZE,
 )
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_readiness import (
+    NOTES_MOODBOARD_STUDIO_READINESS_REASON_CODES_BY_KEY,
+    NOTES_MOODBOARD_STUDIO_READINESS_STATES,
+    NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
+    NotesMoodboardStudioReadinessRecord,
+    default_notes_moodboard_studio_readiness_record,
+    parse_notes_moodboard_studio_readiness_record,
+)
 from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
     NOTES_TASK_READINESS_REASON_CODES_BY_KEY,
     NOTES_TASK_READINESS_STATES,
@@ -144,6 +152,45 @@ _NOTES_TASK_READINESS_TRANSITIONS = {
     "ready": frozenset({"ready"}),
 }
 _NOTES_TASK_LOCAL_UNBOUND_DATASET_ID = "local-unbound"
+
+
+def _moodboard_studio_cursor_regressed(
+    readiness_key: str,
+    current: object,
+    requested: object,
+) -> bool:
+    """Return whether a canonical moodboard or Studio cursor moved backward.
+
+    Args:
+        readiness_key: Domain-specific readiness metadata key.
+        current: Current parsed UUID cursor or placement UUID pair.
+        requested: Requested parsed UUID cursor or placement UUID pair.
+
+    Returns:
+        ``True`` when the requested cursor sorts before the current cursor.
+
+    Raises:
+        SyncStoreError: If the domain or either cursor shape is invalid.
+    """
+    if readiness_key in {"notes_moodboard_v1", "notes_studio_document_v1"}:
+        if not isinstance(current, UUID) or not isinstance(requested, UUID):
+            raise SyncStoreError("notes_moodboard_studio_readiness_cursor_invalid")
+        return requested.int < current.int
+    if readiness_key != "notes_moodboard_note_v1":
+        raise SyncStoreError("notes_moodboard_studio_readiness_cursor_invalid")
+    if not isinstance(current, tuple) or not isinstance(requested, tuple):
+        raise SyncStoreError("notes_moodboard_studio_readiness_cursor_invalid")
+    current_board, current_note = current
+    requested_board, requested_note = requested
+    if not all(
+        isinstance(item, UUID)
+        for item in (current_board, current_note, requested_board, requested_note)
+    ):
+        raise SyncStoreError("notes_moodboard_studio_readiness_cursor_invalid")
+    return requested_board.int < current_board.int or (
+        requested_board.int == current_board.int
+        and requested_note.int < current_note.int
+    )
 
 
 def _is_rebase_required_conflict_source(
@@ -3507,15 +3554,19 @@ class SyncDatabase:
                     raise SyncStoreError("sync_dataset_metadata_invalid") from exc
                 if not isinstance(existing_metadata, dict):
                     raise SyncStoreError("sync_dataset_metadata_invalid")
+                server_metadata_keys = (
+                    NOTES_TASK_SERVER_METADATA_KEYS
+                    | NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS
+                )
                 metadata = {
                     key: value
                     for key, value in dataset.metadata.items()
-                    if key not in NOTES_TASK_SERVER_METADATA_KEYS
+                    if key not in server_metadata_keys
                 }
                 metadata.update(
                     {
                         key: existing_metadata[key]
-                        for key in NOTES_TASK_SERVER_METADATA_KEYS
+                        for key in server_metadata_keys
                         if key in existing_metadata
                     }
                 )
@@ -5039,6 +5090,434 @@ class SyncDatabase:
             if updated is None:
                 raise SyncStoreError("Sync dataset readiness transition was not persisted")
             return _dataset_from_row(updated)
+
+    @staticmethod
+    def _notes_moodboard_studio_readiness_record(
+        metadata: Mapping[str, Any],
+        readiness_key: str,
+    ) -> NotesMoodboardStudioReadinessRecord:
+        """Parse one readiness record, defaulting absent domains to unenrolled.
+
+        Args:
+            metadata: Dataset metadata containing readiness records.
+            readiness_key: Moodboard or Studio readiness domain key.
+
+        Returns:
+            The validated readiness record.
+
+        Raises:
+            SyncStoreError: If an existing record is malformed.
+        """
+        if readiness_key not in metadata:
+            return default_notes_moodboard_studio_readiness_record()
+        result = parse_notes_moodboard_studio_readiness_record(
+            metadata[readiness_key],
+            readiness_key=readiness_key,
+        )
+        if result.record is None:
+            raise SyncStoreError("notes_moodboard_studio_readiness_state_invalid")
+        return result.record
+
+    def _transition_notes_moodboard_studio_readiness_records(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        source_dataset_id: str,
+        records: Sequence[
+            tuple[str, str, str, str | None, int, str | None, str | None]
+        ],
+        moodboard_capture_enabled: bool | None = None,
+        studio_document_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Apply one atomic compare-and-set transition across readiness records.
+
+        Capture remains disabled throughout bootstrap readiness. The method
+        locks the owned dataset row, validates its personal Chatbook scope, and
+        commits all requested domain transitions together.
+
+        Args:
+            dataset_id: Target Sync dataset ID.
+            owner_user_id: Authenticated dataset owner.
+            source_dataset_id: Source scope, which must equal ``dataset_id``.
+            records: Domain transition tuples containing expected and requested
+                state plus source progress evidence.
+            moodboard_capture_enabled: Optional capture guard; only ``False``
+                or ``None`` is accepted.
+            studio_document_capture_enabled: Optional capture guard; only
+                ``False`` or ``None`` is accepted.
+
+        Returns:
+            The updated dataset after the transaction commits.
+
+        Raises:
+            SyncStoreError: If ownership, scope, metadata, capture state,
+                compare-and-set state, or source progress is invalid.
+        """
+        if (
+            not isinstance(source_dataset_id, str)
+            or source_dataset_id != dataset_id
+            or source_dataset_id == _NOTES_TASK_LOCAL_UNBOUND_DATASET_ID
+        ):
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_source_scope_invalid"
+            )
+        if moodboard_capture_enabled is True or studio_document_capture_enabled is True:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_capture_forbidden"
+            )
+        if moodboard_capture_enabled not in {None, False}:
+            raise SyncStoreError("notes_moodboard_studio_readiness_capture_invalid")
+        if studio_document_capture_enabled not in {None, False}:
+            raise SyncStoreError("notes_moodboard_studio_readiness_capture_invalid")
+        for readiness_key, expected_state, state, *_ in records:
+            if readiness_key not in NOTES_MOODBOARD_STUDIO_READINESS_REASON_CODES_BY_KEY:
+                raise SyncStoreError("notes_moodboard_studio_readiness_domain_invalid")
+            if (
+                expected_state not in NOTES_MOODBOARD_STUDIO_READINESS_STATES
+                or state not in NOTES_MOODBOARD_STUDIO_READINESS_STATES
+            ):
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_transition_invalid"
+                )
+
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if (
+                row.get("scope_type") != "personal"
+                or row.get("encryption_policy") != DEFAULT_M1_ENCRYPTION_POLICY
+            ):
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_source_scope_invalid"
+                )
+            raw_metadata = row.get("metadata_json")
+            if not isinstance(raw_metadata, str) or not raw_metadata:
+                raise SyncStoreError("notes_moodboard_studio_readiness_state_invalid")
+            try:
+                metadata = json.loads(raw_metadata)
+            except ValueError as exc:
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_state_invalid"
+                ) from exc
+            if not isinstance(metadata, dict):
+                raise SyncStoreError("notes_moodboard_studio_readiness_state_invalid")
+            if (
+                metadata.get("default_personal") is not True
+                or metadata.get("client_family") != "chatbook"
+            ):
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_source_scope_invalid"
+                )
+            for capture_key in (
+                "moodboard_capture_enabled",
+                "studio_document_capture_enabled",
+            ):
+                raw_capture = metadata.get(capture_key, False)
+                if not isinstance(raw_capture, bool):
+                    raise SyncStoreError(
+                        "notes_moodboard_studio_readiness_state_invalid"
+                    )
+                if raw_capture:
+                    raise SyncStoreError(
+                        "notes_moodboard_studio_readiness_capture_forbidden"
+                    )
+
+            for (
+                readiness_key,
+                expected_state,
+                state,
+                source_cursor,
+                source_count,
+                source_fingerprint,
+                reason_code,
+            ) in records:
+                current = self._notes_moodboard_studio_readiness_record(
+                    metadata,
+                    readiness_key,
+                )
+                requested = self._build_notes_moodboard_studio_readiness_record(
+                    readiness_key=readiness_key,
+                    current=current,
+                    expected_state=expected_state,
+                    state=state,
+                    source_cursor=source_cursor,
+                    source_count=source_count,
+                    source_fingerprint=source_fingerprint,
+                    reason_code=reason_code,
+                )
+                metadata[readiness_key] = requested.as_metadata()
+
+            metadata["moodboard_capture_enabled"] = False
+            metadata["studio_document_capture_enabled"] = False
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset readiness transition was not persisted")
+            return _dataset_from_row(updated)
+
+    def _build_notes_moodboard_studio_readiness_record(
+        self,
+        *,
+        readiness_key: str,
+        current: NotesMoodboardStudioReadinessRecord,
+        expected_state: str,
+        state: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None,
+    ) -> NotesMoodboardStudioReadinessRecord:
+        """Build and validate one readiness compare-and-set transition.
+
+        Args:
+            readiness_key: Domain-specific readiness metadata key.
+            current: Current validated readiness record.
+            expected_state: State the caller expects to replace.
+            state: Requested next state.
+            source_cursor: Requested canonical bootstrap cursor.
+            source_count: Requested processed-object count.
+            source_fingerprint: Requested source snapshot fingerprint.
+            reason_code: Optional domain-specific blocked reason.
+
+        Returns:
+            The validated requested readiness record.
+
+        Raises:
+            SyncStoreError: If the compare-and-set fails, the transition is
+                illegal, or source progress changes or regresses.
+        """
+        if current.state != expected_state:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_compare_and_set_failed"
+            )
+        if state not in _NOTES_TASK_READINESS_TRANSITIONS[expected_state]:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_transition_invalid"
+            )
+        if (
+            isinstance(source_count, int)
+            and not isinstance(source_count, bool)
+            and source_count < current.source_count
+        ):
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_progress_regressed"
+            )
+
+        resume_phase: str | None = None
+        if state == "blocked":
+            if expected_state == "blocked":
+                resume_phase = current.resume_phase
+            elif expected_state == "verifying":
+                resume_phase = "verifying"
+            else:
+                resume_phase = "bootstrapping"
+        parsed = parse_notes_moodboard_studio_readiness_record(
+            {
+                "state": state,
+                "source_cursor": source_cursor,
+                "source_count": source_count,
+                "source_fingerprint": source_fingerprint,
+                "reason_code": reason_code,
+                "resume_phase": resume_phase,
+            },
+            readiness_key=readiness_key,
+        )
+        if parsed.record is None:
+            raise SyncStoreError(
+                parsed.error_code
+                or "notes_moodboard_studio_readiness_state_invalid"
+            )
+        requested = parsed.record
+
+        current_fingerprint = current.source_fingerprint
+        resetting_empty = state == "not_enrolled" and current.source_count == 0
+        if state == "blocked" and any(
+            (
+                source_cursor != current.source_cursor,
+                source_count != current.source_count,
+                source_fingerprint != current_fingerprint,
+            )
+        ):
+            raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+        if expected_state == "blocked" and state not in {"blocked", "not_enrolled"}:
+            if state != current.resume_phase:
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_transition_invalid"
+                )
+            if any(
+                (
+                    source_cursor != current.source_cursor,
+                    source_count != current.source_count,
+                    source_fingerprint != current_fingerprint,
+                )
+            ):
+                raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+        if expected_state == "ready" and requested.as_metadata() != current.as_metadata():
+            raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+        if not resetting_empty:
+            self._validate_notes_moodboard_studio_progress(
+                readiness_key=readiness_key,
+                current=current,
+                requested=requested,
+            )
+        if state == "not_enrolled" and not resetting_empty:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_disable_forbidden"
+            )
+        return requested
+
+    @staticmethod
+    def _validate_notes_moodboard_studio_progress(
+        *,
+        readiness_key: str,
+        current: NotesMoodboardStudioReadinessRecord,
+        requested: NotesMoodboardStudioReadinessRecord,
+    ) -> None:
+        """Validate monotonic cursor, count, and fingerprint progress.
+
+        Args:
+            readiness_key: Domain-specific readiness metadata key.
+            current: Current validated readiness record.
+            requested: Requested validated readiness record.
+
+        Raises:
+            SyncStoreError: If progress regresses or source identity changes
+                without a corresponding cursor and count advance.
+        """
+        if requested.source_count < current.source_count:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_progress_regressed"
+            )
+        if current.source_cursor_key is not None:
+            if requested.source_cursor_key is None:
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_progress_regressed"
+                )
+            if _moodboard_studio_cursor_regressed(
+                readiness_key,
+                current.source_cursor_key,
+                requested.source_cursor_key,
+            ):
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_progress_regressed"
+                )
+        cursor_advanced = requested.source_cursor_key != current.source_cursor_key
+        count_advanced = requested.source_count != current.source_count
+        if cursor_advanced != count_advanced:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_progress_regressed"
+            )
+        if (
+            cursor_advanced
+            and requested.source_fingerprint == current.source_fingerprint
+        ):
+            raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+        if current.source_fingerprint is not None and requested.source_fingerprint is None:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_progress_regressed"
+            )
+        if (
+            not cursor_advanced
+            and not count_advanced
+            and current.source_fingerprint is not None
+            and requested.source_fingerprint != current.source_fingerprint
+        ):
+            raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+
+    def transition_notes_moodboard_graph_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        moodboard_source_cursor: str | None,
+        moodboard_source_count: int,
+        moodboard_source_fingerprint: str | None,
+        placement_source_cursor: str | None,
+        placement_source_count: int,
+        placement_source_fingerprint: str | None,
+        moodboard_reason_code: str | None = None,
+        placement_reason_code: str | None = None,
+        moodboard_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Persist the coupled dormant moodboard and placement readiness records."""
+
+        return self._transition_notes_moodboard_studio_readiness_records(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            source_dataset_id=source_dataset_id,
+            records=[
+                (
+                    "notes_moodboard_v1",
+                    expected_state,
+                    state,
+                    moodboard_source_cursor,
+                    moodboard_source_count,
+                    moodboard_source_fingerprint,
+                    moodboard_reason_code,
+                ),
+                (
+                    "notes_moodboard_note_v1",
+                    expected_state,
+                    state,
+                    placement_source_cursor,
+                    placement_source_count,
+                    placement_source_fingerprint,
+                    placement_reason_code,
+                ),
+            ],
+            moodboard_capture_enabled=moodboard_capture_enabled,
+        )
+
+    def transition_notes_studio_document_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        studio_document_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Persist the independent dormant Studio readiness record."""
+
+        return self._transition_notes_moodboard_studio_readiness_records(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            source_dataset_id=source_dataset_id,
+            records=[
+                (
+                    "notes_studio_document_v1",
+                    expected_state,
+                    state,
+                    source_cursor,
+                    source_count,
+                    source_fingerprint,
+                    reason_code,
+                )
+            ],
+            studio_document_capture_enabled=studio_document_capture_enabled,
+        )
 
     def begin_notes_task_activation(
         self,

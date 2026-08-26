@@ -557,6 +557,48 @@ def build_chacha_rls_sql() -> list[str]:
     """.strip()
     add_tenant_policy("note_task_scope_authority", scope_authority_owner)
 
+    moodboard_scope = """
+    moodboards.owner_user_id = current_setting('app.current_user_id', true)
+    AND moodboards.dataset_id = current_setting('app.current_dataset_id', true)
+    """.strip()
+    add_tenant_policy("moodboards", moodboard_scope)
+
+    placement_scope = """
+    moodboard_notes.owner_user_id = current_setting('app.current_user_id', true)
+    AND moodboard_notes.dataset_id = current_setting('app.current_dataset_id', true)
+    AND EXISTS (
+      SELECT 1 FROM moodboards AS board
+      WHERE board.owner_user_id = moodboard_notes.owner_user_id
+        AND board.dataset_id = moodboard_notes.dataset_id
+        AND board.id = moodboard_notes.moodboard_id
+    )
+    AND EXISTS (
+      SELECT 1 FROM notes AS note
+      WHERE note.id = moodboard_notes.note_id
+        AND note.client_id = moodboard_notes.owner_user_id
+    )
+    """.strip()
+    add_tenant_policy("moodboard_notes", placement_scope)
+
+    studio_scope = """
+    note_studio_documents.owner_user_id = current_setting('app.current_user_id', true)
+    AND note_studio_documents.dataset_id = current_setting('app.current_dataset_id', true)
+    AND EXISTS (
+      SELECT 1 FROM notes AS note
+      WHERE note.id = note_studio_documents.note_id
+        AND note.client_id = note_studio_documents.owner_user_id
+    )
+    AND (
+      note_studio_documents.source_note_id IS NULL
+      OR EXISTS (
+        SELECT 1 FROM notes AS source_note
+        WHERE source_note.id = note_studio_documents.source_note_id
+          AND source_note.client_id = note_studio_documents.owner_user_id
+      )
+    )
+    """.strip()
+    add_tenant_policy("note_studio_documents", studio_scope)
+
     note_edge_owner = """
     note_edges.user_id = current_setting('app.current_user_id', true)
     AND EXISTS (

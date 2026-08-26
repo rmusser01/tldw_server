@@ -49,6 +49,7 @@ from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     NOTES_LINK_DOMAINS,
+    NOTES_MOODBOARD_STUDIO_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_TASK_SYNC_DOMAINS,
     NOTES_TASK_SYNC_OPERATIONS,
@@ -107,6 +108,7 @@ from .models import (
     normalize_supported_adapter_versions,
     normalize_sync_timestamp,
     normalize_sync_v2_requested_domains,
+    sync_v2_advertised_domain_schemas,
     sync_v2_attachment_ref_v2_is_writable,
     sync_v2_dataset_writable_adapter_versions,
     sync_v2_domain_schemas,
@@ -116,6 +118,10 @@ from .mutation_group_validation import (
     StoredMutationGroupValidationError,
     mutation_group_plan_hash,
     validate_stored_mutation_group,
+)
+from .notes_moodboard_studio_readiness import (
+    NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
+    redact_notes_moodboard_studio_server_metadata,
 )
 from .notes_task_contract import (
     NotesTaskV1Payload,
@@ -334,6 +340,15 @@ def _key_recovery_metadata_string(
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return None
+
+
+def _redact_private_sync_server_metadata(
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    """Remove private server readiness metadata from public dataset views."""
+    return redact_notes_moodboard_studio_server_metadata(
+        redact_notes_task_server_metadata(metadata)
+    )
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -1128,15 +1143,19 @@ class SyncV2Service:
                 getattr(attachment_adapter, "v2_writes_enabled", False)
             )
         notes_task_ready = self._notes_task_domains_ready(dataset)
+        private_dormant_domains = {
+            *NOTES_MOODBOARD_STUDIO_DOMAINS,
+            *NOTES_TASK_SYNC_DOMAINS,
+        }
         supported_domains = [
             domain
             for domain in self.settings.supported_domains
-            if domain not in NOTES_TASK_SYNC_DOMAINS
+            if domain not in private_dormant_domains
         ]
         operations = {
             domain: list(domain_operations)
             for domain, domain_operations in self.settings.operations.items()
-            if domain not in NOTES_TASK_SYNC_DOMAINS
+            if domain not in private_dormant_domains
         }
         if notes_task_ready:
             supported_domains.extend(NOTES_TASK_SYNC_DOMAINS)
@@ -1185,10 +1204,13 @@ class SyncV2Service:
             max_batch_size=self.settings.max_batch_size,
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
-            domain_schemas=(
-                _sync_v2_internal_domain_schemas()
-                if notes_task_ready
-                else sync_v2_domain_schemas()
+            domain_schemas=sync_v2_advertised_domain_schemas(
+                (
+                    _sync_v2_internal_domain_schemas()
+                    if notes_task_ready
+                    else sync_v2_domain_schemas()
+                ),
+                advertised_domains=supported_domains,
             ),
             supported_adapter_versions=sync_v2_server_supported_adapter_versions(
                 notes_task_sync_ready=notes_task_ready,
@@ -2009,6 +2031,7 @@ class SyncV2Service:
             "notes_attachment_v2",
             "default_personal",
             "client_family",
+            *NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
             *NOTES_TASK_SERVER_METADATA_KEYS,
         }
         if (
@@ -2096,7 +2119,7 @@ class SyncV2Service:
         return SyncDatasetEnrollment(
             dataset=replace(
                 dataset,
-                metadata=redact_notes_task_server_metadata(dataset.metadata),
+                metadata=_redact_private_sync_server_metadata(dataset.metadata),
             ),
             cursors=dict.fromkeys(dataset.domains, "0"),
             key_setup_required=False,
@@ -8199,7 +8222,7 @@ class SyncV2Service:
         metadata = (
             {}
             if dataset.encryption_policy == "client_private_v1"
-            else redact_notes_task_server_metadata(dataset.metadata)
+            else _redact_private_sync_server_metadata(dataset.metadata)
         )
         return SyncRestoreManifestDataset(
             dataset_id=dataset.dataset_id,

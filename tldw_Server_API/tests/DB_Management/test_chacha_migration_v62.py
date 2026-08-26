@@ -19,8 +19,10 @@ def _initialize(path: Path) -> None:
 
 def test_sqlite_v62_fresh_schema_has_clone_markers_constraint_and_index(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = tmp_path / "chacha-v62-fresh.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 62)
     _initialize(db_path)
 
     with sqlite3.connect(db_path) as conn:

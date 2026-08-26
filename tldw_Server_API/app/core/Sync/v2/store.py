@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Core-facing Sync v2 store facade."""
+
+from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -404,6 +404,72 @@ class SyncV2Store:
             reason_code=reason_code,
             task_activity_capture_enabled=task_activity_capture_enabled,
             captured_source_rebase=captured_source_rebase,
+        )
+
+    def transition_notes_moodboard_graph_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        moodboard_source_cursor: str | None,
+        moodboard_source_count: int,
+        moodboard_source_fingerprint: str | None,
+        placement_source_cursor: str | None,
+        placement_source_count: int,
+        placement_source_fingerprint: str | None,
+        moodboard_reason_code: str | None = None,
+        placement_reason_code: str | None = None,
+        moodboard_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Delegate coupled dormant moodboard/placement readiness transition."""
+
+        return self.db.transition_notes_moodboard_graph_readiness(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            expected_state=expected_state,
+            state=state,
+            source_dataset_id=source_dataset_id,
+            moodboard_source_cursor=moodboard_source_cursor,
+            moodboard_source_count=moodboard_source_count,
+            moodboard_source_fingerprint=moodboard_source_fingerprint,
+            placement_source_cursor=placement_source_cursor,
+            placement_source_count=placement_source_count,
+            placement_source_fingerprint=placement_source_fingerprint,
+            moodboard_reason_code=moodboard_reason_code,
+            placement_reason_code=placement_reason_code,
+            moodboard_capture_enabled=moodboard_capture_enabled,
+        )
+
+    def transition_notes_studio_document_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        studio_document_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Delegate independent dormant Studio readiness transition."""
+
+        return self.db.transition_notes_studio_document_readiness(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            expected_state=expected_state,
+            state=state,
+            source_dataset_id=source_dataset_id,
+            source_cursor=source_cursor,
+            source_count=source_count,
+            source_fingerprint=source_fingerprint,
+            reason_code=reason_code,
+            studio_document_capture_enabled=studio_document_capture_enabled,
         )
 
     def begin_notes_task_activation(

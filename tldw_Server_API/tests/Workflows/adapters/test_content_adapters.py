@@ -2010,6 +2010,48 @@ class TestDiagramGenerateAdapter:
     """Tests for the diagram generation adapter."""
 
     @pytest.mark.asyncio
+    async def test_diagram_generate_reports_deterministic_execution_identity(
+        self, base_context, sample_long_text
+    ):
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_diagram_generate_adapter
+
+        result = await run_diagram_generate_adapter(
+            {"content": sample_long_text, "diagram_type": "flowchart"},
+            base_context,
+        )
+
+        assert result["source"] == "deterministic_fallback"
+        assert (result["provider"], result["model"]) == (
+            "tldw",
+            "diagram-deterministic-v1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_diagram_generate_reports_actual_llm_execution_identity(
+        self, base_context, sample_long_text
+    ):
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_diagram_generate_adapter
+
+        mock_response = mock_chat_response("flowchart TD\nA --> B")
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await run_diagram_generate_adapter(
+                {
+                    "content": sample_long_text,
+                    "diagram_type": "flowchart",
+                    "provider": "openai",
+                    "model": "gpt-test",
+                },
+                base_context,
+            )
+
+        assert result["source"] == "llm"
+        assert (result["provider"], result["model"]) == ("openai", "gpt-test")
+
+    @pytest.mark.asyncio
     async def test_diagram_generate_mermaid(self, monkeypatch, base_context, sample_long_text):
         """Test diagram generation with mermaid format."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_diagram_generate_adapter
@@ -2304,6 +2346,179 @@ class TestContentAdaptersErrorHandling:
         assert result["source"] == "deterministic_fallback"
         assert result["warning"] == "notes_studio_generate_warning"
         assert isinstance(result["payload"], dict)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("response_text", "expected_source"),
+        (
+            ("The model returned prose instead of JSON.", "deterministic_fallback"),
+            ("[]", "deterministic_fallback"),
+            ("{malformed", "deterministic_fallback"),
+            (json.dumps({"unexpected": "not a Studio payload"}), "deterministic_fallback"),
+            (
+                json.dumps({"sections": [{"bogus": 1}]}),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "invalid-1",
+                                "kind": "provider-only",
+                                "title": "Invalid",
+                                "content": "Not a closed Studio kind.",
+                            }
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "duplicate",
+                                "kind": "notes",
+                                "title": "Notes",
+                                "content": "First",
+                            },
+                            {
+                                "id": "duplicate",
+                                "kind": "summary",
+                                "title": "Summary",
+                                "content": "Second",
+                            },
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "cue-1",
+                                "kind": "cue",
+                                "title": "Cue",
+                                "content": "Cue content cannot replace items.",
+                            }
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "cue-1",
+                                "kind": "cue",
+                                "title": "Cue",
+                                "items": "not-an-array",
+                            }
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "notes-1",
+                                "kind": "notes",
+                                "title": "Notes",
+                                "content": "x" * 65_537,
+                            }
+                        ]
+                    }
+                ),
+                "deterministic_fallback",
+            ),
+            (json.dumps({"sections": []}), "llm"),
+            (
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "notes-1",
+                                "kind": "notes",
+                                "title": "Notes",
+                                "content": "Accepted model output.",
+                            }
+                        ]
+                    }
+                ),
+                "llm",
+            ),
+            (
+                json.dumps(
+                    {
+                        "meta": {
+                            "title": "Provider Study Notes",
+                            "source_note_id": "note-1",
+                            "provider_debug": {"request": "must-not-survive"},
+                        },
+                        "layout": {"provider_layout": True},
+                        "sections": [
+                            {
+                                "id": "notes-1",
+                                "kind": "notes",
+                                "title": "Notes",
+                                "content": "Accepted model output.",
+                            }
+                        ],
+                        "provider_response": {"trace": "must-not-survive"},
+                    }
+                ),
+                "llm",
+            ),
+        ),
+    )
+    async def test_notes_studio_generate_labels_only_accepted_json_as_llm(
+        self,
+        base_context,
+        response_text,
+        expected_source,
+    ):
+        """Fallback payloads carry the engine identity that actually produced them."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import (
+            run_notes_studio_generate_adapter,
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=response_text,
+        ):
+            result = await run_notes_studio_generate_adapter(
+                {
+                    "excerpt_text": "Sample study notes.",
+                    "source_note_id": "note-1",
+                    "provider": "mock",
+                    "model": "mock-model",
+                },
+                base_context,
+            )
+
+        assert result["source"] == expected_source
+        assert isinstance(result["payload"], dict)
+        if expected_source == "llm":
+            assert set(result["payload"]) <= {"meta", "sections"}
+            assert set(result["payload"].get("meta", {})) <= {
+                "title",
+                "source_note_id",
+            }
+            if result["payload"]["sections"]:
+                assert result["payload"]["sections"][0]["content"] == "Accepted model output."
+        else:
+            assert set(result["payload"]["meta"]) == {"title", "source_note_id"}
+            assert set(result["payload"]) == {"meta", "layout", "sections"}
 
     @pytest.mark.asyncio
     async def test_summarize_adapter_sanitizes_backend_errors(self, monkeypatch, base_context, sample_long_text):

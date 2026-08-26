@@ -26,13 +26,14 @@ TASK_ID = "22222222-2222-4222-8222-222222222222"
 EVENT_ID = "33333333-3333-4333-8333-333333333333"
 
 
-def test_postgres_initializer_preserves_v60_step_before_current_v62() -> None:
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 62
+def test_postgres_initializer_preserves_v60_v61_and_v62_steps_before_current_v63() -> None:
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 63
     source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
     assert "target_version = self._POSTGRES_SCHEMA_VERSION" in source
     assert "_migrate_from_v59_to_v60_postgres" in source
     assert "_migrate_from_v60_to_v61_postgres" in source
     assert "_migrate_from_v61_to_v62_postgres" in source
+    assert "_migrate_from_v62_to_v63_postgres" in source
     assert "_verify_note_task_schema_postgres" in source
 
 
@@ -576,6 +577,9 @@ def test_sqlite_v60_has_exact_scoped_task_graph_columns(tmp_path: Path) -> None:
             assert _table_columns(conn, "note_task_scope_authority") == {  # nosec B101
                 "owner_user_id",
                 "dataset_id",
+                "task_graph_bound",
+                "moodboard_graph_bound",
+                "studio_graph_bound",
             }
             assert conn.execute(  # nosec B101
                 "SELECT COUNT(*) FROM note_task_scope_authority"
@@ -826,7 +830,7 @@ def test_sqlite_v60_same_path_concurrent_openers_complete_one_migration(
             "SELECT version FROM db_schema_version WHERE schema_name=?",
             (CharactersRAGDB._SCHEMA_NAME,),
         ).fetchone()[0] == CharactersRAGDB._CURRENT_SCHEMA_VERSION
-        assert not any(name.endswith("_v60") for name in tables)  # nosec B101
+        assert not any(name.endswith(("_v60", "_v61")) for name in tables)  # nosec B101
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []  # nosec B101
 
 

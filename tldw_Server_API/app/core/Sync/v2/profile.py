@@ -24,6 +24,9 @@ from .models import (
     server_frontend_mutation_blockers_for_policy,
     server_frontend_mutation_enabled_for_policy,
 )
+from .notes_moodboard_studio_readiness import (
+    parse_notes_moodboard_studio_readiness_record,
+)
 from .notes_task_readiness import parse_notes_task_readiness_record
 from .store import SyncV2Store
 
@@ -123,6 +126,27 @@ class SyncDormantTaskReadinessDiagnostics:
     task: SyncDormantTaskDomainReadiness
     task_activity: SyncDormantTaskDomainReadiness
     task_activity_capture_enabled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDormantMoodboardStudioDomainReadiness:
+    """Privacy-safe internal readiness for one dormant moodboard/Studio domain."""
+
+    state: str = "not_enrolled"
+    source_count: int = 0
+    cursor: str | None = None
+    source_fingerprint: str | None = None
+    reason_code: str | None = None
+    resume_phase: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDormantMoodboardStudioReadinessDiagnostics:
+    """Owner-scoped dormant moodboard/Studio readiness without source values."""
+
+    moodboard: SyncDormantMoodboardStudioDomainReadiness
+    moodboard_note: SyncDormantMoodboardStudioDomainReadiness
+    studio_document: SyncDormantMoodboardStudioDomainReadiness
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,6 +402,44 @@ class SyncV2ProfileManager:
             ),
             task_activity_capture_enabled=(
                 dataset.metadata.get("task_activity_capture_enabled") is True
+            ),
+        )
+
+    def notes_moodboard_studio_readiness_diagnostics(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+    ) -> SyncDormantMoodboardStudioReadinessDiagnostics:
+        """Return owner-only, payload-free readiness for dormant domains."""
+
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        return SyncDormantMoodboardStudioReadinessDiagnostics(
+            moodboard=_safe_dormant_moodboard_studio_readiness(
+                dataset.metadata.get(
+                    "notes_moodboard_v1",
+                    _DORMANT_TASK_READINESS_MISSING,
+                ),
+                readiness_key="notes_moodboard_v1",
+                domain="notes_moodboard",
+            ),
+            moodboard_note=_safe_dormant_moodboard_studio_readiness(
+                dataset.metadata.get(
+                    "notes_moodboard_note_v1",
+                    _DORMANT_TASK_READINESS_MISSING,
+                ),
+                readiness_key="notes_moodboard_note_v1",
+                domain="notes_moodboard_note",
+            ),
+            studio_document=_safe_dormant_moodboard_studio_readiness(
+                dataset.metadata.get(
+                    "notes_studio_document_v1",
+                    _DORMANT_TASK_READINESS_MISSING,
+                ),
+                readiness_key="notes_studio_document_v1",
+                domain="notes_studio_document",
             ),
         )
 
@@ -766,6 +828,42 @@ def _safe_dormant_task_readiness(
     )
 
 
+def _safe_dormant_moodboard_studio_readiness(
+    metadata: object,
+    *,
+    readiness_key: str,
+    domain: str,
+) -> SyncDormantMoodboardStudioDomainReadiness:
+    if metadata is _DORMANT_TASK_READINESS_MISSING:
+        return SyncDormantMoodboardStudioDomainReadiness()
+
+    invalid = SyncDormantMoodboardStudioDomainReadiness(
+        state="blocked",
+        reason_code=f"{domain}_readiness_state_invalid",
+    )
+    result = parse_notes_moodboard_studio_readiness_record(
+        metadata,
+        readiness_key=readiness_key,
+    )
+    if result.record is None:
+        return invalid
+    record = result.record
+    cursor_hash = (
+        "sha256:"
+        + hashlib.sha256(record.source_cursor.encode("utf-8")).hexdigest()
+        if record.source_cursor is not None
+        else None
+    )
+    return SyncDormantMoodboardStudioDomainReadiness(
+        state=record.state,
+        source_count=record.source_count,
+        cursor=cursor_hash,
+        source_fingerprint=record.source_fingerprint,
+        reason_code=record.reason_code,
+        resume_phase=record.resume_phase,
+    )
+
+
 def _safe_non_negative_int(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
@@ -832,6 +930,8 @@ __all__ = [
     "BOOTSTRAP_MODES",
     "DEFAULT_CLIENT_FAMILY",
     "SYNC_V2_M1_PROTOCOL_VERSION",
+    "SyncDormantMoodboardStudioDomainReadiness",
+    "SyncDormantMoodboardStudioReadinessDiagnostics",
     "SyncDormantTaskDomainReadiness",
     "SyncDormantTaskReadinessDiagnostics",
     "SyncNotesAttachmentBootstrapDiagnostics",
