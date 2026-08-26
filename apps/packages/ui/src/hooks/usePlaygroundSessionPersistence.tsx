@@ -409,6 +409,16 @@ export function usePlaygroundSessionPersistence() {
   }, [buildPersistableSessionSnapshot])
 
   useEffect(() => {
+    if (!sessionScopeReady) return
+    if (isSessionValid(currentScopeKey)) return
+
+    // A fresh or invalid session has nothing to replay. Treat that initial
+    // restore lifecycle as settled so the first server chat can be persisted
+    // immediately, including when the user reloads before the debounce fires.
+    initialRestoreSettledRef.current = true
+  }, [currentScopeKey, isSessionValid, sessionScopeReady])
+
+  useEffect(() => {
     if (!initialRestoreSettledRef.current) return
     if (!sessionScopeReady || !currentScopeKey) return
 

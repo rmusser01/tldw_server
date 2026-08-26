@@ -4399,6 +4399,7 @@ export const SidepanelForm = ({
         <CharacterControlsSheet
           beforeTrackedStart={handlePrepareTrackedStart}
           onRequestClose={() => setCharacterControlsOpen(false)}
+          resetChat={clearChat}
         />
       </Modal>
       {documentGeneratorOpen && (

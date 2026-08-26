@@ -8,6 +8,85 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import GreetingSele
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "settings_row",
+    [
+        None,
+        {
+            "settings": {"greetingsChecksum": "bootstrap-only"},
+            "last_modified": datetime(2026, 8, 25, tzinfo=timezone.utc),
+        },
+    ],
+)
+async def test_get_chat_settings_returns_empty_settings_without_user_overrides(
+    settings_row: dict[str, object] | None,
+) -> None:
+    """Bootstrap-only settings are omitted from the user override response."""
+    class _StubDB:
+        """Return a known chat with the parametrized settings row."""
+
+        def get_conversation_by_id(self, chat_id: str) -> dict[str, object]:
+            """Return the requested global conversation."""
+            return {
+                "id": chat_id,
+                "client_id": "1",
+                "scope_type": "global",
+                "character_id": None,
+            }
+
+        def get_conversation_settings(
+            self,
+            chat_id: str,
+        ) -> dict[str, object] | None:
+            """Return the configured persisted settings row."""
+            return settings_row
+
+    class _StubUser:
+        """Represent the owner of the stub conversation."""
+
+        id = "1"
+
+    response = await sessions.get_chat_settings(
+        chat_id="chat-with-default-settings",
+        scope_type=None,
+        workspace_id=None,
+        db=_StubDB(),  # type: ignore[arg-type]
+        current_user=_StubUser(),  # type: ignore[arg-type]
+    )
+
+    assert response.settings == {}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_chat_settings_keeps_unknown_chat_not_found() -> None:
+    """A missing conversation remains a 404 instead of an empty response."""
+    class _StubDB:
+        """Return no conversation for the requested identifier."""
+
+        def get_conversation_by_id(self, chat_id: str) -> None:
+            """Report that the conversation does not exist."""
+            return None
+
+    class _StubUser:
+        """Represent the caller of the missing-chat request."""
+
+        id = "1"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sessions.get_chat_settings(
+            chat_id="missing-chat",
+            scope_type=None,
+            workspace_id=None,
+            db=_StubDB(),  # type: ignore[arg-type]
+            current_user=_StubUser(),  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.unit
 def test_merge_conversation_settings_server_wins_on_equal_updated_at():
     server = {
         "schemaVersion": 2,

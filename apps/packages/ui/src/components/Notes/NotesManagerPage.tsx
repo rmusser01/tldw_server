@@ -1864,7 +1864,7 @@ const NotesManagerPage: React.FC = () => {
       setHistory(historyArr)
       setMessages(mappedMessages)
       updatePageTitle((chat as any)?.title || "")
-      navigate("/")
+      navigate("/chat")
       setTimeout(() => { try { window.dispatchEvent(new CustomEvent("tldw:focus-composer")) } catch {} }, 0)
     } catch (e: any) {
       message.error(e?.message || t("option:notesSearch.openConversationError", { defaultValue: "Failed to open linked conversation." }))

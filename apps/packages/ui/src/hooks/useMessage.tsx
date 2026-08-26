@@ -84,6 +84,7 @@ import { normalizeChatModelId } from "@/utils/chat-model-availability";
 import { validateSelectedChatModelAvailability } from "@/utils/chat-model-validation";
 import { discardAbortedTurnIfRequested } from "@/hooks/chat/abort-turn-cleanup";
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome";
+import { hydrateTrackedCharacterForSend } from "@/hooks/chat/tracked-character-hydration";
 import {
   collectGreetings,
   isGreetingMessageType,
@@ -2008,6 +2009,7 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        conversationId: chatId,
       });
 
       setIsProcessing(false);
@@ -2759,6 +2761,11 @@ export const useMessage = () => {
               : null;
 
           if (sendMode === "tracked_character" && trackedCharacterForSend?.id) {
+            const hydratedTrackedCharacter =
+              await hydrateTrackedCharacterForSend(
+                trackedCharacterForSend,
+                (characterId) => tldwClient.getCharacter(characterId),
+              );
             await characterChatMode(
               message,
               image,
@@ -2767,7 +2774,7 @@ export const useMessage = () => {
               memory || history,
               signal,
               model,
-              trackedCharacterForSend,
+              hydratedTrackedCharacter,
               regenerateFromMessage,
               serverChatIdOverride,
               activeController,

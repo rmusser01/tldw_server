@@ -1086,6 +1086,11 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
         Path to the database used
     """
     if db_path is None:
+        environment_path = str(os.getenv("JOBS_DB_PATH") or "").strip()
+        if environment_path:
+            db_path = Path(environment_path).expanduser()
+
+    if db_path is None:
         # Anchor default path to project root to avoid CWD effects
         try:
             from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr

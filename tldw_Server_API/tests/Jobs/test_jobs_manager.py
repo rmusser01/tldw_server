@@ -5,6 +5,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -24,6 +25,38 @@ def jobs_db(tmp_path):
     db_path = tmp_path / "jobs.db"
     ensure_jobs_tables(db_path)
     yield db_path
+
+
+@pytest.mark.unit
+def test_ensure_jobs_tables_uses_environment_path_when_no_path_is_passed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jobs migrations use the profile environment path by default."""
+    environment_path = tmp_path / "environment" / "jobs.db"
+    monkeypatch.setenv("JOBS_DB_PATH", str(environment_path))
+
+    resolved_path = ensure_jobs_tables()
+
+    assert resolved_path == environment_path
+    assert environment_path.exists()
+
+
+@pytest.mark.unit
+def test_ensure_jobs_tables_explicit_path_precedes_environment_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit jobs path takes precedence over the environment path."""
+    environment_path = tmp_path / "environment" / "jobs.db"
+    explicit_path = tmp_path / "explicit" / "jobs.db"
+    monkeypatch.setenv("JOBS_DB_PATH", str(environment_path))
+
+    resolved_path = ensure_jobs_tables(explicit_path)
+
+    assert resolved_path == explicit_path
+    assert explicit_path.exists()
+    assert not environment_path.exists()
 
 
 def test_sqlite_archive_collision_queries_live_in_db_management(jobs_db):

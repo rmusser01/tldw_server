@@ -9,6 +9,10 @@ import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import { DEFAULT_ANALYSIS_SUMMARY_PROMPT } from "@/utils/default-prompts"
+import {
+  extractMediaDetailAnalysis,
+  extractMediaDetailContent
+} from "@/utils/media-detail-content"
 
 interface AnalysisTimeoutConfig {
   chatRequestTimeoutMs?: number
@@ -39,11 +43,16 @@ const toPositiveNumber = (value: unknown): number => {
   return Number.isFinite(num) && num > 0 ? num : 0
 }
 
-const firstNonEmptyString = (...vals: unknown[]): string => {
-  for (const v of vals) {
-    if (typeof v === 'string' && v.trim().length > 0) return v
+const normalizePersistedModelSelection = (value: unknown): string => {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  try {
+    const parsed = JSON.parse(trimmed)
+    return typeof parsed === 'string' ? parsed.trim() : trimmed
+  } catch {
+    return trimmed
   }
-  return ''
 }
 
 const extractStreamDelta = (chunk: string): string | null => {
@@ -82,6 +91,7 @@ export function AnalysisModal({
   const [showPresets, setShowPresets] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [analysisPreview, setAnalysisPreview] = useState("")
+  const [recoveredMediaContent, setRecoveredMediaContent] = useState("")
   const [cancelledGeneration, setCancelledGeneration] = useState(false)
   const activeAbortControllerRef = useRef<AbortController | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -130,12 +140,53 @@ export function AnalysisModal({
       })),
     [t]
   )
+  const normalizedSelectedModel = useMemo(
+    () => normalizePersistedModelSelection(selectedModel),
+    [selectedModel]
+  )
   const selectedModelKey = useMemo(() => {
-    if (!selectedModel) return undefined
-    return selectedModel.startsWith("tldw:")
-      ? selectedModel
-      : `tldw:${selectedModel}`
-  }, [selectedModel])
+    if (!normalizedSelectedModel) return undefined
+    return normalizedSelectedModel.startsWith("tldw:")
+      ? normalizedSelectedModel
+      : `tldw:${normalizedSelectedModel}`
+  }, [normalizedSelectedModel])
+  const effectiveModelKey = useMemo(() => {
+    if (models.length === 0) return selectedModelKey
+    return models.some((model) => model.id === selectedModelKey)
+      ? selectedModelKey
+      : models[0]?.id
+  }, [models, selectedModelKey])
+  const effectiveMediaContent = mediaContent.trim()
+    ? mediaContent
+    : recoveredMediaContent
+
+  useEffect(() => {
+    if (!open) return
+    if (mediaContent.trim()) {
+      setRecoveredMediaContent(mediaContent)
+      return
+    }
+
+    let cancelled = false
+    setRecoveredMediaContent("")
+    ;(async () => {
+      try {
+        const detail = await bgRequest<any>({
+          path: `/api/v1/media/${mediaId}?include_content=true&include_versions=false&cache_bust=${Date.now()}` as any,
+          method: 'GET' as any
+        })
+        if (!cancelled) {
+          setRecoveredMediaContent(extractMediaDetailContent(detail))
+        }
+      } catch {
+        // Keep generation disabled when the selected media body is unavailable.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [mediaContent, mediaId, open])
 
   useEffect(() => {
     if (!open) {
@@ -265,14 +316,12 @@ export function AnalysisModal({
   }
 
   const handleGenerate = async () => {
-    if (!mediaContent || !mediaContent.trim()) {
+    if (!effectiveMediaContent || !effectiveMediaContent.trim()) {
       messageApi.warning(t('mediaPage.noContentForAnalysis', 'No content available for analysis'))
       return
     }
 
-    const validSelectedModel =
-      selectedModelKey && models.find((m) => m.id === selectedModelKey)?.id
-    const effectiveModel = validSelectedModel || models[0]?.id
+    const effectiveModel = effectiveModelKey
     if (!effectiveModel) {
       messageApi.warning(
         t(
@@ -299,44 +348,29 @@ export function AnalysisModal({
     timerRef.current = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000))
     }, 1000)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped API response with deeply nested optional fields
-    const extractPersistedAnalysis = (detail: Record<string, any>): string => {
-      if (!detail || typeof detail !== 'object') return ''
-      const fromProcessing = firstNonEmptyString(detail?.processing?.analysis)
-      if (fromProcessing) return fromProcessing
-      const fromRoot = firstNonEmptyString(
-        detail?.analysis,
-        detail?.analysis_content,
-        detail?.analysisContent
-      )
-      if (fromRoot) return fromRoot
-      if (Array.isArray(detail?.analyses)) {
-        for (const entry of detail.analyses) {
-          const text = typeof entry === 'string'
-            ? entry
-            : (entry?.content || entry?.text || entry?.summary || entry?.analysis_content || '')
-          const resolved = firstNonEmptyString(text)
-          if (resolved) return resolved
-        }
-      }
-      return ''
-    }
-
     const saveAsVersion = async (analysisText: string) => {
       if (!mediaId) return false
-      if (!mediaContent || !mediaContent.trim()) return false
+      if (!effectiveMediaContent || !effectiveMediaContent.trim()) return false
       try {
-        await bgRequest<any>({
+        const savedDetail = await bgRequest<any>({
           path: `/api/v1/media/${mediaId}/versions`,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: {
-            content: String(mediaContent || ''),
+            content: String(effectiveMediaContent || ''),
             analysis_content: analysisText,
             prompt: systemPrompt
           }
         })
-        return true
+        let persistedAnalysis = extractMediaDetailAnalysis(savedDetail)
+        if (persistedAnalysis.trim() !== analysisText.trim()) {
+          const refreshedDetail = await bgRequest<any>({
+            path: `/api/v1/media/${mediaId}`,
+            method: 'GET'
+          })
+          persistedAnalysis = extractMediaDetailAnalysis(refreshedDetail)
+        }
+        return persistedAnalysis.trim() === analysisText.trim()
       } catch (err) {
         console.error('Failed to save analysis as version:', err)
         return false
@@ -352,7 +386,7 @@ export function AnalysisModal({
           { role: 'system', content: systemPrompt },
           {
             role: 'user',
-            content: `${userPrefix ? userPrefix + '\n\n' : ''}${mediaContent}`
+            content: `${userPrefix ? userPrefix + '\n\n' : ''}${effectiveMediaContent}`
           }
         ]
       }
@@ -417,55 +451,13 @@ export function AnalysisModal({
         return
       }
 
-      onAnalysisGenerated?.(analysisText, systemPrompt)
-
-      // Save the analysis to the media item (MediaUpdateRequest)
-      try {
-        await bgRequest<any>({
-          path: `/api/v1/media/${mediaId}`,
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: {
-            analysis: analysisText,
-            prompt: systemPrompt
-          }
-        })
-
-        let persisted = true
-        try {
-          const detail = await bgRequest<any>({
-            path: `/api/v1/media/${mediaId}`,
-            method: 'GET'
-          })
-          persisted = Boolean(extractPersistedAnalysis(detail))
-        } catch {
-          persisted = true
-        }
-
-        if (!persisted) {
-          const versionSaved = await saveAsVersion(analysisText)
-          if (versionSaved) {
-            messageApi.warning(t('mediaPage.analysisSaveFailed', 'Failed to save analysis to media item'))
-            messageApi.success(t('mediaPage.versionSaved', 'Saved as new version'))
-            onClose()
-            return
-          }
-          messageApi.error(t('mediaPage.analysisSaveFailed', 'Failed to save analysis to media item'))
-          return
-        }
-
+      const persisted = await saveAsVersion(analysisText)
+      if (persisted) {
+        onAnalysisGenerated?.(analysisText, systemPrompt)
         messageApi.success(t('mediaPage.analysisGeneratedAndSaved', 'Analysis generated and saved'))
         onClose()
-      } catch (err) {
-        const versionSaved = await saveAsVersion(analysisText)
-        if (versionSaved) {
-          messageApi.warning(t('mediaPage.analysisSaveFailed', 'Failed to save analysis to media item'))
-          messageApi.success(t('mediaPage.versionSaved', 'Saved as new version'))
-          onClose()
-        } else {
-          messageApi.error(t('mediaPage.analysisSaveFailed', 'Failed to save analysis to media item'))
-        }
-        console.error('Save error:', err)
+      } else {
+        messageApi.error(t('mediaPage.analysisSaveFailed', 'Failed to save analysis to media item'))
       }
     } catch (err) {
       if (cancelledByUserRef.current || abortController.signal.aborted || isAbortError(err)) {
@@ -519,9 +511,9 @@ export function AnalysisModal({
           loading={generating}
           onClick={handleGenerate}
           disabled={
-            !mediaContent ||
-            !mediaContent.trim() ||
-            models.length === 0
+            !effectiveMediaContent ||
+            !effectiveMediaContent.trim() ||
+            !effectiveModelKey
           }
         >
           {t('mediaPage.generateAnalysis', 'Generate Analysis')}
@@ -573,7 +565,7 @@ export function AnalysisModal({
           <Select
             id="media-analysis-model"
             aria-label={t('mediaPage.model', 'Model')}
-            value={selectedModelKey}
+            value={effectiveModelKey}
             onChange={setSelectedModel}
             className="w-full"
             placeholder={t('mediaPage.selectModel', 'Select a model')}

@@ -463,6 +463,36 @@ describe("usePlaygroundSessionPersistence", () => {
     )
   })
 
+  it("allows immediate session persistence when no restore attempt is needed", async () => {
+    const { result } = renderHook(() => usePlaygroundSessionPersistence())
+
+    await waitFor(() => {
+      expect(result.current.sessionScopeReady).toBe(true)
+      expect(result.current.hasPersistedSession).toBe(false)
+    })
+
+    useStoreMessageOption.setState({
+      historyId: "local-history-fresh",
+      serverChatId: "character-chat-fresh",
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: "character-fresh",
+      serverChatCharacterId: "character-fresh",
+      serverChatPersonaMemoryMode: null,
+      serverChatMetaLoaded: true
+    })
+
+    await waitFor(
+      () => {
+        const state = usePlaygroundSessionStore.getState()
+        expect(state.historyId).toBe("local-history-fresh")
+        expect(state.serverChatId).toBe("character-chat-fresh")
+        expect(state.trackedAssistantKind).toBe("character")
+        expect(state.trackedAssistantId).toBe("character-fresh")
+      },
+      { timeout: 250 }
+    )
+  })
+
   it("clears stale tracked state when restoring a plain server-backed session", async () => {
     useStoreMessageOption.setState({
       serverChatAssistantKind: "character",

@@ -1050,6 +1050,10 @@ class IngestionSourceValidationError(ValidationError):
     """Raised when an ingestion source payload fails validation."""
 
 
+class IngestionSourceSchemaError(RuntimeError):
+    """Raised when the ingestion-source schema definition is incomplete."""
+
+
 class ReferenceImportError(RuntimeError):
     """Raised when a reference-manager item cannot be persisted correctly."""
 

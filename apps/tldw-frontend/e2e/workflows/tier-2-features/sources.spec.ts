@@ -17,7 +17,11 @@ import {
 } from "../../utils/fixtures"
 import { expectApiCall } from "../../utils/api-assertions"
 import { SourcesPage } from "../../utils/page-objects"
-import { seedAuth } from "../../utils/helpers"
+import {
+  fetchWithApiKey,
+  seedAuth,
+  TEST_CONFIG,
+} from "../../utils/helpers"
 
 test.describe("Sources & Connectors", () => {
   let sources: SourcesPage
@@ -42,7 +46,6 @@ test.describe("Sources & Connectors", () => {
 
       // One of the valid states should be visible
       const headingVisible = await sources.heading.isVisible().catch(() => false)
-      const loadingVisible = await sources.loadingSpinner.isVisible().catch(() => false)
       const offlineVisible = await sources.offlineMessage.isVisible().catch(() => false)
       const unsupportedVisible = await sources.unsupportedMessage.isVisible().catch(() => false)
       const unavailableVisible = await sources.unavailableMessage.isVisible().catch(() => false)
@@ -132,58 +135,67 @@ test.describe("Sources & Connectors", () => {
       sources = new SourcesPage(authedPage)
       await sources.goto()
       await sources.assertPageReady()
+      await expect(sources.loadingSpinner).toBeHidden({ timeout: 15_000 })
 
-      const isOnline = await sources.isOnlineWorkspace()
       const apiResult = await apiCall
-
-      if (isOnline) {
-        expect(apiResult).not.toBeNull()
-        expect(apiResult?.response.status()).toBeLessThan(500)
-      } else {
-        expect(apiResult).toBeNull()
-        const unsupportedVisible = await sources.unsupportedMessage.isVisible().catch(() => false)
-        const offlineVisible = await sources.offlineMessage.isVisible().catch(() => false)
-        expect(unsupportedVisible || offlineVisible).toBe(true)
-      }
+      expect(apiResult).not.toBeNull()
+      expect(apiResult?.response.status()).toBeLessThan(500)
+      expect(await sources.isOnlineWorkspace()).toBe(true)
 
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("should fire sync API when 'Sync now' is clicked on a source card", async ({
-      authedPage,
-      serverInfo,
-      diagnostics,
-    }) => {
-      skipIfServerUnavailable(serverInfo)
+    if (
+      process.env.TLDW_E2E_INGESTION_SOURCE_ROOT ||
+      process.env.TLDW_LIVE_TIER_UAT === "1"
+    ) {
+      test("should fire sync API when 'Sync now' is clicked on a source card", async ({
+        authedPage,
+        serverInfo,
+        diagnostics,
+      }) => {
+        skipIfServerUnavailable(serverInfo)
 
-      sources = new SourcesPage(authedPage)
-      await sources.goto()
-      await sources.assertPageReady()
+        const sourceRoot = process.env.TLDW_E2E_INGESTION_SOURCE_ROOT
+        expect(sourceRoot, "live-tier runner must expose an allowed source root").toBeTruthy()
 
-      const hasSources = await sources.hasSourceCards()
-      if (!hasSources) {
-        test.skip(true, "No ingestion sources available to test sync")
-        return
-      }
+        const label = `Live Tier source ${Date.now()}`
+        const createResponse = await fetchWithApiKey(
+          `${TEST_CONFIG.serverUrl}/api/v1/ingestion-sources/`,
+          TEST_CONFIG.apiKey,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              source_type: "local_directory",
+              sink_type: "notes",
+              policy: "canonical",
+              enabled: true,
+              config: { path: sourceRoot, label },
+            }),
+          }
+        )
+        expect(createResponse.status).toBe(201)
 
-      const syncVisible = await sources.syncNowButton.isVisible().catch(() => false)
-      if (!syncVisible) return
+        sources = new SourcesPage(authedPage)
+        await sources.goto()
+        await sources.assertPageReady()
+        const sourceCard = authedPage.locator(".ant-card").filter({ hasText: label })
+        await expect(sourceCard).toBeVisible({ timeout: 15_000 })
+        const syncButton = sourceCard.getByRole("button", { name: /^Sync now$/i })
+        await expect(syncButton).toBeVisible()
 
-      const apiCall = expectApiCall(authedPage, {
-        url: /\/api\/v1\/ingestion-sources\/.*\/sync/,
-        method: "POST",
-      }, 15_000)
+        const apiCall = expectApiCall(authedPage, {
+          url: /\/api\/v1\/ingestion-sources\/.*\/sync/,
+          method: "POST",
+        }, 15_000)
 
-      await sources.syncNowButton.click()
-
-      try {
+        await syncButton.click()
         const { response } = await apiCall
         expect(response.status()).toBeLessThan(500)
-      } catch {
-        // Sync may fail if source is not configured properly; acceptable
-      }
 
-      await assertNoCriticalErrors(diagnostics)
-    })
+        await assertNoCriticalErrors(diagnostics)
+      })
+    }
   })
 })

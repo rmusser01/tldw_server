@@ -6,7 +6,7 @@
   "scripts": {
     "postinstall": "node scripts/copy-pdf-worker.mjs",
     "generate:api-types": "node scripts/generate-api-types.mjs",
-    "dev": "next dev --webpack",
+    "dev": "next dev",
     "dev:webpack": "next dev --webpack",
     "dev:turbopack": "next dev",
     "build": "node scripts/build-with-profile.mjs --bundler=turbopack && node scripts/verify-shared-token-sync.mjs --dir .next",
@@ -29,6 +29,8 @@
     "e2e:family-guardrails": "playwright test e2e/workflows/family-guardrails-wizard.spec.ts --reporter=line",
     "e2e:onboarding": "playwright test e2e/workflows/onboarding-ingestion-first.spec.ts --reporter=line",
     "e2e:onboarding:uat": "node scripts/onboarding-uat/run.mjs",
+    "uat:dev-runtime": "node scripts/dev-runtime-uat.mjs",
+    "uat:live-tiers": "node scripts/live-tier-uat/run.mjs",
     "e2e:skills:certify": "node scripts/skills-certification/run.mjs",
     "e2e:research-workspace:parity": "playwright test e2e/workflows/research-workspace.parity.spec.ts --reporter=line",
     "e2e:research-workspace:real": "playwright test e2e/workflows/research-workspace.real-backend.spec.ts --reporter=line",

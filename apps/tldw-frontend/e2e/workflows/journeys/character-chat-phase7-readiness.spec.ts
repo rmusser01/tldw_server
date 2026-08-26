@@ -350,10 +350,12 @@ async function findBlockedModelScenario(): Promise<BlockedModelScenario | null> 
       return {
         label: "provider-unconfigured model advertised by real backend",
         modelKey,
-        expectedReadiness: /configure the selected model provider|provider setup|model setup/i,
-        expectedStatus: /model setup needed|provider setup|model setup/i,
+        expectedReadiness:
+          /configure the selected model provider|provider setup|model setup|choose an available chat model|choose a model/i,
+        expectedStatus:
+          /model setup needed|provider setup|model setup|choose an available chat model|choose a model|model unavailable/i,
         expectedSelector:
-          /configure the selected model provider|provider setup needed|model setup|not configured/i,
+          /configure the selected model provider|provider setup needed|model setup|not configured|choose an available chat model|choose a model|model unavailable/i,
       }
     }
   }
@@ -581,8 +583,12 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
         await expect(readiness).toBeVisible({ timeout: 30_000 })
         await expect(readiness).toContainText(scenario.expectedReadiness)
 
-        const status = page.getByRole("status", { name: "Chat status" })
-        await expect(status).toContainText(scenario.expectedStatus)
+        await expect(readiness).toHaveAttribute("role", "status")
+        await expect(readiness).toHaveAttribute(
+          "aria-label",
+          "Character Chat setup status",
+        )
+        await expect(readiness).toContainText(scenario.expectedStatus)
 
         const modelSelector = page.getByTestId("model-selector").first()
         await expect(modelSelector).toHaveAttribute(
@@ -691,16 +697,36 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
 
     const character = await createCharacterViaApi()
     try {
-      const chatPage = await openCharacterChatWithCharacter(
+      await openCharacterChatWithCharacter(
         page,
         character.name,
         callableModel,
       )
 
+      await expect(page.getByTestId("character-chat-readiness-panel")).toBeHidden({
+        timeout: 60_000,
+      })
+
+      const assistantMessages = page
+        .getByRole("log", { name: /chat messages/i })
+        .locator(
+          "article[aria-label*='Assistant message'], [data-role='assistant'], [data-message-role='assistant'], .assistant-message",
+        )
+      const assistantCountBefore = await assistantMessages.count()
       const capture = captureAllApiCalls(page)
-      await chatPage.sendMessage("Reply with one short sentence for Phase 7.")
-      await waitForStreamComplete(page)
-      await chatPage.waitForResponse(90_000)
+      const input = page.getByPlaceholder(/type a message/i).first()
+      await input.fill("Reply with one short sentence for Phase 7.")
+      await clickPrimaryComposerAction(page, /send/i)
+      await waitForStreamComplete(page, 90_000)
+      await expect
+        .poll(async () => assistantMessages.count(), {
+          timeout: 90_000,
+          message: "Timed out waiting for the deterministic character response",
+        })
+        .toBeGreaterThan(assistantCountBefore)
+      await expect(assistantMessages.last()).toContainText(
+        /mock provider returned a deterministic success/i,
+      )
 
       const calls = await capture.stop()
       const completeCall = calls.find((call) =>

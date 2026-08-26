@@ -3,6 +3,7 @@
 import React from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { FormInstance } from "antd"
 import type { TFunction } from "i18next"
 
 const {
@@ -106,7 +107,7 @@ vi.mock("antd", () => {
         rules?: unknown[]
         initialValue?: unknown
       }) => {
-        formItemSpy({ label, name, rules })
+        formItemSpy({ label, name, rules, initialValue })
         const testId =
           typeof label === "string"
             ? `form-item-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
@@ -114,7 +115,9 @@ vi.mock("antd", () => {
         const controlledChild =
           name === "rememberApiKey" && React.isValidElement(children)
             ? React.cloneElement(children as React.ReactElement<{ checked?: boolean }>, {
-                checked: Boolean(initialValue)
+                // These tests render the child settings section without its
+                // owning Form. Mirror the parent's documented default here.
+                checked: initialValue === undefined ? true : Boolean(initialValue)
               })
             : children
         return <div data-testid={testId}>{controlledChild}</div>
@@ -211,7 +214,7 @@ const createConnectionProps = (
   t,
   form: {
     setFieldValue: vi.fn()
-  } as any,
+  } as unknown as FormInstance,
   configuredServerUrl: "https://api.example.test/path",
   authSource: "manual",
   rememberApiKey: true,
@@ -364,6 +367,16 @@ describe("settings PR review fixes", () => {
     fireEvent.click(remember)
 
     expect(screen.getByText("Keep signed in until this browser closes.")).toBeInTheDocument()
+  })
+
+  it("leaves rememberApiKey initialization to the owning Form", () => {
+    render(<TldwConnectionSettings {...createConnectionProps()} />)
+
+    const rememberField = formItemSpy.mock.calls
+      .map(([props]) => props)
+      .find((props) => props.name === "rememberApiKey")
+
+    expect(rememberField).toMatchObject({ initialValue: undefined })
   })
 
   it("reveals manual key controls when a cookie session changes to a remote origin", () => {
