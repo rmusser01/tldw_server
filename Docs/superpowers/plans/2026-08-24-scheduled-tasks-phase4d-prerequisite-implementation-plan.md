@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:test-driven-development while implementing this plan. Use superpowers:verification-before-completion before committing. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix TASK-13113 so an `agent_task_run` Job with no existing run and an unavailable owner-scoped definition completes deterministically as a skipped Job without creating an invalid run, notification, or definition-scoped audit record, while redelivery preserves recorded terminal history.
+**Goal:** Fix TASK-13127 so an `agent_task_run` Job with no existing run and an unavailable owner-scoped definition completes deterministically as a skipped Job without creating an invalid run, notification, or definition-scoped audit record, while redelivery preserves recorded terminal history.
 
 **Architecture:** Keep the normalized Scheduled Tasks ownership and storage invariants unchanged. Let `create_scheduled_task_run()` resolve any existing `(definition_id, slot)` run before it checks definition availability, but accept that run only when its owner matches the Job owner. Catch its missing-definition `KeyError` only when no run exists, return the explicit no-resource outcome, and preserve the existing execute/finalize path for valid or already-recorded runs.
 
@@ -10,7 +10,7 @@
 
 **Spec:** `Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md`
 
-**Backlog tasks:** `TASK-13113` (implementation), `TASK-13116` (planning)
+**Backlog tasks:** `TASK-13127` (implementation), `TASK-13128` (planning)
 
 ## Global Constraints
 
@@ -42,7 +42,7 @@
 
 - `tldw_Server_API/app/core/Scheduled_Tasks/agent_task_jobs.py` - dedupe-first run creation boundary and typed no-resource outcome.
 - `tldw_Server_API/tests/Notifications/test_agent_task_jobs_consumer.py` - missing and cross-owner definition regressions.
-- `backlog/tasks/task-13113 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md` - implementation notes, verification, and final status.
+- `backlog/tasks/task-13127 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md` - implementation notes, verification, and final status.
 
 **Read-only reference**
 
@@ -52,7 +52,7 @@
 ### Task 0: Rebase, Attach The Plan, And Record The Baseline
 
 **Files:**
-- Modify: `backlog/tasks/task-13113 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md`
+- Modify: `backlog/tasks/task-13127 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md`
 
 **Interfaces:**
 - Consumes: current `origin/dev`, the approved Phase 4D design, and the existing `handle_agent_task_job()` contract.
@@ -68,11 +68,11 @@ git status --short --branch
 git log -1 --format='%H %s'
 ```
 
-Expected: the feature worktree is based on the fetched `origin/dev` tip and has no unrelated changes. If TASK-13113 already has a branch or worktree, use it after proving its merge base and status instead of creating another.
+Expected: the feature worktree is based on the fetched `origin/dev` tip and has no unrelated changes. If TASK-13127 already has a branch or worktree, use it after proving its merge base and status instead of creating another.
 
 - [x] **Step 2: Link the implementation task to this plan**
 
-Use the Backlog.md MCP workflow to set `TASK-13113` to In Progress, add this plan under documentation/references, and record the dev base SHA. Do not edit the task file directly while MCP or CLI is available.
+Use the Backlog.md MCP workflow to set `TASK-13127` to In Progress, add this plan under documentation/references, and record the dev base SHA. Do not edit the task file directly while MCP or CLI is available.
 
 - [x] **Step 3: Run the current focused test to confirm the defect**
 
@@ -223,7 +223,7 @@ Expected: only the preflight, result-contract documentation, and focused tests c
 ### Task 4: Security, Backlog, Review, And Commit
 
 **Files:**
-- Modify: `backlog/tasks/task-13113 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md`
+- Modify: `backlog/tasks/task-13127 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md`
 
 **Interfaces:**
 - Consumes: green focused tests and the final two-file code diff.
@@ -240,7 +240,7 @@ python -m bandit -r \
 
 Expected: exit 0 with no new findings in the changed code.
 
-- [x] **Step 2: Self-review against TASK-13113**
+- [x] **Step 2: Self-review against TASK-13127**
 
 Verify: no run exists for the missing ID; no notification/audit is fabricated; the Job result and bounded warning are observable; cross-owner existence is concealed; valid dedupe/lifecycle/timeout/error paths are unchanged; no payload or secret appears in logging.
 
@@ -255,15 +255,15 @@ git status --short
 git add \
   tldw_Server_API/app/core/Scheduled_Tasks/agent_task_jobs.py \
   tldw_Server_API/tests/Notifications/test_agent_task_jobs_consumer.py \
-  'backlog/tasks/task-13113 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md'
+  'backlog/tasks/task-13127 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md'
 git diff --cached --check
 git commit -m "fix(scheduled-tasks): skip jobs with missing definitions"
 ```
 
-Expected: one focused commit containing only TASK-13113 implementation, tests, and its Backlog record.
+Expected: one focused commit containing only TASK-13127 implementation, tests, and its Backlog record.
 
 ## Completion Review
 
-- TASK-13113 is complete when the exact no-resource contract is implemented and the focused/adjacent suites pass.
+- TASK-13127 is complete when the exact no-resource contract is implemented and the focused/adjacent suites pass.
 - Do not begin Phase 4D.0F in the same commit. The feasibility gate has a separate plan, risk profile, evidence artifacts, and review boundary.
 - Any request to create a synthetic definition, weaken foreign keys, hard-delete audit history, or send a guessed notification is out of scope and must be rejected as inconsistent with the approved design.
