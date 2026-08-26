@@ -258,7 +258,7 @@ Commit: `feat(sharing): register clone worker lifecycle`
 ### Task 6: End-To-End Backend Parity, Documentation, And Security Gates
 
 **Files:**
-- Modify: `.github/workflows/ci.yml`
+- Inspect and modify if needed: `.github/workflows/ci.yml`
 - Modify: `Docs/User_Guides/Server/Organizations_and_Sharing.md`
 - Modify: `Docs/Code_Documentation/Jobs_Module.md`
 - Modify: `backlog/tasks/task-12020.48 - Expose-and-execute-canonical-shared-workspace-clone-operations.md` through Backlog MCP only
@@ -268,19 +268,31 @@ Commit: `feat(sharing): register clone worker lifecycle`
 - Consumes: all prior tasks.
 - Produces: verified SQLite/PostgreSQL API-worker flow, CI shard assignment, operational environment documentation, and completed TASK-12020.48 record.
 
-- [ ] **Step 1: Add full API-to-worker acceptance tests before documentation**
+- [x] **Step 1: Add full API-to-worker acceptance tests before documentation**
 
 Exercise create, response-loss replay, worker completion, partial vector readiness, status, archived replay, revocation before execution, fatal cleanup, owner isolation, and hard-exit reconciliation using real SQLite stores and the canonical PostgreSQL fixtures.
 
-- [ ] **Step 2: Run the integration matrix**
+- [x] **Step 2: Run the integration matrix**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Sharing tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_postgres.py tldw_Server_API/tests/Jobs/test_jobs_terminal_operation_result_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_terminal_operation_result_postgres.py tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py`
 
-- [ ] **Step 3: Document operations and assign every new test to a CI shard**
+- [x] **Step 3: Document operations and assign every new test to a CI shard**
 
 Document the exact routes, header contract, queue/domain/type, 31-day receipt expiry, no automatic retry, worker flag/default, sidecar ownership rule, bounded reconciliation, and vector-indexing limitation. Update `.github/workflows/ci.yml` for every new test path.
 
-- [ ] **Step 4: Run static and repository gates**
+Independent review hardening added before closeout: clone-specific authorization rejects disabled policy before opening owner data; pending target publication requires the exact request fingerprint; durable Media provenance proves pending plus already-promoted rows against the terminal count across hard-exit recovery; and the API-to-worker acceptance flow runs with both SQLite and canonical temporary-PostgreSQL Jobs stores.
+
+Final self-review also aligned clone preparation with the durable proof bound:
+more than 10,000 unique Media records are rejected before Media loading or
+target reservation, preventing an oversized operation from becoming stuck in
+finalization after the copy has already been written.
+
+The existing `gap-verified-11` shard owns the complete
+`tldw_Server_API/tests/Sharing` tree, including the new acceptance file. The
+shard coverage guard reports zero newly uncovered files, so no redundant
+file-level `ci.yml` entry is required.
+
+- [x] **Step 4: Run static and repository gates**
 
 Run:
 
@@ -293,11 +305,21 @@ python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.
 git diff --check
 ```
 
-- [ ] **Step 5: Self-review against the approved spec**
+Final review verification expanded those static commands across every changed
+production and test module. The integration matrix passed 795 tests with 20
+expected Jobs-gated skips; a separate canonical PostgreSQL run passed all 24
+receipt, terminal-CAS, and API-to-worker acceptance cases. Ruff and compileall
+passed. Bandit reported 0 findings and 0 scanner errors across 18,591 production
+lines, and the shard guard reported `new_uncovered=0`. The documentation suite
+passed 188 tests; its two manifest failures reproduce committed source/published
+drift in unrelated documentation paths, while both guides changed by this task
+are byte-identical to their published mirrors.
+
+- [x] **Step 5: Self-review against the approved spec**
 
 Confirm every public field/error/status is bounded, no raw key or owner content enters Jobs/audit/progress, no route aliases or redirects exist, no clone succeeds before durable completion, and frontend/CDP/vector indexing remain out of scope.
 
-- [ ] **Step 6: Finalize the Backlog task and commit**
+- [x] **Step 6: Finalize the Backlog task and commit**
 
 Record exact pass/skip counts, PostgreSQL fixture availability, Bandit result, touched files, residual risks, and commits through Backlog MCP. Commit: `docs(sharing): close clone operations task`
 
