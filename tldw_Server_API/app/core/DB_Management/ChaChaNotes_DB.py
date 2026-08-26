@@ -13590,15 +13590,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             """
             DO $migration_owner$
-            DECLARE schema_owner name;
+            DECLARE
+              schema_owner name;
+              relation_name name;
             BEGIN
               SELECT r.rolname INTO STRICT schema_owner
                 FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner
                WHERE n.nspname=current_schema();
-              EXECUTE format(
-                'ALTER TABLE chacha_schema_migration_progress OWNER TO %I',
-                schema_owner
-              );
+              FOREACH relation_name IN ARRAY ARRAY[
+                'chacha_schema_migration_progress',
+                'note_task_scope_authority',
+                'moodboards',
+                'moodboard_notes',
+                'note_studio_documents'
+              ] LOOP
+                EXECUTE format(
+                  'ALTER TABLE %I OWNER TO %I', relation_name, schema_owner
+                );
+              END LOOP;
             END
             $migration_owner$
             """,
@@ -13641,6 +13650,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS canonical_hash TEXT",
             "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS source_diagnostic_code TEXT",
             "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS source_diagnostic_hash TEXT",
+            # A legacy source reference is advisory lineage, not a required live
+            # relationship. Unknown and cross-owner source IDs remain on the
+            # canonical row with a readiness-blocking diagnostic, so the old
+            # single-column FK cannot be part of the converged v61 catalog.
+            "ALTER TABLE note_studio_documents DROP CONSTRAINT IF EXISTS note_studio_documents_source_note_id_fkey",
         )
 
     def _postgres_v61_board_update(
@@ -13757,6 +13771,72 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (after_owner, after_note, page_size), connection=conn,
         ).rows]
         return rows, ([rows[-1]["owner_user_id"], rows[-1]["note_id"]] if rows else cursor)
+
+    @staticmethod
+    def _postgres_v61_source_cursor(
+        phase: str, row: Mapping[str, Any]
+    ) -> list[Any]:
+        """Return the deterministic legacy keyset cursor for one source row."""
+        if phase == "moodboards":
+            return [row["client_id"], row["id"]]
+        if phase == "moodboard_notes":
+            return [row["owner_user_id"], row["moodboard_id"], row["note_id"]]
+        return [row["owner_user_id"], row["note_id"]]
+
+    def _postgres_v61_fingerprint_phase_page(
+        self,
+        conn: Any,
+        *,
+        source_phase: str,
+        progress: Mapping[str, Any],
+        predict: bool,
+    ) -> dict[str, Any]:
+        """Fingerprint one soft-deadline page with at most one-row overshoot."""
+        source_rows, _ = self._postgres_v61_source_page(
+            conn, phase=source_phase, progress=progress
+        )
+        deadline = (
+            time.monotonic()
+            + self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SECONDS
+        )
+        fingerprint = str(progress["aggregate_fingerprint"])
+        total = int(progress["copied_count"])
+        cursor = (
+            json.loads(str(progress["keyset_cursor"]))
+            if progress.get("keyset_cursor")
+            else None
+        )
+        processed = 0
+        for source_row in source_rows:
+            # Always finish the first row so a single expensive legacy row cannot
+            # livelock the phase. The deadline bounds every subsequent row, so a
+            # transaction can overshoot by no more than one row's work.
+            if processed and time.monotonic() >= deadline:
+                break
+            fingerprint_row = (
+                self._postgres_v61_expected_row(
+                    conn, phase=source_phase, row=source_row
+                )
+                if predict
+                else source_row
+            )
+            added, fingerprint = self._postgres_v61_progress_fingerprint(
+                fingerprint, (fingerprint_row,)
+            )
+            total += added
+            processed += added
+            cursor = self._postgres_v61_source_cursor(source_phase, source_row)
+        exhausted = (
+            len(source_rows) < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+            and processed == len(source_rows)
+        )
+        return {
+            "cursor": cursor,
+            "count": total,
+            "fingerprint": fingerprint,
+            "status": "complete" if exhausted else "running",
+            "processed_count": processed,
+        }
 
     def _postgres_v61_studio_update(self, row: Mapping[str, Any]) -> dict[str, Any]:
         """Canonicalize one legacy PostgreSQL Studio row without mutating it."""
@@ -14272,38 +14352,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if progress["status"] == "complete":
                     conn.commit()
                     break
-                source_rows, cursor = self._postgres_v61_source_page(
-                    conn, phase=source_phase, progress=progress
-                )
-                predicted_rows = [
-                    self._postgres_v61_expected_row(
-                        conn, phase=source_phase, row=row
-                    )
-                    for row in source_rows
-                ]
-                added, fingerprint = self._postgres_v61_progress_fingerprint(
-                    str(progress["aggregate_fingerprint"]), predicted_rows
-                )
-                total = int(progress["copied_count"]) + added
-                status = (
-                    "complete"
-                    if len(source_rows)
-                    < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
-                    else "running"
+                page = self._postgres_v61_fingerprint_phase_page(
+                    conn,
+                    source_phase=source_phase,
+                    progress=progress,
+                    predict=True,
                 )
                 self._upsert_postgres_v61_progress(
                     conn,
                     phase=prediction_phase,
-                    cursor=cursor,
-                    count=total,
-                    fingerprint=fingerprint,
-                    status=status,
+                    cursor=page["cursor"],
+                    count=page["count"],
+                    fingerprint=page["fingerprint"],
+                    status=page["status"],
                 )
                 conn.commit()
                 self._notes_moodboard_studio_v61_postgres_checkpoint(
-                    f"{prediction_phase}:{total}"
+                    f"{prediction_phase}:{page['count']}"
                 )
-                if status == "complete":
+                if page["status"] == "complete":
                     break
 
         for phase in ("moodboards", "moodboard_notes", "note_studio_documents"):
@@ -14345,31 +14412,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if progress["status"] == "complete":
                     conn.commit()
                     break
-                rows, cursor = self._postgres_v61_source_page(
-                    conn, phase=source_phase, progress=progress
-                )
-                added, fingerprint = self._postgres_v61_progress_fingerprint(
-                    str(progress["aggregate_fingerprint"]), rows
-                )
-                total = int(progress["copied_count"]) + added
-                status = (
-                    "complete"
-                    if len(rows) < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
-                    else "running"
+                page = self._postgres_v61_fingerprint_phase_page(
+                    conn,
+                    source_phase=source_phase,
+                    progress=progress,
+                    predict=False,
                 )
                 self._upsert_postgres_v61_progress(
                     conn,
                     phase=verification_phase,
-                    cursor=cursor,
-                    count=total,
-                    fingerprint=fingerprint,
-                    status=status,
+                    cursor=page["cursor"],
+                    count=page["count"],
+                    fingerprint=page["fingerprint"],
+                    status=page["status"],
                 )
                 conn.commit()
                 self._notes_moodboard_studio_v61_postgres_checkpoint(
-                    f"{verification_phase}:{total}"
+                    f"{verification_phase}:{page['count']}"
                 )
-                if status == "complete":
+                if page["status"] == "complete":
                     break
 
         if not begin_phase("aggregate verification phase"):
@@ -14762,8 +14823,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         states = self.backend.execute(
             """
             SELECT c.relname AS table_name,c.relrowsecurity,c.relforcerowsecurity,
-                   c.relowner=current_user::regrole AS is_table_owner,
-                   pg_has_role(current_user,n.nspowner,'USAGE') AS is_schema_owner
+                   c.relowner=n.nspowner AS owner_matches_schema
               FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
              WHERE n.nspname=current_schema() AND c.relkind IN ('r','p')
                AND c.relname=ANY(%s)
@@ -14775,8 +14835,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if {str(row["table_name"]) for row in states} != set(relations):
             raise SchemaError("Notes moodboard/Studio v61 PostgreSQL relation catalog drifted.")  # noqa: TRY003
         if any(
-            not bool(row["is_table_owner"])
-            or not bool(row["is_schema_owner"])
+            not bool(row["owner_matches_schema"])
             or not bool(row["relrowsecurity"])
             or not bool(row["relforcerowsecurity"])
             for row in states
@@ -14953,22 +15012,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
               JOIN pg_namespace n ON n.oid=c.relnamespace
               LEFT JOIN pg_class referenced ON referenced.oid=k.confrelid
-              LEFT JOIN pg_namespace referenced_namespace
+             LEFT JOIN pg_namespace referenced_namespace
                 ON referenced_namespace.oid=referenced.relnamespace
              WHERE n.nspname=current_schema() AND c.relname=ANY(%s)
-               AND (k.conname LIKE '%%\\_v61\\_%%' ESCAPE '\\'
-                    OR k.conname=ANY(%s))
+               AND k.contype IN ('p','f','u','c')
             """,
-            (list(relations), [
-                "moodboards_pkey", "moodboard_notes_pkey",
-                "note_studio_documents_pkey", "note_task_scope_authority_pkey",
-            ]),
+            (list(relations),),
             connection=conn,
         ).rows
         constraints = {
             str(row["constraint_name"]): row for row in constraint_rows
         }
         expected_checks = {
+            "note_task_scope_authority_owner_check": (
+                "char_length(btrim(owner_user_id))>0"
+            ),
+            "note_task_scope_authority_dataset_check": (
+                "char_length(btrim(dataset_id))>0and"
+                "dataset_id=btrim(dataset_id)and"
+                "dataset_id<>'local-unbound'"
+            ),
             "moodboards_v61_owner_check": "char_length(btrim(owner_user_id))>0",
             "moodboards_v61_dataset_check": "char_length(btrim(dataset_id))>0",
             "moodboards_v61_sync_id_check": (
@@ -15037,6 +15100,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "source_diagnostic_hashisnullor"
                 "source_diagnostic_hash~'^sha256:[0-9a-f]{64}$'"
             ),
+            "note_studio_documents_template_type_check": (
+                "template_type=any(array['lined','grid','cornell'])"
+            ),
+            "note_studio_documents_handwriting_mode_check": (
+                "handwriting_mode=any(array['off','accented'])"
+            ),
+            "note_studio_documents_render_version_check": "render_version>=1",
         }
         expected_unique = {
             "moodboards_v61_scope_sync_unique": (
@@ -15060,6 +15130,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ),
         }
         expected_foreign = {
+            "moodboard_notes_moodboard_id_fkey": (
+                "moodboard_notes", ("moodboard_id",),
+                "moodboards", ("id",), "c", "c",
+            ),
+            "moodboard_notes_note_id_fkey": (
+                "moodboard_notes", ("note_id",),
+                "notes", ("id",), "c", "c",
+            ),
             "moodboard_notes_v61_board_fk": (
                 "moodboard_notes", ("owner_user_id", "dataset_id", "moodboard_id"),
                 "moodboards", ("owner_user_id", "dataset_id", "id"), "c", "c",
@@ -15071,6 +15149,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "note_studio_documents_v61_note_fk": (
                 "note_studio_documents", ("owner_user_id", "note_id"),
                 "notes", ("client_id", "id"), "c", "c",
+            ),
+            "note_studio_documents_note_id_fkey": (
+                "note_studio_documents", ("note_id",),
+                "notes", ("id",), "c", "c",
             ),
         }
         expected_constraint_names = (
@@ -15114,16 +15196,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ):
                 raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
 
-        required_indexes = {
-            "idx_moodboards_scope_page",
-            "idx_moodboards_scope_sync_id",
-            "idx_moodboard_notes_scope_board_page",
-            "idx_moodboard_notes_scope_note",
-            "idx_moodboard_notes_scope_placement",
-            "idx_note_studio_documents_scope_page",
-            "idx_note_studio_documents_scope_note",
-            "idx_note_studio_documents_scope_source",
-        }
         index_rows = self.backend.execute(
             "SELECT i.relname AS index_name,x.indisvalid,x.indisready,"
             "pg_get_indexdef(x.indexrelid,0,true) AS definition "
@@ -15134,20 +15206,33 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ).rows
         indexes = {str(row["index_name"]): row for row in index_rows}
         expected_index_definitions = {
+            "idx_moodboards_deleted": "CREATE INDEX idx_moodboards_deleted ON moodboards USING btree (deleted)",
+            "idx_moodboards_last_modified": "CREATE INDEX idx_moodboards_last_modified ON moodboards USING btree (last_modified)",
             "idx_moodboards_scope_page": "CREATE INDEX idx_moodboards_scope_page ON moodboards USING btree (owner_user_id, dataset_id, deleted, last_modified, id)",
             "idx_moodboards_scope_sync_id": "CREATE INDEX idx_moodboards_scope_sync_id ON moodboards USING btree (owner_user_id, dataset_id, sync_id)",
+            "idx_moodboard_notes_board": "CREATE INDEX idx_moodboard_notes_board ON moodboard_notes USING btree (moodboard_id)",
+            "idx_moodboard_notes_note": "CREATE INDEX idx_moodboard_notes_note ON moodboard_notes USING btree (note_id)",
             "idx_moodboard_notes_scope_board_page": "CREATE INDEX idx_moodboard_notes_scope_board_page ON moodboard_notes USING btree (owner_user_id, dataset_id, moodboard_id, deleted, order_index, placement_id)",
             "idx_moodboard_notes_scope_note": "CREATE INDEX idx_moodboard_notes_scope_note ON moodboard_notes USING btree (owner_user_id, dataset_id, note_id, deleted, moodboard_id)",
             "idx_moodboard_notes_scope_placement": "CREATE INDEX idx_moodboard_notes_scope_placement ON moodboard_notes USING btree (owner_user_id, dataset_id, placement_id)",
             "idx_note_studio_documents_scope_page": "CREATE INDEX idx_note_studio_documents_scope_page ON note_studio_documents USING btree (owner_user_id, dataset_id, deleted, last_modified, note_id)",
             "idx_note_studio_documents_scope_note": "CREATE INDEX idx_note_studio_documents_scope_note ON note_studio_documents USING btree (owner_user_id, dataset_id, note_id)",
             "idx_note_studio_documents_scope_source": "CREATE INDEX idx_note_studio_documents_scope_source ON note_studio_documents USING btree (owner_user_id, dataset_id, source_note_id)",
+            "idx_note_studio_documents_source_note_id": "CREATE INDEX idx_note_studio_documents_source_note_id ON note_studio_documents USING btree (source_note_id)",
+            "moodboards_pkey": "CREATE UNIQUE INDEX moodboards_pkey ON moodboards USING btree (id)",
+            "moodboards_v61_scope_id_unique": "CREATE UNIQUE INDEX moodboards_v61_scope_id_unique ON moodboards USING btree (owner_user_id, dataset_id, id)",
+            "moodboards_v61_scope_sync_unique": "CREATE UNIQUE INDEX moodboards_v61_scope_sync_unique ON moodboards USING btree (owner_user_id, dataset_id, sync_id)",
+            "moodboard_notes_pkey": "CREATE UNIQUE INDEX moodboard_notes_pkey ON moodboard_notes USING btree (moodboard_id, note_id)",
+            "moodboard_notes_v61_scope_placement_unique": "CREATE UNIQUE INDEX moodboard_notes_v61_scope_placement_unique ON moodboard_notes USING btree (owner_user_id, dataset_id, placement_id)",
+            "note_studio_documents_pkey": "CREATE UNIQUE INDEX note_studio_documents_pkey ON note_studio_documents USING btree (note_id)",
+            "note_task_scope_authority_pkey": "CREATE UNIQUE INDEX note_task_scope_authority_pkey ON note_task_scope_authority USING btree (owner_user_id)",
         }
-        if not required_indexes.issubset(indexes) or any(
-            not bool(indexes[name]["indisvalid"]) or not bool(indexes[name]["indisready"])
+        if set(indexes) != set(expected_index_definitions) or any(
+            not bool(indexes[name]["indisvalid"])
+            or not bool(indexes[name]["indisready"])
             or " ".join(str(indexes[name]["definition"]).split())
             != expected_index_definitions[name]
-            for name in required_indexes
+            for name in expected_index_definitions
         ):
             raise SchemaError("Notes moodboard/Studio v61 PostgreSQL index catalog drifted.")  # noqa: TRY003
 
@@ -15675,6 +15760,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    table_row.relrowsecurity AS rls_enabled,
                    table_row.relforcerowsecurity AS rls_forced,
                    table_row.relowner = current_user::regrole AS is_table_owner,
+                   table_row.relowner = namespace_row.nspowner
+                     AS owner_matches_schema,
                    pg_has_role(current_user, namespace_row.nspowner, 'USAGE')
                      AS is_schema_owner
               FROM pg_class AS table_row
@@ -15689,8 +15776,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ).rows
         if {str(row.get("table_name")) for row in table_rows} != set(authority_relations):
             raise SchemaError("Notes task v60 PostgreSQL relation catalog drifted.")  # noqa: TRY003
+        v61_authority_owner = (
+            self._get_schema_version_postgres(conn) >= 61
+            or self.backend.table_exists(
+                "chacha_schema_migration_progress", connection=conn
+            )
+        )
         if any(
-            not bool(row.get("is_table_owner"))
+            not bool(
+                row.get("owner_matches_schema")
+                if v61_authority_owner
+                and row.get("table_name") == "note_task_scope_authority"
+                else row.get("is_table_owner")
+            )
             or not bool(row.get("is_schema_owner"))
             or not bool(row.get("rls_enabled"))
             or not bool(row.get("rls_forced"))
@@ -15699,9 +15797,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError("Notes task v60 PostgreSQL ownership or RLS catalog drifted.")  # noqa: TRY003
 
         expected_columns = self._note_task_v60_postgres_columns()
-        if self._get_schema_version_postgres(conn) >= 61 or self.backend.table_exists(
-            "chacha_schema_migration_progress", connection=conn
-        ):
+        if v61_authority_owner:
             expected_columns = dict(expected_columns)
             expected_columns["note_task_scope_authority"] = (
                 *expected_columns["note_task_scope_authority"],
