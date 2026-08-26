@@ -118,6 +118,18 @@ _ACTIVITY_CURSOR_1 = (
 _ACTIVITY_CURSOR_2 = (
     "2026-08-13T00:00:01+00:00|00000000-0000-4000-8000-000000000012"
 )
+_MOODBOARD_CURSOR_1 = "00000000-0000-4000-8000-000000000101"
+_MOODBOARD_CURSOR_2 = "00000000-0000-4000-8000-000000000102"
+_PLACEMENT_CURSOR_1 = (
+    "00000000-0000-4000-8000-000000000101|"
+    "00000000-0000-4000-8000-000000000201"
+)
+_PLACEMENT_CURSOR_2 = (
+    "00000000-0000-4000-8000-000000000102|"
+    "00000000-0000-4000-8000-000000000202"
+)
+_STUDIO_CURSOR_1 = "00000000-0000-4000-8000-000000000301"
+_STUDIO_CURSOR_2 = "00000000-0000-4000-8000-000000000302"
 
 
 def _readiness_record(
@@ -4202,6 +4214,397 @@ def test_notes_task_readiness_blocked_from_verifying_preserves_resume_progress(
     )
     assert resumed.metadata["notes_task_v1"]["state"] == "verifying"
     assert ready.metadata["notes_task_v1"]["state"] == "ready"
+
+
+def _moodboard_dataset(**metadata_overrides: object) -> SyncDatasetCreate:
+    return _dataset(
+        metadata={
+            "default_personal": True,
+            "client_family": "chatbook",
+            **metadata_overrides,
+        }
+    )
+
+
+def test_moodboard_graph_and_studio_readiness_persist_privately_without_capture(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_moodboard_dataset())
+
+    graph = sync_store.transition_notes_moodboard_graph_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        moodboard_source_cursor=None,
+        moodboard_source_count=0,
+        moodboard_source_fingerprint=None,
+        placement_source_cursor=None,
+        placement_source_count=0,
+        placement_source_fingerprint=None,
+    )
+    assert graph.metadata["notes_moodboard_v1"]["state"] == "enrolling"
+    assert graph.metadata["notes_moodboard_note_v1"]["state"] == "enrolling"
+    assert graph.metadata["moodboard_capture_enabled"] is False
+    assert graph.metadata["studio_document_capture_enabled"] is False
+
+    for expected_state, state in (
+        ("enrolling", "bootstrapping"),
+        ("bootstrapping", "verifying"),
+        ("verifying", "ready"),
+    ):
+        graph = sync_store.transition_notes_moodboard_graph_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state=expected_state,
+            state=state,
+            source_dataset_id="dataset-1",
+            moodboard_source_cursor=_MOODBOARD_CURSOR_1,
+            moodboard_source_count=1,
+            moodboard_source_fingerprint="a" * 64,
+            placement_source_cursor=_PLACEMENT_CURSOR_1,
+            placement_source_count=1,
+            placement_source_fingerprint="b" * 64,
+        )
+
+    assert graph.metadata["notes_moodboard_v1"]["state"] == "ready"
+    assert graph.metadata["notes_moodboard_note_v1"]["state"] == "ready"
+    assert "notes.studio_document" not in graph.domains
+
+    studio = sync_store.transition_notes_studio_document_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        source_cursor=None,
+        source_count=0,
+        source_fingerprint=None,
+    )
+    assert studio.metadata["notes_studio_document_v1"]["state"] == "enrolling"
+    assert studio.metadata["notes_moodboard_v1"]["state"] == "ready"
+    assert studio.metadata["studio_document_capture_enabled"] is False
+
+
+def test_moodboard_graph_readiness_is_coupled_atomic_and_cannot_enable_capture(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_store.enroll_dataset(_moodboard_dataset())
+    sync_store.transition_notes_moodboard_graph_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        moodboard_source_cursor=None,
+        moodboard_source_count=0,
+        moodboard_source_fingerprint=None,
+        placement_source_cursor=None,
+        placement_source_count=0,
+        placement_source_fingerprint=None,
+    )
+
+    with pytest.raises(
+        SyncStoreError,
+        match="notes_moodboard_studio_readiness_capture_forbidden",
+    ):
+        sync_store.transition_notes_moodboard_graph_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="enrolling",
+            state="bootstrapping",
+            source_dataset_id="dataset-1",
+            moodboard_source_cursor=None,
+            moodboard_source_count=0,
+            moodboard_source_fingerprint=None,
+            placement_source_cursor=None,
+            placement_source_count=0,
+            placement_source_fingerprint=None,
+            moodboard_capture_enabled=True,
+        )
+
+    original = sync_store.db._get_dataset_row
+
+    def fail_after_update(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise RuntimeError("forced moodboard rollback")
+
+    monkeypatch.setattr(sync_store.db, "_get_dataset_row", fail_after_update)
+    with pytest.raises(RuntimeError, match="forced moodboard rollback"):
+        sync_store.transition_notes_moodboard_graph_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="enrolling",
+            state="bootstrapping",
+            source_dataset_id="dataset-1",
+            moodboard_source_cursor=None,
+            moodboard_source_count=0,
+            moodboard_source_fingerprint=None,
+            placement_source_cursor=None,
+            placement_source_count=0,
+            placement_source_fingerprint=None,
+        )
+    monkeypatch.setattr(sync_store.db, "_get_dataset_row", original)
+
+    stored = sync_store.get_dataset("dataset-1", owner_user_id="user-1")
+    assert stored is not None
+    assert stored.metadata["notes_moodboard_v1"]["state"] == "enrolling"
+    assert stored.metadata["notes_moodboard_note_v1"]["state"] == "enrolling"
+    assert stored.metadata["moodboard_capture_enabled"] is False
+
+
+def test_moodboard_studio_readiness_rejects_scope_and_cas_races(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_moodboard_dataset())
+    sync_store.enroll_dataset(
+        _dataset(
+            dataset_id="workspace-1",
+            scope_type="workspace",
+            workspace_id="workspace-1",
+            domains=["workspaces.workspace"],
+            metadata={"default_personal": True, "client_family": "chatbook"},
+        )
+    )
+    sync_store.enroll_dataset(
+        _dataset(
+            dataset_id="bad-policy",
+            metadata={"default_personal": True, "client_family": "chatbook"},
+        )
+    )
+    sync_store.db.execute(
+        "UPDATE sync_datasets SET encryption_policy = ? WHERE dataset_id = ?",
+        ("client_private_v1", "bad-policy"),
+    )
+
+    for dataset_id, owner_user_id, source_dataset_id in (
+        ("dataset-1", "other-user", "dataset-1"),
+        ("dataset-1", "user-1", "local-unbound"),
+        ("workspace-1", "user-1", "workspace-1"),
+        ("bad-policy", "user-1", "bad-policy"),
+    ):
+        with pytest.raises(SyncStoreError):
+            sync_store.transition_notes_studio_document_readiness(
+                dataset_id,
+                owner_user_id=owner_user_id,
+                expected_state="not_enrolled",
+                state="enrolling",
+                source_dataset_id=source_dataset_id,
+                source_cursor=None,
+                source_count=0,
+                source_fingerprint=None,
+            )
+
+    sync_store.transition_notes_studio_document_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        source_cursor=None,
+        source_count=0,
+        source_fingerprint=None,
+    )
+    with pytest.raises(
+        SyncStoreError,
+        match="notes_moodboard_studio_readiness_compare_and_set_failed",
+    ):
+        sync_store.transition_notes_studio_document_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="not_enrolled",
+            state="enrolling",
+            source_dataset_id="dataset-1",
+            source_cursor=None,
+            source_count=0,
+            source_fingerprint=None,
+        )
+
+
+def test_moodboard_studio_readiness_blocks_and_resumes_without_raw_source_leak(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_moodboard_dataset())
+    sync_store.transition_notes_moodboard_graph_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        moodboard_source_cursor=None,
+        moodboard_source_count=0,
+        moodboard_source_fingerprint=None,
+        placement_source_cursor=None,
+        placement_source_count=0,
+        placement_source_fingerprint=None,
+    )
+    blocked = sync_store.transition_notes_moodboard_graph_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="enrolling",
+        state="blocked",
+        source_dataset_id="dataset-1",
+        moodboard_source_cursor=None,
+        moodboard_source_count=0,
+        moodboard_source_fingerprint=None,
+        placement_source_cursor=None,
+        placement_source_count=0,
+        placement_source_fingerprint=None,
+        moodboard_reason_code="notes_moodboard_source_invalid",
+        placement_reason_code="notes_moodboard_note_source_invalid",
+    )
+    assert blocked.metadata["notes_moodboard_v1"]["resume_phase"] == "bootstrapping"
+    assert blocked.metadata["notes_moodboard_note_v1"]["resume_phase"] == "bootstrapping"
+
+    with pytest.raises(
+        SyncStoreError,
+        match="notes_moodboard_studio_readiness_transition_invalid",
+    ):
+        sync_store.transition_notes_moodboard_graph_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="blocked",
+            state="verifying",
+            source_dataset_id="dataset-1",
+            moodboard_source_cursor=None,
+            moodboard_source_count=0,
+            moodboard_source_fingerprint=hashlib.sha256(b"").hexdigest(),
+            placement_source_cursor=None,
+            placement_source_count=0,
+            placement_source_fingerprint=hashlib.sha256(b"").hexdigest(),
+        )
+
+    resumed = sync_store.transition_notes_moodboard_graph_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="blocked",
+        state="bootstrapping",
+        source_dataset_id="dataset-1",
+        moodboard_source_cursor=None,
+        moodboard_source_count=0,
+        moodboard_source_fingerprint=None,
+        placement_source_cursor=None,
+        placement_source_count=0,
+        placement_source_fingerprint=None,
+    )
+    assert resumed.metadata["notes_moodboard_v1"]["reason_code"] is None
+    assert resumed.metadata["notes_moodboard_note_v1"]["reason_code"] is None
+
+
+@pytest.mark.parametrize(
+    ("readiness_key", "raw", "error_code"),
+    [
+        ("notes_moodboard_v1", None, "notes_moodboard_studio_readiness_state_invalid"),
+        (
+            "notes_moodboard_v1",
+            {**_readiness_record(state="not_enrolled"), "private": "board name"},
+            "notes_moodboard_studio_readiness_state_invalid",
+        ),
+        (
+            "notes_moodboard_v1",
+            _readiness_record(
+                state="ready",
+                source_cursor=_MOODBOARD_CURSOR_1,
+                source_count=1,
+                source_fingerprint=None,
+            ),
+            "notes_moodboard_studio_readiness_fingerprint_invalid",
+        ),
+        (
+            "notes_moodboard_note_v1",
+            _readiness_record(
+                state="bootstrapping",
+                source_cursor=_MOODBOARD_CURSOR_1,
+                source_count=1,
+                source_fingerprint="b" * 64,
+            ),
+            "notes_moodboard_studio_readiness_cursor_invalid",
+        ),
+        (
+            "notes_studio_document_v1",
+            _readiness_record(
+                state="blocked",
+                source_fingerprint="c" * 64,
+                reason_code="studio provider prompt leaked",
+                resume_phase="bootstrapping",
+            ),
+            "notes_moodboard_studio_readiness_reason_invalid",
+        ),
+    ],
+)
+def test_moodboard_studio_readiness_parser_is_total_and_exact(
+    readiness_key: str,
+    raw: object,
+    error_code: str,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_readiness import (
+        parse_notes_moodboard_studio_readiness_record,
+    )
+
+    result = parse_notes_moodboard_studio_readiness_record(
+        raw,
+        readiness_key=readiness_key,
+    )
+
+    assert result.record is None
+    assert result.error_code == error_code
+
+
+def test_moodboard_studio_readiness_rejects_progress_regression_and_source_drift(
+    sync_store: SyncV2Store,
+) -> None:
+    sync_store.enroll_dataset(_moodboard_dataset())
+    sync_store.transition_notes_studio_document_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="not_enrolled",
+        state="enrolling",
+        source_dataset_id="dataset-1",
+        source_cursor=None,
+        source_count=0,
+        source_fingerprint=None,
+    )
+    sync_store.transition_notes_studio_document_readiness(
+        "dataset-1",
+        owner_user_id="user-1",
+        expected_state="enrolling",
+        state="bootstrapping",
+        source_dataset_id="dataset-1",
+        source_cursor=_STUDIO_CURSOR_2,
+        source_count=2,
+        source_fingerprint="c" * 64,
+    )
+
+    with pytest.raises(
+        SyncStoreError,
+        match="notes_moodboard_studio_readiness_progress_regressed",
+    ):
+        sync_store.transition_notes_studio_document_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="bootstrapping",
+            state="bootstrapping",
+            source_dataset_id="dataset-1",
+            source_cursor=_STUDIO_CURSOR_1,
+            source_count=1,
+            source_fingerprint="d" * 64,
+        )
+    with pytest.raises(
+        SyncStoreError,
+        match="notes_moodboard_studio_readiness_source_changed",
+    ):
+        sync_store.transition_notes_studio_document_readiness(
+            "dataset-1",
+            owner_user_id="user-1",
+            expected_state="bootstrapping",
+            state="bootstrapping",
+            source_dataset_id="dataset-1",
+            source_cursor=_STUDIO_CURSOR_2,
+            source_count=2,
+            source_fingerprint="d" * 64,
+        )
 
 
 def test_insert_envelope_is_idempotent_by_dataset_and_client_envelope(sync_store: SyncV2Store):

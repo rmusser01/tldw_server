@@ -382,6 +382,238 @@ def test_attachment_bootstrap_diagnostics_reject_oversized_samples(
         )
 
 
+def test_moodboard_studio_readiness_diagnostics_are_safe_and_owner_scoped(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    dataset = store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-ready",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_moodboard_v1": {
+                    "state": "blocked",
+                    "source_cursor": "00000000-0000-4000-8000-000000000101",
+                    "source_count": 1,
+                    "source_fingerprint": "a" * 64,
+                    "reason_code": "notes_moodboard_source_invalid",
+                    "resume_phase": "bootstrapping",
+                },
+                "notes_moodboard_note_v1": {
+                    "state": "ready",
+                    "source_cursor": (
+                        "00000000-0000-4000-8000-000000000101|"
+                        "00000000-0000-4000-8000-000000000201"
+                    ),
+                    "source_count": 2,
+                    "source_fingerprint": "b" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "notes_studio_document_v1": {
+                    "state": "ready",
+                    "source_cursor": "00000000-0000-4000-8000-000000000301",
+                    "source_count": 3,
+                    "source_fingerprint": "c" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "moodboard_capture_enabled": False,
+                "studio_document_capture_enabled": False,
+            },
+        )
+    )
+
+    diagnostics = service._profile_manager().notes_moodboard_studio_readiness_diagnostics(
+        user_id="user-1",
+        dataset_id=dataset.dataset_id,
+    )
+
+    assert diagnostics.moodboard.state == "blocked"
+    assert diagnostics.moodboard.source_count == 1
+    assert diagnostics.moodboard.resume_phase == "bootstrapping"
+    assert diagnostics.moodboard.cursor is not None
+    assert diagnostics.moodboard.cursor.startswith("sha256:")
+    assert diagnostics.moodboard_note.source_count == 2
+    assert diagnostics.studio_document.source_count == 3
+    assert diagnostics.moodboard_capture_enabled is False
+    assert diagnostics.studio_document_capture_enabled is False
+    serialized = repr(diagnostics)
+    assert "00000000-0000-4000-8000-000000000101" not in serialized
+    assert "00000000-0000-4000-8000-000000000201" not in serialized
+
+    with pytest.raises(SyncStoreError, match="not found or is not accessible"):
+        service._profile_manager().notes_moodboard_studio_readiness_diagnostics(
+            user_id="other-user",
+            dataset_id=dataset.dataset_id,
+        )
+
+
+def test_malformed_moodboard_studio_metadata_reports_stable_blocked_diagnostics(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    dataset = store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-ready",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_moodboard_v1": {
+                    "state": "ready",
+                    "source_cursor": "private board name",
+                    "source_count": "many",
+                    "source_fingerprint": "not-a-hash",
+                    "reason_code": "private note text",
+                    "resume_phase": None,
+                },
+            },
+        )
+    )
+
+    diagnostics = service._profile_manager().notes_moodboard_studio_readiness_diagnostics(
+        user_id="user-1",
+        dataset_id=dataset.dataset_id,
+    )
+
+    assert diagnostics.moodboard.state == "blocked"
+    assert diagnostics.moodboard.reason_code == "notes_moodboard_readiness_state_invalid"
+    assert diagnostics.moodboard.cursor is None
+    assert "private board name" not in repr(diagnostics)
+    assert "private note text" not in repr(diagnostics)
+
+
+def test_forged_ready_moodboard_studio_metadata_does_not_expose_capabilities(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    dormant = {
+        "notes.moodboard",
+        "notes.moodboard_note",
+        "notes.studio_document",
+    }
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-ready",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_moodboard_v1": {
+                    "state": "ready",
+                    "source_cursor": "00000000-0000-4000-8000-000000000101",
+                    "source_count": 1,
+                    "source_fingerprint": "a" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "notes_moodboard_note_v1": {
+                    "state": "ready",
+                    "source_cursor": (
+                        "00000000-0000-4000-8000-000000000101|"
+                        "00000000-0000-4000-8000-000000000201"
+                    ),
+                    "source_count": 1,
+                    "source_fingerprint": "b" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "notes_studio_document_v1": {
+                    "state": "ready",
+                    "source_cursor": "00000000-0000-4000-8000-000000000301",
+                    "source_count": 1,
+                    "source_fingerprint": "c" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "moodboard_capture_enabled": False,
+                "studio_document_capture_enabled": False,
+            },
+        )
+    )
+
+    profile = service.profile(user_id="user-1")
+
+    assert dormant.isdisjoint(profile.capabilities.supported_domains)
+    assert dormant.isdisjoint(profile.capabilities.operations)
+    assert dormant.isdisjoint(profile.capabilities.domain_schemas)
+    assert dormant.isdisjoint(profile.capabilities.supported_adapter_versions)
+    assert dormant.isdisjoint(profile.capabilities.writable_adapter_versions)
+
+
+def test_public_enrollment_and_manifest_redact_moodboard_studio_readiness(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    internal_metadata = {
+        "notes_moodboard_v1": {
+            "state": "ready",
+            "source_cursor": "00000000-0000-4000-8000-000000000101",
+            "source_count": 1,
+            "source_fingerprint": "a" * 64,
+            "reason_code": None,
+            "resume_phase": None,
+        },
+        "notes_moodboard_note_v1": {
+            "state": "ready",
+            "source_cursor": (
+                "00000000-0000-4000-8000-000000000101|"
+                "00000000-0000-4000-8000-000000000201"
+            ),
+            "source_count": 1,
+            "source_fingerprint": "b" * 64,
+            "reason_code": None,
+            "resume_phase": None,
+        },
+        "notes_studio_document_v1": {
+            "state": "blocked",
+            "source_cursor": "00000000-0000-4000-8000-000000000301",
+            "source_count": 1,
+            "source_fingerprint": "c" * 64,
+            "reason_code": "notes_studio_document_source_invalid",
+            "resume_phase": "bootstrapping",
+        },
+        "moodboard_capture_enabled": False,
+        "studio_document_capture_enabled": False,
+    }
+    store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-internal-moodboard-studio-readiness",
+            owner_user_id="user-1",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={"label": "before", **internal_metadata},
+        )
+    )
+
+    enrollment = service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-internal-moodboard-studio-readiness",
+        metadata={"label": "after"},
+    )
+    manifest = service.restore_manifest(user_id="user-1")
+    stored = store.get_dataset(
+        "dataset-internal-moodboard-studio-readiness",
+        owner_user_id="user-1",
+    )
+
+    assert enrollment.dataset.metadata == {"label": "after"}
+    assert manifest.datasets[0].metadata == {"label": "after"}
+    assert stored is not None
+    assert stored.metadata == {"label": "after", **internal_metadata}
+
+
 def test_bootstrap_creates_default_dataset_and_is_idempotent(tmp_path: Path) -> None:
     service, store = _service(tmp_path)
 

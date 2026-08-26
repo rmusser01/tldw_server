@@ -118,6 +118,10 @@ from .mutation_group_validation import (
     mutation_group_plan_hash,
     validate_stored_mutation_group,
 )
+from .notes_moodboard_studio_readiness import (
+    NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
+    redact_notes_moodboard_studio_server_metadata,
+)
 from .notes_task_contract import (
     NotesTaskV1Payload,
     notes_task_activity_object_hash,
@@ -335,6 +339,15 @@ def _key_recovery_metadata_string(
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return None
+
+
+def _redact_private_sync_server_metadata(
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    """Remove private server readiness metadata from public dataset views."""
+    return redact_notes_moodboard_studio_server_metadata(
+        redact_notes_task_server_metadata(metadata)
+    )
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -2013,6 +2026,7 @@ class SyncV2Service:
             "notes_attachment_v2",
             "default_personal",
             "client_family",
+            *NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
             *NOTES_TASK_SERVER_METADATA_KEYS,
         }
         if (
@@ -2100,7 +2114,7 @@ class SyncV2Service:
         return SyncDatasetEnrollment(
             dataset=replace(
                 dataset,
-                metadata=redact_notes_task_server_metadata(dataset.metadata),
+                metadata=_redact_private_sync_server_metadata(dataset.metadata),
             ),
             cursors=dict.fromkeys(dataset.domains, "0"),
             key_setup_required=False,
@@ -8203,7 +8217,7 @@ class SyncV2Service:
         metadata = (
             {}
             if dataset.encryption_policy == "client_private_v1"
-            else redact_notes_task_server_metadata(dataset.metadata)
+            else _redact_private_sync_server_metadata(dataset.metadata)
         )
         return SyncRestoreManifestDataset(
             dataset_id=dataset.dataset_id,
