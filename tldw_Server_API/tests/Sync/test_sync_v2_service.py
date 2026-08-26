@@ -3,13 +3,17 @@ from __future__ import annotations
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from threading import Barrier, Event, Lock, get_ident
 from typing import cast
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
+    SyncCapabilitiesResponse,
+    SyncProfileResponse,
+)
 from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
 from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -40,7 +44,10 @@ from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
 from tldw_Server_API.app.core.Sync.v2.models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     M1_SYNC_DOMAINS,
+    NOTES_MOODBOARD_STUDIO_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    SYNC_V2_SUPPORTED_DOMAINS,
+    SYNC_V2_SUPPORTED_OPERATIONS,
     EncryptionPolicy,
     SyncConflict,
     SyncConflictCreate,
@@ -850,6 +857,109 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
     assert capabilities.max_attachment_bytes == 4096
     assert capabilities.encryption_policies == ["server_trusted_v1"]
     assert capabilities.supports_attachments is False
+
+
+def test_configured_moodboard_studio_domains_stay_private_in_capabilities(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+) -> None:
+    dormant = set(NOTES_MOODBOARD_STUDIO_DOMAINS)
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        settings=SyncV2Settings(
+            supported_domains=[
+                *SYNC_V2_SUPPORTED_DOMAINS,
+                *NOTES_MOODBOARD_STUDIO_DOMAINS,
+            ],
+            operations={
+                **{
+                    domain: list(operations)
+                    for domain, operations in SYNC_V2_SUPPORTED_OPERATIONS.items()
+                },
+                **{
+                    domain: ["upsert", "tombstone"]
+                    for domain in NOTES_MOODBOARD_STUDIO_DOMAINS
+                },
+            },
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    sync_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-forged-moodboard-studio",
+            owner_user_id="user-1",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_moodboard_v1": {
+                    "state": "ready",
+                    "source_cursor": "00000000-0000-4000-8000-000000000101",
+                    "source_count": 1,
+                    "source_fingerprint": "a" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "notes_moodboard_note_v1": {
+                    "state": "ready",
+                    "source_cursor": (
+                        "00000000-0000-4000-8000-000000000101|"
+                        "00000000-0000-4000-8000-000000000201"
+                    ),
+                    "source_count": 1,
+                    "source_fingerprint": "b" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "notes_studio_document_v1": {
+                    "state": "ready",
+                    "source_cursor": "00000000-0000-4000-8000-000000000301",
+                    "source_count": 1,
+                    "source_fingerprint": "c" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "moodboard_capture_enabled": True,
+                "studio_document_capture_enabled": True,
+            },
+        )
+    )
+
+    core_capabilities = service.capabilities()
+    scoped_capabilities = service.capabilities(
+        user_id="user-1",
+        dataset_id="dataset-forged-moodboard-studio",
+    )
+    enrollment = service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-forged-moodboard-studio",
+    )
+    profile = service.profile(user_id="user-1")
+    api_capabilities = SyncCapabilitiesResponse(**asdict(core_capabilities))
+    api_profile = SyncProfileResponse(**asdict(profile))
+
+    for capabilities in (
+        core_capabilities,
+        scoped_capabilities,
+        profile.capabilities,
+        api_capabilities,
+        api_profile.capabilities,
+    ):
+        domains = (
+            capabilities.domains
+            if isinstance(capabilities, SyncCapabilitiesResponse)
+            else capabilities.supported_domains
+        )
+        assert dormant.isdisjoint(domains)
+        assert dormant.isdisjoint(capabilities.operations)
+        assert dormant.isdisjoint(capabilities.domain_schemas)
+        assert dormant.isdisjoint(capabilities.supported_adapter_versions)
+        assert dormant.isdisjoint(capabilities.writable_adapter_versions)
+
+    assert dormant.isdisjoint(enrollment.dataset.domains)
 
 
 def test_capabilities_warn_when_client_private_policy_is_advertised(

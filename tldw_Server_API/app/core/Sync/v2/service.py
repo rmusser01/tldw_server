@@ -49,6 +49,7 @@ from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     NOTES_LINK_DOMAINS,
+    NOTES_MOODBOARD_STUDIO_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_TASK_SYNC_DOMAINS,
     NOTES_TASK_SYNC_OPERATIONS,
@@ -1142,15 +1143,19 @@ class SyncV2Service:
                 getattr(attachment_adapter, "v2_writes_enabled", False)
             )
         notes_task_ready = self._notes_task_domains_ready(dataset)
+        private_dormant_domains = {
+            *NOTES_MOODBOARD_STUDIO_DOMAINS,
+            *NOTES_TASK_SYNC_DOMAINS,
+        }
         supported_domains = [
             domain
             for domain in self.settings.supported_domains
-            if domain not in NOTES_TASK_SYNC_DOMAINS
+            if domain not in private_dormant_domains
         ]
         operations = {
             domain: list(domain_operations)
             for domain, domain_operations in self.settings.operations.items()
-            if domain not in NOTES_TASK_SYNC_DOMAINS
+            if domain not in private_dormant_domains
         }
         if notes_task_ready:
             supported_domains.extend(NOTES_TASK_SYNC_DOMAINS)
