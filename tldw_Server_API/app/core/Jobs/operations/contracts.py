@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -74,6 +76,83 @@ class IdempotentOperationConflict(RuntimeError):
 
 class IdempotentOperationUnavailableError(RuntimeError):
     """A receipt-to-Job correlation cannot be proven safe."""
+
+
+class TerminalOperationResultPatchOutcome(str, Enum):
+    """Closed outcomes for an exact terminal operation-result patch."""
+
+    APPLIED = "applied"
+    IDEMPOTENT = "idempotent"
+    MISSING = "missing"
+    CONFLICT = "conflict"
+
+
+def terminal_operation_result_fingerprint(result: dict[str, Any]) -> str:
+    """Return the canonical SHA-256 fingerprint for a terminal result object."""
+
+    if not isinstance(result, dict):
+        raise ValueError("terminal operation result must be an object")
+    try:
+        encoded = json.dumps(
+            result,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("terminal operation result must be JSON-serializable") from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True)
+class TerminalOperationResultPatchCommand:
+    """Exact correlation and compare-and-set data for terminal result repair."""
+
+    job_uuid: str
+    owner_user_id: str
+    domain: str
+    queue: str
+    job_type: str
+    operation_scope: str
+    allowed_statuses: tuple[str, ...]
+    expected_result_fingerprint: str
+    replacement_result: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        """Reject malformed correlation and defensively copy mutable result data."""
+
+        for field_name in (
+            "job_uuid",
+            "owner_user_id",
+            "domain",
+            "queue",
+            "job_type",
+            "operation_scope",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value or len(value) > 200:
+                raise ValueError(f"{field_name} must be between 1 and 200 characters")
+        statuses = tuple(self.allowed_statuses)
+        if not statuses or len(statuses) != len(set(statuses)):
+            raise ValueError("allowed_statuses must contain unique terminal statuses")
+        if any(
+            status not in {"completed", "failed", "cancelled", "quarantined"}
+            for status in statuses
+        ):
+            raise ValueError("allowed_statuses contains a nonterminal status")
+        fingerprint = self.expected_result_fingerprint
+        if (
+            not isinstance(fingerprint, str)
+            or len(fingerprint) != 64
+            or any(character not in "0123456789abcdef" for character in fingerprint)
+        ):
+            raise ValueError(
+                "expected_result_fingerprint must be a lowercase SHA-256 digest"
+            )
+        terminal_operation_result_fingerprint(self.replacement_result)
+        object.__setattr__(self, "allowed_statuses", statuses)
+        object.__setattr__(self, "replacement_result", copy.deepcopy(self.replacement_result))
 
 
 @dataclass(frozen=True)

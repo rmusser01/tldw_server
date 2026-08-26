@@ -80,12 +80,17 @@ from .operations.contracts import (
     OperationOutcome,
     ReleaseJobCommand,
     RenewLeaseCommand,
+    TerminalOperationResultPatchCommand,
+    TerminalOperationResultPatchOutcome,
 )
 from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import admit_idempotent_operation as _postgres_admit_idempotent_operation
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
 from .operations.postgres import (
     get_job_or_archived_by_uuid as _postgres_get_job_or_archived_by_uuid,
+)
+from .operations.postgres import (
+    patch_terminal_operation_result as _postgres_patch_terminal_operation_result,
 )
 from .operations.postgres import release_job as _postgres_release_job
 from .operations.postgres import renew_lease as _postgres_renew_lease
@@ -96,6 +101,9 @@ from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idemp
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
 from .operations.sqlite import (
     get_job_or_archived_by_uuid as _sqlite_get_job_or_archived_by_uuid,
+)
+from .operations.sqlite import (
+    patch_terminal_operation_result as _sqlite_patch_terminal_operation_result,
 )
 from .operations.sqlite import release_job as _sqlite_release_job
 from .operations.sqlite import renew_lease as _sqlite_renew_lease
@@ -3980,6 +3988,68 @@ class JobManager:
             normalized = self._normalize_active_job_row(job)
             normalized["archived"] = False
             return normalized
+        finally:
+            conn.close()
+
+    def patch_terminal_operation_result(
+        self,
+        command: TerminalOperationResultPatchCommand,
+    ) -> TerminalOperationResultPatchOutcome:
+        """Replace one exact terminal operation result across active/archive storage."""
+
+        try:
+            replacement_json = json.dumps(
+                command.replacement_result,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Terminal operation result must be JSON-serializable"
+            ) from exc
+        max_bytes = int(
+            os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576"
+        )
+        result_bytes = len(replacement_json.encode("utf-8"))
+        if result_bytes > max_bytes:
+            raise ValueError(
+                f"Terminal operation result too large: {result_bytes} bytes > limit {max_bytes}"
+            )
+        stored_replacement = self._maybe_encrypt_json(
+            command.replacement_result,
+            command.domain,
+        )
+        if not isinstance(stored_replacement, dict):
+            raise ValueError("Terminal operation result must be an object")
+
+        def decode_result(raw_result: Any, compressed_result: Any) -> Any:
+            parsed = self._parse_json_value(raw_result)
+            if parsed is None and compressed_result is not None:
+                parsed = self._decode_archive_blob(compressed_result)
+            return self._maybe_decrypt_json(
+                parsed,
+                fail_on_error=True,
+                field_name="terminal operation result",
+            )
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                return _postgres_patch_terminal_operation_result(
+                    conn,
+                    self._pg_cursor,
+                    command=command,
+                    stored_replacement=stored_replacement,
+                    decode_result=decode_result,
+                )
+            return _sqlite_patch_terminal_operation_result(
+                conn,
+                command=command,
+                stored_replacement=stored_replacement,
+                decode_result=decode_result,
+            )
         finally:
             conn.close()
 

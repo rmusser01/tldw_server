@@ -96,33 +96,33 @@ Commit: `feat(sharing): define canonical clone operations`
 - Consumes: exact Job UUID, recipient owner, domain, queue, job type, allowed terminal statuses, expected result fingerprint, and bounded replacement result.
 - Produces: `JobManager.patch_terminal_operation_result(command: TerminalOperationResultPatchCommand) -> TerminalOperationResultPatchOutcome` with `APPLIED`, `IDEMPOTENT`, `MISSING`, and `CONFLICT`; `WorkerSDK.run(..., on_failed: FailureCallback | None = None)`.
 
-- [ ] **Step 1: Write failing SQLite/PostgreSQL CAS tests**
+- [x] **Step 1: Write failing SQLite/PostgreSQL CAS tests**
 
 Verify active and archived updates, `updated_at` advancement, idempotent replay, duplicate active/archive authority rejection, wrong owner/scope/status/result rejection, concurrent winner behavior, JSON size enforcement, and no mutation on malformed correlation.
 
-- [ ] **Step 2: Write failing WorkerSDK callback tests**
+- [x] **Step 2: Write failing WorkerSDK callback tests**
 
 Prove `on_failed(job, exc)` runs after and only after a durable terminal failure, is not called for retry scheduling or rejected terminalization, is bounded/isolated like completion callbacks, and does not suppress cancellation.
 
-- [ ] **Step 3: Run the new tests red**
+- [x] **Step 3: Run the new tests red**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_terminal_operation_result_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_terminal_operation_result_postgres.py tldw_Server_API/tests/Jobs/test_worker_sdk.py`
 
 Expected: missing terminal patch contracts/backends and unsupported `on_failed` argument.
 
-- [ ] **Step 4: Implement backend-neutral terminal patching**
+- [x] **Step 4: Implement backend-neutral terminal patching**
 
 Perform one transactionally consistent active/archive authority read, require one exact correlation and terminal status, compare the expected persisted result digest, then replace only that exact row. Keep backend SQL in the backend modules and expose one JobManager delegation method.
 
-- [ ] **Step 5: Add the post-failure callback without changing default WorkerSDK behavior**
+- [x] **Step 5: Add the post-failure callback without changing default WorkerSDK behavior**
 
 Make failure finalization awaitable, inspect the exact owner-scoped Job after `fail_job`, invoke `on_failed` only when the durable state is terminal, and retain existing behavior when no callback is supplied.
 
-- [ ] **Step 6: Run parity and WorkerSDK tests green**
+- [x] **Step 6: Run parity and WorkerSDK tests green**
 
 Run the Step 3 command. PostgreSQL may skip only when its canonical fixture explicitly reports unavailable; record that condition.
 
-- [ ] **Step 7: Commit the Jobs integration primitive**
+- [x] **Step 7: Commit the Jobs integration primitive**
 
 Commit: `feat(jobs): add scoped terminal operation updates`
 
