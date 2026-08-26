@@ -34,25 +34,25 @@
 **Goal:** Correct Research initialization, Prompt responsive behavior, Settings form ownership, and Kanban gate drift.
 **Success Criteria:** Focused unit/component tests and affected Playwright cases pass without speculative CSS or production-only test hooks.
 **Tests:** Research hook/reconciliation tests, Prompt geometry test, Settings tests, all-pages Kanban recovery.
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 3: Deterministic Chat and Real-Server Gate
 **Goal:** Prove character/persona continuity through a real backend and reduce the legacy 17-case suite to unique, honest coverage.
 **Success Criteria:** Deterministic generation wiring works, no-provider behavior is truthful, and every legacy case is mapped before deletion or repair.
 **Tests:** Character/Persona focused real-server cases, model readiness tests, maintained real-server gate.
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 4: Complete Tier-1–3 UAT Loop
 **Goal:** Execute every listed Tier-1–3 test with live services available and remediate each confirmed defect.
 **Success Criteria:** Exact denominators, mock inventory, evidence classifications, child tasks, fixes, and complete affected-tier reruns are recorded.
 **Tests:** Complete `tier-1`, `tier-2`, and `tier-3` projects plus route sweep and dedicated Research/Chat suites.
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 5: Current-Dev Certification and Closeout
 **Goal:** Reconcile current `origin/dev`, repeat final gates, and finalize Backlog records.
 **Success Criteria:** Final evidence names the exact synchronized commit with no unexplained failure, hang, page error, or false outage popup.
 **Tests:** Focused regressions, full tiers, typecheck, touched-scope lint, build when required, and applicable Bandit.
-**Status:** Not Started
+**Status:** Complete
 
 ## File Structure
 
@@ -561,19 +561,19 @@ Commit: `fix(chat): prove tracked assistant continuity on live backend`
 - Produces: `resolveRunnableChatModel(metadata): { id: string; provider: string } | null` shared by retained provider-dependent cases.
 - Consumes: deterministic custom-OpenAI provider configured in Task 7.
 
-- [ ] **Step 1: Extract and map all 17 tests before editing the suite**
+- [x] **Step 1: Extract and map all 17 tests before editing the suite**
 
 Use `rg -n '^  test\(' apps/test-utils/real-server-workflows.ts` and inspect each title/body. The coverage-map document must contain exactly 17 source rows and one of three decisions: `delete-redundant`, `move-to-tier`, or `retain-live-gate`.
 
-- [ ] **Step 2: Add a red guard for map completeness and skip placement**
+- [x] **Step 2: Add a red guard for map completeness and skip placement**
 
 The guard test reads the map and source titles, asserts every legacy title appears exactly once, rejects `test.skip` after the first mutation marker in retained tests, and rejects empty `catch` blocks around assertions.
 
-- [ ] **Step 3: Delete redundant cases and move unique behavior**
+- [x] **Step 3: Delete redundant cases and move unique behavior**
 
 Delete `delete-redundant` cases only after their mapped maintained test is named and passing. Move `move-to-tier` behavior into the named Tier-1–3 file. Keep only unique cross-surface or extension/WebUI parity behavior in `real-server-workflows.ts`.
 
-- [ ] **Step 4: Centralize current first-run and model readiness helpers**
+- [x] **Step 4: Centralize current first-run and model readiness helpers**
 
 ```ts
 const resolveRunnableChatModel = (items) =>
@@ -584,11 +584,11 @@ const resolveRunnableChatModel = (items) =>
 
 Retained provider-dependent cases call this before mutation and skip only when it returns null. CRUD/navigation cases do not consult model readiness.
 
-- [ ] **Step 5: Update current observable contracts**
+- [x] **Step 5: Update current observable contracts**
 
 Use the shared intentional-tour dismissal, exact action roles, current page identities, and current cleanup payload/identifier shapes. Replace breadcrumb-satisfiable text selectors with scoped roles or stable test IDs.
 
-- [ ] **Step 6: Run the reduced gate against real services and commit**
+- [x] **Step 6: Run the reduced gate against real services and commit**
 
 Run WebUI and extension retained gates, assert every remaining skip is counted with a pre-mutation reason, and run the map guard.
 
@@ -612,7 +612,7 @@ Commit: `test(e2e): reduce real-server workflows to honest coverage`
 - Produces: disposable profile with backend URL, WebUI URL, mock URL, fake API key, isolated users/media/notes/evaluation database paths, and log/report paths.
 - Produces: JSON/Markdown inventory entries `{ project, file, line, matcher, kind: "intercepted" | "live" }`.
 
-- [ ] **Step 1: Test profile isolation, process teardown, and mock inventory**
+- [x] **Step 1: Test profile isolation, process teardown, and mock inventory**
 
 ```ts
 it("places every mutable backend path under the run directory", () => {
@@ -626,11 +626,11 @@ it("marks page.route API fulfillment as intercepted coverage", () => {
 })
 ```
 
-- [ ] **Step 2: Run runner-unit tests and observe red**
+- [x] **Step 2: Run runner-unit tests and observe red**
 
 Run: `cd apps/tldw-frontend && bunx vitest run scripts/__tests__/live-tier-uat.test.ts`
 
-- [ ] **Step 3: Implement disposable service orchestration**
+- [x] **Step 3: Implement disposable service orchestration**
 
 Reuse `createRuntimeProfile()` and `buildBackendEnv()` from `scripts/onboarding-uat/profile.mjs` so the tier runner inherits the established isolated config, users database, per-user database roots, fixture allowlist, synthetic credentials, and secret-safe base environment. Start `.venv/bin/python -m mock_openai.server` from `mock_openai_server/` with a chosen free port, then `.venv/bin/python -m uvicorn tldw_Server_API.app.main:app` from the repository root with the profile environment, then the evidence-backed WebUI dev command. Health-check each service before Playwright and terminate only spawned process groups in reverse order.
 
@@ -646,19 +646,19 @@ Extend the environment returned by `buildBackendEnv()` with the deterministic cu
 
 The runner passes `buildBackendEnv()`'s single-user API key to Playwright; it must not introduce a second hard-coded credential that disagrees with the isolated backend profile.
 
-- [ ] **Step 4: Implement complete list/run phases**
+- [x] **Step 4: Implement complete list/run phases**
 
 For each project, run `playwright test --list --project=<project>` first and record the denominator. Then run the complete project with JSON and line reporters, `TLDW_E2E_ALLOW_OFFLINE=0`, explicit URLs, and `--workers=1`. Do not pass `--grep` in a certification run.
 
-- [ ] **Step 5: Generate mock/interception inventory and result report**
+- [x] **Step 5: Generate mock/interception inventory and result report**
 
 Use the TypeScript parser to find `page.route`, `context.route`, and `route.fulfill` in each listed Tier source file. Report intercepted cases separately and flag critical behavior with no live counterpart for manual classification.
 
-- [ ] **Step 6: Verify the runner on one bounded Tier-1 case, then list all tiers**
+- [x] **Step 6: Verify the runner on one bounded Tier-1 case, then list all tiers**
 
 Run runner unit tests, a non-certifying Tier-1 smoke invocation, and complete `--list` for all three projects. Confirm cleanup leaves no listening service on the allocated ports.
 
-- [ ] **Step 7: Commit the runner**
+- [x] **Step 7: Commit the runner**
 
 Commit: `test(e2e): add isolated live tier UAT runner`
 
@@ -675,33 +675,33 @@ Commit: `test(e2e): add isolated live tier UAT runner`
 - Consumes: Tasks 1–9, the isolated runner, exact Playwright denominators, and current `origin/dev`.
 - Produces: final evidence bound to one exact synchronized commit and finalized Backlog summaries.
 
-- [ ] **Step 1: Run complete Tier-1, Tier-2, and Tier-3 inventories**
+- [x] **Step 1: Run complete Tier-1, Tier-2, and Tier-3 inventories**
 
 Run: `cd apps/tldw-frontend && bun run uat:live-tiers -- --projects=tier-1,tier-2,tier-3 --workers=1`
 
 Record for each project: listed, passed, failed, skipped, intercepted, live-evidence cases, elapsed time, service health before/after, and artifact paths.
 
-- [ ] **Step 2: Classify every non-pass exactly once**
+- [x] **Step 2: Classify every non-pass exactly once**
 
 Use `product defect`, `gate drift`, `optional capability unavailable`, or `environment defect`. Attach assertion, console/page error, failed request, backend correlation, and minimal reproduction. Ambiguous outcomes remain failures.
 
-- [ ] **Step 3: Create and execute one child task per confirmed new defect**
+- [x] **Step 3: Create and execute one child task per confirmed new defect**
 
 Search Backlog first. Create a child under `TASK-13124`, add the plan document, write a failing behavior regression, implement the smallest root-cause fix, run the focused test and adjacent suite, commit, and rerun the complete affected tier.
 
-- [ ] **Step 4: Repeat until affected complete tiers are clean**
+- [x] **Step 4: Repeat until affected complete tiers are clean**
 
 Do not stop at focused green tests. Update exact rerun denominators and justified capability skips in the result document and child task notes.
 
-- [ ] **Step 5: Synchronize with then-current `origin/dev`**
+- [x] **Step 5: Synchronize with then-current `origin/dev`**
 
 Fetch, record the new `origin/dev` hash, inspect incoming changes, and rebase or merge without discarding either workstream. Resolve conflicts by preserving both intended behaviors. Run every focused regression after synchronization.
 
-- [ ] **Step 6: Run final certification gates**
+- [x] **Step 6: Run final certification gates**
 
 Run complete Tier-1–3 again, the all-pages route sweep, Research real-backend suite, Chat Cockpit real-backend suite, reduced real-server gate, runtime probe, frontend typecheck, touched-scope ESLint, `git diff --check`, and an optimized build if Next/bundler configuration changed. Run Bandit on each touched Python scope or record the frontend-only skip.
 
-- [ ] **Step 7: Finalize tasks and commit evidence**
+- [x] **Step 7: Finalize tasks and commit evidence**
 
 Mark acceptance criteria only from recorded evidence. Add modified files, red/green commands, final results, justified skips, exact commit, and final summaries to every child and the parent through Backlog CLI/MCP.
 
