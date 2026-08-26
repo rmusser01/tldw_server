@@ -6,9 +6,9 @@ Date: 2026-08-25
 
 The complete Tier 1, Tier 2, and Tier 3 Playwright inventory passed against an isolated real FastAPI backend and the repository's deterministic OpenAI-compatible mock service.
 
-- Run ID: `task13124-tier123-commit-81a36bef`
-- Tested commit: `81a36bef786eed82540b23e59a4d6c485db51321`
-- Command: `bun run uat:live-tiers -- --run-id=task13124-tier123-commit-81a36bef`
+- Run ID: `task13124-pr2822-review-162e8a4b`
+- Tested commit: `162e8a4bb2a8ce08d83c3e30357b3599c6dd14b7`
+- Command: `bun run uat:live-tiers -- --run-id=task13124-pr2822-review-162e8a4b`
 - Execution: one worker, zero retries, offline fallback disabled, skips rejected
 - Health: healthy before and after the tests; all spawned services stopped
 - Cleanup: disposable backend profile and isolated Next build directory removed
@@ -26,10 +26,10 @@ The intercepted classification is test-level: the report's route table contains 
 
 Retained evidence:
 
-- `apps/tldw-frontend/test-results/live-tier-uat/task13124-tier123-commit-81a36bef/summary.json`
-- `apps/tldw-frontend/test-results/live-tier-uat/task13124-tier123-commit-81a36bef/report.md`
-- `apps/tldw-frontend/test-results/live-tier-uat/task13124-tier123-commit-81a36bef/playwright-results.json`
-- `apps/tldw-frontend/test-results/live-tier-uat/task13124-tier123-commit-81a36bef/backend.log`
+- `apps/tldw-frontend/test-results/live-tier-uat/task13124-pr2822-review-162e8a4b/summary.json`
+- `apps/tldw-frontend/test-results/live-tier-uat/task13124-pr2822-review-162e8a4b/report.md`
+- `apps/tldw-frontend/test-results/live-tier-uat/task13124-pr2822-review-162e8a4b/playwright-results.json`
+- `apps/tldw-frontend/test-results/live-tier-uat/task13124-pr2822-review-162e8a4b/backend.log`
 
 ## Defect and improvement loop
 
@@ -52,7 +52,7 @@ The 17-case legacy real-server suite was reviewed before reduction. Four unique 
 
 ## Verification gates
 
-- Frontend touched regression suite: 20 files, 226 tests passed.
+- Frontend touched regression suite: 34 files, 522 tests passed.
 - Runner lifecycle suites after final cleanup hardening: 65 tests passed; the live-tier suite alone passed 30/30 after the final type fixture correction.
 - Backend/mocked-provider focused suite: 178 passed, 2 environment-dependent skips.
 - Production build: passed with `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000`. Existing broad documentation-trace and stale Browserslist warnings remain non-blocking; two trace-copy warnings named stale extension-test browser profiles that had no open owner and were removed by exact path afterward.
@@ -64,3 +64,5 @@ The 17-case legacy real-server suite was reviewed before reduction. Four unique 
 ## Diagnostic history
 
 Earlier full runs were deliberately not certified until the evidence was trustworthy. They exposed and drove fixes for intercepted-helper undercounting, stale/missing Playwright JSON acceptance, incomplete teardown, non-isolated mutable paths, host provider egress, signal interruption leaks, deterministic analysis generation, and the Sources duplicate-locator failure. The final exact-commit run supersedes those diagnostic attempts.
+
+The superseding PR-review run also includes fixes for connection-hysteresis outage confirmation, version-only media-analysis persistence verification, removed persisted model fallback, phase-specific test registration, and an order-dependent Research Workspace controller assertion. All 21 review threads were answered and resolved before the final merge gate.
