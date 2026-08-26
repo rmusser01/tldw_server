@@ -147,8 +147,6 @@ class SyncDormantMoodboardStudioReadinessDiagnostics:
     moodboard: SyncDormantMoodboardStudioDomainReadiness
     moodboard_note: SyncDormantMoodboardStudioDomainReadiness
     studio_document: SyncDormantMoodboardStudioDomainReadiness
-    moodboard_capture_enabled: bool = False
-    studio_document_capture_enabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,12 +440,6 @@ class SyncV2ProfileManager:
                 ),
                 readiness_key="notes_studio_document_v1",
                 domain="notes_studio_document",
-            ),
-            moodboard_capture_enabled=(
-                dataset.metadata.get("moodboard_capture_enabled") is True
-            ),
-            studio_document_capture_enabled=(
-                dataset.metadata.get("studio_document_capture_enabled") is True
             ),
         )
 

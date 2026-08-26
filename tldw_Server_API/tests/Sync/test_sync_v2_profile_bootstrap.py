@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -441,8 +441,9 @@ def test_moodboard_studio_readiness_diagnostics_are_safe_and_owner_scoped(
     assert diagnostics.moodboard.cursor.startswith("sha256:")
     assert diagnostics.moodboard_note.source_count == 2
     assert diagnostics.studio_document.source_count == 3
-    assert diagnostics.moodboard_capture_enabled is False
-    assert diagnostics.studio_document_capture_enabled is False
+    diagnostic_dump = asdict(diagnostics)
+    assert "moodboard_capture_enabled" not in diagnostic_dump
+    assert "studio_document_capture_enabled" not in diagnostic_dump
     serialized = repr(diagnostics)
     assert "00000000-0000-4000-8000-000000000101" not in serialized
     assert "00000000-0000-4000-8000-000000000201" not in serialized
@@ -490,6 +491,80 @@ def test_malformed_moodboard_studio_metadata_reports_stable_blocked_diagnostics(
     assert diagnostics.moodboard.cursor is None
     assert "private board name" not in repr(diagnostics)
     assert "private note text" not in repr(diagnostics)
+
+
+def test_forged_capture_enabled_moodboard_studio_diagnostics_do_not_leak_state(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    dataset = store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-forged-current",
+            owner_user_id="user-1",
+            scope_type="personal",
+            encryption_policy="server_trusted_v1",
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_moodboard_v1": {
+                    "state": "ready",
+                    "source_cursor": "private board name",
+                    "source_count": 1,
+                    "source_fingerprint": "a" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "notes_moodboard_note_v1": {
+                    "state": "ready",
+                    "source_cursor": "private board name|private note title",
+                    "source_count": 1,
+                    "source_fingerprint": "b" * 64,
+                    "reason_code": None,
+                    "resume_phase": None,
+                },
+                "notes_studio_document_v1": {
+                    "state": "blocked",
+                    "source_cursor": "private Studio prompt",
+                    "source_count": 1,
+                    "source_fingerprint": "c" * 64,
+                    "reason_code": "private provider data",
+                    "resume_phase": "bootstrapping",
+                },
+                "moodboard_capture_enabled": True,
+                "studio_document_capture_enabled": True,
+            },
+        )
+    )
+
+    diagnostics = service._profile_manager().notes_moodboard_studio_readiness_diagnostics(
+        user_id="user-1",
+        dataset_id=dataset.dataset_id,
+    )
+
+    diagnostic_dump = asdict(diagnostics)
+    assert "moodboard_capture_enabled" not in diagnostic_dump
+    assert "studio_document_capture_enabled" not in diagnostic_dump
+    assert not hasattr(diagnostics, "moodboard_capture_enabled")
+    assert not hasattr(diagnostics, "studio_document_capture_enabled")
+    assert diagnostics.moodboard.state == "blocked"
+    assert diagnostics.moodboard.reason_code == "notes_moodboard_readiness_state_invalid"
+    assert diagnostics.moodboard_note.state == "blocked"
+    assert (
+        diagnostics.moodboard_note.reason_code
+        == "notes_moodboard_note_readiness_state_invalid"
+    )
+    assert diagnostics.studio_document.state == "blocked"
+    assert (
+        diagnostics.studio_document.reason_code
+        == "notes_studio_document_readiness_state_invalid"
+    )
+    serialized = repr(diagnostics)
+    assert "True" not in serialized
+    assert "private board name" not in serialized
+    assert "private note title" not in serialized
+    assert "private Studio prompt" not in serialized
+    assert "private provider data" not in serialized
 
 
 def test_forged_ready_moodboard_studio_metadata_does_not_expose_capabilities(
