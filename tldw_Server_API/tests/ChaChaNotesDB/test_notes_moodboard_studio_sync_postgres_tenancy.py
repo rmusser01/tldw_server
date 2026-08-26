@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import re
@@ -20,6 +21,12 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     SchemaError,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    diagram_render_hash,
+    notes_studio_document_object_hash,
+    parse_notes_studio_document_v1,
+    studio_result_hash,
 )
 
 pytestmark = pytest.mark.integration
@@ -52,13 +59,17 @@ def test_postgres_v61_migration_contract_is_bounded_and_version_last() -> None:
     begin_source = inspect.getsource(
         CharactersRAGDB._begin_notes_moodboard_studio_v61_postgres_transaction
     )
+    configure_source = inspect.getsource(
+        CharactersRAGDB._configure_notes_moodboard_studio_v61_postgres_transaction
+    )
     schema_source = inspect.getsource(
         CharactersRAGDB._notes_moodboard_studio_v61_postgres_schema_sql
     )
+    initializer_source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
 
     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 61
-    assert "lock_timeout" in begin_source
-    assert "statement_timeout" in begin_source
+    assert "lock_timeout" in configure_source
+    assert "statement_timeout" in configure_source
     assert "lock=True" in begin_source
     assert "chacha_schema_migration_progress" in schema_source
     assert "_NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE" in source
@@ -71,6 +82,9 @@ def test_postgres_v61_migration_contract_is_bounded_and_version_last() -> None:
     assert source.index(
         'verification_phase = f"aggregate_verification:{source_phase}"'
     ) < source.index('if not begin_phase("RLS phase")')
+    assert initializer_source.index(
+        "_configure_notes_moodboard_studio_v61_postgres_transaction"
+    ) < initializer_source.index("_get_schema_version_postgres(conn, lock=True)")
 
 
 def test_fresh_postgres_schema_is_exact_v61_with_forced_rls(
@@ -97,6 +111,38 @@ def test_fresh_postgres_schema_is_exact_v61_with_forced_rls(
         backend.get_pool().close_all()
 
 
+def test_postgres_initializer_sets_timeouts_before_actual_first_version_lock(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[str, str]] = []
+    original = CharactersRAGDB._get_schema_version_postgres
+
+    def observe_lock(self: CharactersRAGDB, conn: Any, *, lock: bool = False) -> int:
+        if lock:
+            settings = self.backend.execute(
+                "SELECT current_setting('lock_timeout') AS lock_timeout,"
+                "current_setting('statement_timeout') AS statement_timeout",
+                connection=conn,
+            ).rows[0]
+            observed.append(
+                (str(settings["lock_timeout"]), str(settings["statement_timeout"]))
+            )
+        return original(self, conn, lock=lock)
+
+    monkeypatch.setattr(CharactersRAGDB, "_get_schema_version_postgres", observe_lock)
+    backend, db = _open_db(pg_database_config, owner="960016")
+    try:
+        assert observed
+        assert observed[0] == (
+            CharactersRAGDB._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT,
+            CharactersRAGDB._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT,
+        )
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
 def test_postgres_v61_progress_catalog_is_private_and_bounded(
     pg_database_config: DatabaseConfig,
 ) -> None:
@@ -116,8 +162,7 @@ def test_postgres_v61_progress_catalog_is_private_and_bounded(
             privilege = conn.execute(
                 "SELECT has_table_privilege('public',"
                 "'chacha_schema_migration_progress','SELECT') AS public_select,"
-                "c.relowner=current_user::regrole AS is_owner,"
-                "pg_has_role(current_user,n.nspowner,'USAGE') AS is_schema_owner "
+                "c.relowner=n.nspowner AS owner_matches_schema "
                 "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
                 "WHERE n.nspname=current_schema() "
                 "AND c.relname='chacha_schema_migration_progress'"
@@ -143,8 +188,7 @@ def test_postgres_v61_progress_catalog_is_private_and_bounded(
         ]
         assert privilege == {
             "public_select": False,
-            "is_owner": True,
-            "is_schema_owner": True,
+            "owner_matches_schema": True,
         }
     finally:
         db.close_all_connections()
@@ -267,6 +311,165 @@ def test_current_postgres_v61_rejects_constraint_and_progress_drift_without_repa
             second_backend.get_pool().close_all()
 
 
+@pytest.mark.parametrize(
+    ("mutation", "cleanup"),
+    (
+        (
+            "ALTER TABLE moodboards ALTER COLUMN description SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN description DROP NOT NULL",
+        ),
+        (
+            "ALTER TABLE moodboards ALTER COLUMN source_diagnostic_code "
+            "TYPE varchar(64)",
+            "ALTER TABLE moodboards ALTER COLUMN source_diagnostic_code TYPE text",
+        ),
+        (
+            "ALTER TABLE moodboards ALTER COLUMN description "
+            "SET DEFAULT 'unexpected'",
+            "ALTER TABLE moodboards ALTER COLUMN description DROP DEFAULT",
+        ),
+    ),
+)
+def test_current_postgres_v61_rejects_exact_column_metadata_drift_without_repair(
+    pg_database_config: DatabaseConfig,
+    mutation: str,
+    cleanup: str,
+) -> None:
+    backend, db = _open_db(pg_database_config, owner="960012")
+    drift_backend = None
+    try:
+        with backend.transaction() as conn:
+            backend.execute(mutation, connection=conn)
+        drift_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        with pytest.raises(CharactersRAGDBError, match="column metadata drifted"):
+            CharactersRAGDB(":memory:", client_id="960012", backend=drift_backend)
+        with backend.transaction() as conn:
+            metadata = backend.execute(
+                "SELECT format_type(a.atttypid,a.atttypmod) AS data_type,"
+                "a.attnotnull,pg_get_expr(d.adbin,d.adrelid,false) AS default_expression "
+                "FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid "
+                "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum "
+                "WHERE n.nspname=current_schema() AND c.relname='moodboards' "
+                "AND a.attname=CASE WHEN %s LIKE '%%source_diagnostic_code%%' "
+                "THEN 'source_diagnostic_code' ELSE 'description' END",
+                (mutation,),
+                connection=conn,
+            ).rows
+        assert len(metadata) == 1
+    finally:
+        with backend.transaction() as conn:
+            backend.execute(cleanup, connection=conn)
+        db.close_all_connections()
+        backend.get_pool().close_all()
+        if drift_backend is not None:
+            drift_backend.get_pool().close_all()
+
+
+def test_current_postgres_v61_rejects_progress_acl_and_owner_drift(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend, db = _open_db(pg_database_config, owner="960013")
+    ident = backend.escape_identifier  # type: ignore[attr-defined]
+    role = f"v61_progress_drift_{uuid4().hex[:8]}"
+    role_created = False
+    original_schema_owner = ""
+    try:
+        with backend.transaction() as conn:
+            original_schema_owner = str(
+                backend.execute(
+                    "SELECT r.rolname FROM pg_namespace n JOIN pg_roles r "
+                    "ON r.oid=n.nspowner WHERE n.nspname=current_schema()",
+                    connection=conn,
+                ).rows[0]["rolname"]
+            )
+            backend.execute(
+                f"CREATE ROLE {ident(role)} NOLOGIN NOSUPERUSER NOBYPASSRLS",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER "
+                f"ON chacha_schema_migration_progress TO {ident(role)}",
+                connection=conn,
+            )
+        role_created = True
+        drift_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        with pytest.raises(CharactersRAGDBError, match="progress ACL drifted"):
+            CharactersRAGDB(":memory:", client_id="960013", backend=drift_backend)
+        drift_backend.get_pool().close_all()
+
+        with backend.transaction() as conn:
+            backend.execute(
+                f"REVOKE ALL ON chacha_schema_migration_progress FROM {ident(role)}",
+                connection=conn,
+            )
+            backend.execute(
+                "GRANT TRUNCATE,REFERENCES,TRIGGER ON "
+                "chacha_schema_migration_progress TO PUBLIC",
+                connection=conn,
+            )
+        drift_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        with pytest.raises(CharactersRAGDBError, match="progress ACL drifted"):
+            CharactersRAGDB(":memory:", client_id="960013", backend=drift_backend)
+        drift_backend.get_pool().close_all()
+
+        with backend.transaction() as conn:
+            backend.execute(
+                "REVOKE TRUNCATE,REFERENCES,TRIGGER ON "
+                "chacha_schema_migration_progress FROM PUBLIC",
+                connection=conn,
+            )
+            backend.execute(
+                f"REVOKE TRIGGER ON chacha_schema_migration_progress "
+                f"FROM {ident(original_schema_owner)}",
+                connection=conn,
+            )
+        drift_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        with pytest.raises(CharactersRAGDBError, match="progress ACL drifted"):
+            CharactersRAGDB(":memory:", client_id="960013", backend=drift_backend)
+        drift_backend.get_pool().close_all()
+
+        with backend.transaction() as conn:
+            backend.execute(
+                f"GRANT TRIGGER ON chacha_schema_migration_progress "
+                f"TO {ident(original_schema_owner)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"ALTER SCHEMA public OWNER TO {ident(role)}", connection=conn
+            )
+        drift_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        with pytest.raises(CharactersRAGDBError, match="progress catalog drifted"):
+            CharactersRAGDB(":memory:", client_id="960013", backend=drift_backend)
+        drift_backend.get_pool().close_all()
+    finally:
+        with backend.transaction() as conn:
+            if original_schema_owner:
+                backend.execute(
+                    f"ALTER SCHEMA public OWNER TO {ident(original_schema_owner)}",
+                    connection=conn,
+                )
+            backend.execute(
+                "REVOKE TRUNCATE,REFERENCES,TRIGGER ON "
+                "chacha_schema_migration_progress FROM PUBLIC",
+                connection=conn,
+            )
+            if original_schema_owner:
+                backend.execute(
+                    f"GRANT ALL PRIVILEGES ON chacha_schema_migration_progress "
+                    f"TO {ident(original_schema_owner)}",
+                    connection=conn,
+                )
+            if role_created:
+                backend.execute(
+                    f"REVOKE ALL ON chacha_schema_migration_progress FROM {ident(role)}",
+                    connection=conn,
+                )
+                backend.execute(f"DROP ROLE {ident(role)}", connection=conn)
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
 def test_postgres_v61_old_authority_insert_defaults_and_first_enrollment_race(
     pg_database_config: DatabaseConfig,
 ) -> None:
@@ -324,6 +527,72 @@ def test_postgres_v61_old_authority_insert_defaults_and_first_enrollment_race(
             "moodboard_graph_bound": True,
             "studio_graph_bound": True,
         }
+    finally:
+        db_a.close_all_connections()
+        db_b.close_all_connections()
+        backend_a.get_pool().close_all()
+        backend_b.get_pool().close_all()
+
+
+def test_postgres_v61_conflicting_first_enrollment_has_one_winner_and_rolls_back_loser(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner = "960015"
+    dataset_a = f"dataset-a-{uuid4()}"
+    dataset_b = f"dataset-b-{uuid4()}"
+    backend_a, db_a = _open_db(pg_database_config, owner=owner)
+    backend_b, db_b = _open_db(pg_database_config, owner=owner)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = {
+                dataset_a: pool.submit(
+                    db_a.moodboard_sync_store.bind_local_moodboard_graph_to_dataset,
+                    owner_user_id=owner,
+                    target_dataset_id=dataset_a,
+                ),
+                dataset_b: pool.submit(
+                    db_b.moodboard_sync_store.bind_local_moodboard_graph_to_dataset,
+                    owner_user_id=owner,
+                    target_dataset_id=dataset_b,
+                ),
+            }
+            outcomes: dict[str, object] = {}
+            for dataset, future in futures.items():
+                try:
+                    outcomes[dataset] = future.result(timeout=20)
+                except Exception as exc:  # noqa: BLE001 - concurrent loser is asserted below.
+                    outcomes[dataset] = exc
+        winners = [
+            dataset for dataset, outcome in outcomes.items() if isinstance(outcome, dict)
+        ]
+        losers = [
+            outcome for outcome in outcomes.values() if isinstance(outcome, Exception)
+        ]
+        assert len(winners) == len(losers) == 1
+        assert isinstance(losers[0], CharactersRAGDBError)
+        with backend_a.transaction() as conn:
+            authority = backend_a.execute(
+                "SELECT dataset_id,task_graph_bound,moodboard_graph_bound,"
+                "studio_graph_bound FROM note_task_scope_authority "
+                "WHERE owner_user_id=?",
+                (owner,),
+                connection=conn,
+            ).rows
+            wrong_scope_rows = backend_a.execute(
+                "SELECT count(*) AS count FROM moodboards "
+                "WHERE owner_user_id=? AND dataset_id<>?",
+                (owner, winners[0]),
+                connection=conn,
+            ).rows[0]["count"]
+        assert authority == [
+            {
+                "dataset_id": winners[0],
+                "task_graph_bound": False,
+                "moodboard_graph_bound": True,
+                "studio_graph_bound": False,
+            }
+        ]
+        assert wrong_scope_rows == 0
     finally:
         db_a.close_all_connections()
         db_b.close_all_connections()
@@ -417,6 +686,204 @@ def _restore_large_postgres_v60_fixture(
         )
 
 
+def test_postgres_v61_upgrade_matches_sqlite_rule_and_studio_conversion(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner = "960010"
+    other_owner = "960011"
+    collection_sync_id = str(uuid4())
+    valid_note_id = str(uuid4())
+    source_note_id = str(uuid4())
+    backend, db = _open_db(pg_database_config, owner=owner)
+    try:
+        _restore_large_postgres_v60_fixture(db, owner=owner, row_count=4)
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET id=? WHERE id='legacy-note-0001'", (valid_note_id,)
+            )
+            conn.execute(
+                "UPDATE notes SET id=? WHERE id='legacy-note-0002'", (source_note_id,)
+            )
+            collection = conn.execute(
+                "INSERT INTO keyword_collections(sync_id,name,client_id) "
+                "VALUES (?,?,?) RETURNING id",
+                (collection_sync_id, "Legacy portable collection", owner),
+            ).fetchone()
+            board_ids = [
+                row["id"]
+                for row in conn.execute("SELECT id FROM moodboards ORDER BY id").fetchall()
+            ]
+            conn.execute(
+                "UPDATE moodboards SET smart_rule_json=? WHERE id=?",
+                (json.dumps({"collection_ids": [collection["id"]]}), board_ids[0]),
+            )
+            conn.execute(
+                "UPDATE moodboards SET smart_rule_json=? WHERE id=?",
+                (json.dumps({"query": "legacy", "future_key": True}), board_ids[1]),
+            )
+            companion_hash = "sha256:" + hashlib.sha256(b"Legacy body 1").hexdigest()
+            excerpt = "Legacy body"
+            excerpt_hash = "sha256:" + hashlib.sha256(excerpt.encode()).hexdigest()
+            valid_payload = {
+                "meta": {
+                    "title": "Legacy note 1",
+                    "source_note_id": source_note_id,
+                },
+                "layout": {"render_version": 1},
+                "sections": [
+                    {
+                        "id": "section-1",
+                        "kind": "notes",
+                        "title": "Summary",
+                        "content": "Accepted content",
+                    }
+                ],
+            }
+            source_graph = valid_payload["sections"]
+            diagram = "graph TD; A-->B"
+            manifest = {
+                "diagram_type": "flowchart",
+                "source_section_ids": ["section-1"],
+                "source_graph": source_graph,
+                "diagram": diagram,
+                "format": "mermaid",
+                "status": "ready",
+                "render_hash": diagram_render_hash(
+                    diagram_type="flowchart",
+                    context="Summary\nAccepted content",
+                    diagram=diagram,
+                ),
+                "canonical_source": source_graph,
+                "generation_status": "ready",
+                "cached_svg": "<svg>derived cache</svg>",
+            }
+            conn.execute(
+                "UPDATE note_studio_documents SET payload_json=?,source_note_id=?,"
+                "excerpt_snapshot=?,excerpt_hash=?,companion_content_hash=?,"
+                "diagram_manifest_json=? "
+                "WHERE note_id=?",
+                (
+                    json.dumps(valid_payload),
+                    source_note_id,
+                    excerpt,
+                    excerpt_hash,
+                    companion_hash,
+                    json.dumps(manifest),
+                    valid_note_id,
+                ),
+            )
+            conn.execute(
+                "UPDATE note_studio_documents SET payload_json=?,companion_content_hash=? "
+                "WHERE note_id=?",
+                (
+                    json.dumps({"meta": {"title": "wrong"}, "sections": []}),
+                    "sha256:" + hashlib.sha256(b"Legacy body 2").hexdigest(),
+                    source_note_id,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO notes(id,title,content,client_id) VALUES (?,?,?,?)",
+                ("cross-owner-source", "Cross owner", "Source", other_owner),
+            )
+            conn.execute(
+                "UPDATE note_studio_documents SET payload_json=?,source_note_id=?,"
+                "companion_content_hash=? WHERE note_id='legacy-note-0003'",
+                (
+                    json.dumps({"sections": []}),
+                    "cross-owner-source",
+                    "sha256:" + hashlib.sha256(b"Legacy body 3").hexdigest(),
+                ),
+            )
+            source_fk = conn.execute(
+                "SELECT k.conname FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid "
+                "JOIN pg_class parent ON parent.oid=k.confrelid "
+                "WHERE c.relname='note_studio_documents' AND parent.relname='notes' "
+                "AND k.contype='f' AND array_length(k.conkey,1)=1 "
+                "AND (SELECT a.attname FROM pg_attribute a "
+                "WHERE a.attrelid=c.oid AND a.attnum=k.conkey[1])='source_note_id'"
+            ).fetchone()
+            if source_fk is not None:
+                conn.execute(
+                    f"ALTER TABLE note_studio_documents DROP CONSTRAINT {source_fk['conname']}"  # nosec B608 - server catalog identifier.
+                )
+            conn.execute(
+                "UPDATE note_studio_documents SET payload_json=?,source_note_id=?,"
+                "companion_content_hash=? WHERE note_id='legacy-note-0004'",
+                (
+                    json.dumps({"sections": []}),
+                    "unknown-source",
+                    "sha256:" + hashlib.sha256(b"Legacy body 4").hexdigest(),
+                ),
+            )
+
+        with db.transaction() as conn:
+            db._migrate_from_v60_to_v61_postgres(conn)
+
+        with backend.transaction() as conn:
+            boards = backend.execute(
+                "SELECT id,smart_rule_json,source_diagnostic_code FROM moodboards "
+                "ORDER BY id",
+                connection=conn,
+            ).rows
+            studios = {
+                row["note_id"]: row
+                for row in backend.execute(
+                    "SELECT * FROM note_studio_documents ORDER BY note_id",
+                    connection=conn,
+                ).rows
+            }
+        assert json.loads(boards[0]["smart_rule_json"])["collection_sync_ids"] == [
+            collection_sync_id
+        ]
+        assert boards[0]["source_diagnostic_code"] is None
+        assert boards[1]["smart_rule_json"] is None
+        assert boards[1]["source_diagnostic_code"] == "legacy_moodboard_rule_invalid"
+
+        valid = studios[valid_note_id]
+        assert valid["source_diagnostic_code"] is None
+        assert set(json.loads(valid["payload_json"])) == {"sections"}
+        assert not {
+            "canonical_source", "generation_status", "cached_svg"
+        }.intersection(json.loads(valid["diagram_manifest_json"]))
+        provenance = json.loads(valid["accepted_provenance_json"])
+        parsed = parse_notes_studio_document_v1(
+            {
+                "note_id": valid["note_id"],
+                "source_note_id": valid["source_note_id"],
+                "payload_json": json.loads(valid["payload_json"]),
+                "template_type": valid["template_type"],
+                "handwriting_mode": valid["handwriting_mode"],
+                "excerpt_snapshot": valid["excerpt_snapshot"],
+                "excerpt_hash": valid["excerpt_hash"],
+                "diagram_manifest_json": json.loads(valid["diagram_manifest_json"]),
+                "companion_content_hash": valid["companion_content_hash"],
+                "render_version": valid["render_version"],
+                "note_revision": valid["note_revision"],
+                "note_hash": valid["note_hash"],
+                "accepted_provenance": provenance,
+            },
+            bound_attestation="trusted_bootstrap_v1",
+            bound_accepted_at=provenance["accepted_at"],
+        )
+        content_state = parsed.model_dump(mode="json")
+        content_state.pop("accepted_provenance")
+        assert provenance["result_hash"] == studio_result_hash(content_state)
+        assert valid["canonical_hash"] == notes_studio_document_object_hash(
+            parsed, revision=1, deleted=False
+        )
+        assert studios[source_note_id]["source_diagnostic_code"] == (
+            "legacy_studio_payload_invalid"
+        )
+        for note_id in ("legacy-note-0003", "legacy-note-0004"):
+            assert studios[note_id]["source_note_id"] is not None
+            assert studios[note_id]["source_diagnostic_code"] == (
+                "legacy_studio_lineage_unproven"
+            )
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
 def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
     pg_database_config: DatabaseConfig,
     monkeypatch: pytest.MonkeyPatch,
@@ -497,9 +964,19 @@ def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
         for phase in ("moodboards", "moodboard_notes", "note_studio_documents"):
             verified = final_progress[f"aggregate_verification:{phase}"]
             copied = final_progress[phase]
-            assert copied["copied_count"] == verified["copied_count"] == row_count
-            assert copied["aggregate_fingerprint"] == verified["aggregate_fingerprint"]
-            assert copied["status"] == verified["status"] == "complete"
+            predicted = final_progress[f"source_prediction:{phase}"]
+            assert (
+                predicted["copied_count"]
+                == copied["copied_count"]
+                == verified["copied_count"]
+                == row_count
+            )
+            assert (
+                predicted["aggregate_fingerprint"]
+                == copied["aggregate_fingerprint"]
+                == verified["aggregate_fingerprint"]
+            )
+            assert predicted["status"] == copied["status"] == verified["status"] == "complete"
             assert len([stage for stage in injected if stage.startswith(f"copy:{phase}:")]) == 3
             assert len(
                 [
@@ -508,6 +985,16 @@ def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
                     if stage.startswith(f"aggregate_verification:{phase}:")
                 ]
             ) == 3
+            assert len(
+                [
+                    stage
+                    for stage in injected
+                    if stage.startswith(f"source_prediction:{phase}:")
+                ]
+            ) == 3
+        assert len(
+            [stage for stage in injected if stage.startswith("identity:moodboards:")]
+        ) == 3
         assert {"schema", "constraint", "rls", "aggregate_verification", "version"}.issubset(
             injected
         )
@@ -571,6 +1058,68 @@ def test_postgres_v61_aggregate_rejects_valid_looking_target_tampering(
                 connection=conn,
             ).rows
         assert migration == []
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_v61_source_prediction_rejects_consistently_wrong_conversion(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "960014"
+    backend, db = _open_db(pg_database_config, owner=owner)
+
+    class PredictionFinished(RuntimeError):
+        pass
+
+    def stop_after_prediction(stage: str) -> None:
+        if stage == "source_prediction:note_studio_documents:1":
+            raise PredictionFinished
+
+    try:
+        _restore_large_postgres_v60_fixture(db, owner=owner, row_count=1)
+        monkeypatch.setattr(
+            db,
+            "_notes_moodboard_studio_v61_postgres_checkpoint",
+            stop_after_prediction,
+        )
+        with pytest.raises(PredictionFinished):
+            with db.transaction() as conn:
+                db._migrate_from_v60_to_v61_postgres(conn)
+
+        original_expected_row = db._postgres_v61_expected_row
+
+        def consistently_wrong_expected_row(
+            conn: Any, *, phase: str, row: dict[str, Any]
+        ) -> dict[str, Any]:
+            expected = original_expected_row(conn, phase=phase, row=row)
+            if phase == "moodboards":
+                expected["canonical_hash"] = "sha256:" + "e" * 64
+            return expected
+
+        monkeypatch.setattr(
+            db, "_postgres_v61_expected_row", consistently_wrong_expected_row
+        )
+        monkeypatch.setattr(
+            db,
+            "_notes_moodboard_studio_v61_postgres_checkpoint",
+            lambda _stage: None,
+        )
+        with pytest.raises(SchemaError, match="aggregate verification failed"):
+            with db.transaction() as conn:
+                db._migrate_from_v60_to_v61_postgres(conn)
+        with backend.transaction() as conn:
+            assert db._get_schema_version_postgres(conn) == 60
+            predictions = backend.execute(
+                "SELECT phase,status FROM chacha_schema_migration_progress "
+                "WHERE migration_id=? AND phase LIKE 'source_prediction:%%' "
+                "ORDER BY phase",
+                (CharactersRAGDB._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID,),
+                connection=conn,
+            ).rows
+        assert len(predictions) == 3
+        assert all(row["status"] == "complete" for row in predictions)
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
@@ -682,6 +1231,33 @@ def test_postgres_v61_nonowner_rls_relationships_same_id_and_keyset_plans(
             assert backend_a.execute(
                 "SELECT id FROM moodboards", connection=conn
             ).rows == []
+
+        with pytest.raises(DatabaseError):
+            with backend_a.transaction() as conn:
+                backend_a.execute(f"SET LOCAL ROLE {ident(role_name)}", connection=conn)
+                backend_a.execute(
+                    "SELECT set_config('app.current_user_id', ?, true)",
+                    (owner_a,),
+                    connection=conn,
+                )
+                backend_a.execute(
+                    "SELECT set_config('app.current_dataset_id', 'wrong-dataset', true)",
+                    connection=conn,
+                )
+                backend_a.execute(
+                    "INSERT INTO moodboards(id,name,client_id,owner_user_id,dataset_id,"
+                    "sync_id,canvas_json,canonical_revision,canonical_hash) "
+                    "VALUES (999999,'wrong dataset',?,?,?,?,?,1,?)",
+                    (
+                        owner_a,
+                        owner_a,
+                        dataset,
+                        str(uuid4()),
+                        "{}",
+                        "sha256:" + "9" * 64,
+                    ),
+                    connection=conn,
+                )
 
         with pytest.raises(DatabaseError):
             with backend_a.transaction() as conn:

@@ -12546,7 +12546,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _legacy_moodboard_rule_v61(
         self,
-        conn: sqlite3.Connection,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
         raw_value: object,
         *,
         owner_user_id: str,
@@ -12577,9 +12577,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "SELECT sync_id FROM keyword_collections WHERE id=? AND client_id=?",
                     (collection_id, owner_user_id),
                 ).fetchall()
-                if len(rows) != 1 or not str(rows[0][0]).strip():
+                if len(rows) != 1 or not str(rows[0]["sync_id"]).strip():
                     raise ValueError("legacy moodboard collection identity is unavailable")
-                collection_sync_ids.append(str(rows[0][0]))
+                collection_sync_ids.append(str(rows[0]["sync_id"]))
             self._prove_moodboard_collection_sync_ids_v61(
                 conn,
                 owner_user_id=owner_user_id,
@@ -13461,6 +13461,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self, conn: Any
     ) -> int:
         """Set bounded transaction timeouts and lock schema authority first."""
+        self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
+        return self._get_schema_version_postgres(conn, lock=True)
+
+    def _configure_notes_moodboard_studio_v61_postgres_transaction(
+        self, conn: Any
+    ) -> None:
+        """Apply the v61 lock budgets before a transaction acquires any lock."""
         self.backend.execute(
             "SELECT set_config('lock_timeout',%s,true)",
             (self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT,),
@@ -13471,7 +13478,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT,),
             connection=conn,
         )
-        return self._get_schema_version_postgres(conn, lock=True)
 
     @staticmethod
     def _postgres_v61_progress_fingerprint(
@@ -13582,6 +13588,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               PRIMARY KEY(migration_id,phase)
             )
             """,
+            """
+            DO $migration_owner$
+            DECLARE schema_owner name;
+            BEGIN
+              SELECT r.rolname INTO STRICT schema_owner
+                FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner
+               WHERE n.nspname=current_schema();
+              EXECUTE format(
+                'ALTER TABLE chacha_schema_migration_progress OWNER TO %I',
+                schema_owner
+              );
+            END
+            $migration_owner$
+            """,
             "REVOKE ALL ON TABLE chacha_schema_migration_progress FROM PUBLIC",
             "ALTER TABLE note_task_scope_authority ADD COLUMN IF NOT EXISTS task_graph_bound BOOLEAN NOT NULL DEFAULT TRUE",
             "ALTER TABLE note_task_scope_authority ADD COLUMN IF NOT EXISTS moodboard_graph_bound BOOLEAN NOT NULL DEFAULT FALSE",
@@ -13623,38 +13643,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS source_diagnostic_hash TEXT",
         )
 
-    def _postgres_v61_board_update(self, row: Mapping[str, Any]) -> tuple[Any, ...]:
+    def _postgres_v61_board_update(
+        self, conn: Any, row: Mapping[str, Any]
+    ) -> tuple[Any, ...]:
         owner = str(row.get("client_id") or "").strip()
         if not owner:
             raise SchemaError("Notes moodboard v61 migration could not prove board ownership.")  # noqa: TRY003
-        sync_id = str(uuid.uuid4())
+        sync_id = str(row.get("sync_id") or "").strip()
+        if not sync_id:
+            raise SchemaError(
+                "Notes moodboard v61 migration portable identity was not allocated."
+            )  # noqa: TRY003
         canvas = {"layout_mode": "masonry", "metadata": {}}
         raw_rule = row.get("smart_rule_json")
-        diagnostic_code = diagnostic_hash = None
-        rule = None
-        if raw_rule is not None:
-            try:
-                parsed = json.loads(str(raw_rule))
-                if not isinstance(parsed, Mapping):
-                    raise ValueError("rule is not an object")
-                if parsed.get("collection_ids") or parsed.get("notebook_collection_ids"):
-                    raise ValueError("legacy collection identity needs explicit repair")
-                rule = {
-                    "query": parsed.get("query"),
-                    "keyword_tokens": list(parsed.get("keyword_tokens") or []),
-                    "collection_sync_ids": list(parsed.get("collection_sync_ids") or []),
-                    "sources": list(parsed.get("sources") or []),
-                    "updated": parsed.get("updated") or {
-                        "after": parsed.get("updated_after"),
-                        "before": parsed.get("updated_before"),
-                    },
-                }
-            except (TypeError, ValueError, json.JSONDecodeError):
-                diagnostic = moodboard_studio_legacy_source_diagnostic(
-                    "legacy_moodboard_rule_invalid", {"smart_rule": raw_rule}
-                )
-                diagnostic_code = diagnostic["code"]
-                diagnostic_hash = diagnostic["source_hash"]
+        rule, diagnostic_code, diagnostic_hash = self._legacy_moodboard_rule_v61(
+            conn, raw_rule, owner_user_id=owner
+        )
         revision = max(1, int(row.get("version") or 1))
         try:
             payload = parse_notes_moodboard_v1(
@@ -13742,12 +13746,375 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "n.deleted AS parent_deleted,s.owner_user_id AS target_owner_user_id,"
             "s.dataset_id AS target_dataset_id,s.note_revision,s.note_hash,"
             "s.accepted_provenance_json,s.deleted,s.version,s.canonical_revision,"
-            "s.canonical_hash,s.source_diagnostic_code,s.source_diagnostic_hash "
+            "s.canonical_hash,s.source_diagnostic_code,s.source_diagnostic_hash,"
+            "source.client_id AS source_owner_user_id,source.title AS source_title,"
+            "source.content AS source_content,"
+            "source.version AS source_version,source.last_modified AS source_modified,"
+            "source.deleted AS source_deleted "
             "FROM note_studio_documents s JOIN notes n ON n.id=s.note_id "
+            "LEFT JOIN notes source ON source.id=s.source_note_id "
             "WHERE (n.client_id,s.note_id)>(%s,%s) ORDER BY n.client_id,s.note_id LIMIT %s",
             (after_owner, after_note, page_size), connection=conn,
         ).rows]
         return rows, ([rows[-1]["owner_user_id"], rows[-1]["note_id"]] if rows else cursor)
+
+    def _postgres_v61_studio_update(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        """Canonicalize one legacy PostgreSQL Studio row without mutating it."""
+        owner = str(row["owner_user_id"]).strip()
+        accepted_at = self._legacy_sync_timestamp_v61(row["last_modified"])
+        accepted_time = datetime.fromisoformat(accepted_at.replace("Z", "+00:00"))
+        parent_modified = datetime.fromisoformat(
+            self._legacy_sync_timestamp_v61(row["parent_modified"]).replace("Z", "+00:00")
+        )
+        companion_hash = (
+            None
+            if row.get("companion_content_hash") is None
+            else str(row["companion_content_hash"]).strip()
+        )
+        current_companion_hash = "sha256:" + hashlib.sha256(
+            str(row.get("note_content") or "")
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .encode("utf-8")
+        ).hexdigest()
+        parent_changed = parent_modified > accepted_time
+        parent_proven = not parent_changed and companion_hash == current_companion_hash
+        note_revision = max(1, int(row.get("parent_version") or 1)) if parent_proven else 1
+        parent = {
+            "id": row["note_id"],
+            "title": row["note_title"],
+            "content": row["note_content"],
+            "version": row["parent_version"],
+            "last_modified": row["parent_modified"],
+            "deleted": row["parent_deleted"],
+            "client_id": owner,
+        }
+        note_hash = (
+            self._legacy_note_hash_v61(parent)
+            if parent_proven
+            else self._note_task_v60_hash(
+                {
+                    "domain": "notes.studio_document.unproven_parent_lineage",
+                    "note_id": row["note_id"],
+                    "accepted_at": accepted_at,
+                    "companion_content_hash": companion_hash,
+                }
+            )
+        )
+        source_note_id = row.get("source_note_id")
+        source_problem = source_note_id is not None and (
+            not str(row.get("source_owner_user_id") or "").strip()
+            or str(row.get("source_owner_user_id") or "").strip() != owner
+        )
+        source_changed = False
+        if source_note_id is not None and not source_problem:
+            source_modified = datetime.fromisoformat(
+                self._legacy_sync_timestamp_v61(row["source_modified"]).replace("Z", "+00:00")
+            )
+            source_changed = source_modified > accepted_time or bool(row["source_deleted"])
+        source_revision = None
+        source_hash = None
+        if source_note_id is not None:
+            source_revision = (
+                max(1, int(row.get("source_version") or 1))
+                if not source_problem and not source_changed
+                else 1
+            )
+            source_hash = (
+                self._legacy_note_hash_v61(
+                    {
+                        "id": source_note_id,
+                        "title": row.get("source_title"),
+                        "content": row.get("source_content"),
+                        "version": row.get("source_version"),
+                        "last_modified": row.get("source_modified"),
+                        "deleted": row.get("source_deleted"),
+                        "client_id": row.get("source_owner_user_id"),
+                    }
+                )
+                if not source_problem and not source_changed
+                else self._note_task_v60_hash(
+                    {
+                        "domain": "notes.studio_document.unproven_source_lineage",
+                        "note_id": source_note_id,
+                        "accepted_at": accepted_at,
+                        "excerpt_hash": row.get("excerpt_hash"),
+                    }
+                )
+            )
+        excerpt_snapshot = (
+            None
+            if row.get("excerpt_snapshot") is None
+            else str(row["excerpt_snapshot"]).replace("\r\n", "\n").replace("\r", "\n")
+        )
+        excerpt_hash = (
+            None if row.get("excerpt_hash") is None else str(row["excerpt_hash"]).strip()
+        )
+        expected_excerpt_hash = (
+            None
+            if excerpt_snapshot is None
+            else "sha256:" + hashlib.sha256(excerpt_snapshot.encode("utf-8")).hexdigest()
+        )
+        payload_json_text = str(row["payload_json"])
+        manifest_json_text = row.get("diagram_manifest_json")
+        diagnostic_code = diagnostic_hash = None
+        failure_code = "legacy_studio_payload_invalid"
+        try:
+            payload_obj = json.loads(str(row["payload_json"]))
+            if not isinstance(payload_obj, Mapping):
+                raise ValueError("legacy Studio payload is not an object")
+            payload_obj = dict(payload_obj)
+            meta = payload_obj.pop("meta", None)
+            layout = payload_obj.pop("layout", None)
+            if set(payload_obj) != {"sections"}:
+                raise ValueError("legacy Studio payload has unknown nested authority")
+            if meta is not None:
+                if not isinstance(meta, Mapping) or set(meta) - {"title", "source_note_id"}:
+                    raise ValueError("legacy Studio metadata is not closed")
+                if "title" in meta and meta["title"] != row["note_title"]:
+                    raise ValueError("legacy Studio title authority mismatches note")
+                if "source_note_id" in meta and meta["source_note_id"] != source_note_id:
+                    raise ValueError("legacy Studio source authority mismatches sidecar")
+            if layout is not None:
+                expected_layout = {
+                    "template_type": row["template_type"],
+                    "handwriting_mode": row["handwriting_mode"],
+                    "render_version": row["render_version"],
+                }
+                if (
+                    not isinstance(layout, Mapping)
+                    or set(layout) - set(expected_layout)
+                    or any(layout[key] != expected_layout[key] for key in layout)
+                ):
+                    raise ValueError("legacy Studio layout authority mismatches sidecar")
+            if source_problem:
+                failure_code = "legacy_studio_lineage_unproven"
+                raise ValueError("legacy Studio source ownership is unavailable")
+            if excerpt_snapshot is not None:
+                if source_note_id is None or row.get("source_content") is None:
+                    raise ValueError("legacy Studio excerpt source is unavailable")
+                source_content = str(row["source_content"] or "").replace("\r\n", "\n").replace("\r", "\n")
+                if not source_changed and excerpt_snapshot not in source_content:
+                    raise ValueError("legacy Studio excerpt is absent from source note")
+                if excerpt_hash != expected_excerpt_hash:
+                    raise ValueError("legacy Studio excerpt hash mismatches excerpt")
+            manifest_obj = (
+                None
+                if row.get("diagram_manifest_json") is None
+                else json.loads(str(row["diagram_manifest_json"]))
+            )
+            if manifest_obj is not None:
+                if not isinstance(manifest_obj, Mapping):
+                    raise ValueError("legacy Studio diagram manifest is not an object")
+                manifest_obj = dict(manifest_obj)
+                manifest_obj.pop("cached_svg", None)
+                if "canonical_source" in manifest_obj:
+                    if manifest_obj["canonical_source"] != manifest_obj.get("source_graph"):
+                        raise ValueError("legacy Studio canonical_source alias mismatches")
+                    manifest_obj.pop("canonical_source")
+                if "generation_status" in manifest_obj:
+                    if manifest_obj["generation_status"] != manifest_obj.get("status"):
+                        raise ValueError("legacy Studio generation_status alias mismatches")
+                    manifest_obj.pop("generation_status")
+            content_state: dict[str, Any] = {
+                "note_id": row["note_id"],
+                "source_note_id": source_note_id,
+                "payload_json": payload_obj,
+                "template_type": row["template_type"],
+                "handwriting_mode": row["handwriting_mode"],
+                "excerpt_snapshot": excerpt_snapshot,
+                "excerpt_hash": excerpt_hash,
+                "diagram_manifest_json": manifest_obj,
+                "companion_content_hash": companion_hash,
+                "render_version": row["render_version"],
+                "note_revision": note_revision,
+                "note_hash": note_hash,
+            }
+            provenance = {
+                "kind": "legacy_bootstrap",
+                "attestation": "trusted_bootstrap_v1",
+                "provider": None,
+                "model": None,
+                "accepted_at": accepted_at,
+                "source_revision": source_revision,
+                "source_hash": source_hash,
+                "result_hash": studio_result_hash(content_state),
+            }
+            if parent_changed or source_changed or not parent_proven:
+                failure_code = "legacy_studio_lineage_unproven"
+                raise ValueError("legacy Studio historical lineage is unavailable")
+            parsed = parse_notes_studio_document_v1(
+                {**content_state, "accepted_provenance": provenance},
+                bound_attestation="trusted_bootstrap_v1",
+                bound_accepted_at=accepted_at,
+            )
+            payload_json_text = self._canonical_json_text_v61(
+                parsed.payload_json.model_dump(mode="json")
+            )
+            manifest_json_text = (
+                None
+                if parsed.diagram_manifest_json is None
+                else self._canonical_json_text_v61(
+                    parsed.diagram_manifest_json.model_dump(mode="json")
+                )
+            )
+            canonical_hash = notes_studio_document_object_hash(
+                parsed, revision=1, deleted=bool(row["parent_deleted"])
+            )
+            if self._notes_studio_envelope_size_v61(
+                parsed.model_dump(mode="json"),
+                revision=1,
+                deleted=bool(row["parent_deleted"]),
+                canonical_hash=canonical_hash,
+            ) > SYNC_ENVELOPE_MAX_BYTES:
+                raise ValueError("legacy Studio canonical envelope is oversized")
+        except (NotesMoodboardStudioContractError, TypeError, ValueError, json.JSONDecodeError):
+            diagnostic_source = self._note_task_v60_json_safe(dict(row))
+            diagnostic = moodboard_studio_legacy_source_diagnostic(
+                failure_code,
+                {"sidecar": diagnostic_source, "note_id": row["note_id"]},
+            )
+            diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
+            provenance = {
+                "kind": "legacy_bootstrap",
+                "attestation": "trusted_bootstrap_v1",
+                "provider": None,
+                "model": None,
+                "accepted_at": accepted_at,
+                "source_revision": source_revision,
+                "source_hash": source_hash,
+                "result_hash": self._note_task_v60_hash(
+                    {"domain": "notes.studio_document.result", "source": diagnostic_source}
+                ),
+            }
+            canonical_hash = self._note_task_v60_hash(
+                {"domain": "notes.studio_document", "source": diagnostic_source}
+            )
+        return {
+            "payload_json": payload_json_text,
+            "diagram_manifest_json": manifest_json_text,
+            "target_owner_user_id": owner,
+            "target_dataset_id": self._LOCAL_UNBOUND_TASK_DATASET_ID,
+            "note_revision": note_revision,
+            "note_hash": note_hash,
+            "accepted_provenance_json": self._canonical_json_text_v61(provenance),
+            "deleted": bool(row["parent_deleted"]),
+            "version": 1,
+            "canonical_revision": 1,
+            "canonical_hash": canonical_hash,
+            "source_diagnostic_code": diagnostic_code,
+            "source_diagnostic_hash": diagnostic_hash,
+        }
+
+    def _postgres_v61_expected_row(
+        self, conn: Any, *, phase: str, row: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Predict one canonical target row from retained legacy authority."""
+        expected = dict(row)
+        if phase == "moodboards":
+            update = self._postgres_v61_board_update(conn, row)
+            expected.update(
+                target_owner_user_id=update[0],
+                target_dataset_id=update[1],
+                sync_id=update[2],
+                smart_rule_json=update[3],
+                canvas_json=update[4],
+                canonical_revision=update[5],
+                canonical_hash=update[6],
+                source_diagnostic_code=update[7],
+                source_diagnostic_hash=update[8],
+            )
+            return expected
+        if phase == "moodboard_notes":
+            source = {
+                "moodboard_id": row["sync_id"],
+                "note_id": row["note_id"],
+                "x": 0,
+                "y": 0,
+                "width": 320,
+                "height": 220,
+                "order_index": int(row["legacy_order_index"]),
+                "display": {},
+            }
+            diagnostic_code = diagnostic_hash = None
+            try:
+                payload = parse_notes_moodboard_note_v1(source)
+                placement_id = placement_object_id(payload)
+                canonical_hash = notes_moodboard_note_object_hash(
+                    payload, revision=1, deleted=False
+                )
+            except NotesMoodboardStudioContractError:
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    "legacy_moodboard_placement_identity_invalid", source
+                )
+                diagnostic_code = diagnostic["code"]
+                diagnostic_hash = diagnostic["source_hash"]
+                placement_id = "notes.moodboard_note:sha256:" + hashlib.sha256(
+                    canonical_moodboard_studio_json_bytes(
+                        {
+                            "domain": "notes.moodboard_note",
+                            "members": [row["sync_id"], row["note_id"]],
+                            "schema_version": 1,
+                        }
+                    )
+                ).hexdigest()
+                canonical_hash = self._note_task_v60_hash(
+                    {"domain": "notes.moodboard_note", "source": source}
+                )
+            expected.update(
+                target_owner_user_id=row["owner_user_id"],
+                target_dataset_id=self._LOCAL_UNBOUND_TASK_DATASET_ID,
+                placement_id=placement_id,
+                x=0,
+                y=0,
+                width=320,
+                height=220,
+                order_index=int(row["legacy_order_index"]),
+                display_json="{}",
+                last_modified=row["created_at"],
+                deleted=False,
+                version=1,
+                canonical_revision=1,
+                canonical_hash=canonical_hash,
+                source_diagnostic_code=diagnostic_code,
+                source_diagnostic_hash=diagnostic_hash,
+            )
+            return expected
+        expected.update(self._postgres_v61_studio_update(row))
+        return expected
+
+    def _postgres_v61_allocate_board_identity_page(
+        self, conn: Any, *, progress: Mapping[str, Any]
+    ) -> tuple[list[dict[str, Any]], object | None, bool]:
+        """Allocate stable UUIDv4 board identities in one durable bounded page."""
+        selected, original_cursor = self._postgres_v61_source_page(
+            conn, phase="moodboards", progress=progress
+        )
+        rows: list[dict[str, Any]] = []
+        deadline = (
+            time.monotonic()
+            + self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SECONDS
+        )
+        for source_row in selected:
+            if rows and time.monotonic() >= deadline:
+                break
+            row = dict(source_row)
+            sync_id = str(row.get("sync_id") or "").strip() or str(uuid.uuid4())
+            if not row.get("sync_id"):
+                self.backend.execute(
+                    "UPDATE moodboards SET sync_id=%s WHERE id=%s AND sync_id IS NULL",
+                    (sync_id, row["id"]),
+                    connection=conn,
+                )
+            row["sync_id"] = sync_id
+            rows.append(row)
+        if not rows:
+            return rows, original_cursor, not selected
+        source_exhausted = (
+            len(selected) < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+            and len(rows) == len(selected)
+        )
+        return rows, [rows[-1]["client_id"], rows[-1]["id"]], source_exhausted
 
     def _postgres_v61_copy_page(
         self, conn: Any, *, phase: str, progress: Mapping[str, Any]
@@ -13761,120 +14128,58 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             + self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SECONDS
         )
         rows: list[dict[str, Any]] = []
-        for row in selected:
+        for source_row in selected:
             if rows and time.monotonic() >= deadline:
                 break
+            row = self._postgres_v61_expected_row(
+                conn, phase=phase, row=source_row
+            )
             if phase == "moodboards":
-                update_values = self._postgres_v61_board_update(row)
                 self.backend.execute(
                     "UPDATE moodboards SET owner_user_id=%s,dataset_id=%s,sync_id=%s,"
                     "smart_rule_json=%s,canvas_json=%s,canonical_revision=%s,canonical_hash=%s,"
                     "source_diagnostic_code=%s,source_diagnostic_hash=%s WHERE id=%s",
-                    update_values, connection=conn,
-                )
-                row.update(
-                    target_owner_user_id=update_values[0],
-                    target_dataset_id=update_values[1],
-                    sync_id=update_values[2],
-                    smart_rule_json=update_values[3],
-                    canvas_json=update_values[4],
-                    canonical_revision=update_values[5],
-                    canonical_hash=update_values[6],
-                    source_diagnostic_code=update_values[7],
-                    source_diagnostic_hash=update_values[8],
+                    (
+                        row["target_owner_user_id"], row["target_dataset_id"],
+                        row["sync_id"], row["smart_rule_json"], row["canvas_json"],
+                        row["canonical_revision"], row["canonical_hash"],
+                        row["source_diagnostic_code"], row["source_diagnostic_hash"],
+                        row["id"],
+                    ),
+                    connection=conn,
                 )
             elif phase == "moodboard_notes":
-                source = {
-                    "moodboard_id": row["sync_id"], "note_id": row["note_id"],
-                    "x": 0, "y": 0, "width": 320, "height": 220,
-                    "order_index": int(row["legacy_order_index"]), "display": {},
-                }
-                diagnostic_code = diagnostic_hash = None
-                try:
-                    payload = parse_notes_moodboard_note_v1(source)
-                    placement_id = placement_object_id(payload)
-                    canonical_hash = notes_moodboard_note_object_hash(
-                        payload, revision=1, deleted=False
-                    )
-                except NotesMoodboardStudioContractError:
-                    diagnostic = moodboard_studio_legacy_source_diagnostic(
-                        "legacy_moodboard_placement_identity_invalid", source
-                    )
-                    diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
-                    placement_id = "notes.moodboard_note:sha256:" + hashlib.sha256(
-                        canonical_moodboard_studio_json_bytes(
-                            {"domain": "notes.moodboard_note", "members": [row["sync_id"], row["note_id"]], "schema_version": 1}
-                        )
-                    ).hexdigest()
-                    canonical_hash = self._note_task_v60_hash({"domain": "notes.moodboard_note", "source": source})
                 self.backend.execute(
                     "UPDATE moodboard_notes SET owner_user_id=%s,dataset_id=%s,placement_id=%s,"
                     "x=0,y=0,width=320,height=220,order_index=%s,display_json='{}',"
                     "last_modified=created_at,deleted=FALSE,version=1,canonical_revision=1,"
                     "canonical_hash=%s,source_diagnostic_code=%s,source_diagnostic_hash=%s "
                     "WHERE moodboard_id=%s AND note_id=%s",
-                    (row["owner_user_id"], self._LOCAL_UNBOUND_TASK_DATASET_ID, placement_id,
-                     int(row["legacy_order_index"]), canonical_hash, diagnostic_code, diagnostic_hash,
-                     row["moodboard_id"], row["note_id"]), connection=conn,
-                )
-                row.update(
-                    target_owner_user_id=row["owner_user_id"],
-                    target_dataset_id=self._LOCAL_UNBOUND_TASK_DATASET_ID,
-                    placement_id=placement_id,
-                    x=0,
-                    y=0,
-                    width=320,
-                    height=220,
-                    order_index=int(row["legacy_order_index"]),
-                    display_json="{}",
-                    last_modified=row["created_at"],
-                    deleted=False,
-                    version=1,
-                    canonical_revision=1,
-                    canonical_hash=canonical_hash,
-                    source_diagnostic_code=diagnostic_code,
-                    source_diagnostic_hash=diagnostic_hash,
-                )
-            else:
-                accepted_at = self._legacy_sync_timestamp_v61(row["last_modified"])
-                companion_hash = str(row.get("companion_content_hash") or "")
-                note_hash = self._legacy_note_hash_v61(
-                    {"id": row["note_id"], "title": row["note_title"], "content": row["note_content"],
-                     "version": row["parent_version"], "last_modified": row["parent_modified"],
-                     "deleted": row["parent_deleted"], "client_id": row["owner_user_id"]}
-                )
-                provenance = {
-                    "kind": "legacy_bootstrap", "attestation": "trusted_bootstrap_v1",
-                    "provider": None, "model": None, "accepted_at": accepted_at,
-                    "source_revision": None, "source_hash": None,
-                    "result_hash": self._note_task_v60_hash({"domain": "notes.studio_document.result", "source": row["note_id"]}),
-                }
-                diagnostic = moodboard_studio_legacy_source_diagnostic(
-                    "legacy_studio_lineage_unproven", {"note_id": row["note_id"], "companion_content_hash": companion_hash}
-                )
-                canonical_hash = self._note_task_v60_hash({"domain": "notes.studio_document", "source": row["note_id"]})
-                self.backend.execute(
-                    "UPDATE note_studio_documents SET owner_user_id=%s,dataset_id=%s,note_revision=%s,"
-                    "note_hash=%s,accepted_provenance_json=%s,deleted=%s,version=1,canonical_revision=1,"
-                    "canonical_hash=%s,source_diagnostic_code=%s,source_diagnostic_hash=%s WHERE note_id=%s",
-                    (row["owner_user_id"], self._LOCAL_UNBOUND_TASK_DATASET_ID,
-                     max(1, int(row.get("parent_version") or 1)), note_hash,
-                     self._canonical_json_text_v61(provenance), bool(row["parent_deleted"]),
-                     canonical_hash, diagnostic["code"], diagnostic["source_hash"], row["note_id"]),
+                    (
+                        row["target_owner_user_id"], row["target_dataset_id"],
+                        row["placement_id"], row["order_index"], row["canonical_hash"],
+                        row["source_diagnostic_code"], row["source_diagnostic_hash"],
+                        row["moodboard_id"], row["note_id"],
+                    ),
                     connection=conn,
                 )
-                row.update(
-                    target_owner_user_id=row["owner_user_id"],
-                    target_dataset_id=self._LOCAL_UNBOUND_TASK_DATASET_ID,
-                    note_revision=max(1, int(row.get("parent_version") or 1)),
-                    note_hash=note_hash,
-                    accepted_provenance_json=self._canonical_json_text_v61(provenance),
-                    deleted=bool(row["parent_deleted"]),
-                    version=1,
-                    canonical_revision=1,
-                    canonical_hash=canonical_hash,
-                    source_diagnostic_code=diagnostic["code"],
-                    source_diagnostic_hash=diagnostic["source_hash"],
+            else:
+                self.backend.execute(
+                    "UPDATE note_studio_documents SET payload_json=%s,diagram_manifest_json=%s,"
+                    "owner_user_id=%s,dataset_id=%s,note_revision=%s,note_hash=%s,"
+                    "accepted_provenance_json=%s,deleted=%s,version=%s,canonical_revision=%s,"
+                    "canonical_hash=%s,source_diagnostic_code=%s,source_diagnostic_hash=%s "
+                    "WHERE note_id=%s",
+                    (
+                        row["payload_json"], row["diagram_manifest_json"],
+                        row["target_owner_user_id"], row["target_dataset_id"],
+                        row["note_revision"], row["note_hash"],
+                        row["accepted_provenance_json"], row["deleted"],
+                        row["version"], row["canonical_revision"],
+                        row["canonical_hash"], row["source_diagnostic_code"],
+                        row["source_diagnostic_hash"], row["note_id"],
+                    ),
+                    connection=conn,
                 )
             rows.append(row)
         if not rows:
@@ -13923,6 +14228,83 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._complete_postgres_v61_phase(conn, "schema")
             conn.commit()
             self._notes_moodboard_studio_v61_postgres_checkpoint("schema")
+
+        while True:
+            if not begin_phase("moodboard identity allocation phase"):
+                return
+            progress = self._postgres_v61_progress_row(conn, "moodboard_identities")
+            if progress["status"] == "complete":
+                conn.commit()
+                break
+            rows, cursor, source_exhausted = (
+                self._postgres_v61_allocate_board_identity_page(
+                    conn, progress=progress
+                )
+            )
+            added, fingerprint = self._postgres_v61_progress_fingerprint(
+                str(progress["aggregate_fingerprint"]), rows
+            )
+            total = int(progress["copied_count"]) + added
+            status = "complete" if source_exhausted else "running"
+            self._upsert_postgres_v61_progress(
+                conn,
+                phase="moodboard_identities",
+                cursor=cursor,
+                count=total,
+                fingerprint=fingerprint,
+                status=status,
+            )
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint(
+                f"identity:moodboards:{total}"
+            )
+            if status == "complete":
+                break
+
+        for source_phase in (
+            "moodboards", "moodboard_notes", "note_studio_documents",
+        ):
+            prediction_phase = f"source_prediction:{source_phase}"
+            while True:
+                if not begin_phase(f"{source_phase} source prediction phase"):
+                    return
+                progress = self._postgres_v61_progress_row(conn, prediction_phase)
+                if progress["status"] == "complete":
+                    conn.commit()
+                    break
+                source_rows, cursor = self._postgres_v61_source_page(
+                    conn, phase=source_phase, progress=progress
+                )
+                predicted_rows = [
+                    self._postgres_v61_expected_row(
+                        conn, phase=source_phase, row=row
+                    )
+                    for row in source_rows
+                ]
+                added, fingerprint = self._postgres_v61_progress_fingerprint(
+                    str(progress["aggregate_fingerprint"]), predicted_rows
+                )
+                total = int(progress["copied_count"]) + added
+                status = (
+                    "complete"
+                    if len(source_rows)
+                    < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+                    else "running"
+                )
+                self._upsert_postgres_v61_progress(
+                    conn,
+                    phase=prediction_phase,
+                    cursor=cursor,
+                    count=total,
+                    fingerprint=fingerprint,
+                    status=status,
+                )
+                conn.commit()
+                self._notes_moodboard_studio_v61_postgres_checkpoint(
+                    f"{prediction_phase}:{total}"
+                )
+                if status == "complete":
+                    break
 
         for phase in ("moodboards", "moodboard_notes", "note_studio_documents"):
             while True:
@@ -14000,15 +14382,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "moodboard_notes",
                 "note_studio_documents",
             ):
-                source = self._postgres_v61_progress_row(conn, source_phase)
+                predicted = self._postgres_v61_progress_row(
+                    conn, f"source_prediction:{source_phase}"
+                )
+                copied = self._postgres_v61_progress_row(conn, source_phase)
                 verified = self._postgres_v61_progress_row(
                     conn, f"aggregate_verification:{source_phase}"
                 )
                 if (
-                    source["status"] != "complete"
+                    predicted["status"] != "complete"
+                    or copied["status"] != "complete"
                     or verified["status"] != "complete"
-                    or int(source["copied_count"]) != int(verified["copied_count"])
-                    or source["aggregate_fingerprint"]
+                    or int(predicted["copied_count"])
+                    != int(copied["copied_count"])
+                    or int(copied["copied_count"])
+                    != int(verified["copied_count"])
+                    or predicted["aggregate_fingerprint"]
+                    != copied["aggregate_fingerprint"]
+                    or copied["aggregate_fingerprint"]
                     != verified["aggregate_fingerprint"]
                 ):
                     raise SchemaError(
@@ -14218,7 +14609,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         progress_state = self.backend.execute(
             """
             SELECT c.relowner=current_user::regrole AS is_table_owner,
-                   pg_has_role(current_user,n.nspowner,'USAGE') AS is_schema_owner,
+                   n.nspowner=current_user::regrole AS is_schema_owner,
+                   c.relowner=n.nspowner AS owner_matches_schema,
                    has_table_privilege('public',c.oid,'SELECT') AS public_select,
                    has_table_privilege('public',c.oid,'INSERT') AS public_insert,
                    has_table_privilege('public',c.oid,'UPDATE') AS public_update,
@@ -14229,14 +14621,39 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             connection=conn,
         ).rows
-        if len(progress_state) != 1 or any(
-            not bool(progress_state[0][key])
-            for key in ("is_table_owner", "is_schema_owner")
+        if len(progress_state) != 1 or not bool(
+            progress_state[0]["owner_matches_schema"]
         ) or any(
             bool(progress_state[0][key])
             for key in ("public_select", "public_insert", "public_update", "public_delete")
         ):
             raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+
+        progress_acl = self.backend.execute(
+            """
+            SELECT NOT EXISTS(
+                     (SELECT grantee,grantor,privilege_type,is_grantable
+                        FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner)))
+                      EXCEPT
+                      SELECT grantee,grantor,privilege_type,is_grantable
+                        FROM aclexplode(acldefault('r',c.relowner)))
+                   ) AND NOT EXISTS(
+                     (SELECT grantee,grantor,privilege_type,is_grantable
+                        FROM aclexplode(acldefault('r',c.relowner))
+                      EXCEPT
+                      SELECT grantee,grantor,privilege_type,is_grantable
+                        FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))))
+                   ) AS acl_matches
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname=current_schema()
+               AND c.relname='chacha_schema_migration_progress'
+            """,
+            connection=conn,
+        ).rows
+        if len(progress_acl) != 1 or not bool(progress_acl[0]["acl_matches"]):
+            raise SchemaError(
+                "Notes moodboard/Studio v61 PostgreSQL progress ACL drifted."
+            )  # noqa: TRY003
 
         progress_columns = self.backend.execute(
             """
@@ -14420,66 +14837,96 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             metadata[(table, column)] = row
         if any(tuple(actual[table]) != expected_columns[table] for table in relations):
             raise SchemaError("Notes moodboard/Studio v61 PostgreSQL column catalog drifted.")  # noqa: TRY003
-        required_not_null = {
-            (table, column)
-            for table, columns in expected_columns.items()
-            for column in columns
-            if column not in {
-                "description", "smart_rule_json", "source_diagnostic_code",
-                "source_diagnostic_hash", "source_note_id", "excerpt_snapshot",
-                "excerpt_hash", "diagram_manifest_json", "companion_content_hash",
-            }
+        expected_metadata = {
+            "note_task_scope_authority": (
+                ("owner_user_id", "text", True, ""),
+                ("dataset_id", "text", True, ""),
+                ("task_graph_bound", "boolean", True, "true"),
+                ("moodboard_graph_bound", "boolean", True, "false"),
+                ("studio_graph_bound", "boolean", True, "false"),
+            ),
+            "moodboards": (
+                ("id", "bigint", True, "nextval'moodboards_id_seq'::regclass"),
+                ("name", "text", True, ""),
+                ("description", "text", False, ""),
+                ("smart_rule_json", "text", False, ""),
+                ("created_at", "timestamp with time zone", True, "current_timestamp"),
+                ("last_modified", "timestamp with time zone", True, "current_timestamp"),
+                ("deleted", "boolean", True, "false"),
+                ("client_id", "text", True, "'unknown'"),
+                ("version", "integer", True, "1"),
+                ("owner_user_id", "text", True, ""),
+                ("dataset_id", "text", True, ""),
+                ("sync_id", "text", True, ""),
+                ("canvas_json", "text", True, ""),
+                ("canonical_revision", "integer", True, "1"),
+                ("canonical_hash", "text", True, ""),
+                ("source_diagnostic_code", "text", False, ""),
+                ("source_diagnostic_hash", "text", False, ""),
+            ),
+            "moodboard_notes": (
+                ("moodboard_id", "bigint", True, ""),
+                ("note_id", "text", True, ""),
+                ("created_at", "timestamp with time zone", True, "current_timestamp"),
+                ("owner_user_id", "text", True, ""),
+                ("dataset_id", "text", True, ""),
+                ("placement_id", "text", True, ""),
+                ("x", "bigint", True, "0"),
+                ("y", "bigint", True, "0"),
+                ("width", "integer", True, "320"),
+                ("height", "integer", True, "220"),
+                ("order_index", "bigint", True, "0"),
+                ("display_json", "text", True, "'{}'"),
+                ("last_modified", "timestamp with time zone", True, ""),
+                ("deleted", "boolean", True, "false"),
+                ("version", "integer", True, "1"),
+                ("canonical_revision", "integer", True, "1"),
+                ("canonical_hash", "text", True, ""),
+                ("source_diagnostic_code", "text", False, ""),
+                ("source_diagnostic_hash", "text", False, ""),
+            ),
+            "note_studio_documents": (
+                ("note_id", "text", True, ""),
+                ("payload_json", "text", True, ""),
+                ("template_type", "text", True, ""),
+                ("handwriting_mode", "text", True, ""),
+                ("source_note_id", "text", False, ""),
+                ("excerpt_snapshot", "text", False, ""),
+                ("excerpt_hash", "text", False, ""),
+                ("diagram_manifest_json", "text", False, ""),
+                ("companion_content_hash", "text", False, ""),
+                ("render_version", "integer", True, "1"),
+                ("created_at", "timestamp with time zone", True, "current_timestamp"),
+                ("last_modified", "timestamp with time zone", True, "current_timestamp"),
+                ("owner_user_id", "text", True, ""),
+                ("dataset_id", "text", True, ""),
+                ("note_revision", "integer", True, "1"),
+                ("note_hash", "text", True, ""),
+                ("accepted_provenance_json", "text", True, ""),
+                ("deleted", "boolean", True, "false"),
+                ("version", "integer", True, "1"),
+                ("canonical_revision", "integer", True, "1"),
+                ("canonical_hash", "text", True, ""),
+                ("source_diagnostic_code", "text", False, ""),
+                ("source_diagnostic_hash", "text", False, ""),
+            ),
         }
-        if any(not bool(metadata[key]["is_not_null"]) for key in required_not_null):
-            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL nullability drifted.")  # noqa: TRY003
-        expected_types = {
-            ("note_task_scope_authority", "task_graph_bound"): "boolean",
-            ("note_task_scope_authority", "moodboard_graph_bound"): "boolean",
-            ("note_task_scope_authority", "studio_graph_bound"): "boolean",
-            ("moodboards", "sync_id"): "text",
-            ("moodboards", "canonical_revision"): "integer",
-            ("moodboards", "canvas_json"): "text",
-            ("moodboards", "canonical_hash"): "text",
-            ("moodboard_notes", "x"): "bigint",
-            ("moodboard_notes", "y"): "bigint",
-            ("moodboard_notes", "width"): "integer",
-            ("moodboard_notes", "height"): "integer",
-            ("moodboard_notes", "order_index"): "bigint",
-            ("moodboard_notes", "deleted"): "boolean",
-            ("moodboard_notes", "version"): "integer",
-            ("moodboard_notes", "canonical_revision"): "integer",
-            ("note_studio_documents", "note_revision"): "integer",
-            ("note_studio_documents", "deleted"): "boolean",
-            ("note_studio_documents", "version"): "integer",
-            ("note_studio_documents", "canonical_revision"): "integer",
-        }
-        if any(str(metadata[key]["data_type"]) != expected for key, expected in expected_types.items()):
-            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL type catalog drifted.")  # noqa: TRY003
-        expected_defaults = {
-            ("note_task_scope_authority", "task_graph_bound"): "true",
-            ("note_task_scope_authority", "moodboard_graph_bound"): "false",
-            ("note_task_scope_authority", "studio_graph_bound"): "false",
-            ("moodboards", "canonical_revision"): "1",
-            ("moodboard_notes", "x"): "0",
-            ("moodboard_notes", "y"): "0",
-            ("moodboard_notes", "width"): "320",
-            ("moodboard_notes", "height"): "220",
-            ("moodboard_notes", "order_index"): "0",
-            ("moodboard_notes", "display_json"): "'{}'",
-            ("moodboard_notes", "deleted"): "false",
-            ("moodboard_notes", "version"): "1",
-            ("moodboard_notes", "canonical_revision"): "1",
-            ("note_studio_documents", "note_revision"): "1",
-            ("note_studio_documents", "deleted"): "false",
-            ("note_studio_documents", "version"): "1",
-            ("note_studio_documents", "canonical_revision"): "1",
-        }
-        if any(
-            self._normalize_postgres_catalog_expression(metadata[key]["default_expression"])
-            != value
-            for key, value in expected_defaults.items()
-        ):
-            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL default catalog drifted.")  # noqa: TRY003
+        for table, expected_table_metadata in expected_metadata.items():
+            actual_table_metadata = tuple(
+                (
+                    column,
+                    str(metadata[(table, column)]["data_type"]),
+                    bool(metadata[(table, column)]["is_not_null"]),
+                    self._normalize_postgres_catalog_expression(
+                        metadata[(table, column)]["default_expression"]
+                    ),
+                )
+                for column in expected_columns[table]
+            )
+            if actual_table_metadata != expected_table_metadata:
+                raise SchemaError(
+                    "Notes moodboard/Studio v61 PostgreSQL column metadata drifted."
+                )  # noqa: TRY003
 
         constraint_rows = self.backend.execute(
             """
@@ -14775,8 +15222,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         studio_failures = self.backend.execute(
             "SELECT 1 FROM note_studio_documents s LEFT JOIN notes n "
             "ON n.client_id=s.owner_user_id AND n.id=s.note_id "
-            "LEFT JOIN notes source ON source.client_id=s.owner_user_id AND source.id=s.source_note_id "
-            "WHERE n.id IS NULL OR (s.source_note_id IS NOT NULL AND source.id IS NULL) LIMIT 1",
+            "WHERE n.id IS NULL LIMIT 1",
             connection=conn,
         ).rows
         if relationship_failures or studio_failures:
@@ -23125,6 +23571,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         target_version = self._POSTGRES_SCHEMA_VERSION
 
         with backend.transaction() as conn:
+            self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
             schema_exists = backend.table_exists('db_schema_version', connection=conn)
 
             if not schema_exists:
