@@ -1151,7 +1151,7 @@ class NoteStore:
                     "WHERE owner_user_id=? AND dataset_id=? AND note_id=?",
                     (owner, dataset, normalized_note_id),
                 ).fetchone()
-                if previous is None and bool(note.get("deleted")):
+                if bool(note.get("deleted")):
                     raise ConflictError(
                         "Studio parent note not found or not live.",
                         entity="notes",

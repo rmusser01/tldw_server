@@ -497,6 +497,119 @@ def test_ensure_studio_document_returns_exact_parent_tombstone_lifecycle(
     assert replayed["canonical_hash"] != live["canonical_hash"]
 
 
+def test_upsert_studio_document_rejects_grouped_tombstone_mutation(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id), source_note_id=str(source_note_id)
+    )
+    service._ensure_studio_document(**fields)
+    parent = db.get_note_by_id(str(note_id))
+    assert parent is not None
+    db.soft_delete_note(str(note_id), expected_version=int(parent["version"]))
+    before = dict(
+        db.execute_query(
+            "SELECT * FROM note_studio_documents WHERE note_id=?", (note_id,)
+        ).fetchone()
+    )
+    changed = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+        content="Changed while parent is deleted",
+    )
+    changed.update(
+        provenance_kind="regenerate",
+        provenance_provider=None,
+        provenance_model=None,
+    )
+
+    with pytest.raises(ConflictError, match="Studio parent note not found or not live"):
+        db.upsert_note_studio_document(**changed)
+
+    after = dict(
+        db.execute_query(
+            "SELECT * FROM note_studio_documents WHERE note_id=?", (note_id,)
+        ).fetchone()
+    )
+    assert after == before
+
+
+def test_ensure_studio_document_rejects_changed_grouped_tombstone_retry(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id), source_note_id=str(source_note_id)
+    )
+    service._ensure_studio_document(**fields)
+    parent = db.get_note_by_id(str(note_id))
+    assert parent is not None
+    db.soft_delete_note(str(note_id), expected_version=int(parent["version"]))
+    before = db.get_note_studio_document(str(note_id))
+    assert before is not None and before["deleted"] == 1
+    changed = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+        content="Changed while parent is deleted",
+    )
+
+    with pytest.raises(ConflictError, match="captured retry"):
+        service._ensure_studio_document(**changed)
+
+    assert db.get_note_studio_document(str(note_id)) == before
+
+
+def test_restored_studio_parent_allows_changed_upsert(
+    studio_db,
+) -> None:
+    db = studio_db
+    source_note_id = db.add_note(title="Source", content="Accepted excerpt")
+    note_id = db.add_note(title="Study", content="# Study\n\nAccepted companion")
+    assert source_note_id and note_id
+    service = _service(db)
+    fields = _studio_ensure_fields(
+        note_id=str(note_id), source_note_id=str(source_note_id)
+    )
+    service._ensure_studio_document(**fields)
+    parent = db.get_note_by_id(str(note_id))
+    assert parent is not None
+    db.soft_delete_note(str(note_id), expected_version=int(parent["version"]))
+    tombstone = db.get_note_studio_document(str(note_id))
+    deleted_parent = db.get_note_by_id(str(note_id), include_deleted=True)
+    assert tombstone is not None and tombstone["deleted"] == 1
+    assert deleted_parent is not None
+    db.restore_note(str(note_id), expected_version=int(deleted_parent["version"]))
+    restored = db.get_note_studio_document(str(note_id))
+    assert restored is not None and restored["deleted"] == 0
+    changed = _studio_ensure_fields(
+        note_id=str(note_id),
+        source_note_id=str(source_note_id),
+        content="Changed after grouped restore",
+    )
+    changed.update(
+        provenance_kind="regenerate",
+        provenance_provider=None,
+        provenance_model=None,
+    )
+
+    saved = db.upsert_note_studio_document(**changed)
+
+    assert saved["deleted"] == 0
+    assert saved["payload_json"]["sections"][0]["content"] == (
+        "Changed after grouped restore"
+    )
+    assert saved["canonical_revision"] == restored["canonical_revision"] + 1
+
+
 def test_ensure_new_studio_document_rejects_tombstoned_parent(
     studio_db,
 ) -> None:
