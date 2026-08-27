@@ -1,10 +1,10 @@
 ---
-id: TASK-13118
+id: TASK-13130
 title: Add scheduled execution isolation attestation and hostile runtime proof
 status: To Do
 created_date: 2026-08-24 17:38
 dependencies:
-- TASK-13117
+- TASK-13129
 labels:
 - scheduled-tasks
 - phase-4d

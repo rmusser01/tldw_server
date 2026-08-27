@@ -1,10 +1,10 @@
 ---
-id: TASK-13117
+id: TASK-13129
 title: Implement Scheduled Tasks Phase 4D.0F execution feasibility gate
 status: To Do
 created_date: 2026-08-24 17:33
 dependencies:
-- TASK-13113
+- TASK-13127
 labels:
 - scheduled-tasks
 - phase-4d
@@ -17,10 +17,10 @@ references:
 - Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md
 - Docs/ADR/010-sandbox-vz-runtime-ownership.md
 - Docs/ADR/026-security-outbound-egress-and-ssrf-policy.md
-- TASK-13118
-- TASK-13119
-- TASK-13120
-- TASK-13121
+- TASK-13130
+- TASK-13131
+- TASK-13132
+- TASK-13133
 documentation:
 - Docs/superpowers/plans/2026-08-24-scheduled-tasks-phase4d-feasibility-gate-implementation-plan.md
 - Docs/ADR/040-scheduled-agent-execution-feasibility.md
@@ -49,7 +49,7 @@ Implement the Phase 4D.0F proof and fail-closed API/admission gate. Produce repr
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Execute Docs/superpowers/plans/2026-08-24-scheduled-tasks-phase4d-feasibility-gate-implementation-plan.md only after user approval. Keep the certification/evidence change separate from TASK-13113 and all later Phase 4D execution work.
+Execute Docs/superpowers/plans/2026-08-24-scheduled-tasks-phase4d-feasibility-gate-implementation-plan.md only after user approval. Keep the certification/evidence change separate from TASK-13127 and all later Phase 4D execution work.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes

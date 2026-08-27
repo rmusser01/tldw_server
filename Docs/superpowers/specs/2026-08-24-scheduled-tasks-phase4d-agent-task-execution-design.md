@@ -3,7 +3,7 @@
 Date: 2026-08-24
 Status: Approved
 Owner: Codex brainstorming session
-Backlog: TASK-13112
+Backlog: TASK-13126
 
 Related:
 
@@ -12,8 +12,8 @@ Related:
 - `Docs/superpowers/specs/2026-06-09-scheduled-tasks-phase4b-backend-api-foundation-design.md`
 - `Docs/superpowers/specs/2026-06-30-scheduled-tasks-phase4c-recurring-question-execution-design.md`
 - `Docs/ADR/003-jobs-vs-scheduler-default.md`
-- `backlog/tasks/task-13112 - Design-Scheduled-Tasks-Phase-4D-Agent-Task-execution.md`
-- `backlog/tasks/task-13113 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md`
+- `backlog/tasks/task-13126 - Design-Scheduled-Tasks-Phase-4D-Agent-Task-execution.md`
+- `backlog/tasks/task-13127 - Fix-Agent-Task-Jobs-consumer-missing-definition-crash.md`
 
 ## Summary
 
@@ -47,7 +47,7 @@ Repository evidence that shapes this design:
 - The existing Scheduled Tasks reference client has Overview, Results, Tasks, and Create surfaces plus a stable `/scheduled-tasks/results` route.
 - Phase 3 Home surfacing uses a dedicated Automation Inbox module and preserves Watchlists ownership.
 - `Docs/ADR/003-jobs-vs-scheduler-default.md` makes Jobs the default for new user-visible work that needs retries, pause/resume, quotas, RLS, status, and operations visibility.
-- Focused baseline verification passed 71 of 72 tests. `test_missing_definition_skips` fails deterministically because run creation enforces definition existence before the consumer's missing-definition branch. TASK-13113 owns that prerequisite fix.
+- Focused baseline verification passed 71 of 72 tests. `test_missing_definition_skips` fails deterministically because run creation enforces definition existence before the consumer's missing-definition branch. TASK-13127 owns that prerequisite fix.
 
 This design does not assume that secure payload storage, durable Agent Task approvals, pre-action tool mediation, cancellation confirmation, or production Agent Task execution currently works. Each is an explicit dependency and capability gate.
 
@@ -1295,7 +1295,7 @@ The implementation plan must treat these as dependencies, not assume they exist:
 - shared migration-control journal, all-path migrated-provenance admission fencing, restartable rollback, two-release legacy fencing, and canonical scheduler generation cutover;
 - event stream or bounded polling contract for live state;
 - local health and observability without external telemetry;
-- TASK-13113 missing-definition consumer fix.
+- TASK-13127 missing-definition consumer fix.
 
 ## Operational Visibility
 
@@ -1369,7 +1369,7 @@ A failed or partial proof never relaxes isolation requirements. It narrows the a
 
 | Stage | Product capability |
 | --- | --- |
-| 4D.0 | Fix TASK-13113 with dedupe-preserving missing-definition handling and establish a green focused baseline. |
+| 4D.0 | Fix TASK-13127 with dedupe-preserving missing-definition handling and establish a green focused baseline. |
 | 4D.0F | Certify or reject execution feasibility per deployment class; publish the isolation/adapter ADR and capability outcome. |
 | 4D.0E | Expand canonical schemas, deploy epoch-compatible readers/writers, converge every process on the required `schema_writer_epoch`, drain stale work, and backfill before revision-dependent execution is enabled. |
 | 4D.M1 | Deploy legacy generation/idempotency fields and handler fencing to every instance; run migration inventory and dry-run without ownership transfer. |
@@ -1580,7 +1580,7 @@ The user approved the revised design on 2026-08-24 after the cross-section remed
 
 The follow-up implementation plan should split reviewable work into:
 
-1. TASK-13113 dedupe-preserving missing-definition fix and contract characterization.
+1. TASK-13127 dedupe-preserving missing-definition fix and contract characterization.
 2. 4D.0F isolation, scheduled-transcript, adapter-idempotency, cancellation-evidence, and deployment feasibility proof plus ADR.
 3. 4D.0E immutable-revision/schema backfill, normative granular RBAC, actor/delegation rules, retention fields, and compatibility mappings.
 4. 4D.M1 legacy generation/idempotency fields, handler fencing, inventory, and dry run without ownership transfer.

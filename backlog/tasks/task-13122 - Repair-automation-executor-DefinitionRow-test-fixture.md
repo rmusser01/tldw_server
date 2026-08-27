@@ -11,14 +11,14 @@ labels:
   - cleanup
 dependencies: []
 references:
-  - TASK-13113
+  - TASK-13127
 priority: high
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Update the automation executor test helper to construct the current DefinitionRow shape after normalized result-policy fields were added on dev. This is a test-only compatibility repair discovered while running the TASK-13113 adjacent regression gate.
+Update the automation executor test helper to construct the current DefinitionRow shape after normalized result-policy fields were added on dev. This is a test-only compatibility repair discovered while running the TASK-13127 adjacent regression gate.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

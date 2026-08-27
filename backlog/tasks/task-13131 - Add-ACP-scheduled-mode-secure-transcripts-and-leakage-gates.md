@@ -1,10 +1,10 @@
 ---
-id: TASK-13119
+id: TASK-13131
 title: Add ACP scheduled-mode secure transcripts and leakage gates
 status: To Do
 created_date: 2026-08-24 17:39
 dependencies:
-- TASK-13117
+- TASK-13129
 labels:
 - scheduled-tasks
 - phase-4d

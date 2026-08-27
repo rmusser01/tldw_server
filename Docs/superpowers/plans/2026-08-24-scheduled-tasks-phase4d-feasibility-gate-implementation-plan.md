@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:test-driven-development for each implementation unit, superpowers:systematic-debugging for unexpected probe failures, and superpowers:verification-before-completion before every commit. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement TASK-13117 as an API-first, fail-closed feasibility gate that produces reproducible evidence for the approved seven security/operational domains, publishes an ADR, and prevents Agent automation execution from being advertised or dispatched before both deployment certification and the later execution stack are ready.
+**Goal:** Implement TASK-13129 as an API-first, fail-closed feasibility gate that produces reproducible evidence for the approved seven security/operational domains, publishes an ADR, and prevents Agent automation execution from being advertised or dispatched before both deployment certification and the later execution stack are ready.
 
 **Architecture:** Add a small pure certification domain under Scheduled Tasks, a separate evidence harness that characterizes existing Sandbox/ACP/MCP behavior without granting authority, and an additive versioned capability projection on the existing `/api/v1/scheduled-tasks/capabilities` endpoint. Use one shared fail-closed readiness decision at capability projection, Run Now admission, scheduler arming, and worker admission. The first run is expected to reject certification honestly: statically eligible runtimes remain `draft_only` while required cross-system proof is missing, and statically ineligible runtimes are `unsupported`. Even a certified test fixture only clears the feasibility prerequisite; this slice has no Phase 4D execution stack and therefore never advertises or dispatches Agent automation. Later dependency work may satisfy the same evidence contract; it must not weaken the evaluator.
 
@@ -10,9 +10,9 @@
 
 **Spec:** `Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md`
 
-**Backlog task:** `TASK-13117`
+**Backlog task:** `TASK-13129`
 
-**Pre-created dependency tasks:** `TASK-13118` (isolation/hostile proof), `TASK-13119` (secure transcripts), `TASK-13120` (dispatch/evidence), `TASK-13121` (identity/credentials/mediation)
+**Pre-created dependency tasks:** `TASK-13130` (isolation/hostile proof), `TASK-13131` (secure transcripts), `TASK-13132` (dispatch/evidence), `TASK-13133` (identity/credentials/mediation)
 
 ## Global Constraints
 
@@ -34,7 +34,7 @@
 - Certification is necessary but not sufficient for execution. In this slice, `execute` and `run_now` for the `agent_task` family are always `disabled`: non-certified deployments report the certification blocker, while a synthetic certified fixture reports `agent_execution_stack_unimplemented`. No state maps to `available` until the later 4D.1B execution stack adds an independently tested readiness input.
 - Manual Run Now, scheduler arming/fire, and worker admission apply the same conjunction. They reject or skip `agent_task` before adapter execution in this slice, including a synthetically certified deployment, while recurring-question execution remains unchanged.
 - Preserve standalone Agent Tasks. Its ordinary interactive ACP lifecycle and UX are a separate job/persona and are not gated or renamed by this work.
-- ADR number 040 is current at plan time. Recheck `Docs/ADR/README.md` and the directory immediately before edits; if 040 has been claimed on current dev, update this plan and TASK-13117 to the next free number before creating the ADR.
+- ADR number 040 is current at plan time. Recheck `Docs/ADR/README.md` and the directory immediately before edits; if 040 has been claimed on current dev, update this plan and TASK-13129 to the next free number before creating the ADR.
 
 ## Evidence Domains And Current Gaps
 
@@ -82,11 +82,11 @@
 - `tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py` - versioned API contract, Run Now refusal, and action-gating regressions.
 - `tldw_Server_API/tests/Notifications/test_automation_definition_feed.py` - recurring-question preservation and Agent arming/fire refusal.
 - `tldw_Server_API/tests/Notifications/test_agent_task_jobs_consumer.py` - already-queued Agent Job refusal before executor dispatch.
-- `backlog/tasks/task-13117 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md` - progress, evidence, dependency tasks, and final decision.
-- `backlog/tasks/task-13118 - Add-scheduled-execution-isolation-attestation-and-hostile-runtime-proof.md` - attach ADR/evidence and the exact isolation requirement result.
-- `backlog/tasks/task-13119 - Add-ACP-scheduled-mode-secure-transcripts-and-leakage-gates.md` - attach ADR/evidence and the exact transcript requirement result.
-- `backlog/tasks/task-13120 - Add-ACP-dispatch-recovery-and-monotonic-execution-evidence.md` - attach ADR/evidence and the exact recovery/evidence requirement results.
-- `backlog/tasks/task-13121 - Add-scheduled-execution-identity-credentials-and-pre-action-mediation.md` - attach ADR/evidence and the exact credential/mediation requirement result.
+- `backlog/tasks/task-13129 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md` - progress, evidence, dependency tasks, and final decision.
+- `backlog/tasks/task-13130 - Add-scheduled-execution-isolation-attestation-and-hostile-runtime-proof.md` - attach ADR/evidence and the exact isolation requirement result.
+- `backlog/tasks/task-13131 - Add-ACP-scheduled-mode-secure-transcripts-and-leakage-gates.md` - attach ADR/evidence and the exact transcript requirement result.
+- `backlog/tasks/task-13132 - Add-ACP-dispatch-recovery-and-monotonic-execution-evidence.md` - attach ADR/evidence and the exact recovery/evidence requirement results.
+- `backlog/tasks/task-13133 - Add-scheduled-execution-identity-credentials-and-pre-action-mediation.md` - attach ADR/evidence and the exact credential/mediation requirement result.
 
 **Read-only evidence sources**
 
@@ -103,13 +103,13 @@
 ### Task 0: Rebase, Reserve The ADR, And Record Baseline Evidence Sources
 
 **Files:**
-- Modify: `backlog/tasks/task-13117 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md`
+- Modify: `backlog/tasks/task-13129 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md`
 
 **Interfaces:**
-- Consumes: completed TASK-13113, current `origin/dev`, the approved Phase 4D spec, and existing Sandbox/ACP/MCP evidence contracts.
+- Consumes: completed TASK-13127, current `origin/dev`, the approved Phase 4D spec, and existing Sandbox/ACP/MCP evidence contracts.
 - Produces: one clean implementation worktree and an explicit record of every evidence source and known limitation.
 
-- [ ] **Step 1: Start only after TASK-13113 is merged**
+- [ ] **Step 1: Start only after TASK-13127 is merged**
 
 ```bash
 git fetch origin dev
@@ -117,10 +117,10 @@ git worktree add .worktrees/scheduled-tasks-phase4d-feasibility -b codex/schedul
 cd .worktrees/scheduled-tasks-phase4d-feasibility
 git status --short --branch
 git log -1 --format='%H %s'
-backlog task TASK-13113 --plain
+backlog task TASK-13127 --plain
 ```
 
-Expected: clean worktree on current dev and TASK-13113 Done. If TASK-13113 is not merged, stop; do not combine the prerequisite and security gate.
+Expected: clean worktree on current dev and TASK-13127 Done. If TASK-13127 is not merged, stop; do not combine the prerequisite and security gate.
 
 - [ ] **Step 2: Confirm ADR 040 is free**
 
@@ -129,9 +129,9 @@ ls Docs/ADR
 rg -n '^# ADR-040:' Docs/ADR
 ```
 
-Expected: no existing ADR-040. If it exists, update this plan and TASK-13117 to the next free number before any ADR file is created.
+Expected: no existing ADR-040. If it exists, update this plan and TASK-13129 to the next free number before any ADR file is created.
 
-- [ ] **Step 3: Mark TASK-13117 In Progress and record the evidence inventory**
+- [ ] **Step 3: Mark TASK-13129 In Progress and record the evidence inventory**
 
 Use Backlog.md MCP to record the dev SHA and the exact reusable sources from the evidence table. Record these baseline facts: ordinary ACP stores raw prompts; ACP sandbox creation has no dispatch token/idempotency key; current cancellation lacks the required event journal; MCP credential brokering is partial; no deployment class is currently certified.
 
@@ -149,7 +149,7 @@ python -m pytest -q --tb=short \
   tldw_Server_API/tests/MCP_Hub/test_mcp_slot_status.py
 ```
 
-Expected: record exact counts and pre-existing skips/failures in TASK-13117. These tests establish reusable primitives; they do not count as Phase 4D.0F certification.
+Expected: record exact counts and pre-existing skips/failures in TASK-13129. These tests establish reusable primitives; they do not count as Phase 4D.0F certification.
 
 ### Task 1: Define Deployment Identity And Fail-Closed Outcome Rules
 
@@ -217,7 +217,7 @@ python -m pytest -q --tb=short \
 git add \
   tldw_Server_API/app/core/Scheduled_Tasks/execution_certification.py \
   tldw_Server_API/tests/Notifications/test_scheduled_task_execution_certification.py \
-  'backlog/tasks/task-13117 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md'
+  'backlog/tasks/task-13129 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md'
 git diff --cached --check
 git commit -m "feat(scheduled-tasks): add execution certification gate"
 ```
@@ -337,7 +337,7 @@ Expected: Docker reports `draft_only`; worktree reports `unsupported`; neither o
 git add \
   Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py \
   tldw_Server_API/tests/Helper_Scripts/test_scheduled_agent_execution_certification.py \
-  'backlog/tasks/task-13117 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md'
+  'backlog/tasks/task-13129 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md'
 git diff --cached --check
 git commit -m "test(scheduled-tasks): add execution feasibility evidence harness"
 ```
@@ -409,7 +409,7 @@ Add optional certification and execution-stack readiness resolvers to `Scheduled
 
 `resolve_current_agent_execution_certification()` reads `TLDW_BUILD_SHA` as the only server build identity source. Accept only a lowercase or uppercase 40- or 64-character hexadecimal digest and normalize it to lowercase. Missing or malformed input adds `server_build_identity_unverified` and prevents certification; never run Git, inspect the repository, or derive identity from a mutable version string inside the API process.
 
-Map `draft_only` and `unsupported` to disabled execution actions with stable reasons `execution_certification_draft_only` or `execution_certification_unsupported`. Map `certified` plus the current false stack input to disabled with `agent_execution_stack_unimplemented`. Run Now raises the same typed reason before idempotency or Job creation. For `unsupported`, preview-create, definition-create, and duplicate raise `agent_automation_unsupported` before persistence; retain ordinary management of existing definitions. The scheduler refuses Agent arming and rechecks at fire time. The consumer rechecks after the TASK-13113 owner-scoped definition preflight and records a skipped blocked run without calling an executor. Do not change recurring-question scheduling/execution or draft-only definition mutation.
+Map `draft_only` and `unsupported` to disabled execution actions with stable reasons `execution_certification_draft_only` or `execution_certification_unsupported`. Map `certified` plus the current false stack input to disabled with `agent_execution_stack_unimplemented`. Run Now raises the same typed reason before idempotency or Job creation. For `unsupported`, preview-create, definition-create, and duplicate raise `agent_automation_unsupported` before persistence; retain ordinary management of existing definitions. The scheduler refuses Agent arming and rechecks at fire time. The consumer rechecks after the TASK-13127 owner-scoped definition preflight and records a skipped blocked run without calling an executor. Do not change recurring-question scheduling/execution or draft-only definition mutation.
 
 - [ ] **Step 4: Run GREEN and API regressions**
 
@@ -436,7 +436,7 @@ git add \
   tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py \
   tldw_Server_API/tests/Notifications/test_automation_definition_feed.py \
   tldw_Server_API/tests/Notifications/test_agent_task_jobs_consumer.py \
-  'backlog/tasks/task-13117 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md'
+  'backlog/tasks/task-13129 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md'
 git diff --cached --check
 git commit -m "feat(scheduled-tasks): expose agent execution feasibility"
 ```
@@ -451,7 +451,7 @@ Expected: one API-first commit with no frontend, Watchlists, standalone Agent Ta
 - Create: `Docs/Development/Scheduled_Agent_Execution_Certification.md`
 - Create: `Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json`
 - Create: `Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.md`
-- Modify: `backlog/tasks/task-13117 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md`
+- Modify: `backlog/tasks/task-13129 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md`
 
 **Interfaces:**
 - Consumes: the helper at the two preceding commits and current runtime metadata.
@@ -515,12 +515,12 @@ Document the exact CLI invocations, evidence schema, seven requirement definitio
 
 Use Backlog.md MCP to add ADR-040 and both baseline artifacts to these existing tasks:
 
-1. `TASK-13118`: `isolation_attestation` and `hostile_boundary`.
-2. `TASK-13119`: `scheduled_transcript_non_disclosure`.
-3. `TASK-13120`: `adapter_dispatch_recovery` and `monotonic_execution_evidence`.
-4. `TASK-13121`: `brokered_credentials_and_mediation`.
+1. `TASK-13130`: `isolation_attestation` and `hostile_boundary`.
+2. `TASK-13131`: `scheduled_transcript_non_disclosure`.
+3. `TASK-13132`: `adapter_dispatch_recovery` and `monotonic_execution_evidence`.
+4. `TASK-13133`: `brokered_credentials_and_mediation`.
 
-Record `operational_fail_closed` as a cross-cutting exit criterion on TASK-13117 and all four dependency tasks rather than creating a fifth implementation silo. Do not begin any dependency task in this branch.
+Record `operational_fail_closed` as a cross-cutting exit criterion on TASK-13129 and all four dependency tasks rather than creating a fifth implementation silo. Do not begin any dependency task in this branch.
 
 - [ ] **Step 5: Validate documentation and artifact consistency**
 
@@ -550,22 +550,22 @@ git add \
   Docs/Development/Scheduled_Agent_Execution_Certification.md \
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json \
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.md \
-  'backlog/tasks/task-13117 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md' \
-  'backlog/tasks/task-13118 - Add-scheduled-execution-isolation-attestation-and-hostile-runtime-proof.md' \
-  'backlog/tasks/task-13119 - Add-ACP-scheduled-mode-secure-transcripts-and-leakage-gates.md' \
-  'backlog/tasks/task-13120 - Add-ACP-dispatch-recovery-and-monotonic-execution-evidence.md' \
-  'backlog/tasks/task-13121 - Add-scheduled-execution-identity-credentials-and-pre-action-mediation.md'
+  'backlog/tasks/task-13129 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md' \
+  'backlog/tasks/task-13130 - Add-scheduled-execution-isolation-attestation-and-hostile-runtime-proof.md' \
+  'backlog/tasks/task-13131 - Add-ACP-scheduled-mode-secure-transcripts-and-leakage-gates.md' \
+  'backlog/tasks/task-13132 - Add-ACP-dispatch-recovery-and-monotonic-execution-evidence.md' \
+  'backlog/tasks/task-13133 - Add-scheduled-execution-identity-credentials-and-pre-action-mediation.md'
 git diff --cached --check
 git commit -m "docs(scheduled-tasks): publish phase 4d feasibility decision"
 ```
 
-Expected: only the ADR and index, guide, validated evidence, TASK-13117, and the four exact dependency records are staged.
+Expected: only the ADR and index, guide, validated evidence, TASK-13129, and the four exact dependency records are staged.
 
 ### Task 5: Cross-Module Verification, Security Review, And Completion
 
 **Files:**
 - Verify all touched files.
-- Modify: `backlog/tasks/task-13117 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md`
+- Modify: `backlog/tasks/task-13129 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md`
 
 **Interfaces:**
 - Consumes: all four implementation units and generated evidence.
@@ -619,7 +619,7 @@ python -m bandit -r \
   tldw_Server_API/app/core/Scheduled_Tasks/agent_task_jobs.py \
   tldw_Server_API/app/api/v1/endpoints/scheduled_tasks_control_plane.py \
   Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py \
-  -f json -o /tmp/bandit_task_13117.json
+  -f json -o /tmp/bandit_task_13129.json
 ```
 
 Expected: compile and lint exit 0; Bandit reports no new findings in touched Python.
@@ -638,12 +638,12 @@ Verify all of the following:
 - recurring questions, Watchlists, and standalone Agent Tasks are unchanged;
 - there is no frontend inference or execution implementation in the diff.
 
-- [ ] **Step 4: Finalize TASK-13117 and amend the evidence commit**
+- [ ] **Step 4: Finalize TASK-13129 and amend the evidence commit**
 
-Use Backlog.md MCP to record exact test counts, host-gated skips, artifact evidence IDs, Bandit result, API/admission behavior, ADR decision, and TASK-13118 through TASK-13121. Check acceptance criteria and definition-of-done only after verification. Mark Done when the gate and documentation are complete even though the outcome is `draft_only`/`unsupported`; the task's objective is an honest feasibility decision, not forced certification.
+Use Backlog.md MCP to record exact test counts, host-gated skips, artifact evidence IDs, Bandit result, API/admission behavior, ADR decision, and TASK-13130 through TASK-13133. Check acceptance criteria and definition-of-done only after verification. Mark Done when the gate and documentation are complete even though the outcome is `draft_only`/`unsupported`; the task's objective is an honest feasibility decision, not forced certification.
 
 ```bash
-git add 'backlog/tasks/task-13117 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md'
+git add 'backlog/tasks/task-13129 - Implement-Scheduled-Tasks-Phase-4D.0F-execution-feasibility-gate.md'
 git diff --cached --check
 git commit --amend --no-edit
 ```
@@ -659,27 +659,27 @@ git diff --name-status origin/dev...HEAD
 git log --oneline origin/dev..HEAD
 ```
 
-Expected: only the complete file map, TASK-13117, and the four pre-created dependency task records appear; the worktree is clean. There are four clear commits: domain/evaluator, evidence harness, capability/admission gate, and evidence/ADR.
+Expected: only the complete file map, TASK-13129, and the four pre-created dependency task records appear; the worktree is clean. There are four clear commits: domain/evaluator, evidence harness, capability/admission gate, and evidence/ADR.
 
 ## Completion Review And Follow-On Gate
 
-- Passing TASK-13117 does not authorize Agent automation execution. It establishes the machine-readable gate and admission boundary, then records why current execution is unavailable. Certification removes one prerequisite only; 4D.1B must independently set execution-stack readiness after its complete vertical slice passes.
+- Passing TASK-13129 does not authorize Agent automation execution. It establishes the machine-readable gate and admission boundary, then records why current execution is unavailable. Certification removes one prerequisite only; 4D.1B must independently set execution-stack readiness after its complete vertical slice passes.
 - 4D.0E schema-epoch work may proceed after this decision because it is execution-independent. Revision-dependent executable work may proceed only for a deployment class whose later evidence changes this evaluator's result to `certified` through reviewed server-verified proof.
 - Draft-only work must retain disabled `execute`/`run_now`, no canonical migration activation, and no implied background execution.
-- The next implementation plan after TASK-13117 should be 4D.0E unless the user explicitly prioritizes one of the four certification dependencies first.
+- The next implementation plan after TASK-13129 should be 4D.0E unless the user explicitly prioritizes one of the four certification dependencies first.
 
 ## Approved-Spec Coverage Matrix
 
 | Approved requirement | Plan coverage | Later implementation boundary |
 | --- | --- | --- |
-| TASK-13113 missing-definition crash | Separate Phase 4D.0 prerequisite plan Tasks 1-4 | None after TASK-13113 passes |
-| Server-verified isolation attestation | Feasibility Tasks 1, 2, and 4 | TASK-13118 implements the missing verifier/trust-root path |
-| Hostile agent boundary attempts | Feasibility Task 2 manifest/refusal and Task 4 evidence | TASK-13118 implements and runs attested hostile probes |
-| Scheduled transcript sentinel exclusion | Feasibility Task 2 ordinary-ACP characterization and Task 4 evidence | TASK-13119 implements scheduled-mode protected storage and all leakage gates |
-| Idempotent adapter session and dispatch lookup | Feasibility Task 2 recovery characterization | TASK-13120 implements dispatch-token idempotency and exact lookup |
-| Terminal, timeout, approval, effect, and cancellation ordering | Feasibility Task 2 evidence characterization | TASK-13120 implements the monotonic adapter journal |
-| Brokered identity/credentials and pre-action mediation | Feasibility Task 2 credential characterization | TASK-13121 implements grants, issuance, revocation, and mediation |
-| Installation, upgrade, health, and fail-closed operation | Feasibility Tasks 1-5 and capability API gate | Cross-cutting exit criterion on TASK-13118 through TASK-13121 |
+| TASK-13127 missing-definition crash | Separate Phase 4D.0 prerequisite plan Tasks 1-4 | None after TASK-13127 passes |
+| Server-verified isolation attestation | Feasibility Tasks 1, 2, and 4 | TASK-13130 implements the missing verifier/trust-root path |
+| Hostile agent boundary attempts | Feasibility Task 2 manifest/refusal and Task 4 evidence | TASK-13130 implements and runs attested hostile probes |
+| Scheduled transcript sentinel exclusion | Feasibility Task 2 ordinary-ACP characterization and Task 4 evidence | TASK-13131 implements scheduled-mode protected storage and all leakage gates |
+| Idempotent adapter session and dispatch lookup | Feasibility Task 2 recovery characterization | TASK-13132 implements dispatch-token idempotency and exact lookup |
+| Terminal, timeout, approval, effect, and cancellation ordering | Feasibility Task 2 evidence characterization | TASK-13132 implements the monotonic adapter journal |
+| Brokered identity/credentials and pre-action mediation | Feasibility Task 2 credential characterization | TASK-13133 implements grants, issuance, revocation, and mediation |
+| Installation, upgrade, health, and fail-closed operation | Feasibility Tasks 1-5 and capability API gate | Cross-cutting exit criterion on TASK-13130 through TASK-13133 |
 | Explicit `certified`/`draft_only`/`unsupported` outcomes | Feasibility Tasks 1, 3, and 4 | Future evidence may promote only through the same evaluator |
 | API-first product contract | Feasibility Task 3 versions the existing capabilities API and enforces the same decision at Run Now, scheduler, and worker admission | Full execution APIs remain Phase 4D.1A/4D.1B |
 | No migration activation without certification | Global constraints, Task 3 gate, ADR, completion review | 4D.M1 remains dry-run; 4D.M2 remains blocked |

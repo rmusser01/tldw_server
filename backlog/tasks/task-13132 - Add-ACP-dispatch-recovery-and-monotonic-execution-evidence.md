@@ -1,10 +1,10 @@
 ---
-id: TASK-13120
+id: TASK-13132
 title: Add ACP dispatch recovery and monotonic execution evidence
 status: To Do
 created_date: 2026-08-24 17:39
 dependencies:
-- TASK-13117
+- TASK-13129
 labels:
 - scheduled-tasks
 - phase-4d

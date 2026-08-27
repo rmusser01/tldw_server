@@ -1,5 +1,5 @@
 ---
-id: TASK-13112
+id: TASK-13126
 title: Design Scheduled Tasks Phase 4D Agent Task execution
 status: Done
 created_date: 2026-08-24 06:01
@@ -18,13 +18,13 @@ references:
 - Docs/ADR/003-jobs-vs-scheduler-default.md
 - Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md
 dependencies:
-- TASK-13113
+- TASK-13127
 updated_date: 2026-08-24 17:12
 documentation:
 - Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md
 modified_files:
 - Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md
-- backlog/tasks/task-13112 - Design-Scheduled-Tasks-Phase-4D-Agent-Task-execution.md
+- backlog/tasks/task-13126 - Design-Scheduled-Tasks-Phase-4D-Agent-Task-execution.md
 ---
 
 ## Description
@@ -46,7 +46,7 @@ Create the API-first product/UX and backend dependency design for Scheduled Task
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Repository discovery found existing side-effect-free automation execution from TASK-13020/TASK-13021/TASK-13022/TASK-13110. Agent Task execution remains planned because raw messages are redacted at rest and tool approvals are not durable for unattended runs. Baseline verification: 71/72 focused tests passed; `test_missing_definition_skips` failed deterministically because `create_scheduled_task_run` enforces definition existence before the consumer's missing-definition check. Tracked as separate dependency TASK-13113.
+Repository discovery found existing side-effect-free automation execution from TASK-13020/TASK-13021/TASK-13022/TASK-13110. Agent Task execution remains planned because raw messages are redacted at rest and tool approvals are not durable for unattended runs. Baseline verification: 71/72 focused tests passed; `test_missing_definition_skips` failed deterministically because `create_scheduled_task_run` enforces definition existence before the consumer's missing-definition check. Tracked as separate dependency TASK-13127.
 
 Approved brainstorming decisions consolidated into the written Phase 4D design: Scheduled Tasks-owned direct adapter dispatch; provider-neutral target refs with ACP first; encrypted prompt references and audited reveal; revision-bound bounded authority; fail-closed drift; phase-aware retry and confirmation-only cancellation; canonical Results/Home projection; reference-client IA and accessibility; automatic fenced legacy ACP schedule migration; staged API-first rollout.
 
