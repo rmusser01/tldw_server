@@ -35,6 +35,37 @@ from .suggestion_observability import (
 from .suggestion_retrieval import SuggestionRetriever
 
 
+def build_suggestion_decision_service(
+    *,
+    note_db: Any,
+    owner_user_id: str,
+    dataset_id: str,
+) -> Any | None:
+    """Build owner/dataset-bound decision coordinators when canonical Sync is active."""
+
+    from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import NotesLinkCoordinator
+    from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
+        NotesOrganizationCoordinator,
+    )
+    from tldw_Server_API.app.core.Sync.v2.server_origin import (
+        get_active_server_origin_sync_service_for_user,
+    )
+
+    from .suggestion_decisions import SuggestionDecisionService
+
+    sync = get_active_server_origin_sync_service_for_user(owner_user_id)
+    if sync is None:
+        return None
+    dataset = sync.store.get_dataset(dataset_id)
+    if dataset is None or dataset.owner_user_id != owner_user_id:
+        return None
+    return SuggestionDecisionService(
+        store=note_db.note_graph_suggestion_store,
+        link_coordinator=NotesLinkCoordinator(sync, note_db, owner_user_id, dataset),
+        organization_coordinator=NotesOrganizationCoordinator(sync, note_db, owner_user_id),
+    )
+
+
 class SuggestionWorkerError(RuntimeError):
     retryable = False
 
@@ -409,4 +440,5 @@ __all__ = [
     "SuggestionWorker",
     "SuggestionWorkerCancelled",
     "SuggestionWorkerError",
+    "build_suggestion_decision_service",
 ]

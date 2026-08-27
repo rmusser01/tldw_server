@@ -2450,3 +2450,89 @@ def test_postgres_review_fix_discovers_durable_scopes_and_fences_publication_lea
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
+
+
+def test_postgres_task7_transaction_guard_finalizer_and_expired_takeover(
+    tmp_path,
+    pg_database_config,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = _new_db(tmp_path, backend=backend)
+    source = "90000000-0000-4000-8000-000000000701"
+    target = "90000000-0000-4000-8000-000000000702"
+    try:
+        db.add_note("Task 7 source", "body", note_id=source)
+        db.add_note("Task 7 target", "body", note_id=target)
+        store = db.note_graph_suggestion_store
+        _publish_related(
+            db,
+            source=source,
+            target=target,
+            key="task7-pg-finalize-run",
+            suggestion_id="task7-pg-finalize",
+        )
+        finalized_fence = store.claim_acceptance(
+            dataset_id=DATASET_ID,
+            suggestion_id="task7-pg-finalize",
+            expected_revision=1,
+            expected_source_fingerprint=_note_fingerprint(db, source),
+            expected_target_fingerprint=_note_fingerprint(db, target),
+            idempotency_key="task7-pg-finalize-key",
+            now=NOW,
+        ).suggestion
+        assert finalized_fence is not None
+        with db.transaction() as conn:
+            store.guard_acceptance_in_transaction(
+                conn=conn,
+                fence=finalized_fence,
+                now=NOW,
+            )
+            accepted = store.finalize_acceptance_in_transaction(
+                conn=conn,
+                fence=finalized_fence,
+                accepted_resource_identity="90000000-0000-4000-8000-000000000703",
+                now=NOW,
+            )
+        assert accepted.envelope["state"] == "accepted"
+
+        _publish_related(
+            db,
+            source=source,
+            target=target,
+            key="task7-pg-takeover-run",
+            suggestion_id="task7-pg-takeover",
+            model="model-b",
+        )
+        old_fence = store.claim_acceptance(
+            dataset_id=DATASET_ID,
+            suggestion_id="task7-pg-takeover",
+            expected_revision=1,
+            expected_source_fingerprint=_note_fingerprint(db, source),
+            expected_target_fingerprint=_note_fingerprint(db, target),
+            idempotency_key="task7-pg-takeover-key",
+            now=NOW,
+        ).suggestion
+        assert old_fence is not None
+        claims = store.claim_expired_acceptances(
+            dataset_id=DATASET_ID,
+            limit=100,
+            now=NOW + timedelta(minutes=5, seconds=1),
+        )
+        assert [claim.id for claim in claims] == ["task7-pg-takeover"]
+        with db.transaction() as conn:
+            with pytest.raises(RuntimeError, match="notes_graph_suggestion_conflict"):
+                store.guard_acceptance_in_transaction(
+                    conn=conn,
+                    fence=old_fence,
+                    now=NOW + timedelta(minutes=5, seconds=1),
+                )
+        released = store.resolve_expired_acceptance(
+            fence=claims[0],
+            accepted_resource_identity=None,
+            resolved_keyword_sync_id=None,
+            now=NOW + timedelta(minutes=5, seconds=1),
+        )
+        assert released.envelope["state"] == "pending"
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()

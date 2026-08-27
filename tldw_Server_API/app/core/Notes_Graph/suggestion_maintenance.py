@@ -97,6 +97,23 @@ def classify_job_observation(
 class MaintenanceScope:
     store: Any
     dataset_id: str
+    decision_service: Any | None = None
+
+    def __post_init__(self) -> None:
+        if self.decision_service is not None:
+            return
+        note_db = getattr(self.store, "_db", None)
+        owner = getattr(self.store, "owner_user_id", None)
+        if note_db is None or not isinstance(owner, str):
+            return
+        from .suggestion_service import build_suggestion_decision_service
+
+        decisions = build_suggestion_decision_service(
+            note_db=note_db,
+            owner_user_id=owner,
+            dataset_id=self.dataset_id,
+        )
+        object.__setattr__(self, "decision_service", decisions)
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,6 +375,17 @@ class SuggestionMaintenance:
                 )
                 reconciled += 1
                 self._record_reconciliation(run, reconciled_run)
+
+        for scope in self._scopes:
+            if scope.decision_service is None:
+                continue
+            decisions = scope.decision_service.reconcile_expired(
+                dataset_id=scope.dataset_id,
+                limit=limit,
+                now=now,
+            )
+            claimed += len(decisions)
+            reconciled += len(decisions)
 
         cleaned = 0
         cleanup_remaining = max(0, limit - claimed)

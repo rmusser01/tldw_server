@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 16:44
+updated_date: 2026-08-27 17:24
 labels:
 - notes
 - knowledge-graph
@@ -172,6 +172,8 @@ Task 6 completed from exact base 34e8e58ad5ab254bbadc0b4ff57541b6e8cd82ee. Added
 Task 6 Fix Round 1 completed locally from reviewed head a7b7c1607072af25015a485fd2d11db14e0f886a. Guard identities and complete guarded Notes plans are now validated before append; matching envelopes carry only a fixed content-free guard-required marker, and every replay entry point fails closed without the exact fresh process-local capability set. New-tag capture uses a before-only keyword guard plus the finalizing keyword-link guard. Added post-append SQLite barriers and a live PostgreSQL row-lock barrier; also corrected the PostgreSQL note_edges.directed 0/1 binding exposed by that test. Verification: required suite 98 passed/0 skipped/2 inherited warnings; Ruff clean; Bandit 0 findings/0 errors; git diff --check clean. Full Fix Round 1 evidence is in .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-6-report.md. Parent task remains In Progress.
 Task 6 Fix Round 2 completed locally from reviewed head 9043a29f957d2a71485e92e4ef91ca8af2f18c33. Reserved `_sync_guard_required_v1` routing metadata is rejected at generic client push, compound notes.task push, and conflict-resolution envelope ingress before durable append. Persisted markers are honored only for supported guarded domains with owner-bound server-origin provenance; malformed groups fail closed as integrity conflicts without product or apply-status mutation. Final required suite: 270 passed/0 skipped/2 inherited warnings, including live PostgreSQL. Ruff clean; Bandit 0 findings/0 errors; git diff --check clean. Full evidence is in the ignored task-6-report.md. Parent task remains In Progress.
 Task 7 NEEDS_CONTEXT at base e8cfbd5b62390bd4dfd00dfaba6d8f4e1ccb3451. The Task 3 store lacks the authorized transaction-bound acceptance guard/finalizer, same-fence renewal, exact-existing-postcondition finalization, stale receipt closure, and bounded expired-acceptance scan/resolution surface required by Task 7 and Task 6 callbacks. Strict RED reached the expected missing suggestion_decisions module (2 collection errors, 5 inherited warnings) after one sandbox temporary-directory retry. No production/tests were retained; store SQL was not modified. Exact required atomic contract and evidence are in the ignored task-7-report.md.
+Task 7 resumed from blocker commit 1e4e7f583a24a64a448dbcbad5987c4289336cea after controller authorization of the narrow DB_Management acceptance/reconciliation surface. Strict TDD continues with focused store-contract plus decision/integration RED before production edits; no schema change is planned.
+Task 7 completed locally after the authorized DB-layer continuation. Added review-safe accept/reject/reset orchestration, exact transaction-bound acceptance guards/finalization, separate guarded keyword and membership steps, portable rename/merge/collision resolution, bounded expired-lease reconciliation, and durable stale/terminal receipt closure. Verification: exact Task 7 suite 25 passed; affected Task 3/5 regressions 92 passed; required live PostgreSQL parity 1 passed with no skip; Ruff clean; Bandit 0 findings; diff check clean. Parent task remains In Progress for Tasks 8-12.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

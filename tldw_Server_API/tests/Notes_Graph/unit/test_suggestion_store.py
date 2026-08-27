@@ -7,6 +7,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
+from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 
 pytestmark = pytest.mark.unit
 
@@ -164,6 +165,47 @@ def _stage_and_activate(
         now=NOW,
     )
     return activated
+
+
+def _stage_and_activate_tag(
+    db: CharactersRAGDB,
+    *,
+    key: str,
+    suggestion_id: str,
+    normalized_tag: str = "research",
+    display_tag: str = "Research",
+    keyword_sync_id: str | None = None,
+):
+    running = _queue_and_run(db, _admit(db, key=key))
+    publishing = db.note_graph_suggestion_store.stage_suggestions(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_state="running",
+        expected_revision=running.revision,
+        expected_job_id=running.job_id,
+        expected_completion_token=running.expected_completion_token,
+        result_digest=f"sha256:{'9' * 64}",
+        candidates=(
+            _tag_candidate(
+                suggestion_id=suggestion_id,
+                normalized_tag=normalized_tag,
+                display_tag=display_tag,
+                keyword_sync_id=keyword_sync_id,
+            ),
+        ),
+        invalid_item_count=0,
+        now=NOW,
+    )
+    return db.note_graph_suggestion_store.activate_staged_run(
+        dataset_id=DATASET_ID,
+        run_id=publishing.id,
+        expected_state="publishing",
+        expected_revision=publishing.revision,
+        observed_job_id=publishing.job_id,
+        observed_completion_token=publishing.expected_completion_token,
+        observed_result_digest=publishing.result_digest,
+        now=NOW,
+    )
 
 
 def test_request_fingerprints_and_key_digests_are_versioned_bounded_and_safe(db) -> None:
@@ -820,6 +862,328 @@ def test_acceptance_lease_is_five_minutes_and_stale_fence_cannot_mutate(db) -> N
             expected_lease_token=first.suggestion.acceptance_lease_token,
             now=NOW + timedelta(minutes=5, seconds=2),
         )
+
+
+def test_acceptance_guard_renewal_and_finalizer_share_the_exact_fence(db) -> None:
+    _stage_and_activate(db, key="guard-finalize-run", suggestion_id="guard-finalize")
+    store = db.note_graph_suggestion_store
+    claimed = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="guard-finalize",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="guard-finalize-key",
+        now=NOW,
+    ).suggestion
+    assert claimed is not None
+
+    renewed = store.renew_acceptance(fence=claimed, now=NOW + timedelta(minutes=1))
+    assert renewed.revision == claimed.revision
+    assert renewed.acceptance_lease_token == claimed.acceptance_lease_token
+    assert renewed.acceptance_lease_expires_at == (NOW + timedelta(minutes=6)).isoformat()
+
+    with db.transaction() as conn:
+        store.guard_acceptance_in_transaction(conn=conn, fence=renewed, now=NOW + timedelta(minutes=1))
+        finalized = store.finalize_acceptance_in_transaction(
+            conn=conn,
+            fence=renewed,
+            accepted_resource_identity="44444444-4444-4444-8444-444444444444",
+            now=NOW + timedelta(minutes=1),
+        )
+    assert finalized.envelope == {
+        "accepted_resource_identity": "44444444-4444-4444-8444-444444444444",
+        "revision": 3,
+        "state": "accepted",
+        "suggestion_id": "guard-finalize",
+    }
+    row = db.execute_query(
+        "SELECT state,rationale,acceptance_lease_token,acceptance_lease_expires_at "
+        "FROM note_graph_suggestions WHERE id='guard-finalize'"
+    ).fetchone()
+    assert tuple(row) == ("accepted", None, None, None)
+    assert db.execute_query(
+        "SELECT COUNT(*) AS count FROM note_graph_suggestion_evidence "
+        "WHERE suggestion_id='guard-finalize'"
+    ).fetchone()["count"] == 0
+    receipt = db.execute_query(
+        "SELECT state,http_status FROM note_graph_suggestion_operation_receipts WHERE id=?",
+        (renewed.decision_receipt_id,),
+    ).fetchone()
+    assert tuple(receipt) == ("completed", 200)
+
+    with db.transaction() as conn:
+        with pytest.raises(RuntimeError, match="notes_graph_suggestion_conflict"):
+            store.guard_acceptance_in_transaction(conn=conn, fence=claimed, now=NOW + timedelta(minutes=1))
+
+
+def test_exact_existing_postcondition_requires_final_tag_membership(db) -> None:
+    keyword_id = db.add_keyword("Research")
+    keyword = db.get_keyword_by_id(keyword_id)
+    assert keyword is not None
+    _stage_and_activate_tag(
+        db,
+        key="existing-tag-run",
+        suggestion_id="existing-tag",
+        keyword_sync_id=str(keyword["sync_id"]),
+    )
+    store = db.note_graph_suggestion_store
+    fence = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="existing-tag",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=None,
+        idempotency_key="existing-tag-key",
+        now=NOW,
+    ).suggestion
+    assert fence is not None
+    relationship_identity = organization_link_id(
+        "notes.keyword_link",
+        ["note", SOURCE_ID, str(keyword["sync_id"])],
+    )
+
+    absent = store.finalize_existing_acceptance(
+        fence=fence,
+        accepted_resource_identity=relationship_identity,
+        resolved_keyword_sync_id=str(keyword["sync_id"]),
+        now=NOW,
+    )
+    assert absent.disposition == "in_progress"
+    assert absent.suggestion is not None and absent.suggestion.state.value == "accepting"
+
+    assert db.link_note_to_keyword(SOURCE_ID, keyword_id)
+    accepted = store.finalize_existing_acceptance(
+        fence=fence,
+        accepted_resource_identity=relationship_identity,
+        resolved_keyword_sync_id=str(keyword["sync_id"]),
+        now=NOW,
+    )
+    assert accepted.envelope["state"] == "accepted"
+
+
+def test_expired_acceptance_scan_claims_higher_fence_and_only_resolves_existing_or_pending(db) -> None:
+    _stage_and_activate(db, key="expired-run", suggestion_id="expired-acceptance")
+    store = db.note_graph_suggestion_store
+    first = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="expired-acceptance",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="expired-key",
+        now=NOW,
+    ).suggestion
+    assert first is not None
+
+    claims = store.claim_expired_acceptances(
+        dataset_id=DATASET_ID,
+        limit=100,
+        now=NOW + timedelta(minutes=5, seconds=1),
+    )
+    assert [item.id for item in claims] == ["expired-acceptance"]
+    takeover = claims[0]
+    assert takeover.revision == first.revision + 1
+    assert takeover.acceptance_lease_token != first.acceptance_lease_token
+
+    resolved = store.resolve_expired_acceptance(
+        fence=takeover,
+        accepted_resource_identity=None,
+        resolved_keyword_sync_id=None,
+        now=NOW + timedelta(minutes=5, seconds=1),
+    )
+    assert resolved.envelope == {
+        "revision": takeover.revision + 1,
+        "state": "pending",
+        "suggestion_id": "expired-acceptance",
+    }
+    with db.transaction() as conn:
+        with pytest.raises(RuntimeError, match="notes_graph_suggestion_conflict"):
+            store.guard_acceptance_in_transaction(
+                conn=conn,
+                fence=first,
+                now=NOW + timedelta(minutes=5, seconds=1),
+            )
+
+
+def test_stale_accept_and_reject_close_operation_specific_receipts(db) -> None:
+    _stage_and_activate(db, key="stale-accept-run", suggestion_id="stale-accept")
+    accept = db.note_graph_suggestion_store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="stale-accept",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="stale-accept-key",
+        now=NOW,
+    )
+    assert accept.suggestion is not None
+    assert db.update_note(SOURCE_ID, {"content": "source changed"}, expected_version=1)
+    replay = db.note_graph_suggestion_store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="stale-accept",
+        expected_revision=1,
+        expected_source_fingerprint=accept.suggestion.source_fingerprint,
+        expected_target_fingerprint=accept.suggestion.target_fingerprint,
+        idempotency_key="stale-accept-key",
+        now=NOW + timedelta(minutes=1),
+    )
+    assert replay.disposition == "terminal_replay"
+    assert replay.envelope["state"] == "stale"
+
+    _stage_and_activate(db, key="stale-reject-run", suggestion_id="stale-reject")
+    source_fingerprint = _fingerprint(db, SOURCE_ID)
+    target_fingerprint = _fingerprint(db, TARGET_ID)
+    with db.transaction() as conn:
+        conn.execute("UPDATE notes SET content='changed without hook' WHERE id=?", (TARGET_ID,))
+    rejected = db.note_graph_suggestion_store.reject_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="stale-reject",
+        expected_revision=1,
+        expected_source_fingerprint=source_fingerprint,
+        expected_target_fingerprint=target_fingerprint,
+        idempotency_key="stale-reject-key",
+        now=NOW,
+    )
+    assert rejected.envelope == {
+        "error_code": "notes_graph_fingerprint_stale",
+        "revision": 2,
+        "state": "stale",
+        "suggestion_id": "stale-reject",
+    }
+
+
+def test_rejection_set_caps_at_exactly_two_thousand_keys(db) -> None:
+    _stage_and_activate(db, key="rejection-cap-run", suggestion_id="rejection-cap")
+    source_fingerprint = _fingerprint(db, SOURCE_ID)
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO note_graph_suggestion_rejection_sets("
+            "owner_user_id,dataset_id,source_note_id,source_fingerprint,revision,rejection_count,updated_at"
+            ") VALUES (?,?,?,?,1,2000,?)",
+            (db.client_id, DATASET_ID, SOURCE_ID, source_fingerprint, NOW.isoformat()),
+        )
+    with pytest.raises(RuntimeError, match="notes_graph_suggestion_suppression_limit"):
+        db.note_graph_suggestion_store.reject_suggestion(
+            dataset_id=DATASET_ID,
+            suggestion_id="rejection-cap",
+            expected_revision=1,
+            expected_source_fingerprint=source_fingerprint,
+            expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+            idempotency_key="rejection-cap-key",
+            now=NOW,
+        )
+    assert db.execute_query(
+        "SELECT state FROM note_graph_suggestions WHERE id='rejection-cap'"
+    ).fetchone()["state"] == "pending"
+
+
+def test_accept_reject_race_closes_the_losing_operation_receipt(db) -> None:
+    _stage_and_activate(db, key="accept-wins-run", suggestion_id="accept-wins")
+    store = db.note_graph_suggestion_store
+    fence = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="accept-wins",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="accept-wins-key",
+        now=NOW,
+    ).suggestion
+    assert fence is not None
+    with db.transaction() as conn:
+        accepted = store.finalize_acceptance_in_transaction(
+            conn=conn,
+            fence=fence,
+            accepted_resource_identity="66666666-6666-4666-8666-666666666666",
+            now=NOW,
+        )
+
+    losing_reject = store.reject_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="accept-wins",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="reject-lost-key",
+        now=NOW,
+    )
+    assert losing_reject.envelope == accepted.envelope
+    assert losing_reject.disposition == "completed"
+
+    _stage_and_activate(db, key="reject-wins-run", suggestion_id="reject-wins")
+    rejected = store.reject_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="reject-wins",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="reject-wins-key",
+        now=NOW,
+    )
+    losing_accept = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="reject-wins",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="accept-lost-key",
+        now=NOW,
+    )
+    assert losing_accept.envelope == {
+        **rejected.envelope,
+        "error_code": "notes_graph_suggestion_rejected",
+    }
+    assert losing_accept.disposition == "completed"
+
+    receipt_states = db.execute_query(
+        "SELECT state FROM note_graph_suggestion_operation_receipts "
+        "WHERE resource_identity IN ('accept-wins','reject-wins') ORDER BY id"
+    ).fetchall()
+    assert receipt_states and all(row["state"] == "completed" for row in receipt_states)
+
+
+def test_deleted_keyword_identity_marks_acceptance_stale_and_closes_receipt(db) -> None:
+    keyword_id = db.add_keyword("Disposable")
+    keyword = db.get_keyword_by_id(keyword_id)
+    assert keyword is not None
+    _stage_and_activate_tag(
+        db,
+        key="deleted-identity-run",
+        suggestion_id="deleted-identity",
+        normalized_tag="disposable",
+        display_tag="Disposable",
+        keyword_sync_id=str(keyword["sync_id"]),
+    )
+    store = db.note_graph_suggestion_store
+    fence = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="deleted-identity",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=None,
+        idempotency_key="deleted-identity-key",
+        now=NOW,
+    ).suggestion
+    assert fence is not None
+    assert db.soft_delete_keyword(keyword_id, expected_version=1)
+
+    stale = store.mark_acceptance_stale(
+        fence=fence,
+        reason="canonical_resource_missing",
+        now=NOW,
+    )
+    assert stale.envelope == {
+        "error_code": "notes_graph_canonical_resource_stale",
+        "revision": 3,
+        "state": "stale",
+        "suggestion_id": "deleted-identity",
+    }
+    receipt = db.execute_query(
+        "SELECT state,http_status FROM note_graph_suggestion_operation_receipts WHERE id=?",
+        (fence.decision_receipt_id,),
+    ).fetchone()
+    assert tuple(receipt) == ("completed", 409)
 
 
 def test_acceptance_replay_and_fences_never_expose_another_receipts_lease(db) -> None:
