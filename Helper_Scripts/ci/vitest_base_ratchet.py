@@ -987,13 +987,14 @@ def _load_failures(
                     raise RatchetError(
                         f"failed assertion in {relative_path} is missing title"
                     )
-                if ancestor_titles is None:
+                current_ancestor_titles = assertion.get("ancestorTitles")
+                if not isinstance(current_ancestor_titles, list):
                     raise RatchetError(
                         f"failed assertion in {relative_path} is missing ancestors"
                     )
                 identity = (
                     relative_path,
-                    tuple(ancestor_titles),
+                    tuple(current_ancestor_titles),
                     title,
                     full_name,
                 )

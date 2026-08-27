@@ -2139,6 +2139,91 @@ def test_package_compare_rejects_malformed_failure_provenance(tmp_path: Path) ->
 
 
 @pytest.mark.unit
+def test_package_compare_matches_structured_failures_across_sibling_suites(
+    tmp_path: Path,
+) -> None:
+    """Match each failure against its own ancestor titles within one file."""
+
+    head_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    base_root = tmp_path / "base" / "apps" / "packages" / "ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_order_report = tmp_path / "head-order.json"
+    base_order_report = tmp_path / "base-order.json"
+    changed_files = tmp_path / "changed.txt"
+    relative_path = "src/route.test.ts"
+    full_names = ["first suite rejects access", "second suite rejects access"]
+    failures = {relative_path: full_names}
+
+    for report_path, package_root in (
+        (head_report, head_root),
+        (base_report, base_root),
+    ):
+        _write_report(report_path, package_root, failures)
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        assertions = payload["testResults"][0]["assertionResults"]
+        assertions[0]["ancestorTitles"] = ["first suite"]
+        assertions[0]["title"] = "rejects access"
+        assertions[1]["ancestorTitles"] = ["second suite"]
+        assertions[1]["title"] = "rejects access"
+        payload["numTotalTestSuites"] = 3
+        payload["numFailedTestSuites"] = 3
+        report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    structured_failures = []
+    for suite, full_name in zip(("first suite", "second suite"), full_names):
+        failure = _structured_failure(
+            relative_path,
+            full_name,
+            "expected true to be false",
+            [],
+        )
+        failure["ancestorTitles"] = [suite]
+        failure["title"] = "rejects access"
+        structured_failures.append(failure)
+
+    _write_structured_order_report(
+        head_order_report,
+        (relative_path,),
+        structured_failures,
+    )
+    _write_structured_order_report(
+        base_order_report,
+        (relative_path,),
+        structured_failures,
+    )
+    for order_report in (head_order_report, base_order_report):
+        payload = json.loads(order_report.read_text(encoding="utf-8"))
+        payload["suiteCount"] = 3
+        payload["suites"].extend(
+            {
+                "module": relative_path,
+                "path": [index],
+                "name": suite,
+                "state": "failed",
+                "mode": "run",
+            }
+            for index, suite in enumerate(("first suite", "second suite"))
+        )
+        order_report.write_text(json.dumps(payload), encoding="utf-8")
+    changed_files.write_text("apps/packages/ui/src/runtime.ts\n", encoding="utf-8")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("apps/packages/ui"),
+        changed_files_path=changed_files,
+        head_order_report_path=head_order_report,
+        base_order_report_path=base_order_report,
+    )
+
+    assert result.passes
+    assert len(result.inherited) == 2
+
+
+@pytest.mark.unit
 def test_package_compare_consumes_duplicate_structured_failure_identities(
     tmp_path: Path,
 ) -> None:

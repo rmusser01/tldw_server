@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: 2026-08-21 20:41
-updated_date: 2026-08-27 16:43
+updated_date: 2026-08-27 18:07
 labels:
 - admin
 - webhooks
@@ -36,6 +36,9 @@ modified_files:
 - admin-ui/scripts/ci/vitest-safety-reporter.test.ts
 - tldw_Server_API/tests/CI/test_path_classifier.py
 - tldw_Server_API/tests/CI/test_vitest_base_ratchet.py
+- apps/packages/ui/src/components/Option/Prompt/Studio/StudioTabContainer.tsx
+- apps/packages/ui/src/components/Option/Prompt/__tests__/StudioTabContainer.stage6-navigation.test.tsx
+- tldw_Server_API/tests/CI/test_required_workflow_contracts.py
 ---
 
 ## Description
@@ -234,6 +237,11 @@ The claimed nested-suite bug is factually incorrect and was not implemented. Rea
 2026-08-27 Qodo marker-analyzer compatibility follow-up: refreshed exact-head Qodo resolved the docstring finding but continued to report the already-present unit marker because it was placed above a multiline parametrize decorator. Reordered the two decorators so @pytest.mark.unit is directly adjacent to the function; pytest semantics and test behavior are unchanged, while the compliance marker is now visible at the cited function boundary. Verification: isolated test_path_classifier module 12/12 passed under Python 3.12; Ruff, py_compile, AST inspection for exactly one adjacent unit marker, and git diff --check passed. This change intentionally restarts exact-head CI; hosted frontend remains the only substantive open gate.
 2026-08-27 exact-head CI remediation: frontend-unit-tests shard 6 (run 33090600759, job 98582458166) exhausted the configured 4096 MiB V8 heap while running the dependency-impact suite. Vitest then emitted an unfinished assertion and the schema-3 ratchet correctly failed closed before exact-base comparison. Raised only the frontend unit shard NODE_OPTIONS budget to 5120 MiB, matching the repository's existing frontend CI memory precedent, and added a workflow contract pinning the budget. RED proof: focused contract failed with 4096 != 5120. Local verification after the change: focused contract 1 passed; required + license-first workflow contract modules 55 passed; Ruff passed; py_compile passed; git diff --check passed. Exact-head hosted CI remains required before completion.
 2026-08-27 fresh Qodo follow-up at e8c98cf7b1c329f63f5e7fed88aae6a78d6e07ae: Qodo reported 0 bugs and two rule items. The hosted frontend gate remains intentionally open. The new marker finding was valid because the heap-budget contract modified test_frontend_required_uses_isolated_vitest_shards without a direct classification marker. Added exactly one direct @pytest.mark.unit marker and the required pytest import. Verification: required + license-first workflow contracts plus path-classifier contracts 67 passed; AST confirmed the target function has exactly ['pytest.mark.unit']; Ruff, py_compile, and git diff --check passed. The two local unknown-marker warnings are caused only by the isolated -c /dev/null invocation omitting the repository marker registration.
+2026-08-27 correction and final local remediation evidence: the earlier 5120 MiB heap diagnosis was disproven when the exact local shard also exhausted 5120 MiB; the workflow heap increase, its contract assertion, and the marker/import added only for that assertion are reverted to the established 4096 MiB budget. Root-cause isolation found two actual frontend render/effect loops: the Studio navigation test returned a fresh React Query client on every render, repeatedly reopening its WebSocket effect, and StudioTabContainer had competing URL-to-store/store-to-URL effects that oscillated after store-driven tab changes. The query-client mock is now stable and tab synchronization uses one last-agreed-value reconciliation effect. Review then reproduced a separate React Strict Mode reversal of valid initial deep links; RED failed with projects instead of evaluations, and the reconciler now advances its last-synchronized ref only after URL and store agree. Both store-to-URL onboarding navigation and initial URL-to-store deep links are covered under Strict Mode. Focused frontend verification at a 1024 MiB heap: 16/16 passed in under one second. Before the Strict Mode follow-up, the exact original 4096 MiB dependency-impact shard completed 254 files/1608 tests without OOM; its 25 failures replayed on exact base 2306c1939f3b460f9c62da8ae83a1aa47c02ee0d as the same 25 failures.
+
+The real report comparison exposed a separate schema-3 comparator defect: the failed-assertion pass reused ancestorTitles from the final assertion in a file, so sibling suites could not match their own structured provenance. Focused RED reproduced the missing-provenance error; the helper now reads and validates ancestorTitles from each current failed assertion. The focused regression passes and the saved real head/base reports compare inherited=25 regressions=0. Helper SHA-256 74fa9548fe0b9c36e83caed664cf33b1face02686ee63bb0c70d6856f0fb5ca1 is pinned in both frontend-required ratchet jobs.
+
+Final local gates: Studio navigation 16/16; CI ratchet/workflow contracts 117/117 (56 isolated-config marker warnings only); Ruff passed; Python 3.12 py_compile passed; git diff --check passed; both helper digest pins verified. Canonical frontend TypeScript diagnostics are byte-for-byte identical to exact base: 80 inherited errors, zero references to changed files. Prettier also fails both touched TypeScript files on exact base, so no file-wide formatting churn was introduced. TASK-13014 remains In Progress pending commit/push, fresh exact-head Qodo review, green hosted frontend CI, and final unresolved-thread audit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->

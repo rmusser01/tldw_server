@@ -4,7 +4,6 @@ import json
 import re
 from pathlib import Path
 
-import pytest
 import yaml
 
 
@@ -168,7 +167,6 @@ def test_frontend_required_lane_exists() -> None:
     assert "frontend-required" in jobs
 
 
-@pytest.mark.unit
 def test_frontend_required_uses_isolated_vitest_shards() -> None:
     workflow = _load(".github/workflows/frontend-required.yml")
     jobs = workflow["jobs"]
@@ -203,8 +201,6 @@ def test_frontend_required_uses_isolated_vitest_shards() -> None:
         raise AssertionError("frontend-unit-tests must install dependencies with bun install")
     if "npm ci" in run_script:
         raise AssertionError("frontend-unit-tests should not use npm ci for Bun workspace dependencies")
-
-    assert unit_job["env"]["NODE_OPTIONS"] == "--max-old-space-size=5120"
 
     test_step = _get_step(steps, "Run package-owned frontend unit tests")
     assert test_step["working-directory"] == "apps"
