@@ -197,6 +197,7 @@ def _write_structured_order_report(
     modules: tuple[str, ...],
     failures: list[dict[str, object]],
 ) -> None:
+    """Write a schema-3 execution-order sidecar for comparator tests."""
     path.write_text(
         json.dumps(
             {
@@ -228,6 +229,7 @@ def _structured_failure(
     message: str,
     stacks: list[dict[str, object]],
 ) -> dict[str, object]:
+    """Build one schema-3 failed-test record."""
     return {
         "module": module,
         "ancestorTitles": [],
