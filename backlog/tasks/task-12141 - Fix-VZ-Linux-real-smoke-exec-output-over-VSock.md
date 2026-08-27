@@ -4,7 +4,7 @@ title: Fix VZ Linux real smoke exec output over VSock
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-04 17:55'
+updated_date: '2026-08-27 02:02'
 labels:
   - sandbox
   - vz-linux
@@ -40,6 +40,8 @@ Fix: return the priming bufio.Reader from primeConnection and pass it to ServeSt
 Verification: GOCACHE=/private/tmp/tldw-go-build-cache go test ./internal/guest; GOCACHE=/private/tmp/tldw-go-build-cache go test ./... in tools/tldw-agent; rebuilt Debian arm64 bundle; real host smoke final_exit_code=0 at /private/tmp/tvz-e2e.4iJ3wt/evidence/host-smoke-evidence.json.
 
 Bandit: not applicable to touched production code; this change is Go-only under tools/tldw-agent.
+
+PR review follow-up: updated TestGuestVSockClientRunPreservesExecBufferedAfterReady to wait for and validate the exec response before closing the helper-side pipe, removing the race noted in review.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

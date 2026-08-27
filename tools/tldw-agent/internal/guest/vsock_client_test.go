@@ -6,10 +6,9 @@ import (
 	"encoding/json"
 	"io"
 	"net"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 type recordingDialer struct {
@@ -241,6 +240,8 @@ func TestGuestVSockClientRunPreservesExecBufferedAfterReady(t *testing.T) {
 		dialer: &recordingDialer{conns: []io.ReadWriteCloser{guestConn}},
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	helperDone := make(chan error, 1)
 	go func() {
 		defer helperConn.Close()
@@ -278,24 +279,40 @@ func TestGuestVSockClientRunPreservesExecBufferedAfterReady(t *testing.T) {
 			return
 		}
 
-		execPayload := []byte(`{"protocol_version":"1","request_id":"req-buffered-exec","type":"exec","argv":["/bin/sh","-c","printf preserved > buffered-exec.txt"],"cwd":"."}`)
+		execPayload := []byte(`{"protocol_version":"1","request_id":"req-buffered-exec","type":"exec","argv":["/bin/echo","preserved"],"cwd":"."}`)
 		payload := append(append(readyPayload, '\n'), execPayload...)
 		payload = append(payload, '\n')
-		_, err = helperConn.Write(payload)
-		helperDone <- err
+		if _, err = helperConn.Write(payload); err != nil {
+			helperDone <- err
+			return
+		}
+
+		if err = helperConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+			helperDone <- err
+			return
+		}
+		var execResp ExecResponse
+		if err = decodeLine(reader, &execResp); err != nil {
+			helperDone <- err
+			return
+		}
+		if execResp.RequestID != "req-buffered-exec" {
+			helperDone <- errUnexpectedValue("exec request id", execResp.RequestID)
+			return
+		}
+		if execResp.Stdout != "preserved\n" {
+			helperDone <- errUnexpectedValue("exec stdout", execResp.Stdout)
+			return
+		}
+		cancel()
+		helperDone <- nil
 	}()
 
-	_ = client.Run(context.Background(), server)
+	if err := client.Run(ctx, server); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
 	if err := <-helperDone; err != nil {
 		t.Fatalf("helper side error = %v", err)
-	}
-
-	got, err := os.ReadFile(filepath.Join(root, "buffered-exec.txt"))
-	if err != nil {
-		t.Fatalf("expected buffered exec request to run: %v", err)
-	}
-	if string(got) != "preserved" {
-		t.Fatalf("expected buffered exec output file %q, got %q", "preserved", string(got))
 	}
 }
 
