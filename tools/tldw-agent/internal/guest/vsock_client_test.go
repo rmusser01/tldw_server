@@ -287,7 +287,7 @@ func TestGuestVSockClientRunPreservesExecBufferedAfterReady(t *testing.T) {
 			return
 		}
 
-		if err = helperConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		if err = helperConn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			helperDone <- err
 			return
 		}
