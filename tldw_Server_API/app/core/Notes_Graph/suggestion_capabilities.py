@@ -40,6 +40,7 @@ _HARD_LIMIT_VALUES = {
     "provider_timeout_seconds": 120,
     "response_candidates": 1,
 }
+_UNAVAILABLE_ENDPOINT_FACTS = b'{"configured":false}'
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +79,7 @@ class ProviderCapabilityContract:
 
     adapter: str
     model: str
-    endpoint_url: str = field(repr=False)
+    endpoint_url: str | None = field(repr=False)
     call_policy: ProviderCallPolicy
     data_boundary: DataBoundary
     credentials_available: bool
@@ -88,6 +89,7 @@ class ProviderCapabilityContract:
     prompt_contract_version: str = PROMPT_CONTRACT_VERSION
     health_heartbeat: str | None = field(default=None, repr=False)
     allowed_actions: tuple[str, ...] = DEFAULT_ALLOWED_ACTIONS
+    unavailable_reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.data_boundary not in {"local", "remote", "unknown"}:
@@ -119,6 +121,12 @@ def canonical_endpoint_origin_digest(endpoint_url: str) -> str:
     return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
 
+def _endpoint_origin_revision(endpoint_url: str | None) -> str:
+    if endpoint_url is None:
+        return f"sha256:{hashlib.sha256(_UNAVAILABLE_ENDPOINT_FACTS).hexdigest()}"
+    return canonical_endpoint_origin_digest(endpoint_url)
+
+
 def _scope_origin_digest(scope: ConfiguredEndpointScope | None) -> str | None:
     if scope is None:
         return None
@@ -143,6 +151,8 @@ def _policy_revision_fields(policy: ProviderCallPolicy) -> dict[str, object]:
 
 
 def _availability(contract: ProviderCapabilityContract) -> tuple[bool, str | None]:
+    if contract.unavailable_reason is not None:
+        return False, contract.unavailable_reason
     policy = contract.call_policy
     if policy.max_transport_attempts != 1:
         return False, "notes_graph_provider_retry_policy_unsupported"
@@ -153,6 +163,8 @@ def _availability(contract: ProviderCapabilityContract) -> tuple[bool, str | Non
         or not transport.enforces_configured_endpoint_scope
         or not transport.enforces_maximum_timeout
     ):
+        return False, "notes_graph_provider_call_policy_unsupported"
+    if contract.endpoint_url is None:
         return False, "notes_graph_provider_call_policy_unsupported"
     try:
         endpoint_scope = ConfiguredEndpointScope.from_url(contract.endpoint_url)
@@ -181,11 +193,13 @@ def build_suggestion_capabilities(
 ) -> SuggestionCapabilities:
     """Build one deterministic sanitized provider disclosure snapshot."""
 
-    endpoint_revision = canonical_endpoint_origin_digest(contract.endpoint_url)
+    endpoint_revision = _endpoint_origin_revision(contract.endpoint_url)
     revision_payload = {
         "adapter": contract.adapter,
         "model": contract.model,
+        "endpoint_configured": contract.endpoint_url is not None,
         "endpoint_origin_revision": endpoint_revision,
+        "call_policy_configured": contract.call_policy.required_endpoint_scope is not None,
         "call_policy": _policy_revision_fields(contract.call_policy),
         "data_boundary": contract.data_boundary,
         "outbound_data_categories": list(contract.outbound_data_categories),
@@ -214,6 +228,30 @@ def build_suggestion_capabilities(
     )
 
 
+def build_unavailable_suggestion_capabilities(
+    *,
+    provider: str | None,
+    model: str | None,
+    reason: str = "notes_graph_provider_disallowed",
+) -> SuggestionCapabilities:
+    """Build a canonical content-free disclosure for unresolved provider facts."""
+
+    safe_provider = provider.strip() if isinstance(provider, str) and provider.strip() else "unconfigured"
+    safe_model = model.strip() if isinstance(model, str) and model.strip() else "unconfigured"
+    return build_suggestion_capabilities(
+        ProviderCapabilityContract(
+            adapter=safe_provider,
+            model=safe_model,
+            endpoint_url=None,
+            call_policy=ProviderCallPolicy(),
+            data_boundary="unknown",
+            credentials_available=False,
+            provider_healthy=False,
+            unavailable_reason=reason,
+        )
+    )
+
+
 __all__ = [
     "DEFAULT_ALLOWED_ACTIONS",
     "DEFAULT_OUTBOUND_DATA_CATEGORIES",
@@ -223,5 +261,6 @@ __all__ = [
     "SuggestionCapabilities",
     "SuggestionCapabilityLimits",
     "build_suggestion_capabilities",
+    "build_unavailable_suggestion_capabilities",
     "canonical_endpoint_origin_digest",
 ]

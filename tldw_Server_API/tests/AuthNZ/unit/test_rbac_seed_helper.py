@@ -149,6 +149,65 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             assert perm_id[name] in admin_perm_ids
 
 
+@pytest.mark.asyncio
+async def test_sqlite_repeated_bootstrap_preserves_revoked_notes_suggestion_grants() -> None:
+    import aiosqlite
+
+    from tldw_Server_API.app.core.AuthNZ.rbac_seed import (
+        ensure_baseline_rbac_seed,
+        ensure_sqlite_rbac_tables,
+    )
+
+    protected_permissions = (
+        "notes.graph.suggest",
+        "notes.link_keyword",
+        "keywords.create",
+    )
+    async with aiosqlite.connect(":memory:") as conn:
+        await ensure_sqlite_rbac_tables(conn)
+        await ensure_baseline_rbac_seed(conn, include_mcp_permissions=True)
+        await conn.execute(
+            """
+            DELETE FROM role_permissions
+            WHERE permission_id IN (
+                SELECT id FROM permissions WHERE name IN (?, ?, ?)
+            )
+            """,
+            protected_permissions,
+        )
+        await conn.execute(
+            """
+            DELETE FROM role_permissions
+            WHERE role_id = (SELECT id FROM roles WHERE name = 'user')
+              AND permission_id = (SELECT id FROM permissions WHERE name = 'media.read')
+            """
+        )
+
+        await ensure_baseline_rbac_seed(conn, include_mcp_permissions=True)
+
+        cur = await conn.execute(
+            """
+            SELECT r.name, p.name
+            FROM role_permissions rp
+            JOIN roles r ON r.id = rp.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE p.name IN (?, ?, ?)
+            """,
+            protected_permissions,
+        )
+        assert await cur.fetchall() == []
+        cur = await conn.execute(
+            """
+            SELECT 1
+            FROM role_permissions rp
+            JOIN roles r ON r.id = rp.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE r.name = 'user' AND p.name = 'media.read'
+            """
+        )
+        assert await cur.fetchone() is not None
+
+
 def test_migration_089_seeds_prompts_read_for_existing_admin_and_user_roles() -> None:
     import sqlite3
 

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 from tldw_Server_API.app.core.Chat.chat_target_resolution import (
     get_default_model_for_provider,
@@ -15,12 +13,10 @@ from tldw_Server_API.app.core.LLM_Calls import adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import _resolve_openai_api_base
 
 from .suggestion_capabilities import (
-    DEFAULT_ALLOWED_ACTIONS,
-    DEFAULT_OUTBOUND_DATA_CATEGORIES,
-    HARD_SUGGESTION_CAPABILITY_LIMITS,
     ProviderCapabilityContract,
     SuggestionCapabilities,
     build_suggestion_capabilities,
+    build_unavailable_suggestion_capabilities,
 )
 from .suggestion_generation import GenerationProvider, build_provider_call_policy
 
@@ -33,42 +29,16 @@ class ResolvedSuggestionProvider:
     provider: GenerationProvider
 
 
-def unavailable_generation_capability(
-    *,
-    provider: str | None,
-    model: str | None,
-    reason: str = "notes_graph_provider_disallowed",
-) -> SuggestionCapabilities:
-    """Build a deterministic sanitized readiness response without provider secrets."""
+unavailable_generation_capability = build_unavailable_suggestion_capabilities
 
-    safe_provider = provider.strip() if isinstance(provider, str) and provider.strip() else "unconfigured"
-    safe_model = model.strip() if isinstance(model, str) and model.strip() else "unconfigured"
-    origin_revision = f"sha256:{hashlib.sha256(b'notes-graph-unconfigured-origin-v1').hexdigest()}"
-    revision_payload = {
-        "provider": safe_provider,
-        "model": safe_model,
-        "endpoint_origin_revision": origin_revision,
-        "data_boundary": "unknown",
-        "outbound_data_categories": list(DEFAULT_OUTBOUND_DATA_CATEGORIES),
-        "limits": asdict(HARD_SUGGESTION_CAPABILITY_LIMITS),
-        "reason": reason,
-    }
-    revision = hashlib.sha256(
-        json.dumps(revision_payload, sort_keys=True, separators=(",", ":")).encode("ascii")
-    ).hexdigest()
-    return SuggestionCapabilities(
-        provider=safe_provider,
-        model=safe_model,
-        endpoint_origin_revision=origin_revision,
-        data_boundary="unknown",
-        disclosure_external=False,
-        outbound_data_categories=DEFAULT_OUTBOUND_DATA_CATEGORIES,
-        generation_available=False,
-        unavailable_reason=reason,
-        limits=HARD_SUGGESTION_CAPABILITY_LIMITS,
-        allowed_actions=DEFAULT_ALLOWED_ACTIONS,
-        revision=f"sha256:{revision}",
-    )
+
+class SuggestionProviderResolutionError(ValueError):
+    """Sanitized unresolved provider/model facts for capability preflight."""
+
+    def __init__(self, *, provider: str | None, model: str | None) -> None:
+        self.provider = provider
+        self.model = model
+        super().__init__("notes_graph_provider_model_disallowed")
 
 
 def resolve_generation_capability(
@@ -79,11 +49,17 @@ def resolve_generation_capability(
     """Resolve the configured provider/model once for API and worker parity."""
 
     requested_provider = provider.strip() if isinstance(provider, str) else ""
-    resolved_provider = requested_provider or get_default_provider()
+    default_provider = get_default_provider()
+    resolved_provider = requested_provider or (
+        default_provider.strip() if isinstance(default_provider, str) else ""
+    )
     requested_model = model.strip() if isinstance(model, str) else ""
     resolved_model = requested_model or get_default_model_for_provider(resolved_provider) or ""
     if not resolved_provider or not resolved_model:
-        raise ValueError("notes_graph_provider_model_disallowed")
+        raise SuggestionProviderResolutionError(
+            provider=resolved_provider or None,
+            model=resolved_model or None,
+        )
 
     registry = adapter_registry.get_registry()
     canonical = registry.resolve_provider_name(resolved_provider)
@@ -120,6 +96,7 @@ def resolve_generation_capability(
 
 __all__ = [
     "ResolvedSuggestionProvider",
+    "SuggestionProviderResolutionError",
     "resolve_generation_capability",
     "unavailable_generation_capability",
 ]

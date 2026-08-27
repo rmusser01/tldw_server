@@ -337,6 +337,26 @@ def test_capability_preflight_sanitizes_missing_provider_while_admission_stays_4
     )
 
 
+def test_capability_preflight_preserves_partially_resolved_safe_defaults() -> None:
+    error = ValueError("notes_graph_provider_model_disallowed")
+    error.provider = "openai"
+    error.model = None
+
+    def missing_model(**_kwargs):
+        raise error
+
+    capabilities = _api(resolve_capability=missing_model).get_capabilities(
+        note_id=SOURCE_ID,
+        provider=None,
+        model=None,
+    )
+
+    assert capabilities.provider == "openai"
+    assert capabilities.model == "unconfigured"
+    assert capabilities.data_boundary == "unknown"
+    assert capabilities.disclosure_external is True
+
+
 def test_terminal_decision_replays_precede_shorter_lived_resources_and_sync_readiness() -> None:
     accept = SimpleNamespace(
         envelope={

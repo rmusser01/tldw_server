@@ -90,3 +90,65 @@ async def test_postgres_fresh_seed_matches_migration_94_and_is_idempotent(
         *_PERMISSIONS,
     )
     assert readonly_rows == []
+
+
+@pytest.mark.asyncio
+async def test_postgres_repeated_bootstrap_preserves_revoked_notes_suggestion_grants(
+    isolated_test_environment,
+) -> None:
+    _client, _db_name = isolated_test_environment
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.initialize import setup_database
+
+    pool = await get_db_pool()
+    setup_connection = await asyncpg.connect(pool.settings.DATABASE_URL)
+    try:
+        await setup_connection.execute(
+            """
+            DELETE FROM role_permissions rp
+            USING permissions p
+            WHERE rp.permission_id = p.id
+              AND p.name = ANY($1::text[])
+            """,
+            list(_PERMISSIONS),
+        )
+        await setup_connection.execute(
+            """
+            DELETE FROM role_permissions rp
+            USING roles r, permissions p
+            WHERE rp.role_id = r.id
+              AND rp.permission_id = p.id
+              AND r.name = 'user'
+              AND p.name = 'media.read'
+            """
+        )
+    finally:
+        await setup_connection.close()
+
+    await setup_database()
+    await setup_database()
+
+    revoked_rows = await pool.fetch(
+        """
+        SELECT r.name AS role_name, p.name AS permission_name
+        FROM role_permissions rp
+        JOIN roles r ON r.id = rp.role_id
+        JOIN permissions p ON p.id = rp.permission_id
+        WHERE p.name IN (?, ?, ?)
+        """,
+        *_PERMISSIONS,
+    )
+    assert revoked_rows == []
+    restored_legacy = await pool.fetchrow(
+        """
+        SELECT 1
+        FROM role_permissions rp
+        JOIN roles r ON r.id = rp.role_id
+        JOIN permissions p ON p.id = rp.permission_id
+        WHERE r.name = ? AND p.name = ?
+        """,
+        "user",
+        "media.read",
+    )
+    assert restored_legacy is not None

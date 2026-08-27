@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.Notes_Graph import suggestion_api as api_module
+from tldw_Server_API.app.core.Notes_Graph import suggestion_capabilities as capabilities_module
+from tldw_Server_API.app.core.Notes_Graph import suggestion_provider as provider_module
 from tldw_Server_API.app.core.Notes_Graph.suggestion_api import NotesGraphSuggestionsAPI
 from tldw_Server_API.app.core.Notes_Graph.suggestion_provider import (
     ResolvedSuggestionProvider,
     resolve_generation_capability,
+    unavailable_generation_capability,
 )
 from tldw_Server_API.app.services import notes_graph_suggestions_worker
 
@@ -37,6 +41,19 @@ def test_api_preflight_and_admission_default_to_the_worker_shared_resolver() -> 
         api.capability_resolver
         is notes_graph_suggestions_worker.resolve_generation_capability
     )
+
+
+def test_unavailable_disclosure_has_one_canonical_revision_authority() -> None:
+    canonical_builder = getattr(
+        capabilities_module,
+        "build_unavailable_suggestion_capabilities",
+        None,
+    )
+
+    assert callable(canonical_builder)
+    assert unavailable_generation_capability is canonical_builder
+    assert api_module.build_unavailable_suggestion_capabilities is canonical_builder
+    assert provider_module.build_suggestion_capabilities is capabilities_module.build_suggestion_capabilities
 
 
 def test_shared_resolver_returns_one_typed_revision_bound_pair(
@@ -85,3 +102,21 @@ def test_shared_resolver_returns_one_typed_revision_bound_pair(
     assert resolved.capabilities.revision == "sha256:shared-revision"
     assert resolved.provider.adapter == "openai"
     assert resolved.provider.model == "model-a"
+
+
+def test_missing_model_error_preserves_the_safely_resolved_default_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(provider_module, "get_default_provider", lambda: "openai")
+    monkeypatch.setattr(
+        provider_module,
+        "get_default_model_for_provider",
+        lambda _provider: None,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        resolve_generation_capability(provider=None, model=None)
+
+    assert str(exc_info.value) == "notes_graph_provider_model_disallowed"
+    assert exc_info.value.provider == "openai"
+    assert exc_info.value.model is None

@@ -6,12 +6,17 @@ import pytest
 
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.Notes_Graph.suggestion_capabilities import (
+    DEFAULT_ALLOWED_ACTIONS,
     DEFAULT_OUTBOUND_DATA_CATEGORIES,
+    HARD_SUGGESTION_CAPABILITY_LIMITS,
     PROMPT_CONTRACT_VERSION,
     ProviderCapabilityContract,
     SuggestionCapabilityLimits,
     build_suggestion_capabilities,
     canonical_endpoint_origin_digest,
+)
+from tldw_Server_API.app.core.Notes_Graph.suggestion_provider import (
+    unavailable_generation_capability,
 )
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
@@ -174,6 +179,46 @@ def test_default_disclosure_and_effective_limits_are_exact() -> None:
         "reject",
         "reset_rejections",
     )
+
+
+def test_unavailable_disclosure_matches_canonical_policy_contract() -> None:
+    unavailable = unavailable_generation_capability(
+        provider="openai",
+        model="model-a",
+        reason="notes_graph_provider_disallowed",
+    )
+    other_readiness = unavailable_generation_capability(
+        provider="openai",
+        model="model-a",
+        reason="notes_graph_provider_unavailable",
+    )
+
+    assert unavailable.data_boundary == "unknown"
+    assert unavailable.disclosure_external is True
+    assert unavailable.outbound_data_categories == DEFAULT_OUTBOUND_DATA_CATEGORIES
+    assert unavailable.allowed_actions == DEFAULT_ALLOWED_ACTIONS
+    assert unavailable.limits == HARD_SUGGESTION_CAPABILITY_LIMITS
+    assert unavailable.revision == other_readiness.revision
+    assert unavailable.endpoint_origin_revision == other_readiness.endpoint_origin_revision
+
+
+def test_unavailable_disclosure_is_deterministic_and_redacts_endpoint_facts() -> None:
+    first = unavailable_generation_capability(
+        provider="openai",
+        model="model-a",
+    )
+    second = unavailable_generation_capability(
+        provider=" openai ",
+        model=" model-a ",
+    )
+
+    assert first == second
+    assert first.revision != unavailable_generation_capability(
+        provider="openai",
+        model="model-b",
+    ).revision
+    assert "http" not in repr(first).lower()
+    assert "secret" not in repr(first).lower()
 
 
 def test_readiness_facts_must_be_explicit() -> None:

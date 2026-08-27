@@ -59,6 +59,9 @@ _MCP_PERMISSIONS: Sequence[PermissionDef] = (
 )
 
 _INTERACTIVE_ROLES = ("admin", "user", "moderator", "reviewer", "viewer")
+_GRANT_ONLY_ON_CATALOG_CREATE = frozenset(
+    {"notes.graph.suggest", "notes.link_keyword", "keywords.create"}
+)
 
 
 def _is_postgres_connection(conn: Any) -> bool:
@@ -66,8 +69,14 @@ def _is_postgres_connection(conn: Any) -> bool:
     return callable(getattr(conn, "fetch", None))
 
 
-def _build_role_grants(permission_names: Iterable[str], *, include_mcp_permissions: bool) -> dict[str, list[str]]:
+def _build_role_grants(
+    permission_names: Iterable[str],
+    *,
+    include_mcp_permissions: bool,
+    newly_created_permissions: Iterable[str] = (),
+) -> dict[str, list[str]]:
     base = set(permission_names)
+    base -= _GRANT_ONLY_ON_CATALOG_CREATE - set(newly_created_permissions)
     grants: dict[str, list[str]] = {
         "user": [
             p
@@ -142,7 +151,7 @@ async def ensure_baseline_rbac_seed(
     if include_mcp_permissions:
         permissions.extend(_MCP_PERMISSIONS)
 
-    grants = _build_role_grants((p[0] for p in permissions), include_mcp_permissions=include_mcp_permissions)
+    newly_created_permissions: set[str] = set()
 
     if is_postgres:
         for name, description, is_system in _BASELINE_ROLES:
@@ -154,13 +163,21 @@ async def ensure_baseline_rbac_seed(
                 bool(is_system),
             )
         for name, description, category in permissions:
-            await conn.execute(
+            inserted = await conn.fetchval(
                 "INSERT INTO permissions (name, description, category) VALUES ($1, $2, $3) "
-                "ON CONFLICT (name) DO NOTHING",
+                "ON CONFLICT (name) DO NOTHING RETURNING name",
                 name,
                 description,
                 category,
             )
+            if inserted is not None:
+                newly_created_permissions.add(str(inserted))
+
+        grants = _build_role_grants(
+            (p[0] for p in permissions),
+            include_mcp_permissions=include_mcp_permissions,
+            newly_created_permissions=newly_created_permissions,
+        )
 
         role_names = list(dict.fromkeys([*(role[0] for role in _BASELINE_ROLES), *grants]))
         role_rows = await conn.fetch(
@@ -197,10 +214,18 @@ async def ensure_baseline_rbac_seed(
             (name, description, 1 if is_system else 0),
         )
     for name, description, category in permissions:
-        await conn.execute(
+        cursor = await conn.execute(
             "INSERT OR IGNORE INTO permissions (name, description, category) VALUES (?, ?, ?)",
             (name, description, category),
         )
+        if cursor.rowcount == 1:
+            newly_created_permissions.add(name)
+
+    grants = _build_role_grants(
+        (p[0] for p in permissions),
+        include_mcp_permissions=include_mcp_permissions,
+        newly_created_permissions=newly_created_permissions,
+    )
 
     try:
         role_names = list(dict.fromkeys([*(role[0] for role in _BASELINE_ROLES), *grants]))

@@ -19,12 +19,12 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store i
     NotesGraphSourceTooLargeError,
 )
 
-from .suggestion_capabilities import SuggestionCapabilities
-from .suggestion_content import EvidenceReference, content_fingerprint, reconstruct_evidence
-from .suggestion_provider import (
-    resolve_generation_capability,
-    unavailable_generation_capability,
+from .suggestion_capabilities import (
+    SuggestionCapabilities,
+    build_unavailable_suggestion_capabilities,
 )
+from .suggestion_content import EvidenceReference, content_fingerprint, reconstruct_evidence
+from .suggestion_provider import resolve_generation_capability
 
 
 class SuggestionAPIError(RuntimeError):
@@ -221,9 +221,9 @@ class NotesGraphSuggestionsAPI:
             capabilities, _generation_provider = self._resolved_parts(resolved)
         except Exception as exc:
             if str(exc) == "notes_graph_provider_model_disallowed":
-                capabilities = unavailable_generation_capability(
-                    provider=provider,
-                    model=model,
+                capabilities = build_unavailable_suggestion_capabilities(
+                    provider=getattr(exc, "provider", provider),
+                    model=getattr(exc, "model", model),
                 )
             else:
                 raise self._translate(exc) from exc
