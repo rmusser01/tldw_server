@@ -6771,7 +6771,7 @@ CREATE TABLE note_graph_suggestion_runs(
     ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY(owner_user_id, dataset_id, admission_receipt_id)
     REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
-    ON DELETE SET NULL ON UPDATE CASCADE
+    ON DELETE NO ACTION ON UPDATE CASCADE
 );
 
 CREATE TABLE note_graph_suggestion_rejection_sets(
@@ -6823,7 +6823,7 @@ CREATE TABLE note_graph_suggestions(
     ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY(owner_user_id, dataset_id, decision_receipt_id)
     REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
-    ON DELETE SET NULL ON UPDATE CASCADE,
+    ON DELETE NO ACTION ON UPDATE CASCADE,
   CHECK(
     (kind = 'related_note' AND target_note_id IS NOT NULL AND target_fingerprint IS NOT NULL AND normalized_tag IS NULL AND display_tag IS NULL)
     OR (kind = 'tag' AND target_note_id IS NULL AND target_fingerprint IS NULL AND normalized_tag IS NOT NULL AND display_tag IS NOT NULL)
@@ -6931,7 +6931,7 @@ CREATE TABLE IF NOT EXISTS note_graph_suggestion_runs(
     ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY(owner_user_id, dataset_id, admission_receipt_id)
     REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
-    ON DELETE SET NULL ON UPDATE CASCADE
+    ON DELETE NO ACTION ON UPDATE CASCADE
 );
 CREATE TABLE IF NOT EXISTS note_graph_suggestion_rejection_sets(
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
@@ -6975,7 +6975,7 @@ CREATE TABLE IF NOT EXISTS note_graph_suggestions(
     ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY(owner_user_id, dataset_id, decision_receipt_id)
     REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
-    ON DELETE SET NULL ON UPDATE CASCADE,
+    ON DELETE NO ACTION ON UPDATE CASCADE,
   CHECK((kind = 'related_note' AND target_note_id IS NOT NULL AND target_fingerprint IS NOT NULL AND normalized_tag IS NULL AND display_tag IS NULL) OR (kind = 'tag' AND target_note_id IS NULL AND target_fingerprint IS NULL AND normalized_tag IS NOT NULL AND display_tag IS NOT NULL))
 );
 CREATE TABLE IF NOT EXISTS note_graph_suggestion_evidence(
@@ -7041,6 +7041,67 @@ ALTER TABLE note_graph_suggestion_evidence FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence;
 CREATE POLICY note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
 """
+
+    _NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL = """
+CREATE TRIGGER note_graph_suggestion_operation_receipts_clear_references
+BEFORE DELETE ON note_graph_suggestion_operation_receipts
+BEGIN
+  UPDATE note_graph_suggestion_runs
+     SET admission_receipt_id = NULL
+   WHERE owner_user_id = OLD.owner_user_id
+     AND dataset_id = OLD.dataset_id
+     AND admission_receipt_id = OLD.id
+     AND EXISTS (
+       SELECT 1 FROM notes
+        WHERE client_id = OLD.owner_user_id AND id = OLD.source_note_id
+     );
+
+  UPDATE note_graph_suggestions
+     SET decision_receipt_id = NULL
+   WHERE owner_user_id = OLD.owner_user_id
+     AND dataset_id = OLD.dataset_id
+     AND decision_receipt_id = OLD.id
+     AND EXISTS (
+       SELECT 1 FROM notes
+        WHERE client_id = OLD.owner_user_id AND id = OLD.source_note_id
+     );
+END;
+"""
+
+    _NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_POSTGRES_TRIGGER_STATEMENTS = (
+        """
+        CREATE OR REPLACE FUNCTION note_graph_suggestion_clear_receipt_references()
+        RETURNS trigger AS $$
+        BEGIN
+          UPDATE note_graph_suggestion_runs
+             SET admission_receipt_id = NULL
+           WHERE owner_user_id = OLD.owner_user_id
+             AND dataset_id = OLD.dataset_id
+             AND admission_receipt_id = OLD.id
+             AND EXISTS (
+               SELECT 1 FROM notes
+                WHERE client_id = OLD.owner_user_id AND id = OLD.source_note_id
+             );
+
+          UPDATE note_graph_suggestions
+             SET decision_receipt_id = NULL
+           WHERE owner_user_id = OLD.owner_user_id
+             AND dataset_id = OLD.dataset_id
+             AND decision_receipt_id = OLD.id
+             AND EXISTS (
+               SELECT 1 FROM notes
+                WHERE client_id = OLD.owner_user_id AND id = OLD.source_note_id
+             );
+          RETURN OLD;
+        END;
+        $$ LANGUAGE plpgsql
+        """,
+        "DROP TRIGGER IF EXISTS note_graph_suggestion_operation_receipts_clear_references "
+        "ON note_graph_suggestion_operation_receipts",
+        "CREATE TRIGGER note_graph_suggestion_operation_receipts_clear_references "
+        "BEFORE DELETE ON note_graph_suggestion_operation_receipts "
+        "FOR EACH ROW EXECUTE FUNCTION note_graph_suggestion_clear_receipt_references()",
+    )
 
     _SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL = """
 DO $shared_workspace_chat_v61_verify$
@@ -13794,6 +13855,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             savepoint_active = True
             for statement in split_sql_statements(self._MIGRATION_SQL_V63_TO_V64):
                 conn.execute(statement)
+            conn.execute(self._NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL)
             cursor = conn.execute(
                 "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
                 (64, self._SCHEMA_NAME, 63),
@@ -17038,8 +17100,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn,
             expected_version=64,
         )
+        self._configure_note_graph_suggestion_receipt_delete_trigger_postgres(conn)
         if self._get_schema_version_postgres(conn) != 64:
             raise SchemaError("Notes graph suggestion v64 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _configure_note_graph_suggestion_receipt_delete_trigger_postgres(self, conn: Any) -> None:
+        """Clear only receipt IDs before PostgreSQL deletes an expiring receipt."""
+        for statement in self._NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_POSTGRES_TRIGGER_STATEMENTS:
+            self.backend.execute(statement, connection=conn)
 
     def _notes_graph_schema_postgres(self, conn: Any) -> None:
         """Create owner-scoped graph projections and direct-write invalidation."""

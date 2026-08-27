@@ -146,14 +146,16 @@ def _insert_tag_suggestion(
     source_note_id: str = "source-note",
     source_fingerprint: str = "fingerprint-source-note",
     normalized_tag: str = "research",
+    decision_receipt_id: str | None = None,
+    state: str = "pending",
 ) -> None:
     conn.execute(
         """
         INSERT INTO note_graph_suggestions(
             id, run_id, owner_user_id, dataset_id, kind, source_note_id,
             source_fingerprint, normalized_tag, display_tag, state, revision,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            decision_receipt_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """,
         (
             suggestion_id,
@@ -165,8 +167,9 @@ def _insert_tag_suggestion(
             source_fingerprint,
             normalized_tag,
             normalized_tag.title(),
-            "pending",
+            state,
             1,
+            decision_receipt_id,
         ),
     )
 
@@ -457,6 +460,78 @@ def test_sqlite_v64_note_hard_delete_cascades_receipt_graph(tmp_path: Path) -> N
             "note_graph_suggestion_evidence",
         ):
             assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0  # nosec B608
+    finally:
+        db.close_all_connections()
+
+
+def test_sqlite_v64_receipt_delete_clears_only_scoped_receipt_references(tmp_path: Path) -> None:
+    db = _initialize(tmp_path / "chacha-v64-receipt-retention.sqlite")
+    try:
+        conn = db.get_connection()
+        _create_note(conn, "source-note")
+        _insert_receipt(conn, "admission-receipt")
+        _insert_receipt(conn, "decision-receipt")
+        _insert_run(conn, "run-a", admission_receipt_id="admission-receipt")
+        _insert_tag_suggestion(
+            conn,
+            "suggestion-a",
+            run_id="run-a",
+            decision_receipt_id="decision-receipt",
+            state="rejected",
+        )
+        _insert_tag_suggestion(
+            conn,
+            "suggestion-pending",
+            run_id="run-a",
+            normalized_tag="planning",
+        )
+
+        conn.execute(
+            "DELETE FROM note_graph_suggestion_operation_receipts WHERE id = ?",
+            ("admission-receipt",),
+        )
+        run = conn.execute(
+            """
+            SELECT owner_user_id, dataset_id, source_note_id, admission_receipt_id, state
+              FROM note_graph_suggestion_runs
+             WHERE id = ?
+            """,
+            ("run-a",),
+        ).fetchone()
+        assert tuple(run) == ("owner-a", "dataset-a", "source-note", None, "succeeded")
+        assert tuple(
+            conn.execute(
+                "SELECT state FROM note_graph_suggestions WHERE id = ?",
+                ("suggestion-a",),
+            ).fetchone()
+        ) == ("rejected",)
+        assert tuple(
+            conn.execute(
+                "SELECT state FROM note_graph_suggestions WHERE id = ?",
+                ("suggestion-pending",),
+            ).fetchone()
+        ) == ("pending",)
+
+        conn.execute(
+            "DELETE FROM note_graph_suggestion_operation_receipts WHERE id = ?",
+            ("decision-receipt",),
+        )
+        suggestion = conn.execute(
+            """
+            SELECT owner_user_id, dataset_id, run_id, source_note_id, decision_receipt_id, state
+              FROM note_graph_suggestions
+             WHERE id = ?
+            """,
+            ("suggestion-a",),
+        ).fetchone()
+        assert tuple(suggestion) == (
+            "owner-a",
+            "dataset-a",
+            "run-a",
+            "source-note",
+            None,
+            "rejected",
+        )
     finally:
         db.close_all_connections()
 

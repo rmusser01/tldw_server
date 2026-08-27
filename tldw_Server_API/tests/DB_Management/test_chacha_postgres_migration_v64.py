@@ -113,6 +113,11 @@ def test_postgres_v64_migration_versions_after_applying_ddl(
         "_apply_postgres_migration_script",
         lambda script, _conn, *, expected_version: applied.append((script, expected_version)),
     )
+    monkeypatch.setattr(
+        db,
+        "_configure_note_graph_suggestion_receipt_delete_trigger_postgres",
+        lambda _conn: None,
+    )
 
     db._migrate_from_v63_to_v64_postgres(object())
 
@@ -412,6 +417,165 @@ def test_postgres_v64_note_hard_delete_cascades_receipt_graph(
                 assert backend.execute(  # nosec B608
                     f"SELECT COUNT(*) FROM {table}", connection=conn
                 ).scalar == 0
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_postgres_v64_receipt_delete_clears_only_scoped_receipt_references(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    try:
+        with backend.transaction() as conn:
+            _set_tenant_scope(backend, conn, "owner-a", "dataset-a")
+            _insert_note(backend, conn, "source-note", "owner-a")
+            for receipt_id in ("admission-receipt", "decision-receipt"):
+                backend.execute(
+                    """
+                    INSERT INTO note_graph_suggestion_operation_receipts(
+                        id, operation_kind, owner_user_id, dataset_id, source_note_id,
+                        resource_identity, idempotency_key_digest, request_fingerprint,
+                        state, expires_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        receipt_id,
+                        "run_admit",
+                        "owner-a",
+                        "dataset-a",
+                        "source-note",
+                        f"resource-{receipt_id}",
+                        f"key-{receipt_id}",
+                        f"request-{receipt_id}",
+                        "completed",
+                    ),
+                    connection=conn,
+                )
+            backend.execute(
+                """
+                INSERT INTO note_graph_suggestion_runs(
+                    id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
+                    admission_receipt_id, state, revision, created_at, expires_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (
+                    "run-a",
+                    "owner-a",
+                    "dataset-a",
+                    "source-note",
+                    "source-fingerprint",
+                    "admission-receipt",
+                    "succeeded",
+                    1,
+                ),
+                connection=conn,
+            )
+            backend.execute(
+                """
+                INSERT INTO note_graph_suggestions(
+                    id, run_id, owner_user_id, dataset_id, kind, source_note_id,
+                    source_fingerprint, normalized_tag, display_tag, state, revision,
+                    decision_receipt_id, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (
+                    "suggestion-a",
+                    "run-a",
+                    "owner-a",
+                    "dataset-a",
+                    "tag",
+                    "source-note",
+                    "source-fingerprint",
+                    "research",
+                    "Research",
+                    "rejected",
+                    1,
+                    "decision-receipt",
+                ),
+                connection=conn,
+            )
+            backend.execute(
+                """
+                INSERT INTO note_graph_suggestions(
+                    id, run_id, owner_user_id, dataset_id, kind, source_note_id,
+                    source_fingerprint, normalized_tag, display_tag, state, revision,
+                    created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (
+                    "suggestion-pending",
+                    "run-a",
+                    "owner-a",
+                    "dataset-a",
+                    "tag",
+                    "source-note",
+                    "source-fingerprint",
+                    "planning",
+                    "Planning",
+                    "pending",
+                    1,
+                ),
+                connection=conn,
+            )
+
+            backend.execute(
+                "DELETE FROM note_graph_suggestion_operation_receipts WHERE id = %s",
+                ("admission-receipt",),
+                connection=conn,
+            )
+            run = backend.execute(
+                """
+                SELECT owner_user_id, dataset_id, source_note_id, admission_receipt_id, state
+                  FROM note_graph_suggestion_runs
+                 WHERE id = %s
+                """,
+                ("run-a",),
+                connection=conn,
+            ).rows[0]
+            assert tuple(run.values()) == (
+                "owner-a",
+                "dataset-a",
+                "source-note",
+                None,
+                "succeeded",
+            )
+            assert backend.execute(
+                "SELECT state FROM note_graph_suggestions WHERE id = %s",
+                ("suggestion-a",),
+                connection=conn,
+            ).scalar == "rejected"
+            assert backend.execute(
+                "SELECT state FROM note_graph_suggestions WHERE id = %s",
+                ("suggestion-pending",),
+                connection=conn,
+            ).scalar == "pending"
+
+            backend.execute(
+                "DELETE FROM note_graph_suggestion_operation_receipts WHERE id = %s",
+                ("decision-receipt",),
+                connection=conn,
+            )
+            suggestion = backend.execute(
+                """
+                SELECT owner_user_id, dataset_id, run_id, source_note_id, decision_receipt_id, state
+                  FROM note_graph_suggestions
+                 WHERE id = %s
+                """,
+                ("suggestion-a",),
+                connection=conn,
+            ).rows[0]
+            assert tuple(suggestion.values()) == (
+                "owner-a",
+                "dataset-a",
+                "run-a",
+                "source-note",
+                None,
+                "rejected",
+            )
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
