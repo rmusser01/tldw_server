@@ -1,9 +1,72 @@
+import ast
 import sqlite3
 from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.unit
+
+
+def _is_named_call(node: ast.AST, name: str) -> bool:
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Name) and node.func.id == name)
+        or (isinstance(node.func, ast.Attribute) and node.func.attr == name)
+    )
+
+
+def test_all_production_rbac_seed_callers_own_pool_transactions() -> None:
+    repository_root = Path(__file__).resolve().parents[4]
+    app_root = repository_root / "tldw_Server_API" / "app"
+    expected_callers = {
+        "core/AuthNZ/initialize.py": 2,
+        "core/MCP_unified/adapters/tldw_runtime.py": 1,
+    }
+    actual_callers: dict[str, int] = {}
+
+    for path in app_root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        if "ensure_baseline_rbac_seed" not in source:
+            continue
+        tree = ast.parse(source)
+        seed_calls = {
+            node
+            for node in ast.walk(tree)
+            if _is_named_call(node, "ensure_baseline_rbac_seed")
+        }
+        if not seed_calls:
+            continue
+
+        relative_path = str(path.relative_to(app_root))
+        actual_callers[relative_path] = len(seed_calls)
+        transaction_owned_calls: set[ast.AST] = set()
+        for async_with in (
+            node for node in ast.walk(tree) if isinstance(node, ast.AsyncWith)
+        ):
+            if not any(
+                _is_named_call(item.context_expr, "transaction")
+                for item in async_with.items
+            ):
+                continue
+            for statement in async_with.body:
+                transaction_owned_calls.update(
+                    node
+                    for node in ast.walk(statement)
+                    if _is_named_call(node, "ensure_baseline_rbac_seed")
+                )
+
+        assert seed_calls == transaction_owned_calls, relative_path
+
+    assert actual_callers == expected_callers
+
+    helper_path = app_root / "core" / "AuthNZ" / "rbac_seed.py"
+    helper_tree = ast.parse(helper_path.read_text(encoding="utf-8"))
+    helper = next(
+        node
+        for node in ast.walk(helper_tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "ensure_baseline_rbac_seed"
+    )
+    assert not any(_is_named_call(node, "transaction") for node in ast.walk(helper))
 
 
 @pytest.mark.asyncio

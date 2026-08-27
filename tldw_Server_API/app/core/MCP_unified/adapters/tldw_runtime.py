@@ -349,7 +349,7 @@ class TldwPermissionSeeder:
         )
 
         pool = await get_db_pool()
-        async with pool.acquire() as conn:
+        async with pool.transaction() as conn:
             await ensure_baseline_rbac_seed(
                 conn,
                 include_mcp_permissions=True,

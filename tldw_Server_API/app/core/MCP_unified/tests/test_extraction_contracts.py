@@ -2729,22 +2729,30 @@ async def test_tldw_permission_seeder_uses_shared_rbac_seed(
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
 
-    class _AcquireContext:
+    class _TransactionContext:
         def __init__(self, conn: object) -> None:
             self.conn = conn
+            self.entered = False
+            self.exited = False
 
         async def __aenter__(self) -> object:
+            self.entered = True
             return self.conn
 
         async def __aexit__(self, *_exc_info: Any) -> None:
+            self.exited = True
             return None
 
     class _Pool:
         def __init__(self) -> None:
             self.conn = object()
+            self.context = _TransactionContext(self.conn)
 
-        def acquire(self) -> _AcquireContext:
-            return _AcquireContext(self.conn)
+        def acquire(self) -> None:
+            raise AssertionError("permission seed must not use an unowned connection")
+
+        def transaction(self) -> _TransactionContext:
+            return self.context
 
     pool = _Pool()
     ensure_calls: list[tuple[object, bool, bool]] = []
@@ -2774,6 +2782,66 @@ async def test_tldw_permission_seeder_uses_shared_rbac_seed(
     assert ensure_calls == [
         (pool.conn, True, False)
     ]
+    assert pool.context.entered is True
+    assert pool.context.exited is True
+
+
+@pytest.mark.asyncio
+async def test_tldw_permission_seeder_propagates_failure_and_rolls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    class _TransactionContext:
+        def __init__(self, pool: _Pool) -> None:
+            self.pool = pool
+            self.snapshot: list[str] = []
+
+        async def __aenter__(self) -> object:
+            self.snapshot = list(self.pool.rows)
+            return self.pool.conn
+
+        async def __aexit__(self, exc_type: object, *_exc_info: Any) -> None:
+            if exc_type is not None:
+                self.pool.rows[:] = self.snapshot
+                self.pool.rolled_back = True
+            return None
+
+    class _Pool:
+        def __init__(self) -> None:
+            self.conn = object()
+            self.rows: list[str] = []
+            self.rolled_back = False
+
+        def acquire(self) -> None:
+            raise AssertionError("permission seed must not use an unowned connection")
+
+        def transaction(self) -> _TransactionContext:
+            return _TransactionContext(self)
+
+    pool = _Pool()
+
+    async def _get_db_pool() -> _Pool:
+        return pool
+
+    async def _failing_seed(*_args: Any, **_kwargs: Any) -> None:
+        pool.rows.append("partial-catalog")
+        raise RuntimeError("forced seed failure")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+        _get_db_pool,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.rbac_seed.ensure_baseline_rbac_seed",
+        _failing_seed,
+    )
+
+    with pytest.raises(RuntimeError, match="forced seed failure"):
+        await tldw_runtime.TldwPermissionSeeder().seed_default_tool_permissions()
+
+    assert pool.rows == []
+    assert pool.rolled_back is True
 
 
 def test_authnz_access_token_helper_documents_boolean_semantics() -> None:

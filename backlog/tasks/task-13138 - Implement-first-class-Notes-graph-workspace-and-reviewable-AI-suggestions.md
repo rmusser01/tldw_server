@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 23:22
+updated_date: 2026-08-27 23:41
 labels:
 - notes
 - knowledge-graph
@@ -189,6 +189,8 @@ Task 8 Fix Round 1/3 started from exact base 24563b3daf31191a395cab71d8210b78b6e
 Task 8 Fix Round 1/3 completed from exact base 24563b3daf31191a395cab71d8210b78b6e72857. Closed fresh SQLite/PostgreSQL RBAC seed parity, exact receipt-first admission/decision/cancellation replay, dataset non-enumeration, sanitized capability readiness, stable route-wide 429s, verified-admin authorization, unique-note evidence reconstruction, strict strong ETags, and bounded structured OpenAPI contracts. Verification: final focused gate 153 passed with live PostgreSQL and no skips; affected Task 3/5/7/8/Jobs/worker/maintenance/Sync 253 passed with 8 established jobs-suite-only PostgreSQL prune skips; OpenAPI/router/catalog 90 passed; v64 SQLite/live-PostgreSQL migrations 30 passed; Ruff clean; Bandit 0 findings; diff check clean. Complete evidence and unchanged baselines are in the ignored task-8-report.md. Parent task remains In Progress for Tasks 9-12.
 Task 8 Fix Round 2/3 started from exact base e06111f3871aec70dd5b21333aafcb4cbe3fdc9e. Scope is limited to canonical unavailable capability disclosure/revision parity and preserving independently revoked Notes suggestion grants across repeated RBAC bootstrap. Focused capability and SQLite/live-PostgreSQL RBAC RED tests precede production edits.
 Task 8 Fix Round 2/3 completed from exact base e06111f3871aec70dd5b21333aafcb4cbe3fdc9e. Canonical unavailable capability disclosure now shares the normal revision authority, preserves safely resolved provider/model defaults, treats unknown as external, and exposes no endpoint or credential material. Repeated bootstrap preserves revocations for only the three independently revocable Notes suggestion permissions while fresh bootstrap and migration 94 grants remain intact. Verification: focused provider/API/RBAC 58 passed; affected Task 8/AuthNZ/Jobs/worker 190 passed with live PostgreSQL and no skips; Ruff clean; Bandit 0 findings; diff check clean. Full evidence is in the ignored task-8-report.md.
+Task 8 Fix Round 3/3 started from exact base 5c8c93eebb196728ebedbbc8961ce29544180bc8. Scope is limited to making TldwPermissionSeeder call the shared RBAC seed through the AuthNZ pool transaction abstraction, plus contract/live-PostgreSQL rollback tests and a production-caller transaction ownership audit. Strict RED precedes the one-line production boundary change; no nested transaction will be added.
+Task 8 Fix Round 3/3 completed from exact base 5c8c93eebb196728ebedbbc8961ce29544180bc8. TldwPermissionSeeder now invokes the shared RBAC seed through the AuthNZ pool transaction abstraction; all three production callers are transaction-owned and the helper starts no nested transaction. Live PostgreSQL fault injection proves catalog/grant rollback, clean retry with complete default grants, and preserved post-success revocations. Verification: focused contract gate 4 passed; complete MCP/AuthNZ/live-PostgreSQL/Task-8 capability gate 227 passed with no skips; Ruff clean; Bandit 0 findings; diff check clean. Full RED/GREEN and security evidence is in the ignored task-8-report.md. Parent task remains In Progress for Tasks 9-12.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
