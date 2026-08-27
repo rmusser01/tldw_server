@@ -44,6 +44,15 @@ from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (  
 
 SCHEMA_VERSION = "scheduled-agent-execution-certification.v1"
 VALIDITY_WINDOW = timedelta(hours=24)
+STATIC_RUNTIME_VALUES = (
+    "docker",
+    "firecracker",
+    "lima",
+    "vz_linux",
+    "vz_macos",
+    "seatbelt",
+    "worktree",
+)
 HELPER_PATH = (
     "Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py"
 )
@@ -469,7 +478,7 @@ def _command_manifest() -> list[dict[str, object]]:
                 "parameter_names": parameter_names,
                 "safe_to_run_by_default": safe_to_run,
                 "required_environment_names": (
-                    ["configured_api_key_environment"] if not safe_to_run else []
+                    ["configured_credential_environment"] if not safe_to_run else []
                 ),
             }
         )
@@ -613,6 +622,28 @@ def render_manifest_json(manifest: Mapping[str, object]) -> str:
     return json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
 
 
+def _static_runtime_eligibility_rows() -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    for runtime in STATIC_RUNTIME_VALUES:
+        eligibility = _runtime_eligibility(runtime)
+        if eligibility.untrusted_eligible and eligibility.strict_deny_all:
+            rows.append(
+                (
+                    runtime,
+                    "draft_only",
+                    "required_server_verified_evidence_incomplete",
+                )
+            )
+            continue
+        reasons: list[str] = []
+        if not eligibility.untrusted_eligible:
+            reasons.append("runtime_not_untrusted_eligible")
+        if not eligibility.strict_deny_all:
+            reasons.append("runtime_strict_deny_all_unavailable")
+        rows.append((runtime, "unsupported", ", ".join(reasons)))
+    return rows
+
+
 def render_manifest_markdown(manifest: Mapping[str, object]) -> str:
     """Render a bounded Markdown summary of the same manifest."""
 
@@ -650,6 +681,22 @@ def render_manifest_markdown(manifest: Mapping[str, object]) -> str:
         "| `{requirement_id}` | `{state}` | `{verification}` | "
         "`{evidence_sha256}` |".format(**item)
         for item in requirements
+    )
+    lines.extend(
+        [
+            "",
+            "## Repository-Static Runtime Eligibility",
+            "",
+            "This appendix is derived from typed runtime metadata. It is not "
+            "deployment certification evidence.",
+            "",
+            "| Runtime | Default outcome | Primary reason |",
+            "| --- | --- | --- |",
+        ]
+    )
+    lines.extend(
+        f"| `{runtime}` | `{outcome}` | `{reason}` |"
+        for runtime, outcome, reason in _static_runtime_eligibility_rows()
     )
     lines.extend(
         [
@@ -709,12 +756,7 @@ def validate_artifact_pair(json_path: Path, markdown_path: Path) -> None:
         raise ValueError("JSON evidence must contain one manifest object")
     validate_manifest(manifest)
     markdown = markdown_path.read_text(encoding="utf-8")
-    expected_values = (
-        str(manifest["evidence_id"]),
-        str(manifest["deployment_class_id"]),
-        f"| Outcome | `{manifest['outcome']}` |",
-    )
-    if any(value not in markdown for value in expected_values):
+    if markdown != render_manifest_markdown(manifest):
         raise ValueError("Markdown artifact does not match JSON evidence")
 
 

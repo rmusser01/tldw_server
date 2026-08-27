@@ -248,6 +248,7 @@ def test_command_manifest_contains_names_but_no_values_or_urls(
     assert "single_user" not in serialized
     assert "docker" not in serialized
     assert "b" * 40 not in serialized
+    assert "api_key" not in serialized
 
 
 def test_evidence_id_covers_canonical_sanitized_content(tmp_path: Path) -> None:
@@ -334,6 +335,48 @@ def test_write_and_validate_artifact_pair(tmp_path: Path) -> None:
     module.validate_artifact_pair(json_path, markdown_path)
     assert json.loads(json_path.read_text(encoding="utf-8")) == manifest
     assert manifest["evidence_id"] in markdown_path.read_text(encoding="utf-8")
+
+
+def test_markdown_runtime_appendix_is_derived_and_pair_validated(
+    tmp_path: Path,
+) -> None:
+    """Static runtime eligibility is complete and covered by pair validation."""
+
+    module = _load_module()
+    manifest = module.build_evidence_manifest(
+        _inputs(module),
+        now=NOW,
+        temporary_directory=tmp_path,
+    )
+    markdown = module.render_manifest_markdown(manifest)
+    expected = {
+        "docker": "draft_only",
+        "firecracker": "draft_only",
+        "lima": "draft_only",
+        "vz_linux": "draft_only",
+        "vz_macos": "unsupported",
+        "seatbelt": "unsupported",
+        "worktree": "unsupported",
+    }
+
+    assert "## Repository-Static Runtime Eligibility" in markdown
+    for runtime, outcome in expected.items():
+        assert f"| `{runtime}` | `{outcome}` |" in markdown
+
+    json_path = tmp_path / "baseline.json"
+    markdown_path = tmp_path / "baseline.md"
+    json_path.write_text(module.render_manifest_json(manifest), encoding="utf-8")
+    markdown_path.write_text(
+        markdown.replace(
+            "| `docker` | `draft_only` |",
+            "| `docker` | `certified` |",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Markdown"):
+        module.validate_artifact_pair(json_path, markdown_path)
 
 
 def test_artifact_pair_rejects_markdown_from_another_manifest(

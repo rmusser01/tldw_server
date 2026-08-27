@@ -55,8 +55,8 @@
 | 1 | Freeze the certification vocabulary and fail-closed evaluator | All outcome and freshness rules are deterministic and mock evidence cannot certify | Pure unit tests | Complete |
 | 2 | Produce reproducible current-state evidence | Seven requirement records and a sanitized manifest are generated for an exact deployment class | Helper and characterization tests | Complete |
 | 3 | Publish and enforce the API-first readiness gate | Versioned capability metadata, typed Run Now refusal, no Agent scheduler enqueue, and worker defense-in-depth agree | Schema/service/API/OpenAPI/feed/consumer tests | Complete |
-| 4 | Publish the decision and current baseline | ADR, operator guide, JSON/Markdown evidence, and dependency tasks agree | Artifact validator and docs checks | In Progress |
-| 5 | Complete regression and security gates | Focused cross-module tests, compile, lint, Bandit, diff review, and Backlog evidence pass | Verification matrix | Not Started |
+| 4 | Publish the decision and current baseline | ADR, operator guide, JSON/Markdown evidence, and dependency tasks agree | Artifact validator and docs checks | Complete |
+| 5 | Complete regression and security gates | Focused cross-module tests, compile, lint, Bandit, diff review, and Backlog evidence pass | Verification matrix | Complete |
 
 ## File Map
 
@@ -461,7 +461,7 @@ Expected: one API-first commit with no frontend, Watchlists, standalone Agent Ta
 - Consumes: the helper at the two preceding commits and current runtime metadata.
 - Produces: a reproducible reviewed decision that no deployment class is certified yet, plus bounded follow-on dependency tasks.
 
-- [ ] **Step 1: Generate the exact current baseline artifacts**
+- [x] **Step 1: Generate the exact current baseline artifacts**
 
 Run the helper for the implementation host's observed OS/architecture/AuthNZ/runtime/adapter tuple and use the current implementation commit SHA as both `source_commit` and the baseline build identity. The values below are examples for the current worktree host and must be replaced if observation differs; the helper must refuse a claimed host OS/architecture that disagrees with its local observation unless `--repository-characterization-only` is explicit. The JSON artifact is evidence for that one exact, unverified deployment class. The Markdown artifact renders the same record and adds a clearly labeled repository-static eligibility appendix for all runtime values; neither the appendix nor a repository-characterization baseline is deployment certification evidence.
 
@@ -503,7 +503,7 @@ The static appendix applies these expected default outcomes when all non-runtime
 
 The generator must validate that the JSON record and corresponding Markdown deployment-class section have identical outcome/reason codes before writing. It must also validate the static appendix directly from `runtime_capabilities.py`. Any unexpected `certified` result is a release-blocking failure.
 
-- [ ] **Step 2: Write ADR-041**
+- [x] **Step 2: Write ADR-041**
 
 Use the repository ADR template and add ADR-041 to `Docs/ADR/README.md` with its final status and one-sentence decision. The decision is:
 
@@ -511,11 +511,11 @@ Use the repository ADR template and add ADR-041 to `Docs/ADR/README.md` with its
 
 Alternatives rejected must include: trusting Docker/container isolation alone; reusing ordinary ACP transcripts; treating Sandbox idempotency as adapter dispatch recovery; treating generic MCP credentials/governance as scheduled grants; and hiding Agent automation entirely instead of retaining an explicit draft-only API state.
 
-- [ ] **Step 3: Write the operator guide**
+- [x] **Step 3: Write the operator guide**
 
 Document the exact CLI invocations, evidence schema, seven requirement definitions, trust levels, freshness/subject invalidation, safe refusal behavior, artifact redaction, API projection, and rerun procedure. State that changing evidence JSON manually cannot certify a deployment. Document that host-gated raw artifacts remain outside the repository and only sanitized digests/results are committed.
 
-- [ ] **Step 4: Attach confirmed evidence to the pre-created dependency tasks**
+- [x] **Step 4: Attach confirmed evidence to the pre-created dependency tasks**
 
 Use Backlog.md MCP to add ADR-041 and both baseline artifacts to these existing tasks:
 
@@ -526,7 +526,7 @@ Use Backlog.md MCP to add ADR-041 and both baseline artifacts to these existing 
 
 Record `operational_fail_closed` as a cross-cutting exit criterion on TASK-13129 and all four dependency tasks rather than creating a fifth implementation silo. Do not begin any dependency task in this branch.
 
-- [ ] **Step 5: Validate documentation and artifact consistency**
+- [x] **Step 5: Validate documentation and artifact consistency**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -545,7 +545,15 @@ python Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py
 
 Expected: artifact validation passes; both negated scans exit 0 because no match exists; no document claims a certified current deployment. Review operator-guide prose separately because it intentionally names prohibited data categories without including values.
 
-- [ ] **Step 6: Commit the evidence decision**
+Recorded result: the regenerated artifact pair validates exactly. Evidence
+`sha256:1df8024b73472ea0a02a323fbad0d2f864d8b5f604611cb01bf49478f60a5874`
+reports `draft_only` for deployment class
+`sha256:76a1074c303c74cd6db3f6823f391133e44437a0da019f99f5b02b95b2cb3337`.
+Both prohibited-content scans returned no matches after the command-manifest
+placeholder was narrowed from an API-key-shaped name to a generic credential
+environment name. The focused helper suite passed 22 tests with 2 warnings.
+
+- [x] **Step 6: Commit the evidence decision**
 
 ```bash
 git add \
@@ -575,7 +583,7 @@ Expected: only the ADR and index, guide, validated evidence, TASK-13129, and the
 - Consumes: all four implementation units and generated evidence.
 - Produces: a reviewed, test-backed gate with no execution capability enabled.
 
-- [ ] **Step 1: Run focused and adjacent tests**
+- [x] **Step 1: Run focused and adjacent tests**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -596,7 +604,10 @@ python -m pytest -q --tb=short \
 
 Expected: PASS except explicitly recorded host-gated skips. A skipped host probe cannot count as passing evidence.
 
-- [ ] **Step 2: Run syntax, lint, and Bandit gates**
+Recorded result: 275 passed, 0 failed, 0 skipped, and 19 warnings in
+93.04 seconds. No host-gated skip was counted as evidence.
+
+- [x] **Step 2: Run syntax, lint, and Bandit gates**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -628,7 +639,11 @@ python -m bandit -r \
 
 Expected: compile and lint exit 0; Bandit reports no new findings in touched Python.
 
-- [ ] **Step 3: Perform the security self-review**
+Recorded result: compileall and Ruff exited 0. Bandit report
+`/tmp/bandit_task_13129.json` contains zero findings and zero errors across
+4,965 production lines.
+
+- [x] **Step 3: Perform the security self-review**
 
 Verify all of the following:
 
@@ -642,7 +657,14 @@ Verify all of the following:
 - recurring questions, Watchlists, and standalone Agent Tasks are unchanged;
 - there is no frontend inference or execution implementation in the diff.
 
-- [ ] **Step 4: Finalize TASK-13129 and amend the evidence commit**
+Recorded result: all checks passed. The current resolver can emit only
+repository characterization; the production stack gate is source-defined
+false; exact-subject, freshness, receipt, hostile-admission, redaction, and
+cross-layer API/scheduler/worker invariants remain fail closed. Recurring
+Questions are unchanged, and the branch contains no frontend, Watchlists, or
+standalone Agent Tasks changes.
+
+- [x] **Step 4: Finalize TASK-13129 and amend the evidence commit**
 
 Use Backlog.md MCP to record exact test counts, host-gated skips, artifact evidence IDs, Bandit result, API/admission behavior, ADR decision, and TASK-13130 through TASK-13133. Check acceptance criteria and definition-of-done only after verification. Mark Done when the gate and documentation are complete even though the outcome is `draft_only`/`unsupported`; the task's objective is an honest feasibility decision, not forced certification.
 
@@ -654,7 +676,7 @@ git commit --amend --no-edit
 
 Expected: the final Backlog evidence is included in the existing evidence/ADR commit, retaining four implementation commits.
 
-- [ ] **Step 5: Review the complete branch diff after finalization**
+- [x] **Step 5: Review the complete branch diff after finalization**
 
 ```bash
 git diff --check origin/dev...HEAD
