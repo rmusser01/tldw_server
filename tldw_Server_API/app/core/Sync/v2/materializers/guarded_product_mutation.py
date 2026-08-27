@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Process-local guard callbacks for one canonical Notes product mutation."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +10,15 @@ from ..models import SyncDomain
 
 GuardBefore = Callable[[Any], None]
 GuardAfter = Callable[[Any, str], None]
+GUARD_REQUIRED_ROUTING_KEY = "_sync_guard_required_v1"
+
+
+def has_guard_required_routing_key(
+    routing_metadata: Mapping[str, object],
+) -> bool:
+    """Return whether routing contains the reserved process-local guard marker."""
+
+    return GUARD_REQUIRED_ROUTING_KEY in routing_metadata
 
 
 class GuardedProductMutationIdentityError(ValueError):
@@ -59,8 +68,10 @@ class GuardedProductMutation:
 
 
 __all__ = [
+    "GUARD_REQUIRED_ROUTING_KEY",
     "GuardAfter",
     "GuardBefore",
     "GuardedProductMutation",
     "GuardedProductMutationIdentityError",
+    "has_guard_required_routing_key",
 ]

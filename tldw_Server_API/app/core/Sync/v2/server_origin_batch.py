@@ -22,8 +22,10 @@ from .errors import (
     SyncStoreError,
 )
 from .materializers.guarded_product_mutation import (
+    GUARD_REQUIRED_ROUTING_KEY,
     GuardedProductMutation,
     GuardedProductMutationIdentityError,
+    has_guard_required_routing_key,
 )
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
@@ -56,8 +58,6 @@ from .server_origin import (
 )
 from .service import SyncV2Service
 from .store import SyncV2Store
-
-_GUARD_REQUIRED_MARKER = "_sync_guard_required_v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +216,7 @@ def capture_server_origin_mutation_batch(
         expected_steps = (
             guarded_canonical_steps
             if any(
-                envelope.routing_metadata.get(_GUARD_REQUIRED_MARKER) is True
+                envelope.routing_metadata.get(GUARD_REQUIRED_ROUTING_KEY) is True
                 for envelope in existing
             )
             else canonical_steps
@@ -719,7 +719,7 @@ def _materialize_group(
         dataset_id=dataset.dataset_id,
         mutation_group_id=group[0].mutation_group_id or "",
     )
-    guard_by_identity = _require_group_guards(group, guarded_mutations)
+    guard_by_identity = _require_group_guards(dataset, group, guarded_mutations)
     trusted_notes_task_coordinator = (
         bootstrap_id is None
         and _is_trusted_notes_task_coordinator_group(dataset, group)
@@ -791,7 +791,7 @@ def _bind_guard_requirements(
             routing_metadata={
                 key: value
                 for key, value in step.routing_metadata.items()
-                if key != _GUARD_REQUIRED_MARKER
+                if key != GUARD_REQUIRED_ROUTING_KEY
             },
         )
         for step in steps
@@ -825,24 +825,31 @@ def _bind_guard_requirements(
             step,
             routing_metadata={
                 **dict(step.routing_metadata),
-                _GUARD_REQUIRED_MARKER: True,
+                GUARD_REQUIRED_ROUTING_KEY: True,
             },
         )
     return tuple(bound)
 
 
 def _require_group_guards(
+    dataset: SyncDataset,
     group: Sequence[SyncEnvelope],
     guards: Sequence[GuardedProductMutation],
 ) -> dict[tuple[SyncDomain, str], GuardedProductMutation]:
     required: dict[tuple[SyncDomain, str], SyncEnvelope] = {}
     for envelope in group:
-        marker = envelope.routing_metadata.get(_GUARD_REQUIRED_MARKER)
-        if _GUARD_REQUIRED_MARKER in envelope.routing_metadata and marker is not True:
+        marker = envelope.routing_metadata.get(GUARD_REQUIRED_ROUTING_KEY)
+        if has_guard_required_routing_key(envelope.routing_metadata) and marker is not True:
             raise SyncIdempotencyConflictError(
                 "Sync stored mutation group has an invalid guard-required marker"
             )
         if marker is True:
+            if not GuardedProductMutation.supports_domain(
+                envelope.domain
+            ) or not _has_guarded_server_origin_provenance(dataset, envelope):
+                raise SyncIdempotencyConflictError(
+                    "Sync guard-required envelope failed integrity validation"
+                )
             identity = (envelope.domain, envelope.object_id)
             if identity in required:
                 raise GuardedProductMutationIdentityError(
@@ -872,6 +879,22 @@ def _require_group_guards(
             "Fresh guarded mutation does not match a guard-required envelope"
         )
     return supplied
+
+
+def _has_guarded_server_origin_provenance(
+    dataset: SyncDataset,
+    envelope: SyncEnvelope,
+) -> bool:
+    routing = envelope.routing_metadata
+    source = routing.get("source")
+    return (
+        envelope.device_id == SERVER_ORIGIN_DEVICE_ID
+        and routing.get("origin") == "server"
+        and routing.get("server_device_id") == SERVER_ORIGIN_DEVICE_ID
+        and routing.get("server_owner_user_id") == dataset.owner_user_id
+        and isinstance(source, str)
+        and bool(source)
+    )
 
 
 def _materialize_group_guarded(

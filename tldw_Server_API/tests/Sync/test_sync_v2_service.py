@@ -37,6 +37,9 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult, NotesMaterializer
+from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+    GUARD_REQUIRED_ROUTING_KEY,
+)
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import NotesLinkMaterializer
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
     NotesOrganizationMaterializer,
@@ -2394,6 +2397,39 @@ def test_push_rejects_envelopes_for_datasets_user_cannot_access(sync_service: Sy
         )
 
 
+@pytest.mark.parametrize("marker_value", [True, False, "spoofed"])
+def test_push_rejects_reserved_guard_routing_before_persistence(
+    sync_service: SyncV2Service,
+    marker_value: object,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    result = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(
+                routing_metadata={
+                    "entity_kind": "note",
+                    GUARD_REQUIRED_ROUTING_KEY: marker_value,
+                }
+            )
+        ],
+    )
+
+    assert result.accepted == []
+    assert result.conflicts == []
+    assert [item.error_code for item in result.rejected] == [
+        "reserved_routing_metadata"
+    ]
+    assert sync_service.store.list_envelopes_after("dataset-1", 0) == []
+
+
 def test_push_returns_per_envelope_accepted_rejected_and_conflict_outcomes(
     sync_store: SyncV2Store,
 ):
@@ -3228,6 +3264,70 @@ def test_resolve_conflict_stores_resolution_envelope(sync_store: SyncV2Store):
     assert resolved.resolution_action == "overwrite"
     assert [envelope.client_envelope_id for envelope in pulled.envelopes] == ["env-resolution"]
     assert pulled.envelopes[0].status == "accepted"
+
+
+def test_resolve_conflict_rejects_reserved_guard_routing_before_claim(
+    sync_store: SyncV2Store,
+) -> None:
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes.note",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes.note",
+                    entity_id="note-1",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        materializers={"notes.note": _OutcomeMaterializer()},
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-conflict")],
+    )
+    conflict_id = pushed.conflicts[0].conflict_id
+
+    with pytest.raises(SyncStoreError, match="reserved routing metadata"):
+        service.resolve_conflict(
+            user_id="user-1",
+            conflict_id=conflict_id,
+            action="overwrite",
+            resolved_by_device_id="device-1",
+            resolution_envelope=_envelope(
+                client_envelope_id="env-resolution-reserved-routing",
+                payload_hash="sha256:reserved-routing",
+                routing_metadata={
+                    "entity_kind": "note",
+                    GUARD_REQUIRED_ROUTING_KEY: True,
+                },
+            ),
+        )
+
+    conflict = sync_store.get_conflict(conflict_id)
+    assert conflict is not None
+    assert conflict.status == "unresolved"
+    assert all(
+        envelope.client_envelope_id != "env-resolution-reserved-routing"
+        for envelope in sync_store.list_envelopes_after("dataset-1", 0)
+    )
 
 
 def test_resolve_conflict_duplicate_rename_accepts_distinct_object_id(

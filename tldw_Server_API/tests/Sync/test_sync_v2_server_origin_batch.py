@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 )
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+    GUARD_REQUIRED_ROUTING_KEY,
     GuardedProductMutation,
     GuardedProductMutationIdentityError,
 )
@@ -261,6 +262,21 @@ def test_guard_identity_mismatch_prevents_every_product_materializer_call(
 
     assert materializer.calls == []
     assert service.store.list_envelopes_after("dataset-1", 0) == []
+
+
+def test_server_origin_strips_untrusted_guard_marker_from_ordinary_step(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+) -> None:
+    service, _materializer = batch_service
+    step = replace(
+        _step("conversation-guard-spoof"),
+        routing_metadata={GUARD_REQUIRED_ROUTING_KEY: True},
+    )
+
+    result = _capture(service, [step], key="strip-guard-marker")
+
+    assert result.fully_applied is True
+    assert GUARD_REQUIRED_ROUTING_KEY not in result.envelopes[0].routing_metadata
 
 
 def test_batch_rejects_explicit_nonpositive_object_revision(

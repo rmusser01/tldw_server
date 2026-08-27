@@ -4,6 +4,7 @@ import hashlib
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Event
 from typing import Any
@@ -26,7 +27,9 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_link import (
     NotesLinkDomainAdapter,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncIdempotencyConflictError
 from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+    GUARD_REQUIRED_ROUTING_KEY,
     GuardedProductMutation,
     GuardedProductMutationIdentityError,
 )
@@ -40,9 +43,13 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     NOTES_ORGANIZATION_DOMAINS,
     SyncDatasetCreate,
+    SyncDomain,
     SyncEnvelope,
     SyncEnvelopeCreate,
     SyncObjectState,
+)
+from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+    mutation_group_plan_hash,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkCoordinator,
@@ -307,6 +314,42 @@ def _create_link(
     )
 
 
+def _insert_marked_group(
+    store: SyncV2Store,
+    *,
+    domain: SyncDomain,
+    object_id: str,
+    device_id: str,
+    routing_metadata: dict[str, object],
+    payload: dict[str, object],
+    group_id: str,
+) -> list[SyncEnvelope]:
+    pending = SyncEnvelopeCreate(
+        dataset_id=DATASET_ID,
+        client_envelope_id=f"{group_id}-step-0",
+        domain=domain,
+        operation="upsert",
+        object_id=object_id,
+        device_id=device_id,
+        object_revision=1,
+        entity_version=1,
+        payload=payload,
+        payload_hash=f"sha256:{group_id}",
+        created_at_client=NOW,
+        routing_metadata=routing_metadata,
+        status="accepted",
+        mutation_group_id=group_id,
+        mutation_step=0,
+        mutation_step_count=1,
+        mutation_plan_hash="0" * 64,
+    )
+    pending = replace(
+        pending,
+        mutation_plan_hash=mutation_group_plan_hash((pending,)),
+    )
+    return store.insert_envelopes_atomic((pending,))
+
+
 def test_valid_guard_commits_canonical_link_and_finalization_together(
     guarded_context: tuple[SyncV2Service, SyncV2Store, CharactersRAGDB],
 ) -> None:
@@ -476,6 +519,80 @@ def test_guarded_group_rejects_missing_or_duplicate_guard_before_append(
         )
         assert store.list_mutation_group(DATASET_ID, group_id) == []
     assert note_db.get_keyword_by_text("Research") is None
+
+
+def test_persisted_guard_marker_without_server_origin_is_integrity_conflict(
+    guarded_context: tuple[SyncV2Service, SyncV2Store, CharactersRAGDB],
+) -> None:
+    service, store, note_db = guarded_context
+    edge_id = "44444444-4444-4444-8444-444444444444"
+    group = _insert_marked_group(
+        store,
+        domain="notes.link",
+        object_id=edge_id,
+        device_id="device-1",
+        routing_metadata={GUARD_REQUIRED_ROUTING_KEY: True},
+        payload={
+            "source_note_id": SOURCE_ID,
+            "target_note_id": TARGET_ID,
+            "type": "related",
+            "directed": False,
+            "weight": 1.0,
+            "label": None,
+            "properties": {},
+        },
+        group_id="malformed-guard-client-origin",
+    )
+    statuses = [envelope.apply_status for envelope in group]
+    dataset = store.get_dataset(DATASET_ID)
+    assert dataset is not None
+
+    with pytest.raises(SyncIdempotencyConflictError, match="guard-required.*integrity"):
+        materialize_accepted_mutation_group(
+            service=service,
+            dataset=dataset,
+            envelopes=group,
+        )
+
+    stored = store.list_mutation_group(DATASET_ID, "malformed-guard-client-origin")
+    assert [envelope.apply_status for envelope in stored] == statuses
+    assert note_db.notes_link_store.get(edge_id) is None
+
+
+def test_persisted_guard_marker_on_unsupported_domain_is_integrity_conflict(
+    guarded_context: tuple[SyncV2Service, SyncV2Store, CharactersRAGDB],
+) -> None:
+    service, store, note_db = guarded_context
+    note_id = "55555555-5555-4555-8555-555555555555"
+    group = _insert_marked_group(
+        store,
+        domain="notes.note",
+        object_id=note_id,
+        device_id="server-origin",
+        routing_metadata={
+            GUARD_REQUIRED_ROUTING_KEY: True,
+            "source": "notes_api",
+            "origin": "server",
+            "server_device_id": "server-origin",
+            "server_owner_user_id": OWNER_ID,
+        },
+        payload={"title": "Spoofed marker", "content": "Body"},
+        group_id="malformed-guard-domain",
+    )
+    statuses = [envelope.apply_status for envelope in group]
+    dataset = store.get_dataset(DATASET_ID)
+    assert dataset is not None
+
+    with pytest.raises(SyncIdempotencyConflictError, match="guard-required.*integrity"):
+        materialize_accepted_mutation_group(
+            service=service,
+            dataset=dataset,
+            envelopes=group,
+        )
+
+    stored = store.list_mutation_group(DATASET_ID, "malformed-guard-domain")
+    assert [envelope.apply_status for envelope in stored] == statuses
+    assert note_db.get_note_by_id(note_id) is None
 
 
 @pytest.mark.parametrize("entrypoint", ["resume", "accepted"])
