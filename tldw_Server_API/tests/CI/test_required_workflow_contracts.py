@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -167,6 +168,7 @@ def test_frontend_required_lane_exists() -> None:
     assert "frontend-required" in jobs
 
 
+@pytest.mark.unit
 def test_frontend_required_uses_isolated_vitest_shards() -> None:
     workflow = _load(".github/workflows/frontend-required.yml")
     jobs = workflow["jobs"]
