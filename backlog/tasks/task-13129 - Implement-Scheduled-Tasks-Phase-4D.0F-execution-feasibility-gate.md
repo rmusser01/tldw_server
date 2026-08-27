@@ -1,7 +1,7 @@
 ---
 id: TASK-13129
 title: Implement Scheduled Tasks Phase 4D.0F execution feasibility gate
-status: To Do
+status: In Progress
 created_date: 2026-08-24 17:33
 dependencies:
 - TASK-13127
@@ -23,9 +23,9 @@ references:
 - TASK-13133
 documentation:
 - Docs/superpowers/plans/2026-08-24-scheduled-tasks-phase4d-feasibility-gate-implementation-plan.md
-- Docs/ADR/040-scheduled-agent-execution-feasibility.md
+- Docs/ADR/041-scheduled-agent-execution-feasibility.md
 - Docs/Development/Scheduled_Agent_Execution_Certification.md
-updated_date: 2026-08-24 17:58
+updated_date: 2026-08-27 02:19
 ---
 
 ## Description
@@ -55,9 +55,12 @@ Execute Docs/superpowers/plans/2026-08-24-scheduled-tasks-phase4d-feasibility-ga
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Baseline dev SHA: 2306c1939f3b460f9c62da8ae83a1aa47c02ee0d. ADR-040 is occupied by synchronized moodboards; ADR-041 is reserved for this task. Reusable evidence sources: Sandbox runtime capabilities/operator evidence/operator status; ACP sandbox bridge/runner and session persistence/admin service; MCP managed credential broker; existing ACP certification smoke helper. Confirmed limitations: ordinary ACP stores raw prompts; ACP sandbox creation has no stable dispatch token/idempotency binding; cancellation lacks the required ordered per-attempt evidence journal; MCP credential brokering is partial and not Scheduled Tasks grant/action-token binding; no deployment class is currently certified. Statically eligible runtimes must remain draft_only until all seven server-verified domains pass; ineligible runtimes are unsupported.
 
+Focused pre-change baseline on the recorded SHA: 171 passed, 0 failed, 0 skipped, and 19 warnings in 78.28 seconds across Scheduled Tasks automation API, ACP sandbox/session/runner, Sandbox runtime capabilities/operator evidence, and MCP slot-status tests. This validates reusable primitives only and is not Phase 4D.0F certification evidence. Two unrelated untracked Watchlists templates appeared in the isolated worktree and are intentionally excluded from this task.
+
+Stage 1 TDD evidence: the new pure-domain suite first failed during collection because execution_certification.py did not exist. The implemented immutable domain now covers canonical deployment/profile identity, the seven closed requirements, exact subject/freshness/verification checks, authoritative bundle receipt matching, unsupported boundary outcomes, bounded reason codes, a repository-characterization-only current resolver, and the independent execution-stack conjunction. GREEN rerun: 31 passed, 0 failed, 2 warnings in 7.97 seconds. Ruff and compileall passed. Bandit report /tmp/bandit_task_13129_stage1.json contains 0 findings and 0 errors across 510 lines. git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

@@ -34,7 +34,7 @@
 - Certification is necessary but not sufficient for execution. In this slice, `execute` and `run_now` for the `agent_task` family are always `disabled`: non-certified deployments report the certification blocker, while a synthetic certified fixture reports `agent_execution_stack_unimplemented`. No state maps to `available` until the later 4D.1B execution stack adds an independently tested readiness input.
 - Manual Run Now, scheduler arming/fire, and worker admission apply the same conjunction. They reject or skip `agent_task` before adapter execution in this slice, including a synthetically certified deployment, while recurring-question execution remains unchanged.
 - Preserve standalone Agent Tasks. Its ordinary interactive ACP lifecycle and UX are a separate job/persona and are not gated or renamed by this work.
-- ADR number 040 is current at plan time. Recheck `Docs/ADR/README.md` and the directory immediately before edits; if 040 has been claimed on current dev, update this plan and TASK-13129 to the next free number before creating the ADR.
+- ADR-040 is occupied by synchronized moodboards on the implementation baseline. ADR-041 is reserved for this feasibility decision; recheck `Docs/ADR/README.md` immediately before creating the ADR and advance again if current `dev` claims it first.
 
 ## Evidence Domains And Current Gaps
 
@@ -52,8 +52,8 @@
 
 | Stage | Goal | Success Criteria | Tests | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Freeze the certification vocabulary and fail-closed evaluator | All outcome and freshness rules are deterministic and mock evidence cannot certify | Pure unit tests | Not Started |
-| 2 | Produce reproducible current-state evidence | Seven requirement records and a sanitized manifest are generated for an exact deployment class | Helper and characterization tests | Not Started |
+| 1 | Freeze the certification vocabulary and fail-closed evaluator | All outcome and freshness rules are deterministic and mock evidence cannot certify | Pure unit tests | Complete |
+| 2 | Produce reproducible current-state evidence | Seven requirement records and a sanitized manifest are generated for an exact deployment class | Helper and characterization tests | In Progress |
 | 3 | Publish and enforce the API-first readiness gate | Versioned capability metadata, typed Run Now refusal, no Agent scheduler enqueue, and worker defense-in-depth agree | Schema/service/API/OpenAPI/feed/consumer tests | Not Started |
 | 4 | Publish the decision and current baseline | ADR, operator guide, JSON/Markdown evidence, and dependency tasks agree | Artifact validator and docs checks | Not Started |
 | 5 | Complete regression and security gates | Focused cross-module tests, compile, lint, Bandit, diff review, and Backlog evidence pass | Verification matrix | Not Started |
@@ -66,7 +66,7 @@
 - `tldw_Server_API/tests/Notifications/test_scheduled_task_execution_certification.py` - pure outcome, subject-binding, freshness, and runtime-eligibility tests in the existing Scheduled Tasks test area.
 - `Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py` - sanitized manifest/evidence generator and explicit host-gated refusal/run controls.
 - `tldw_Server_API/tests/Helper_Scripts/test_scheduled_agent_execution_certification.py` - helper CLI, evidence schema, sentinel exclusion, and no-false-certification tests.
-- `Docs/ADR/040-scheduled-agent-execution-feasibility.md` - accepted/rejected deployment-class decision and consequences.
+- `Docs/ADR/041-scheduled-agent-execution-feasibility.md` - accepted/rejected deployment-class decision and consequences.
 - `Docs/Development/Scheduled_Agent_Execution_Certification.md` - operator commands, trust/evidence contract, outcome interpretation, and rerun rules.
 - `Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json` - machine-readable current repository result.
 - `Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.md` - bounded human-readable result and gaps.
@@ -74,7 +74,7 @@
 **Modify**
 
 - `tldw_Server_API/app/api/v1/schemas/scheduled_tasks_automation_schemas.py` - additive typed certification capability.
-- `Docs/ADR/README.md` - register ADR-040 in the canonical ADR index.
+- `Docs/ADR/README.md` - register ADR-041 in the canonical ADR index.
 - `tldw_Server_API/app/services/scheduled_task_automation_service.py` - inject/resolve certification and gate Agent capability projection and Run Now admission.
 - `tldw_Server_API/app/services/scheduled_task_automation_scheduler.py` - prevent Agent definitions from arming or enqueueing before the complete execution stack is ready.
 - `tldw_Server_API/app/core/Scheduled_Tasks/agent_task_jobs.py` - worker-side defense in depth for already-queued Agent Jobs.
@@ -109,7 +109,7 @@
 - Consumes: completed TASK-13127, current `origin/dev`, the approved Phase 4D spec, and existing Sandbox/ACP/MCP evidence contracts.
 - Produces: one clean implementation worktree and an explicit record of every evidence source and known limitation.
 
-- [ ] **Step 1: Start only after TASK-13127 is merged**
+- [x] **Step 1: Start only after TASK-13127 is merged**
 
 ```bash
 git fetch origin dev
@@ -122,20 +122,20 @@ backlog task TASK-13127 --plain
 
 Expected: clean worktree on current dev and TASK-13127 Done. If TASK-13127 is not merged, stop; do not combine the prerequisite and security gate.
 
-- [ ] **Step 2: Confirm ADR 040 is free**
+- [x] **Step 2: Reserve the next free ADR after finding ADR-040 occupied**
 
 ```bash
 ls Docs/ADR
-rg -n '^# ADR-040:' Docs/ADR
+rg -n '^# ADR-04[01]:' Docs/ADR
 ```
 
-Expected: no existing ADR-040. If it exists, update this plan and TASK-13129 to the next free number before any ADR file is created.
+Observed: ADR-040 is occupied by synchronized moodboards. ADR-041 is the next free number and is reserved in this plan and TASK-13129 before any ADR file is created.
 
-- [ ] **Step 3: Mark TASK-13129 In Progress and record the evidence inventory**
+- [x] **Step 3: Mark TASK-13129 In Progress and record the evidence inventory**
 
 Use Backlog.md MCP to record the dev SHA and the exact reusable sources from the evidence table. Record these baseline facts: ordinary ACP stores raw prompts; ACP sandbox creation has no dispatch token/idempotency key; current cancellation lacks the required event journal; MCP credential brokering is partial; no deployment class is currently certified.
 
-- [ ] **Step 4: Run the focused pre-change baseline**
+- [x] **Step 4: Run the focused pre-change baseline**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -149,7 +149,7 @@ python -m pytest -q --tb=short \
   tldw_Server_API/tests/MCP_Hub/test_mcp_slot_status.py
 ```
 
-Expected: record exact counts and pre-existing skips/failures in TASK-13129. These tests establish reusable primitives; they do not count as Phase 4D.0F certification.
+Observed on baseline SHA `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`: 171 passed, 0 failed, 0 skipped, and 19 warnings in 78.28 seconds. These tests establish reusable primitives; they do not count as Phase 4D.0F certification.
 
 ### Task 1: Define Deployment Identity And Fail-Closed Outcome Rules
 
@@ -161,7 +161,7 @@ Expected: record exact counts and pre-existing skips/failures in TASK-13129. The
 - Consumes: a normalized `DeploymentClass`, seven `RequirementEvidence` records, runtime isolation/network metadata, and an injected UTC clock.
 - Produces: immutable `ExecutionCertification` with outcome, opaque deployment-class ID, optional evidence ID, validity timestamps, and bounded stable reason codes.
 
-- [ ] **Step 1: Write failing type and identity tests**
+- [x] **Step 1: Write failing type and identity tests**
 
 Cover the exact public vocabulary:
 
@@ -176,7 +176,7 @@ EvidenceVerification = Literal[
 
 Define these seven closed requirement IDs in the order shown in the evidence table. Test that `DeploymentClass.canonical_payload()` sorts fields and that `deployment_class_id` is `sha256:` plus 64 lowercase hex characters. Changing any identity field must change the digest; insertion order must not.
 
-- [ ] **Step 2: Write failing evaluator tests**
+- [x] **Step 2: Write failing evaluator tests**
 
 Test all rules independently:
 
@@ -190,7 +190,7 @@ Test all rules independently:
 - ordinary missing dependencies, including the absent scheduled transcript mode, produce `draft_only`, not a false claim that the runtime itself was breached;
 - reason codes are sorted, deduplicated, bounded, and contain no free text.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -200,7 +200,7 @@ python -m pytest -q --tb=short \
 
 Expected: FAIL during collection because `execution_certification.py` does not exist.
 
-- [ ] **Step 4: Implement the minimal pure domain**
+- [x] **Step 4: Implement the minimal pure domain**
 
 Use frozen dataclasses and pure helpers. `evaluate_execution_certification(subject, evidence, verification_receipt, *, now)` must never read environment, files, databases, or network. Validate all requirement IDs, subject digests, timestamps, verification levels, evidence IDs, and the already-verified receipt's bundle digest before applying the outcome rules. The receipt type is an internal trust-boundary input, is never accepted from the API or evidence JSON, and has no production constructor in this task. Unit tests may construct it only through a test helper to prove the outcome table; that does not create a production certification path.
 
@@ -208,7 +208,7 @@ Add `resolve_current_agent_execution_certification()` as a separate fail-closed 
 
 Add a separate pure `agent_execution_dispatch_readiness(certification, *, execution_stack_ready)` decision. It returns ready only when certification is `certified` **and** the later stack input is true. The production call sites in this task always pass a source-defined false constant; no environment variable, config file, API parameter, or evidence artifact can change it. Tests prove a certified fixture remains blocked with `agent_execution_stack_unimplemented`.
 
-- [ ] **Step 5: Run GREEN and commit the domain unit**
+- [x] **Step 5: Run GREEN and commit the domain unit**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -446,7 +446,7 @@ Expected: one API-first commit with no frontend, Watchlists, standalone Agent Ta
 ### Task 4: Generate The Baseline, ADR, Operator Guide, And Dependencies
 
 **Files:**
-- Create: `Docs/ADR/040-scheduled-agent-execution-feasibility.md`
+- Create: `Docs/ADR/041-scheduled-agent-execution-feasibility.md`
 - Modify: `Docs/ADR/README.md`
 - Create: `Docs/Development/Scheduled_Agent_Execution_Certification.md`
 - Create: `Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json`
@@ -499,9 +499,9 @@ The static appendix applies these expected default outcomes when all non-runtime
 
 The generator must validate that the JSON record and corresponding Markdown deployment-class section have identical outcome/reason codes before writing. It must also validate the static appendix directly from `runtime_capabilities.py`. Any unexpected `certified` result is a release-blocking failure.
 
-- [ ] **Step 2: Write ADR-040**
+- [ ] **Step 2: Write ADR-041**
 
-Use the repository ADR template and add ADR-040 to `Docs/ADR/README.md` with its final status and one-sentence decision. The decision is:
+Use the repository ADR template and add ADR-041 to `Docs/ADR/README.md` with its final status and one-sentence decision. The decision is:
 
 > No current deployment class is certified for Scheduled Tasks Agent automation execution. Statically eligible isolation runtimes remain draft-only until all seven server-verified evidence domains pass for an exact deployment class; host-local and current non-eligible runtimes are unsupported. Existing ordinary ACP, Sandbox, and MCP primitives are retained as dependencies but are not treated as proof.
 
@@ -513,7 +513,7 @@ Document the exact CLI invocations, evidence schema, seven requirement definitio
 
 - [ ] **Step 4: Attach confirmed evidence to the pre-created dependency tasks**
 
-Use Backlog.md MCP to add ADR-040 and both baseline artifacts to these existing tasks:
+Use Backlog.md MCP to add ADR-041 and both baseline artifacts to these existing tasks:
 
 1. `TASK-13130`: `isolation_attestation` and `hostile_boundary`.
 2. `TASK-13131`: `scheduled_transcript_non_disclosure`.
@@ -531,7 +531,7 @@ python Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json \
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.md
 ! rg -n '[T]ODO|[T]BD|[F]IXME|certified.*true' \
-  Docs/ADR/040-scheduled-agent-execution-feasibility.md \
+  Docs/ADR/041-scheduled-agent-execution-feasibility.md \
   Docs/ADR/README.md \
   Docs/Development/Scheduled_Agent_Execution_Certification.md \
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.*
@@ -545,7 +545,7 @@ Expected: artifact validation passes; both negated scans exit 0 because no match
 
 ```bash
 git add \
-  Docs/ADR/040-scheduled-agent-execution-feasibility.md \
+  Docs/ADR/041-scheduled-agent-execution-feasibility.md \
   Docs/ADR/README.md \
   Docs/Development/Scheduled_Agent_Execution_Certification.md \
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json \
