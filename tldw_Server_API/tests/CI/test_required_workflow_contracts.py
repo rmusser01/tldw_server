@@ -202,6 +202,8 @@ def test_frontend_required_uses_isolated_vitest_shards() -> None:
     if "npm ci" in run_script:
         raise AssertionError("frontend-unit-tests should not use npm ci for Bun workspace dependencies")
 
+    assert unit_job["env"]["NODE_OPTIONS"] == "--max-old-space-size=5120"
+
     test_step = _get_step(steps, "Run package-owned frontend unit tests")
     assert test_step["working-directory"] == "apps"
     test_run_script = str(test_step.get("run") or "")
