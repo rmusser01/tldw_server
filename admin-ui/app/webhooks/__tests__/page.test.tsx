@@ -882,6 +882,189 @@ describe('legacy webhook compatibility mode', () => {
     expect(screen.getByText('second.completed')).toBeInTheDocument();
   });
 
+  it('does not refresh from an earlier expansion after the same row is re-expanded', async () => {
+    const testDelivery = deferred<Record<string, unknown>>();
+    mocks.detect.mockResolvedValue({
+      kind: 'legacy',
+      status: { ...STATUS, route_selection: 'legacy' },
+      client: mocks.legacy,
+    });
+    mocks.legacy.getWebhooks.mockResolvedValue({
+      items: [{
+        id: 'legacy-1',
+        targetUrl: 'https://legacy.example/hook',
+        eventTypes: ['incident.created'],
+        enabled: true,
+        createdAt: null,
+        updatedAt: null,
+      }],
+      total: 1,
+    });
+    mocks.legacy.testWebhook.mockReturnValue(testDelivery.promise);
+    const user = userEvent.setup();
+    render(<WebhooksPage />);
+
+    const row = (await screen.findByText('https://legacy.example/hook')).closest('tr');
+    expect(row).not.toBeNull();
+    await user.click(within(row!).getByRole('button', { name: /show delivery history/i }));
+    await waitFor(() => expect(mocks.legacy.getWebhookDeliveries).toHaveBeenCalledTimes(1));
+    await user.click(within(row!).getByRole('button', { name: /^test$/i }));
+    await waitFor(() => expect(mocks.legacy.testWebhook).toHaveBeenCalledWith('legacy-1'));
+    await user.click(within(row!).getByRole('button', { name: /hide delivery history/i }));
+    await user.click(within(row!).getByRole('button', { name: /show delivery history/i }));
+    await waitFor(() => expect(mocks.legacy.getWebhookDeliveries).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      testDelivery.resolve({
+        id: 'delivery-old-expansion',
+        webhookId: 'legacy-1',
+        eventType: 'webhook.test',
+        statusCode: 200,
+        responseTimeMs: 15,
+        success: true,
+        error: null,
+        attemptedAt: '2026-08-22T12:00:00Z',
+        payloadPreview: null,
+      });
+      await testDelivery.promise;
+    });
+
+    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      'Legacy test delivery succeeded',
+    ));
+    expect(mocks.legacy.getWebhookDeliveries).toHaveBeenCalledTimes(2);
+  });
+
+  it('only lets the latest overlapping legacy test refresh delivery history', async () => {
+    const firstTest = deferred<Record<string, unknown>>();
+    const secondTest = deferred<Record<string, unknown>>();
+    const delivery = {
+      id: 'delivery-test',
+      webhookId: 'legacy-1',
+      eventType: 'webhook.test',
+      statusCode: 200,
+      responseTimeMs: 15,
+      success: true,
+      error: null,
+      attemptedAt: '2026-08-22T12:00:00Z',
+      payloadPreview: null,
+    };
+    mocks.detect.mockResolvedValue({
+      kind: 'legacy',
+      status: { ...STATUS, route_selection: 'legacy' },
+      client: mocks.legacy,
+    });
+    mocks.legacy.getWebhooks.mockResolvedValue({
+      items: [{
+        id: 'legacy-1',
+        targetUrl: 'https://legacy.example/hook',
+        eventTypes: ['incident.created'],
+        enabled: true,
+        createdAt: null,
+        updatedAt: null,
+      }],
+      total: 1,
+    });
+    mocks.legacy.testWebhook
+      .mockReturnValueOnce(firstTest.promise)
+      .mockReturnValueOnce(secondTest.promise);
+    const user = userEvent.setup();
+    render(<WebhooksPage />);
+
+    const row = (await screen.findByText('https://legacy.example/hook')).closest('tr');
+    expect(row).not.toBeNull();
+    await user.click(within(row!).getByRole('button', { name: /show delivery history/i }));
+    await waitFor(() => expect(mocks.legacy.getWebhookDeliveries).toHaveBeenCalledTimes(1));
+    const testButton = within(row!).getByRole('button', { name: /^test$/i });
+    await user.click(testButton);
+    await user.click(testButton);
+    await waitFor(() => expect(mocks.legacy.testWebhook).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      secondTest.resolve({ ...delivery, id: 'delivery-newer-test' });
+      await secondTest.promise;
+    });
+    await waitFor(() => expect(mocks.legacy.getWebhookDeliveries).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      firstTest.resolve({ ...delivery, id: 'delivery-older-test' });
+      await firstTest.promise;
+    });
+
+    expect(mocks.legacy.getWebhookDeliveries).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates an older test history refresh when a newer same-row test starts', async () => {
+    const olderHistory = deferred<{ items: Array<Record<string, unknown>>; total: number }>();
+    const newerTest = deferred<Record<string, unknown>>();
+    const delivery = {
+      id: 'delivery-test',
+      webhookId: 'legacy-1',
+      eventType: 'webhook.test',
+      statusCode: 200,
+      responseTimeMs: 15,
+      success: true,
+      error: null,
+      attemptedAt: '2026-08-22T12:00:00Z',
+      payloadPreview: null,
+    };
+    mocks.detect.mockResolvedValue({
+      kind: 'legacy',
+      status: { ...STATUS, route_selection: 'legacy' },
+      client: mocks.legacy,
+    });
+    mocks.legacy.getWebhooks.mockResolvedValue({
+      items: [{
+        id: 'legacy-1',
+        targetUrl: 'https://legacy.example/hook',
+        eventTypes: ['incident.created'],
+        enabled: true,
+        createdAt: null,
+        updatedAt: null,
+      }],
+      total: 1,
+    });
+    mocks.legacy.getWebhookDeliveries
+      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockReturnValueOnce(olderHistory.promise)
+      .mockResolvedValueOnce({
+        items: [{ ...delivery, id: 'history-newer', eventType: 'newer.completed' }],
+        total: 1,
+      });
+    mocks.legacy.testWebhook
+      .mockResolvedValueOnce({ ...delivery, id: 'test-older' })
+      .mockReturnValueOnce(newerTest.promise);
+    const user = userEvent.setup();
+    render(<WebhooksPage />);
+
+    const row = (await screen.findByText('https://legacy.example/hook')).closest('tr');
+    expect(row).not.toBeNull();
+    await user.click(within(row!).getByRole('button', { name: /show delivery history/i }));
+    await screen.findByText(/no legacy deliveries recorded/i);
+    const testButton = within(row!).getByRole('button', { name: /^test$/i });
+    await user.click(testButton);
+    await waitFor(() => expect(mocks.legacy.getWebhookDeliveries).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(/loading delivery history/i)).toBeInTheDocument();
+    await user.click(testButton);
+    await waitFor(() => expect(mocks.legacy.testWebhook).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      olderHistory.resolve({
+        items: [{ ...delivery, id: 'history-older', eventType: 'older.completed' }],
+        total: 1,
+      });
+      await olderHistory.promise;
+    });
+
+    expect(screen.queryByText('older.completed')).not.toBeInTheDocument();
+
+    await act(async () => {
+      newerTest.resolve({ ...delivery, id: 'test-newer' });
+      await newerTest.promise;
+    });
+    expect(await screen.findByText('newer.completed')).toBeInTheDocument();
+  });
+
   it('rejects an unsafe destination before calling the legacy API', async () => {
     mocks.detect.mockResolvedValue({
       kind: 'legacy',

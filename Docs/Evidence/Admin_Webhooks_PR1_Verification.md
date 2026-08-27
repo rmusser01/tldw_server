@@ -1194,3 +1194,62 @@ The reporter and ratchet source files are unchanged, so their pinned SHA-256
 values remain the values recorded immediately above. Fresh exact-head Qodo
 analysis, hosted CI, and a final unresolved-thread audit remain required before
 merge.
+
+## Same-Row Legacy Test Ownership Follow-Up
+
+Qodo's review of pushed head `43c56eef80` identified one additional valid
+lifecycle race. A test delivery started while a legacy row was expanded could
+complete after that same row was collapsed and re-expanded, or after a newer
+test started for the same expansion, then reacquire delivery-history ownership
+and perform an obsolete refresh.
+
+TDD reproduced both paths before implementation. The collapse/re-expansion
+case and the overlapping-test case each observed three history requests where
+only the initial load and current refresh were permitted. The controller now
+assigns an identity token only to tests started for the expanded row. A newer
+test supersedes the prior token, while row switches, collapse, and unmount
+synchronously invalidate it. Completion may refresh history only when the test
+still owns that token and its row remains expanded. Tests started on unrelated
+collapsed rows do not interfere with the active expansion.
+
+Independent review then identified a third ordering: an older test could pass
+its ownership check and start a history request before a newer same-row test
+began. TDD reproduced the stale publication as `older.completed` appearing
+after the newer test started. Test-triggered history requests now retain their
+originating test token. A newer expanded-row test invalidates only an older
+test-triggered history request and clears its loading state; ordinary manual
+history requests remain independent. The shared owner-aware guard suppresses
+stale success, error, and `finally` publication. Independent re-review found no
+remaining Critical or Important issues.
+
+Qodo also treated the recorded repository-wide admin UI baseline failures as a
+new PR failure. That claim does not match this repository's required exact-base
+ratchet policy: the failures are inherited, unchanged debt, the changed
+webhook/reporter surface is green, and the ratchet contracts remain green. The
+truthful baseline evidence is retained; no test or evidence was removed to
+mask inherited failures.
+
+Fresh local evidence at `2026-08-27T07:53:41Z`:
+
+```text
+same-row lifecycle TDD RED:            2 failed (3 calls observed, 2 expected)
+in-flight refresh TDD RED:              1 failed (stale history published)
+same-row ownership regressions GREEN:  3 passed
+complete webhook page suite:           33 passed
+focused webhook/reporter matrix:       80 passed across 6 files
+CI/workflow/ratchet contracts:         165 passed
+admin UI package typecheck:            PASS
+admin UI package lint:                 PASS, 0 errors/41 inherited warnings
+admin UI production build:             PASS, 49/49 routes
+Chromium webhook lifecycle:            1 passed
+independent re-review:                  PASS, no Critical/Important findings
+focused Ruff and Python compilation:   PASS
+reporter/ratchet SHA-256 pins:          PASS, unchanged
+git diff --check:                       PASS
+```
+
+The restricted production-build attempt failed only because the sandbox denied
+Turbopack's local helper port bind; the identical unrestricted command passed.
+Playwright's generated `next-env.d.ts` development-path drift was restored and
+is excluded. Commit/push, refreshed exact-head Qodo analysis, hosted CI, and a
+final unresolved-thread audit remain required before merge.

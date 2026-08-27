@@ -85,16 +85,22 @@ export const useWebhooksPageController = () => {
   const [mutatingId, setMutatingId] = useState<number | null>(null);
   const legacyExpandedIdRef = useRef<string | null>(legacyExpandedId);
   const activeLegacyDeliveryRequestRef = useRef<symbol | null>(null);
+  const activeLegacyDeliveryTestOwnerRef = useRef<symbol | null>(null);
+  const activeLegacyTestRequestRef = useRef<symbol | null>(null);
 
   useEffect(() => {
     if (legacyExpandedIdRef.current === legacyExpandedId) return;
     legacyExpandedIdRef.current = legacyExpandedId;
     activeLegacyDeliveryRequestRef.current = null;
+    activeLegacyDeliveryTestOwnerRef.current = null;
+    activeLegacyTestRequestRef.current = null;
   }, [legacyExpandedId]);
 
   useEffect(() => () => {
     legacyExpandedIdRef.current = null;
     activeLegacyDeliveryRequestRef.current = null;
+    activeLegacyDeliveryTestOwnerRef.current = null;
+    activeLegacyTestRequestRef.current = null;
   }, []);
 
   const clearCreateForm = useCallback(() => {
@@ -410,12 +416,15 @@ export const useWebhooksPageController = () => {
   const beginLegacyDeliveryRequest = (
     registrationId: string,
     expandRegistration: boolean,
+    testOwnerToken: symbol | null = null,
   ) => {
     if (!expandRegistration && legacyExpandedIdRef.current !== registrationId) return null;
     const requestToken = Symbol('legacy-delivery-history');
     activeLegacyDeliveryRequestRef.current = requestToken;
+    activeLegacyDeliveryTestOwnerRef.current = testOwnerToken;
     if (expandRegistration) {
       legacyExpandedIdRef.current = registrationId;
+      activeLegacyTestRequestRef.current = null;
       setLegacyExpandedId(registrationId);
       setLegacyDeliveries([]);
     }
@@ -429,6 +438,10 @@ export const useWebhooksPageController = () => {
   ) => (
     legacyExpandedIdRef.current === registrationId
     && activeLegacyDeliveryRequestRef.current === requestToken
+    && (
+      activeLegacyDeliveryTestOwnerRef.current === null
+      || activeLegacyDeliveryTestOwnerRef.current === activeLegacyTestRequestRef.current
+    )
   );
 
   const loadLegacyDeliveryHistory = async (
@@ -449,6 +462,7 @@ export const useWebhooksPageController = () => {
     } finally {
       if (isActiveLegacyDeliveryRequest(registrationId, requestToken)) {
         activeLegacyDeliveryRequestRef.current = null;
+        activeLegacyDeliveryTestOwnerRef.current = null;
         setLegacyDeliveryLoading(false);
       }
     }
@@ -456,6 +470,15 @@ export const useWebhooksPageController = () => {
 
   const testLegacyRegistration = async (registration: LegacyWebhookView) => {
     const refreshIfStillExpanded = legacyExpandedIdRef.current === registration.id;
+    const testRequestToken = refreshIfStillExpanded ? Symbol('legacy-webhook-test') : null;
+    if (testRequestToken) {
+      activeLegacyTestRequestRef.current = testRequestToken;
+      if (activeLegacyDeliveryTestOwnerRef.current) {
+        activeLegacyDeliveryRequestRef.current = null;
+        activeLegacyDeliveryTestOwnerRef.current = null;
+        setLegacyDeliveryLoading(false);
+      }
+    }
     try {
       const delivery = await legacyWebhookApi.testWebhook(registration.id);
       if (delivery.success) {
@@ -463,14 +486,26 @@ export const useWebhooksPageController = () => {
       } else {
         showError('Legacy test delivery failed');
       }
-      if (refreshIfStillExpanded) {
-        const requestToken = beginLegacyDeliveryRequest(registration.id, false);
+      if (
+        testRequestToken
+        && activeLegacyTestRequestRef.current === testRequestToken
+        && legacyExpandedIdRef.current === registration.id
+      ) {
+        const requestToken = beginLegacyDeliveryRequest(
+          registration.id,
+          false,
+          testRequestToken,
+        );
         if (requestToken) {
           await loadLegacyDeliveryHistory(registration.id, requestToken);
         }
       }
     } catch {
       showError('Legacy test delivery failed');
+    } finally {
+      if (activeLegacyTestRequestRef.current === testRequestToken) {
+        activeLegacyTestRequestRef.current = null;
+      }
     }
   };
 
@@ -478,6 +513,8 @@ export const useWebhooksPageController = () => {
     if (legacyExpandedIdRef.current === registration.id) {
       legacyExpandedIdRef.current = null;
       activeLegacyDeliveryRequestRef.current = null;
+      activeLegacyDeliveryTestOwnerRef.current = null;
+      activeLegacyTestRequestRef.current = null;
       setLegacyExpandedId(null);
       setLegacyDeliveries([]);
       setLegacyDeliveryLoading(false);
