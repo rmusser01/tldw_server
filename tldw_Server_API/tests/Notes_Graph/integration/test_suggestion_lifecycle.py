@@ -682,6 +682,41 @@ def _running_for(db: CharactersRAGDB, source: str, key: str, *, model: str = "mo
     )
 
 
+def _stage_for(
+    db: CharactersRAGDB,
+    *,
+    source: str,
+    key: str,
+    candidates: tuple[dict[str, object], ...],
+    model: str = "model-a",
+    digest_char: str = "7",
+):
+    running = _running_for(db, source, key, model=model)
+    return db.note_graph_suggestion_store.stage_suggestions(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_state="running",
+        expected_revision=running.revision,
+        result_digest=f"sha256:{digest_char * 64}",
+        candidates=candidates,
+        invalid_item_count=0,
+        now=NOW,
+    )
+
+
+def _activate(db: CharactersRAGDB, publishing):
+    return db.note_graph_suggestion_store.activate_staged_run(
+        dataset_id=DATASET_ID,
+        run_id=publishing.id,
+        expected_state="publishing",
+        expected_revision=publishing.revision,
+        observed_job_id=publishing.job_id,
+        observed_completion_token=publishing.expected_completion_token,
+        observed_result_digest=publishing.result_digest,
+        now=NOW,
+    )
+
+
 def _publish_related(
     db: CharactersRAGDB,
     *,
@@ -691,14 +726,11 @@ def _publish_related(
     suggestion_id: str,
     model: str = "model-a",
 ):
-    store = db.note_graph_suggestion_store
-    running = _running_for(db, source, key, model=model)
-    publishing = store.stage_suggestions(
-        dataset_id=DATASET_ID,
-        run_id=running.id,
-        expected_state="running",
-        expected_revision=running.revision,
-        result_digest=f"sha256:{'7' * 64}",
+    publishing = _stage_for(
+        db,
+        source=source,
+        key=key,
+        model=model,
         candidates=(
             {
                 "id": suggestion_id,
@@ -710,19 +742,477 @@ def _publish_related(
                 "evidence": (),
             },
         ),
-        invalid_item_count=0,
-        now=NOW,
     )
-    return store.activate_staged_run(
+    return _activate(db, publishing)
+
+
+def _accepting_snapshot(db: CharactersRAGDB, suggestion_id: str) -> tuple[object, ...]:
+    row = db.execute_query(
+        "SELECT state,revision,acceptance_lease_token,acceptance_lease_expires_at,"
+        "decision_receipt_id FROM note_graph_suggestions WHERE id=?",
+        (suggestion_id,),
+    ).fetchone()
+    assert row is not None
+    return tuple(row)
+
+
+def _exercise_accepting_duplicate_activation(db: CharactersRAGDB) -> None:
+    store = db.note_graph_suggestion_store
+    source = "60000000-0000-4000-8000-000000000001"
+    target = "60000000-0000-4000-8000-000000000002"
+    other = "60000000-0000-4000-8000-000000000003"
+    db.add_note("Accepting source", "body", note_id=source)
+    db.add_note("Accepting target", "body", note_id=target)
+    db.add_note("Accepting other", "body", note_id=other)
+
+    _publish_related(
+        db,
+        source=source,
+        target=target,
+        key="accepting-related-original",
+        suggestion_id="accepting-related",
+    )
+    related_claim = store.claim_acceptance(
         dataset_id=DATASET_ID,
-        run_id=publishing.id,
-        expected_state="publishing",
-        expected_revision=publishing.revision,
-        observed_job_id=publishing.job_id,
-        observed_completion_token=publishing.expected_completion_token,
-        observed_result_digest=publishing.result_digest,
+        suggestion_id="accepting-related",
+        expected_revision=1,
+        expected_source_fingerprint=_note_fingerprint(db, source),
+        expected_target_fingerprint=_note_fingerprint(db, target),
+        idempotency_key="accepting-related-claim",
         now=NOW,
     )
+    assert related_claim.suggestion is not None
+    related_before = _accepting_snapshot(db, "accepting-related")
+    related_publishing = _stage_for(
+        db,
+        source=target,
+        key="accepting-related-reverse",
+        model="model-b",
+        digest_char="a",
+        candidates=(
+            {
+                "id": "filtered-related",
+                "kind": "related_note",
+                "target_note_id": source,
+                "target_fingerprint": _note_fingerprint(db, source),
+                "match_strength": "strong",
+                "rationale": "Canonical reverse duplicate",
+                "evidence": (),
+            },
+            {
+                "id": "published-related",
+                "kind": "related_note",
+                "target_note_id": other,
+                "target_fingerprint": _note_fingerprint(db, other),
+                "match_strength": "possible",
+                "rationale": "Unrelated candidate",
+                "evidence": (),
+            },
+        ),
+    )
+    related_result = _activate(db, related_publishing)
+    assert (related_result.state.value, related_result.suggestion_count) == ("succeeded", 1)
+    assert _accepting_snapshot(db, "accepting-related") == related_before
+    assert [(row["id"], row["state"]) for row in db.execute_query(
+        "SELECT id,state FROM note_graph_suggestions WHERE run_id=? ORDER BY id",
+        (related_publishing.id,),
+    ).fetchall()] == [("published-related", "pending")]
+
+    original_tag_publishing = _stage_for(
+        db,
+        source=source,
+        key="accepting-tag-original",
+        model="model-c",
+        digest_char="b",
+        candidates=(
+            {
+                "id": "accepting-tag",
+                "kind": "tag",
+                "normalized_tag": "canonical tag",
+                "display_tag": "Canonical Tag",
+                "keyword_sync_id": None,
+                "match_strength": "strong",
+                "rationale": "Original tag",
+                "evidence": (),
+            },
+        ),
+    )
+    _activate(db, original_tag_publishing)
+    tag_claim = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="accepting-tag",
+        expected_revision=1,
+        expected_source_fingerprint=_note_fingerprint(db, source),
+        expected_target_fingerprint=None,
+        idempotency_key="accepting-tag-claim",
+        now=NOW,
+    )
+    assert tag_claim.suggestion is not None
+    tag_before = _accepting_snapshot(db, "accepting-tag")
+
+    keyword_id = db.add_keyword("Legacy Tag")
+    keyword = db.get_keyword_by_id(keyword_id)
+    assert keyword is not None
+    tag_publishing = _stage_for(
+        db,
+        source=source,
+        key="accepting-tag-reresolve",
+        model="model-d",
+        digest_char="c",
+        candidates=(
+            {
+                "id": "filtered-tag",
+                "kind": "tag",
+                "normalized_tag": "legacy tag",
+                "display_tag": "Legacy Tag",
+                "keyword_sync_id": keyword["sync_id"],
+                "match_strength": "strong",
+                "rationale": "Renamed duplicate",
+                "evidence": (),
+            },
+            {
+                "id": "published-tag",
+                "kind": "tag",
+                "normalized_tag": "independent tag",
+                "display_tag": "Independent Tag",
+                "keyword_sync_id": None,
+                "match_strength": "possible",
+                "rationale": "Unrelated candidate",
+                "evidence": (),
+            },
+        ),
+    )
+    db.rename_keyword(keyword_id, "Canonical Tag", expected_version=1)
+    tag_result = _activate(db, tag_publishing)
+    assert (tag_result.state.value, tag_result.suggestion_count) == ("succeeded", 1)
+    assert _accepting_snapshot(db, "accepting-tag") == tag_before
+    assert [(row["id"], row["state"]) for row in db.execute_query(
+        "SELECT id,state FROM note_graph_suggestions WHERE run_id=? ORDER BY id",
+        (tag_publishing.id,),
+    ).fetchall()] == [("published-tag", "pending")]
+
+
+def _exercise_capability_failure_replay(db: CharactersRAGDB) -> None:
+    store = db.note_graph_suggestion_store
+    capability_source = "70000000-0000-4000-8000-000000000001"
+    db.add_note("Capability replay source", "body", note_id=capability_source)
+
+    capability = _admit_for(db, capability_source, "capability-change")
+    failed = store.fail_admission(
+        dataset_id=DATASET_ID,
+        run_id=capability.run.id,
+        expected_state="admitting",
+        expected_revision=capability.run.revision,
+        error_code="notes_graph_capabilities_changed_before_queue",
+        guidance_key="retry_generation",
+        now=NOW,
+    )
+    assert failed.error_code == "notes_graph_capabilities_changed_before_queue"
+    db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (failed.id,))
+    capability_replay = _admit_for(db, capability_source, "capability-change")
+    assert capability_replay.run is None
+    assert capability_replay.replay_envelope == {
+        "run_id": failed.id,
+        "state": "failed",
+        "error_code": "notes_graph_capabilities_changed_before_queue",
+        "guidance_key": "retry_generation",
+    }
+
+
+def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
+    store = db.note_graph_suggestion_store
+    cancel_source = "70000000-0000-4000-8000-000000000002"
+    state_source = "70000000-0000-4000-8000-000000000003"
+    stale_source = "70000000-0000-4000-8000-000000000004"
+    publication_source = "70000000-0000-4000-8000-000000000005"
+    publication_target = "70000000-0000-4000-8000-000000000006"
+    queued_stale_source = "70000000-0000-4000-8000-000000000007"
+    missing_cancel_source = "70000000-0000-4000-8000-000000000008"
+    for index, note_id in enumerate(
+        (
+            cancel_source,
+            state_source,
+            stale_source,
+            publication_source,
+            publication_target,
+            queued_stale_source,
+            missing_cancel_source,
+        )
+    ):
+        db.add_note(f"Protocol note {index}", "body", note_id=note_id)
+
+    running = _running_for(db, cancel_source, "cancel-admit")
+    cancellation = store.admit_run_cancellation(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_state="running",
+        expected_revision=running.revision,
+        reason="user_cancelled",
+        idempotency_key="cancel-key",
+        now=NOW,
+    )
+    assert cancellation.run is not None
+    assert cancellation.run.state.value == "cancelling"
+    continuation = store.get_run_cancellation_continuation(
+        dataset_id=DATASET_ID,
+        operation_id=cancellation.operation_id,
+    )
+    assert continuation.operation_id == cancellation.operation_id
+    with pytest.raises(RuntimeError, match="notes_graph_suggestion_idempotency_mismatch"):
+        store.admit_run_cancellation(
+            dataset_id=DATASET_ID,
+            run_id=running.id,
+            expected_state="running",
+            expected_revision=running.revision,
+            reason="notes_graph_source_changed",
+            idempotency_key="cancel-key",
+            now=NOW,
+        )
+    with pytest.raises(RuntimeError, match="notes_graph_run_conflict"):
+        store.complete_run_cancellation_receipt(
+            dataset_id=DATASET_ID,
+            run_id=running.id,
+            operation_id=cancellation.operation_id,
+            expected_state="cancelling",
+            expected_revision=running.revision,
+            now=NOW,
+        )
+    completed = store.complete_run_cancellation_receipt(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        operation_id=cancellation.operation_id,
+        expected_state="cancelling",
+        expected_revision=cancellation.run.revision,
+        now=NOW,
+    )
+    assert completed.replay_envelope == {
+        "run_id": running.id,
+        "state": "cancelling",
+        "revision": cancellation.run.revision,
+    }
+    cancelled = store.reconcile_run_after_job_lookup(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_state="cancelling",
+        expected_revision=cancellation.run.revision,
+        observation="terminal_succeeded",
+        error_code=None,
+        guidance_key=None,
+        now=NOW,
+    )
+    assert cancelled.state.value == "cancelled"
+    db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (cancelled.id,))
+    cancellation_replay = store.admit_run_cancellation(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_state="running",
+        expected_revision=running.revision,
+        reason="user_cancelled",
+        idempotency_key="cancel-key",
+        now=NOW,
+    )
+    assert cancellation_replay.run is None
+    assert cancellation_replay.replay_envelope == completed.replay_envelope
+
+    queued_stale_admission = _admit_for(db, queued_stale_source, "queued-stale")
+    queued_stale = store.bind_admitted_run(
+        dataset_id=DATASET_ID,
+        run_id=queued_stale_admission.run.id,
+        expected_state="admitting",
+        expected_revision=queued_stale_admission.run.revision,
+        job_id="job-queued-stale",
+        completion_token="completion-queued-stale",
+        replay_envelope={"run_id": queued_stale_admission.run.id, "state": "queued"},
+        now=NOW,
+    )
+    assert db.update_note(queued_stale_source, {"content": "changed"}, expected_version=1)
+    queued_stale_operation = store.cancellation_operation_id(
+        dataset_id=DATASET_ID,
+        run_id=queued_stale.id,
+        run_revision=queued_stale.revision,
+    )
+    queued_stale_continuation = store.get_run_cancellation_continuation(
+        dataset_id=DATASET_ID,
+        operation_id=queued_stale_operation,
+    )
+    assert queued_stale_continuation.run is not None
+    assert queued_stale_continuation.run.state.value == "stale"
+    queued_stale_completed = store.complete_run_cancellation_receipt(
+        dataset_id=DATASET_ID,
+        run_id=queued_stale.id,
+        operation_id=queued_stale_operation,
+        expected_state="stale",
+        expected_revision=queued_stale.revision + 1,
+        now=NOW,
+    )
+    assert queued_stale_completed.replay_envelope == {
+        "run_id": queued_stale.id,
+        "state": "stale",
+        "revision": queued_stale.revision + 1,
+    }
+
+    missing_cancel_running = _running_for(db, missing_cancel_source, "missing-cancel")
+    missing_cancellation = store.admit_run_cancellation(
+        dataset_id=DATASET_ID,
+        run_id=missing_cancel_running.id,
+        expected_state="running",
+        expected_revision=missing_cancel_running.revision,
+        reason="user_cancelled",
+        idempotency_key="missing-cancel-key",
+        now=NOW,
+    )
+    db.execute_query(
+        "DELETE FROM note_graph_suggestion_runs WHERE id=?",
+        (missing_cancel_running.id,),
+    )
+    with pytest.raises(RuntimeError, match="notes_graph_run_cancel_resource_missing"):
+        store.admit_run_cancellation(
+            dataset_id=DATASET_ID,
+            run_id=missing_cancel_running.id,
+            expected_state="running",
+            expected_revision=missing_cancel_running.revision,
+            reason="user_cancelled",
+            idempotency_key="missing-cancel-key",
+            now=NOW,
+        )
+    assert missing_cancellation.operation_id
+
+    missing_admitting = _admit_for(db, state_source, "missing-admitting")
+    missing = store.reconcile_run_after_job_lookup(
+        dataset_id=DATASET_ID,
+        run_id=missing_admitting.run.id,
+        expected_state="admitting",
+        expected_revision=missing_admitting.run.revision,
+        observation="definitively_missing",
+        error_code=None,
+        guidance_key=None,
+        now=NOW,
+    )
+    assert (missing.state.value, missing.error_code) == ("failed", "notes_graph_job_missing")
+
+    queued_admission = _admit_for(db, state_source, "cancelled-queued", model="model-queued")
+    queued = store.bind_admitted_run(
+        dataset_id=DATASET_ID,
+        run_id=queued_admission.run.id,
+        expected_state="admitting",
+        expected_revision=queued_admission.run.revision,
+        job_id="job-cancelled-queued",
+        completion_token="completion-cancelled-queued",
+        replay_envelope={"run_id": queued_admission.run.id, "state": "queued"},
+        now=NOW,
+    )
+    queued_cancelled = store.reconcile_run_after_job_lookup(
+        dataset_id=DATASET_ID,
+        run_id=queued.id,
+        expected_state="queued",
+        expected_revision=queued.revision,
+        observation="terminal_cancelled",
+        error_code=None,
+        guidance_key=None,
+        now=NOW,
+    )
+    assert queued_cancelled.state.value == "cancelled"
+
+    state_running = _running_for(db, state_source, "state-missing", model="model-running")
+    state_missing = store.reconcile_run_after_job_lookup(
+        dataset_id=DATASET_ID,
+        run_id=state_running.id,
+        expected_state="running",
+        expected_revision=state_running.revision,
+        observation="terminal_succeeded",
+        error_code=None,
+        guidance_key=None,
+        now=NOW,
+    )
+    assert (state_missing.state.value, state_missing.error_code) == (
+        "failed",
+        "notes_graph_publication_state_missing",
+    )
+
+    stale_running = _running_for(db, stale_source, "stale-precedence")
+    assert db.update_note(stale_source, {"content": "changed"}, expected_version=1)
+    stale_row = db.execute_query(
+        "SELECT state,revision FROM note_graph_suggestion_runs WHERE id=?",
+        (stale_running.id,),
+    ).fetchone()
+    stale = store.reconcile_run_after_job_lookup(
+        dataset_id=DATASET_ID,
+        run_id=stale_running.id,
+        expected_state="cancelling",
+        expected_revision=int(stale_row["revision"]),
+        observation="terminal_failed",
+        error_code="notes_graph_provider_unavailable",
+        guidance_key="retry_generation",
+        now=NOW,
+    )
+    assert (stale.state.value, stale.error_code) == ("stale", "notes_graph_source_changed")
+
+    for suffix, observation, expected_code in (
+        ("mismatch", "publication_receipt_mismatch", "notes_graph_publication_receipt_mismatch"),
+        ("missing", "publication_receipt_missing", "notes_graph_publication_receipt_missing"),
+    ):
+        publishing = _stage_for(
+            db,
+            source=publication_source,
+            key=f"publication-{suffix}",
+            model=f"model-{suffix}",
+            digest_char="d" if suffix == "mismatch" else "e",
+            candidates=(
+                {
+                    "id": f"publication-{suffix}-staged",
+                    "kind": "related_note",
+                    "target_note_id": publication_target,
+                    "target_fingerprint": _note_fingerprint(db, publication_target),
+                    "match_strength": "strong",
+                    "rationale": "Hidden staged candidate",
+                    "evidence": (),
+                },
+            ),
+        )
+        reconciled = store.reconcile_run_after_job_lookup(
+            dataset_id=DATASET_ID,
+            run_id=publishing.id,
+            expected_state="publishing",
+            expected_revision=publishing.revision,
+            observation=observation,
+            error_code=None,
+            guidance_key=None,
+            now=NOW,
+        )
+        assert (reconciled.state.value, reconciled.error_code) == ("failed", expected_code)
+        assert db.execute_query(
+            "SELECT COUNT(*) AS count FROM note_graph_suggestions WHERE run_id=?",
+            (publishing.id,),
+        ).fetchone()["count"] == 0
+
+    invalid = _running_for(db, publication_source, "invalid-reconcile", model="model-invalid")
+    with pytest.raises(ValueError, match="notes_graph_maintenance_contract_invalid"):
+        store.reconcile_run_after_job_lookup(
+            dataset_id=DATASET_ID,
+            run_id=invalid.id,
+            expected_state="running",
+            expected_revision=invalid.revision,
+            observation="terminal_failed",
+            error_code="provider said private text",
+            guidance_key="retry_generation",
+            now=NOW,
+        )
+    with pytest.raises(ValueError, match="notes_graph_maintenance_contract_invalid"):
+        store.reconcile_run_after_job_lookup(
+            dataset_id=DATASET_ID,
+            run_id=invalid.id,
+            expected_state="running",
+            expected_revision=invalid.revision,
+            observation="publication_receipt_missing",
+            error_code=None,
+            guidance_key=None,
+            now=NOW,
+        )
+    unchanged = db.execute_query(
+        "SELECT state,revision FROM note_graph_suggestion_runs WHERE id=?",
+        (invalid.id,),
+    ).fetchone()
+    assert (unchanged["state"], int(unchanged["revision"])) == ("running", invalid.revision)
 
 
 def _exercise_receipt_cleanup_and_acceptance_fences(db: CharactersRAGDB) -> None:
@@ -1130,6 +1620,69 @@ def test_postgres_fix_round_receipts_identities_tags_and_fences(tmp_path, pg_dat
     try:
         _exercise_receipt_cleanup_and_acceptance_fences(db)
         _exercise_reverse_and_tag_activation(db)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_sqlite_fix_round_two_filters_accepting_identity_duplicates(tmp_path) -> None:
+    db = _new_db(tmp_path)
+    try:
+        _exercise_accepting_duplicate_activation(db)
+    finally:
+        db.close_all_connections()
+
+
+def test_postgres_fix_round_two_filters_accepting_identity_duplicates(
+    tmp_path,
+    pg_database_config,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = _new_db(tmp_path, backend=backend)
+    try:
+        _exercise_accepting_duplicate_activation(db)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_sqlite_fix_round_two_exposes_closed_task5_store_protocol(tmp_path) -> None:
+    db = _new_db(tmp_path)
+    try:
+        _exercise_task5_store_protocol(db)
+    finally:
+        db.close_all_connections()
+
+
+def test_postgres_fix_round_two_exposes_closed_task5_store_protocol(
+    tmp_path,
+    pg_database_config,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = _new_db(tmp_path, backend=backend)
+    try:
+        _exercise_task5_store_protocol(db)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_sqlite_fix_round_two_replays_capability_change_failure_without_run(tmp_path) -> None:
+    db = _new_db(tmp_path)
+    try:
+        _exercise_capability_failure_replay(db)
+    finally:
+        db.close_all_connections()
+
+
+def test_postgres_fix_round_two_replays_capability_change_failure_without_run(
+    tmp_path,
+    pg_database_config,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = _new_db(tmp_path, backend=backend)
+    try:
+        _exercise_capability_failure_replay(db)
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()

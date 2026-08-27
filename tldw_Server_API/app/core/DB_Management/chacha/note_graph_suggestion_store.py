@@ -59,6 +59,17 @@ class RunAdmissionResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RunCancellationResult:
+    """Durable cancellation admission, continuation, or terminal replay."""
+
+    disposition: Literal["created", "in_progress", "completed", "terminal_replay"]
+    operation_id: str
+    run: NoteGraphSuggestionRun | None = None
+    continuation: str | None = None
+    replay_envelope: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SuggestionPage:
     """One stable keyset page of visible suggestions."""
 
@@ -92,11 +103,11 @@ class NoteGraphSuggestionStore:
     """Own the database boundary for future suggestion reads and transitions."""
 
     _RUN_TRANSITIONS = {
-        "admitting": frozenset({"queued", "cancelling", "failed", "stale"}),
+        "admitting": frozenset({"queued", "cancelling", "failed", "cancelled", "stale"}),
         "queued": frozenset({"running", "cancelling", "failed", "cancelled", "stale"}),
-        "running": frozenset({"publishing", "cancelling", "failed", "stale"}),
+        "running": frozenset({"publishing", "cancelling", "failed", "cancelled", "stale"}),
         "cancelling": frozenset({"cancelled", "failed", "stale"}),
-        "publishing": frozenset({"succeeded", "failed", "stale"}),
+        "publishing": frozenset({"succeeded", "failed", "cancelled", "stale"}),
         "succeeded": frozenset(),
         "failed": frozenset(),
         "cancelled": frozenset(),
@@ -138,10 +149,46 @@ class NoteGraphSuggestionStore:
         {
             "notes_graph_admission_failed",
             "notes_graph_active_run_conflict",
+            "notes_graph_capabilities_changed_before_provider",
+            "notes_graph_capabilities_changed_before_queue",
             "notes_graph_fingerprint_stale",
             "notes_graph_fts_not_ready",
+            "notes_graph_job_missing",
+            "notes_graph_provider_retry_policy_unsupported",
             "notes_graph_provider_unavailable",
+            "notes_graph_publication_receipt_mismatch",
+            "notes_graph_publication_receipt_missing",
+            "notes_graph_publication_state_missing",
+            "notes_graph_source_too_large",
+            "notes_graph_suggestion_no_valid_items",
+            "notes_graph_suggestion_suppression_limit",
         }
+    )
+    _WORKER_ERROR_CODES = frozenset(
+        {
+            "notes_graph_capabilities_changed_before_provider",
+            "notes_graph_fingerprint_stale",
+            "notes_graph_fts_not_ready",
+            "notes_graph_provider_retry_policy_unsupported",
+            "notes_graph_provider_unavailable",
+            "notes_graph_source_too_large",
+            "notes_graph_suggestion_no_valid_items",
+            "notes_graph_suggestion_suppression_limit",
+        }
+    )
+    _MAINTENANCE_OBSERVATIONS = frozenset(
+        {
+            "terminal_succeeded",
+            "terminal_failed",
+            "terminal_cancelled",
+            "definitively_missing",
+            "publication_receipt_mismatch",
+            "publication_receipt_missing",
+        }
+    )
+    _ACTIVE_RUN_STATES = frozenset({"admitting", "queued", "running", "cancelling", "publishing"})
+    _STALE_ON_COMPLETION_CODES = frozenset(
+        {"notes_graph_source_changed", "notes_graph_target_changed"}
     )
     _STABLE_GUIDANCE_KEYS = frozenset(
         {"configure_provider", "contact_administrator", "refresh_note", "retry_generation"}
@@ -322,7 +369,11 @@ class NoteGraphSuggestionStore:
                 }
             )
         elif operation_kind == "run_cancel":
-            valid = state in {"cancelled", "stale"} and keys == {"run_id", "state", "revision"}
+            valid = state in {"cancelling", "cancelled", "failed", "stale"} and keys == {
+                "run_id",
+                "state",
+                "revision",
+            }
         else:
             valid = False
         if not valid:
@@ -1097,6 +1148,35 @@ class NoteGraphSuggestionStore:
         ).fetchall()
         return any(str(row["keyword"]).strip().casefold() == normalized_tag for row in rows)
 
+    def _has_accepting_identity(self, conn: SuggestionConnection, row: Any) -> bool:
+        if row["kind"] == "related_note":
+            predicate, identity = self._related_identity_predicate(
+                source_note_id=str(row["source_note_id"]),
+                source_fingerprint=str(row["source_fingerprint"]),
+                target_note_id=str(row["target_note_id"]),
+                target_fingerprint=str(row["target_fingerprint"]),
+            )
+            source_predicate = ""
+            source_identity: tuple[object, ...] = ()
+        else:
+            predicate = "normalized_tag=?"
+            identity = (row["normalized_tag"],)
+            source_predicate = "source_note_id=? AND source_fingerprint=? AND "
+            source_identity = (row["source_note_id"], row["source_fingerprint"])
+        return conn.execute(
+            "SELECT 1 FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? "
+            "AND id<>? AND kind=? AND state='accepting' AND "
+            f"{source_predicate}{predicate} LIMIT 1",  # nosec B608
+            (
+                self.owner_user_id,
+                row["dataset_id"],
+                row["id"],
+                row["kind"],
+                *source_identity,
+                *identity,
+            ),
+        ).fetchone() is not None
+
     def _supersede_pending(self, conn: SuggestionConnection, row: Any, now_utc: datetime) -> None:
         if row["kind"] == "related_note":
             predicate, identity = self._related_identity_predicate(
@@ -1289,7 +1369,7 @@ class NoteGraphSuggestionStore:
             ).fetchall()
             activated_ids: list[str] = []
             for row in staged:
-                filtered = self._is_suppressed(conn, row)
+                filtered = self._is_suppressed(conn, row) or self._has_accepting_identity(conn, row)
                 if row["kind"] == "related_note":
                     filtered = filtered or self._has_current_link(
                         conn, str(row["source_note_id"]), str(row["target_note_id"])
@@ -2080,6 +2160,376 @@ class NoteGraphSuggestionStore:
             ("notes-graph-run-cancel-v1", self.owner_user_id, self._scope(dataset_id), run_id, str(run_revision))
         )
         return str(uuid.uuid5(uuid.NAMESPACE_URL, material))
+
+    def _load_cancellation_run(
+        self,
+        conn: SuggestionConnection,
+        dataset_id: str,
+        run_id: str,
+    ) -> NoteGraphSuggestionRun:
+        try:
+            return self._load_run(conn, dataset_id, run_id)
+        except RuntimeError as exc:
+            if str(exc) == "notes_graph_run_not_found":
+                raise RuntimeError("notes_graph_run_cancel_resource_missing") from exc
+            raise
+
+    def admit_run_cancellation(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+        expected_state: str,
+        expected_revision: int,
+        reason: str,
+        idempotency_key: str,
+        now: datetime,
+    ) -> RunCancellationResult:
+        """Admit one receipt-backed cancellation without calling Jobs."""
+
+        if expected_state not in {"admitting", "queued", "running"}:
+            raise ValueError("notes_graph_run_cancel_contract_invalid")
+        self._require_run_transition(expected_state, "cancelling")
+        dataset = self._scope(dataset_id)
+        now_utc = self._aware_utc(now)
+        request_fields = {
+            "run_id": run_id,
+            "run_revision": expected_revision,
+            "reason": reason,
+        }
+
+        def mutate(conn: SuggestionConnection) -> RunCancellationResult:
+            disposition, receipt = self._admit_receipt(
+                conn,
+                dataset_id=dataset,
+                operation_kind=NoteGraphSuggestionOperationKind.RUN_CANCEL.value,
+                source_note_id=None,
+                resource_identity=run_id,
+                idempotency_key=idempotency_key,
+                request_fields=request_fields,
+                now_utc=now_utc,
+            )
+            if disposition == "terminal_replay":
+                return RunCancellationResult(
+                    disposition="terminal_replay",
+                    operation_id=str(receipt["id"]),
+                    replay_envelope=self._decode_envelope(
+                        NoteGraphSuggestionOperationKind.RUN_CANCEL.value,
+                        receipt["replay_envelope"],
+                    ),
+                )
+            if disposition == "in_progress":
+                run = self._load_cancellation_run(conn, dataset, run_id)
+                if run.state not in {
+                    NoteGraphSuggestionRunState.CANCELLING,
+                    NoteGraphSuggestionRunState.STALE,
+                }:
+                    raise RuntimeError("notes_graph_run_cancel_resource_conflict")
+                return RunCancellationResult(
+                    disposition="in_progress",
+                    operation_id=str(receipt["id"]),
+                    run=run,
+                    continuation="resume_run_cancellation",
+                )
+
+            run = self._load_run(conn, dataset, run_id)
+            if run.state.value != expected_state or run.revision != expected_revision:
+                raise RuntimeError("notes_graph_run_conflict")
+            disposition, receipt = self._admit_receipt(
+                conn,
+                dataset_id=dataset,
+                operation_kind=NoteGraphSuggestionOperationKind.RUN_CANCEL.value,
+                source_note_id=run.source_note_id,
+                resource_identity=run_id,
+                idempotency_key=idempotency_key,
+                request_fields=request_fields,
+                now_utc=now_utc,
+            )
+            if disposition != "created":
+                raise RuntimeError("notes_graph_receipt_conflict")
+            updated = conn.execute(
+                "UPDATE note_graph_suggestion_runs SET state='cancelling',revision=revision+1,"
+                "error_code=?,guidance_key=NULL,completed_at=NULL,expires_at=? "
+                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?",
+                (
+                    reason,
+                    self._db_datetime(now_utc + timedelta(days=30)),
+                    self.owner_user_id,
+                    dataset,
+                    run_id,
+                    expected_state,
+                    expected_revision,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("notes_graph_run_conflict")
+            return RunCancellationResult(
+                disposition="created",
+                operation_id=str(receipt["id"]),
+                run=self._load_run(conn, dataset, run_id),
+                continuation="resume_run_cancellation",
+            )
+
+        return self._with_dataset_scope(dataset, mutate)
+
+    def get_run_cancellation_continuation(
+        self,
+        *,
+        dataset_id: str,
+        operation_id: str,
+    ) -> RunCancellationResult:
+        """Resolve one exact cancellation receipt before its shorter-lived run."""
+
+        if not isinstance(operation_id, str) or not self._SAFE_ID_PATTERN.fullmatch(operation_id):
+            raise ValueError("notes_graph_run_cancel_contract_invalid")
+        dataset = self._scope(dataset_id)
+
+        def read(conn: SuggestionConnection) -> RunCancellationResult:
+            receipt = conn.execute(
+                "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND id=? AND operation_kind='run_cancel'",
+                (self.owner_user_id, dataset, operation_id),
+            ).fetchone()
+            if receipt is None:
+                raise RuntimeError("notes_graph_run_cancel_receipt_missing")
+            if receipt["state"] in {"completed", "failed"}:
+                return RunCancellationResult(
+                    disposition="terminal_replay",
+                    operation_id=operation_id,
+                    replay_envelope=self._decode_envelope(
+                        NoteGraphSuggestionOperationKind.RUN_CANCEL.value,
+                        receipt["replay_envelope"],
+                    ),
+                )
+            run = self._load_cancellation_run(conn, dataset, str(receipt["resource_identity"]))
+            if run.state not in {
+                NoteGraphSuggestionRunState.CANCELLING,
+                NoteGraphSuggestionRunState.STALE,
+            }:
+                raise RuntimeError("notes_graph_run_cancel_resource_conflict")
+            return RunCancellationResult(
+                disposition="in_progress",
+                operation_id=operation_id,
+                run=run,
+                continuation="resume_run_cancellation",
+            )
+
+        return self._with_dataset_scope(dataset, read)
+
+    def complete_run_cancellation_receipt(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+        operation_id: str,
+        expected_state: str,
+        expected_revision: int,
+        now: datetime,
+    ) -> RunCancellationResult:
+        """Record Jobs cancellation-command acceptance under the exact run fence."""
+
+        if expected_state not in {"cancelling", "stale"}:
+            raise ValueError("notes_graph_run_cancel_contract_invalid")
+        dataset = self._scope(dataset_id)
+        now_utc = self._aware_utc(now)
+
+        def mutate(conn: SuggestionConnection) -> RunCancellationResult:
+            receipt = conn.execute(
+                "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND id=? AND operation_kind='run_cancel' AND resource_identity=?",
+                (self.owner_user_id, dataset, operation_id, run_id),
+            ).fetchone()
+            if receipt is None:
+                raise RuntimeError("notes_graph_run_cancel_receipt_missing")
+            if receipt["state"] in {"completed", "failed"}:
+                return RunCancellationResult(
+                    disposition="terminal_replay",
+                    operation_id=operation_id,
+                    replay_envelope=self._decode_envelope(
+                        NoteGraphSuggestionOperationKind.RUN_CANCEL.value,
+                        receipt["replay_envelope"],
+                    ),
+                )
+            run = self._load_cancellation_run(conn, dataset, run_id)
+            if run.state.value != expected_state or run.revision != expected_revision:
+                raise RuntimeError("notes_graph_run_conflict")
+            envelope = {"run_id": run.id, "state": run.state.value, "revision": run.revision}
+            self._complete_receipt(
+                conn,
+                dataset_id=dataset,
+                receipt=receipt,
+                envelope=envelope,
+                http_status=202,
+                now_utc=now_utc,
+            )
+            return RunCancellationResult(
+                disposition="completed",
+                operation_id=operation_id,
+                run=run,
+                replay_envelope=envelope,
+            )
+
+        return self._with_dataset_scope(dataset, mutate)
+
+    def reconcile_run_after_job_lookup(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+        expected_state: str,
+        expected_revision: int,
+        observation: str,
+        error_code: str | None,
+        guidance_key: str | None,
+        now: datetime,
+    ) -> NoteGraphSuggestionRun:
+        """Apply one closed maintenance outcome after an external Jobs lookup."""
+
+        if expected_state not in self._ACTIVE_RUN_STATES or observation not in self._MAINTENANCE_OBSERVATIONS:
+            raise ValueError("notes_graph_maintenance_contract_invalid")
+        publication_observation = observation in {
+            "publication_receipt_mismatch",
+            "publication_receipt_missing",
+        }
+        if publication_observation and expected_state != "publishing":
+            raise ValueError("notes_graph_maintenance_contract_invalid")
+        if expected_state == "publishing" and observation in {
+            "terminal_succeeded",
+            "definitively_missing",
+        }:
+            raise ValueError("notes_graph_maintenance_contract_invalid")
+        if observation == "terminal_failed":
+            if error_code not in self._WORKER_ERROR_CODES or guidance_key not in self._STABLE_GUIDANCE_KEYS:
+                raise ValueError("notes_graph_maintenance_contract_invalid")
+        elif error_code is not None or guidance_key is not None:
+            raise ValueError("notes_graph_maintenance_contract_invalid")
+        dataset = self._scope(dataset_id)
+        now_utc = self._aware_utc(now)
+
+        def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
+            run = self._load_run(conn, dataset, run_id)
+            if run.state.value != expected_state or run.revision != expected_revision:
+                raise RuntimeError("notes_graph_run_conflict")
+
+            stale_on_completion = (
+                expected_state == "cancelling" and run.error_code in self._STALE_ON_COMPLETION_CODES
+            )
+            if stale_on_completion:
+                new_state = "stale"
+                final_error = run.error_code
+                final_guidance = None
+            elif expected_state == "admitting":
+                new_state = "failed"
+                final_error = error_code if observation == "terminal_failed" else (
+                    "notes_graph_job_missing"
+                    if observation == "definitively_missing"
+                    else "notes_graph_admission_failed"
+                )
+                final_guidance = guidance_key or "retry_generation"
+            elif observation == "terminal_succeeded":
+                if expected_state == "cancelling":
+                    new_state = "cancelled"
+                    final_error = final_guidance = None
+                else:
+                    new_state = "failed"
+                    final_error = "notes_graph_publication_state_missing"
+                    final_guidance = "retry_generation"
+            elif observation == "terminal_failed":
+                new_state = "failed"
+                final_error = error_code
+                final_guidance = guidance_key
+            elif observation == "terminal_cancelled":
+                new_state = "cancelled"
+                final_error = final_guidance = None
+            elif observation == "definitively_missing":
+                new_state = "failed"
+                final_error = "notes_graph_job_missing"
+                final_guidance = "retry_generation"
+            else:
+                new_state = "failed"
+                final_error = {
+                    "publication_receipt_mismatch": "notes_graph_publication_receipt_mismatch",
+                    "publication_receipt_missing": "notes_graph_publication_receipt_missing",
+                }[observation]
+                final_guidance = "retry_generation"
+
+            self._require_run_transition(expected_state, new_state)
+            if expected_state == "publishing":
+                self._delete_staged_for_run(conn, dataset_id=dataset, run_id=run_id)
+            updated = conn.execute(
+                "UPDATE note_graph_suggestion_runs SET state=?,revision=revision+1,error_code=?,"
+                "guidance_key=?,completed_at=?,expires_at=? WHERE owner_user_id=? AND dataset_id=? "
+                "AND id=? AND state=? AND revision=?",
+                (
+                    new_state,
+                    final_error,
+                    final_guidance,
+                    self._db_datetime(now_utc),
+                    self._db_datetime(now_utc + timedelta(days=30)),
+                    self.owner_user_id,
+                    dataset,
+                    run_id,
+                    expected_state,
+                    expected_revision,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("notes_graph_run_conflict")
+            reconciled = self._load_run(conn, dataset, run_id)
+
+            cancellation_receipts = conn.execute(
+                "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND operation_kind='run_cancel' AND resource_identity=? "
+                "AND state='in_progress' ORDER BY id",
+                (self.owner_user_id, dataset, run_id),
+            ).fetchall()
+            for receipt in cancellation_receipts:
+                self._complete_receipt(
+                    conn,
+                    dataset_id=dataset,
+                    receipt=receipt,
+                    envelope={
+                        "run_id": reconciled.id,
+                        "state": reconciled.state.value,
+                        "revision": reconciled.revision,
+                    },
+                    http_status=200,
+                    now_utc=now_utc,
+                )
+
+            if expected_state == "admitting" and run.admission_receipt_id is not None:
+                admission_receipt = conn.execute(
+                    "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? "
+                    "AND dataset_id=? AND id=? AND operation_kind='run_admit' AND state='in_progress'",
+                    (self.owner_user_id, dataset, run.admission_receipt_id),
+                ).fetchone()
+                if admission_receipt is not None:
+                    envelope = {
+                        "run_id": reconciled.id,
+                        "state": "failed",
+                        "error_code": str(reconciled.error_code),
+                        "guidance_key": str(reconciled.guidance_key),
+                    }
+                    receipt_update = conn.execute(
+                        "UPDATE note_graph_suggestion_operation_receipts SET state='failed',http_status=503,"
+                        "replay_envelope=?,completed_at=?,expires_at=? WHERE owner_user_id=? "
+                        "AND dataset_id=? AND id=? AND operation_kind='run_admit' "
+                        "AND state='in_progress' AND request_fingerprint=?",
+                        (
+                            self._encode_envelope("run_admit", envelope),
+                            self._db_datetime(now_utc),
+                            self._db_datetime(now_utc + timedelta(days=90)),
+                            self.owner_user_id,
+                            dataset,
+                            admission_receipt["id"],
+                            admission_receipt["request_fingerprint"],
+                        ),
+                    )
+                    if receipt_update.rowcount != 1:
+                        raise RuntimeError("notes_graph_receipt_conflict")
+            return reconciled
+
+        return self._with_dataset_scope(dataset, mutate)
 
     def _persist_cancellation_receipt(
         self,

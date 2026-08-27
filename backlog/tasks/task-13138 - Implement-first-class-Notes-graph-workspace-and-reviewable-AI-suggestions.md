@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 09:40
+updated_date: 2026-08-27 10:19
 labels:
 - notes
 - knowledge-graph
@@ -115,6 +115,8 @@ Verification:
 - Live PostgreSQL exercised active-run identity, note lifecycle invalidation, publication, receipt replay, acceptance fencing, reject/reset, and retention; no established-fixture skips.
 - Local ignored report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md
 Task 3 Fix Round 1 completed locally from reviewer base 5fdb9575256d888cc6a743318cc6112a1330aff8. Fixed terminal receipt replay after detail cleanup, explicit atomic admission failure, canonical undirected related identity, tag sync-id re-resolution and membership filtering, receipt-bound acceptance fences/release, unreleased-v64 non-null binding fields, closed transition/request/envelope contracts, exact bounded retention, and complete same-transaction NoteStore/Sync lifecycle rollback coverage. Verification: required Task 3 suite 43 passed/0 skipped; v64 SQLite/live-PostgreSQL 28 passed/0 skipped; Task 2 26 passed/0 skipped; direct NoteStore/projection/Sync 65 passed/0 skipped; final deduplicated 11-file run 154 passed/0 skipped (2 established warnings). Ruff clean; Bandit 0 findings/0 errors; git diff --check passed. Live PostgreSQL ran with no skips. Ignored report appended at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md.
+Task 3 Fix Round 2 started from exact base 2cd3220c4533476d8c06e201354191ff62650d18. Scope is the two verified remaining findings: accepting-identity activation filtering for canonical tag/undirected related suggestions, and a closed Task-5-ready cancellation/publication/maintenance CAS persistence surface. Focused SQLite/live-PostgreSQL RED precedes production edits; no Jobs/provider authority is added.
+Task 3 Fix Round 2 completed from exact base 2cd3220c4533476d8c06e201354191ff62650d18. Activation now filters staged canonical tag/undirected-related duplicates when an accepting row owns the visible identity, preserving that row's revision, lease, and decision receipt while publishing unrelated staged rows atomically. Added exact notes_graph_capabilities_changed_before_queue admission failure replay and closed operation-specific cancellation receipt plus Task-5 maintenance reconciliation CAS primitives; no Jobs/provider I/O or generic transition surface was added. Strict focused RED: 6 failed/8 deselected/0 skipped/2 warnings, followed by 6 passed/8 deselected/0 skipped/2 warnings. Review subcycles: queued-stale continuation RED 2 failed then GREEN 2 passed; missing in-progress resource RED 2 failed then GREEN 2 passed, both SQLite/live PostgreSQL. Verification: Task 3 49 passed/0 skipped; v64 migration 28 passed/0 skipped; Task 2 26 passed/0 skipped; direct NoteStore/projection/Sync 58 passed/0 skipped; final deduplicated 11-file run 161 passed/0 skipped/2 inherited warnings. One unchanged initial final run hit Hypothesis input-generation health-check timing (1 failed/160 passed); isolated rerun and unchanged full rerun passed. Ruff clean; Bandit 0 findings/0 errors; git diff --check passed. Ignored report appended at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
