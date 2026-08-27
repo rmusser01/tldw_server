@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: Done
 assignee: []
 created_date: 2026-08-21 20:41
-updated_date: 2026-08-27 22:19
+updated_date: 2026-08-27 22:44
 labels:
 - admin
 - webhooks
@@ -248,8 +248,9 @@ Final local gates: Studio navigation 16/16; CI ratchet/workflow contracts 117/11
 2026-08-27 ACP policies-tab race remediation is locally verified. The test now awaits the rendered `Permission Policies (1)` button rather than observing only the API call. Focused file 8/8 passed; the affected test passed 20/20 repeated focused runs; the focused run with the exact JSON+safety reporter stack passed 8/8 and strict validate-success accepted both reports; admin-ui lint passed with 0 errors/41 inherited warnings; admin-ui typecheck passed; git diff --check passed. A complete local admin-ui run exercised all 148 files/807 tests and the ACP file passed 8/8; the run still exited 1 because this local environment exposes 117 pre-existing failures and 130 hook errors, so the strict safety reporter correctly refused a local full-suite ratchet. Hosted exact-head CI remains the authoritative complete gate after review/push.
 2026-08-27 exact-head hosted closure evidence: frontend-required run 33112693381 completed successfully at commit 776662a9c39896eb3c44e5b54bd938776a519a89 (https://github.com/rmusser01/tldw_server/actions/runs/33112693381). All eight frontend-unit-tests shards passed; shard 6 passed with the established NODE_OPTIONS --max-old-space-size=4096 budget. The aggregate frontend-required job also passed frontend lint, report-only coverage, production Chrome extension build, WebUI and extension API-key persistence lifecycles, single-user cookie persistence, admin-ui lint/typecheck/unit tests, admin-ui real-backend E2E, and admin-ui production build. This hosted run proves the ACP policies-tab scheduler-race remediation under the complete exact-head gate. Final review-thread response/resolution and rerun of the deliberately canceled exact-head workflows remain pending; TASK-13014 stays In Progress.
 2026-08-27 final gate closure: all 16 exact-head workflows that were deliberately canceled for runner prioritization were rerun at commit 776662a9c39896eb3c44e5b54bd938776a519a89 and completed successfully. `gh pr checks 2806` shows every applicable check passing with only intentional skips; `gh pr view` reports mergeStateStatus CLEAN. Final paginated GraphQL review audit covered 35 threads and found zero unresolved. TASK-13014 is complete; PR merge was not performed.
+2026-08-27 post-closure Qodo follow-up at d7992aa63c0d33c16d3d5728af3895d4222b33ae found one valid retained-evidence inconsistency: Docs/Evidence/Admin_Webhooks_PR1_Verification.md still described hosted CI and thread audit as pending even though the Backlog final summary recorded closure at source head 776662a9c39896eb3c44e5b54bd938776a519a89. TASK-13014 is reopened while the retained evidence is synchronized and independently reviewed.
+2026-08-27 retained-evidence remediation: Qodo's d7992aa63c finding was valid. Docs/Evidence/Admin_Webhooks_PR1_Verification.md now identifies final implementation source head 776662a9c39896eb3c44e5b54bd938776a519a89, frontend-required run 33112693381, replacement license run 33112773587, all 16 successful workflow reruns, the 0-bug source review, the resolved hosted-gate thread, and the final 35-thread/0-unresolved audit. The stale statement that hosted CI and review audit remained mandatory was replaced with the completed closure record. The document explicitly separates implementation-source proof from later administrative task/evidence commits. No runtime, test, or workflow behavior changed; git diff --check passed. TASK-13014 returns to Done pending independent review, push, fresh Qodo confirmation, and exact-head documentation-only checks.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
@@ -257,11 +258,12 @@ Implemented the approved PR 1 canonical outgoing-webhook control plane and migra
 
 Final remediation closed CI ratchet/provenance defects, frontend Studio synchronization loops, and the scheduler-sensitive ACP policies-tab test without weakening fail-closed comparison behavior.
 
-Verification is complete at exact PR head 776662a9c39896eb3c44e5b54bd938776a519a89. Frontend-required run 33112693381 passed all 8 shards and its aggregate, including admin unit, real-backend E2E, and production build. All 16 deliberately canceled exact-head workflows were rerun successfully; the PR reports CLEAN. A paginated audit covered 35 review threads and found zero unresolved after posting hosted evidence. Qodo reported 0 bugs at the final source head. PR: https://github.com/rmusser01/tldw_server/pull/2806.
+Verification is complete at exact implementation source head 776662a9c39896eb3c44e5b54bd938776a519a89. Frontend-required run 33112693381 passed all 8 shards and its aggregate, including admin unit, real-backend E2E, and production build. All 16 deliberately canceled exact-head workflows were rerun successfully; the PR reported CLEAN. A paginated audit covered 35 review threads and found zero unresolved after posting hosted evidence. Qodo reported 0 bugs at the final source head. PR: https://github.com/rmusser01/tldw_server/pull/2806.
 
 The two unrelated untracked watchlist templates were not touched or staged. Merge remains a human decision and was not performed.
-<!-- SECTION:FINAL_SUMMARY:END -->
 
+Post-closure follow-up synchronized the designated retained evidence with the final hosted run, workflow reruns, Qodo disposition, and review-thread audit. This follow-up changes documentation/task history only.
+<!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

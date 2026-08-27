@@ -14,13 +14,18 @@
   `517d7b016089e220fa55eab3483f212031b6f5cb`
 - Exact-head Qodo follow-up test commit:
   `7253450461a58f0724fba77de84c97e5ec26b548`
+- Final implementation source commit:
+  `776662a9c39896eb3c44e5b54bd938776a519a89`
+- Final exact-head frontend-required run:
+  `33112693381`
 - Last immutable pushed head before the Qodo stack-context follow-up:
   `650cce6d1a8ba60a3dde1243bba6d482bd8b0100`
 - Rebased onto: `origin/dev` at
   `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`
 - Final ratchet comparison base: `origin/dev` at
   `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`
-- Final verification timestamp: `2026-08-27T10:08:18Z`
+- Final local verification timestamp: `2026-08-27T10:08:18Z`
+- Final hosted closure timestamp: `2026-08-27T22:16:16Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -33,6 +38,8 @@ persistence, legacy importer, key rotation, route selector, admin UI, runbooks,
 and all runtime gate fixes described below. Later immutable commits contain the
 analyzer testability remediation and the exact-base CI ratchet described below.
 This evidence file is a documentation-only follow-up to those source trees.
+The final implementation proof is bound to `776662a9c39896eb3c44e5b54bd938776a519a89`;
+later commits update only the retained Backlog and evidence records.
 
 ## Result Summary
 
@@ -63,6 +70,10 @@ This evidence file is a documentation-only follow-up to those source trees.
 | Post-ratchet review remediation | PASS locally: 4 Qodo findings and 7 independent-review findings closed |
 | Credential destination proof | PASS: hostile request Host never received the single-user API key |
 | Exact-head Qodo follow-up | 2 valid test findings fixed; incorrect suite-count claim refuted with Vitest runtime/source evidence |
+| Final exact-head frontend-required | PASS: run 33112693381; all 8 shards and aggregate passed |
+| Final canceled-workflow replay | PASS: all 16 exact-head workflows reran successfully |
+| Final Qodo source review | PASS: 0 bugs at source head 776662a9c; hosted-gate evidence resolved |
+| Final review-thread audit | PASS: 35 total threads, 0 unresolved |
 
 PR 1 remains default-off. These results do not authorize outbound webhook
 delivery or canonical activation.
@@ -1327,6 +1338,51 @@ The ratchet helper's new SHA-256 is
 `ca4617a935d71e1fb1ee66d15f6ca7a0024d79b0484c0af3982be187ede78d37`
 and both frontend-required call sites pin that value. The unchanged
 deterministic-config, execution-order reporter, and admin safety-reporter
-digests still match their workflow pins. Commit/push, fresh exact-head Qodo
-analysis, complete hosted CI, and a final unresolved-thread audit remain
-mandatory before merge.
+digests still match their workflow pins.
+
+## Final Hosted Closure
+
+The mandatory hosted gates were completed against final implementation source
+commit `776662a9c39896eb3c44e5b54bd938776a519a89`. Frontend-required run
+`33112693381` passed all eight unit shards, including shard 6 at the established
+4096 MiB V8 heap budget. Its aggregate passed frontend lint, report-only
+coverage, the production Chrome extension build, WebUI and extension API-key
+persistence, the single-user cookie lifecycle, admin-ui lint/typecheck/unit
+tests, admin-ui real-backend E2E, and the admin-ui production build. The
+policy-driven replacement Frontend License Gate Audit run `33112773587` also
+passed at that source commit.
+
+The 16 workflows deliberately canceled to prioritize the frontend proof were
+then rerun at the same exact source head:
+
+| Workflow | Run | Result |
+| --- | --- | --- |
+| CodeQL | 33112693442 | PASS |
+| coverage-required | 33112693422 | PASS |
+| UI Research Workspace Parity | 33112693403 | PASS |
+| pre-commit | 33112693350 | PASS |
+| tldw-server PyPI Package Check | 33112693312 | PASS |
+| SBOM | 33112693294 | PASS |
+| Frontend UX Gates | 33112693275 | PASS |
+| Lint Workflows (actionlint) | 33112693274 | PASS |
+| security-required | 33112693273 | PASS |
+| Frontend E2E Tiers | 33112693271 | PASS |
+| container-build-check | 33112693237 | PASS |
+| e2e-required | 33112693229 | PASS |
+| CI | 33112693219 | PASS |
+| backend-required | 33112693218 | PASS |
+| onboarding-docs-gate | 33112693216 | PASS |
+| E2E Critical Smoke (In-Process) | 33112693212 | PASS |
+
+Qodo updated its review through the final implementation source commit and
+reported 0 bugs. The remaining hosted-gate thread received the exact run and
+shard evidence, then was resolved. A fresh paginated GraphQL audit covered all
+35 review threads in one page and found 0 unresolved. `gh pr checks 2806`
+reported every applicable check passing with only intentional skips, and
+`gh pr view 2806` reported merge state `CLEAN`. The pull request remained open
+and unmerged for the human merge decision.
+
+Administrative closure commit
+`d7992aa63c0d33c16d3d5728af3895d4222b33ae` changed only the Backlog task
+record. This retained-evidence correction likewise changes no runtime, test, or
+workflow behavior; it records the already-completed source-head proof above.
