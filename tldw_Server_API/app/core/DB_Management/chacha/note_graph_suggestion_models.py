@@ -67,11 +67,11 @@ class NoteGraphSuggestionRun:
     revision: int
     created_at: str
     expires_at: str
+    provider: str
+    model: str
+    capability_revision: str
+    prompt_contract_version: str
     admission_receipt_id: str | None = None
-    provider: str | None = None
-    model: str | None = None
-    capability_revision: str | None = None
-    prompt_contract_version: str | None = None
     job_id: str | None = None
     expected_completion_token: str | None = None
     result_digest: str | None = None

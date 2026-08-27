@@ -162,9 +162,21 @@ def _exercise_exact_rejection_and_tag_limit(db: CharactersRAGDB) -> None:
         _set_graph_scope(db, conn)
         conn.execute(
             "INSERT INTO note_graph_suggestion_runs("
-            "id,owner_user_id,dataset_id,source_note_id,source_fingerprint,state,revision,created_at,expires_at"
-            ") VALUES (?,?,?,?,?,'succeeded',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
-            ("run-400", db.client_id, DATASET_ID, source, source_fingerprint),
+            "id,owner_user_id,dataset_id,source_note_id,source_fingerprint,"
+            "provider,model,capability_revision,prompt_contract_version,"
+            "state,revision,created_at,expires_at"
+            ") VALUES (?,?,?,?,?,?,?,?,?,'succeeded',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+            (
+                "run-400",
+                db.client_id,
+                DATASET_ID,
+                source,
+                source_fingerprint,
+                "provider",
+                "model",
+                "capability-v1",
+                "prompt-v1",
+            ),
         )
         conn.execute(
             "INSERT INTO note_graph_suggestions("

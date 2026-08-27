@@ -84,8 +84,10 @@ def _insert_run(
         """
         INSERT INTO note_graph_suggestion_runs(
             id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
-            admission_receipt_id, state, revision, created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            admission_receipt_id, provider, model, capability_revision,
+            prompt_contract_version, state, revision, created_at, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'openai', 'model-a', 'cap-v1',
+                  'prompt-v1', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """,
         (
             run_id,
@@ -98,6 +100,87 @@ def _insert_run(
             1,
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    (
+        ("provider", None),
+        ("provider", ""),
+        ("provider", "   "),
+        ("model", None),
+        ("model", ""),
+        ("capability_revision", None),
+        ("capability_revision", " "),
+        ("prompt_contract_version", None),
+        ("prompt_contract_version", ""),
+    ),
+)
+def test_sqlite_v64_active_run_binding_fields_are_non_null_trimmed_and_non_empty(
+    tmp_path: Path,
+    column: str,
+    value: str | None,
+) -> None:
+    db_path = tmp_path / f"chacha-v64-{column}-{value!r}.sqlite"
+    db = _initialize(db_path)
+    db.close_all_connections()
+    fields = {
+        "provider": "openai",
+        "model": "model-a",
+        "capability_revision": "cap-v1",
+        "prompt_contract_version": "prompt-v1",
+    }
+    fields[column] = value
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        _create_note(conn, "binding-note")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO note_graph_suggestion_runs(
+                    id,owner_user_id,dataset_id,source_note_id,source_fingerprint,
+                    provider,model,capability_revision,prompt_contract_version,
+                    state,revision,created_at,expires_at
+                ) VALUES ('binding-run','owner-a','dataset-a','binding-note','fp',
+                          ?,?,?,?,'queued',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+                """,
+                (
+                    fields["provider"],
+                    fields["model"],
+                    fields["capability_revision"],
+                    fields["prompt_contract_version"],
+                ),
+            )
+
+
+def test_sqlite_v64_active_run_contract_fields_preserve_duplicate_equivalence(tmp_path: Path) -> None:
+    db_path = tmp_path / "chacha-v64-active-equivalence.sqlite"
+    db = _initialize(db_path)
+    db.close_all_connections()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        _create_note(conn, "equivalent-note")
+        values = (
+            "owner-a",
+            "dataset-a",
+            "equivalent-note",
+            "fingerprint",
+            "openai",
+            "model-a",
+            "cap-v1",
+            "prompt-v1",
+            "queued",
+        )
+        sql = """
+            INSERT INTO note_graph_suggestion_runs(
+                id,owner_user_id,dataset_id,source_note_id,source_fingerprint,
+                provider,model,capability_revision,prompt_contract_version,
+                state,revision,created_at,expires_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        """
+        conn.execute(sql, ("equivalent-a", *values))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(sql, ("equivalent-b", *values))
 
 
 def _insert_related_suggestion(
@@ -229,24 +312,26 @@ def test_sqlite_v64_fresh_schema_has_graph_suggestion_tables_constraints_and_ind
             """
             INSERT INTO note_graph_suggestion_runs(
                 id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
-                provider, model, prompt_contract_version, state, revision, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                provider, model, capability_revision, prompt_contract_version,
+                state, revision, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 "run-active", "owner-a", "dataset-a", "source-note", "source-fingerprint",
-                "openai", "model-a", "prompt-v1", "queued", 1,
+                "openai", "model-a", "cap-v1", "prompt-v1", "queued", 1,
             ),
         )
         conn.execute(
             """
             INSERT INTO note_graph_suggestion_runs(
                 id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
-                provider, model, prompt_contract_version, state, revision, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                provider, model, capability_revision, prompt_contract_version,
+                state, revision, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 "run-different-fingerprint", "owner-a", "dataset-a", "source-note",
-                "new-fingerprint", "openai", "model-a", "prompt-v1", "running", 1,
+                "new-fingerprint", "openai", "model-a", "cap-v1", "prompt-v1", "running", 1,
             ),
         )
         with pytest.raises(sqlite3.IntegrityError):
@@ -254,12 +339,13 @@ def test_sqlite_v64_fresh_schema_has_graph_suggestion_tables_constraints_and_ind
                 """
                 INSERT INTO note_graph_suggestion_runs(
                     id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
-                    provider, model, prompt_contract_version, state, revision, created_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    provider, model, capability_revision, prompt_contract_version,
+                    state, revision, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
                     "run-conflict", "owner-a", "dataset-a", "source-note", "source-fingerprint",
-                    "openai", "model-a", "prompt-v1", "running", 1,
+                    "openai", "model-a", "cap-v1", "prompt-v1", "running", 1,
                 ),
             )
         with pytest.raises(sqlite3.IntegrityError):
@@ -267,8 +353,10 @@ def test_sqlite_v64_fresh_schema_has_graph_suggestion_tables_constraints_and_ind
                 """
                 INSERT INTO note_graph_suggestion_runs(
                     id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
+                    provider,model,capability_revision,prompt_contract_version,
                     state, revision, created_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, 'openai','model-a','cap-v1','prompt-v1',
+                          ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 ("run-invalid", "owner-a", "dataset-a", "source-note", "source-fingerprint", "invalid", 1),
             )

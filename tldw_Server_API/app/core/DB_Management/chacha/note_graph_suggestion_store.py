@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import sqlite3
 import uuid
@@ -52,7 +53,7 @@ class RunAdmissionResult:
     """Durable admission or replay outcome without Jobs-side details."""
 
     disposition: Literal["created", "in_progress", "terminal_replay"]
-    run: NoteGraphSuggestionRun
+    run: NoteGraphSuggestionRun | None
     continuation: str | None = None
     replay_envelope: dict[str, Any] | None = None
 
@@ -89,6 +90,63 @@ class SuggestionNoteRecord:
 
 class NoteGraphSuggestionStore:
     """Own the database boundary for future suggestion reads and transitions."""
+
+    _RUN_TRANSITIONS = {
+        "admitting": frozenset({"queued", "cancelling", "failed", "stale"}),
+        "queued": frozenset({"running", "cancelling", "failed", "cancelled", "stale"}),
+        "running": frozenset({"publishing", "cancelling", "failed", "stale"}),
+        "cancelling": frozenset({"cancelled", "failed", "stale"}),
+        "publishing": frozenset({"succeeded", "failed", "stale"}),
+        "succeeded": frozenset(),
+        "failed": frozenset(),
+        "cancelled": frozenset(),
+        "stale": frozenset(),
+    }
+    _REQUEST_FIELDS = {
+        "run_admit": {
+            "source_note_id": (str, False, 256),
+            "source_fingerprint": (str, False, 128),
+            "provider": (str, False, 128),
+            "model": (str, False, 256),
+            "capability_revision": (str, False, 128),
+            "prompt_contract_version": (str, False, 128),
+        },
+        "run_cancel": {
+            "run_id": (str, False, 256),
+            "run_revision": (int, False, None),
+            "reason": (str, False, 128),
+        },
+        "suggestion_accept": {
+            "suggestion_id": (str, False, 256),
+            "expected_revision": (int, False, None),
+            "source_fingerprint": (str, False, 128),
+            "target_fingerprint": (str, True, 128),
+        },
+        "suggestion_reject": {
+            "suggestion_id": (str, False, 256),
+            "expected_revision": (int, False, None),
+            "source_fingerprint": (str, False, 128),
+            "target_fingerprint": (str, True, 128),
+        },
+        "rejections_reset": {
+            "source_note_id": (str, False, 256),
+            "source_fingerprint": (str, False, 128),
+            "expected_revision": (int, False, None),
+        },
+    }
+    _STABLE_ERROR_CODES = frozenset(
+        {
+            "notes_graph_admission_failed",
+            "notes_graph_active_run_conflict",
+            "notes_graph_fingerprint_stale",
+            "notes_graph_fts_not_ready",
+            "notes_graph_provider_unavailable",
+        }
+    )
+    _STABLE_GUIDANCE_KEYS = frozenset(
+        {"configure_provider", "contact_administrator", "refresh_note", "retry_generation"}
+    )
+    _SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
@@ -181,37 +239,32 @@ class NoteGraphSuggestionStore:
 
     @staticmethod
     def canonical_request_fingerprint(operation_kind: str, fields: dict[str, Any]) -> str:
-        """Hash bounded canonical non-content request fields with an explicit version."""
+        """Hash an allowlisted bounded operation request with an explicit version."""
 
-        forbidden_keys = {
-            "content",
-            "credential",
-            "credentials",
-            "excerpt",
-            "note_text",
-            "password",
-            "prompt",
-            "secret",
-            "text",
-            "token",
-        }
-
-        def validate(value: Any, path: tuple[str, ...] = ()) -> None:
-            if isinstance(value, dict):
-                for key, child in value.items():
-                    normalized = str(key).lower()
-                    if normalized in forbidden_keys or normalized.endswith(("_secret", "_credential", "_token")):
-                        raise ValueError("notes_graph_request_contains_sensitive_field")
-                    validate(child, (*path, normalized))
-            elif isinstance(value, (list, tuple)):
-                for child in value:
-                    validate(child, path)
-            elif value is not None and not isinstance(value, (str, int, float, bool)):
-                raise ValueError("notes_graph_request_fingerprint_invalid")
-
-        if not isinstance(operation_kind, str) or not operation_kind.strip() or not isinstance(fields, dict):
-            raise ValueError("notes_graph_request_fingerprint_invalid")
-        validate(fields)
+        contract = NoteGraphSuggestionStore._REQUEST_FIELDS.get(operation_kind)
+        if contract is None or not isinstance(fields, dict) or set(fields) != set(contract):
+            raise ValueError("notes_graph_request_contract_invalid")
+        for name, (expected_type, nullable, max_bytes) in contract.items():
+            value = fields[name]
+            if value is None and nullable:
+                continue
+            if expected_type is int:
+                if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                    raise ValueError("notes_graph_request_contract_invalid")
+                continue
+            if (
+                not isinstance(value, str)
+                or not value.strip()
+                or value != value.strip()
+                or max_bytes is None
+                or len(value.encode("utf-8")) > max_bytes
+            ):
+                raise ValueError("notes_graph_request_contract_invalid")
+        if operation_kind == "run_cancel" and fields["reason"] not in {
+            "notes_graph_source_changed",
+            "user_cancelled",
+        }:
+            raise ValueError("notes_graph_request_contract_invalid")
         encoded = json.dumps(
             {"v": 1, "operation": operation_kind, "fields": fields},
             sort_keys=True,
@@ -224,41 +277,71 @@ class NoteGraphSuggestionStore:
         digest = hashlib.sha256(b"notes-graph-request-v1\0" + encoded).hexdigest()
         return f"sha256:{digest}"
 
-    @staticmethod
-    def _decode_envelope(value: object | None) -> dict[str, Any] | None:
+    @classmethod
+    def _decode_envelope(cls, operation_kind: str, value: object | None) -> dict[str, Any] | None:
         if value is None:
             return None
         decoded = json.loads(str(value))
         if not isinstance(decoded, dict):
             raise RuntimeError("notes_graph_receipt_envelope_invalid")
+        try:
+            cls._encode_envelope(operation_kind, decoded)
+        except ValueError as exc:
+            raise RuntimeError("notes_graph_receipt_envelope_invalid") from exc
         return decoded
 
-    @staticmethod
-    def _encode_envelope(value: dict[str, Any]) -> str:
-        allowed_keys = {
-            "accepted_resource_identity",
-            "cleared_count",
-            "count",
-            "error_code",
-            "guidance_key",
-            "invalid_item_count",
-            "operation_id",
-            "rejection_set_revision",
-            "related_note_count",
-            "revision",
-            "run_id",
-            "source_note_id",
-            "state",
-            "suggestion_count",
-            "suggestion_id",
-            "tag_count",
-        }
-        if any(key not in allowed_keys for key in value) or any(
-            isinstance(item, str) and len(item.encode("utf-8")) > 256
-            or item is not None and not isinstance(item, (str, int, bool))
-            for item in value.values()
-        ):
+    @classmethod
+    def _encode_envelope(cls, operation_kind: str, value: dict[str, Any]) -> str:
+        if not isinstance(value, dict):
             raise ValueError("notes_graph_replay_envelope_invalid")
+        keys = set(value)
+        state = value.get("state")
+        if operation_kind == "run_admit":
+            valid = (
+                state == "queued" and keys == {"run_id", "state"}
+            ) or (
+                state == "failed"
+                and keys == {"run_id", "state", "error_code", "guidance_key"}
+                and value["error_code"] in cls._STABLE_ERROR_CODES
+                and value["guidance_key"] in cls._STABLE_GUIDANCE_KEYS
+            )
+        elif operation_kind == "suggestion_reject":
+            valid = state == "rejected" and keys == {"suggestion_id", "state", "revision"}
+        elif operation_kind == "rejections_reset":
+            valid = keys == {"source_note_id", "cleared_count", "rejection_set_revision"}
+        elif operation_kind == "suggestion_accept":
+            valid = (
+                state == "pending" and keys == {"suggestion_id", "state", "revision"}
+            ) or (
+                state == "accepted"
+                and keys == {
+                    "suggestion_id",
+                    "state",
+                    "revision",
+                    "accepted_resource_identity",
+                }
+            )
+        elif operation_kind == "run_cancel":
+            valid = state in {"cancelled", "stale"} and keys == {"run_id", "state", "revision"}
+        else:
+            valid = False
+        if not valid:
+            raise ValueError("notes_graph_replay_envelope_invalid")
+        for key, item in value.items():
+            if key in {"revision", "rejection_set_revision"}:
+                if isinstance(item, bool) or not isinstance(item, int) or item < 1:
+                    raise ValueError("notes_graph_replay_envelope_invalid")
+            elif key == "cleared_count":
+                if isinstance(item, bool) or not isinstance(item, int) or item < 0 or item > 10_000:
+                    raise ValueError("notes_graph_replay_envelope_invalid")
+            elif (
+                not isinstance(item, str)
+                or len(item.encode("utf-8")) > 256
+                or key
+                in {"run_id", "source_note_id", "suggestion_id", "accepted_resource_identity"}
+                and not cls._SAFE_ID_PATTERN.fullmatch(item)
+            ):
+                raise ValueError("notes_graph_replay_envelope_invalid")
         encoded = json.dumps(
             value,
             sort_keys=True,
@@ -308,6 +391,11 @@ class NoteGraphSuggestionStore:
             raise RuntimeError("notes_graph_run_not_found")
         return self._run_from_row(row)
 
+    @classmethod
+    def _require_run_transition(cls, expected_state: str, new_state: str) -> None:
+        if new_state not in cls._RUN_TRANSITIONS.get(expected_state, frozenset()):
+            raise ValueError("notes_graph_run_transition_invalid")
+
     def admit_run(
         self,
         *,
@@ -326,17 +414,20 @@ class NoteGraphSuggestionStore:
         dataset = self._scope(dataset_id)
         now_utc = self._aware_utc(now)
         key_digest = self.idempotency_key_digest(idempotency_key)
-        request_fingerprint = self.canonical_request_fingerprint(
-            "run_admit",
-            {
-                "source_note_id": source_note_id,
-                "source_fingerprint": source_fingerprint,
-                "provider": provider,
-                "model": model,
-                "capability_revision": capability_revision,
-                "prompt_contract_version": prompt_contract_version,
-            },
-        )
+        try:
+            request_fingerprint = self.canonical_request_fingerprint(
+                "run_admit",
+                {
+                    "source_note_id": source_note_id,
+                    "source_fingerprint": source_fingerprint,
+                    "provider": provider,
+                    "model": model,
+                    "capability_revision": capability_revision,
+                    "prompt_contract_version": prompt_contract_version,
+                },
+            )
+        except ValueError as exc:
+            raise ValueError("notes_graph_admission_contract_invalid") from exc
 
         def mutate(conn: SuggestionConnection) -> RunAdmissionResult:
             receipt = conn.execute(
@@ -348,20 +439,23 @@ class NoteGraphSuggestionStore:
             if receipt is not None:
                 if not secrets.compare_digest(str(receipt["request_fingerprint"]), request_fingerprint):
                     raise RuntimeError("notes_graph_suggestion_idempotency_mismatch")
+                if str(receipt["state"]) in {"completed", "failed"}:
+                    return RunAdmissionResult(
+                        disposition="terminal_replay",
+                        run=None,
+                        replay_envelope=self._decode_envelope(
+                            NoteGraphSuggestionOperationKind.RUN_ADMIT.value,
+                            receipt["replay_envelope"],
+                        ),
+                    )
                 run_row = conn.execute(
                     "SELECT * FROM note_graph_suggestion_runs WHERE owner_user_id=? AND dataset_id=? "
                     "AND admission_receipt_id=?",
                     (self.owner_user_id, dataset, receipt["id"]),
                 ).fetchone()
                 if run_row is None:
-                    raise RuntimeError("notes_graph_receipt_run_missing")
+                    raise RuntimeError("notes_graph_run_admit_resource_missing")
                 run = self._run_from_row(run_row)
-                if str(receipt["state"]) in {"completed", "failed"}:
-                    return RunAdmissionResult(
-                        disposition="terminal_replay",
-                        run=run,
-                        replay_envelope=self._decode_envelope(receipt["replay_envelope"]),
-                    )
                 return RunAdmissionResult(
                     disposition="in_progress",
                     run=run,
@@ -452,9 +546,23 @@ class NoteGraphSuggestionStore:
 
         dataset = self._scope(dataset_id)
         now_utc = self._aware_utc(now)
-        envelope = self._encode_envelope(replay_envelope)
+        self._require_run_transition(expected_state, "queued")
+        if expected_state != "admitting":
+            raise ValueError("notes_graph_run_transition_invalid")
+        envelope = self._encode_envelope(
+            NoteGraphSuggestionOperationKind.RUN_ADMIT.value,
+            replay_envelope,
+        )
 
         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
+            run = self._load_run(conn, dataset, run_id)
+            receipt_row = conn.execute(
+                "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND id=? AND operation_kind='run_admit' AND state='in_progress'",
+                (self.owner_user_id, dataset, run.admission_receipt_id),
+            ).fetchone()
+            if receipt_row is None:
+                raise RuntimeError("notes_graph_receipt_conflict")
             updated = conn.execute(
                 "UPDATE note_graph_suggestion_runs SET job_id=?,expected_completion_token=?,"
                 "state='queued',revision=revision+1 WHERE owner_user_id=? AND dataset_id=? AND id=? "
@@ -475,8 +583,8 @@ class NoteGraphSuggestionStore:
             receipt = conn.execute(
                 "UPDATE note_graph_suggestion_operation_receipts SET state='completed',http_status=202,"
                 "replay_envelope=?,completed_at=?,expires_at=? WHERE owner_user_id=? AND dataset_id=? "
-                "AND id=? AND state='in_progress' AND request_fingerprint=(SELECT request_fingerprint "
-                "FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? AND dataset_id=? AND id=?)",
+                "AND id=? AND operation_kind='run_admit' AND state='in_progress' "
+                "AND request_fingerprint=?",
                 (
                     envelope,
                     self._db_datetime(now_utc),
@@ -484,9 +592,7 @@ class NoteGraphSuggestionStore:
                     self.owner_user_id,
                     dataset,
                     run.admission_receipt_id,
-                    self.owner_user_id,
-                    dataset,
-                    run.admission_receipt_id,
+                    receipt_row["request_fingerprint"],
                 ),
             )
             if receipt.rowcount != 1:
@@ -495,64 +601,114 @@ class NoteGraphSuggestionStore:
 
         return self._with_dataset_scope(dataset, mutate)
 
-    def transition_run(
+    def fail_admission(
         self,
         *,
         dataset_id: str,
         run_id: str,
         expected_state: str,
         expected_revision: int,
-        new_state: str,
+        error_code: str,
+        guidance_key: str,
         now: datetime,
-        error_code: str | None = None,
     ) -> NoteGraphSuggestionRun:
-        """Apply one owner/dataset/state/revision fenced run transition."""
+        """Fail an admitting run and its admission receipt in one fenced transaction."""
 
         dataset = self._scope(dataset_id)
         now_utc = self._aware_utc(now)
-        if new_state not in {state.value for state in NoteGraphSuggestionRunState}:
-            raise ValueError("notes_graph_run_state_invalid")
-        terminal = new_state in {"succeeded", "failed", "cancelled", "stale"}
+        self._require_run_transition(expected_state, "failed")
+        if expected_state != "admitting":
+            raise ValueError("notes_graph_run_transition_invalid")
 
         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
-            if terminal:
-                query = (
-                    "UPDATE note_graph_suggestion_runs SET state=?,revision=revision+1,error_code=?,"
-                    "completed_at=?,expires_at=? WHERE owner_user_id=? AND dataset_id=? AND id=? "
-                    "AND state=? AND revision=?"
-                )
-                values: tuple[object, ...] = (
-                    new_state,
+            run = self._load_run(conn, dataset, run_id)
+            if run.state.value != expected_state or run.revision != expected_revision:
+                raise RuntimeError("notes_graph_run_conflict")
+            receipt_row = conn.execute(
+                "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND id=? AND operation_kind='run_admit' AND state='in_progress'",
+                (self.owner_user_id, dataset, run.admission_receipt_id),
+            ).fetchone()
+            if receipt_row is None:
+                raise RuntimeError("notes_graph_receipt_conflict")
+            envelope = {
+                "run_id": run.id,
+                "state": "failed",
+                "error_code": error_code,
+                "guidance_key": guidance_key,
+            }
+            encoded_envelope = self._encode_envelope(
+                NoteGraphSuggestionOperationKind.RUN_ADMIT.value,
+                envelope,
+            )
+            cursor = conn.execute(
+                "UPDATE note_graph_suggestion_runs SET state='failed',revision=revision+1,"
+                "error_code=?,guidance_key=?,completed_at=?,expires_at=? WHERE owner_user_id=? "
+                "AND dataset_id=? AND id=? AND state=? AND revision=?",
+                (
                     error_code,
+                    guidance_key,
                     self._db_datetime(now_utc),
-                    self._db_datetime(now_utc + timedelta(days=90 if new_state == "succeeded" else 30)),
+                    self._db_datetime(now_utc + timedelta(days=30)),
                     self.owner_user_id,
                     dataset,
                     run_id,
                     expected_state,
                     expected_revision,
-                )
-            else:
-                started_sql = "started_at=?," if new_state == "running" else ""
-                query = (
-                    "UPDATE note_graph_suggestion_runs SET state=?,revision=revision+1,error_code=?,"
-                    f"{started_sql}expires_at=expires_at WHERE owner_user_id=? AND dataset_id=? "  # nosec B608
-                    "AND id=? AND state=? AND revision=?"
-                )
-                started_values: tuple[object, ...] = (
-                    (self._db_datetime(now_utc),) if new_state == "running" else ()
-                )
-                values = (
-                    new_state,
-                    error_code,
-                    *started_values,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("notes_graph_run_conflict")
+            receipt = conn.execute(
+                "UPDATE note_graph_suggestion_operation_receipts SET state='failed',http_status=503,"
+                "replay_envelope=?,completed_at=?,expires_at=? WHERE owner_user_id=? AND dataset_id=? "
+                "AND id=? AND operation_kind='run_admit' AND state='in_progress' "
+                "AND request_fingerprint=?",
+                (
+                    encoded_envelope,
+                    self._db_datetime(now_utc),
+                    self._db_datetime(now_utc + timedelta(days=90)),
+                    self.owner_user_id,
+                    dataset,
+                    run.admission_receipt_id,
+                    receipt_row["request_fingerprint"],
+                ),
+            )
+            if receipt.rowcount != 1:
+                raise RuntimeError("notes_graph_receipt_conflict")
+            return self._load_run(conn, dataset, run_id)
+
+        return self._with_dataset_scope(dataset, mutate)
+
+    def start_run(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+        expected_state: str,
+        expected_revision: int,
+        now: datetime,
+    ) -> NoteGraphSuggestionRun:
+        """Move one exact queued run to running under its revision fence."""
+
+        self._require_run_transition(expected_state, "running")
+        if expected_state != "queued":
+            raise ValueError("notes_graph_run_transition_invalid")
+        dataset = self._scope(dataset_id)
+        now_utc = self._aware_utc(now)
+
+        def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
+            cursor = conn.execute(
+                "UPDATE note_graph_suggestion_runs SET state='running',revision=revision+1,started_at=? "
+                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state='queued' AND revision=?",
+                (
+                    self._db_datetime(now_utc),
                     self.owner_user_id,
                     dataset,
                     run_id,
-                    expected_state,
                     expected_revision,
-                )
-            cursor = conn.execute(query, values)
+                ),
+            )
             if cursor.rowcount != 1:
                 raise RuntimeError("notes_graph_run_conflict")
             return self._load_run(conn, dataset, run_id)
@@ -631,6 +787,9 @@ class NoteGraphSuggestionStore:
 
         dataset = self._scope(dataset_id)
         now_utc = self._aware_utc(now)
+        self._require_run_transition(expected_state, "publishing")
+        if expected_state != "running":
+            raise ValueError("notes_graph_run_transition_invalid")
         if not result_digest.startswith("sha256:") or len(result_digest) != 71:
             raise ValueError("notes_graph_result_digest_invalid")
         if not 0 <= invalid_item_count <= 10_000 or len(candidates) > 100:
@@ -782,16 +941,22 @@ class NoteGraphSuggestionStore:
         source_note_id: str,
         target_note_id: str,
     ) -> bool:
+        first_note_id, _, second_note_id, _ = self._canonical_related_identity(
+            source_note_id,
+            "source",
+            target_note_id,
+            "target",
+        )
         row = conn.execute(
             "SELECT 1 FROM note_edges WHERE user_id=? AND deleted=? AND "
             "((from_note_id=? AND to_note_id=?) OR (from_note_id=? AND to_note_id=?)) LIMIT 1",
             (
                 self.owner_user_id,
                 self._deleted_value(),
-                source_note_id,
-                target_note_id,
-                target_note_id,
-                source_note_id,
+                first_note_id,
+                second_note_id,
+                second_note_id,
+                first_note_id,
             ),
         ).fetchone()
         if row is not None:
@@ -801,30 +966,87 @@ class NoteGraphSuggestionStore:
             "((source_note_id=? AND target_note_id=?) OR (source_note_id=? AND target_note_id=?))"
         )
         params: tuple[object, ...] = (
-            source_note_id,
-            target_note_id,
-            target_note_id,
-            source_note_id,
+            first_note_id,
+            second_note_id,
+            second_note_id,
+            first_note_id,
         )
         if self.is_postgres:
             query += " AND owner_user_id=?"
             params += (self.owner_user_id,)
         return conn.execute(f"{query} LIMIT 1", params).fetchone() is not None  # nosec B608
 
+    @staticmethod
+    def _canonical_related_identity(
+        source_note_id: str,
+        source_fingerprint: str,
+        target_note_id: str,
+        target_fingerprint: str,
+    ) -> tuple[str, str, str, str]:
+        if source_note_id < target_note_id:
+            return source_note_id, source_fingerprint, target_note_id, target_fingerprint
+        return target_note_id, target_fingerprint, source_note_id, source_fingerprint
+
+    @classmethod
+    def _related_identity_predicate(
+        cls,
+        *,
+        source_note_id: str,
+        source_fingerprint: str,
+        target_note_id: str,
+        target_fingerprint: str,
+    ) -> tuple[str, tuple[object, ...]]:
+        first_id, first_fingerprint, second_id, second_fingerprint = cls._canonical_related_identity(
+            source_note_id,
+            source_fingerprint,
+            target_note_id,
+            target_fingerprint,
+        )
+        return (
+            "((source_note_id=? AND source_fingerprint=? AND target_note_id=? "
+            "AND target_fingerprint=?) OR (source_note_id=? AND source_fingerprint=? "
+            "AND target_note_id=? AND target_fingerprint=?))",
+            (
+                first_id,
+                first_fingerprint,
+                second_id,
+                second_fingerprint,
+                second_id,
+                second_fingerprint,
+                first_id,
+                first_fingerprint,
+            ),
+        )
+
+    def _related_identity_is_current(self, conn: SuggestionConnection, row: Any) -> bool:
+        first_id, first_fingerprint, second_id, second_fingerprint = self._canonical_related_identity(
+            str(row["source_note_id"]),
+            str(row["source_fingerprint"]),
+            str(row["target_note_id"]),
+            str(row["target_fingerprint"]),
+        )
+        return (
+            self._current_note_fingerprint(conn, first_id) == first_fingerprint
+            and self._current_note_fingerprint(conn, second_id) == second_fingerprint
+        )
+
     def _is_suppressed(self, conn: SuggestionConnection, row: Any) -> bool:
         if row["kind"] == "related_note":
+            predicate, identity = self._related_identity_predicate(
+                source_note_id=str(row["source_note_id"]),
+                source_fingerprint=str(row["source_fingerprint"]),
+                target_note_id=str(row["target_note_id"]),
+                target_fingerprint=str(row["target_fingerprint"]),
+            )
             return conn.execute(
                 "SELECT 1 FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? "
-                "AND id<>? AND kind='related_note' AND state='rejected' AND source_note_id=? "
-                "AND source_fingerprint=? AND target_note_id=? AND target_fingerprint=? LIMIT 1",
+                "AND id<>? AND kind='related_note' AND state='rejected' AND "
+                f"{predicate} LIMIT 1",  # nosec B608
                 (
                     self.owner_user_id,
                     row["dataset_id"],
                     row["id"],
-                    row["source_note_id"],
-                    row["source_fingerprint"],
-                    row["target_note_id"],
-                    row["target_fingerprint"],
+                    *identity,
                 ),
             ).fetchone() is not None
         return conn.execute(
@@ -841,36 +1063,66 @@ class NoteGraphSuggestionStore:
             ),
         ).fetchone() is not None
 
-    def _tag_identity_is_current(self, conn: SuggestionConnection, row: Any) -> bool:
+    def _resolve_tag_identity(
+        self,
+        conn: SuggestionConnection,
+        row: Any,
+    ) -> tuple[str, str] | None:
         sync_id = row["keyword_sync_id"]
         if sync_id is None:
-            return True
+            return str(row["normalized_tag"]), str(row["display_tag"])
         keyword_table = self._db._map_table_for_backend("keywords")
         keyword = conn.execute(
             f"SELECT keyword FROM {keyword_table} WHERE client_id=? AND sync_id=? AND deleted=?",  # nosec B608
             (self.owner_user_id, sync_id, self._deleted_value()),
         ).fetchone()
-        return keyword is not None and str(keyword["keyword"]).strip().casefold() == row["normalized_tag"]
+        if keyword is None:
+            return None
+        display = str(keyword["keyword"]).strip()
+        return display.casefold(), display
+
+    def _source_has_tag(
+        self,
+        conn: SuggestionConnection,
+        *,
+        source_note_id: str,
+        normalized_tag: str,
+    ) -> bool:
+        keyword_table = self._db._map_table_for_backend("keywords")
+        rows = conn.execute(
+            f"SELECT keyword.keyword FROM {keyword_table} keyword "  # nosec B608
+            "JOIN note_keywords membership ON membership.keyword_id=keyword.id "
+            "WHERE membership.note_id=? AND keyword.client_id=? AND keyword.deleted=?",
+            (source_note_id, self.owner_user_id, self._deleted_value()),
+        ).fetchall()
+        return any(str(row["keyword"]).strip().casefold() == normalized_tag for row in rows)
 
     def _supersede_pending(self, conn: SuggestionConnection, row: Any, now_utc: datetime) -> None:
         if row["kind"] == "related_note":
-            predicate = "target_note_id=? AND target_fingerprint=?"
-            identity: tuple[object, ...] = (row["target_note_id"], row["target_fingerprint"])
+            predicate, identity = self._related_identity_predicate(
+                source_note_id=str(row["source_note_id"]),
+                source_fingerprint=str(row["source_fingerprint"]),
+                target_note_id=str(row["target_note_id"]),
+                target_fingerprint=str(row["target_fingerprint"]),
+            )
+            source_predicate = ""
+            source_identity: tuple[object, ...] = ()
         else:
             predicate = "normalized_tag=?"
             identity = (row["normalized_tag"],)
+            source_predicate = "source_note_id=? AND source_fingerprint=? AND "
+            source_identity = (row["source_note_id"], row["source_fingerprint"])
         pending = conn.execute(
             "SELECT id,revision FROM note_graph_suggestions "
-            "WHERE owner_user_id=? AND dataset_id=? AND id<>? AND source_note_id=? "
-            "AND source_fingerprint=? AND kind=? AND state='pending' AND "
+            "WHERE owner_user_id=? AND dataset_id=? AND id<>? AND kind=? AND state='pending' AND "
+            f"{source_predicate}"
             f"{predicate} ORDER BY id",  # nosec B608
             (
                 self.owner_user_id,
                 row["dataset_id"],
                 row["id"],
-                row["source_note_id"],
-                row["source_fingerprint"],
                 row["kind"],
+                *source_identity,
                 *identity,
             ),
         ).fetchall()
@@ -928,6 +1180,9 @@ class NoteGraphSuggestionStore:
 
         dataset = self._scope(dataset_id)
         now_utc = self._aware_utc(now)
+        self._require_run_transition(expected_state, "succeeded")
+        if expected_state != "publishing":
+            raise ValueError("notes_graph_run_transition_invalid")
 
         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
             run = self._load_run(conn, dataset, run_id)
@@ -960,10 +1215,8 @@ class NoteGraphSuggestionStore:
                     ) != row["target_fingerprint"]:
                         freshness_failed = True
                         break
-                    if row["kind"] == "tag" and not self._tag_identity_is_current(conn, row):
-                        freshness_failed = True
-                        break
             if freshness_failed:
+                self._require_run_transition(run.state.value, "stale")
                 self._delete_staged_for_run(
                     conn,
                     dataset_id=dataset,
@@ -987,12 +1240,65 @@ class NoteGraphSuggestionStore:
                     raise RuntimeError("notes_graph_run_conflict")
                 return self._load_run(conn, dataset, run_id)
 
+            filtered_tag_ids: set[str] = set()
+            resolved_tags: dict[str, tuple[str, str, str]] = {}
+            for row in staged:
+                if row["kind"] != "tag":
+                    continue
+                resolved = self._resolve_tag_identity(conn, row)
+                row_id = str(row["id"])
+                if resolved is None:
+                    filtered_tag_ids.add(row_id)
+                    continue
+                normalized_tag, display_tag = resolved
+                if normalized_tag in resolved_tags:
+                    filtered_tag_ids.add(row_id)
+                    continue
+                resolved_tags[normalized_tag] = (row_id, normalized_tag, display_tag)
+            for row in staged:
+                if str(row["id"]) not in filtered_tag_ids:
+                    continue
+                deleted = conn.execute(
+                    "DELETE FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? "
+                    "AND id=? AND state='staged' AND revision=?",
+                    (self.owner_user_id, dataset, row["id"], row["revision"]),
+                )
+                if deleted.rowcount != 1:
+                    raise RuntimeError("notes_graph_suggestion_conflict")
+            for row_id, normalized_tag, display_tag in resolved_tags.values():
+                source_row = next(row for row in staged if str(row["id"]) == row_id)
+                updated = conn.execute(
+                    "UPDATE note_graph_suggestions SET normalized_tag=?,display_tag=?,updated_at=? "
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state='staged' AND revision=?",
+                    (
+                        normalized_tag,
+                        display_tag,
+                        self._db_datetime(now_utc),
+                        self.owner_user_id,
+                        dataset,
+                        row_id,
+                        source_row["revision"],
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise RuntimeError("notes_graph_suggestion_conflict")
+            staged = conn.execute(
+                "SELECT * FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? "
+                "AND run_id=? AND state='staged' ORDER BY id",
+                (self.owner_user_id, dataset, run_id),
+            ).fetchall()
             activated_ids: list[str] = []
             for row in staged:
                 filtered = self._is_suppressed(conn, row)
                 if row["kind"] == "related_note":
                     filtered = filtered or self._has_current_link(
                         conn, str(row["source_note_id"]), str(row["target_note_id"])
+                    )
+                else:
+                    filtered = filtered or self._source_has_tag(
+                        conn,
+                        source_note_id=str(row["source_note_id"]),
+                        normalized_tag=str(row["normalized_tag"]),
                     )
                 if filtered:
                     deleted = conn.execute(
@@ -1170,7 +1476,7 @@ class NoteGraphSuggestionStore:
         *,
         dataset_id: str,
         operation_kind: str,
-        source_note_id: str,
+        source_note_id: str | None,
         resource_identity: str,
         idempotency_key: str,
         request_fields: dict[str, Any],
@@ -1196,6 +1502,8 @@ class NoteGraphSuggestionStore:
                 raise RuntimeError("notes_graph_suggestion_idempotency_mismatch")
             disposition = "terminal_replay" if existing["state"] in {"completed", "failed"} else "in_progress"
             return disposition, existing
+        if source_note_id is None:
+            return "absent", None
         new_id = receipt_id or str(uuid.uuid4())
         conn.execute(
             "INSERT INTO note_graph_suggestion_operation_receipts("
@@ -1237,7 +1545,7 @@ class NoteGraphSuggestionStore:
             "AND id=? AND state='in_progress' AND request_fingerprint=?",
             (
                 http_status,
-                self._encode_envelope(envelope),
+                self._encode_envelope(str(receipt["operation_kind"]), envelope),
                 self._db_datetime(now_utc),
                 self._db_datetime(now_utc + timedelta(days=90)),
                 self.owner_user_id,
@@ -1312,6 +1620,33 @@ class NoteGraphSuggestionStore:
         now_utc = self._aware_utc(now)
 
         def mutate(conn: SuggestionConnection) -> MutationResult:
+            disposition, receipt = self._admit_receipt(
+                conn,
+                dataset_id=dataset,
+                operation_kind=NoteGraphSuggestionOperationKind.SUGGESTION_REJECT.value,
+                source_note_id=None,
+                resource_identity=suggestion_id,
+                idempotency_key=idempotency_key,
+                request_fields={
+                    "suggestion_id": suggestion_id,
+                    "expected_revision": expected_revision,
+                    "source_fingerprint": expected_source_fingerprint,
+                    "target_fingerprint": expected_target_fingerprint,
+                },
+                now_utc=now_utc,
+            )
+            if disposition == "terminal_replay":
+                envelope = self._decode_envelope(
+                    NoteGraphSuggestionOperationKind.SUGGESTION_REJECT.value,
+                    receipt["replay_envelope"],
+                ) or {}
+                return MutationResult("terminal_replay", envelope)
+            if disposition == "in_progress":
+                try:
+                    self._load_suggestion(conn, dataset, suggestion_id)
+                except RuntimeError as exc:
+                    raise RuntimeError("notes_graph_suggestion_reject_resource_missing") from exc
+                raise RuntimeError("notes_graph_receipt_conflict")
             suggestion = self._load_suggestion(conn, dataset, suggestion_id)
             disposition, receipt = self._admit_receipt(
                 conn,
@@ -1328,16 +1663,7 @@ class NoteGraphSuggestionStore:
                 },
                 now_utc=now_utc,
             )
-            if disposition == "terminal_replay":
-                envelope = self._decode_envelope(receipt["replay_envelope"]) or {}
-                rejection_set = self._load_rejection_set(
-                    conn,
-                    dataset,
-                    suggestion.source_note_id,
-                    suggestion.source_fingerprint,
-                )
-                return MutationResult("terminal_replay", envelope, rejection_set=rejection_set)
-            if disposition == "in_progress":
+            if disposition != "created":
                 raise RuntimeError("notes_graph_receipt_conflict")
             if suggestion.state.value != "pending" or suggestion.revision != expected_revision:
                 raise RuntimeError("notes_graph_suggestion_conflict")
@@ -1460,7 +1786,10 @@ class NoteGraphSuggestionStore:
                 )
                 return MutationResult(
                     "terminal_replay",
-                    self._decode_envelope(receipt["replay_envelope"]) or {},
+                    self._decode_envelope(
+                        NoteGraphSuggestionOperationKind.REJECTIONS_RESET.value,
+                        receipt["replay_envelope"],
+                    ) or {},
                     rejection_set=rejection_set,
                 )
             if disposition == "in_progress":
@@ -1548,6 +1877,42 @@ class NoteGraphSuggestionStore:
         now_utc = self._aware_utc(now)
 
         def mutate(conn: SuggestionConnection) -> MutationResult:
+            disposition, receipt = self._admit_receipt(
+                conn,
+                dataset_id=dataset,
+                operation_kind=NoteGraphSuggestionOperationKind.SUGGESTION_ACCEPT.value,
+                source_note_id=None,
+                resource_identity=suggestion_id,
+                idempotency_key=idempotency_key,
+                request_fields={
+                    "suggestion_id": suggestion_id,
+                    "expected_revision": expected_revision,
+                    "source_fingerprint": expected_source_fingerprint,
+                    "target_fingerprint": expected_target_fingerprint,
+                },
+                now_utc=now_utc,
+            )
+            if disposition == "terminal_replay":
+                return MutationResult(
+                    "terminal_replay",
+                    self._decode_envelope(
+                        NoteGraphSuggestionOperationKind.SUGGESTION_ACCEPT.value,
+                        receipt["replay_envelope"],
+                    ) or {},
+                )
+            if disposition == "in_progress":
+                try:
+                    suggestion = self._load_suggestion(conn, dataset, suggestion_id)
+                except RuntimeError as exc:
+                    raise RuntimeError("notes_graph_suggestion_accept_resource_missing") from exc
+                if suggestion.decision_receipt_id != str(receipt["id"]):
+                    raise RuntimeError("notes_graph_receipt_conflict")
+                return MutationResult(
+                    "in_progress",
+                    {},
+                    suggestion=suggestion,
+                    continuation="resume_suggestion_acceptance",
+                )
             suggestion = self._load_suggestion(conn, dataset, suggestion_id)
             disposition, receipt = self._admit_receipt(
                 conn,
@@ -1564,19 +1929,8 @@ class NoteGraphSuggestionStore:
                 },
                 now_utc=now_utc,
             )
-            if disposition == "terminal_replay":
-                return MutationResult(
-                    "terminal_replay",
-                    self._decode_envelope(receipt["replay_envelope"]) or {},
-                    suggestion=suggestion,
-                )
-            if disposition == "in_progress":
-                return MutationResult(
-                    "in_progress",
-                    {},
-                    suggestion=suggestion,
-                    continuation="resume_suggestion_acceptance",
-                )
+            if disposition != "created":
+                raise RuntimeError("notes_graph_receipt_conflict")
             if suggestion.state != NoteGraphSuggestionState.PENDING or suggestion.revision != expected_revision:
                 raise RuntimeError("notes_graph_suggestion_conflict")
             self._require_current_suggestion_fingerprints(
@@ -1619,6 +1973,7 @@ class NoteGraphSuggestionStore:
         *,
         dataset_id: str,
         suggestion_id: str,
+        decision_receipt_id: str,
         expected_state: str,
         expected_revision: int,
         expected_lease_token: str,
@@ -1634,7 +1989,8 @@ class NoteGraphSuggestionStore:
             updated = conn.execute(
                 "UPDATE note_graph_suggestions SET revision=revision+1,acceptance_lease_token=?,"
                 "acceptance_lease_expires_at=?,updated_at=? WHERE owner_user_id=? AND dataset_id=? "
-                "AND id=? AND state=? AND revision=? AND acceptance_lease_token=? "
+                "AND id=? AND state=? AND revision=? AND decision_receipt_id=? "
+                "AND acceptance_lease_token=? "
                 "AND acceptance_lease_expires_at<=?",
                 (
                     lease_token,
@@ -1645,6 +2001,7 @@ class NoteGraphSuggestionStore:
                     suggestion_id,
                     expected_state,
                     expected_revision,
+                    decision_receipt_id,
                     expected_lease_token,
                     self._db_datetime(now_utc),
                 ),
@@ -1660,22 +2017,31 @@ class NoteGraphSuggestionStore:
         *,
         dataset_id: str,
         suggestion_id: str,
+        decision_receipt_id: str,
         expected_state: str,
         expected_revision: int,
         expected_lease_token: str,
         now: datetime,
-    ) -> NoteGraphSuggestion:
-        """Return an accepting row to pending only under its current fence."""
+    ) -> MutationResult:
+        """Release one receipt-bound acceptance lease and terminalize its receipt."""
 
         dataset = self._scope(dataset_id)
         now_utc = self._aware_utc(now)
 
-        def mutate(conn: SuggestionConnection) -> NoteGraphSuggestion:
+        def mutate(conn: SuggestionConnection) -> MutationResult:
+            receipt = conn.execute(
+                "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND id=? AND operation_kind='suggestion_accept' "
+                "AND resource_identity=? AND state='in_progress'",
+                (self.owner_user_id, dataset, decision_receipt_id, suggestion_id),
+            ).fetchone()
+            if receipt is None:
+                raise RuntimeError("notes_graph_receipt_conflict")
             updated = conn.execute(
                 "UPDATE note_graph_suggestions SET state='pending',revision=revision+1,"
                 "acceptance_lease_token=NULL,acceptance_lease_expires_at=NULL,decision_receipt_id=NULL,"
                 "updated_at=? WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? "
-                "AND revision=? AND acceptance_lease_token=?",
+                "AND revision=? AND decision_receipt_id=? AND acceptance_lease_token=?",
                 (
                     self._db_datetime(now_utc),
                     self.owner_user_id,
@@ -1683,12 +2049,27 @@ class NoteGraphSuggestionStore:
                     suggestion_id,
                     expected_state,
                     expected_revision,
+                    decision_receipt_id,
                     expected_lease_token,
                 ),
             )
             if updated.rowcount != 1:
                 raise RuntimeError("notes_graph_suggestion_conflict")
-            return self._load_suggestion(conn, dataset, suggestion_id)
+            suggestion = self._load_suggestion(conn, dataset, suggestion_id)
+            envelope = {
+                "suggestion_id": suggestion.id,
+                "state": "pending",
+                "revision": suggestion.revision,
+            }
+            self._complete_receipt(
+                conn,
+                dataset_id=dataset,
+                receipt=receipt,
+                envelope=envelope,
+                http_status=200,
+                now_utc=now_utc,
+            )
+            return MutationResult("completed", envelope, suggestion=suggestion)
 
         return self._with_dataset_scope(dataset, mutate)
 
@@ -1814,6 +2195,7 @@ class NoteGraphSuggestionStore:
                         self._db_datetime(now_utc),
                         self._db_datetime(now_utc + timedelta(days=30)),
                     )
+                self._require_run_transition(run.state.value, next_state)
                 updated = conn.execute(
                     "UPDATE note_graph_suggestion_runs SET state=?,revision=revision+1,error_code=?,"
                     f"{completion_sql}expires_at=? "  # nosec B608
@@ -1846,6 +2228,7 @@ class NoteGraphSuggestionStore:
                 run = self._load_run(conn, dataset, str(target_row["run_id"]))
                 if run.state != NoteGraphSuggestionRunState.PUBLISHING:
                     raise RuntimeError("notes_graph_run_conflict")
+                self._require_run_transition(run.state.value, "stale")
                 self._delete_staged_for_run(
                     conn,
                     dataset_id=dataset,
@@ -1903,7 +2286,7 @@ class NoteGraphSuggestionStore:
     ) -> dict[str, int]:
         """Delete bounded expired detail without aging out current review state."""
 
-        if not 1 <= limit <= 1000:
+        if not 1 <= limit <= 100:
             raise ValueError("notes_graph_cleanup_limit_invalid")
         dataset = self._scope(dataset_id)
         now_utc = self._aware_utc(now)
@@ -1947,7 +2330,8 @@ class NoteGraphSuggestionStore:
             )
             if len(removable) < remaining:
                 rejected_rows = conn.execute(
-                    "SELECT id,state,revision,expires_at,source_note_id,source_fingerprint "
+                    "SELECT id,state,revision,expires_at,kind,source_note_id,source_fingerprint,"
+                    "target_note_id,target_fingerprint "
                     "FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? "
                     "AND state='rejected' AND expires_at<=? ORDER BY expires_at,id LIMIT ?",
                     (self.owner_user_id, dataset, now_value, remaining - len(removable)),
@@ -1955,8 +2339,14 @@ class NoteGraphSuggestionStore:
                 removable.extend(
                     row
                     for row in rejected_rows
-                    if self._current_note_fingerprint(conn, str(row["source_note_id"]))
-                    != str(row["source_fingerprint"])
+                    if (
+                        self._current_note_fingerprint(conn, str(row["source_note_id"]))
+                        != str(row["source_fingerprint"])
+                        or (
+                            row["kind"] == "related_note"
+                            and not self._related_identity_is_current(conn, row)
+                        )
+                    )
                 )
             counts["suggestions"] = delete_fenced(
                 conn,

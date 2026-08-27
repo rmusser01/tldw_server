@@ -147,6 +147,10 @@ def test_postgres_v64_ddl_has_owner_scoped_tables_checks_indexes_and_forced_rls(
         "CHECK(state IN ('staged', 'pending', 'accepting', 'accepted', 'rejected', 'stale'))",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_active_source",
         "source_note_id, source_fingerprint, provider, model, prompt_contract_version",
+        "provider TEXT NOT NULL CHECK(char_length(btrim(provider)) > 0)",
+        "model TEXT NOT NULL CHECK(char_length(btrim(model)) > 0)",
+        "capability_revision TEXT NOT NULL CHECK(char_length(btrim(capability_revision)) > 0)",
+        "prompt_contract_version TEXT NOT NULL CHECK(char_length(btrim(prompt_contract_version)) > 0)",
         "WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing')",
         "idx_note_graph_suggestions_staged_related_identity",
         "idx_note_graph_suggestions_staged_tag_identity",
@@ -274,6 +278,106 @@ def test_postgres_v64_live_schema_has_owner_scoped_graph_suggestion_contract(
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
+def test_postgres_v64_active_run_binding_fields_are_required_and_duplicate_equivalent(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    try:
+        with backend.transaction() as conn:
+            _set_tenant_scope(backend, conn, "owner-a", "dataset-a")
+            _insert_note(backend, conn, "binding-note", "owner-a")
+
+        columns = backend.execute(
+            """
+            SELECT column_name,is_nullable
+              FROM information_schema.columns
+             WHERE table_schema=current_schema()
+               AND table_name='note_graph_suggestion_runs'
+               AND column_name=ANY(%s)
+            """,
+            (["provider", "model", "capability_revision", "prompt_contract_version"],),
+        ).rows
+        assert {str(row["column_name"]): str(row["is_nullable"]) for row in columns} == {
+            "provider": "NO",
+            "model": "NO",
+            "capability_revision": "NO",
+            "prompt_contract_version": "NO",
+        }
+
+        for index, (column, value) in enumerate(
+            (
+                ("provider", None),
+                ("provider", " "),
+                ("model", None),
+                ("model", ""),
+                ("capability_revision", None),
+                ("capability_revision", " "),
+                ("prompt_contract_version", None),
+                ("prompt_contract_version", ""),
+            )
+        ):
+            fields = {
+                "provider": "openai",
+                "model": "model-a",
+                "capability_revision": "cap-v1",
+                "prompt_contract_version": "prompt-v1",
+            }
+            fields[column] = value
+            with pytest.raises(BackendDatabaseError):
+                with backend.transaction() as conn:
+                    _set_tenant_scope(backend, conn, "owner-a", "dataset-a")
+                    backend.execute(
+                        """
+                        INSERT INTO note_graph_suggestion_runs(
+                            id,owner_user_id,dataset_id,source_note_id,source_fingerprint,
+                            provider,model,capability_revision,prompt_contract_version,
+                            state,revision,created_at,expires_at
+                        ) VALUES (%s,'owner-a','dataset-a','binding-note','fp',
+                                  %s,%s,%s,%s,'queued',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+                        """,
+                        (
+                            f"invalid-binding-{index}",
+                            fields["provider"],
+                            fields["model"],
+                            fields["capability_revision"],
+                            fields["prompt_contract_version"],
+                        ),
+                        connection=conn,
+                    )
+
+        valid = (
+            "owner-a",
+            "dataset-a",
+            "binding-note",
+            "fp",
+            "openai",
+            "model-a",
+            "cap-v1",
+            "prompt-v1",
+            "queued",
+        )
+        insert_sql = """
+            INSERT INTO note_graph_suggestion_runs(
+                id,owner_user_id,dataset_id,source_note_id,source_fingerprint,
+                provider,model,capability_revision,prompt_contract_version,
+                state,revision,created_at,expires_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        """
+        with backend.transaction() as conn:
+            _set_tenant_scope(backend, conn, "owner-a", "dataset-a")
+            backend.execute(insert_sql, ("binding-valid-a", *valid), connection=conn)
+        with pytest.raises(BackendDatabaseError):
+            with backend.transaction() as conn:
+                _set_tenant_scope(backend, conn, "owner-a", "dataset-a")
+                backend.execute(insert_sql, ("binding-valid-b", *valid), connection=conn)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
 def test_postgres_v64_rejects_cross_scope_source_note_reference(
     pg_database_config: DatabaseConfig,
 ) -> None:
@@ -294,8 +398,10 @@ def test_postgres_v64_rejects_cross_scope_source_note_reference(
                     """
                     INSERT INTO note_graph_suggestion_runs(
                         id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
+                        provider,model,capability_revision,prompt_contract_version,
                         state, revision, created_at, expires_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ) VALUES (%s, %s, %s, %s, %s, 'openai','model-a','cap-v1','prompt-v1',
+                              %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
                         "cross-owner-run",
@@ -349,8 +455,10 @@ def test_postgres_v64_note_hard_delete_cascades_receipt_graph(
                 """
                 INSERT INTO note_graph_suggestion_runs(
                     id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
-                    admission_receipt_id, state, revision, created_at, expires_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    admission_receipt_id,provider,model,capability_revision,prompt_contract_version,
+                    state, revision, created_at, expires_at
+                ) VALUES (%s, %s, %s, %s, %s, %s,'openai','model-a','cap-v1','prompt-v1',
+                          %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
                     "run-a",
@@ -464,8 +572,10 @@ def test_postgres_v64_receipt_delete_clears_only_scoped_receipt_references(
                 """
                 INSERT INTO note_graph_suggestion_runs(
                     id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
-                    admission_receipt_id, state, revision, created_at, expires_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    admission_receipt_id,provider,model,capability_revision,prompt_contract_version,
+                    state, revision, created_at, expires_at
+                ) VALUES (%s, %s, %s, %s, %s, %s,'openai','model-a','cap-v1','prompt-v1',
+                          %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
                     "run-a",
@@ -603,8 +713,10 @@ def test_postgres_v64_rejects_duplicate_tag_and_reverse_related_pair(
                     """
                     INSERT INTO note_graph_suggestion_runs(
                         id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
+                        provider,model,capability_revision,prompt_contract_version,
                         state, revision, created_at, expires_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ) VALUES (%s, %s, %s, %s, %s,'openai','model-a','cap-v1','prompt-v1',
+                              %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
                         run_id,
@@ -686,8 +798,10 @@ def test_postgres_v64_rejects_duplicate_tag_identity(
                 """
                 INSERT INTO note_graph_suggestion_runs(
                     id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
+                    provider,model,capability_revision,prompt_contract_version,
                     state, revision, created_at, expires_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ) VALUES (%s, %s, %s, %s, %s,'openai','model-a','cap-v1','prompt-v1',
+                          %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
                     "run-a",

@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 08:50
+updated_date: 2026-08-27 09:40
 labels:
 - notes
 - knowledge-graph
@@ -24,12 +24,14 @@ documentation:
 priority: high
 modified_files:
 - tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+- tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_models.py
 - tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py
 - tldw_Server_API/app/core/DB_Management/chacha/note_store.py
 - tldw_Server_API/tests/DB_Management/test_chacha_migration_v64.py
 - tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v64.py
 - tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_store.py
 - tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_lifecycle.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py
 ---
 
 ## Description
@@ -112,6 +114,7 @@ Verification:
 - Bandit touched production Python: 0 findings, 0 errors.
 - Live PostgreSQL exercised active-run identity, note lifecycle invalidation, publication, receipt replay, acceptance fencing, reject/reset, and retention; no established-fixture skips.
 - Local ignored report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md
+Task 3 Fix Round 1 completed locally from reviewer base 5fdb9575256d888cc6a743318cc6112a1330aff8. Fixed terminal receipt replay after detail cleanup, explicit atomic admission failure, canonical undirected related identity, tag sync-id re-resolution and membership filtering, receipt-bound acceptance fences/release, unreleased-v64 non-null binding fields, closed transition/request/envelope contracts, exact bounded retention, and complete same-transaction NoteStore/Sync lifecycle rollback coverage. Verification: required Task 3 suite 43 passed/0 skipped; v64 SQLite/live-PostgreSQL 28 passed/0 skipped; Task 2 26 passed/0 skipped; direct NoteStore/projection/Sync 65 passed/0 skipped; final deduplicated 11-file run 154 passed/0 skipped (2 established warnings). Ruff clean; Bandit 0 findings/0 errors; git diff --check passed. Live PostgreSQL ran with no skips. Ignored report appended at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
