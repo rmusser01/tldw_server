@@ -179,20 +179,32 @@ jobs:
             exit 1
           fi
 
-          BASE_WORKTREE="${RUNNER_TEMP}/frontend-unit-base-${{ matrix.shard }}"
-          BASE_READY=0
           RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"
-          EXPECTED_RATCHET_SHA256="cdb398d906152e741fe01636a18c4ac1f1bfec59ff78bad7b21d02212fcd1a9f"
+          RATCHET_CONFIG_TEMPLATE="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_deterministic.config.ts"
+          ORDER_REPORTER="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_execution_order_reporter.mjs"
+          EXPECTED_RATCHET_SHA256="1426966c059f9ff8080e33ffedba02cf6c3794369251283d715b4342908890e4"
+          EXPECTED_RATCHET_CONFIG_SHA256="5393dd2f8652fe784c0cc268f3b52b4438bedb7dfdce23e579babf972c42dafd"
+          EXPECTED_ORDER_REPORTER_SHA256="6c0c06d6a85b8638868d63e243feb757e61ba399c1f5a1da9c55d8e2fb17cb8e"
           verify_ratchet_script() {
             printf '%s  %s\n' "$EXPECTED_RATCHET_SHA256" "$RATCHET_SCRIPT" | sha256sum --check --status
           }
-          if ! verify_ratchet_script; then
-            echo "The frontend Vitest ratchet helper does not match the workflow-pinned digest." >&2
+          verify_package_ratchet_artifacts() {
+            verify_ratchet_script &&
+              printf '%s  %s\n' "$EXPECTED_RATCHET_CONFIG_SHA256" "$RATCHET_CONFIG_TEMPLATE" | sha256sum --check --status &&
+              printf '%s  %s\n' "$EXPECTED_ORDER_REPORTER_SHA256" "$ORDER_REPORTER" | sha256sum --check --status
+          }
+          if ! verify_package_ratchet_artifacts; then
+            echo "The frontend Vitest ratchet artifacts do not match the workflow-pinned digests." >&2
             exit 1
           fi
 
           common_vitest_args=(
             "--shard=${{ matrix.shard }}/8"
+            "--maxWorkers=1"
+            "--testTimeout=15000"
+            "--passWithNoTests"
+          )
+          context_vitest_args=(
             "--maxWorkers=1"
             "--testTimeout=15000"
             "--passWithNoTests"
@@ -214,8 +226,10 @@ jobs:
           fi
 
           USE_DIRECT_TESTS=0
+          PRESERVE_IMPACT_CONTEXT=1
           if (( IMPACTED_TEST_COUNT > IMPACTED_TEST_LIMIT )); then
             USE_DIRECT_TESTS=1
+            PRESERVE_IMPACT_CONTEXT=0
             DIRECT_TEST_COUNT=0
             while IFS= read -r repo_file; do
               case "$repo_file" in
@@ -228,6 +242,7 @@ jobs:
             done < "$CHANGED_FILES_PATH"
             if (( DIRECT_TEST_COUNT == 0 )); then
               USE_DIRECT_TESTS=0
+              PRESERVE_IMPACT_CONTEXT=1
               echo "Dependency impact expanded to ${IMPACTED_TEST_COUNT} tests with no directly changed frontend tests; retaining the sharded dependency-impact set."
             else
               echo "Dependency impact expanded to ${IMPACTED_TEST_COUNT} tests; sharding ${DIRECT_TEST_COUNT} directly changed frontend tests instead."
@@ -236,26 +251,49 @@ jobs:
             echo "Sharding ${IMPACTED_TEST_COUNT} dependency-impacted frontend tests from ${BASE_SHA}."
           fi
 
-          ensure_base_worktree() {
-            if (( BASE_READY == 1 )); then
-              return 0
-            fi
-            if [[ -e "$BASE_WORKTREE" ]]; then
-              echo "Refusing to reuse unexpected base worktree path: ${BASE_WORKTREE}." >&2
+          create_base_worktree() {
+            local worktree_path="$1"
+            local purpose="$2"
+            if [[ -e "$worktree_path" ]]; then
+              echo "Refusing to reuse unexpected ${purpose} worktree path: ${worktree_path}." >&2
               return 1
             fi
-            if ! git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"; then
-              echo "Unable to create exact-base worktree for ${BASE_SHA}." >&2
+            if ! git worktree add --detach "$worktree_path" "$BASE_SHA"; then
+              echo "Unable to create ${purpose} worktree for ${BASE_SHA}." >&2
               return 1
             fi
             if ! (
-              cd "$BASE_WORKTREE/apps" &&
+              cd "$worktree_path/apps" &&
               bun install --frozen-lockfile
             ); then
-              echo "Unable to install exact-base frontend dependencies." >&2
+              echo "Unable to install ${purpose} frontend dependencies." >&2
               return 1
             fi
-            BASE_READY=1
+          }
+
+          install_deterministic_config() {
+            local package_root="$1"
+            local config_path="$2"
+            if [[ "$config_path" != "${package_root}/.tldw-vitest-ratchet.config.ts" ]]; then
+              echo "Unexpected deterministic Vitest config path: ${config_path}." >&2
+              return 1
+            fi
+            if [[ -e "$config_path" ]]; then
+              echo "Refusing to replace existing deterministic Vitest config: ${config_path}." >&2
+              return 1
+            fi
+            if ! verify_package_ratchet_artifacts; then
+              echo "The frontend Vitest ratchet artifacts changed before config installation." >&2
+              return 1
+            fi
+            if ! cp -- "$RATCHET_CONFIG_TEMPLATE" "$config_path"; then
+              echo "Unable to install deterministic Vitest config at ${config_path}." >&2
+              return 1
+            fi
+            if ! printf '%s  %s\n' "$EXPECTED_RATCHET_CONFIG_SHA256" "$config_path" | sha256sum --check --status; then
+              echo "Installed deterministic Vitest config failed digest verification." >&2
+              return 1
+            fi
           }
 
           run_package() {
@@ -263,17 +301,31 @@ jobs:
             local package_repo_path="$2"
             local exclude_pattern="$3"
             local head_package_root="${GITHUB_WORKSPACE}/${package_repo_path}"
-            local base_package_root="${BASE_WORKTREE}/${package_repo_path}"
+            local base_worktree="${RUNNER_TEMP}/frontend-unit-base-${{ matrix.shard }}-${label}"
+            local context_base_worktree="${RUNNER_TEMP}/frontend-unit-base-context-${{ matrix.shard }}-${label}"
+            local base_package_root="${base_worktree}/${package_repo_path}"
+            local context_base_package_root="${context_base_worktree}/${package_repo_path}"
+            local head_config="${head_package_root}/.tldw-vitest-ratchet.config.ts"
+            local base_config="${base_package_root}/.tldw-vitest-ratchet.config.ts"
+            local context_base_config="${context_base_package_root}/.tldw-vitest-ratchet.config.ts"
             local head_report="${RUNNER_TEMP}/${label}-head-${{ matrix.shard }}.json"
             local base_report="${RUNNER_TEMP}/${label}-base-${{ matrix.shard }}.json"
+            local context_report="${RUNNER_TEMP}/${label}-base-context-${{ matrix.shard }}.json"
+            local head_order_report="${RUNNER_TEMP}/${label}-head-order-${{ matrix.shard }}.json"
+            local base_order_report="${RUNNER_TEMP}/${label}-base-order-${{ matrix.shard }}.json"
+            local context_order_report="${RUNNER_TEMP}/${label}-base-context-order-${{ matrix.shard }}.json"
             local failed_files_path="${RUNNER_TEMP}/${label}-failed-files-${{ matrix.shard }}.txt"
+            local context_files_path="${RUNNER_TEMP}/${label}-context-files-${{ matrix.shard }}.txt"
             local head_status=0
             local base_status=0
+            local context_status=0
+            local compare_status=0
             local relative_file=""
             local -a head_command=(bunx vitest run)
             local -a package_vitest_args=()
             local -a direct_test_files=()
             local -a failed_files=()
+            local -a context_files=()
 
             if (( USE_DIRECT_TESTS == 1 )); then
               while IFS= read -r repo_file; do
@@ -289,7 +341,7 @@ jobs:
                     ;;
                 esac
                 if [[ "$relative_file" =~ (^|/).+\.(test|spec)\.(ts|tsx)$ ]]; then
-                  direct_test_files+=("$relative_file")
+                  direct_test_files+=("./${relative_file}")
                 fi
               done < "$CHANGED_FILES_PATH"
 
@@ -302,25 +354,30 @@ jobs:
               package_vitest_args=("--changed=${BASE_SHA}" "${common_vitest_args[@]}")
             fi
 
+            if ! install_deterministic_config "$head_package_root" "$head_config"; then
+              return 1
+            fi
             if [[ -n "$exclude_pattern" ]]; then
               head_command+=("--exclude=${exclude_pattern}")
             fi
             head_command+=(
               "${package_vitest_args[@]}"
+              "--config=${head_config}"
               "--reporter=default"
               "--reporter=json"
+              "--reporter=${ORDER_REPORTER}"
               "--outputFile.json=${head_report}"
             )
 
             echo "Running ${label} changed tests from ${BASE_SHA}, shard ${{ matrix.shard }}/8"
             (
               cd "$head_package_root" &&
-              "${head_command[@]}"
+              TLDW_VITEST_ORDER_REPORT="$head_order_report" "${head_command[@]}"
             ) || head_status=$?
 
             if (( head_status == 0 )); then
-              if ! verify_ratchet_script; then
-                echo "The frontend Vitest ratchet helper changed during the test run." >&2
+              if ! verify_package_ratchet_artifacts; then
+                echo "The frontend Vitest ratchet artifacts changed during the test run." >&2
                 return 1
               fi
               python3 "$RATCHET_SCRIPT" validate-success \
@@ -328,10 +385,14 @@ jobs:
                 --package-root "$head_package_root"
               return $?
             fi
+            if (( head_status != 1 )); then
+              echo "${label} Vitest exited with non-test status ${head_status}; refusing to ratchet." >&2
+              return 1
+            fi
 
             echo "${label} failed on the PR head; replaying only its failed test files at ${BASE_SHA}."
-            if ! verify_ratchet_script; then
-              echo "The frontend Vitest ratchet helper changed during the test run." >&2
+            if ! verify_package_ratchet_artifacts; then
+              echo "The frontend Vitest ratchet artifacts changed during the test run." >&2
               return 1
             fi
             if ! python3 "$RATCHET_SCRIPT" extract \
@@ -340,13 +401,16 @@ jobs:
               --output "$failed_files_path"; then
               return 1
             fi
-            if ! ensure_base_worktree; then
+            if ! create_base_worktree "$base_worktree" "exact-base"; then
+              return 1
+            fi
+            if ! install_deterministic_config "$base_package_root" "$base_config"; then
               return 1
             fi
 
             while IFS= read -r test_file; do
               if [[ -n "$test_file" ]]; then
-                failed_files+=("$test_file")
+                failed_files+=("./${test_file}")
               fi
             done < "$failed_files_path"
             if (( ${#failed_files[@]} == 0 )); then
@@ -356,18 +420,24 @@ jobs:
 
             (
               cd "$base_package_root" &&
-              bunx vitest run "${failed_files[@]}" \
+              TLDW_VITEST_ORDER_REPORT="$base_order_report" bunx vitest run "${failed_files[@]}" \
+                "--config=${base_config}" \
                 --maxWorkers=1 \
                 --testTimeout=15000 \
                 --passWithNoTests \
                 "--reporter=default" \
                 "--reporter=json" \
+                "--reporter=${ORDER_REPORTER}" \
                 "--outputFile.json=${base_report}"
             ) || base_status=$?
             echo "${label} exact-base replay exited with status ${base_status}."
+            if (( base_status != 0 && base_status != 1 )); then
+              echo "${label} exact-base Vitest exited abnormally with status ${base_status}; refusing to ratchet." >&2
+              return 1
+            fi
 
-            if ! verify_ratchet_script; then
-              echo "The frontend Vitest ratchet helper changed before comparison." >&2
+            if ! verify_package_ratchet_artifacts; then
+              echo "The frontend Vitest ratchet artifacts changed before comparison." >&2
               return 1
             fi
             python3 "$RATCHET_SCRIPT" compare \
@@ -376,7 +446,86 @@ jobs:
               --head-package-root "$head_package_root" \
               --base-package-root "$base_package_root" \
               --package-repo-path "$package_repo_path" \
-              --changed-files "$CHANGED_FILES_PATH"
+              --changed-files "$CHANGED_FILES_PATH" || compare_status=$?
+            if (( compare_status == 0 )); then
+              return 0
+            fi
+            if (( compare_status != 1 || PRESERVE_IMPACT_CONTEXT != 1 )); then
+              return "$compare_status"
+            fi
+
+            echo "${label} failed-file replay lost dependency-impact context; replaying the exact head shard manifest at ${BASE_SHA}."
+            if ! verify_package_ratchet_artifacts; then
+              echo "The frontend Vitest ratchet artifacts changed before context extraction." >&2
+              return 1
+            fi
+            if ! python3 "$RATCHET_SCRIPT" extract-context \
+              --report "$head_report" \
+              --order-report "$head_order_report" \
+              --package-root "$head_package_root" \
+              --output "$context_files_path"; then
+              return 1
+            fi
+            if ! create_base_worktree "$context_base_worktree" "pristine context-base"; then
+              return 1
+            fi
+            if ! install_deterministic_config "$context_base_package_root" "$context_base_config"; then
+              return 1
+            fi
+
+            while IFS= read -r test_file; do
+              if [[ -z "$test_file" ]]; then
+                continue
+              fi
+              if [[ "$test_file" == /* || "$test_file" == ../* || "$test_file" == */../* || "$test_file" == */.. || "$test_file" == *$'\r'* ]]; then
+                echo "Unsafe ${label} context test path: ${test_file}." >&2
+                return 1
+              fi
+              if [[ ! -f "$head_package_root/$test_file" || ! -f "$context_base_package_root/$test_file" ]]; then
+                echo "${label} context test is not present in both head and base: ${test_file}." >&2
+                return 1
+              fi
+              context_files+=("./${test_file}")
+              if (( ${#context_files[@]} > 5000 )); then
+                echo "${label} context replay exceeds the 5000-file safety bound." >&2
+                return 1
+              fi
+            done < "$context_files_path"
+            if (( ${#context_files[@]} == 0 )); then
+              echo "${label} dependency-impact context is empty." >&2
+              return 1
+            fi
+
+            (
+              cd "$context_base_package_root" &&
+              TLDW_VITEST_ORDER_REPORT="$context_order_report" bunx vitest run "${context_files[@]}" \
+                "${context_vitest_args[@]}" \
+                "--config=${context_base_config}" \
+                "--reporter=default" \
+                "--reporter=json" \
+                "--reporter=${ORDER_REPORTER}" \
+                "--outputFile.json=${context_report}"
+            ) || context_status=$?
+            echo "${label} exact-base context replay exited with status ${context_status}."
+            if (( context_status != 0 && context_status != 1 )); then
+              echo "${label} exact-base context replay exited abnormally with status ${context_status}; refusing to ratchet." >&2
+              return 1
+            fi
+
+            if ! verify_package_ratchet_artifacts; then
+              echo "The frontend Vitest ratchet artifacts changed before context comparison." >&2
+              return 1
+            fi
+            python3 "$RATCHET_SCRIPT" compare \
+              --head-report "$head_report" \
+              --base-report "$context_report" \
+              --head-package-root "$head_package_root" \
+              --base-package-root "$context_base_package_root" \
+              --package-repo-path "$package_repo_path" \
+              --changed-files "$CHANGED_FILES_PATH" \
+              --head-order-report "$head_order_report" \
+              --base-order-report "$context_order_report" \
+              --require-equivalent-context
           }
 
           frontend_status=0
@@ -620,7 +769,7 @@ jobs:
           FAILED_FILES_PATH="${RUNNER_TEMP}/admin-ui-unit-failed-files.txt"
           RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"
           SAFETY_REPORTER="${GITHUB_WORKSPACE}/admin-ui/scripts/ci/vitest-safety-reporter.mjs"
-          EXPECTED_RATCHET_SHA256="cdb398d906152e741fe01636a18c4ac1f1bfec59ff78bad7b21d02212fcd1a9f"
+          EXPECTED_RATCHET_SHA256="1426966c059f9ff8080e33ffedba02cf6c3794369251283d715b4342908890e4"
           EXPECTED_SAFETY_REPORTER_SHA256="433e8ab9a163694775fa4a50ceae2f7722358331d1f8f4426ec7ec31e36e93f3"
           verify_ratchet_artifacts() {
             printf '%s  %s\n' "$EXPECTED_RATCHET_SHA256" "$RATCHET_SCRIPT" | sha256sum --check --status &&

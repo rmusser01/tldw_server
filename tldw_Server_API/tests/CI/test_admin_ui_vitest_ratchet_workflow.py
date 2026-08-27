@@ -210,7 +210,7 @@ def test_package_ratchet_uses_required_base_and_trusted_helper() -> None:
     assert '[[ ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$' in run_script
     assert 'EXPECTED_RATCHET_SHA256="' in run_script
     assert "verify_ratchet_script()" in run_script
-    assert run_script.count("verify_ratchet_script") >= 4
+    assert run_script.count("verify_package_ratchet_artifacts") >= 4
 
     expected_hash = re.search(
         r'^EXPECTED_RATCHET_SHA256="([0-9a-f]{64})"$',
@@ -222,6 +222,159 @@ def test_package_ratchet_uses_required_base_and_trusted_helper() -> None:
         Path("Helper_Scripts/ci/vitest_base_ratchet.py").read_bytes()
     ).hexdigest()
     assert expected_hash.group(1) == actual_hash
+
+
+@pytest.mark.unit
+def test_package_ratchet_pins_and_installs_deterministic_vitest_config() -> None:
+    """Pin path sequencing and reporter-observed runtime-order evidence."""
+
+    workflow = yaml.safe_load(
+        Path(".github/workflows/frontend-required.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["frontend-unit-tests"]["steps"]
+    unit_step = next(
+        step for step in steps if step.get("name") == "Run package-owned frontend unit tests"
+    )
+    run_script = str(unit_step["run"])
+    template_path = Path("Helper_Scripts/ci/vitest_deterministic.config.ts")
+    order_reporter_path = Path(
+        "Helper_Scripts/ci/vitest_execution_order_reporter.mjs"
+    )
+
+    assert template_path.is_file()
+    template_source = template_path.read_text(encoding="utf-8")
+    assert "class DeterministicSequencer extends BaseSequencer" in template_source
+    assert "relative(this.ctx.config.root, specification.moduleId)" in template_source
+    assert "return left < right ? -1 : left > right ? 1 : 0" in template_source
+
+    expected_hash = re.search(
+        r'^EXPECTED_RATCHET_CONFIG_SHA256="([0-9a-f]{64})"$',
+        run_script,
+        flags=re.MULTILINE,
+    )
+    assert expected_hash is not None
+    assert expected_hash.group(1) == hashlib.sha256(template_path.read_bytes()).hexdigest()
+
+    assert order_reporter_path.is_file()
+    order_reporter_source = order_reporter_path.read_text(encoding="utf-8")
+    assert "onTestModuleStart(testModule)" in order_reporter_source
+    assert "testModule.relativeModuleId" in order_reporter_source
+    assert "onTestRunEnd(testModules)" in order_reporter_source
+    expected_reporter_hash = re.search(
+        r'^EXPECTED_ORDER_REPORTER_SHA256="([0-9a-f]{64})"$',
+        run_script,
+        flags=re.MULTILINE,
+    )
+    assert expected_reporter_hash is not None
+    assert expected_reporter_hash.group(1) == hashlib.sha256(
+        order_reporter_path.read_bytes()
+    ).hexdigest()
+
+    required_contracts = (
+        'RATCHET_CONFIG_TEMPLATE="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_deterministic.config.ts"',
+        'ORDER_REPORTER="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_execution_order_reporter.mjs"',
+        "verify_package_ratchet_artifacts()",
+        "install_deterministic_config()",
+        'local head_config="${head_package_root}/.tldw-vitest-ratchet.config.ts"',
+        'local base_config="${base_package_root}/.tldw-vitest-ratchet.config.ts"',
+        'local context_base_config="${context_base_package_root}/.tldw-vitest-ratchet.config.ts"',
+        'local head_order_report="${RUNNER_TEMP}/${label}-head-order-',
+        'local base_order_report="${RUNNER_TEMP}/${label}-base-order-',
+        'local context_order_report="${RUNNER_TEMP}/${label}-base-context-order-',
+        'install_deterministic_config "$head_package_root" "$head_config"',
+        'install_deterministic_config "$base_package_root" "$base_config"',
+        'install_deterministic_config "$context_base_package_root" "$context_base_config"',
+        '"--config=${head_config}"',
+        '"--config=${base_config}"',
+        '"--config=${context_base_config}"',
+        'TLDW_VITEST_ORDER_REPORT="$head_order_report"',
+        'TLDW_VITEST_ORDER_REPORT="$base_order_report"',
+        'TLDW_VITEST_ORDER_REPORT="$context_order_report"',
+        '"--reporter=${ORDER_REPORTER}"',
+        '--order-report "$head_order_report"',
+        '--head-order-report "$head_order_report"',
+        '--base-order-report "$context_order_report"',
+    )
+    missing = [contract for contract in required_contracts if contract not in run_script]
+    assert not missing, f"deterministic Vitest contracts missing: {missing}"
+
+
+@pytest.mark.unit
+def test_package_ratchet_preserves_context_after_failed_file_mismatch() -> None:
+    """Replay the full inherited shard only after a comparable fast-path miss."""
+
+    workflow = yaml.safe_load(
+        Path(".github/workflows/frontend-required.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["frontend-unit-tests"]["steps"]
+    unit_step = next(
+        step for step in steps if step.get("name") == "Run package-owned frontend unit tests"
+    )
+    run_script = str(unit_step["run"])
+
+    required_contracts = (
+        "USE_DIRECT_TESTS=0\nPRESERVE_IMPACT_CONTEXT=1",
+        "USE_DIRECT_TESTS=1\n  PRESERVE_IMPACT_CONTEXT=0",
+        'direct_test_files+=("./${relative_file}")',
+        'local context_base_worktree="${RUNNER_TEMP}/frontend-unit-base-context-',
+        'create_base_worktree "$context_base_worktree" "pristine context-base"',
+        'local context_report="${RUNNER_TEMP}/${label}-base-context-',
+        'local context_files_path="${RUNNER_TEMP}/${label}-context-files-',
+        "if (( head_status != 1 )); then",
+        'failed_files+=("./${test_file}")',
+        "if (( base_status != 0 && base_status != 1 )); then",
+        "if (( compare_status != 1 || PRESERVE_IMPACT_CONTEXT != 1 )); then",
+        'python3 "$RATCHET_SCRIPT" extract-context',
+        '[[ "$test_file" == /* || "$test_file" == ../* || "$test_file" == */../* || "$test_file" == */.. || "$test_file" == *$\'\\r\'* ]]',
+        'if [[ ! -f "$head_package_root/$test_file" || ! -f "$context_base_package_root/$test_file" ]]; then',
+        'context_files+=("./${test_file}")',
+        'if (( ${#context_files[@]} > 5000 )); then',
+        'bunx vitest run "${context_files[@]}"',
+        '"${context_vitest_args[@]}"',
+        "if (( context_status != 0 && context_status != 1 )); then",
+        '--base-package-root "$context_base_package_root"',
+        "--require-equivalent-context",
+        'python3 "$RATCHET_SCRIPT" compare',
+    )
+    missing = [contract for contract in required_contracts if contract not in run_script]
+
+    assert not missing, f"package context-ratchet contracts missing: {missing}"
+    assert run_script.count('python3 "$RATCHET_SCRIPT" compare') >= 2
+
+
+@pytest.mark.unit
+def test_package_ratchet_isolates_base_worktrees_per_package_and_replay() -> None:
+    """Prevent cached transforms or test side effects from crossing replay scopes."""
+
+    workflow = yaml.safe_load(
+        Path(".github/workflows/frontend-required.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["frontend-unit-tests"]["steps"]
+    unit_step = next(
+        step for step in steps if step.get("name") == "Run package-owned frontend unit tests"
+    )
+    run_script = str(unit_step["run"])
+
+    assert (
+        'local base_worktree="${RUNNER_TEMP}/frontend-unit-base-'
+        '${{ matrix.shard }}-${label}"' in run_script
+    )
+    assert (
+        'local context_base_worktree="${RUNNER_TEMP}/frontend-unit-base-context-'
+        '${{ matrix.shard }}-${label}"' in run_script
+    )
+    assert 'create_base_worktree "$base_worktree" "exact-base"' in run_script
+    assert (
+        'create_base_worktree "$context_base_worktree" "pristine context-base"'
+        in run_script
+    )
+    assert "BASE_READY=" not in run_script
+    assert "CONTEXT_BASE_READY=" not in run_script
+    assert 'BASE_WORKTREE="${RUNNER_TEMP}/frontend-unit-base-' not in run_script
+    assert (
+        'CONTEXT_BASE_WORKTREE="${RUNNER_TEMP}/frontend-unit-base-context-'
+        not in run_script
+    )
 
 
 @pytest.mark.unit

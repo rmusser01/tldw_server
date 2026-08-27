@@ -640,7 +640,7 @@ constants, and checked-out artifacts. A manual `workflow_dispatch` inherits
 the trust of the selected workflow ref. The final pinned digests are:
 
 ```text
-ratchet helper:  cdb398d906152e741fe01636a18c4ac1f1bfec59ff78bad7b21d02212fcd1a9f
+ratchet helper:  1426966c059f9ff8080e33ffedba02cf6c3794369251283d715b4342908890e4
 safety reporter: 433e8ab9a163694775fa4a50ceae2f7722358331d1f8f4426ec7ec31e36e93f3
 ```
 
@@ -735,6 +735,102 @@ failures. Both reproduce unchanged on the exact base: the stale
 `ui-watchlists-extension-e2e.yml` route manifest and a PostgreSQL schema test
 that rejects the valid `public.users` qualification. They are documented as
 current-base defects and were not folded into this already broad webhook PR.
+
+## Frontend Dependency-Impact Shard Remediation
+
+The exact-head frontend unit job `98053488515` failed in shard 5 after all
+other completed checks had passed. The shard ran 1,942 tests across 522 suites.
+It reported 10 failed assertions and one collection failure caused by the
+unchanged `Playground.cockpit-shell.test.tsx` mock omitting the upstream
+`LEGACY_SERVICE_PROMPT_DEFAULTS` export. The test and its source import chain
+are unchanged from exact base `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`.
+
+The first exact-base policy replayed only the seven files reported as failed.
+That isolated replay reproduced six failed assertions plus the collection
+failure on head and base, yielding `inherited=7 regressions=0`. Five other
+failures from the hosted shard passed in isolation because they depend on the
+complete shard's module and test-order context. Treating that mismatch as a
+product regression would be a false red; accepting it without an exact-base
+comparison would be a false green.
+
+The package ratchet now keeps its fast failed-file replay. When that
+well-formed comparison returns the normal regression status `1` after the head
+ran in dependency-impact mode, it extracts the validated execution manifest
+and replays those modules at the exact base. This applies to bounded dependency
+impact and the existing greater-than-500/no-direct-test fallback; direct-test
+mode remains bounded and does not enter context replay. The explicit manifest
+is not sharded a second time.
+
+Both revisions run through a pinned path-ordering sequencer, and a separately
+pinned reporter records every `onTestModuleStart` event. This distinction is
+required because Vitest 4.0.18 sorts the execution pool through the sequencer
+but gives its built-in JSON reporter the original pre-sequencing specification
+array. A first hardened comparison correctly rejected the head/base JSON array
+order even though sorting the assertion-bearing file start timestamps showed
+the same order. The final policy does not infer execution order from JSON.
+It validates the reporter sidecar against the JSON module set, extracts the head
+manifest in observed runtime order, and requires a byte-equivalent base runtime
+order. Test identities and file-local order, suite identities and statuses, and
+every reconciled test/suite counter must also match before failures are compared.
+
+Fast and context replays use separate, newly-created detached worktrees for
+each package, each with a frozen dependency install. This prevents Vitest cache
+state or test side effects from crossing packages or replay modes. The workflow
+rejects non-test Vitest exit codes, malformed comparator status,
+absolute/traversal/CR paths, files absent from either revision, empty context,
+and context above 5,000 modules. Extracted paths are prefixed with `./` before
+reaching Vitest.
+
+Non-strict package ratchets can now compare a zero-assertion collection
+failure by package-relative file plus its exact normalized diagnostic message.
+Checkout-specific package and repository roots are normalized while diagnostic
+suffixes remain exact. Missing diagnostics, changed diagnostics, failures in
+changed test files, and file-level failures after assertion collection remain
+blocking. Strict admin UI validation still rejects every file-level error
+before this comparison, so its safety contract is unchanged.
+
+Final review also closed the remaining fail-open edges. Package comparisons now retain
+duplicate failure multiplicity and require normalized assertion diagnostics in
+both strict and non-strict modes. Package reports also reject a nonempty
+file-level diagnostic whenever assertions were collected, so an inherited
+assertion cannot mask a new hook error; a nonempty file diagnostic is permitted
+only for a failed zero-assertion collection result in package mode.
+Runtime-order sidecars accept only integer schema version `1`. Suite
+reconciliation now follows observed Vitest 4.0.18 behavior for completed
+skipped/disabled assertions: the assertions remain pending-test counts while
+their completed containing suites count as passed. A captured all-skipped
+Vitest JSON report is retained as the regression fixture.
+
+Fresh local proof against the exact base:
+
+```text
+dependency-impact discovery: 2,028 candidate files
+head shard 5 manifest:        253 unique runtime-ordered modules
+fresh exact-base manifest:    253 byte-identical runtime-ordered modules
+head shard 5:                 1,942 tests, 522 suites, 10 failed assertions
+fresh exact-base replay:      1,942 tests, 522 suites, 10 failed assertions
+test identities/status/order: exact match after canonical module serialization
+suite identities/statuses:    exact match with counters reconciled to structure
+file-level failures:          1 matching collection diagnostic on each side
+ratchet comparison:           inherited=11 regressions=0, exit 0
+Python CI contracts:          102 passed, 6 warnings
+Ruff:                         PASS
+embedded workflow Bash:       PASS (bash -n)
+git diff --check:             PASS
+```
+
+The helper remains pinned at both package and strict admin ratchet call sites.
+The package-only sequencer and runtime-order reporter are pinned with it:
+
+```text
+ratchet helper:          1426966c059f9ff8080e33ffedba02cf6c3794369251283d715b4342908890e4
+path sequencer:          5393dd2f8652fe784c0cc268f3b52b4438bedb7dfdce23e579babf972c42dafd
+runtime-order reporter:  6c0c06d6a85b8638868d63e243feb757e61ba399c1f5a1da9c55d8e2fb17cb8e
+```
+
+This is local exact-revision evidence. A new pushed source commit, refreshed
+Qodo review, and exact-head GitHub Actions run remain required before the task
+or PR can be considered complete.
 
 ## Upstream Admin UI Baselines
 

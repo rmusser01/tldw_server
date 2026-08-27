@@ -216,7 +216,10 @@ def test_frontend_required_uses_isolated_vitest_shards() -> None:
         'git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA"'
         in test_run_script
     )
-    assert 'git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"' in test_run_script
+    assert (
+        'git worktree add --detach "$worktree_path" "$BASE_SHA"'
+        in test_run_script
+    )
     assert "bun install --frozen-lockfile" in test_run_script
     assert 'run_package "frontend" "apps/tldw-frontend" "../packages/ui/**"' in test_run_script
     assert 'run_package "ui" "apps/packages/ui" ""' in test_run_script
