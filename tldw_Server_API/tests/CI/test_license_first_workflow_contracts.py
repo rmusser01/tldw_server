@@ -60,7 +60,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "e2e-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
     "e2e-smoke.yml": "47fa5c3b099aeee7d744da19e5c8db6f403d82963b9d19b9f60292f0377d7180",
     "frontend-e2e-tiers.yml": "c157a675e397e879a8b394b26a99e472dfbe87f5f3f6236c63907d6d21897a79",
-    "frontend-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "frontend-required.yml": "3b0371351439f7a458a405b3238da9cc540d34fdb377423c1a39f3978e601978",
     "frontend-ux-gates.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
     "jobs-suite.yml": "023309eacbc53b533c94c56e00e710422e6e5885ba06a0921524964db7cf4476",
     "mcp-unified-rc.yml": "8b1a9335ecab966807fcf0a8c81560b264942decc458cd9bc98275d6062310aa",
@@ -503,7 +503,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert combined_text.count("github.event.pull_request.number") == 27
     assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 55
     assert combined_text.count("github.event.pull_request.head.sha") == 52
-    assert combined_text.count("github.event.pull_request.base.sha") == 4
+    assert combined_text.count("github.event.pull_request.base.sha") == 5
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
 
     for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():
@@ -562,15 +562,6 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert 'git fetch --no-tags --depth=1 origin "$BASE_SHA"' in backend_mypy_script
     assert 'git fetch --no-tags --depth=1 origin "$HEAD_SHA"' in backend_mypy_script
 
-    frontend_text = workflows["frontend-required.yml"][1]
-    assert (
-        'if [[ "${{ github.event_name }}" == "pull_request" || '
-        '"${{ github.event_name }}" == "workflow_run" ]]; then'
-    ) in frontend_text
-    assert (
-        'BASE_SHA="${{ needs.admission.outputs.base_sha || '
-        'github.event.pull_request.base.sha }}"'
-    ) in frontend_text
     frontend_unit_job = workflows["frontend-required.yml"][0]["jobs"]["frontend-unit-tests"]
     frontend_checkout = next(
         step
@@ -578,16 +569,34 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         if step.get("name") == "Checkout"
     )
     assert frontend_checkout["with"]["fetch-depth"] == 0
-    frontend_unit_script = next(
-        step["run"]
+    frontend_unit_step = next(
+        step
         for step in frontend_unit_job["steps"]
         if step.get("name") == "Run package-owned frontend unit tests"
     )
+    expected_ratchet_base_env = {
+        "RATCHET_BASE_SHA": (
+            "${{ needs.admission.outputs.base_sha || "
+            "github.event.pull_request.base.sha || inputs.base_sha }}"
+        )
+    }
+    assert frontend_unit_step["env"] == expected_ratchet_base_env
+    frontend_unit_script = frontend_unit_step["run"]
+    assert 'BASE_SHA="$RATCHET_BASE_SHA"' in frontend_unit_script
     assert 'git cat-file -e "${BASE_SHA}^{commit}"' in frontend_unit_script
     assert 'git fetch --no-tags --depth=1 origin "$BASE_SHA"' in frontend_unit_script
     assert frontend_unit_script.index('git cat-file -e "${BASE_SHA}^{commit}"') < (
         frontend_unit_script.index('package_vitest_args=("--changed=${BASE_SHA}"')
     )
+
+    frontend_required_job = workflows["frontend-required.yml"][0]["jobs"]["frontend-required"]
+    admin_unit_step = next(
+        step
+        for step in frontend_required_job["steps"]
+        if step.get("name") == "Run admin-ui unit tests"
+    )
+    assert admin_unit_step["env"] == expected_ratchet_base_env
+    assert 'BASE_SHA="$RATCHET_BASE_SHA"' in admin_unit_step["run"]
 
     pre_commit = workflows["pre-commit.yml"][0]
     pre_commit_script = next(

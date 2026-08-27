@@ -984,6 +984,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
@@ -2467,6 +2469,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
@@ -3821,6 +3825,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
@@ -5098,6 +5104,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py
@@ -6381,6 +6389,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_link_migration_v58.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_migration_v61.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_notes_moodboard_studio_sync_postgres_tenancy.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py
               tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_migration_v56.py

@@ -913,3 +913,64 @@ clean suite; they are governed by the strict exact-base ratchet.
   delivery history, and activation readiness remain absent from PR 1.
 - Two unrelated untracked watchlist template files were excluded from every
   commit and verification artifact.
+
+## Final Rebase Onto Advanced Dev
+
+After source `51f204b5c1ed779bc335088af673f227f715bc89` was pushed,
+`dev` had advanced by 106 commits and GitHub reported the PR as conflicted. The
+45 PR commits were rebased onto exact base
+`2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`. The only conflict was the
+generated OpenAPI fingerprint. It was regenerated from the fully rebased API,
+and the frontend API generation command completed with the dependency-complete
+Python 3.11 environment:
+
+```text
+OpenAPI paths:    2,040
+OpenAPI schemas:  3,037
+OpenAPI SHA-256:  a4c4b6b24aea9cfbaa4102595c29988e5ed8041e10574ff798773bf0d0ef09b4
+drift check:      PASS
+```
+
+The rebase exposed an inherited `dev` CI coverage gap. Two new
+ChaChaNotesDB moodboard-studio tests were absent from every full-suite shard,
+and the required workflow contract failed identically on exact base. Both
+files are now assigned to the existing `chacha-content-persona` shard in all
+five matrices. Running the resulting 95-case shard order exposed one more
+exact-base test defect: its finite fake clock replaced the process-wide
+`time.monotonic`, so unrelated logging could consume a sample and raise
+`StopIteration`. The production migration was unchanged; the test now replaces
+only the `ChaChaNotes_DB.time` module reference with a deterministic fake.
+
+Final post-rebase local evidence:
+
+```text
+CI ratchet/workflow contracts:       116 passed, 2 warnings
+frontend-required embedded Bash:      22/22 syntax checks passed
+new ChaChaNotesDB shard files:         67 passed, 28 expected PostgreSQL skips
+Admin_Webhooks non-PostgreSQL suite:  302 passed, 24 deselected
+admin webhook UI focused suite:        77 passed across 7 files
+admin UI typecheck:                    PASS
+OpenAPI drift check:                   PASS
+focused Ruff and py_compile:           PASS
+```
+
+The initial 102-test ratchet/workflow subset omitted the license-first freeze
+contracts. Adding that module to the final local gate exposed three stale
+expectations from this PR's intentional exact-base workflow changes: the
+`workflow_dispatch` trigger digest, the direct pull-request base-reference
+count, and the removed inline event-branching script. The contract now freezes
+the required `base_sha` dispatch input and verifies both frontend and admin
+ratchet steps receive the same structured `RATCHET_BASE_SHA` expression. The
+complete 116-test contract set passes after that reconciliation.
+
+The upstream frontend typecheck reports 80 errors, but the extracted error
+lines are byte-identical on exact base `2306c1939f`; none of the reported source
+files differs in this PR. That inherited base failure is not represented as a
+PR regression. The worktree-local OpenAPI Make target lacked FastAPI, and the
+first frontend generator attempt selected a pre-3.10 system Python; both were
+environment-only failures before the successful Python 3.11 generation above.
+
+The 253-module deterministic ratchet proof in the earlier section is bound to
+the pre-rebase exact revisions. A fresh Qodo review and complete hosted CI run
+at the rebased PR SHA remain mandatory; those hosted checks are the final
+exact-head proof against the new base.

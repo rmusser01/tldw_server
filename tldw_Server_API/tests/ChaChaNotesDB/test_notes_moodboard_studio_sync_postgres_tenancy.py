@@ -252,6 +252,13 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
     monkeypatch: pytest.MonkeyPatch,
     predict: bool,
 ) -> None:
+    class _FakeTime:
+        def __init__(self, *samples: float) -> None:
+            self._samples = iter(samples)
+
+        def monotonic(self) -> float:
+            return next(self._samples)
+
     db = object.__new__(CharactersRAGDB)
     large_json = json.dumps(
         {"sections": [{"kind": "markdown", "content": "x" * 200_000}]},
@@ -302,10 +309,9 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
         "aggregate_fingerprint": empty_fingerprint,
     }
 
-    first_clock = iter((0.0, 26.0))
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.time.monotonic",
-        lambda: next(first_clock),
+        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.time",
+        _FakeTime(0.0, 26.0),
     )
     first = db._postgres_v61_fingerprint_phase_page(
         None,
@@ -322,10 +328,9 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
         "copied_count": first["count"],
         "aggregate_fingerprint": first["fingerprint"],
     }
-    resumed_clock = iter((100.0, 100.0))
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.time.monotonic",
-        lambda: next(resumed_clock),
+        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.time",
+        _FakeTime(100.0, 100.0),
     )
     resumed = db._postgres_v61_fingerprint_phase_page(
         None,
