@@ -293,10 +293,14 @@ def test_package_ratchet_pins_and_installs_deterministic_vitest_config() -> None
         '"--reporter=${ORDER_REPORTER}"',
         '--order-report "$head_order_report"',
         '--head-order-report "$head_order_report"',
+        '--base-order-report "$base_order_report"',
         '--base-order-report "$context_order_report"',
     )
     missing = [contract for contract in required_contracts if contract not in run_script]
     assert not missing, f"deterministic Vitest contracts missing: {missing}"
+    assert run_script.count('--head-order-report "$head_order_report"') == 2
+    assert run_script.count('--base-order-report "$base_order_report"') == 1
+    assert run_script.count('--base-order-report "$context_order_report"') == 1
 
 
 @pytest.mark.unit

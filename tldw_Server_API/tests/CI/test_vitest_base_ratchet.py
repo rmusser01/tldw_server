@@ -32,6 +32,7 @@ def _write_report(
                 "status": "failed",
                 "assertionResults": [
                     {
+                        "title": full_name,
                         "fullName": full_name,
                         "status": "failed",
                         "ancestorTitles": [],
@@ -189,6 +190,57 @@ def _write_order_report(path: Path, modules: tuple[str, ...]) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _write_structured_order_report(
+    path: Path,
+    modules: tuple[str, ...],
+    failures: list[dict[str, object]],
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 3,
+                "moduleCount": len(modules),
+                "modules": list(modules),
+                "suiteCount": len(modules),
+                "suites": [
+                    {
+                        "module": module,
+                        "path": [],
+                        "name": module,
+                        "state": "failed",
+                        "mode": None,
+                    }
+                    for module in modules
+                ],
+                "failureCount": len(failures),
+                "failures": failures,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _structured_failure(
+    module: str,
+    full_name: str,
+    message: str,
+    stacks: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "module": module,
+        "ancestorTitles": [],
+        "title": full_name,
+        "fullName": full_name,
+        "errors": [
+            {
+                "name": "AssertionError",
+                "message": message,
+                "stacks": stacks,
+            }
+        ],
+    }
 
 
 def test_failing_test_files_normalizes_and_sorts_package_paths(tmp_path: Path) -> None:
@@ -1773,10 +1825,10 @@ def test_package_compare_rejects_changed_failure_cause(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_package_compare_ignores_volatile_node_scheduler_frames(
+def test_package_compare_preserves_raw_node_scheduler_frames_without_provenance(
     tmp_path: Path,
 ) -> None:
-    """Do not turn optional Node scheduler frames into a regression."""
+    """Fail closed when raw diagnostic text only looks like a stack trace."""
 
     head_root = tmp_path / "head" / "apps" / "packages" / "ui"
     base_root = tmp_path / "base" / "apps" / "packages" / "ui"
@@ -1819,8 +1871,332 @@ def test_package_compare_ignores_volatile_node_scheduler_frames(
         changed_files_path=changed_files,
     )
 
+    assert not result.passes
+    assert result.inherited == ()
+    assert result.regressions[0].failure_messages == (
+        "route failed at <PACKAGE_ROOT>/src/route.test.ts:42:7\n"
+        "    at routeHandler (<PACKAGE_ROOT>/src/route.test.ts:42:7)\n"
+        "    at runNextTicks (node:internal/process/task_queues:65:5)\n"
+        "    at processTimers (node:internal/timers:538:9)",
+    )
+
+
+@pytest.mark.unit
+def test_package_compare_uses_structured_failure_provenance(
+    tmp_path: Path,
+) -> None:
+    """Normalize scheduler frames only when Vitest identifies structured frames."""
+
+    head_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    base_root = tmp_path / "base" / "apps" / "packages" / "ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_order_report = tmp_path / "head-order.json"
+    base_order_report = tmp_path / "base-order.json"
+    changed_files = tmp_path / "changed.txt"
+    relative_path = "src/route.test.ts"
+    full_name = "route stays protected"
+    failures = {relative_path: [full_name]}
+    _write_report(
+        head_report,
+        head_root,
+        failures,
+        failure_messages={
+            relative_path: [
+                f"route failed at {head_root}/src/route.test.ts:42:7\n"
+                f"    at routeHandler ({head_root}/src/route.test.ts:42:7)\n"
+                "    at runNextTicks (node:internal/process/task_queues:65:5)\n"
+                "    at processTimers (node:internal/timers:538:9)\n"
+                f"    at VitestRunner.run ({head_root}/node_modules/vitest/runner.js:10:2)"
+            ]
+        },
+    )
+    _write_report(
+        base_report,
+        base_root,
+        failures,
+        failure_messages={
+            relative_path: [
+                f"route failed at {base_root}/src/route.test.ts:42:7\n"
+                f"    at routeHandler ({base_root}/src/route.test.ts:42:7)\n"
+                f"    at VitestRunner.run ({base_root}/node_modules/vitest/runner.js:99:8)"
+            ]
+        },
+    )
+    _write_structured_order_report(
+        head_order_report,
+        (relative_path,),
+        [
+            _structured_failure(
+                relative_path,
+                full_name,
+                f"route failed at {head_root}/src/route.test.ts:42:7",
+                [
+                    {
+                        "method": "routeHandler",
+                        "file": f"{head_root}/src/route.test.ts",
+                        "line": 42,
+                        "column": 7,
+                    },
+                    {
+                        "method": "runNextTicks",
+                        "file": "node:internal/process/task_queues",
+                        "line": 65,
+                        "column": 5,
+                    },
+                    {
+                        "method": "processTimers",
+                        "file": "node:internal/timers",
+                        "line": 538,
+                        "column": 9,
+                    },
+                ],
+            )
+        ],
+    )
+    _write_structured_order_report(
+        base_order_report,
+        (relative_path,),
+        [
+            _structured_failure(
+                relative_path,
+                full_name,
+                f"route failed at {base_root}/src/route.test.ts:42:7",
+                [
+                    {
+                        "method": "routeHandler",
+                        "file": f"{base_root}/src/route.test.ts",
+                        "line": 42,
+                        "column": 7,
+                    }
+                ],
+            )
+        ],
+    )
+    changed_files.write_text("apps/packages/ui/src/runtime.ts\n", encoding="utf-8")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("apps/packages/ui"),
+        changed_files_path=changed_files,
+        head_order_report_path=head_order_report,
+        base_order_report_path=base_order_report,
+    )
+
     assert result.passes
     assert len(result.inherited) == 1
+    assert result.regressions == ()
+
+
+@pytest.mark.unit
+def test_package_compare_preserves_scheduler_text_in_structured_messages(
+    tmp_path: Path,
+) -> None:
+    """Never classify scheduler-looking error.message content as a parsed frame."""
+
+    head_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    base_root = tmp_path / "base" / "apps" / "packages" / "ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_order_report = tmp_path / "head-order.json"
+    base_order_report = tmp_path / "base-order.json"
+    changed_files = tmp_path / "changed.txt"
+    relative_path = "src/route.test.ts"
+    full_name = "route stays protected"
+    failures = {relative_path: [full_name]}
+    _write_report(head_report, head_root, failures)
+    _write_report(base_report, base_root, failures)
+    base_message = "route failed\n    at rendered (/diagnostics/view.ts:12:3)"
+    head_message = (
+        f"{base_message}\n"
+        "    at runNextTicks (node:internal/process/task_queues:65:5)"
+    )
+    _write_structured_order_report(
+        head_order_report,
+        (relative_path,),
+        [_structured_failure(relative_path, full_name, head_message, [])],
+    )
+    _write_structured_order_report(
+        base_order_report,
+        (relative_path,),
+        [_structured_failure(relative_path, full_name, base_message, [])],
+    )
+    changed_files.write_text("apps/packages/ui/src/runtime.ts\n", encoding="utf-8")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("apps/packages/ui"),
+        changed_files_path=changed_files,
+        head_order_report_path=head_order_report,
+        base_order_report_path=base_order_report,
+    )
+
+    assert not result.passes
+    fingerprint = json.loads(result.regressions[0].failure_messages[0])
+    assert fingerprint["message"] == head_message
+    assert fingerprint["stacks"] == []
+
+
+@pytest.mark.unit
+def test_package_compare_rejects_one_sided_failure_provenance(tmp_path: Path) -> None:
+    """Do not silently fall back when only one checkout has provenance."""
+
+    head_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    base_root = tmp_path / "base" / "apps" / "packages" / "ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_order_report = tmp_path / "head-order.json"
+    changed_files = tmp_path / "changed.txt"
+    relative_path = "src/route.test.ts"
+    full_name = "route stays protected"
+    failures = {relative_path: [full_name]}
+    _write_report(head_report, head_root, failures)
+    _write_report(base_report, base_root, failures)
+    _write_structured_order_report(
+        head_order_report,
+        (relative_path,),
+        [
+            _structured_failure(
+                relative_path,
+                full_name,
+                "expected true to be false",
+                [],
+            )
+        ],
+    )
+    changed_files.write_text("apps/packages/ui/src/runtime.ts\n", encoding="utf-8")
+
+    with pytest.raises(RatchetError, match="head and base execution-order reports"):
+        compare_reports(
+            head_report=head_report,
+            base_report=base_report,
+            head_package_root=head_root,
+            base_package_root=base_root,
+            package_repo_path=Path("apps/packages/ui"),
+            changed_files_path=changed_files,
+            head_order_report_path=head_order_report,
+        )
+
+
+@pytest.mark.unit
+def test_package_compare_rejects_malformed_failure_provenance(tmp_path: Path) -> None:
+    """Reject a schema-3 sidecar that omits its structured failures."""
+
+    head_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    base_root = tmp_path / "base" / "apps" / "packages" / "ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_order_report = tmp_path / "head-order.json"
+    base_order_report = tmp_path / "base-order.json"
+    changed_files = tmp_path / "changed.txt"
+    relative_path = "src/route.test.ts"
+    full_name = "route stays protected"
+    failures = {relative_path: [full_name]}
+    _write_report(head_report, head_root, failures)
+    _write_report(base_report, base_root, failures)
+    structured_failures = [
+        _structured_failure(
+            relative_path,
+            full_name,
+            "expected true to be false",
+            [],
+        )
+    ]
+    _write_structured_order_report(
+        head_order_report,
+        (relative_path,),
+        structured_failures,
+    )
+    _write_structured_order_report(
+        base_order_report,
+        (relative_path,),
+        structured_failures,
+    )
+    base_payload = json.loads(base_order_report.read_text(encoding="utf-8"))
+    del base_payload["failures"]
+    base_order_report.write_text(json.dumps(base_payload), encoding="utf-8")
+    changed_files.write_text("apps/packages/ui/src/runtime.ts\n", encoding="utf-8")
+
+    with pytest.raises(RatchetError, match="missing structured failures"):
+        compare_reports(
+            head_report=head_report,
+            base_report=base_report,
+            head_package_root=head_root,
+            base_package_root=base_root,
+            package_repo_path=Path("apps/packages/ui"),
+            changed_files_path=changed_files,
+            head_order_report_path=head_order_report,
+            base_order_report_path=base_order_report,
+        )
+
+
+@pytest.mark.unit
+def test_package_compare_consumes_duplicate_structured_failure_identities(
+    tmp_path: Path,
+) -> None:
+    """Preserve duplicate failures instead of overwriting them by identity."""
+
+    head_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    base_root = tmp_path / "base" / "apps" / "packages" / "ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_order_report = tmp_path / "head-order.json"
+    base_order_report = tmp_path / "base-order.json"
+    changed_files = tmp_path / "changed.txt"
+    relative_path = "src/route.test.ts"
+    full_name = "duplicate route check"
+    failures = {relative_path: [full_name, full_name]}
+    _write_report(
+        head_report,
+        head_root,
+        failures,
+        failure_messages={
+            relative_path: ["raw head error one", "raw head error two"]
+        },
+    )
+    _write_report(
+        base_report,
+        base_root,
+        failures,
+        failure_messages={
+            relative_path: ["raw base error one", "raw base error two"]
+        },
+    )
+    structured_failures = [
+        _structured_failure(relative_path, full_name, "first error", []),
+        _structured_failure(relative_path, full_name, "second error", []),
+    ]
+    _write_structured_order_report(
+        head_order_report,
+        (relative_path,),
+        structured_failures,
+    )
+    _write_structured_order_report(
+        base_order_report,
+        (relative_path,),
+        structured_failures,
+    )
+    changed_files.write_text("apps/packages/ui/src/runtime.ts\n", encoding="utf-8")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("apps/packages/ui"),
+        changed_files_path=changed_files,
+        head_order_report_path=head_order_report,
+        base_order_report_path=base_order_report,
+    )
+
+    assert result.passes
+    assert len(result.inherited) == 2
     assert result.regressions == ()
 
 
@@ -1872,10 +2248,10 @@ def test_package_compare_preserves_exact_scheduler_looking_assertion_content(
 
 
 @pytest.mark.unit
-def test_package_compare_does_not_treat_rendered_at_text_as_stack_context(
+def test_package_compare_preserves_rendered_at_text_in_raw_fallback(
     tmp_path: Path,
 ) -> None:
-    """Require a source location before stripping a scheduler-looking line."""
+    """Preserve raw diagnostic text that happens to use indented at-lines."""
 
     head_root = tmp_path / "head" / "apps" / "packages" / "ui"
     base_root = tmp_path / "base" / "apps" / "packages" / "ui"
@@ -1926,7 +2302,7 @@ def test_package_compare_does_not_treat_rendered_at_text_as_stack_context(
 def test_package_compare_preserves_scheduler_only_failure_messages(
     tmp_path: Path,
 ) -> None:
-    """Treat scheduler-looking text without stack context as diagnostic content."""
+    """Treat scheduler-looking raw text as diagnostic content."""
 
     head_root = tmp_path / "head" / "apps" / "packages" / "ui"
     base_root = tmp_path / "base" / "apps" / "packages" / "ui"
@@ -1969,7 +2345,7 @@ def test_package_compare_preserves_scheduler_only_failure_messages(
 def test_package_compare_preserves_scheduler_markers_in_custom_diagnostics(
     tmp_path: Path,
 ) -> None:
-    """Do not erase marker text outside an actual V8 stack frame."""
+    """Do not erase scheduler markers from raw custom diagnostics."""
 
     head_root = tmp_path / "head" / "apps" / "packages" / "ui"
     base_root = tmp_path / "base" / "apps" / "packages" / "ui"

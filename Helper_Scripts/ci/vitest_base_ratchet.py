@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,16 +38,11 @@ _SAFETY_BLOCKING_COUNTERS = (
     "incompleteSuiteCount",
     "incompleteTestCount",
 )
-_VOLATILE_NODE_SCHEDULER_FRAME_PATTERNS = (
-    re.compile(
-        r"\s*at runNextTicks \(node:internal/process/task_queues:\d+:\d+\)\s*"
-    ),
-    re.compile(r"\s*at processTimers \(node:internal/timers:\d+:\d+\)\s*"),
-)
-_V8_STACK_FRAME_PATTERN = re.compile(r"\s+at .+")
-_V8_SOURCE_FRAME_PATTERN = re.compile(
-    r"\s+at (?:.+ \()?(?:file://)?"
-    r"(?:<PACKAGE_ROOT>|<REPOSITORY_ROOT>|/).+:\d+:\d+\)?\s*"
+_VOLATILE_NODE_SCHEDULER_FRAMES = frozenset(
+    {
+        ("runNextTicks", "node:internal/process/task_queues"),
+        ("processTimers", "node:internal/timers"),
+    }
 )
 _COLLECTION_FAILURE_FULL_NAME = "<collection failure>"
 
@@ -96,6 +90,18 @@ class ExecutionContext:
 
     modules: tuple[str, ...]
     suites: tuple[tuple[str, tuple[int, ...], str, str, str | None], ...]
+    failures: tuple[StructuredFailureProvenance, ...] | None
+
+
+@dataclass(frozen=True)
+class StructuredFailureProvenance:
+    """Record one failed test and canonical Vitest-parsed error fingerprints."""
+
+    file: str
+    ancestor_titles: tuple[str, ...]
+    title: str
+    full_name: str
+    failure_messages: tuple[str, ...]
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -155,11 +161,21 @@ def _normalize_failure_message(
     package_root: Path,
     repository_root: Path | None = None,
 ) -> str:
-    """Normalize checkout-specific package and repository roots in a failure."""
+    """Normalize checkout-specific roots without interpreting diagnostic text."""
 
     if not isinstance(raw_message, str) or not raw_message.strip():
         raise RatchetError("failure has an empty or invalid diagnostic message")
-    normalized = raw_message
+    return _normalize_checkout_roots(raw_message, package_root, repository_root)
+
+
+def _normalize_checkout_roots(
+    value: str,
+    package_root: Path,
+    repository_root: Path | None,
+) -> str:
+    """Replace checkout-specific package and repository roots in trusted text."""
+
+    normalized = value
     replacements = [(package_root.resolve(), "<PACKAGE_ROOT>")]
     if repository_root is not None:
         replacements.append((repository_root.resolve(), "<REPOSITORY_ROOT>"))
@@ -171,26 +187,6 @@ def _normalize_failure_message(
     }
     for root_variant in sorted(variants, key=len, reverse=True):
         normalized = normalized.replace(root_variant, variants[root_variant])
-    lines = normalized.splitlines()
-    stack_start = len(lines)
-    while stack_start and _V8_STACK_FRAME_PATTERN.fullmatch(lines[stack_start - 1]):
-        stack_start -= 1
-
-    filtered_lines = lines[:stack_start]
-    saw_stable_frame = False
-    for line in lines[stack_start:]:
-        is_volatile = any(
-            pattern.fullmatch(line)
-            for pattern in _VOLATILE_NODE_SCHEDULER_FRAME_PATTERNS
-        )
-        if is_volatile and saw_stable_frame:
-            continue
-        filtered_lines.append(line)
-        if _V8_SOURCE_FRAME_PATTERN.fullmatch(line):
-            saw_stable_frame = True
-    normalized = "\n".join(filtered_lines)
-    if not normalized.strip():
-        raise RatchetError("failure has an empty diagnostic after normalization")
     return normalized
 
 
@@ -457,10 +453,180 @@ def _load_report_context(report_path: Path, package_root: Path) -> ReportContext
     )
 
 
+def _structured_error_fingerprint(
+    raw_error: object,
+    order_report_path: Path,
+    package_root: Path,
+    repository_root: Path | None,
+) -> str:
+    """Canonicalize one reporter-validated error without parsing raw stack text."""
+
+    if not isinstance(raw_error, dict) or set(raw_error) != {
+        "name",
+        "message",
+        "stacks",
+    }:
+        raise RatchetError(
+            f"Vitest order report {order_report_path} has an invalid structured error"
+        )
+    name = raw_error["name"]
+    if name is not None and (
+        not isinstance(name, str) or not name.strip()
+    ):
+        raise RatchetError(
+            f"Vitest order report {order_report_path} has an invalid error name"
+        )
+    message = _normalize_failure_message(
+        raw_error["message"],
+        package_root,
+        repository_root,
+    )
+    raw_stacks = raw_error["stacks"]
+    if not isinstance(raw_stacks, list):
+        raise RatchetError(
+            f"Vitest order report {order_report_path} has invalid structured stacks"
+        )
+    stacks: list[dict[str, object]] = []
+    for raw_frame in raw_stacks:
+        if not isinstance(raw_frame, dict) or set(raw_frame) != {
+            "method",
+            "file",
+            "line",
+            "column",
+        }:
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has an invalid stack frame"
+            )
+        method = raw_frame["method"]
+        file = raw_frame["file"]
+        line = raw_frame["line"]
+        column = raw_frame["column"]
+        if (
+            not isinstance(method, str)
+            or not isinstance(file, str)
+            or not file.strip()
+            or isinstance(line, bool)
+            or not isinstance(line, int)
+            or line < 0
+            or isinstance(column, bool)
+            or not isinstance(column, int)
+            or column < 0
+        ):
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has an invalid stack frame"
+            )
+        if (method, file) in _VOLATILE_NODE_SCHEDULER_FRAMES:
+            continue
+        stacks.append(
+            {
+                "method": method,
+                "file": _normalize_checkout_roots(
+                    file,
+                    package_root,
+                    repository_root,
+                ),
+                "line": line,
+                "column": column,
+            }
+        )
+    return json.dumps(
+        {"name": name, "message": message, "stacks": stacks},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _load_structured_failure_provenance(
+    payload: dict[str, Any],
+    order_report_path: Path,
+    package_root: Path,
+    repository_root: Path | None,
+    report_context: ReportContext,
+) -> tuple[StructuredFailureProvenance, ...]:
+    """Validate schema-3 failed-test identities and structured diagnostics."""
+
+    failure_count = _nonnegative_int(payload, "failureCount", order_report_path)
+    raw_failures = payload.get("failures")
+    if not isinstance(raw_failures, list):
+        raise RatchetError(
+            f"Vitest order report {order_report_path} is missing structured failures"
+        )
+    if failure_count != len(raw_failures):
+        raise RatchetError(
+            f"Vitest order report {order_report_path} failureCount does not match failures"
+        )
+    counters = dict(report_context.counters)
+    if failure_count != counters["numFailedTests"]:
+        raise RatchetError(
+            f"Vitest order report {order_report_path} failureCount does not match JSON"
+        )
+
+    failures: list[StructuredFailureProvenance] = []
+    for raw_failure in raw_failures:
+        if not isinstance(raw_failure, dict) or set(raw_failure) != {
+            "module",
+            "ancestorTitles",
+            "title",
+            "fullName",
+            "errors",
+        }:
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has an invalid structured failure"
+            )
+        module = _relative_test_path(raw_failure["module"], package_root)
+        if module not in report_context.files:
+            raise RatchetError(
+                f"Vitest order report {order_report_path} failure references an unknown module"
+            )
+        raw_ancestor_titles = raw_failure["ancestorTitles"]
+        if not isinstance(raw_ancestor_titles, list) or any(
+            not isinstance(title, str) or not title.strip()
+            for title in raw_ancestor_titles
+        ):
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has invalid failure ancestors"
+            )
+        title = raw_failure["title"]
+        full_name = raw_failure["fullName"]
+        if (
+            not isinstance(title, str)
+            or not title.strip()
+            or not isinstance(full_name, str)
+            or not full_name.strip()
+        ):
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has an invalid failure identity"
+            )
+        raw_errors = raw_failure["errors"]
+        if not isinstance(raw_errors, list) or not raw_errors:
+            raise RatchetError(
+                f"Vitest order report {order_report_path} failure is missing errors"
+            )
+        failures.append(
+            StructuredFailureProvenance(
+                file=module,
+                ancestor_titles=tuple(raw_ancestor_titles),
+                title=title,
+                full_name=full_name,
+                failure_messages=tuple(
+                    _structured_error_fingerprint(
+                        raw_error,
+                        order_report_path,
+                        package_root,
+                        repository_root,
+                    )
+                    for raw_error in raw_errors
+                ),
+            )
+        )
+    return tuple(failures)
+
+
 def _load_execution_context(
     order_report_path: Path,
     package_root: Path,
     report_context: ReportContext,
+    repository_root: Path | None = None,
 ) -> ExecutionContext:
     """Validate reporter-observed modules and runtime suites against Vitest JSON."""
 
@@ -469,7 +635,7 @@ def _load_execution_context(
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version not in {1, 2}
+        or schema_version not in {1, 2, 3}
     ):
         raise RatchetError(
             f"Vitest order report {order_report_path} has an unsupported schemaVersion"
@@ -500,7 +666,7 @@ def _load_execution_context(
                 f"Vitest order report {order_report_path} cannot prove counter "
                 "numTotalTestSuites with schemaVersion 1"
             )
-        return ExecutionContext(modules=modules, suites=())
+        return ExecutionContext(modules=modules, suites=(), failures=None)
 
     suite_count = _nonnegative_int(payload, "suiteCount", order_report_path)
     raw_suites = payload.get("suites")
@@ -625,6 +791,17 @@ def _load_execution_context(
                 f"Vitest order report {order_report_path} does not match JSON suite hierarchy"
             )
 
+    failure_provenance = (
+        _load_structured_failure_provenance(
+            payload,
+            order_report_path,
+            package_root,
+            repository_root,
+            report_context,
+        )
+        if schema_version == 3
+        else None
+    )
     return ExecutionContext(
         modules=modules,
         suites=tuple(
@@ -633,6 +810,7 @@ def _load_execution_context(
                 for (module, path), (name, state, mode) in runtime_suites.items()
             )
         ),
+        failures=failure_provenance,
     )
 
 
@@ -643,6 +821,7 @@ def _load_failures(
     strict: bool = False,
     safety_report_path: Path | None = None,
     repository_root: Path | None = None,
+    failure_provenance: tuple[StructuredFailureProvenance, ...] | None = None,
 ) -> tuple[FailedTest, ...]:
     """Read comparable failure identities from a Vitest JSON report."""
 
@@ -653,6 +832,19 @@ def _load_failures(
     if not isinstance(test_results, list):
         raise RatchetError(f"Vitest report {report_path} is missing testResults")
     counters = _strict_counters(payload, report_path) if strict else None
+    provenance_by_identity: dict[
+        tuple[str, tuple[str, ...], str, str],
+        deque[StructuredFailureProvenance],
+    ] = {}
+    if failure_provenance is not None:
+        for provenance in failure_provenance:
+            identity = (
+                provenance.file,
+                provenance.ancestor_titles,
+                provenance.title,
+                provenance.full_name,
+            )
+            provenance_by_identity.setdefault(identity, deque()).append(provenance)
 
     failures: list[FailedTest] = []
     assertion_status_counts: Counter[str] = Counter()
@@ -695,7 +887,8 @@ def _load_failures(
                     f"{assertion_status!r}"
                 )
             assertion_status_counts[assertion_status] += 1
-            if strict:
+            ancestor_titles = None
+            if strict or failure_provenance is not None:
                 ancestor_titles = assertion.get("ancestorTitles")
                 if (
                     not isinstance(ancestor_titles, list)
@@ -707,6 +900,9 @@ def _load_failures(
                     raise RatchetError(
                         f"Vitest result {relative_path} has invalid ancestorTitles"
                     )
+            if strict:
+                if ancestor_titles is None:
+                    raise RatchetError("strict assertion validation lost ancestorTitles")
                 suite_status = _assertion_suite_status(assertion_status)
                 suite_keys = [(relative_path,)]
                 suite_keys.extend(
@@ -776,14 +972,50 @@ def _load_failures(
                 raise RatchetError(
                     f"failed assertion in {relative_path} is missing failureMessages"
                 )
-            failure_messages = tuple(
-                _normalize_failure_message(
-                    message,
-                    package_root,
-                    repository_root,
+            if failure_provenance is None:
+                failure_messages = tuple(
+                    _normalize_failure_message(
+                        message,
+                        package_root,
+                        repository_root,
+                    )
+                    for message in raw_messages
                 )
-                for message in raw_messages
-            )
+            else:
+                title = assertion.get("title")
+                if not isinstance(title, str) or not title.strip():
+                    raise RatchetError(
+                        f"failed assertion in {relative_path} is missing title"
+                    )
+                if ancestor_titles is None:
+                    raise RatchetError(
+                        f"failed assertion in {relative_path} is missing ancestors"
+                    )
+                identity = (
+                    relative_path,
+                    tuple(ancestor_titles),
+                    title,
+                    full_name,
+                )
+                matching_provenance = provenance_by_identity.get(identity)
+                if not matching_provenance:
+                    raise RatchetError(
+                        f"failed assertion in {relative_path} is missing "
+                        "structured failure provenance"
+                    )
+                provenance = matching_provenance.popleft()
+                for message in raw_messages:
+                    _normalize_failure_message(
+                        message,
+                        package_root,
+                        repository_root,
+                    )
+                if len(raw_messages) != len(provenance.failure_messages):
+                    raise RatchetError(
+                        f"failed assertion in {relative_path} error count does not "
+                        "match structured failure provenance"
+                    )
+                failure_messages = provenance.failure_messages
             failures.append(
                 FailedTest(
                     file=relative_path,
@@ -791,6 +1023,11 @@ def _load_failures(
                     failure_messages=failure_messages,
                 )
             )
+
+    if failure_provenance is not None and any(provenance_by_identity.values()):
+        raise RatchetError(
+            f"Vitest report {report_path} has unmatched structured failure provenance"
+        )
 
     if strict:
         if counters is None:
@@ -939,7 +1176,7 @@ def _repository_root(package_root: Path, package_repo_path: Path) -> Path:
     return repository_root
 
 
-def _validate_equivalent_context(
+def _load_comparison_execution_contexts(
     *,
     head_report: Path,
     base_report: Path,
@@ -947,23 +1184,35 @@ def _validate_equivalent_context(
     base_package_root: Path,
     head_order_report_path: Path,
     base_order_report_path: Path,
-) -> None:
-    """Require equal runtime order, identities, and counters for context replay."""
+    head_repository_root: Path,
+    base_repository_root: Path,
+    require_equivalent_context: bool,
+) -> tuple[ExecutionContext, ExecutionContext]:
+    """Load paired sidecars and optionally require equivalent runtime context."""
 
     head_context = _load_report_context(head_report, head_package_root)
     base_context = _load_report_context(base_report, base_package_root)
-    if head_context.files != base_context.files:
-        raise RatchetError("head and base Vitest module manifests differ")
     head_execution = _load_execution_context(
         head_order_report_path,
         head_package_root,
         head_context,
+        head_repository_root,
     )
     base_execution = _load_execution_context(
         base_order_report_path,
         base_package_root,
         base_context,
+        base_repository_root,
     )
+    if (head_execution.failures is None) != (base_execution.failures is None):
+        raise RatchetError(
+            "head and base execution-order reports have mismatched failure provenance"
+        )
+    if not require_equivalent_context:
+        return head_execution, base_execution
+
+    if head_context.files != base_context.files:
+        raise RatchetError("head and base Vitest module manifests differ")
     if head_execution.modules != base_execution.modules:
         raise RatchetError("head and base Vitest module execution order differs")
     if head_context.tests != base_context.tests:
@@ -974,6 +1223,7 @@ def _validate_equivalent_context(
         raise RatchetError("head and base Vitest runtime suite trees differ")
     if head_context.counters != base_context.counters:
         raise RatchetError("head and base Vitest test or suite counts differ")
+    return head_execution, base_execution
 
 
 def compare_reports(
@@ -1020,18 +1270,27 @@ def compare_reports(
     package_path = _normalized_package_repo_path(package_repo_path)
     head_repository_root = _repository_root(head_package_root, package_path)
     base_repository_root = _repository_root(base_package_root, package_path)
-    if require_equivalent_context:
-        if head_order_report_path is None or base_order_report_path is None:
-            raise RatchetError(
-                "equivalent context requires head and base execution-order reports"
-            )
-        _validate_equivalent_context(
+    if (head_order_report_path is None) != (base_order_report_path is None):
+        raise RatchetError(
+            "comparison requires both head and base execution-order reports"
+        )
+    head_execution = None
+    base_execution = None
+    if head_order_report_path is not None and base_order_report_path is not None:
+        head_execution, base_execution = _load_comparison_execution_contexts(
             head_report=head_report,
             base_report=base_report,
             head_package_root=head_package_root,
             base_package_root=base_package_root,
             head_order_report_path=head_order_report_path,
             base_order_report_path=base_order_report_path,
+            head_repository_root=head_repository_root,
+            base_repository_root=base_repository_root,
+            require_equivalent_context=require_equivalent_context,
+        )
+    elif require_equivalent_context:
+        raise RatchetError(
+            "equivalent context requires head and base execution-order reports"
         )
 
     head_failures = _load_failures(
@@ -1040,6 +1299,9 @@ def compare_reports(
         strict=strict,
         safety_report_path=head_safety_report_path,
         repository_root=head_repository_root,
+        failure_provenance=(
+            head_execution.failures if head_execution is not None else None
+        ),
     )
     if not head_failures:
         raise RatchetError("head report has no failures to compare")
@@ -1049,6 +1311,9 @@ def compare_reports(
         strict=strict,
         safety_report_path=base_safety_report_path,
         repository_root=base_repository_root,
+        failure_provenance=(
+            base_execution.failures if base_execution is not None else None
+        ),
     )
     base_failures = Counter(loaded_base_failures)
     changed_files = _load_changed_files(changed_files_path, strict=strict)

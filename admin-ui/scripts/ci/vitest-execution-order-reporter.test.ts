@@ -22,6 +22,14 @@ function suite(name: string, state: string, mode: string, ...children: object[])
   };
 }
 
+function testCase(name: string, state: string, errors: object[] = []) {
+  return {
+    type: 'test',
+    name,
+    result: () => ({ state, errors }),
+  };
+}
+
 function testModule(relativeModuleId: string, state: string, ...children: object[]) {
   return {
     relativeModuleId,
@@ -53,8 +61,27 @@ describe('VitestExecutionOrderReporter', () => {
     const alpha = testModule(
       'app\\alpha.test.ts',
       'failed',
-      { type: 'test' },
-      suite('empty suite', 'failed', 'run'),
+      testCase('passes directly', 'passed'),
+      suite(
+        'failure suite',
+        'failed',
+        'run',
+        testCase('rejects invalid input', 'failed', [
+          {
+            name: 'AssertionError',
+            message: 'expected true to be false',
+            stack: 'raw stack must not be serialized',
+            stacks: [
+              {
+                method: 'rejectInput',
+                file: '/checkout/app/alpha.test.ts',
+                line: 42,
+                column: 7,
+              },
+            ],
+          },
+        ]),
+      ),
       suite('todo suite', 'skipped', 'todo'),
     );
     const beta = testModule('app/beta.test.ts', 'passed');
@@ -64,7 +91,7 @@ describe('VitestExecutionOrderReporter', () => {
     reporter.onTestRunEnd([alpha, beta]);
 
     await expect(readFile(path, 'utf-8')).resolves.toBe(
-      '{"schemaVersion":2,"moduleCount":2,"modules":["app/alpha.test.ts","app/beta.test.ts"],"suiteCount":4,"suites":[{"module":"app/alpha.test.ts","path":[],"name":"app/alpha.test.ts","state":"failed","mode":null},{"module":"app/alpha.test.ts","path":[1],"name":"empty suite","state":"failed","mode":"run"},{"module":"app/alpha.test.ts","path":[2],"name":"todo suite","state":"skipped","mode":"todo"},{"module":"app/beta.test.ts","path":[],"name":"app/beta.test.ts","state":"passed","mode":null}]}\n',
+      '{"schemaVersion":3,"moduleCount":2,"modules":["app/alpha.test.ts","app/beta.test.ts"],"suiteCount":4,"suites":[{"module":"app/alpha.test.ts","path":[],"name":"app/alpha.test.ts","state":"failed","mode":null},{"module":"app/alpha.test.ts","path":[1],"name":"failure suite","state":"failed","mode":"run"},{"module":"app/alpha.test.ts","path":[2],"name":"todo suite","state":"skipped","mode":"todo"},{"module":"app/beta.test.ts","path":[],"name":"app/beta.test.ts","state":"passed","mode":null}],"failureCount":1,"failures":[{"module":"app/alpha.test.ts","ancestorTitles":["failure suite"],"title":"rejects invalid input","fullName":"failure suite rejects invalid input","errors":[{"name":"AssertionError","message":"expected true to be false","stacks":[{"method":"rejectInput","file":"/checkout/app/alpha.test.ts","line":42,"column":7}]}]}]}\n',
     );
     await expect(readdir(dirname(path))).resolves.toEqual(['execution-order.json']);
   });
