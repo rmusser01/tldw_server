@@ -69,12 +69,12 @@ export const useWebhooksPageController = () => {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createUrl, setCreateUrl] = useState('');
+  const [createUrlError, setCreateUrlError] = useState('');
   const [createDescription, setCreateDescription] = useState('');
   const [createTimeout, setCreateTimeout] = useState('10');
   const [createEvents, setCreateEvents] = useState<string[]>([]);
   const [legacyEvents, setLegacyEvents] = useState('');
   const [legacyEnabled, setLegacyEnabled] = useState(true);
-  const [creating, setCreating] = useState(false);
 
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [editDescription, setEditDescription] = useState('');
@@ -86,6 +86,7 @@ export const useWebhooksPageController = () => {
 
   const clearCreateForm = useCallback(() => {
     setCreateUrl('');
+    setCreateUrlError('');
     setCreateDescription('');
     setCreateTimeout('10');
     setCreateEvents([]);
@@ -102,11 +103,12 @@ export const useWebhooksPageController = () => {
     commandBusy,
     pendingOperation,
     hasPendingCommand,
+    sensitiveCommandLocked,
     setCommandError,
     setSecretAcknowledged,
     clearSensitiveCommandState,
-    revealSecret,
     startSecretCommand,
+    startLegacySecretCommand,
     retrySecretCommand: retryPendingSecretCommand,
     handleCopySecret,
     requestSecretClose,
@@ -119,14 +121,16 @@ export const useWebhooksPageController = () => {
     showError,
     success,
   });
+  const creating = commandBusy && pendingOperation === 'create';
 
   const beginCanonicalCreate = async () => {
     if (!catalog || createEvents.length === 0 || !createUrl.trim()) return;
     const destination = validateWebhookUrl(createUrl);
     if (!destination.valid) {
-      setCommandError(destination.message);
+      setCreateUrlError(destination.message);
       return;
     }
+    setCreateUrlError('');
     const timeout = Number(createTimeout);
     if (!Number.isInteger(timeout) || timeout < 1 || timeout > 30) {
       setCommandError('Timeout must be a whole number from 1 to 30 seconds.');
@@ -147,22 +151,12 @@ export const useWebhooksPageController = () => {
       ),
     );
     const pending: PendingSecretCommand = { command, operation: 'create', webhookId: null };
-    setCreating(true);
-    try {
-      await startSecretCommand(pending);
-    } finally {
-      setCreating(false);
-    }
+    await startSecretCommand(pending);
   };
 
   const retrySecretCommand = async () => {
     if (!hasPendingCommand) return;
-    setCreating(pendingOperation === 'create');
-    try {
-      await retryPendingSecretCommand();
-    } finally {
-      setCreating(false);
-    }
+    await retryPendingSecretCommand();
   };
 
   const beginLegacyCreate = async () => {
@@ -170,27 +164,19 @@ export const useWebhooksPageController = () => {
     if (!createUrl.trim() || events.length === 0) return;
     const destination = validateWebhookUrl(createUrl);
     if (!destination.valid) {
-      setCommandError(destination.message);
+      setCreateUrlError(destination.message);
       return;
     }
-    setCreating(true);
+    setCreateUrlError('');
     setCommandError('');
-    try {
+    await startLegacySecretCommand(async () => {
       const response = await legacyWebhookApi.createWebhook({
         url: destination.value,
         events,
         enabled: legacyEnabled,
       });
-      setCreateOpen(false);
-      clearCreateForm();
-      revealSecret({ signing_secret: response.signingSecret, replayed: false }, 'create');
-      success('Legacy webhook created');
-      await loadControlPlane(0);
-    } catch {
-      showError('Webhook creation failed', 'The legacy webhook could not be created.');
-    } finally {
-      setCreating(false);
-    }
+      return { signing_secret: response.signingSecret, replayed: false };
+    });
   };
 
   const openCreate = () => {
@@ -200,7 +186,7 @@ export const useWebhooksPageController = () => {
   };
 
   const handleCreateOpenChange = (open: boolean) => {
-    if (!open && hasPendingCommand) {
+    if (!open && sensitiveCommandLocked) {
       setCommandError('Resolve or reload the submitted command before closing this dialog.');
       return;
     }
@@ -461,6 +447,7 @@ export const useWebhooksPageController = () => {
     statusError,
     createOpen,
     createUrl,
+    createUrlError,
     createDescription,
     createTimeout,
     createEvents,
@@ -483,6 +470,7 @@ export const useWebhooksPageController = () => {
     commandBusy,
     pendingOperation,
     hasPendingCommand,
+    sensitiveCommandLocked,
     legacyExpandedId,
     legacyDeliveries,
     legacyDeliveryLoading,
@@ -496,6 +484,7 @@ export const useWebhooksPageController = () => {
     setCreateOpen,
     setCreateTimeout,
     setCreateUrl,
+    setCreateUrlError,
     setEditDescription,
     setEditTimeout,
     setEditor,

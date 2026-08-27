@@ -974,3 +974,163 @@ The 253-module deterministic ratchet proof in the earlier section is bound to
 the pre-rebase exact revisions. A fresh Qodo review and complete hosted CI run
 at the rebased PR SHA remain mandatory; those hosted checks are the final
 exact-head proof against the new base.
+
+## Five-Finding Qodo Remediation
+
+Source commit `c253e20467` addresses the five active findings in Qodo comment
+`5383466884` at prior PR head `bdf3bdfec8`:
+
+- canonical create, legacy create, and destination replacement now share an
+  explicit browser-side invariant URL validator; deployment-specific HTTP,
+  DNS, and egress decisions remain authoritative on the backend;
+- `WebhooksPageContent` retains presentation while control-plane loading,
+  pagination/conflict recovery, one-time-secret/retry state, and CRUD/form
+  orchestration live in focused hooks and a composing controller;
+- proxy route tests mock backend `fetch` but exercise the production
+  `buildProxyResponse` and assert the returned public `Response` contract;
+- the execution-order reporter is imported and exercised behaviorally for
+  ordered path normalization, exact JSON, atomic replacement, temporary-file
+  cleanup, and the CI environment-path constructor; and
+- the newly added ratchet status line uses `sys.stdout.write` with an inline
+  dependency-boundary explanation. The frontend workflow invokes this helper
+  before installing any Python dependencies, so importing Loguru there would
+  break the gate. Both helper digest pins were refreshed.
+
+TDD reproduced the URL gap as three failing page cases before the validator
+was wired. The proxy mutation proof failed 1 of 16 tests when the mocked
+response builder copied a backend `content-length`; the same assertion passes
+only after the test exercises the production response builder.
+
+Final local evidence for source `c253e20467`:
+
+```text
+focused admin UI matrix:              94 passed across 9 files
+admin UI package typecheck:           PASS
+admin UI package lint:                PASS, 0 errors/41 inherited warnings
+admin UI production build:            PASS, 49/49 routes
+Chromium webhook lifecycle:           1 passed
+CI/workflow contracts:                129 passed
+embedded frontend-required Bash:      22/22 passed bash -n
+workflow integrity digests:           PASS
+OpenAPI drift check:                   PASS
+Admin_Webhooks non-PostgreSQL matrix: 302 passed, 24 deselected
+Ruff, node/python syntax, diff checks: PASS
+```
+
+The first production-build attempt failed only because the restricted sandbox
+denied Turbopack's internal local port bind; the identical command passed with
+normal process permissions. Raw Bandit reports one existing low-confidence
+`B101` at the unchanged strict-counter assertion; excluding that established
+non-diff finding leaves no findings. The 24 PostgreSQL tests were not rerun for
+this remediation because it changes no persistence, schema, or backend webhook
+behavior; the prior required-provider proof remains applicable. Independent
+review, fresh Qodo analysis, exact-head hosted CI, and the final review-thread
+audit remain mandatory before merge.
+
+## Follow-up Review and Hosted Ratchet Remediation
+
+Independent review of source `c253e20467` found four additional issues. The
+follow-up rejects raw URL authorities containing `@` or percent-encoded host
+syntax before `URL` normalization; invalid create destinations now use a
+dedicated field error instead of marking the URL invalid for unrelated command
+errors; late canonical or legacy create responses cannot restore a signing
+secret after `pagehide` or unmount cleanup; and a shared execution-order
+reporter change now selects the admin UI unit gate that owns its behavioral
+test.
+
+The old hosted frontend shard also exposed a separate ratchet defect. Run
+`33037959693`, job `98406051146`, completed the 255-file UI shard with 25 failed
+and 1,933 passed assertions plus three unhandled errors. Its exact-base fast
+replay found inherited failures but the full-context fallback rejected the
+head report because `numTotalTestSuites` did not equal the suite hierarchy
+reconstructable from serialized assertions.
+
+A complete local reproduction produced the same 255 modules, 1,958 assertions,
+and 556 raw Vitest suites. Only 555 suites were observable in JSON because
+Vitest 4 counts module and suite tasks directly while its JSON assertion
+records omit empty and skipped suite nodes. A real minimal fixture proved both
+sides of the contract:
+
+- one module, one visible suite, and one empty skipped suite reported three
+  raw/runtime suites while JSON assertions exposed only two; strict validation
+  accepted the clean reporter proof;
+- adding an ordinary empty suite reported four suites and one module error;
+  the safety reporter preserved the exact suite count and strict validation
+  rejected the nonzero error rather than accepting an incomplete report.
+
+The execution-order reporter is now schema version 2 and records the exact
+runtime suite tree using module-relative child-index paths, names, terminal
+states, and suite modes. Mode is required because Vitest reports both ordinary
+skipped suites and todo suites with terminal state `skipped`, but counts only
+todo suites as pending. Vitest also rewrites a normal suite containing only
+`test.todo` cases to `mode=skip`, so assertion-derived pending parent statuses
+remain unknown lower bounds rather than guessed categories. The runtime tree
+must independently reconcile all passed, failed, and pending totals with the
+raw JSON counters. Context validation also requires reporter `suiteCount` to
+equal the raw Vitest total, requires module roots and complete parent paths,
+and compares the exact runtime tree across head and base. Schema version 1
+remains accepted only when JSON alone proves the complete suite total.
+
+The admin safety reporter is also schema version 2. It independently records
+the exact passed, failed, and pending suite totals using Vitest's JSON reporter
+semantics. Strict validation requires those categories and their sum to match
+the raw JSON counters, rejects a success flag paired with any failed test or
+suite counter, and still rejects unhandled, module, or hook errors. The old
+optimized-away Python assertion was replaced with an explicit fail-closed
+counter guard.
+
+A second independent review also found lifecycle races outside the reporter
+contract. Signing-secret commands are now serialized before any request can
+start, including non-retryable legacy creation; all webhook mutations and
+legacy create fields remain disabled until the one-time secret is stored or
+cleared; stale clipboard promises cannot mark a newer secret as copied; late
+legacy request failures or successes cannot mutate post-cleanup state; and raw
+fragment delimiters are rejected before URL normalization. Focused tests cover
+same-tick canonical and legacy command starts, cross-row locking, stale
+clipboard completion, page-unload cleanup, late legacy completion, and
+fragment-bearing or empty-literal-authority destinations.
+
+Final independent re-review found two remaining CI fail-closed gaps. Vitest's
+JSON counters combine legitimate skip/todo work with tasks still pending at
+report time, so the safety reporter now records separate incomplete suite and
+test counters and strict validation requires both to be zero. Assertion JSON
+with status `pending` and runtime suite manifests with state `pending` or
+`queued` are rejected directly. The path classifier also routes the shared
+ratchet helper to backend, package-frontend, and admin-UI gates; the deterministic
+config to the package gate; the order reporter to both consuming frontend
+gates; and the classifier plus its output emitter to their Python CI-test gate.
+Table-driven tests freeze each routing contract.
+
+Final local evidence for the follow-up source:
+
+```text
+focused webhook/reporter matrix:      75 passed across 6 files
+admin UI package typecheck:           PASS
+admin UI package lint:                PASS, 0 errors/41 inherited warnings
+admin UI production build:            PASS, 49/49 routes
+Chromium webhook lifecycle:           1 passed
+CI/workflow/ratchet contracts:         165 passed
+embedded frontend-required Bash:      22/22 passed bash -n
+real hidden-suite reporter proof:      PASS
+Python compile, Ruff, and Bandit:      PASS
+Node reporter syntax:                 PASS
+git diff --check:                      PASS
+```
+
+The unrestricted production build passed after the restricted sandbox denied
+Turbopack's internal local port bind. The prior complete admin UI baseline run
+reported 117 failures and 673 passes across unrelated surfaces; all 75 tests in
+the changed webhook/reporter surface pass at this follow-up source. Those
+repository-wide failures remain governed by the exact-base ratchet and were
+not altered by this remediation.
+
+Pinned SHA-256 values at this source are:
+
+```text
+vitest_base_ratchet.py:               84e744941a29724319f9783f4a02199646399d7c1eae51fb73f182338276839f
+vitest_execution_order_reporter.mjs: af01d572f95d69faaa32261e50d1f2d4c8924d6106af806b913b33f558a3f3d1
+vitest-safety-reporter.mjs:          cf7621d1658a1a3e1b1d16c392dc9af3fe6751072bdb5ef967169f06972ecf4d
+```
+
+Independent re-review, fresh Qodo analysis, exact-head hosted CI, and the final
+review-thread audit remain mandatory before merge.

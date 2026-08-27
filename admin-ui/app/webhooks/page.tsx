@@ -135,6 +135,7 @@ function WebhooksPageContent() {
     statusError,
     createOpen,
     createUrl,
+    createUrlError,
     createDescription,
     createTimeout,
     createEvents,
@@ -156,7 +157,7 @@ function WebhooksPageContent() {
     commandError,
     commandBusy,
     pendingOperation,
-    hasPendingCommand,
+    sensitiveCommandLocked,
     legacyExpandedId,
     legacyDeliveries,
     legacyDeliveryLoading,
@@ -170,6 +171,7 @@ function WebhooksPageContent() {
     setCreateOpen,
     setCreateTimeout,
     setCreateUrl,
+    setCreateUrlError,
     setEditDescription,
     setEditTimeout,
     setEditor,
@@ -224,7 +226,12 @@ function WebhooksPageContent() {
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
               Refresh
             </Button>
-            <Button type="button" size="sm" onClick={openCreate} disabled={addDisabled}>
+            <Button
+              type="button"
+              size="sm"
+              onClick={openCreate}
+              disabled={addDisabled || sensitiveCommandLocked}
+            >
               <Plus className="h-4 w-4" aria-hidden="true" />
               Add webhook
             </Button>
@@ -329,6 +336,7 @@ function WebhooksPageContent() {
                   {canonicalPage.items.map((registration) => {
                     const activationReason = activationBlockReason(registration, status);
                     const busy = mutatingId === registration.id;
+                    const rowActionsDisabled = busy || sensitiveCommandLocked;
                     const rotationBlocked = registration.active
                       ? 'Disable the webhook before generating a new secret'
                       : status.key_state !== 'available'
@@ -376,7 +384,7 @@ function WebhooksPageContent() {
                               variant="outline"
                               size="sm"
                               onClick={() => openMetadataEditor(registration)}
-                              disabled={busy}
+                              disabled={rowActionsDisabled}
                             >
                               <Edit3 className="h-4 w-4" aria-hidden="true" />
                               Edit metadata
@@ -386,7 +394,7 @@ function WebhooksPageContent() {
                               variant="outline"
                               size="sm"
                               onClick={() => openDestinationEditor(registration)}
-                              disabled={busy}
+                              disabled={rowActionsDisabled}
                             >
                               <Link2 className="h-4 w-4" aria-hidden="true" />
                               Replace destination
@@ -396,7 +404,7 @@ function WebhooksPageContent() {
                               variant="outline"
                               size="sm"
                               onClick={() => void rotateCanonicalSecret(registration)}
-                              disabled={busy || Boolean(rotationBlocked)}
+                              disabled={rowActionsDisabled || Boolean(rotationBlocked)}
                               title={rotationBlocked ?? undefined}
                             >
                               <KeyRound className="h-4 w-4" aria-hidden="true" />
@@ -407,7 +415,7 @@ function WebhooksPageContent() {
                               variant="outline"
                               size="sm"
                               onClick={() => void toggleCanonicalRegistration(registration)}
-                              disabled={busy || Boolean(activationReason)}
+                              disabled={rowActionsDisabled || Boolean(activationReason)}
                               title={activationReason ?? undefined}
                             >
                               {registration.active ? 'Disable' : 'Enable'}
@@ -418,7 +426,7 @@ function WebhooksPageContent() {
                               size="icon"
                               className="h-9 w-9"
                               onClick={() => void deleteCanonicalRegistration(registration)}
-                              disabled={busy}
+                              disabled={rowActionsDisabled}
                               aria-label="Delete webhook"
                             >
                               <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
@@ -471,8 +479,9 @@ function WebhooksPageContent() {
                               <Button
                                 type="button"
                                 variant="outline"
-                                size="sm"
-                                onClick={() => void testLegacyRegistration(registration)}
+                              size="sm"
+                              onClick={() => void testLegacyRegistration(registration)}
+                              disabled={sensitiveCommandLocked}
                               >
                                 <Play className="h-4 w-4" aria-hidden="true" />
                                 Test
@@ -481,7 +490,8 @@ function WebhooksPageContent() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => void toggleLegacyDeliveries(registration)}
+                              onClick={() => void toggleLegacyDeliveries(registration)}
+                              disabled={sensitiveCommandLocked}
                                 aria-label={legacyExpandedId === registration.id
                                   ? 'Hide delivery history'
                                   : 'Show delivery history'}
@@ -491,8 +501,9 @@ function WebhooksPageContent() {
                               <Button
                                 type="button"
                                 variant="outline"
-                                size="sm"
-                                onClick={() => void toggleLegacyEnabled(registration)}
+                              size="sm"
+                              onClick={() => void toggleLegacyEnabled(registration)}
+                              disabled={sensitiveCommandLocked}
                               >
                                 {registration.enabled ? 'Disable' : 'Enable'}
                               </Button>
@@ -501,7 +512,8 @@ function WebhooksPageContent() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-9 w-9"
-                                onClick={() => void deleteLegacyRegistration(registration)}
+                              onClick={() => void deleteLegacyRegistration(registration)}
+                              disabled={sensitiveCommandLocked}
                                 aria-label="Delete legacy webhook"
                               >
                                 <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
@@ -596,13 +608,20 @@ function WebhooksPageContent() {
                 value={createUrl}
                 onChange={(event) => {
                   setCreateUrl(event.target.value);
+                  setCreateUrlError('');
                   setCommandError('');
                 }}
                 placeholder="https://receiver.example/hooks/events"
                 maxLength={2_048}
-                aria-invalid={Boolean(commandError)}
-                disabled={hasPendingCommand}
+                aria-invalid={Boolean(createUrlError)}
+                aria-describedby={createUrlError ? 'webhook-create-url-error' : undefined}
+                disabled={sensitiveCommandLocked}
               />
+              {createUrlError && (
+                <p id="webhook-create-url-error" role="alert" className="text-sm text-destructive">
+                  {createUrlError}
+                </p>
+              )}
             </div>
             {mode === 'canonical' ? (
               <>
@@ -613,7 +632,7 @@ function WebhooksPageContent() {
                     value={createDescription}
                     onChange={(event) => setCreateDescription(event.target.value)}
                     maxLength={500}
-                    disabled={hasPendingCommand}
+                    disabled={sensitiveCommandLocked}
                   />
                 </div>
                 <div className="space-y-2">
@@ -626,7 +645,7 @@ function WebhooksPageContent() {
                     step={1}
                     value={createTimeout}
                     onChange={(event) => setCreateTimeout(event.target.value)}
-                    disabled={hasPendingCommand}
+                    disabled={sensitiveCommandLocked}
                   />
                 </div>
                 <fieldset className="space-y-3">
@@ -636,7 +655,7 @@ function WebhooksPageContent() {
                       <Checkbox
                         checked={createEvents.includes(event.event_type)}
                         onCheckedChange={() => toggleCreateEvent(event.event_type)}
-                        disabled={hasPendingCommand}
+                        disabled={sensitiveCommandLocked}
                       />
                       <span className="min-w-0">
                         <span className="block break-all font-mono text-sm">{event.event_type}</span>
@@ -655,12 +674,14 @@ function WebhooksPageContent() {
                     value={legacyEvents}
                     onChange={(event) => setLegacyEvents(event.target.value)}
                     placeholder="incident.created, user.created"
+                    disabled={sensitiveCommandLocked}
                   />
                 </div>
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={legacyEnabled}
                     onCheckedChange={(checked) => setLegacyEnabled(checked === true)}
+                    disabled={sensitiveCommandLocked}
                   />
                   Enabled
                 </label>
@@ -709,7 +730,7 @@ function WebhooksPageContent() {
               onClick={() => void (mode === 'canonical' ? beginCanonicalCreate() : beginLegacyCreate())}
               disabled={
                 creating
-                || hasPendingCommand
+                || sensitiveCommandLocked
                 || !createUrl.trim()
                 || (mode === 'canonical' ? createEvents.length === 0 : !legacyEvents.trim())
               }

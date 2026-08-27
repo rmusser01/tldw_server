@@ -3,21 +3,38 @@ id: TASK-13014
 title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
-created_date: '2026-08-21 20:41'
-updated_date: '2026-08-27 04:45'
+created_date: 2026-08-21 20:41
+updated_date: 2026-08-27 06:47
 labels:
-  - admin
-  - webhooks
-  - security
-  - migrations
+- admin
+- webhooks
+- security
+- migrations
 dependencies:
-  - TASK-13013
+- TASK-13013
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/2806'
+- https://github.com/rmusser01/tldw_server/pull/2806
 documentation:
-  - Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
-  - Docs/superpowers/plans/2026-08-21-canonical-admin-webhook-control-plane.md
+- Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
+- Docs/superpowers/plans/2026-08-21-canonical-admin-webhook-control-plane.md
 priority: high
+modified_files:
+- .github/workflows/frontend-required.yml
+- Docs/Evidence/Admin_Webhooks_PR1_Verification.md
+- Helper_Scripts/ci/path_classifier.py
+- Helper_Scripts/ci/vitest_base_ratchet.py
+- Helper_Scripts/ci/vitest_execution_order_reporter.mjs
+- admin-ui/app/webhooks/__tests__/page.test.tsx
+- admin-ui/app/webhooks/__tests__/webhook-url.test.ts
+- admin-ui/app/webhooks/page.tsx
+- admin-ui/app/webhooks/use-webhook-secret-commands.ts
+- admin-ui/app/webhooks/use-webhooks-page-controller.ts
+- admin-ui/app/webhooks/webhook-url.ts
+- admin-ui/scripts/ci/vitest-execution-order-reporter.test.ts
+- admin-ui/scripts/ci/vitest-safety-reporter.mjs
+- admin-ui/scripts/ci/vitest-safety-reporter.test.ts
+- tldw_Server_API/tests/CI/test_path_classifier.py
+- tldw_Server_API/tests/CI/test_vitest_base_ratchet.py
 ---
 
 ## Description
@@ -50,7 +67,7 @@ Detailed plan: Docs/superpowers/plans/2026-08-21-canonical-admin-webhook-control
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-21: Created after approval of TASK-13013. Planning scope is upstream PR 1 only; delivery substrate/recovery and durable producers/final activation remain separate future tasks.
 
 Planning correction: the approved design assigns final legacy-handler deletion and final canonical mount to PR 3. PR 1 therefore extracts/isolate-selects legacy routes and introduces canonical routes behind an exclusive startup selector; it does not delete compatibility behavior.
@@ -202,8 +219,8 @@ The claimed nested-suite bug is factually incorrect and was not implemented. Rea
 2026-08-26: User approved the bounded remediation design for the five active Qodo findings on PR #2806. Scope: explicit invariant URL validation for canonical/legacy create and destination replacement; extract page orchestration into focused control-plane/secret hooks plus a composing controller; exercise the real proxy response builder; add behavioral tests for the execution-order reporter; document the stdlib-only ratchet CLI logging exception and refresh pinned digests. Implementation will proceed test-first.
 
 2026-08-26 bounded Qodo remediation implementation is locally complete pending independent review. URL-validation TDD reproduced 3 unsafe create/replacement paths before implementation; proxy mutation proof reproduced the mocked-response gap (1 failed/15 passed). Added shared browser invariant validation, split the page into control-plane/secret hooks plus a composing controller, exercised the real proxy response builder, added direct execution-order reporter tests, and documented the stdlib-only ratchet status-output exception because frontend-unit-tests installs no Python dependencies before invoking the helper. Verification: focused admin UI 94/94; package typecheck; package lint 0 errors/41 inherited warnings; production build 49/49 routes (sandbox port-bind retry passed with normal process permissions); Chromium webhook lifecycle 1/1; CI/workflow contracts 129/129; all 22 embedded Bash steps; all pinned digests; OpenAPI drift; Admin_Webhooks non-PostgreSQL 302/302 with 24 PostgreSQL tests intentionally deselected; node/python syntax and git diff checks all pass. Independent review, immutable commit/evidence update, push, fresh Qodo, exact-head CI, and thread audit remain.
-<!-- SECTION:NOTES:END -->
-
+2026-08-26 final Qodo-remediation closure before push: independent re-review found no remaining Critical or Important issues and explicitly confirmed both prior findings closed. Incomplete Vitest suite/test states are separately counted and rejected; shared CI guardrail files now route to every consuming validation gate. Fresh local verification on the current diff: focused webhook/reporter Vitest 75/75 across 6 files; CI/workflow/ratchet contracts 165/165; admin UI typecheck PASS; lint PASS with 0 errors/41 inherited warnings; production build PASS with 49/49 routes; Chromium webhook lifecycle 1/1; all 22 embedded frontend-required Bash blocks pass bash -n; Ruff, Bandit, Python compilation, Node reporter syntax, and git diff --check PASS. Final pinned SHA-256 values: ratchet 84e744941a29724319f9783f4a02199646399d7c1eae51fb73f182338276839f; order reporter af01d572f95d69faaa32261e50d1f2d4c8924d6106af806b913b33f558a3f3d1; safety reporter cf7621d1658a1a3e1b1d16c392dc9af3fe6751072bdb5ef967169f06972ecf4d. Playwright-generated next-env.d.ts drift was restored and is not included. Two unrelated untracked watchlist templates remain excluded. Remaining gates: commit/push exact PR head, request fresh Qodo agentic review, monitor exact-head hosted CI, and audit/resolve all review threads before TASK-13014 completion or merge.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

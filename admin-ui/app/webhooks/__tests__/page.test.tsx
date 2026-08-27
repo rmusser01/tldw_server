@@ -1,11 +1,12 @@
 /* @vitest-environment jsdom */
 
 import type { ReactNode } from 'react';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import WebhooksPage from '../page';
+import { useWebhookSecretCommands } from '../use-webhook-secret-commands';
 import { WebhookApiError, WebhookContractError, WebhookTransportError } from '@/lib/http';
 import type {
   WebhookCatalog,
@@ -132,6 +133,7 @@ const REGISTRATION: WebhookRegistration = {
 };
 
 const SIGNING_SECRET = `whsec_${'a'.repeat(64)}`;
+const SECOND_SIGNING_SECRET = `whsec_${'b'.repeat(64)}`;
 const SECRET_RESPONSE: WebhookSecretResponse = {
   registration: REGISTRATION,
   signing_secret: SIGNING_SECRET,
@@ -279,6 +281,26 @@ describe('canonical webhook control plane page', () => {
 
     expect(await within(dialog).findByText(/must not include credentials or a fragment/i))
       .toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/destination url/i).getAttribute('aria-invalid'))
+      .toBe('true');
+    expect(mocks.canonical.createWebhook).not.toHaveBeenCalled();
+  });
+
+  it('does not mark the destination invalid for a timeout validation error', async () => {
+    const user = userEvent.setup();
+    await renderReadyPage();
+    const dialog = await openCreateDialog(user);
+    const destination = within(dialog).getByLabelText(/destination url/i);
+    await user.type(destination, 'https://receiver.example/hooks/events');
+    await user.click(within(dialog).getByLabelText(/catalog\.only/i));
+    const timeout = within(dialog).getByLabelText(/timeout/i);
+    await user.clear(timeout);
+    await user.type(timeout, '31');
+    await user.click(within(dialog).getByRole('button', { name: /^create$/i }));
+
+    expect(await within(dialog).findByText(/timeout must be a whole number/i)).toBeInTheDocument();
+    expect(destination.getAttribute('aria-invalid')).toBe('false');
+    expect(destination.hasAttribute('aria-describedby')).toBe(false);
     expect(mocks.canonical.createWebhook).not.toHaveBeenCalled();
   });
 
@@ -306,6 +328,73 @@ describe('canonical webhook control plane page', () => {
       window.dispatchEvent(event);
     });
     expect(screen.queryByDisplayValue(SIGNING_SECRET)).not.toBeInTheDocument();
+  });
+
+  it('does not restore a secret when a create response resolves after pagehide', async () => {
+    const user = userEvent.setup();
+    let resolveCreate: ((value: ReturnType<typeof strongResponse>) => void) | undefined;
+    mocks.canonical.createWebhook.mockReturnValue(new Promise((resolve) => {
+      resolveCreate = resolve;
+    }));
+    await renderReadyPage();
+
+    await submitCanonicalCreate(user);
+    await waitFor(() => expect(mocks.canonical.createWebhook).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    const createDialog = screen.getByRole('dialog', { name: /add webhook/i });
+    expect(within(createDialog).getByRole('button', { name: /^create$/i })).not.toBeDisabled();
+    await act(async () => {
+      resolveCreate?.(strongResponse(SECRET_RESPONSE, '"admin-webhook-41-r2"', 201));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByDisplayValue(SIGNING_SECRET)).not.toBeInTheDocument();
+    expect(mocks.toastSuccess).not.toHaveBeenCalledWith(
+      'Webhook created',
+      expect.any(String),
+    );
+  });
+
+  it('does not apply a stale clipboard result to a later signing secret', async () => {
+    const user = userEvent.setup();
+    let resolveCopy: (() => void) | undefined;
+    const writeText = vi.fn(() => new Promise<void>((resolve) => {
+      resolveCopy = resolve;
+    }));
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    mocks.canonical.createWebhook.mockReset()
+      .mockResolvedValueOnce(strongResponse(SECRET_RESPONSE, '"admin-webhook-41-r2"', 201))
+      .mockResolvedValueOnce(strongResponse({
+        ...SECRET_RESPONSE,
+        signing_secret: SECOND_SIGNING_SECRET,
+      }, '"admin-webhook-41-r3"', 201));
+    await renderReadyPage();
+
+    await submitCanonicalCreate(user);
+    const firstSecretDialog = await screen.findByRole('dialog', { name: /signing secret/i });
+    await user.click(within(firstSecretDialog).getByRole('button', { name: /copy signing secret/i }));
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await submitCanonicalCreate(user);
+    const secondSecretDialog = await screen.findByRole('dialog', { name: /signing secret/i });
+    expect(within(secondSecretDialog).getByDisplayValue(SECOND_SIGNING_SECRET))
+      .toBeInTheDocument();
+
+    await act(async () => {
+      resolveCopy?.();
+      await Promise.resolve();
+    });
+
+    expect(within(secondSecretDialog).queryByText(/copied to clipboard/i))
+      .not.toBeInTheDocument();
+    expect(within(secondSecretDialog).getByRole('button', { name: /^done$/i }))
+      .toBeDisabled();
   });
 
   it('retries a lost create response with the same idempotency key only on operator request', async () => {
@@ -500,6 +589,33 @@ describe('canonical webhook control plane page', () => {
     ));
   });
 
+  it('locks other secret rotations while one rotation command is pending', async () => {
+    const secondRegistration = {
+      ...REGISTRATION,
+      id: 42,
+      target_display: 'https://second.example',
+      target_hostname: 'second.example',
+    };
+    mocks.canonical.getWebhooks.mockResolvedValue(
+      canonicalPage([REGISTRATION, secondRegistration]),
+    );
+    mocks.canonical.getWebhook.mockImplementation(async (id: number) => (
+      id === secondRegistration.id
+        ? strongResponse(secondRegistration, '"admin-webhook-42-r2"')
+        : strongResponse(REGISTRATION)
+    ));
+    mocks.canonical.rotateWebhookSecret.mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    await renderReadyPage();
+
+    const rotateButtons = screen.getAllByRole('button', { name: /generate a new secret/i });
+    await user.click(rotateButtons[0]!);
+    await waitFor(() => expect(mocks.canonical.rotateWebhookSecret).toHaveBeenCalledTimes(1));
+
+    expect(screen.getAllByRole('button', { name: /generate a new secret/i })[1])
+      .toBeDisabled();
+  });
+
   it('keeps bounded status failures visible and never downgrades to legacy CRUD', async () => {
     const user = userEvent.setup();
     mocks.detect.mockRejectedValueOnce(new WebhookContractError(
@@ -600,5 +716,194 @@ describe('legacy webhook compatibility mode', () => {
 
     expect(await within(dialog).findByText(/absolute HTTP or HTTPS URL/i)).toBeInTheDocument();
     expect(mocks.legacy.createWebhook).not.toHaveBeenCalled();
+  });
+
+  it('does not show a stale creation error after pagehide invalidates the request', async () => {
+    mocks.detect.mockResolvedValue({
+      kind: 'legacy',
+      status: { ...STATUS, route_selection: 'legacy' },
+      client: mocks.legacy,
+    });
+    let rejectCreate: ((error: Error) => void) | undefined;
+    mocks.legacy.createWebhook.mockReturnValue(new Promise((_resolve, reject) => {
+      rejectCreate = reject;
+    }));
+    const user = userEvent.setup();
+    render(<WebhooksPage />);
+    await screen.findByRole('heading', { name: 'Webhooks' });
+    const dialog = await openCreateDialog(user);
+    await user.type(
+      within(dialog).getByLabelText(/destination url/i),
+      'https://legacy.example/hook',
+    );
+    await user.type(within(dialog).getByLabelText(/^events$/i), 'incident.created');
+    await user.click(within(dialog).getByRole('button', { name: /^create$/i }));
+    await waitFor(() => expect(mocks.legacy.createWebhook).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      rejectCreate?.(new Error('late failure'));
+      await Promise.resolve();
+    });
+
+    expect(mocks.toastError).not.toHaveBeenCalledWith(
+      'Webhook creation failed',
+      expect.any(String),
+    );
+  });
+
+  it('does not restore a legacy secret when creation resolves after pagehide', async () => {
+    mocks.detect.mockResolvedValue({
+      kind: 'legacy',
+      status: { ...STATUS, route_selection: 'legacy' },
+      client: mocks.legacy,
+    });
+    let resolveCreate: ((value: { signingSecret: string }) => void) | undefined;
+    mocks.legacy.createWebhook.mockReturnValue(new Promise((resolve) => {
+      resolveCreate = resolve;
+    }));
+    const user = userEvent.setup();
+    render(<WebhooksPage />);
+    await screen.findByRole('heading', { name: 'Webhooks' });
+    const dialog = await openCreateDialog(user);
+    await user.type(
+      within(dialog).getByLabelText(/destination url/i),
+      'https://legacy.example/hook',
+    );
+    await user.type(within(dialog).getByLabelText(/^events$/i), 'incident.created');
+    await user.click(within(dialog).getByRole('button', { name: /^create$/i }));
+    await waitFor(() => expect(mocks.legacy.createWebhook).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      resolveCreate?.({ signingSecret: SIGNING_SECRET });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByDisplayValue(SIGNING_SECRET)).not.toBeInTheDocument();
+    expect(mocks.toastSuccess).not.toHaveBeenCalledWith('Legacy webhook created');
+  });
+
+  it('locks the legacy form and row mutations while creation is in flight', async () => {
+    mocks.detect.mockResolvedValue({
+      kind: 'legacy',
+      status: { ...STATUS, route_selection: 'legacy' },
+      client: mocks.legacy,
+    });
+    mocks.legacy.getWebhooks.mockResolvedValue({
+      items: [{
+        id: 'legacy-1',
+        targetUrl: 'https://legacy.example/existing',
+        eventTypes: ['incident.created'],
+        enabled: true,
+        createdAt: null,
+        updatedAt: null,
+      }],
+      total: 1,
+    });
+    mocks.legacy.createWebhook.mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    render(<WebhooksPage />);
+    await screen.findByText('https://legacy.example/existing');
+    const dialog = await openCreateDialog(user);
+    const destination = within(dialog).getByLabelText(/destination url/i);
+    const events = within(dialog).getByLabelText(/^events$/i);
+    await user.type(destination, 'https://legacy.example/new');
+    await user.type(events, 'incident.created');
+    await user.click(within(dialog).getByRole('button', { name: /^create$/i }));
+    await waitFor(() => expect(mocks.legacy.createWebhook).toHaveBeenCalledTimes(1));
+
+    expect(destination).toBeDisabled();
+    expect(events).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^test$/i, hidden: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /show delivery history/i, hidden: true }))
+      .toBeDisabled();
+    expect(screen.getByRole('button', { name: /^disable$/i, hidden: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /delete legacy webhook/i, hidden: true }))
+      .toBeDisabled();
+  });
+});
+
+describe('one-time secret command ownership', () => {
+  it('atomically rejects a second command while the first owns sensitive state', async () => {
+    const firstRun = vi.fn(() => new Promise<ReturnType<typeof strongResponse>>(() => {}));
+    const secondRun = vi.fn().mockResolvedValue(
+      strongResponse(SECRET_RESPONSE, '"admin-webhook-42-r2"'),
+    );
+    const showError = vi.fn();
+    const { result } = renderHook(() => useWebhookSecretCommands({
+      clearCreateForm: vi.fn(),
+      loadControlPlane: vi.fn().mockResolvedValue(undefined),
+      offset: 0,
+      recoverConditionalConflict: vi.fn().mockResolvedValue(undefined),
+      setCreateOpen: vi.fn(),
+      showError,
+      success: vi.fn(),
+    }));
+    const first = {
+      command: {
+        idempotencyKey: 'first-command',
+        canRetry: false,
+        run: firstRun,
+        retry: firstRun,
+      },
+      operation: 'rotate' as const,
+      webhookId: 41,
+    };
+    const second = {
+      command: {
+        idempotencyKey: 'second-command',
+        canRetry: false,
+        run: secondRun,
+        retry: secondRun,
+      },
+      operation: 'rotate' as const,
+      webhookId: 42,
+    };
+
+    await act(async () => {
+      void result.current.startSecretCommand(first);
+      void result.current.startSecretCommand(second);
+      await Promise.resolve();
+    });
+
+    expect(firstRun).toHaveBeenCalledTimes(1);
+    expect(secondRun).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith(
+      'Signing secret command blocked',
+      expect.stringMatching(/finish the current signing-secret command/i),
+    );
+  });
+
+  it('atomically rejects a second non-retryable legacy secret command', async () => {
+    const firstRun = vi.fn(() => new Promise<{
+      signing_secret: string;
+      replayed: boolean;
+    }>(() => {}));
+    const secondRun = vi.fn().mockResolvedValue({
+      signing_secret: SECOND_SIGNING_SECRET,
+      replayed: false,
+    });
+    const showError = vi.fn();
+    const { result } = renderHook(() => useWebhookSecretCommands({
+      clearCreateForm: vi.fn(),
+      loadControlPlane: vi.fn().mockResolvedValue(undefined),
+      offset: 0,
+      recoverConditionalConflict: vi.fn().mockResolvedValue(undefined),
+      setCreateOpen: vi.fn(),
+      showError,
+      success: vi.fn(),
+    }));
+
+    await act(async () => {
+      void result.current.startLegacySecretCommand(firstRun);
+      void result.current.startLegacySecretCommand(secondRun);
+      await Promise.resolve();
+    });
+
+    expect(firstRun).toHaveBeenCalledTimes(1);
+    expect(secondRun).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith(
+      'Signing secret command blocked',
+      expect.stringMatching(/finish the current signing-secret command/i),
+    );
   });
 });

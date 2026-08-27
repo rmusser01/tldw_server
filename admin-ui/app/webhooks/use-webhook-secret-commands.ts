@@ -12,6 +12,13 @@ import {
 } from './webhook-controller-shared';
 
 type Toast = (title: string, description?: string) => void;
+type SecretCommandLease = {
+  lifecycleGeneration: number;
+  token: symbol;
+};
+type LegacySecretCommand = () => Promise<
+  Pick<WebhookSecretResponse, 'signing_secret' | 'replayed'>
+>;
 
 type UseWebhookSecretCommandsOptions = {
   clearCreateForm: () => void;
@@ -46,10 +53,16 @@ export const useWebhookSecretCommands = ({
   const [pendingOperation, setPendingOperation] = useState<SecretOperation | null>(null);
   const pendingCommandRef = useRef<PendingSecretCommand | null>(null);
   const secretRef = useRef<SecretState | null>(null);
+  const activeCommandRef = useRef<symbol | null>(null);
+  const lifecycleGenerationRef = useRef(0);
+  const copyAttemptRef = useRef(0);
 
   const clearSensitiveCommandState = useCallback((synchronous = false) => {
+    lifecycleGenerationRef.current += 1;
+    copyAttemptRef.current += 1;
     pendingCommandRef.current = null;
     secretRef.current = null;
+    activeCommandRef.current = null;
     const clearState = () => {
       setSecretState(null);
       setSecretCopied(false);
@@ -68,7 +81,7 @@ export const useWebhookSecretCommands = ({
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!secretRef.current && !pendingCommandRef.current) return;
+      if (!secretRef.current && !pendingCommandRef.current && !activeCommandRef.current) return;
       event.preventDefault();
       event.returnValue = '';
     };
@@ -85,15 +98,21 @@ export const useWebhookSecretCommands = ({
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('pageshow', handlePageShow);
+      lifecycleGenerationRef.current += 1;
+      copyAttemptRef.current += 1;
       pendingCommandRef.current = null;
       secretRef.current = null;
+      activeCommandRef.current = null;
     };
   }, [clearSensitiveCommandState]);
 
   const revealSecret = useCallback((
     response: Pick<WebhookSecretResponse, 'signing_secret' | 'replayed'>,
     operation: SecretOperation,
+    lifecycleGeneration: number,
   ) => {
+    if (lifecycleGenerationRef.current !== lifecycleGeneration) return false;
+    copyAttemptRef.current += 1;
     const nextSecret = {
       value: response.signing_secret,
       replayed: response.replayed,
@@ -104,27 +123,66 @@ export const useWebhookSecretCommands = ({
     setSecretCopied(false);
     setSecretAcknowledged(false);
     setSecretWarning('');
+    return true;
   }, []);
+
+  const acquireCommandLease = useCallback((allowPendingCommand = false) => {
+    if (
+      activeCommandRef.current
+      || secretRef.current
+      || (!allowPendingCommand && pendingCommandRef.current)
+    ) {
+      showError(
+        'Signing secret command blocked',
+        'Finish the current signing-secret command and store its one-time secret before starting another.',
+      );
+      return null;
+    }
+    const lease = {
+      lifecycleGeneration: lifecycleGenerationRef.current,
+      token: Symbol('webhook-secret-command'),
+    };
+    activeCommandRef.current = lease.token;
+    setCommandBusy(true);
+    setCommandError('');
+    return lease;
+  }, [showError]);
+
+  const isCommandLeaseCurrent = useCallback((lease: SecretCommandLease) => (
+    lifecycleGenerationRef.current === lease.lifecycleGeneration
+    && activeCommandRef.current === lease.token
+  ), []);
+
+  const releaseCommandLease = useCallback((lease: SecretCommandLease) => {
+    if (!isCommandLeaseCurrent(lease)) return;
+    activeCommandRef.current = null;
+    setCommandBusy(false);
+  }, [isCommandLeaseCurrent]);
 
   const runSecretCommand = useCallback(async (
     pending: PendingSecretCommand,
     retry: boolean,
+    lease: SecretCommandLease,
   ) => {
-    setCommandBusy(true);
-    setCommandError('');
+    const isCurrent = () => (
+      isCommandLeaseCurrent(lease)
+      && pendingCommandRef.current === pending
+    );
     try {
       const response = retry ? await pending.command.retry() : await pending.command.run();
+      if (!isCurrent()) return;
       pendingCommandRef.current = null;
       setPendingOperation(null);
       setCreateOpen(false);
       clearCreateForm();
-      revealSecret(response.data, pending.operation);
+      revealSecret(response.data, pending.operation, lease.lifecycleGeneration);
       success(
         pending.operation === 'create' ? 'Webhook created' : 'Signing secret generated',
         'The registration remains inactive until explicitly enabled.',
       );
       await loadControlPlane(pending.operation === 'create' ? 0 : offset);
     } catch (error) {
+      if (!isCurrent()) return;
       if (pending.command.canRetry) {
         setCommandError(
           'The connection was lost after submission. Retry the same command, or reload and inspect inactive registrations before creating another one. A lost secret can only be replaced by generating a new secret.',
@@ -140,13 +198,15 @@ export const useWebhookSecretCommands = ({
         }
       }
     } finally {
-      setCommandBusy(false);
+      releaseCommandLease(lease);
     }
   }, [
     clearCreateForm,
     loadControlPlane,
     offset,
     recoverConditionalConflict,
+    isCommandLeaseCurrent,
+    releaseCommandLease,
     revealSecret,
     setCreateOpen,
     showError,
@@ -154,25 +214,76 @@ export const useWebhookSecretCommands = ({
   ]);
 
   const startSecretCommand = useCallback(async (pending: PendingSecretCommand) => {
+    const lease = acquireCommandLease();
+    if (!lease) return false;
     pendingCommandRef.current = pending;
     setPendingOperation(pending.operation);
-    await runSecretCommand(pending, false);
-  }, [runSecretCommand]);
+    await runSecretCommand(pending, false, lease);
+    return true;
+  }, [acquireCommandLease, runSecretCommand]);
 
   const retrySecretCommand = useCallback(async () => {
     const pending = pendingCommandRef.current;
     if (!pending) return;
-    await runSecretCommand(pending, true);
-  }, [runSecretCommand]);
+    const lease = acquireCommandLease(true);
+    if (!lease) return;
+    await runSecretCommand(pending, true, lease);
+  }, [acquireCommandLease, runSecretCommand]);
+
+  const startLegacySecretCommand = useCallback(async (command: LegacySecretCommand) => {
+    const lease = acquireCommandLease();
+    if (!lease) return false;
+    setPendingOperation('create');
+    let secretRevealed = false;
+    try {
+      const response = await command();
+      if (!isCommandLeaseCurrent(lease)) return false;
+      setCreateOpen(false);
+      clearCreateForm();
+      secretRevealed = revealSecret(response, 'create', lease.lifecycleGeneration);
+      if (!secretRevealed) return false;
+      success('Legacy webhook created');
+      await loadControlPlane(0);
+      return true;
+    } catch {
+      if (isCommandLeaseCurrent(lease) && !secretRevealed) {
+        showError('Webhook creation failed', 'The legacy webhook could not be created.');
+      }
+      return false;
+    } finally {
+      if (isCommandLeaseCurrent(lease)) setPendingOperation(null);
+      releaseCommandLease(lease);
+    }
+  }, [
+    acquireCommandLease,
+    clearCreateForm,
+    isCommandLeaseCurrent,
+    loadControlPlane,
+    releaseCommandLease,
+    revealSecret,
+    setCreateOpen,
+    showError,
+    success,
+  ]);
 
   const handleCopySecret = useCallback(async () => {
     const current = secretRef.current;
     if (!current) return;
+    const lifecycleGeneration = lifecycleGenerationRef.current;
+    const copyAttempt = copyAttemptRef.current + 1;
+    copyAttemptRef.current = copyAttempt;
+    const isCurrent = () => (
+      lifecycleGenerationRef.current === lifecycleGeneration
+      && copyAttemptRef.current === copyAttempt
+      && secretRef.current === current
+    );
     try {
       await navigator.clipboard.writeText(current.value);
+      if (!isCurrent()) return;
       setSecretCopied(true);
       setSecretWarning('');
     } catch {
+      if (!isCurrent()) return;
       setSecretWarning('Clipboard access failed. Select the secret and copy it manually.');
     }
   }, []);
@@ -194,11 +305,17 @@ export const useWebhookSecretCommands = ({
     commandBusy,
     pendingOperation,
     hasPendingCommand: pendingCommandRef.current !== null,
+    sensitiveCommandLocked: (
+      commandBusy
+      || activeCommandRef.current !== null
+      || pendingCommandRef.current !== null
+      || secretState !== null
+    ),
     setCommandError,
     setSecretAcknowledged,
     clearSensitiveCommandState,
-    revealSecret,
     startSecretCommand,
+    startLegacySecretCommand,
     retrySecretCommand,
     handleCopySecret,
     requestSecretClose,

@@ -24,6 +24,26 @@ export const validateWebhookUrl = (rawValue: string): WebhookUrlValidation => {
   if (INVALID_URL_CHARACTERS.test(value) || !/^https?:\/\//iu.test(value)) {
     return { valid: false, message: 'Destination must be an absolute HTTP or HTTPS URL.' };
   }
+  if (value.includes('#')) {
+    return {
+      valid: false,
+      message: 'Destination URL must not include credentials or a fragment.',
+    };
+  }
+
+  const authority = value.slice(value.indexOf('://') + 3).split(/[/?#]/u, 1)[0] ?? '';
+  if (!authority) {
+    return { valid: false, message: 'Destination must be an absolute HTTP or HTTPS URL.' };
+  }
+  if (authority.includes('@')) {
+    return {
+      valid: false,
+      message: 'Destination URL must not include credentials or a fragment.',
+    };
+  }
+  if (authority.includes('%')) {
+    return { valid: false, message: 'Destination URL has an invalid hostname.' };
+  }
 
   let parsed: URL;
   try {

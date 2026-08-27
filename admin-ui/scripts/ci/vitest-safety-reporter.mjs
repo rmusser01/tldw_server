@@ -14,6 +14,35 @@ function moduleErrorCount(testModules) {
   return count;
 }
 
+function suiteStatusCounts(testModules) {
+  const counts = { passed: 0, failed: 0, pending: 0, incomplete: 0 };
+  for (const testModule of testModules) {
+    const suites = [testModule, ...testModule.children.allSuites()];
+    for (const suite of suites) {
+      const state = suite.state();
+      let status = 'passed';
+      if (state === 'failed') {
+        status = 'failed';
+      } else if (state === 'pending' || state === 'queued' || suite.options?.mode === 'todo') {
+        status = 'pending';
+      }
+      if (state === 'pending' || state === 'queued') {
+        counts.incomplete += 1;
+      }
+      counts[status] += 1;
+    }
+  }
+  return counts;
+}
+
+function incompleteTestCount(testModules) {
+  return testModules.reduce(
+    (count, testModule) => count + Array.from(testModule.children.allTests())
+      .filter((test) => test.result().state === 'pending').length,
+    0,
+  );
+}
+
 export default class VitestSafetyReporter {
   constructor(optionsOrReportPath) {
     const reportPath = typeof optionsOrReportPath === 'string'
@@ -40,10 +69,17 @@ export default class VitestSafetyReporter {
   }
 
   async onTestRunEnd(testModules, unhandledErrors, reason) {
+    const suiteCounts = suiteStatusCounts(testModules);
     const report = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       reason,
       moduleCount: testModules.length,
+      suiteCount: suiteCounts.passed + suiteCounts.failed + suiteCounts.pending,
+      passedSuiteCount: suiteCounts.passed,
+      failedSuiteCount: suiteCounts.failed,
+      pendingSuiteCount: suiteCounts.pending,
+      incompleteSuiteCount: suiteCounts.incomplete,
+      incompleteTestCount: incompleteTestCount(testModules),
       testCount: testModules.reduce(
         (count, testModule) => count + Array.from(testModule.children.allTests()).length,
         0,

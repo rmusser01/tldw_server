@@ -137,16 +137,37 @@ def _write_safety_report(
     reason: str,
     test_count: int,
     module_count: int = 1,
+    suite_count: int | None = None,
+    passed_suite_count: int | None = None,
+    failed_suite_count: int | None = None,
+    pending_suite_count: int = 0,
+    incomplete_suite_count: int = 0,
+    incomplete_test_count: int = 0,
     unhandled_error_count: int = 0,
     module_error_count: int = 0,
     hook_error_count: int = 0,
 ) -> None:
+    resolved_suite_count = module_count if suite_count is None else suite_count
+    resolved_failed_suite_count = (
+        1 if reason == "failed" else 0
+    ) if failed_suite_count is None else failed_suite_count
+    resolved_passed_suite_count = (
+        resolved_suite_count - resolved_failed_suite_count - pending_suite_count
+        if passed_suite_count is None
+        else passed_suite_count
+    )
     path.write_text(
         json.dumps(
             {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "reason": reason,
                 "moduleCount": module_count,
+                "suiteCount": resolved_suite_count,
+                "passedSuiteCount": resolved_passed_suite_count,
+                "failedSuiteCount": resolved_failed_suite_count,
+                "pendingSuiteCount": pending_suite_count,
+                "incompleteSuiteCount": incomplete_suite_count,
+                "incompleteTestCount": incomplete_test_count,
                 "testCount": test_count,
                 "unhandledErrorCount": unhandled_error_count,
                 "moduleErrorCount": module_error_count,
@@ -307,6 +328,288 @@ def test_test_result_files_accepts_real_all_skipped_vitest_fixture(
         package_root,
         order_report_path,
     ) == (relative_path,)
+
+@pytest.mark.unit
+def test_test_result_files_accepts_reporter_proven_hidden_suites(
+    tmp_path: Path,
+) -> None:
+    """Use runtime suite evidence for suites omitted from Vitest JSON assertions."""
+
+    package_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    relative_path = "src/empty-suite.test.ts"
+    report_path = tmp_path / "head.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["success"] = False
+    payload["numTotalTestSuites"] = 4
+    payload["numPassedTestSuites"] = 2
+    payload["numFailedTestSuites"] = 2
+    payload["testResults"][0]["name"] = str(package_root / relative_path)
+    payload["testResults"][0]["status"] = "failed"
+    payload["testResults"][0]["assertionResults"][0]["ancestorTitles"] = [
+        "visible suite"
+    ]
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    order_report_path = tmp_path / "head-order.json"
+    order_report_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "moduleCount": 1,
+                "modules": [relative_path],
+                "suiteCount": 4,
+                "suites": [
+                    {
+                        "module": relative_path,
+                        "path": [],
+                        "name": relative_path,
+                        "state": "failed",
+                        "mode": None,
+                    },
+                    {
+                        "module": relative_path,
+                        "path": [0],
+                        "name": "visible suite",
+                        "state": "passed",
+                        "mode": "run",
+                    },
+                    {
+                        "module": relative_path,
+                        "path": [1],
+                        "name": "empty suite",
+                        "state": "failed",
+                        "mode": "run",
+                    },
+                    {
+                        "module": relative_path,
+                        "path": [2],
+                        "name": "empty skipped suite",
+                        "state": "skipped",
+                        "mode": "skip",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert vitest_base_ratchet.test_result_files(
+        report_path,
+        package_root,
+        order_report_path,
+    ) == (relative_path,)
+
+
+@pytest.mark.unit
+def test_test_result_files_classifies_todo_suite_as_pending(tmp_path: Path) -> None:
+    """Use suite mode to distinguish todo from ordinary skipped suites."""
+
+    package_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    relative_path = "src/todo-suite.test.ts"
+    report_path = tmp_path / "head.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assertion = payload["testResults"][0]["assertionResults"][0]
+    payload["testResults"][0]["name"] = str(package_root / relative_path)
+    assertion["fullName"] = "todo suite pending case"
+    assertion["status"] = "todo"
+    assertion["ancestorTitles"] = ["todo suite"]
+    payload["numTotalTestSuites"] = 2
+    payload["numPassedTestSuites"] = 1
+    payload["numPendingTestSuites"] = 1
+    payload["numPassedTests"] = 0
+    payload["numTodoTests"] = 1
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    order_report_path = tmp_path / "head-order.json"
+    order_report_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "moduleCount": 1,
+                "modules": [relative_path],
+                "suiteCount": 2,
+                "suites": [
+                    {
+                        "module": relative_path,
+                        "path": [],
+                        "name": relative_path,
+                        "state": "passed",
+                        "mode": None,
+                    },
+                    {
+                        "module": relative_path,
+                        "path": [0],
+                        "name": "todo suite",
+                        "state": "skipped",
+                        "mode": "todo",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert vitest_base_ratchet.test_result_files(
+        report_path,
+        package_root,
+        order_report_path,
+    ) == (relative_path,)
+
+    order_payload = json.loads(order_report_path.read_text(encoding="utf-8"))
+    order_payload["suites"][1]["mode"] = "skip"
+    order_report_path.write_text(json.dumps(order_payload), encoding="utf-8")
+    with pytest.raises(RatchetError, match="suite count does not match JSON"):
+        vitest_base_ratchet.test_result_files(
+            report_path,
+            package_root,
+            order_report_path,
+        )
+
+    order_payload["suites"][1].update({"state": "pending", "mode": "run"})
+    order_report_path.write_text(json.dumps(order_payload), encoding="utf-8")
+    with pytest.raises(RatchetError, match="unfinished suite"):
+        vitest_base_ratchet.test_result_files(
+            report_path,
+            package_root,
+            order_report_path,
+        )
+
+    order_payload["suites"][1].update({"state": "skipped", "mode": "todo"})
+    order_report_path.write_text(json.dumps(order_payload), encoding="utf-8")
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    report_payload["testResults"][0]["assertionResults"][0]["status"] = "pending"
+    report_payload["numPendingTests"] = 1
+    report_payload["numTodoTests"] = 0
+    report_path.write_text(json.dumps(report_payload), encoding="utf-8")
+    with pytest.raises(RatchetError, match="unfinished assertion"):
+        vitest_base_ratchet.test_result_files(
+            report_path,
+            package_root,
+            order_report_path,
+        )
+
+
+@pytest.mark.unit
+def test_vitest_todo_suite_shapes_match_raw_status_counters(tmp_path: Path) -> None:
+    """Accept Vitest's distinct todo-only parent and describe.todo semantics."""
+
+    package_root = tmp_path / "head" / "admin-ui"
+    relative_path = "src/todo-shapes.test.ts"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    order_report_path = tmp_path / "head-order.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "numTotalTestSuites": 4,
+                "numPassedTestSuites": 3,
+                "numFailedTestSuites": 0,
+                "numPendingTestSuites": 1,
+                "numTotalTests": 4,
+                "numPassedTests": 1,
+                "numFailedTests": 0,
+                "numPendingTests": 0,
+                "numTodoTests": 3,
+                "testResults": [
+                    {
+                        "name": str(package_root / relative_path),
+                        "status": "passed",
+                        "assertionResults": [
+                            {
+                                "fullName": "todo-only parent future behavior",
+                                "status": "todo",
+                                "ancestorTitles": ["todo-only parent"],
+                                "failureMessages": [],
+                            },
+                            {
+                                "fullName": "mixed parent current behavior",
+                                "status": "passed",
+                                "ancestorTitles": ["mixed parent"],
+                                "failureMessages": [],
+                            },
+                            {
+                                "fullName": "mixed parent future behavior",
+                                "status": "todo",
+                                "ancestorTitles": ["mixed parent"],
+                                "failureMessages": [],
+                            },
+                            {
+                                "fullName": "todo suite never collected",
+                                "status": "todo",
+                                "ancestorTitles": ["todo suite"],
+                                "failureMessages": [],
+                            },
+                        ],
+                        "message": "",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_safety_report(
+        safety_path,
+        reason="passed",
+        test_count=4,
+        suite_count=4,
+        passed_suite_count=3,
+        pending_suite_count=1,
+    )
+    order_report_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "moduleCount": 1,
+                "modules": [relative_path],
+                "suiteCount": 4,
+                "suites": [
+                    {
+                        "module": relative_path,
+                        "path": [],
+                        "name": relative_path,
+                        "state": "passed",
+                        "mode": None,
+                    },
+                    {
+                        "module": relative_path,
+                        "path": [0],
+                        "name": "todo-only parent",
+                        "state": "skipped",
+                        "mode": "skip",
+                    },
+                    {
+                        "module": relative_path,
+                        "path": [1],
+                        "name": "mixed parent",
+                        "state": "passed",
+                        "mode": "run",
+                    },
+                    {
+                        "module": relative_path,
+                        "path": [2],
+                        "name": "todo suite",
+                        "state": "skipped",
+                        "mode": "todo",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert vitest_base_ratchet.test_result_files(
+        report_path,
+        package_root,
+        order_report_path,
+    ) == (relative_path,)
+    validate_success_report(
+        report_path,
+        package_root,
+        strict=True,
+        safety_report_path=safety_path,
+    )
 
 
 @pytest.mark.unit
@@ -1026,10 +1329,10 @@ def test_strict_validate_success_report_rejects_counter_mismatch(
 
 
 @pytest.mark.unit
-def test_strict_validate_success_report_rejects_suite_hierarchy_mismatch(
+def test_strict_validate_success_report_rejects_unproven_suite_count(
     tmp_path: Path,
 ) -> None:
-    """Reject suite counters that disagree with the assertion hierarchy."""
+    """Reject hidden suite counters not proven by the lifecycle reporter."""
 
     package_root = tmp_path / "head" / "admin-ui"
     report_path = tmp_path / "head.json"
@@ -1041,7 +1344,7 @@ def test_strict_validate_success_report_rejects_suite_hierarchy_mismatch(
     report_path.write_text(json.dumps(payload), encoding="utf-8")
     _write_safety_report(safety_path, reason="passed", test_count=1)
 
-    with pytest.raises(RatchetError, match="suite.*assertion hierarchy"):
+    with pytest.raises(RatchetError, match="suiteCount does not match JSON"):
         validate_success_report(
             report_path,
             package_root,
@@ -1069,7 +1372,12 @@ def test_strict_validate_success_report_accepts_nested_suite_hierarchy(
     payload["numPassedTestSuites"] = 3
     assert len(payload["testResults"]) == 1
     report_path.write_text(json.dumps(payload), encoding="utf-8")
-    _write_safety_report(safety_path, reason="passed", test_count=1)
+    _write_safety_report(
+        safety_path,
+        reason="passed",
+        test_count=1,
+        suite_count=3,
+    )
 
     validate_success_report(
         report_path,
@@ -1077,6 +1385,164 @@ def test_strict_validate_success_report_accepts_nested_suite_hierarchy(
         strict=True,
         safety_report_path=safety_path,
     )
+
+
+@pytest.mark.unit
+def test_strict_validate_success_report_accepts_reporter_proven_hidden_suites(
+    tmp_path: Path,
+) -> None:
+    """Accept empty or skipped suites proven by the lifecycle reporter."""
+
+    package_root = tmp_path / "head" / "admin-ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["numTotalTestSuites"] = 2
+    payload["numPassedTestSuites"] = 2
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(
+        safety_path,
+        reason="passed",
+        test_count=1,
+        suite_count=2,
+    )
+
+    validate_success_report(
+        report_path,
+        package_root,
+        strict=True,
+        safety_report_path=safety_path,
+    )
+
+
+@pytest.mark.unit
+def test_strict_validate_success_report_rejects_hidden_suite_status_mismatch(
+    tmp_path: Path,
+) -> None:
+    """Require reporter status categories to match every raw suite counter."""
+
+    package_root = tmp_path / "head" / "admin-ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["numTotalTestSuites"] = 2
+    payload["numPassedTestSuites"] = 2
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(
+        safety_path,
+        reason="passed",
+        test_count=1,
+        suite_count=2,
+        passed_suite_count=1,
+        pending_suite_count=1,
+    )
+
+    with pytest.raises(RatchetError, match="pendingSuiteCount does not match JSON"):
+        validate_success_report(
+            report_path,
+            package_root,
+            strict=True,
+            safety_report_path=safety_path,
+        )
+
+
+@pytest.mark.unit
+def test_strict_validate_success_report_rejects_failed_suite_counter(
+    tmp_path: Path,
+) -> None:
+    """Reject a success flag that contradicts a failed-suite counter."""
+
+    package_root = tmp_path / "head" / "admin-ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["numTotalTestSuites"] = 2
+    payload["numPassedTestSuites"] = 1
+    payload["numFailedTestSuites"] = 1
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(
+        safety_path,
+        reason="passed",
+        test_count=1,
+        suite_count=2,
+        failed_suite_count=1,
+    )
+
+    with pytest.raises(RatchetError, match="claims success"):
+        validate_success_report(
+            report_path,
+            package_root,
+            strict=True,
+            safety_report_path=safety_path,
+        )
+
+
+@pytest.mark.unit
+def test_strict_validate_success_report_rejects_unfinished_test(
+    tmp_path: Path,
+) -> None:
+    """Reject a completed success report that still contains a pending test."""
+
+    package_root = tmp_path / "head" / "admin-ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assertion = payload["testResults"][0]["assertionResults"][0]
+    assertion["status"] = "pending"
+    payload["numPassedTests"] = 0
+    payload["numPendingTests"] = 1
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(
+        safety_path,
+        reason="passed",
+        test_count=1,
+        incomplete_test_count=1,
+    )
+
+    with pytest.raises(RatchetError, match="unfinished assertion"):
+        validate_success_report(
+            report_path,
+            package_root,
+            strict=True,
+            safety_report_path=safety_path,
+        )
+
+
+@pytest.mark.unit
+def test_strict_validate_success_report_rejects_hidden_incomplete_suite(
+    tmp_path: Path,
+) -> None:
+    """Reject reporter-observed runtime work left pending at run completion."""
+
+    package_root = tmp_path / "head" / "admin-ui"
+    report_path = tmp_path / "head.json"
+    safety_path = tmp_path / "head-safety.json"
+    _write_success_report(report_path, package_root)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["numTotalTestSuites"] = 2
+    payload["numPendingTestSuites"] = 1
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    _write_safety_report(
+        safety_path,
+        reason="passed",
+        test_count=1,
+        suite_count=2,
+        passed_suite_count=1,
+        pending_suite_count=1,
+        incomplete_suite_count=1,
+    )
+
+    with pytest.raises(RatchetError, match="incompleteSuiteCount"):
+        validate_success_report(
+            report_path,
+            package_root,
+            strict=True,
+            safety_report_path=safety_path,
+        )
 
 
 @pytest.mark.unit

@@ -1,3 +1,4 @@
+import pytest
 from Helper_Scripts.ci.path_classifier import classify_paths
 
 
@@ -41,6 +42,63 @@ def test_admin_ui_change_enables_frontend_without_e2e() -> None:
     assert flags["admin_ui_changed"] is True
     assert flags["tldw_frontend_changed"] is False
     assert flags["e2e_changed"] is False
+
+
+@pytest.mark.parametrize(
+    ("path", "backend_changed", "tldw_frontend_changed", "admin_ui_changed"),
+    (
+        (
+            "Helper_Scripts/ci/vitest_base_ratchet.py",
+            True,
+            True,
+            True,
+        ),
+        (
+            "Helper_Scripts/ci/vitest_deterministic.config.ts",
+            False,
+            True,
+            False,
+        ),
+        (
+            "Helper_Scripts/ci/vitest_execution_order_reporter.mjs",
+            False,
+            True,
+            True,
+        ),
+        (
+            "Helper_Scripts/ci/emit_ci_gate_flags.py",
+            True,
+            False,
+            False,
+        ),
+        (
+            "Helper_Scripts/ci/path_classifier.py",
+            True,
+            False,
+            False,
+        ),
+        (
+            "admin-ui/scripts/ci/vitest-safety-reporter.mjs",
+            False,
+            False,
+            True,
+        ),
+    ),
+)
+def test_shared_vitest_guardrail_selects_every_consuming_gate(
+    path: str,
+    backend_changed: bool,
+    tldw_frontend_changed: bool,
+    admin_ui_changed: bool,
+) -> None:
+    flags = classify_paths([path])
+    assert flags["backend_changed"] is backend_changed
+    assert flags["frontend_changed"] is (
+        tldw_frontend_changed or admin_ui_changed
+    )
+    assert flags["tldw_frontend_changed"] is tldw_frontend_changed
+    assert flags["admin_ui_changed"] is admin_ui_changed
+    assert flags["e2e_changed"] is tldw_frontend_changed
 
 
 def test_api_schema_change_enables_e2e() -> None:

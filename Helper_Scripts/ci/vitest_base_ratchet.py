@@ -15,7 +15,11 @@ _ASSERTION_STATUSES = frozenset(
     {"passed", "failed", "skipped", "pending", "todo", "disabled"}
 )
 _TEST_RESULT_STATUSES = frozenset({"passed", "failed"})
-_SUITE_STATUS_RANK = {"pending": 0, "passed": 1, "failed": 2}
+_EXECUTION_SUITE_STATES = frozenset(
+    {"passed", "failed", "skipped", "pending", "queued"}
+)
+_EXECUTION_SUITE_MODES = frozenset({"run", "only", "skip", "todo"})
+_SUITE_STATUS_RANK = {"unknown": -1, "pending": 0, "passed": 1, "failed": 2}
 _STRICT_COUNTERS = (
     "numTotalTestSuites",
     "numPassedTestSuites",
@@ -27,10 +31,12 @@ _STRICT_COUNTERS = (
     "numPendingTests",
     "numTodoTests",
 )
-_SAFETY_ERROR_COUNTERS = (
+_SAFETY_BLOCKING_COUNTERS = (
     "unhandledErrorCount",
     "moduleErrorCount",
     "hookErrorCount",
+    "incompleteSuiteCount",
+    "incompleteTestCount",
 )
 _COLLECTION_FAILURE_FULL_NAME = "<collection failure>"
 
@@ -70,6 +76,14 @@ class ReportContext:
     tests: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
     suites: tuple[tuple[tuple[str, ...], str], ...]
     counters: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
+class ExecutionContext:
+    """Record reporter-observed module order and exact runtime suite tree."""
+
+    modules: tuple[str, ...]
+    suites: tuple[tuple[str, tuple[int, ...], str, str, str | None], ...]
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -117,7 +131,10 @@ def _strict_counters(payload: dict[str, Any], report_path: Path) -> dict[str, in
         + counters["numPendingTestSuites"]
         != counters["numTotalTestSuites"]
     ):
-        raise RatchetError(f"Vitest report {report_path} has inconsistent suite counters")
+        raise RatchetError(
+            f"Vitest report {report_path} counter numTotalTestSuites is "
+            "inconsistent with suite status counters"
+        )
     return counters
 
 
@@ -150,12 +167,14 @@ def _validate_safety_report(
     *,
     expected_reason: str,
     expected_module_count: int,
+    expected_suite_count: int,
+    expected_suite_status_counts: dict[str, int],
     expected_test_count: int,
 ) -> None:
     """Require a clean custom-reporter summary for a completed Vitest run."""
 
     payload = _load_json(safety_report_path)
-    if payload.get("schemaVersion") != 1:
+    if payload.get("schemaVersion") != 2:
         raise RatchetError(
             f"Vitest safety report {safety_report_path} has an unsupported schemaVersion"
         )
@@ -166,17 +185,48 @@ def _validate_safety_report(
 
     counts = {
         key: _nonnegative_int(payload, key, safety_report_path)
-        for key in ("moduleCount", "testCount", *_SAFETY_ERROR_COUNTERS)
+        for key in (
+            "moduleCount",
+            "suiteCount",
+            "passedSuiteCount",
+            "failedSuiteCount",
+            "pendingSuiteCount",
+            "testCount",
+            *_SAFETY_BLOCKING_COUNTERS,
+        )
     }
     if counts["moduleCount"] != expected_module_count:
         raise RatchetError(
             f"Vitest safety report {safety_report_path} moduleCount does not match JSON"
         )
+    if counts["suiteCount"] != expected_suite_count:
+        raise RatchetError(
+            f"Vitest safety report {safety_report_path} suiteCount does not match JSON"
+        )
+    if (
+        counts["passedSuiteCount"]
+        + counts["failedSuiteCount"]
+        + counts["pendingSuiteCount"]
+        != counts["suiteCount"]
+    ):
+        raise RatchetError(
+            f"Vitest safety report {safety_report_path} has inconsistent suite counters"
+        )
+    for safety_counter, vitest_counter in (
+        ("pendingSuiteCount", "numPendingTestSuites"),
+        ("failedSuiteCount", "numFailedTestSuites"),
+        ("passedSuiteCount", "numPassedTestSuites"),
+    ):
+        if counts[safety_counter] != expected_suite_status_counts[vitest_counter]:
+            raise RatchetError(
+                f"Vitest safety report {safety_report_path} {safety_counter} "
+                "does not match JSON"
+            )
     if counts["testCount"] != expected_test_count:
         raise RatchetError(
             f"Vitest safety report {safety_report_path} testCount does not match JSON"
         )
-    for counter_name in _SAFETY_ERROR_COUNTERS:
+    for counter_name in _SAFETY_BLOCKING_COUNTERS:
         if counts[counter_name] != 0:
             raise RatchetError(
                 f"Vitest safety report {safety_report_path} has nonzero {counter_name}"
@@ -207,13 +257,13 @@ def _relative_test_path(raw_name: object, package_root: Path) -> str:
 
 
 def _assertion_suite_status(assertion_status: str) -> str:
-    """Map one assertion status to Vitest's aggregate suite status."""
+    """Map assertion evidence without guessing pending parent-suite modes."""
 
     if assertion_status == "failed":
         return "failed"
     if assertion_status in {"passed", "skipped", "disabled"}:
         return "passed"
-    return "pending"
+    return "unknown"
 
 
 def _record_suite_status(
@@ -221,7 +271,7 @@ def _record_suite_status(
     suite_key: tuple[str, ...],
     status: str,
 ) -> None:
-    """Merge a suite status using Vitest's failed/passed/pending precedence."""
+    """Merge suite evidence with unknown below Vitest's known status precedence."""
 
     current_status = suite_statuses.get(suite_key)
     if (
@@ -229,6 +279,30 @@ def _record_suite_status(
         or _SUITE_STATUS_RANK[status] > _SUITE_STATUS_RANK[current_status]
     ):
         suite_statuses[suite_key] = status
+
+
+def _validate_observable_suite_counts(
+    report_path: Path,
+    counters: dict[str, int],
+    suite_statuses: dict[tuple[str, ...], str],
+) -> None:
+    """Require raw counters to cover every suite observable in Vitest JSON."""
+
+    observed_counts = Counter(suite_statuses.values())
+    if len(suite_statuses) > counters["numTotalTestSuites"]:
+        raise RatchetError(
+            f"Vitest report {report_path} exposes more suites than its total counter"
+        )
+    for status, counter_name in (
+        ("passed", "numPassedTestSuites"),
+        ("failed", "numFailedTestSuites"),
+        ("pending", "numPendingTestSuites"),
+    ):
+        if observed_counts[status] > counters[counter_name]:
+            raise RatchetError(
+                f"Vitest report {report_path} counter {counter_name} cannot cover "
+                "its observable suite hierarchy"
+            )
 
 
 def _load_report_context(report_path: Path, package_root: Path) -> ReportContext:
@@ -264,18 +338,21 @@ def _load_report_context(report_path: Path, package_root: Path) -> ReportContext
             )
         files.append(relative_path)
         tests_by_file[relative_path] = []
-        if not assertion_results:
-            _record_suite_status(
-                suite_statuses,
-                (relative_path,),
-                test_result_status,
-            )
+        _record_suite_status(
+            suite_statuses,
+            (relative_path,),
+            test_result_status,
+        )
         for assertion in assertion_results:
             if not isinstance(assertion, dict):
                 raise RatchetError(
                     f"Vitest result {relative_path} has an invalid assertion"
                 )
             assertion_status = assertion.get("status")
+            if assertion_status == "pending":
+                raise RatchetError(
+                    f"Vitest result {relative_path} contains an unfinished assertion"
+                )
             if assertion_status not in _ASSERTION_STATUSES:
                 raise RatchetError(
                     f"Vitest result {relative_path} has an invalid assertion status"
@@ -319,16 +396,6 @@ def _load_report_context(report_path: Path, package_root: Path) -> ReportContext
             for status in ("skipped", "pending", "disabled")
         ),
         "numTodoTests": assertion_status_counts["todo"],
-        "numTotalTestSuites": len(suite_statuses),
-        "numPassedTestSuites": sum(
-            status == "passed" for status in suite_statuses.values()
-        ),
-        "numFailedTestSuites": sum(
-            status == "failed" for status in suite_statuses.values()
-        ),
-        "numPendingTestSuites": sum(
-            status == "pending" for status in suite_statuses.values()
-        ),
     }
     for counter_name, observed_count in observed_counts.items():
         if counters[counter_name] != observed_count:
@@ -336,6 +403,17 @@ def _load_report_context(report_path: Path, package_root: Path) -> ReportContext
                 f"Vitest report {report_path} counter {counter_name} does not "
                 "match report structure"
             )
+    if (
+        counters["numPassedTestSuites"]
+        + counters["numFailedTestSuites"]
+        + counters["numPendingTestSuites"]
+        != counters["numTotalTestSuites"]
+    ):
+        raise RatchetError(
+            f"Vitest report {report_path} counter numTotalTestSuites is "
+            "inconsistent with suite status counters"
+        )
+    _validate_observable_suite_counts(report_path, counters, suite_statuses)
     return ReportContext(
         files=tuple(sorted(files)),
         tests=tuple(
@@ -347,19 +425,19 @@ def _load_report_context(report_path: Path, package_root: Path) -> ReportContext
     )
 
 
-def _load_execution_order(
+def _load_execution_context(
     order_report_path: Path,
     package_root: Path,
-    expected_files: tuple[str, ...],
-) -> tuple[str, ...]:
-    """Validate reporter-observed module starts against the JSON manifest."""
+    report_context: ReportContext,
+) -> ExecutionContext:
+    """Validate reporter-observed modules and runtime suites against Vitest JSON."""
 
     payload = _load_json(order_report_path)
     schema_version = payload.get("schemaVersion")
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version != 1
+        or schema_version not in {1, 2}
     ):
         raise RatchetError(
             f"Vitest order report {order_report_path} has an unsupported schemaVersion"
@@ -379,11 +457,151 @@ def _load_execution_order(
         )
     if len(modules) != len(set(modules)):
         raise RatchetError(f"Vitest order report {order_report_path} repeats a module")
-    if set(modules) != set(expected_files):
+    if set(modules) != set(report_context.files):
         raise RatchetError(
             f"Vitest order report {order_report_path} order manifest does not match JSON"
         )
-    return modules
+    counters = dict(report_context.counters)
+    if schema_version == 1:
+        if counters["numTotalTestSuites"] != len(report_context.suites):
+            raise RatchetError(
+                f"Vitest order report {order_report_path} cannot prove counter "
+                "numTotalTestSuites with schemaVersion 1"
+            )
+        return ExecutionContext(modules=modules, suites=())
+
+    suite_count = _nonnegative_int(payload, "suiteCount", order_report_path)
+    raw_suites = payload.get("suites")
+    if not isinstance(raw_suites, list):
+        raise RatchetError(
+            f"Vitest order report {order_report_path} is missing runtime suites"
+        )
+    runtime_suites: dict[
+        tuple[str, tuple[int, ...]], tuple[str, str, str | None]
+    ] = {}
+    for raw_suite in raw_suites:
+        if not isinstance(raw_suite, dict):
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has an invalid runtime suite"
+            )
+        module = _relative_test_path(raw_suite.get("module"), package_root)
+        if module not in report_context.files:
+            raise RatchetError(
+                f"Vitest order report {order_report_path} suite references an unknown module"
+            )
+        raw_path = raw_suite.get("path")
+        if (
+            not isinstance(raw_path, list)
+            or any(
+                isinstance(index, bool) or not isinstance(index, int) or index < 0
+                for index in raw_path
+            )
+        ):
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has an invalid suite path"
+            )
+        path = tuple(raw_path)
+        name = raw_suite.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has an invalid suite name"
+            )
+        state = raw_suite.get("state")
+        if state not in _EXECUTION_SUITE_STATES:
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has an invalid suite state"
+            )
+        if state in {"pending", "queued"}:
+            raise RatchetError(
+                f"Vitest order report {order_report_path} contains an unfinished suite"
+            )
+        mode = raw_suite.get("mode")
+        if "mode" not in raw_suite or (
+            (not path and mode is not None)
+            or (path and mode not in _EXECUTION_SUITE_MODES)
+        ):
+            raise RatchetError(
+                f"Vitest order report {order_report_path} has an invalid suite mode"
+            )
+        key = (module, path)
+        if key in runtime_suites:
+            raise RatchetError(
+                f"Vitest order report {order_report_path} repeats a suite path"
+            )
+        runtime_suites[key] = (name, state, mode)
+
+    if suite_count != len(runtime_suites):
+        raise RatchetError(
+            f"Vitest order report {order_report_path} suiteCount does not match suites"
+        )
+    if suite_count != counters["numTotalTestSuites"]:
+        raise RatchetError(
+            f"Vitest order report {order_report_path} suiteCount does not match JSON"
+        )
+
+    runtime_observable: dict[tuple[str, ...], str] = {}
+    runtime_status_counts: Counter[str] = Counter()
+    for (module, path), (name, state, mode) in runtime_suites.items():
+        if not path:
+            if name != module:
+                raise RatchetError(
+                    f"Vitest order report {order_report_path} has an invalid module root suite"
+                )
+            observable_key = (module,)
+        else:
+            parent_key = (module, path[:-1])
+            if parent_key not in runtime_suites:
+                raise RatchetError(
+                    f"Vitest order report {order_report_path} has an orphaned suite"
+                )
+            ancestor_names = []
+            current_path = path
+            while current_path:
+                ancestor_names.append(runtime_suites[(module, current_path)][0])
+                current_path = current_path[:-1]
+            observable_key = (module, *reversed(ancestor_names))
+        aggregate_status = (
+            "failed"
+            if state == "failed"
+            else "pending"
+            if state in {"pending", "queued"} or mode == "todo"
+            else "passed"
+        )
+        runtime_status_counts[aggregate_status] += 1
+        _record_suite_status(runtime_observable, observable_key, aggregate_status)
+
+    if {(module, ()) for module in report_context.files} - runtime_suites.keys():
+        raise RatchetError(
+            f"Vitest order report {order_report_path} omits a module root suite"
+        )
+    for status, counter_name in (
+        ("passed", "numPassedTestSuites"),
+        ("failed", "numFailedTestSuites"),
+        ("pending", "numPendingTestSuites"),
+    ):
+        if runtime_status_counts[status] != counters[counter_name]:
+            raise RatchetError(
+                f"Vitest order report {order_report_path} {status} suite count "
+                "does not match JSON"
+            )
+    for observable_key, status in report_context.suites:
+        runtime_status = runtime_observable.get(observable_key)
+        if runtime_status is None or (
+            status != "unknown" and runtime_status != status
+        ):
+            raise RatchetError(
+                f"Vitest order report {order_report_path} does not match JSON suite hierarchy"
+            )
+
+    return ExecutionContext(
+        modules=modules,
+        suites=tuple(
+            sorted(
+                (module, path, name, state, mode)
+                for (module, path), (name, state, mode) in runtime_suites.items()
+            )
+        ),
+    )
 
 
 def _load_failures(
@@ -422,6 +640,12 @@ def _load_failures(
             raise RatchetError(
                 f"Vitest result {relative_path} is missing assertionResults"
             )
+        if strict:
+            _record_suite_status(
+                suite_statuses,
+                (relative_path,),
+                test_result_status,
+            )
         failed_assertions = []
         for assertion in assertion_results:
             if not isinstance(assertion, dict):
@@ -429,6 +653,10 @@ def _load_failures(
                     f"Vitest result {relative_path} has an invalid assertion"
                 )
             assertion_status = assertion.get("status")
+            if assertion_status == "pending":
+                raise RatchetError(
+                    f"Vitest result {relative_path} contains an unfinished assertion"
+                )
             if assertion_status not in _ASSERTION_STATUSES:
                 raise RatchetError(
                     f"Vitest result {relative_path} has an invalid assertion status: "
@@ -533,7 +761,8 @@ def _load_failures(
             )
 
     if strict:
-        assert counters is not None
+        if counters is None:
+            raise RatchetError("strict Vitest validation is missing counters")
         observed_counts = {
             "numTotalTests": sum(assertion_status_counts.values()),
             "numPassedTests": assertion_status_counts["passed"],
@@ -550,32 +779,24 @@ def _load_failures(
                     f"Vitest report {report_path} counter {counter_name} does not "
                     f"match assertionResults"
                 )
-        observed_suite_counts = {
-            "numTotalTestSuites": len(suite_statuses),
-            "numPassedTestSuites": sum(
-                status == "passed" for status in suite_statuses.values()
-            ),
-            "numFailedTestSuites": sum(
-                status == "failed" for status in suite_statuses.values()
-            ),
-            "numPendingTestSuites": sum(
-                status == "pending" for status in suite_statuses.values()
-            ),
-        }
-        for counter_name, observed_count in observed_suite_counts.items():
-            if counters[counter_name] != observed_count:
-                raise RatchetError(
-                    f"Vitest report {report_path} suite counter {counter_name} "
-                    "does not match assertion hierarchy"
-                )
+        _validate_observable_suite_counts(report_path, counters, suite_statuses)
         if safety_report_path is None:
             raise RatchetError("strict Vitest validation requires a safety report")
         _validate_safety_report(
             safety_report_path,
             expected_reason="passed" if payload["success"] else "failed",
             expected_module_count=len(test_results),
+            expected_suite_count=counters["numTotalTestSuites"],
+            expected_suite_status_counts=counters,
             expected_test_count=counters["numTotalTests"],
         )
+
+        if payload["success"] and (
+            counters["numFailedTestSuites"] or counters["numFailedTests"]
+        ):
+            raise RatchetError(
+                f"Vitest report {report_path} claims success but has failed counters"
+            )
 
     if payload["success"] and failures:
         raise RatchetError(
@@ -614,7 +835,7 @@ def test_result_files(
     """Return the reporter-observed normalized module execution order."""
 
     context = _load_report_context(report_path, package_root)
-    return _load_execution_order(order_report_path, package_root, context.files)
+    return _load_execution_context(order_report_path, package_root, context).modules
 
 
 def validate_success_report(
@@ -701,22 +922,24 @@ def _validate_equivalent_context(
     base_context = _load_report_context(base_report, base_package_root)
     if head_context.files != base_context.files:
         raise RatchetError("head and base Vitest module manifests differ")
-    head_order = _load_execution_order(
+    head_execution = _load_execution_context(
         head_order_report_path,
         head_package_root,
-        head_context.files,
+        head_context,
     )
-    base_order = _load_execution_order(
+    base_execution = _load_execution_context(
         base_order_report_path,
         base_package_root,
-        base_context.files,
+        base_context,
     )
-    if head_order != base_order:
+    if head_execution.modules != base_execution.modules:
         raise RatchetError("head and base Vitest module execution order differs")
     if head_context.tests != base_context.tests:
         raise RatchetError("head and base Vitest test identities or file-local order differ")
     if head_context.suites != base_context.suites:
         raise RatchetError("head and base Vitest suite identities differ")
+    if head_execution.suites != base_execution.suites:
+        raise RatchetError("head and base Vitest runtime suite trees differ")
     if head_context.counters != base_context.counters:
         raise RatchetError("head and base Vitest test or suite counts differ")
 
