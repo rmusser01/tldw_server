@@ -260,6 +260,7 @@ def test_guard_identity_mismatch_prevents_every_product_materializer_call(
         )
 
     assert materializer.calls == []
+    assert service.store.list_envelopes_after("dataset-1", 0) == []
 
 
 def test_batch_rejects_explicit_nonpositive_object_revision(

@@ -23,19 +23,26 @@ class GuardedProductMutation:
     expected_domain: SyncDomain
     expected_object_id: str
     before: GuardBefore
-    after: GuardAfter
+    after: GuardAfter | None
 
     def __post_init__(self) -> None:
-        if self.expected_domain not in {
-            "notes.link",
-            "notes.keyword",
-            "notes.keyword_link",
-        }:
+        if not self.supports_domain(self.expected_domain):
             raise GuardedProductMutationIdentityError("Guarded product mutation domain is unsupported")
         if not self.expected_object_id.strip():
             raise GuardedProductMutationIdentityError("Guarded product mutation object identity is empty")
-        if not callable(self.before) or not callable(self.after):
+        if not callable(self.before):
             raise TypeError("Guarded product mutation callbacks must be callable")
+        if self.expected_domain == "notes.keyword":
+            if self.after is not None:
+                raise TypeError("Guarded keyword mutation must be before-only")
+        elif not callable(self.after):
+            raise TypeError("Guarded product mutation finalizer must be callable")
+
+    @staticmethod
+    def supports_domain(domain: SyncDomain) -> bool:
+        """Return whether a product domain supports guarded materialization."""
+
+        return domain in {"notes.link", "notes.keyword", "notes.keyword_link"}
 
     def matches(self, domain: SyncDomain, object_id: str) -> bool:
         """Return whether the guard is bound to this exact Sync identity."""

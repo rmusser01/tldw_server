@@ -450,7 +450,7 @@ def test_keyword_exact_replay_executes_guard_without_finalizing_acceptance(
         expected_domain="notes.keyword",
         expected_object_id=KEYWORD_ID,
         before=lambda _conn: events.append(("before", None)),
-        after=lambda _conn, identity: events.append(("after", identity)),
+        after=None,
     )
 
     result = materializer.apply(

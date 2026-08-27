@@ -155,6 +155,7 @@ class NotesOrganizationCoordinator:
         source: str,
         idempotency_key: str,
         guarded_mutation: GuardedProductMutation | None = None,
+        guarded_mutations: Sequence[GuardedProductMutation] = (),
     ) -> ServerOriginBatchResult:
         """Capture one planned Notes mutation through durable Sync authority."""
 
@@ -167,6 +168,7 @@ class NotesOrganizationCoordinator:
                 source=source,
                 idempotency_key=idempotency_key,
                 guarded_mutation=guarded_mutation,
+                guarded_mutations=guarded_mutations,
             )
         except (
             NotesOrganizationDomainsIncompleteError,

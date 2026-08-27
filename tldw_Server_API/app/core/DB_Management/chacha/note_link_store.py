@@ -322,7 +322,7 @@ class NotesLinkStore:
                         (
                             self._owner_id,
                             normalized["type"],
-                            self._deleted_value(bool(normalized["directed"])),
+                            int(bool(normalized["directed"])),
                             normalized["source_note_id"],
                             normalized["target_note_id"],
                         ),
@@ -347,7 +347,7 @@ class NotesLinkStore:
                             normalized["source_note_id"],
                             normalized["target_note_id"],
                             normalized["type"],
-                            self._deleted_value(bool(normalized["directed"])),
+                            int(bool(normalized["directed"])),
                             normalized["weight"],
                             normalized["label"],
                             properties,
