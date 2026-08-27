@@ -6755,6 +6755,8 @@ CREATE TABLE note_graph_suggestion_runs(
   expected_completion_token TEXT,
   state TEXT NOT NULL CHECK(state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing', 'succeeded', 'failed', 'cancelled', 'stale')),
   revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  maintenance_lease_token TEXT CHECK(maintenance_lease_token IS NULL OR length(trim(maintenance_lease_token)) > 0),
+  maintenance_lease_expires_at DATETIME,
   result_digest TEXT,
   suggestion_count INTEGER NOT NULL DEFAULT 0 CHECK(suggestion_count >= 0),
   related_note_count INTEGER NOT NULL DEFAULT 0 CHECK(related_note_count >= 0),
@@ -6771,7 +6773,11 @@ CREATE TABLE note_graph_suggestion_runs(
     ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY(owner_user_id, dataset_id, admission_receipt_id)
     REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
-    ON DELETE NO ACTION ON UPDATE CASCADE
+    ON DELETE NO ACTION ON UPDATE CASCADE,
+  CHECK(
+    (maintenance_lease_token IS NULL AND maintenance_lease_expires_at IS NULL)
+    OR (maintenance_lease_token IS NOT NULL AND maintenance_lease_expires_at IS NOT NULL)
+  )
 );
 
 CREATE TABLE note_graph_suggestion_rejection_sets(
@@ -6859,6 +6865,11 @@ CREATE UNIQUE INDEX idx_note_graph_suggestion_runs_active_source
   WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
 CREATE INDEX idx_note_graph_suggestion_runs_retention
   ON note_graph_suggestion_runs(state, expires_at);
+CREATE INDEX idx_note_graph_suggestion_runs_maintenance
+  ON note_graph_suggestion_runs(
+    owner_user_id, dataset_id, state, maintenance_lease_expires_at, created_at, id
+  )
+  WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
 CREATE INDEX idx_note_graph_suggestion_operation_receipts_retention
   ON note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, state, expires_at);
 CREATE INDEX idx_note_graph_suggestions_owner_dataset_source_state
@@ -6936,6 +6947,8 @@ CREATE TABLE IF NOT EXISTS note_graph_suggestion_runs(
   job_id TEXT, expected_completion_token TEXT,
   state TEXT NOT NULL CHECK(state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing', 'succeeded', 'failed', 'cancelled', 'stale')),
   revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  maintenance_lease_token TEXT CHECK(maintenance_lease_token IS NULL OR char_length(btrim(maintenance_lease_token)) > 0),
+  maintenance_lease_expires_at TIMESTAMPTZ,
   result_digest TEXT,
   suggestion_count INTEGER NOT NULL DEFAULT 0 CHECK(suggestion_count >= 0),
   related_note_count INTEGER NOT NULL DEFAULT 0 CHECK(related_note_count >= 0),
@@ -6949,7 +6962,11 @@ CREATE TABLE IF NOT EXISTS note_graph_suggestion_runs(
     ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY(owner_user_id, dataset_id, admission_receipt_id)
     REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
-    ON DELETE NO ACTION ON UPDATE CASCADE
+    ON DELETE NO ACTION ON UPDATE CASCADE,
+  CHECK(
+    (maintenance_lease_token IS NULL AND maintenance_lease_expires_at IS NULL)
+    OR (maintenance_lease_token IS NOT NULL AND maintenance_lease_expires_at IS NOT NULL)
+  )
 );
 CREATE TABLE IF NOT EXISTS note_graph_suggestion_rejection_sets(
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
@@ -7022,6 +7039,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_active_source
   )
   WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_retention ON note_graph_suggestion_runs(state, expires_at);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_maintenance
+  ON note_graph_suggestion_runs(
+    owner_user_id, dataset_id, state, maintenance_lease_expires_at, created_at, id
+  )
+  WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_operation_receipts_retention ON note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, state, expires_at);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_owner_dataset_source_state ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, state, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_target_state ON note_graph_suggestions(owner_user_id, dataset_id, target_note_id, state);

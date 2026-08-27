@@ -369,6 +369,7 @@ def test_sqlite_v64_fresh_schema_has_graph_suggestion_tables_constraints_and_ind
         "idx_note_graph_suggestion_runs_owner_dataset_note_state",
         "idx_note_graph_suggestion_runs_active_source",
         "idx_note_graph_suggestion_runs_retention",
+        "idx_note_graph_suggestion_runs_maintenance",
     } <= run_indexes
     assert {
         "idx_note_graph_suggestions_owner_dataset_source_state",
@@ -386,6 +387,52 @@ def test_sqlite_v64_fresh_schema_has_graph_suggestion_tables_constraints_and_ind
     }
 
 
+def test_sqlite_v64_fix_round_three_has_paired_maintenance_lease_and_scan_index(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "chacha-v64-maintenance-lease.sqlite"
+    db = _initialize(db_path)
+    db.close_all_connections()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        columns = {
+            str(row[1]): row
+            for row in conn.execute("PRAGMA table_info(note_graph_suggestion_runs)")
+        }
+        indexes = {
+            str(row[1]) for row in conn.execute("PRAGMA index_list(note_graph_suggestion_runs)")
+        }
+        _create_note(conn, "maintenance-note")
+        conn.execute(
+            """
+            INSERT INTO note_graph_suggestion_runs(
+                id,owner_user_id,dataset_id,source_note_id,source_fingerprint,
+                provider,model,capability_revision,prompt_contract_version,
+                state,revision,created_at,expires_at
+            ) VALUES ('maintenance-run','owner-a','dataset-a','maintenance-note','fp',
+                      'openai','model-a','cap-v1','prompt-v1','queued',1,
+                      CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+            """
+        )
+        lease = conn.execute(
+            "SELECT maintenance_lease_token,maintenance_lease_expires_at "
+            "FROM note_graph_suggestion_runs WHERE id='maintenance-run'"
+        ).fetchone()
+
+        assert columns["maintenance_lease_token"][3] == 0
+        assert columns["maintenance_lease_token"][4] is None
+        assert columns["maintenance_lease_expires_at"][3] == 0
+        assert columns["maintenance_lease_expires_at"][4] is None
+        assert lease == (None, None)
+        assert "idx_note_graph_suggestion_runs_maintenance" in indexes
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE note_graph_suggestion_runs SET maintenance_lease_token='orphan' "
+                "WHERE id='maintenance-run'"
+            )
+
+
 def test_sqlite_v63_to_v64_upgrade_creates_graph_suggestion_schema(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -401,8 +448,16 @@ def test_sqlite_v63_to_v64_upgrade_creates_graph_suggestion_schema(
             str(row[0])
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
+        run_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(note_graph_suggestion_runs)")
+        }
+        run_indexes = {
+            str(row[1]) for row in conn.execute("PRAGMA index_list(note_graph_suggestion_runs)")
+        }
         assert _version(conn) == 64
         assert tables >= _TABLES
+        assert {"maintenance_lease_token", "maintenance_lease_expires_at"} <= run_columns
+        assert "idx_note_graph_suggestion_runs_maintenance" in run_indexes
 
 
 def test_sqlite_v64_failure_rolls_back_partial_ddl_and_preserves_v63(

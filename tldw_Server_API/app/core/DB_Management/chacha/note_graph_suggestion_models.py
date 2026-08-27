@@ -83,6 +83,8 @@ class NoteGraphSuggestionRun:
     guidance_key: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
+    maintenance_lease_token: str | None = None
+    maintenance_lease_expires_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

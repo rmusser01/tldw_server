@@ -146,6 +146,7 @@ def test_postgres_v64_ddl_has_owner_scoped_tables_checks_indexes_and_forced_rls(
         "CHECK(operation_kind IN ('run_admit', 'run_cancel', 'suggestion_accept', 'suggestion_reject', 'rejections_reset'))",
         "CHECK(state IN ('staged', 'pending', 'accepting', 'accepted', 'rejected', 'stale'))",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_active_source",
+        "CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_maintenance",
         "source_note_id, source_fingerprint, provider, model, prompt_contract_version",
         "provider TEXT NOT NULL CHECK(char_length(btrim(provider)) > 0)",
         "model TEXT NOT NULL CHECK(char_length(btrim(model)) > 0)",
@@ -192,7 +193,8 @@ def test_postgres_v64_live_schema_has_owner_scoped_graph_suggestion_contract(
                AND table_name = ANY(%s)
                AND column_name IN (
                    'owner_user_id', 'dataset_id', 'state', 'source_note_id',
-                   'expires_at', 'acceptance_lease_expires_at', 'keyword_sync_id'
+                   'expires_at', 'acceptance_lease_expires_at', 'keyword_sync_id',
+                   'maintenance_lease_token', 'maintenance_lease_expires_at'
                )
             """,
             (list(tables),),
@@ -245,6 +247,10 @@ def test_postgres_v64_live_schema_has_owner_scoped_graph_suggestion_contract(
         assert ("note_graph_suggestions", "keyword_sync_id") in {
             (row["table_name"], row["column_name"]) for row in columns
         }
+        assert {
+            ("note_graph_suggestion_runs", "maintenance_lease_token"),
+            ("note_graph_suggestion_runs", "maintenance_lease_expires_at"),
+        } <= {(row["table_name"], row["column_name"]) for row in columns}
         assert all(
             row["data_type"] == "timestamp with time zone"
             for row in columns
@@ -259,6 +265,7 @@ def test_postgres_v64_live_schema_has_owner_scoped_graph_suggestion_contract(
         assert {
             "idx_note_graph_suggestion_runs_active_source",
             "idx_note_graph_suggestion_runs_retention",
+            "idx_note_graph_suggestion_runs_maintenance",
             "idx_note_graph_suggestions_acceptance_lease",
             "idx_note_graph_suggestions_retention",
             "idx_note_graph_suggestions_staged_related_identity",
@@ -271,6 +278,82 @@ def test_postgres_v64_live_schema_has_owner_scoped_graph_suggestion_contract(
         assert len(policies) == len(tables)
         assert all("owner_user_id" in str(row["qual"]) for row in policies)
         assert all("dataset_id" in str(row["with_check"]) for row in policies)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_postgres_v64_fix_round_three_has_paired_maintenance_lease_and_scan_index(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    try:
+        columns = backend.execute(
+            """
+            SELECT column_name,is_nullable,column_default,data_type
+              FROM information_schema.columns
+             WHERE table_schema=current_schema()
+               AND table_name='note_graph_suggestion_runs'
+               AND column_name=ANY(%s)
+            """,
+            (["maintenance_lease_token", "maintenance_lease_expires_at"],),
+        ).rows
+        indexes = backend.execute(
+            """
+            SELECT indexname FROM pg_indexes
+             WHERE schemaname=current_schema()
+               AND tablename='note_graph_suggestion_runs'
+            """
+        ).rows
+        assert {
+            str(row["column_name"]): (
+                str(row["is_nullable"]),
+                row["column_default"],
+                str(row["data_type"]),
+            )
+            for row in columns
+        } == {
+            "maintenance_lease_token": ("YES", None, "text"),
+            "maintenance_lease_expires_at": ("YES", None, "timestamp with time zone"),
+        }
+        assert "idx_note_graph_suggestion_runs_maintenance" in {
+            str(row["indexname"]) for row in indexes
+        }
+
+        with backend.transaction() as conn:
+            _set_tenant_scope(backend, conn, "owner-a", "dataset-a")
+            _insert_note(backend, conn, "maintenance-note", "owner-a")
+            backend.execute(
+                """
+                INSERT INTO note_graph_suggestion_runs(
+                    id,owner_user_id,dataset_id,source_note_id,source_fingerprint,
+                    provider,model,capability_revision,prompt_contract_version,
+                    state,revision,created_at,expires_at
+                ) VALUES ('maintenance-run','owner-a','dataset-a','maintenance-note','fp',
+                          'openai','model-a','cap-v1','prompt-v1','queued',1,
+                          CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+                """,
+                connection=conn,
+            )
+            lease = backend.execute(
+                "SELECT maintenance_lease_token,maintenance_lease_expires_at "
+                "FROM note_graph_suggestion_runs WHERE id='maintenance-run'",
+                connection=conn,
+            ).rows[0]
+            assert lease["maintenance_lease_token"] is None
+            assert lease["maintenance_lease_expires_at"] is None
+
+        with pytest.raises(BackendDatabaseError):
+            with backend.transaction() as conn:
+                _set_tenant_scope(backend, conn, "owner-a", "dataset-a")
+                backend.execute(
+                    "UPDATE note_graph_suggestion_runs SET maintenance_lease_token='orphan' "
+                    "WHERE id='maintenance-run'",
+                    connection=conn,
+                )
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
@@ -912,9 +995,31 @@ def test_postgres_v63_to_v64_upgrade_creates_graph_suggestion_schema(
                 (list(reversed(tables)),),
             ).rows
         }
+        run_columns = {
+            str(row["column_name"])
+            for row in backend.execute(
+                """
+                SELECT column_name FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'note_graph_suggestion_runs'
+                """
+            ).rows
+        }
+        run_indexes = {
+            str(row["indexname"])
+            for row in backend.execute(
+                """
+                SELECT indexname FROM pg_indexes
+                 WHERE schemaname = current_schema()
+                   AND tablename = 'note_graph_suggestion_runs'
+                """
+            ).rows
+        }
 
         assert int(version) == 64
         assert migrated_tables == set(tables)
+        assert {"maintenance_lease_token", "maintenance_lease_expires_at"} <= run_columns
+        assert "idx_note_graph_suggestion_runs_maintenance" in run_indexes
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()

@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 10:19
+updated_date: 2026-08-27 10:51
 labels:
 - notes
 - knowledge-graph
@@ -75,6 +75,7 @@ Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-2
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -117,7 +118,12 @@ Verification:
 Task 3 Fix Round 1 completed locally from reviewer base 5fdb9575256d888cc6a743318cc6112a1330aff8. Fixed terminal receipt replay after detail cleanup, explicit atomic admission failure, canonical undirected related identity, tag sync-id re-resolution and membership filtering, receipt-bound acceptance fences/release, unreleased-v64 non-null binding fields, closed transition/request/envelope contracts, exact bounded retention, and complete same-transaction NoteStore/Sync lifecycle rollback coverage. Verification: required Task 3 suite 43 passed/0 skipped; v64 SQLite/live-PostgreSQL 28 passed/0 skipped; Task 2 26 passed/0 skipped; direct NoteStore/projection/Sync 65 passed/0 skipped; final deduplicated 11-file run 154 passed/0 skipped (2 established warnings). Ruff clean; Bandit 0 findings/0 errors; git diff --check passed. Live PostgreSQL ran with no skips. Ignored report appended at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md.
 Task 3 Fix Round 2 started from exact base 2cd3220c4533476d8c06e201354191ff62650d18. Scope is the two verified remaining findings: accepting-identity activation filtering for canonical tag/undirected related suggestions, and a closed Task-5-ready cancellation/publication/maintenance CAS persistence surface. Focused SQLite/live-PostgreSQL RED precedes production edits; no Jobs/provider authority is added.
 Task 3 Fix Round 2 completed from exact base 2cd3220c4533476d8c06e201354191ff62650d18. Activation now filters staged canonical tag/undirected-related duplicates when an accepting row owns the visible identity, preserving that row's revision, lease, and decision receipt while publishing unrelated staged rows atomically. Added exact notes_graph_capabilities_changed_before_queue admission failure replay and closed operation-specific cancellation receipt plus Task-5 maintenance reconciliation CAS primitives; no Jobs/provider I/O or generic transition surface was added. Strict focused RED: 6 failed/8 deselected/0 skipped/2 warnings, followed by 6 passed/8 deselected/0 skipped/2 warnings. Review subcycles: queued-stale continuation RED 2 failed then GREEN 2 passed; missing in-progress resource RED 2 failed then GREEN 2 passed, both SQLite/live PostgreSQL. Verification: Task 3 49 passed/0 skipped; v64 migration 28 passed/0 skipped; Task 2 26 passed/0 skipped; direct NoteStore/projection/Sync 58 passed/0 skipped; final deduplicated 11-file run 161 passed/0 skipped/2 inherited warnings. One unchanged initial final run hit Hypothesis input-generation health-check timing (1 failed/160 passed); isolated rerun and unchanged full rerun passed. Ruff clean; Bandit 0 findings/0 errors; git diff --check passed. Ignored report appended at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md.
+Task 3 Fix Round 3 started from exact base 4faf2e73c10b291055cb8c5ff1739fdfb2e6676f. Final ordinary fix scope is the ledger-approved unreleased-v64 maintenance lease omission and operation-specific error/guidance pair contracts. SQLite/live-PostgreSQL migration and store tests will be added and run RED before schema/model/store edits; Task 5 retains scheduling, Jobs lookup, and external effects.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Task 3 Fix Round 3 completed from exact base 4faf2e73c10b291055cb8c5ff1739fdfb2e6676f. Unreleased v64 now persists paired five-minute maintenance lease tokens/expiries and an owner/dataset active-run scan index. The store claims deterministic bounded batches (1..100), fences reconcile/release by owner, dataset, state, revision, exact non-expired token, clears leases on all competing run transitions, and keeps Jobs/provider I/O outside ChaChaNotes. Admission and worker error/guidance contracts are exact operation-specific mappings; job/publication outcomes are derived and run-admit replay rejects unsafe persisted cross-products. Strict RED: 6 failed/42 deselected/0 skipped/2 warnings; lease subcycles each failed on SQLite/live PostgreSQL before fixes. GREEN: focused 6 passed; Task 3 53 passed; v64 SQLite/live PostgreSQL 30 passed; Task 2 26 passed; NoteStore/projection/Sync 58 passed; final deduplicated run 167 passed/0 skipped/2 inherited warnings. Ruff clean; Bandit 0 findings; git diff --check passed. Report appended locally at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md and remains ignored.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

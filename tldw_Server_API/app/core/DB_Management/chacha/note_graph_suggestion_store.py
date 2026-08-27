@@ -145,37 +145,24 @@ class NoteGraphSuggestionStore:
             "expected_revision": (int, False, None),
         },
     }
-    _STABLE_ERROR_CODES = frozenset(
-        {
-            "notes_graph_admission_failed",
-            "notes_graph_active_run_conflict",
-            "notes_graph_capabilities_changed_before_provider",
-            "notes_graph_capabilities_changed_before_queue",
-            "notes_graph_fingerprint_stale",
-            "notes_graph_fts_not_ready",
-            "notes_graph_job_missing",
-            "notes_graph_provider_retry_policy_unsupported",
-            "notes_graph_provider_unavailable",
-            "notes_graph_publication_receipt_mismatch",
-            "notes_graph_publication_receipt_missing",
-            "notes_graph_publication_state_missing",
-            "notes_graph_source_too_large",
-            "notes_graph_suggestion_no_valid_items",
-            "notes_graph_suggestion_suppression_limit",
-        }
-    )
-    _WORKER_ERROR_CODES = frozenset(
-        {
-            "notes_graph_capabilities_changed_before_provider",
-            "notes_graph_fingerprint_stale",
-            "notes_graph_fts_not_ready",
-            "notes_graph_provider_retry_policy_unsupported",
-            "notes_graph_provider_unavailable",
-            "notes_graph_source_too_large",
-            "notes_graph_suggestion_no_valid_items",
-            "notes_graph_suggestion_suppression_limit",
-        }
-    )
+    _ADMISSION_FAILURE_GUIDANCE = {
+        "notes_graph_admission_failed": "retry_generation",
+        "notes_graph_capabilities_changed_before_queue": "retry_generation",
+    }
+    _RUN_ADMIT_ENVELOPE_GUIDANCE = {
+        **_ADMISSION_FAILURE_GUIDANCE,
+        "notes_graph_job_missing": "retry_generation",
+    }
+    _WORKER_FAILURE_GUIDANCE = {
+        "notes_graph_capabilities_changed_before_provider": "retry_generation",
+        "notes_graph_fingerprint_stale": "refresh_note",
+        "notes_graph_fts_not_ready": "contact_administrator",
+        "notes_graph_provider_retry_policy_unsupported": "configure_provider",
+        "notes_graph_provider_unavailable": "retry_generation",
+        "notes_graph_source_too_large": "refresh_note",
+        "notes_graph_suggestion_no_valid_items": "retry_generation",
+        "notes_graph_suggestion_suppression_limit": "refresh_note",
+    }
     _MAINTENANCE_OBSERVATIONS = frozenset(
         {
             "terminal_succeeded",
@@ -190,9 +177,7 @@ class NoteGraphSuggestionStore:
     _STALE_ON_COMPLETION_CODES = frozenset(
         {"notes_graph_source_changed", "notes_graph_target_changed"}
     )
-    _STABLE_GUIDANCE_KEYS = frozenset(
-        {"configure_provider", "contact_administrator", "refresh_note", "retry_generation"}
-    )
+    _MAINTENANCE_LEASE_DURATION = timedelta(minutes=5)
     _SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 
     def __init__(self, db: CharactersRAGDB) -> None:
@@ -349,8 +334,10 @@ class NoteGraphSuggestionStore:
             ) or (
                 state == "failed"
                 and keys == {"run_id", "state", "error_code", "guidance_key"}
-                and value["error_code"] in cls._STABLE_ERROR_CODES
-                and value["guidance_key"] in cls._STABLE_GUIDANCE_KEYS
+                and isinstance(value["error_code"], str)
+                and isinstance(value["guidance_key"], str)
+                and cls._RUN_ADMIT_ENVELOPE_GUIDANCE.get(value["error_code"])
+                == value["guidance_key"]
             )
         elif operation_kind == "suggestion_reject":
             valid = state == "rejected" and keys == {"suggestion_id", "state", "revision"}
@@ -431,6 +418,8 @@ class NoteGraphSuggestionStore:
             guidance_key=row["guidance_key"],
             started_at=self._iso(row["started_at"]),
             completed_at=self._iso(row["completed_at"]),
+            maintenance_lease_token=row["maintenance_lease_token"],
+            maintenance_lease_expires_at=self._iso(row["maintenance_lease_expires_at"]),
         )
 
     def _load_run(self, conn: SuggestionConnection, dataset_id: str, run_id: str) -> NoteGraphSuggestionRun:
@@ -616,7 +605,8 @@ class NoteGraphSuggestionStore:
                 raise RuntimeError("notes_graph_receipt_conflict")
             updated = conn.execute(
                 "UPDATE note_graph_suggestion_runs SET job_id=?,expected_completion_token=?,"
-                "state='queued',revision=revision+1 WHERE owner_user_id=? AND dataset_id=? AND id=? "
+                "state='queued',revision=revision+1,maintenance_lease_token=NULL,"
+                "maintenance_lease_expires_at=NULL WHERE owner_user_id=? AND dataset_id=? AND id=? "
                 "AND state=? AND revision=?",
                 (
                     job_id,
@@ -665,6 +655,12 @@ class NoteGraphSuggestionStore:
     ) -> NoteGraphSuggestionRun:
         """Fail an admitting run and its admission receipt in one fenced transaction."""
 
+        if (
+            not isinstance(error_code, str)
+            or not isinstance(guidance_key, str)
+            or self._ADMISSION_FAILURE_GUIDANCE.get(error_code) != guidance_key
+        ):
+            raise ValueError("notes_graph_admission_failure_contract_invalid")
         dataset = self._scope(dataset_id)
         now_utc = self._aware_utc(now)
         self._require_run_transition(expected_state, "failed")
@@ -694,7 +690,9 @@ class NoteGraphSuggestionStore:
             )
             cursor = conn.execute(
                 "UPDATE note_graph_suggestion_runs SET state='failed',revision=revision+1,"
-                "error_code=?,guidance_key=?,completed_at=?,expires_at=? WHERE owner_user_id=? "
+                "error_code=?,guidance_key=?,completed_at=?,expires_at=?,"
+                "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
+                "WHERE owner_user_id=? "
                 "AND dataset_id=? AND id=? AND state=? AND revision=?",
                 (
                     error_code,
@@ -750,7 +748,8 @@ class NoteGraphSuggestionStore:
 
         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
             cursor = conn.execute(
-                "UPDATE note_graph_suggestion_runs SET state='running',revision=revision+1,started_at=? "
+                "UPDATE note_graph_suggestion_runs SET state='running',revision=revision+1,started_at=?,"
+                "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
                 "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state='queued' AND revision=?",
                 (
                     self._db_datetime(now_utc),
@@ -965,7 +964,8 @@ class NoteGraphSuggestionStore:
                     )
             cursor = conn.execute(
                 "UPDATE note_graph_suggestion_runs SET state='publishing',revision=revision+1,"
-                "result_digest=?,suggestion_count=?,related_note_count=?,tag_count=?,invalid_item_count=? "
+                "result_digest=?,suggestion_count=?,related_note_count=?,tag_count=?,invalid_item_count=?,"
+                "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
                 "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?",
                 (
                     result_digest,
@@ -1304,7 +1304,8 @@ class NoteGraphSuggestionStore:
                 )
                 cursor = conn.execute(
                     "UPDATE note_graph_suggestion_runs SET state='stale',revision=revision+1,"
-                    "error_code='notes_graph_fingerprint_stale',completed_at=?,expires_at=? "
+                    "error_code='notes_graph_fingerprint_stale',completed_at=?,expires_at=?,"
+                    "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
                     "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?",
                     (
                         self._db_datetime(now_utc),
@@ -1409,7 +1410,8 @@ class NoteGraphSuggestionStore:
                 "suggestion_count=?,related_note_count=(SELECT COUNT(*) FROM note_graph_suggestions "
                 "WHERE owner_user_id=? AND dataset_id=? AND run_id=? AND kind='related_note' AND state='pending'),"
                 "tag_count=(SELECT COUNT(*) FROM note_graph_suggestions WHERE owner_user_id=? "
-                "AND dataset_id=? AND run_id=? AND kind='tag' AND state='pending'),completed_at=?,expires_at=? "
+                "AND dataset_id=? AND run_id=? AND kind='tag' AND state='pending'),completed_at=?,expires_at=?,"
+                "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
                 "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?",
                 (
                     len(activated_ids),
@@ -2249,7 +2251,8 @@ class NoteGraphSuggestionStore:
                 raise RuntimeError("notes_graph_receipt_conflict")
             updated = conn.execute(
                 "UPDATE note_graph_suggestion_runs SET state='cancelling',revision=revision+1,"
-                "error_code=?,guidance_key=NULL,completed_at=NULL,expires_at=? "
+                "error_code=?,guidance_key=NULL,completed_at=NULL,expires_at=?,"
+                "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
                 "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?",
                 (
                     reason,
@@ -2371,6 +2374,104 @@ class NoteGraphSuggestionStore:
 
         return self._with_dataset_scope(dataset, mutate)
 
+    def claim_runs_for_maintenance(
+        self,
+        *,
+        dataset_id: str,
+        limit: int,
+        now: datetime,
+    ) -> tuple[NoteGraphSuggestionRun, ...]:
+        """Claim a bounded deterministic active-run batch without external I/O."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("notes_graph_maintenance_limit_invalid")
+        dataset = self._scope(dataset_id)
+        now_utc = self._aware_utc(now)
+        now_value = self._db_datetime(now_utc)
+        lease_expires_at = now_utc + self._MAINTENANCE_LEASE_DURATION
+
+        def mutate(conn: SuggestionConnection) -> tuple[NoteGraphSuggestionRun, ...]:
+            query = (
+                "SELECT id,state,revision FROM note_graph_suggestion_runs "
+                "WHERE owner_user_id=? AND dataset_id=? "
+                "AND state IN ('admitting','queued','running','cancelling','publishing') "
+                "AND (maintenance_lease_token IS NULL OR maintenance_lease_expires_at<=?) "
+                "ORDER BY created_at,id LIMIT ?"
+            )
+            if self.is_postgres:
+                query += " FOR UPDATE SKIP LOCKED"
+            candidates = conn.execute(
+                query,
+                (self.owner_user_id, dataset, now_value, limit),
+            ).fetchall()
+            claimed: list[NoteGraphSuggestionRun] = []
+            for candidate in candidates:
+                token = f"ml_{secrets.token_urlsafe(32)}"
+                updated = conn.execute(
+                    "UPDATE note_graph_suggestion_runs SET maintenance_lease_token=?,"
+                    "maintenance_lease_expires_at=?,revision=revision+1 "
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=? "
+                    "AND (maintenance_lease_token IS NULL OR maintenance_lease_expires_at<=?)",
+                    (
+                        token,
+                        self._db_datetime(lease_expires_at),
+                        self.owner_user_id,
+                        dataset,
+                        candidate["id"],
+                        candidate["state"],
+                        candidate["revision"],
+                        now_value,
+                    ),
+                )
+                if updated.rowcount == 1:
+                    claimed.append(self._load_run(conn, dataset, str(candidate["id"])))
+            return tuple(claimed)
+
+        return self._with_dataset_scope(dataset, mutate)
+
+    def release_run_maintenance_lease(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+        expected_state: str,
+        expected_revision: int,
+        maintenance_lease_token: str,
+        now: datetime,
+    ) -> NoteGraphSuggestionRun:
+        """Release one live exact maintenance lease without changing run state."""
+
+        if (
+            expected_state not in self._ACTIVE_RUN_STATES
+            or not isinstance(maintenance_lease_token, str)
+            or not self._SAFE_ID_PATTERN.fullmatch(maintenance_lease_token)
+        ):
+            raise ValueError("notes_graph_maintenance_contract_invalid")
+        dataset = self._scope(dataset_id)
+        now_utc = self._aware_utc(now)
+
+        def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
+            updated = conn.execute(
+                "UPDATE note_graph_suggestion_runs SET maintenance_lease_token=NULL,"
+                "maintenance_lease_expires_at=NULL,revision=revision+1 "
+                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=? "
+                "AND maintenance_lease_token=? AND maintenance_lease_expires_at>?",
+                (
+                    self.owner_user_id,
+                    dataset,
+                    run_id,
+                    expected_state,
+                    expected_revision,
+                    maintenance_lease_token,
+                    self._db_datetime(now_utc),
+                ),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("notes_graph_maintenance_lease_conflict")
+            return self._load_run(conn, dataset, run_id)
+
+        return self._with_dataset_scope(dataset, mutate)
+
     def reconcile_run_after_job_lookup(
         self,
         *,
@@ -2378,6 +2479,7 @@ class NoteGraphSuggestionStore:
         run_id: str,
         expected_state: str,
         expected_revision: int,
+        maintenance_lease_token: str,
         observation: str,
         error_code: str | None,
         guidance_key: str | None,
@@ -2385,7 +2487,12 @@ class NoteGraphSuggestionStore:
     ) -> NoteGraphSuggestionRun:
         """Apply one closed maintenance outcome after an external Jobs lookup."""
 
-        if expected_state not in self._ACTIVE_RUN_STATES or observation not in self._MAINTENANCE_OBSERVATIONS:
+        if (
+            expected_state not in self._ACTIVE_RUN_STATES
+            or observation not in self._MAINTENANCE_OBSERVATIONS
+            or not isinstance(maintenance_lease_token, str)
+            or not self._SAFE_ID_PATTERN.fullmatch(maintenance_lease_token)
+        ):
             raise ValueError("notes_graph_maintenance_contract_invalid")
         publication_observation = observation in {
             "publication_receipt_mismatch",
@@ -2398,8 +2505,14 @@ class NoteGraphSuggestionStore:
             "definitively_missing",
         }:
             raise ValueError("notes_graph_maintenance_contract_invalid")
+        if expected_state == "admitting" and observation != "definitively_missing":
+            raise ValueError("notes_graph_maintenance_contract_invalid")
         if observation == "terminal_failed":
-            if error_code not in self._WORKER_ERROR_CODES or guidance_key not in self._STABLE_GUIDANCE_KEYS:
+            if (
+                not isinstance(error_code, str)
+                or not isinstance(guidance_key, str)
+                or self._WORKER_FAILURE_GUIDANCE.get(error_code) != guidance_key
+            ):
                 raise ValueError("notes_graph_maintenance_contract_invalid")
         elif error_code is not None or guidance_key is not None:
             raise ValueError("notes_graph_maintenance_contract_invalid")
@@ -2407,9 +2520,23 @@ class NoteGraphSuggestionStore:
         now_utc = self._aware_utc(now)
 
         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
-            run = self._load_run(conn, dataset, run_id)
-            if run.state.value != expected_state or run.revision != expected_revision:
-                raise RuntimeError("notes_graph_run_conflict")
+            row = conn.execute(
+                "SELECT * FROM note_graph_suggestion_runs WHERE owner_user_id=? AND dataset_id=? "
+                "AND id=? AND state=? AND revision=? AND maintenance_lease_token=? "
+                "AND maintenance_lease_expires_at>?",
+                (
+                    self.owner_user_id,
+                    dataset,
+                    run_id,
+                    expected_state,
+                    expected_revision,
+                    maintenance_lease_token,
+                    self._db_datetime(now_utc),
+                ),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("notes_graph_maintenance_lease_conflict")
+            run = self._run_from_row(row)
 
             stale_on_completion = (
                 expected_state == "cancelling" and run.error_code in self._STALE_ON_COMPLETION_CODES
@@ -2420,12 +2547,8 @@ class NoteGraphSuggestionStore:
                 final_guidance = None
             elif expected_state == "admitting":
                 new_state = "failed"
-                final_error = error_code if observation == "terminal_failed" else (
-                    "notes_graph_job_missing"
-                    if observation == "definitively_missing"
-                    else "notes_graph_admission_failed"
-                )
-                final_guidance = guidance_key or "retry_generation"
+                final_error = "notes_graph_job_missing"
+                final_guidance = "retry_generation"
             elif observation == "terminal_succeeded":
                 if expected_state == "cancelling":
                     new_state = "cancelled"
@@ -2458,8 +2581,10 @@ class NoteGraphSuggestionStore:
                 self._delete_staged_for_run(conn, dataset_id=dataset, run_id=run_id)
             updated = conn.execute(
                 "UPDATE note_graph_suggestion_runs SET state=?,revision=revision+1,error_code=?,"
-                "guidance_key=?,completed_at=?,expires_at=? WHERE owner_user_id=? AND dataset_id=? "
-                "AND id=? AND state=? AND revision=?",
+                "guidance_key=?,completed_at=?,expires_at=?,maintenance_lease_token=NULL,"
+                "maintenance_lease_expires_at=NULL WHERE owner_user_id=? AND dataset_id=? "
+                "AND id=? AND state=? AND revision=? AND maintenance_lease_token=? "
+                "AND maintenance_lease_expires_at>?",
                 (
                     new_state,
                     final_error,
@@ -2471,10 +2596,12 @@ class NoteGraphSuggestionStore:
                     run_id,
                     expected_state,
                     expected_revision,
+                    maintenance_lease_token,
+                    self._db_datetime(now_utc),
                 ),
             )
             if updated.rowcount != 1:
-                raise RuntimeError("notes_graph_run_conflict")
+                raise RuntimeError("notes_graph_maintenance_lease_conflict")
             reconciled = self._load_run(conn, dataset, run_id)
 
             cancellation_receipts = conn.execute(
@@ -2648,7 +2775,8 @@ class NoteGraphSuggestionStore:
                 self._require_run_transition(run.state.value, next_state)
                 updated = conn.execute(
                     "UPDATE note_graph_suggestion_runs SET state=?,revision=revision+1,error_code=?,"
-                    f"{completion_sql}expires_at=? "  # nosec B608
+                    f"{completion_sql}expires_at=?,maintenance_lease_token=NULL,"  # nosec B608
+                    "maintenance_lease_expires_at=NULL "
                     "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?",
                     (
                         *transition_values,
@@ -2686,7 +2814,8 @@ class NoteGraphSuggestionStore:
                 )
                 updated = conn.execute(
                     "UPDATE note_graph_suggestion_runs SET state='stale',revision=revision+1,"
-                    "error_code='notes_graph_target_changed',completed_at=?,expires_at=? "
+                    "error_code='notes_graph_target_changed',completed_at=?,expires_at=?,"
+                    "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
                     "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state='publishing' AND revision=?",
                     (
                         self._db_datetime(now_utc),

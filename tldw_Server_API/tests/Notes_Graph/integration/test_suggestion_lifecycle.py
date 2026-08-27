@@ -990,11 +990,13 @@ def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
         "state": "cancelling",
         "revision": cancellation.run.revision,
     }
+    cancellation_claim = _claim_maintenance_run(db, running.id)
     cancelled = store.reconcile_run_after_job_lookup(
         dataset_id=DATASET_ID,
         run_id=running.id,
         expected_state="cancelling",
-        expected_revision=cancellation.run.revision,
+        expected_revision=cancellation_claim.revision,
+        maintenance_lease_token=cancellation_claim.maintenance_lease_token,
         observation="terminal_succeeded",
         error_code=None,
         guidance_key=None,
@@ -1078,11 +1080,13 @@ def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
     assert missing_cancellation.operation_id
 
     missing_admitting = _admit_for(db, state_source, "missing-admitting")
+    missing_claim = _claim_maintenance_run(db, missing_admitting.run.id)
     missing = store.reconcile_run_after_job_lookup(
         dataset_id=DATASET_ID,
         run_id=missing_admitting.run.id,
         expected_state="admitting",
-        expected_revision=missing_admitting.run.revision,
+        expected_revision=missing_claim.revision,
+        maintenance_lease_token=missing_claim.maintenance_lease_token,
         observation="definitively_missing",
         error_code=None,
         guidance_key=None,
@@ -1101,11 +1105,13 @@ def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
         replay_envelope={"run_id": queued_admission.run.id, "state": "queued"},
         now=NOW,
     )
+    queued_claim = _claim_maintenance_run(db, queued.id)
     queued_cancelled = store.reconcile_run_after_job_lookup(
         dataset_id=DATASET_ID,
         run_id=queued.id,
         expected_state="queued",
-        expected_revision=queued.revision,
+        expected_revision=queued_claim.revision,
+        maintenance_lease_token=queued_claim.maintenance_lease_token,
         observation="terminal_cancelled",
         error_code=None,
         guidance_key=None,
@@ -1114,11 +1120,13 @@ def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
     assert queued_cancelled.state.value == "cancelled"
 
     state_running = _running_for(db, state_source, "state-missing", model="model-running")
+    state_claim = _claim_maintenance_run(db, state_running.id)
     state_missing = store.reconcile_run_after_job_lookup(
         dataset_id=DATASET_ID,
         run_id=state_running.id,
         expected_state="running",
-        expected_revision=state_running.revision,
+        expected_revision=state_claim.revision,
+        maintenance_lease_token=state_claim.maintenance_lease_token,
         observation="terminal_succeeded",
         error_code=None,
         guidance_key=None,
@@ -1131,15 +1139,13 @@ def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
 
     stale_running = _running_for(db, stale_source, "stale-precedence")
     assert db.update_note(stale_source, {"content": "changed"}, expected_version=1)
-    stale_row = db.execute_query(
-        "SELECT state,revision FROM note_graph_suggestion_runs WHERE id=?",
-        (stale_running.id,),
-    ).fetchone()
+    stale_claim = _claim_maintenance_run(db, stale_running.id)
     stale = store.reconcile_run_after_job_lookup(
         dataset_id=DATASET_ID,
         run_id=stale_running.id,
         expected_state="cancelling",
-        expected_revision=int(stale_row["revision"]),
+        expected_revision=stale_claim.revision,
+        maintenance_lease_token=stale_claim.maintenance_lease_token,
         observation="terminal_failed",
         error_code="notes_graph_provider_unavailable",
         guidance_key="retry_generation",
@@ -1169,11 +1175,13 @@ def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
                 },
             ),
         )
+        publishing_claim = _claim_maintenance_run(db, publishing.id)
         reconciled = store.reconcile_run_after_job_lookup(
             dataset_id=DATASET_ID,
             run_id=publishing.id,
             expected_state="publishing",
-            expected_revision=publishing.revision,
+            expected_revision=publishing_claim.revision,
+            maintenance_lease_token=publishing_claim.maintenance_lease_token,
             observation=observation,
             error_code=None,
             guidance_key=None,
@@ -1186,12 +1194,14 @@ def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
         ).fetchone()["count"] == 0
 
     invalid = _running_for(db, publication_source, "invalid-reconcile", model="model-invalid")
+    invalid_claim = _claim_maintenance_run(db, invalid.id)
     with pytest.raises(ValueError, match="notes_graph_maintenance_contract_invalid"):
         store.reconcile_run_after_job_lookup(
             dataset_id=DATASET_ID,
             run_id=invalid.id,
             expected_state="running",
-            expected_revision=invalid.revision,
+            expected_revision=invalid_claim.revision,
+            maintenance_lease_token=invalid_claim.maintenance_lease_token,
             observation="terminal_failed",
             error_code="provider said private text",
             guidance_key="retry_generation",
@@ -1202,7 +1212,8 @@ def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
             dataset_id=DATASET_ID,
             run_id=invalid.id,
             expected_state="running",
-            expected_revision=invalid.revision,
+            expected_revision=invalid_claim.revision,
+            maintenance_lease_token=invalid_claim.maintenance_lease_token,
             observation="publication_receipt_missing",
             error_code=None,
             guidance_key=None,
@@ -1212,7 +1223,10 @@ def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
         "SELECT state,revision FROM note_graph_suggestion_runs WHERE id=?",
         (invalid.id,),
     ).fetchone()
-    assert (unchanged["state"], int(unchanged["revision"])) == ("running", invalid.revision)
+    assert (unchanged["state"], int(unchanged["revision"])) == (
+        "running",
+        invalid_claim.revision,
+    )
 
 
 def _exercise_receipt_cleanup_and_acceptance_fences(db: CharactersRAGDB) -> None:
@@ -1605,6 +1619,395 @@ def _exercise_reverse_and_tag_activation(db: CharactersRAGDB) -> None:
     assert member_result.suggestion_count == 0
 
 
+def _claim_maintenance_run(
+    db: CharactersRAGDB,
+    run_id: str,
+    *,
+    now: datetime = NOW,
+):
+    claims = db.note_graph_suggestion_store.claim_runs_for_maintenance(
+        dataset_id=DATASET_ID,
+        limit=100,
+        now=now,
+    )
+    return next(claim for claim in claims if claim.id == run_id)
+
+
+def _exercise_maintenance_claim_fences(db: CharactersRAGDB) -> None:
+    store = db.note_graph_suggestion_store
+    run_ids = ("maintenance-a", "maintenance-b", "maintenance-c")
+    for index, run_id in enumerate(run_ids, start=1):
+        source_id = f"80000000-0000-4000-8000-{index:012d}"
+        db.add_note(f"Maintenance {index}", "body", note_id=source_id)
+        _seed_run(db, source_id=source_id, state="running", run_id=run_id, job_id=f"job-{run_id}")
+
+    for invalid_limit in (0, -1, 101):
+        with pytest.raises(ValueError, match="notes_graph_maintenance_limit_invalid"):
+            store.claim_runs_for_maintenance(
+                dataset_id=DATASET_ID,
+                limit=invalid_limit,
+                now=NOW,
+            )
+
+    first = store.claim_runs_for_maintenance(dataset_id=DATASET_ID, limit=2, now=NOW)
+    assert [claim.id for claim in first] == ["maintenance-a", "maintenance-b"]
+    assert all(claim.revision == 2 for claim in first)
+    assert all(claim.maintenance_lease_token for claim in first)
+    assert all(
+        claim.maintenance_lease_expires_at == (NOW + timedelta(minutes=5)).isoformat()
+        for claim in first
+    )
+
+    competing = store.claim_runs_for_maintenance(dataset_id=DATASET_ID, limit=2, now=NOW)
+    assert [claim.id for claim in competing] == ["maintenance-c"]
+    assert not ({claim.id for claim in first} & {claim.id for claim in competing})
+    claimed_c = competing[0]
+
+    db.execute_query(
+        "UPDATE note_graph_suggestion_runs SET expires_at=? WHERE id='maintenance-c'",
+        ((NOW - timedelta(days=31)).isoformat(),),
+    )
+    cleanup = store.cleanup_retention(dataset_id=DATASET_ID, now=NOW, limit=100)
+    retained_c = db.execute_query(
+        "SELECT state,revision,maintenance_lease_token FROM note_graph_suggestion_runs "
+        "WHERE id='maintenance-c'"
+    ).fetchone()
+    assert cleanup["runs"] == 0
+    assert (
+        retained_c["state"],
+        int(retained_c["revision"]),
+        retained_c["maintenance_lease_token"],
+    ) == ("running", claimed_c.revision, claimed_c.maintenance_lease_token)
+
+    with pytest.raises(RuntimeError, match="notes_graph_maintenance_lease_conflict"):
+        store.reconcile_run_after_job_lookup(
+            dataset_id=DATASET_ID,
+            run_id=claimed_c.id,
+            expected_state="running",
+            expected_revision=claimed_c.revision,
+            maintenance_lease_token="wrong-token",
+            observation="terminal_succeeded",
+            error_code=None,
+            guidance_key=None,
+            now=NOW,
+        )
+    unchanged_c = db.execute_query(
+        "SELECT state,revision,maintenance_lease_token FROM note_graph_suggestion_runs "
+        "WHERE id='maintenance-c'"
+    ).fetchone()
+    assert (
+        unchanged_c["state"],
+        int(unchanged_c["revision"]),
+        unchanged_c["maintenance_lease_token"],
+    ) == ("running", claimed_c.revision, claimed_c.maintenance_lease_token)
+
+    released_c = store.release_run_maintenance_lease(
+        dataset_id=DATASET_ID,
+        run_id=claimed_c.id,
+        expected_state="running",
+        expected_revision=claimed_c.revision,
+        maintenance_lease_token=claimed_c.maintenance_lease_token,
+        now=NOW,
+    )
+    assert released_c.revision == claimed_c.revision + 1
+    assert released_c.maintenance_lease_token is None
+    assert released_c.maintenance_lease_expires_at is None
+
+    reclaimed_c = store.claim_runs_for_maintenance(dataset_id=DATASET_ID, limit=1, now=NOW)[0]
+    assert reclaimed_c.id == "maintenance-c"
+    assert reclaimed_c.revision == released_c.revision + 1
+    assert reclaimed_c.maintenance_lease_token != claimed_c.maintenance_lease_token
+
+    after_expiry = store.claim_runs_for_maintenance(
+        dataset_id=DATASET_ID,
+        limit=100,
+        now=NOW + timedelta(minutes=5),
+    )
+    assert [claim.id for claim in after_expiry] == list(run_ids)
+    reclaimed = {claim.id: claim for claim in after_expiry}
+    assert reclaimed["maintenance-c"].maintenance_lease_token != reclaimed_c.maintenance_lease_token
+    with pytest.raises(RuntimeError, match="notes_graph_maintenance_lease_conflict"):
+        store.release_run_maintenance_lease(
+            dataset_id=DATASET_ID,
+            run_id=reclaimed_c.id,
+            expected_state="running",
+            expected_revision=reclaimed_c.revision,
+            maintenance_lease_token=reclaimed_c.maintenance_lease_token,
+            now=NOW + timedelta(minutes=5),
+        )
+
+    released_a = store.release_run_maintenance_lease(
+        dataset_id=DATASET_ID,
+        run_id=reclaimed["maintenance-a"].id,
+        expected_state="running",
+        expected_revision=reclaimed["maintenance-a"].revision,
+        maintenance_lease_token=reclaimed["maintenance-a"].maintenance_lease_token,
+        now=NOW + timedelta(minutes=5),
+    )
+    assert (released_a.state.value, released_a.revision) == (
+        "running",
+        reclaimed["maintenance-a"].revision + 1,
+    )
+
+    terminal_b = store.reconcile_run_after_job_lookup(
+        dataset_id=DATASET_ID,
+        run_id=reclaimed["maintenance-b"].id,
+        expected_state="running",
+        expected_revision=reclaimed["maintenance-b"].revision,
+        maintenance_lease_token=reclaimed["maintenance-b"].maintenance_lease_token,
+        observation="terminal_succeeded",
+        error_code=None,
+        guidance_key=None,
+        now=NOW + timedelta(minutes=5),
+    )
+    assert (
+        terminal_b.state.value,
+        terminal_b.error_code,
+        terminal_b.guidance_key,
+        terminal_b.maintenance_lease_token,
+        terminal_b.maintenance_lease_expires_at,
+    ) == ("failed", "notes_graph_publication_state_missing", "retry_generation", None, None)
+
+    source_c = "80000000-0000-4000-8000-000000000003"
+    assert db.update_note(source_c, {"content": "changed while claimed"}, expected_version=1)
+    cancelled_c = db.execute_query(
+        "SELECT state,revision,maintenance_lease_token,maintenance_lease_expires_at "
+        "FROM note_graph_suggestion_runs WHERE id='maintenance-c'"
+    ).fetchone()
+    assert (
+        cancelled_c["state"],
+        int(cancelled_c["revision"]),
+        cancelled_c["maintenance_lease_token"],
+        cancelled_c["maintenance_lease_expires_at"],
+    ) == ("cancelling", reclaimed["maintenance-c"].revision + 1, None, None)
+    cancellation_receipt = db.execute_query(
+        "SELECT id,state FROM note_graph_suggestion_operation_receipts "
+        "WHERE resource_identity='maintenance-c' AND operation_kind='run_cancel'"
+    ).fetchone()
+    assert (
+        cancellation_receipt["id"],
+        cancellation_receipt["state"],
+    ) == (
+        store.cancellation_operation_id(
+            dataset_id=DATASET_ID,
+            run_id="maintenance-c",
+            run_revision=reclaimed["maintenance-c"].revision,
+        ),
+        "in_progress",
+    )
+    with pytest.raises(RuntimeError, match="notes_graph_maintenance_lease_conflict"):
+        store.reconcile_run_after_job_lookup(
+            dataset_id=DATASET_ID,
+            run_id="maintenance-c",
+            expected_state="cancelling",
+            expected_revision=int(cancelled_c["revision"]),
+            maintenance_lease_token=reclaimed["maintenance-c"].maintenance_lease_token,
+            observation="terminal_cancelled",
+            error_code=None,
+            guidance_key=None,
+            now=NOW + timedelta(minutes=5),
+        )
+
+
+def _exercise_operation_specific_error_contracts(db: CharactersRAGDB) -> None:
+    store = db.note_graph_suggestion_store
+    invalid_source = "81000000-0000-4000-8000-000000000001"
+    db.add_note("Invalid admission pairs", "body", note_id=invalid_source)
+    invalid_admission = _admit_for(db, invalid_source, "invalid-admission-pairs")
+    for error_code, guidance_key in (
+        ("notes_graph_publication_receipt_missing", "retry_generation"),
+        ("notes_graph_capabilities_changed_before_queue", "contact_administrator"),
+        ("provider included private text", "retry_generation"),
+    ):
+        with pytest.raises(ValueError, match="notes_graph_admission_failure_contract_invalid"):
+            store.fail_admission(
+                dataset_id=DATASET_ID,
+                run_id=invalid_admission.run.id,
+                expected_state="admitting",
+                expected_revision=invalid_admission.run.revision,
+                error_code=error_code,
+                guidance_key=guidance_key,
+                now=NOW,
+            )
+        unchanged = db.execute_query(
+            "SELECT state,revision FROM note_graph_suggestion_runs WHERE id=?",
+            (invalid_admission.run.id,),
+        ).fetchone()
+        assert (unchanged["state"], int(unchanged["revision"])) == (
+            "admitting",
+            invalid_admission.run.revision,
+        )
+
+    valid_failed = store.fail_admission(
+        dataset_id=DATASET_ID,
+        run_id=invalid_admission.run.id,
+        expected_state="admitting",
+        expected_revision=invalid_admission.run.revision,
+        error_code="notes_graph_admission_failed",
+        guidance_key="retry_generation",
+        now=NOW,
+    )
+    db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (valid_failed.id,))
+    valid_replay = _admit_for(db, invalid_source, "invalid-admission-pairs")
+    assert valid_replay.run is None
+    assert valid_replay.replay_envelope == {
+        "run_id": valid_failed.id,
+        "state": "failed",
+        "error_code": "notes_graph_admission_failed",
+        "guidance_key": "retry_generation",
+    }
+
+    capability_source = "81000000-0000-4000-8000-000000000002"
+    db.add_note("Capability admission", "body", note_id=capability_source)
+    capability = _admit_for(db, capability_source, "round-three-capability")
+    capability_failed = store.fail_admission(
+        dataset_id=DATASET_ID,
+        run_id=capability.run.id,
+        expected_state="admitting",
+        expected_revision=capability.run.revision,
+        error_code="notes_graph_capabilities_changed_before_queue",
+        guidance_key="retry_generation",
+        now=NOW,
+    )
+    db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (capability_failed.id,))
+    assert _admit_for(db, capability_source, "round-three-capability").replay_envelope == {
+        "run_id": capability_failed.id,
+        "state": "failed",
+        "error_code": "notes_graph_capabilities_changed_before_queue",
+        "guidance_key": "retry_generation",
+    }
+
+    job_missing_source = "81000000-0000-4000-8000-000000000003"
+    db.add_note("Missing admission job", "body", note_id=job_missing_source)
+    job_missing_admission = _admit_for(db, job_missing_source, "round-three-job-missing")
+    job_missing_claim = _claim_maintenance_run(db, job_missing_admission.run.id)
+    job_missing = store.reconcile_run_after_job_lookup(
+        dataset_id=DATASET_ID,
+        run_id=job_missing_claim.id,
+        expected_state="admitting",
+        expected_revision=job_missing_claim.revision,
+        maintenance_lease_token=job_missing_claim.maintenance_lease_token,
+        observation="definitively_missing",
+        error_code=None,
+        guidance_key=None,
+        now=NOW,
+    )
+    assert (job_missing.error_code, job_missing.guidance_key) == (
+        "notes_graph_job_missing",
+        "retry_generation",
+    )
+    db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (job_missing.id,))
+    assert _admit_for(db, job_missing_source, "round-three-job-missing").replay_envelope == {
+        "run_id": job_missing.id,
+        "state": "failed",
+        "error_code": "notes_graph_job_missing",
+        "guidance_key": "retry_generation",
+    }
+
+    worker_pairs = (
+        ("notes_graph_capabilities_changed_before_provider", "retry_generation"),
+        ("notes_graph_fingerprint_stale", "refresh_note"),
+        ("notes_graph_fts_not_ready", "contact_administrator"),
+        ("notes_graph_provider_retry_policy_unsupported", "configure_provider"),
+        ("notes_graph_provider_unavailable", "retry_generation"),
+        ("notes_graph_source_too_large", "refresh_note"),
+        ("notes_graph_suggestion_no_valid_items", "retry_generation"),
+        ("notes_graph_suggestion_suppression_limit", "refresh_note"),
+    )
+    for index, (error_code, guidance_key) in enumerate(worker_pairs, start=10):
+        source_id = f"81000000-0000-4000-8000-{index:012d}"
+        db.add_note(f"Worker failure {index}", "body", note_id=source_id)
+        running = _running_for(db, source_id, f"worker-failure-{index}")
+        claim = _claim_maintenance_run(db, running.id)
+        failed = store.reconcile_run_after_job_lookup(
+            dataset_id=DATASET_ID,
+            run_id=claim.id,
+            expected_state="running",
+            expected_revision=claim.revision,
+            maintenance_lease_token=claim.maintenance_lease_token,
+            observation="terminal_failed",
+            error_code=error_code,
+            guidance_key=guidance_key,
+            now=NOW,
+        )
+        assert (failed.state.value, failed.error_code, failed.guidance_key) == (
+            "failed",
+            error_code,
+            guidance_key,
+        )
+
+    unsafe_source = "81000000-0000-4000-8000-000000000100"
+    db.add_note("Unsafe worker pair", "body", note_id=unsafe_source)
+    unsafe_running = _running_for(db, unsafe_source, "unsafe-worker-pair")
+    unsafe_claim = _claim_maintenance_run(db, unsafe_running.id)
+    for error_code, guidance_key in (
+        ("notes_graph_provider_unavailable", "contact_administrator"),
+        ("notes_graph_publication_receipt_mismatch", "retry_generation"),
+        ("private provider output", "retry_generation"),
+    ):
+        with pytest.raises(ValueError, match="notes_graph_maintenance_contract_invalid"):
+            store.reconcile_run_after_job_lookup(
+                dataset_id=DATASET_ID,
+                run_id=unsafe_claim.id,
+                expected_state="running",
+                expected_revision=unsafe_claim.revision,
+                maintenance_lease_token=unsafe_claim.maintenance_lease_token,
+                observation="terminal_failed",
+                error_code=error_code,
+                guidance_key=guidance_key,
+                now=NOW,
+            )
+        unchanged = db.execute_query(
+            "SELECT state,revision,maintenance_lease_token FROM note_graph_suggestion_runs WHERE id=?",
+            (unsafe_claim.id,),
+        ).fetchone()
+        assert (
+            unchanged["state"],
+            int(unchanged["revision"]),
+            unchanged["maintenance_lease_token"],
+        ) == (
+            "running",
+            unsafe_claim.revision,
+            unsafe_claim.maintenance_lease_token,
+        )
+    with pytest.raises(ValueError, match="notes_graph_maintenance_contract_invalid"):
+        store.reconcile_run_after_job_lookup(
+            dataset_id=DATASET_ID,
+            run_id=unsafe_claim.id,
+            expected_state="running",
+            expected_revision=unsafe_claim.revision,
+            maintenance_lease_token=unsafe_claim.maintenance_lease_token,
+            observation="publication_receipt_missing",
+            error_code=None,
+            guidance_key=None,
+            now=NOW,
+        )
+
+    corrupted_source = "81000000-0000-4000-8000-000000000101"
+    db.add_note("Corrupted replay", "body", note_id=corrupted_source)
+    corrupted = _admit_for(db, corrupted_source, "corrupted-replay")
+    corrupted_failed = store.fail_admission(
+        dataset_id=DATASET_ID,
+        run_id=corrupted.run.id,
+        expected_state="admitting",
+        expected_revision=corrupted.run.revision,
+        error_code="notes_graph_admission_failed",
+        guidance_key="retry_generation",
+        now=NOW,
+    )
+    db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (corrupted_failed.id,))
+    db.execute_query(
+        "UPDATE note_graph_suggestion_operation_receipts SET replay_envelope=? WHERE id=?",
+        (
+            '{"error_code":"notes_graph_capabilities_changed_before_queue",'
+            '"guidance_key":"contact_administrator","run_id":"unsafe","state":"failed"}',
+            corrupted.run.admission_receipt_id,
+        ),
+    )
+    with pytest.raises(RuntimeError, match="notes_graph_receipt_envelope_invalid"):
+        _admit_for(db, corrupted_source, "corrupted-replay")
+
+
 def test_sqlite_fix_round_receipts_identities_tags_and_fences(tmp_path) -> None:
     db = _new_db(tmp_path)
     try:
@@ -1683,6 +2086,48 @@ def test_postgres_fix_round_two_replays_capability_change_failure_without_run(
     db = _new_db(tmp_path, backend=backend)
     try:
         _exercise_capability_failure_replay(db)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_sqlite_fix_round_three_claims_and_fences_maintenance(tmp_path) -> None:
+    db = _new_db(tmp_path)
+    try:
+        _exercise_maintenance_claim_fences(db)
+    finally:
+        db.close_all_connections()
+
+
+def test_postgres_fix_round_three_claims_and_fences_maintenance(
+    tmp_path,
+    pg_database_config,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = _new_db(tmp_path, backend=backend)
+    try:
+        _exercise_maintenance_claim_fences(db)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_sqlite_fix_round_three_closes_error_guidance_pairs(tmp_path) -> None:
+    db = _new_db(tmp_path)
+    try:
+        _exercise_operation_specific_error_contracts(db)
+    finally:
+        db.close_all_connections()
+
+
+def test_postgres_fix_round_three_closes_error_guidance_pairs(
+    tmp_path,
+    pg_database_config,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = _new_db(tmp_path, backend=backend)
+    try:
+        _exercise_operation_specific_error_contracts(db)
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
