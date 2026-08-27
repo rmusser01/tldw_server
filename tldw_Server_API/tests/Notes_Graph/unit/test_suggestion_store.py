@@ -77,6 +77,8 @@ def _queue_and_run(db: CharactersRAGDB, admission):
         run_id=queued.id,
         expected_state="queued",
         expected_revision=queued.revision,
+        expected_job_id=queued.job_id,
+        acquired_completion_token=f"worker-{admission.run.id}",
         now=NOW,
     )
 
@@ -144,6 +146,8 @@ def _stage_and_activate(
         run_id=running.id,
         expected_state="running",
         expected_revision=running.revision,
+        expected_job_id=running.job_id,
+        expected_completion_token=running.expected_completion_token,
         result_digest=f"sha256:{'1' * 64}",
         candidates=(_related_candidate(db, suggestion_id=suggestion_id, target_id=target_id),),
         invalid_item_count=0,
@@ -292,6 +296,8 @@ def test_explicit_run_transition_and_admission_failure_are_fenced_and_receipt_at
             run_id=admission.run.id,
             expected_state="admitting",
             expected_revision=admission.run.revision,
+            expected_job_id="job-invalid-transition",
+            acquired_completion_token="worker-invalid-transition",
             now=NOW,
         )
 
@@ -386,6 +392,8 @@ def test_staged_rows_are_hidden_and_activation_is_atomic_and_supersedes(db) -> N
         run_id=running.id,
         expected_state="running",
         expected_revision=running.revision,
+        expected_job_id=running.job_id,
+        expected_completion_token=running.expected_completion_token,
         result_digest=f"sha256:{'2' * 64}",
         candidates=(_related_candidate(db, suggestion_id="suggestion-b"),),
         invalid_item_count=0,
@@ -434,6 +442,8 @@ def test_reverse_orientation_is_canonical_for_supersession_and_rejection_suppres
         run_id=reverse_running.id,
         expected_state="running",
         expected_revision=reverse_running.revision,
+        expected_job_id=reverse_running.job_id,
+        expected_completion_token=reverse_running.expected_completion_token,
         result_digest=f"sha256:{'a' * 64}",
         candidates=(
             {
@@ -478,6 +488,8 @@ def test_reverse_orientation_is_canonical_for_supersession_and_rejection_suppres
         run_id=forward_running.id,
         expected_state="running",
         expected_revision=forward_running.revision,
+        expected_job_id=forward_running.job_id,
+        expected_completion_token=forward_running.expected_completion_token,
         result_digest=f"sha256:{'b' * 64}",
         candidates=(_related_candidate(db, suggestion_id="suppressed-forward"),),
         invalid_item_count=0,
@@ -510,6 +522,8 @@ def test_existing_tag_rename_delete_and_current_membership_are_rechecked_atomica
         run_id=rename_running.id,
         expected_state="running",
         expected_revision=rename_running.revision,
+        expected_job_id=rename_running.job_id,
+        expected_completion_token=rename_running.expected_completion_token,
         result_digest=f"sha256:{'c' * 64}",
         candidates=(
             _tag_candidate(
@@ -549,6 +563,8 @@ def test_existing_tag_rename_delete_and_current_membership_are_rechecked_atomica
         run_id=delete_running.id,
         expected_state="running",
         expected_revision=delete_running.revision,
+        expected_job_id=delete_running.job_id,
+        expected_completion_token=delete_running.expected_completion_token,
         result_digest=f"sha256:{'d' * 64}",
         candidates=(
             _tag_candidate(
@@ -594,6 +610,8 @@ def test_existing_tag_rename_delete_and_current_membership_are_rechecked_atomica
         run_id=member_running.id,
         expected_state="running",
         expected_revision=member_running.revision,
+        expected_job_id=member_running.job_id,
+        expected_completion_token=member_running.expected_completion_token,
         result_digest=f"sha256:{'e' * 64}",
         candidates=(
             _tag_candidate(
@@ -626,6 +644,8 @@ def test_freshness_failure_discards_entire_staged_set_without_partial_activation
         run_id=running.id,
         expected_state="running",
         expected_revision=running.revision,
+        expected_job_id=running.job_id,
+        expected_completion_token=running.expected_completion_token,
         result_digest=f"sha256:{'3' * 64}",
         candidates=(
             _related_candidate(db, suggestion_id="fresh-candidate"),

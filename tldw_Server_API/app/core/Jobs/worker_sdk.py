@@ -108,6 +108,7 @@ class WorkerConfig:
     retry_backoff_seconds: int = 10
     completion_callback_timeout_seconds: float = 30.0
     completion_callback_max_detached_tasks: int = 32
+    bind_completion_token: bool = False
 
 
 class WorkerSDK:
@@ -361,7 +362,12 @@ class WorkerSDK:
                         backoff_seconds=backoff_s,
                         worker_id=self.cfg.worker_id,
                         lease_id=lease_id_str,
-                        completion_token=(lease_id_str if is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN")) else None),
+                        completion_token=(
+                            lease_id_str
+                            if self.cfg.bind_completion_token
+                            or is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN"))
+                            else None
+                        ),
                         enforce=enforce,
                         error_code=error_code,
                         error_class=type(exc).__name__,
@@ -519,7 +525,12 @@ class WorkerSDK:
                     result=result,
                     worker_id=self.cfg.worker_id,
                     lease_id=lease_id_str,
-                    completion_token=(lease_id_str if is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN")) else None),
+                    completion_token=(
+                        lease_id_str
+                        if self.cfg.bind_completion_token
+                        or is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN"))
+                        else None
+                    ),
                     enforce=enforce,
                 )
                 if not ok:

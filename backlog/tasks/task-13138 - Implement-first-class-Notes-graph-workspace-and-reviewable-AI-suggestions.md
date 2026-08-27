@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 12:02
+updated_date: 2026-08-27 13:16
 labels:
 - notes
 - knowledge-graph
@@ -46,6 +46,22 @@ modified_files:
 - tldw_Server_API/app/core/LLM_Calls/adapter_registry.py
 - tldw_Server_API/app/core/LLM_Calls/capability_registry.py
 - tldw_Server_API/app/core/LLM_Calls/providers/openai_adapter.py
+- tldw_Server_API/app/core/Jobs/manager.py
+- tldw_Server_API/app/core/Jobs/worker_sdk.py
+- tldw_Server_API/app/core/Notes_Graph/suggestion_jobs.py
+- tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py
+- tldw_Server_API/app/core/Notes_Graph/suggestion_observability.py
+- tldw_Server_API/app/core/Notes_Graph/suggestion_service.py
+- tldw_Server_API/app/services/notes_graph_suggestions_maintenance.py
+- tldw_Server_API/app/services/notes_graph_suggestions_worker.py
+- tldw_Server_API/app/services/startup_study_privilege_jobs_pollers.py
+- tldw_Server_API/tests/Jobs/test_jobs_prune_postgres.py
+- tldw_Server_API/tests/Jobs/test_jobs_prune_sqlite.py
+- tldw_Server_API/tests/Jobs/test_worker_sdk.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_jobs.py
+- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_observability.py
+- tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
+- tldw_Server_API/tests/Services/test_startup_study_privilege_jobs_pollers.py
 ---
 
 ## Description
@@ -141,6 +157,10 @@ Task 4 Fix Round 1/3 started from exact base b2af691006235d1d49492a25ad3ddb0aba9
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 4 Fix Round 1 completed from exact base b2af691006235d1d49492a25ad3ddb0aba9a92c1. Replaced caller-attested transport booleans with an exact-concrete-adapter registry contract and bound the disclosed ConfiguredEndpointScope to the OpenAI centralized fetch transport. Strict opt-in calls use one retry attempt, same-origin-only redirects, configured timeout clamping, and an outer async deadline; ordinary and Prompt Improvement behavior remains unchanged. One validated effective limits object now drives disclosure revision, prompt/request caps, parser caps, output size, candidate count, and timeout. Added exact-one-choice normalization, NFC matching, duplicate-key/depth-safe JSON rejection, and real counting-transport 307/308 coverage. Strict RED: 67 failed/7 passed/4 warnings. GREEN: Task 4 focused 74 passed/0 skipped/4 inherited warnings; required Task 4 plus no-retry, Prompt Improvement, and OpenAI adapter regressions 128 passed/0 skipped/4 inherited warnings. Ruff lint clean; five Task 4 files/tests Ruff-format clean; four pre-existing shared files intentionally retain baseline formatting to avoid mechanical churn; Bandit 0 findings; git diff --check passed. Ignored report appended at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-4-report.md.
+
+Task 5 NEEDS_CONTEXT at base 9be6076b18cc4865d572c1e85d887429977cc992. Blocking closed-contract gap: bind_admitted_run requires expected_completion_token before enqueue binding reaches queued, but the required completion token is the WorkerSDK-acquired lease ID, which does not exist until acquire_next_job; start_run and stage_suggestions expose no fenced way to bind it. Job UUID substitution would force receipt mismatch, direct SQL would bypass Task 3 CAS, and preallocating Jobs lease IDs broadens scope. Recommended ruling: authorize an operation-specific Task 3 extension that atomically binds the acquired lease ID during queued-to-running CAS. No production/tests changed; RED intentionally not authored because it would encode an unapproved architecture. Ignored report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-5-report.md.
+
+Task 5 completed from base 9be6076b18cc4865d572c1e85d887429977cc992 after the approved lease-binding and authoritative-owner/run-lookup rulings. Added content-free idempotent Jobs admission, owner-row-authoritative one-call worker execution, queued placeholder-to-acquired-lease CAS, running-to-publishing Job/token fencing, active/archive immutable receipt publication, provider-independent bounded maintenance, closed local observability, opt-in WorkerSDK completion-token binding, exact 31-day forced-archive prune handling, and app-owned lifecycle registration. Final required Step 7: 102 passed/0 skipped/4 inherited warnings, including live PostgreSQL. Task 3 plus migrations: 85 passed/0 skipped/2 inherited warnings. Task 4 regressions: 128 passed/0 skipped/4 inherited warnings. Scoped Jobs/idempotency/startup: 167 passed/0 skipped/2 inherited warnings; focused updated startup expectations: 16 passed/0 skipped/2 inherited warnings. Three broad sidecar/inventory expectation failures are byte-identical inherited baseline defects against 9be6076 and were not changed. Ruff clean; Bandit 0 findings; git diff --check clean. Ignored report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-5-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

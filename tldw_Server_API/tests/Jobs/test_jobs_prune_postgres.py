@@ -73,6 +73,50 @@ def _receipt_count_pg(dsn: str) -> int:
         return int(cur.fetchone()[0])
 
 
+def test_pg_notes_graph_prune_retains_29_and_30_days_and_forces_31_day_archive(
+    monkeypatch,
+    jobs_pg_dsn,
+) -> None:
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", "graph-suggestions")
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_OTHER", "default")
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    notes_jobs = [
+        manager.create_job(
+            domain="notes",
+            queue="graph-suggestions",
+            job_type="note_graph_suggestions",
+            payload={"schema_version": 1},
+            owner_user_id="owner-1",
+            max_retries=0,
+        )
+        for _ in range(3)
+    ]
+    unrelated = manager.create_job(
+        domain="other",
+        queue="default",
+        job_type="ordinary",
+        payload={},
+        owner_user_id="owner-1",
+    )
+    for job, age in zip(notes_jobs, (29, 30, 31), strict=True):
+        _set_terminal_pg(jobs_pg_dsn, int(job["id"]), days_old=age)
+    _set_terminal_pg(jobs_pg_dsn, int(unrelated["id"]), days_old=2)
+
+    assert manager.prune_jobs(statuses=["completed"], older_than_days=1) == 2
+    assert manager.get_job_by_uuid(notes_jobs[0]["uuid"]) is not None
+    assert manager.get_job_by_uuid(notes_jobs[1]["uuid"]) is not None
+    archived = manager.get_job_or_archived_by_uuid(notes_jobs[2]["uuid"])
+    assert archived is not None and archived["archived"] is True
+    assert manager.get_job_or_archived_by_uuid(unrelated["uuid"]) is None
+
+    assert manager.prune_jobs(
+        statuses=["completed"],
+        older_than_days=1,
+        domain="notes",
+    ) == 0
+
+
 def test_pg_prune_archives_receipt_job_without_global_archive(
     monkeypatch,
     jobs_pg_dsn,

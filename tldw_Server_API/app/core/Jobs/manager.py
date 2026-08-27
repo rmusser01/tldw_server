@@ -9102,8 +9102,19 @@ class JobManager:
             params=candidate_params,
             cursor=cur,
         )
+        cur.execute(
+            "SELECT id FROM jobs WHERE id = ANY(%s) AND domain=%s AND queue=%s "
+            "AND job_type=%s AND status IN ('completed','failed','cancelled','quarantined')",
+            (candidate_ids, "notes", "graph-suggestions", "note_graph_suggestions"),
+        )
+        notes_graph_candidate_ids = {
+            int(row["id"] if isinstance(row, dict) else row[0])
+            for row in (cur.fetchall() or [])
+        }
         archive_candidate_ids = (
-            candidate_ids if archive_enabled else sorted(receipt_candidates)
+            candidate_ids
+            if archive_enabled
+            else sorted(set(receipt_candidates) | notes_graph_candidate_ids)
         )
         cur.execute(
             (
@@ -9367,6 +9378,15 @@ class JobManager:
                             "NOW() - (%s || ' days')::interval"
                         )
                         params.append(int(older_than_days))
+                        where_parts.append(
+                            "(NOT (domain=%s AND queue=%s AND job_type=%s AND status IN "
+                            "('completed','failed','cancelled','quarantined')) OR "
+                            "COALESCE(completed_at, created_at) <= "
+                            "NOW() - INTERVAL '31 days')"
+                        )
+                        params.extend(
+                            ["notes", "graph-suggestions", "note_graph_suggestions"]
+                        )
                         for column, value in (
                             ("domain", domain),
                             ("queue", queue),
@@ -9453,6 +9473,20 @@ class JobManager:
                     params.extend(
                         [prune_ref_sql, f"-{int(older_than_days)} days"]
                     )
+                    where_parts.append(
+                        "(NOT (domain=? AND queue=? AND job_type=? AND status IN "
+                        "('completed','failed','cancelled','quarantined')) OR "
+                        "julianday(COALESCE(completed_at, created_at)) "
+                        "<= julianday(?, '-31 days'))"
+                    )
+                    params.extend(
+                        [
+                            "notes",
+                            "graph-suggestions",
+                            "note_graph_suggestions",
+                            prune_ref_sql,
+                        ]
+                    )
                     if domain:
                         where_parts.append("domain = ?")
                         params.append(domain)
@@ -9509,6 +9543,14 @@ class JobManager:
                         where_clause=where_clause,
                         params=tuple(params),
                     )
+                    notes_graph_candidates = conn.execute(
+                        f"SELECT id FROM jobs{where_clause} AND domain=? AND queue=? "  # nosec B608
+                        "AND job_type=?",
+                        tuple(
+                            params
+                            + ["notes", "graph-suggestions", "note_graph_suggestions"]
+                        ),
+                    ).fetchall()
                     conn.execute(
                         (
                             "UPDATE job_dependencies SET "
@@ -9533,7 +9575,7 @@ class JobManager:
                     )
                     # Receipt-backed jobs always archive before active deletion;
                     # global archive policy still controls all other candidates.
-                    if archive_enabled or receipt_candidates:
+                    if archive_enabled or receipt_candidates or notes_graph_candidates:
                         receipt_exists_clause = (
                             " EXISTS (SELECT 1 FROM job_idempotency_receipts "
                             "AS receipt WHERE receipt.job_uuid = jobs.uuid "
@@ -9547,12 +9589,23 @@ class JobManager:
                         receipt_where_clause = (
                             where_clause + " AND" + receipt_exists_clause
                         )
-                        archive_where_clause = (
-                            where_clause
-                            if archive_enabled
-                            else receipt_where_clause
-                        )
                         archive_params = list(params)
+                        if archive_enabled:
+                            archive_where_clause = where_clause
+                        else:
+                            archive_where_clause = (
+                                where_clause
+                                + " AND ("
+                                + receipt_exists_clause
+                                + " OR (domain=? AND queue=? AND job_type=?))"
+                            )
+                            archive_params.extend(
+                                [
+                                    "notes",
+                                    "graph-suggestions",
+                                    "note_graph_suggestions",
+                                ]
+                            )
                         prompt_archive_params = tuple(
                             archive_params + ["prompt_studio", "optimization"]
                         )

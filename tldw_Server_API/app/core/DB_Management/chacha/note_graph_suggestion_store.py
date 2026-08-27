@@ -431,6 +431,17 @@ class NoteGraphSuggestionStore:
             raise RuntimeError("notes_graph_run_not_found")
         return self._run_from_row(row)
 
+    def get_run(self, *, dataset_id: str, run_id: str) -> NoteGraphSuggestionRun:
+        """Load one run within this store's owner and dataset scope."""
+
+        dataset = self._scope(dataset_id)
+        if not isinstance(run_id, str) or not self._SAFE_ID_PATTERN.fullmatch(run_id):
+            raise ValueError("notes_graph_run_id_invalid")
+        return self._with_dataset_scope(
+            dataset,
+            lambda conn: self._load_run(conn, dataset, run_id),
+        )
+
     @classmethod
     def _require_run_transition(cls, expected_state: str, new_state: str) -> None:
         if new_state not in cls._RUN_TRANSITIONS.get(expected_state, frozenset()):
@@ -736,27 +747,40 @@ class NoteGraphSuggestionStore:
         run_id: str,
         expected_state: str,
         expected_revision: int,
+        expected_job_id: str,
+        acquired_completion_token: str,
         now: datetime,
     ) -> NoteGraphSuggestionRun:
-        """Move one exact queued run to running under its revision fence."""
+        """Bind the acquired Jobs lease and move one exact queued run to running."""
 
         self._require_run_transition(expected_state, "running")
         if expected_state != "queued":
             raise ValueError("notes_graph_run_transition_invalid")
+        if (
+            not isinstance(expected_job_id, str)
+            or not self._SAFE_ID_PATTERN.fullmatch(expected_job_id)
+            or not isinstance(acquired_completion_token, str)
+            or not self._SAFE_ID_PATTERN.fullmatch(acquired_completion_token)
+        ):
+            raise ValueError("notes_graph_worker_binding_contract_invalid")
         dataset = self._scope(dataset_id)
         now_utc = self._aware_utc(now)
 
         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
             cursor = conn.execute(
-                "UPDATE note_graph_suggestion_runs SET state='running',revision=revision+1,started_at=?,"
+                "UPDATE note_graph_suggestion_runs SET expected_completion_token=?,state='running',"
+                "revision=revision+1,started_at=?,"
                 "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
-                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state='queued' AND revision=?",
+                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state='queued' AND revision=? "
+                "AND job_id=?",
                 (
+                    acquired_completion_token,
                     self._db_datetime(now_utc),
                     self.owner_user_id,
                     dataset,
                     run_id,
                     expected_revision,
+                    expected_job_id,
                 ),
             )
             if cursor.rowcount != 1:
@@ -828,6 +852,8 @@ class NoteGraphSuggestionStore:
         run_id: str,
         expected_state: str,
         expected_revision: int,
+        expected_job_id: str,
+        expected_completion_token: str,
         result_digest: str,
         candidates: tuple[dict[str, Any], ...],
         invalid_item_count: int,
@@ -840,6 +866,13 @@ class NoteGraphSuggestionStore:
         self._require_run_transition(expected_state, "publishing")
         if expected_state != "running":
             raise ValueError("notes_graph_run_transition_invalid")
+        if (
+            not isinstance(expected_job_id, str)
+            or not self._SAFE_ID_PATTERN.fullmatch(expected_job_id)
+            or not isinstance(expected_completion_token, str)
+            or not self._SAFE_ID_PATTERN.fullmatch(expected_completion_token)
+        ):
+            raise ValueError("notes_graph_worker_binding_contract_invalid")
         if not result_digest.startswith("sha256:") or len(result_digest) != 71:
             raise ValueError("notes_graph_result_digest_invalid")
         if not 0 <= invalid_item_count <= 10_000 or len(candidates) > 100:
@@ -847,7 +880,12 @@ class NoteGraphSuggestionStore:
 
         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
             run = self._load_run(conn, dataset, run_id)
-            if run.state.value != expected_state or run.revision != expected_revision:
+            if (
+                run.state.value != expected_state
+                or run.revision != expected_revision
+                or run.job_id != expected_job_id
+                or run.expected_completion_token != expected_completion_token
+            ):
                 raise RuntimeError("notes_graph_run_conflict")
             related_count = 0
             tag_count = 0
@@ -965,19 +1003,25 @@ class NoteGraphSuggestionStore:
             cursor = conn.execute(
                 "UPDATE note_graph_suggestion_runs SET state='publishing',revision=revision+1,"
                 "result_digest=?,suggestion_count=?,related_note_count=?,tag_count=?,invalid_item_count=?,"
+                "job_id=?,expected_completion_token=?,"
                 "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
-                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?",
+                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=? "
+                "AND job_id=? AND expected_completion_token=?",
                 (
                     result_digest,
                     len(candidates),
                     related_count,
                     tag_count,
                     invalid_item_count,
+                    expected_job_id,
+                    expected_completion_token,
                     self.owner_user_id,
                     dataset,
                     run_id,
                     expected_state,
                     expected_revision,
+                    expected_job_id,
+                    expected_completion_token,
                 ),
             )
             if cursor.rowcount != 1:

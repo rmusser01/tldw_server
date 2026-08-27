@@ -554,6 +554,8 @@ def test_postgres_durable_publication_and_decision_state_machine(tmp_path, pg_da
             run_id=queued.id,
             expected_state="queued",
             expected_revision=queued.revision,
+            expected_job_id=queued.job_id,
+            acquired_completion_token="postgres-worker-lease",
             now=NOW,
         )
         publishing = store.stage_suggestions(
@@ -561,6 +563,8 @@ def test_postgres_durable_publication_and_decision_state_machine(tmp_path, pg_da
             run_id=running.id,
             expected_state="running",
             expected_revision=running.revision,
+            expected_job_id=running.job_id,
+            expected_completion_token=running.expected_completion_token,
             result_digest=f"sha256:{'9' * 64}",
             candidates=(
                 {
@@ -678,6 +682,8 @@ def _running_for(db: CharactersRAGDB, source: str, key: str, *, model: str = "mo
         run_id=queued.id,
         expected_state="queued",
         expected_revision=queued.revision,
+        expected_job_id=queued.job_id,
+        acquired_completion_token=f"worker-{key}",
         now=NOW,
     )
 
@@ -697,6 +703,8 @@ def _stage_for(
         run_id=running.id,
         expected_state="running",
         expected_revision=running.revision,
+        expected_job_id=running.job_id,
+        expected_completion_token=running.expected_completion_token,
         result_digest=f"sha256:{digest_char * 64}",
         candidates=candidates,
         invalid_item_count=0,
@@ -1491,6 +1499,8 @@ def _exercise_reverse_and_tag_activation(db: CharactersRAGDB) -> None:
         run_id=tag_running.id,
         expected_state="running",
         expected_revision=tag_running.revision,
+        expected_job_id=tag_running.job_id,
+        expected_completion_token=tag_running.expected_completion_token,
         result_digest=f"sha256:{'8' * 64}",
         candidates=(
             {
@@ -1536,6 +1546,8 @@ def _exercise_reverse_and_tag_activation(db: CharactersRAGDB) -> None:
         run_id=deleted_running.id,
         expected_state="running",
         expected_revision=deleted_running.revision,
+        expected_job_id=deleted_running.job_id,
+        expected_completion_token=deleted_running.expected_completion_token,
         result_digest=f"sha256:{'5' * 64}",
         candidates=(
             {
@@ -1590,6 +1602,8 @@ def _exercise_reverse_and_tag_activation(db: CharactersRAGDB) -> None:
         run_id=member_running.id,
         expected_state="running",
         expected_revision=member_running.revision,
+        expected_job_id=member_running.job_id,
+        expected_completion_token=member_running.expected_completion_token,
         result_digest=f"sha256:{'6' * 64}",
         candidates=(
             {
@@ -2008,6 +2022,150 @@ def _exercise_operation_specific_error_contracts(db: CharactersRAGDB) -> None:
         _admit_for(db, corrupted_source, "corrupted-replay")
 
 
+def _exercise_worker_completion_token_fences(db: CharactersRAGDB) -> None:
+    source = "90000000-0000-4000-8000-000000000001"
+    db.add_note("Worker token source", "body", note_id=source)
+    store = db.note_graph_suggestion_store
+    admission = store.admit_run(
+        dataset_id=DATASET_ID,
+        source_note_id=source,
+        source_fingerprint=_note_fingerprint(db, source),
+        provider="openai",
+        model="model-a",
+        capability_revision="cap-v1",
+        prompt_contract_version="prompt-v1",
+        idempotency_key="worker-token-fence",
+        now=NOW,
+    )
+    queued = store.bind_admitted_run(
+        dataset_id=DATASET_ID,
+        run_id=admission.run.id,
+        expected_state="admitting",
+        expected_revision=admission.run.revision,
+        job_id="job-worker-token",
+        completion_token="placeholder-worker-token",
+        replay_envelope={"run_id": admission.run.id, "state": "queued"},
+        now=NOW,
+    )
+    loaded = store.get_run(dataset_id=DATASET_ID, run_id=queued.id)
+    assert loaded == queued
+    with pytest.raises(RuntimeError, match="notes_graph_run_not_found"):
+        store.get_run(dataset_id=DATASET_ID, run_id="missing-worker-run")
+
+    for overrides in (
+        {"expected_job_id": "wrong-job"},
+        {"expected_revision": queued.revision + 1},
+    ):
+        kwargs = {
+            "dataset_id": DATASET_ID,
+            "run_id": queued.id,
+            "expected_state": "queued",
+            "expected_revision": queued.revision,
+            "expected_job_id": queued.job_id,
+            "acquired_completion_token": "lease-worker-token",
+            "now": NOW,
+        }
+        kwargs.update(overrides)
+        with pytest.raises(RuntimeError, match="notes_graph_run_conflict"):
+            store.start_run(**kwargs)
+
+    for unsafe_token in ("", " ", "unsafe/token"):
+        with pytest.raises(ValueError, match="notes_graph_worker_binding_contract_invalid"):
+            store.start_run(
+                dataset_id=DATASET_ID,
+                run_id=queued.id,
+                expected_state="queued",
+                expected_revision=queued.revision,
+                expected_job_id=queued.job_id,
+                acquired_completion_token=unsafe_token,
+                now=NOW,
+            )
+
+    unchanged = db.execute_query(
+        "SELECT state,revision,job_id,expected_completion_token FROM note_graph_suggestion_runs "
+        "WHERE id=?",
+        (queued.id,),
+    ).fetchone()
+    assert tuple(
+        unchanged[column]
+        for column in ("state", "revision", "job_id", "expected_completion_token")
+    ) == (
+        "queued",
+        queued.revision,
+        "job-worker-token",
+        "placeholder-worker-token",
+    )
+
+    running = store.start_run(
+        dataset_id=DATASET_ID,
+        run_id=queued.id,
+        expected_state="queued",
+        expected_revision=queued.revision,
+        expected_job_id="job-worker-token",
+        acquired_completion_token="lease-worker-token",
+        now=NOW,
+    )
+    assert running.state.value == "running"
+    assert running.job_id == "job-worker-token"
+    assert running.expected_completion_token == "lease-worker-token"
+
+    for overrides in (
+        {"expected_job_id": "wrong-job"},
+        {"expected_completion_token": "stale-lease-token"},
+        {"expected_revision": running.revision + 1},
+    ):
+        kwargs = {
+            "dataset_id": DATASET_ID,
+            "run_id": running.id,
+            "expected_state": "running",
+            "expected_revision": running.revision,
+            "expected_job_id": running.job_id,
+            "expected_completion_token": running.expected_completion_token,
+            "result_digest": f"sha256:{'a' * 64}",
+            "candidates": (),
+            "invalid_item_count": 0,
+            "now": NOW,
+        }
+        kwargs.update(overrides)
+        with pytest.raises(RuntimeError, match="notes_graph_run_conflict"):
+            store.stage_suggestions(**kwargs)
+
+    assert db.execute_query(
+        "SELECT COUNT(*) AS count FROM note_graph_suggestions WHERE run_id=?",
+        (running.id,),
+    ).fetchone()["count"] == 0
+    still_running = db.execute_query(
+        "SELECT state,revision,job_id,expected_completion_token FROM note_graph_suggestion_runs "
+        "WHERE id=?",
+        (running.id,),
+    ).fetchone()
+    assert tuple(
+        still_running[column]
+        for column in ("state", "revision", "job_id", "expected_completion_token")
+    ) == (
+        "running",
+        running.revision,
+        "job-worker-token",
+        "lease-worker-token",
+    )
+
+    publishing = store.stage_suggestions(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_state="running",
+        expected_revision=running.revision,
+        expected_job_id="job-worker-token",
+        expected_completion_token="lease-worker-token",
+        result_digest=f"sha256:{'b' * 64}",
+        candidates=(),
+        invalid_item_count=0,
+        now=NOW,
+    )
+    assert publishing.state.value == "publishing"
+    assert publishing.job_id == "job-worker-token"
+    assert publishing.expected_completion_token == "lease-worker-token"
+
+
 def test_sqlite_fix_round_receipts_identities_tags_and_fences(tmp_path) -> None:
     db = _new_db(tmp_path)
     try:
@@ -2128,6 +2286,27 @@ def test_postgres_fix_round_three_closes_error_guidance_pairs(
     db = _new_db(tmp_path, backend=backend)
     try:
         _exercise_operation_specific_error_contracts(db)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_sqlite_worker_completion_token_binding_and_staging_are_fenced(tmp_path) -> None:
+    db = _new_db(tmp_path)
+    try:
+        _exercise_worker_completion_token_fences(db)
+    finally:
+        db.close_all_connections()
+
+
+def test_postgres_worker_completion_token_binding_and_staging_are_fenced(
+    tmp_path,
+    pg_database_config,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = _new_db(tmp_path, backend=backend)
+    try:
+        _exercise_worker_completion_token_fences(db)
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
