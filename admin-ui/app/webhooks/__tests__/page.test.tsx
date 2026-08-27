@@ -265,6 +265,23 @@ describe('canonical webhook control plane page', () => {
     expect(JSON.stringify(mocks.toastSuccess.mock.calls)).not.toContain('private.example');
   });
 
+  it('rejects an unsafe destination before creating an idempotent command', async () => {
+    const user = userEvent.setup();
+    await renderReadyPage();
+    const dialog = await openCreateDialog(user);
+
+    await user.type(
+      within(dialog).getByLabelText(/destination url/i),
+      'https://operator:secret@receiver.example/hooks/events#private',
+    );
+    await user.click(within(dialog).getByLabelText(/catalog\.only/i));
+    await user.click(within(dialog).getByRole('button', { name: /^create$/i }));
+
+    expect(await within(dialog).findByText(/must not include credentials or a fragment/i))
+      .toBeInTheDocument();
+    expect(mocks.canonical.createWebhook).not.toHaveBeenCalled();
+  });
+
   it('warns on premature close and clears secret and retry state synchronously on pagehide', async () => {
     const user = userEvent.setup();
     await renderReadyPage();
@@ -417,6 +434,20 @@ describe('canonical webhook control plane page', () => {
     );
   });
 
+  it('rejects an unsafe replacement destination before loading a fresh ETag', async () => {
+    const user = userEvent.setup();
+    await renderReadyPage();
+    await user.click(screen.getByRole('button', { name: /replace destination/i }));
+    const dialog = await screen.findByRole('dialog', { name: /replace webhook destination/i });
+
+    await user.type(within(dialog).getByLabelText(/new destination url/i), 'javascript:alert(1)');
+    await user.click(within(dialog).getByRole('button', { name: /save destination/i }));
+
+    expect(await within(dialog).findByText(/absolute HTTP or HTTPS URL/i)).toBeInTheDocument();
+    expect(mocks.canonical.getWebhook).not.toHaveBeenCalled();
+    expect(mocks.canonical.updateWebhook).not.toHaveBeenCalled();
+  });
+
   it.each([412, 428])('does not automatically retry a conditional mutation after HTTP %i', async (status) => {
     const user = userEvent.setup();
     const fresh = { ...REGISTRATION, description: 'Changed elsewhere', revision: 3 };
@@ -550,5 +581,24 @@ describe('legacy webhook compatibility mode', () => {
     await user.click(screen.getByRole('button', { name: /^test$/i }));
     await waitFor(() => expect(mocks.legacy.testWebhook).toHaveBeenCalledWith('legacy-1'));
     expect(mocks.canonical.getWebhookCatalog).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unsafe destination before calling the legacy API', async () => {
+    mocks.detect.mockResolvedValue({
+      kind: 'legacy',
+      status: { ...STATUS, route_selection: 'legacy' },
+      client: mocks.legacy,
+    });
+    const user = userEvent.setup();
+    render(<WebhooksPage />);
+    await screen.findByRole('heading', { name: 'Webhooks' });
+    const dialog = await openCreateDialog(user);
+
+    await user.type(within(dialog).getByLabelText(/destination url/i), 'file:///tmp/callback');
+    await user.type(within(dialog).getByLabelText(/^events$/i), 'incident.created');
+    await user.click(within(dialog).getByRole('button', { name: /^create$/i }));
+
+    expect(await within(dialog).findByText(/absolute HTTP or HTTPS URL/i)).toBeInTheDocument();
+    expect(mocks.legacy.createWebhook).not.toHaveBeenCalled();
   });
 });

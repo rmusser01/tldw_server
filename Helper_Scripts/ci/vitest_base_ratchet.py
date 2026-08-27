@@ -909,7 +909,9 @@ def _run_extract_context(args: argparse.Namespace) -> int:
         raise RatchetError("Vitest report produced no executed module context")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("".join(f"{path}\n" for path in files), encoding="utf-8")
-    print(f"[vitest-ratchet] context_files={len(files)}")
+    # frontend-unit-tests runs this helper before project Python dependencies exist.
+    # Keep this status line on the standard-library stream instead of importing Loguru.
+    sys.stdout.write(f"[vitest-ratchet] context_files={len(files)}\n")
     return 0
 
 
