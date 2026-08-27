@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-26
 - **Task:** `TASK-13138`
-- **Status:** Approved in chat after UX, architecture, contract, and operational review
+- **Status:** Written-spec review approved; awaiting final user approval
 - **Reviewed baseline:** `origin/dev` at `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`
 - **Deferred tasks:** `TASK-13134`, `TASK-13135`, `TASK-13136`, and `TASK-13137`
 
@@ -120,7 +120,7 @@ On desktop, the workspace has three unframed regions:
 
 The page toolbar provides:
 
-- node search;
+- node search over the nodes currently loaded on the canvas;
 - focus-current-note;
 - edge visibility toggles for manual, wikilink/backlink, tag, source, and
   provisional suggestion edges;
@@ -194,10 +194,15 @@ behavior.
 
 The `Relationships` view is a structured, keyboard-accessible equivalent to the
 canvas. It exposes the same selection, relationship details, evidence, and
-decision commands. Status never depends on color alone. Focus order, visible
-focus, screen-reader names, reduced motion, long titles, long tags, and high zoom
-must remain usable. Dynamic labels, loading indicators, and suggestion state must
-not resize the canvas controls or overlap adjacent content.
+decision commands. Relationship groups use a stable canonical sort and client-side
+pages of at most 100 rows over the currently loaded bounded graph so a dense graph
+does not become an excessive accessibility DOM. Moving between pages preserves the
+selected node, group context, and logical screen-reader position. The Notes sidebar
+remains the library-wide search surface; canvas search and graph edge filters never
+alter the server-side candidate-retrieval scope. Status never depends on color alone.
+Focus order, visible focus, screen-reader names, reduced motion, long titles, long
+tags, and high zoom must remain usable. Dynamic labels, loading indicators, and
+suggestion state must not resize the canvas controls or overlap adjacent content.
 
 When the client is offline, the workspace may show the last authoritative graph
 already available to the Notes client, clearly marked as offline. Generation,
@@ -235,10 +240,23 @@ Generation uses:
 - owner: authenticated user ID;
 - maximum automatic retries: `0`.
 
-The Job payload contains only a schema version, run ID, owner ID, dataset ID,
-source note ID, source content fingerprint, provider/model identifiers, and prompt
-contract version. It does not contain note text, excerpts, rationales, tags,
-provider responses, credentials, endpoints, or authorization claims.
+The Job payload contains only a schema version, run ID, dataset ID, source note ID,
+source content fingerprint, provider/model identifiers, capability revision, and
+prompt contract version. Owner identity comes only from the authoritative leased
+Job row and is not duplicated in the payload. Before any Notes read, the handler
+requires the run owner and dataset to match that authoritative Job scope. The
+payload does not contain note text, excerpts, rationales, tags, provider responses,
+credentials, endpoints, or authorization claims.
+
+Immediately before provider invocation, the worker resolves the current provider
+configuration and recomputes the admitted capability revision. The revision binds
+the provider adapter, model, a digest of the canonical endpoint origin, provider
+policy, `data_boundary`, outbound data categories, effective hard limits, and
+prompt-contract version. It excludes credential values and volatile worker
+heartbeat state. A mismatch fails the run with
+`notes_graph_capabilities_changed_before_provider` before any note-derived data is
+sent. The worker never substitutes a different endpoint, provider, or model for an
+admitted run.
 
 The safe Job result contains the run ID, result digest, candidate count, validated
 relationship/tag counts, dropped-item counts, and bounded usage counts. It does
@@ -273,17 +291,21 @@ Admission proceeds as follows:
 Replay with the same key and request returns the same run. Reuse of the key with a
 different request returns `409 notes_graph_suggestion_idempotency_mismatch`.
 Only one run with the same owner, dataset, selected note, content fingerprint,
-provider, model, and prompt contract may be `admitting`, `queued`, `running`, or
-`publishing`. A new key may create a new run after the prior run is terminal.
+provider, model, and prompt contract may be `admitting`, `queued`, `running`,
+`cancelling`, or `publishing`. A new key may create a new run after the prior run
+is terminal.
 
 If the process stops between run creation and Job admission, replay resumes the
 same admission. A bounded reconciler marks abandoned `admitting` records failed
 when the matching Job cannot be found or admitted.
 
-The suggestion worker lifecycle runs this reconciliation as a maintenance pass at
-startup and at most once per minute, claiming no more than 100 rows per pass. Every
-claim uses row revision and lease compare-and-swap, so multiple application or
-sidecar processes may run the pass without duplicate publication.
+A lightweight suggestion-maintenance lifecycle runs whenever suggestion storage is
+enabled, independently of provider configuration and generation-worker readiness.
+It runs reconciliation at startup and at most once per minute, claiming no more
+than 100 rows per pass. The periodic pass is scheduled independently of provider
+handlers, so a 120-second provider call cannot delay it. Every claim uses row
+revision and lease compare-and-swap, so multiple application or sidecar processes
+may run the pass without duplicate publication.
 
 Publication proceeds as follows:
 
@@ -292,18 +314,61 @@ Publication proceeds as follows:
 2. It retrieves candidates, calls the provider once, validates the response, and
    revalidates every referenced note fingerprint.
 3. One ChaChaNotes transaction writes hidden staged suggestions, their evidence
-   references, aggregate validation counts, a result digest, and run state
-   `publishing`.
-4. The worker completes the Job with the same safe result digest.
-5. One ChaChaNotes transaction verifies the completed Job postcondition, activates
-   the staged suggestions, applies suppression and supersession, and marks the run
-   `succeeded`.
+   references, aggregate validation counts, a result digest, expected Job UUID,
+   expected completion token, and run state `publishing`.
+4. The worker completes the Job with the same completion token and safe result
+   digest.
+5. Outside a ChaChaNotes transaction, the publisher reads the exact owner-scoped
+   terminal Job receipt by UUID across active and archived Jobs storage. The
+   receipt is acceptable only when its terminal-success state, completion token,
+   run ID, and result digest all match the staged run.
+6. One ChaChaNotes transaction reloads the source and every staged target under the
+   same owner/dataset, requires each note to remain active with its staged
+   fingerprint, re-resolves existing-tag identities, and rechecks current links,
+   tags, and suppression decisions. Only then does it record the observed receipt
+   and compare-and-swap the expected `publishing` revision to activate the staged
+   suggestions, apply filtering and supersession, and mark the run `succeeded`.
+   Any source/target freshness failure marks the run `stale` and discards the
+   complete staged set instead of publishing a partial result.
 
-Suggestion reads expose only rows from a `succeeded` run. If a crash occurs after
-staging but before Job completion, reconciliation discards the staged set after
-the Job becomes terminal. If a crash occurs after Job completion but before
-activation, reconciliation verifies the digest and finishes activation. The
-public API never reports staged or uncertain output as successful.
+Suggestion reads expose only rows from a `succeeded` run. Reconciliation uses the
+same exact active-or-archived Job lookup and never attempts to read Jobs from
+inside a ChaChaNotes transaction. If a crash occurs after staging but before Job
+completion, reconciliation discards the staged set after the Job becomes a
+non-success terminal state. If a crash occurs after Job completion but before
+activation, reconciliation verifies the immutable receipt and finishes activation.
+A temporarily unavailable Jobs authority or a missing receipt leaves the run in
+`publishing` during the 30-day publication-recovery horizon. A mismatched receipt
+fails closed immediately; a still-missing receipt fails closed at the horizon.
+Either failure discards the staged set and records
+`notes_graph_publication_receipt_mismatch` or
+`notes_graph_publication_receipt_missing`, respectively. Jobs terminal-receipt
+retention for this queue must be at least 30 days. The public API never reports
+staged or uncertain output as successful.
+
+The maintenance lifecycle also reconciles `queued`, `running`, and `cancelling`
+runs against their exact owner-scoped Job across active/archive storage:
+
+- a terminal failed or cancelled Job maps the run to the corresponding terminal
+  state with a sanitized stable code, except that a durable stale-on-completion
+  reason takes precedence and maps it to `stale`;
+- a successful Job paired with `queued` or `running` but no staged `publishing`
+  state fails closed as `notes_graph_publication_state_missing` because the
+  required stage-before-complete protocol cannot be proven;
+- a successful Job paired with `cancelling` publishes no output and becomes
+  `cancelled` for a user cancellation or `stale` for a stale-on-completion reason;
+- for a `cancelling` run with a nonterminal Job, maintenance first claims and
+  resumes any in-progress cancellation receipt by resending the same idempotent
+  Jobs cancellation command; a queued Job can then terminate without being leased,
+  while an already running provider call remains active until the worker returns;
+- other nonterminal Jobs leave their runs active and rely on Jobs lease recovery;
+- a definitively missing Job after a ten-minute binding grace marks the run failed,
+  while temporary Jobs-authority unavailability leaves it unchanged.
+
+These transitions use run revision compare-and-swap and are included in the same
+bounded 100-row maintenance budget. They prevent abandoned active states from
+blocking explicit retries indefinitely without inventing a second Jobs lease
+policy.
 
 ### Sync Boundary
 
@@ -348,6 +413,24 @@ and half-open start/end offsets measured in Unicode code points after the same
 line-ending and NFC normalization. The server reconstructs evidence from the
 current note only when the fingerprint matches. JavaScript never slices source
 text from these offsets.
+
+Fingerprinting covers the full normalized title and content whenever a note enters
+the analysis pipeline. Suggestion analysis has separate hard limits over the
+combined stored title/content UTF-8 byte length: 1,000,000 bytes for the selected
+note and 250,000 bytes for an individual candidate. SQLite checks
+the sum of `length(CAST(COALESCE(field, '') AS BLOB))` for both fields; PostgreSQL
+checks the equivalent sum of `octet_length(COALESCE(field, ''))`. These predicates
+run before loading content into the application, including before fingerprinting
+or term extraction.
+
+Admission returns `422 notes_graph_source_too_large` with guidance to split an
+oversized selected note. FTS still searches the complete active index, but
+oversized candidates are excluded before prompt-content retrieval and are reported
+only in an aggregate excluded-candidate count. Eligible text is then canonicalized
+once for fingerprinting and evidence offsets without retaining unnecessary
+full-size copies. These limits are explicit product behavior, not silent
+truncation, and administrators may lower but not raise them without a contract
+change.
 
 ### FTS Candidate Retrieval
 
@@ -423,6 +506,14 @@ and candidate IDs are allowlists, and instructions appearing in note text must b
 ignored. The call uses no tools, browsing, function execution, or provider routing
 chosen by note content.
 
+The feature configures provider SDKs and HTTP transports with automatic request
+retries disabled; one run may make only one outbound generation request. A provider
+adapter that cannot prove one-attempt behavior is unavailable for this feature and
+preflight reports `notes_graph_provider_retry_policy_unsupported`. Redirects that
+would change the canonical endpoint origin are rejected rather than followed.
+Jobs `max_retries=0` therefore covers handler restart while the adapter contract
+covers retries hidden inside one handler invocation.
+
 The strict response shape is conceptually:
 
 ```json
@@ -488,9 +579,10 @@ application scoping.
 Each run stores:
 
 - canonical run UUID, owner, dataset, source note, and source fingerprint;
-- idempotency-key digest and canonical request fingerprint;
-- resolved provider/model and prompt-contract version;
-- Job UUID;
+- admission operation-receipt identity;
+- resolved provider/model, admitted capability revision, and prompt-contract
+  version;
+- Job UUID and expected completion token;
 - state and revision;
 - result digest and safe aggregate counts;
 - stable error code and bounded public guidance key;
@@ -499,6 +591,52 @@ Each run stores:
 Run states are `admitting`, `queued`, `running`, `cancelling`, `publishing`,
 `succeeded`, `failed`, `cancelled`, and `stale`. Provider error text, prompts,
 responses, candidate IDs, note text, and credentials are not stored on the run.
+
+### `note_graph_suggestion_operation_receipts`
+
+Every mutating suggestion endpoint uses one owner/dataset-scoped idempotency
+receipt. Operation kinds are `run_admit`, `run_cancel`, `suggestion_accept`,
+`suggestion_reject`, and `rejections_reset`. Each receipt stores only:
+
+- operation kind, owner, dataset, resource identity, and idempotency-key digest;
+- canonical request fingerprint and operation state;
+- bounded HTTP status and replay envelope containing IDs, revisions, state, safe
+  counts, and stable codes but no note-derived text;
+- created, completed, and expiry timestamps.
+
+The unique key is owner, operation kind, resource identity, and key digest. Exact
+terminal replay returns the stored envelope without executing the operation again.
+An in-progress replay or maintenance claim may perform only its operation-specific
+idempotent continuation:
+
+- `run_admit` may resume the same run-UUID-based Jobs enqueue and Job binding, but
+  never create a second run or Job;
+- `run_cancel` may resend cancellation to the same Job UUID with the same operation
+  identity until Jobs accepts it or the Job is already terminal;
+- `suggestion_accept` may run the documented fence/postcondition reconciliation and
+  guarded coordinator continuation, but an old fence cannot mutate;
+- `suggestion_reject` and `rejections_reset` admit and finalize their receipt in the
+  same ChaChaNotes transaction as their mutation, so they expose no committed
+  in-progress state.
+
+No receipt continuation may invoke the LLM. Admission receipts become terminal
+when the Job binding succeeds or admission fails before queueing; cancellation
+receipts become terminal when Jobs accepts the cancellation command or reports an
+already terminal Job; acceptance receipts become terminal with the decision
+outcome. Reuse with a different request fingerprint returns the standard
+idempotency mismatch. Receipts remain for 90 days even when a failed/cancelled run
+or rejected suggestion is compacted earlier. Hard note/user deletion may cascade a
+receipt and therefore overrides its replay guarantee.
+
+### `note_graph_suggestion_rejection_sets`
+
+One compact row per owner, dataset, source note, and source fingerprint stores a
+monotonically increasing revision, current compact-rejection count, and updated
+timestamp. Reject and reset lock or compare-and-swap this row in the same
+transaction that changes rejection keys. Reset increments rather than deletes the
+revision row, including when the resulting count is zero, so a concurrent or stale
+reset cannot recreate an old snapshot. The row contains no rationale, excerpt,
+candidate title, or tag display text.
 
 ### `note_graph_suggestions`
 
@@ -511,8 +649,9 @@ Each suggestion stores:
 - normalized/display tag plus existing keyword portable identity for `tag`;
 - `match_strength`, bounded rationale, and decision state;
 - revision, decision reason, accepted resource identity, and timestamps;
-- acceptance idempotency digest, request fingerprint, lease token, and lease
-  expiry when a decision is in progress.
+- current acceptance lease token and lease expiry when a decision is in progress;
+- the operation receipt identity for the decision that established its current
+  state.
 
 Suggestion states are `staged`, `pending`, `accepting`, `accepted`, `rejected`,
 and `stale`. Superseded suggestions use `stale` with reason
@@ -540,11 +679,26 @@ Indexes support owner/dataset/note/status pagination, active-run uniqueness,
 source/target invalidation, suppression lookup, acceptance lease expiry, and
 retention scans.
 
-Title/content edit, note trash, and note deletion mark affected `pending`
-suggestions stale in the same product transaction. Restore does not reactivate a
-stale suggestion; the user regenerates from the restored current version. Tag
-membership changes do not affect the content fingerprint and do not stale sibling
-suggestions. Hard deletion cascades through runs, suggestions, and evidence.
+Title/content edit and note trash invalidate affected review state in the same
+ChaChaNotes product transaction. A source edit/trash marks an unbound `admitting`
+run stale, marks `queued` stale and requests Job cancellation after commit, and
+moves `running` to `cancelling` with a durable stale-on-completion reason. It also
+marks a `publishing` run stale and removes its hidden staged set, so the later Job
+receipt cannot activate it. A target edit/trash affecting a staged relationship
+marks its containing `publishing` run stale and removes that run's complete staged
+set; an affected `pending` relationship suggestion becomes stale individually.
+Worker and activation fingerprint checks remain mandatory because candidates are
+not all known when these hooks begin.
+
+For an `accepting` suggestion, the same edit/trash transaction either observes an
+already atomically finalized canonical mutation or increments the fence and marks
+the suggestion stale before the coordinator guard can write. Accepted suggestions
+and their canonical links/tags are not retroactively undone. Restore does not
+reactivate stale review state; the user regenerates from the restored current
+version. Tag membership changes do not affect the content fingerprint and do not
+stale sibling suggestions. Hard deletion cascades through runs, suggestions,
+evidence, and operation receipts; an already leased worker then fails its required
+run lookup and cannot publish or mutate.
 
 An existing-tag suggestion binds to the keyword's portable identity as well as its
 normalized value. Rename resolves the current display value at read and accept
@@ -557,6 +711,34 @@ result; acceptance succeeds only when the selected note has the surviving tag.
 
 All routes remain under the existing Notes graph namespace:
 
+### Capabilities
+
+- `GET /api/v1/notes/{note_id}/graph/suggestions/capabilities`
+
+The capability request may identify a configured provider/model pair or omit it to
+resolve the Notes default. It performs the same owner, dataset, permission,
+provider-policy, FTS-structure, Jobs-worker, and feature-readiness checks used by
+admission without creating a run. Expected provider, FTS, or worker unavailability
+still returns `200` with `generation_available=false`; authorization and
+non-enumerating note scope retain their ordinary error responses. The bounded
+response contains the effective provider/model, `data_boundary` (`local`,
+`remote`, or `unknown`), the outbound data categories, generation availability,
+safe unavailable reason, effective limits, allowed decision actions, and an opaque
+capability revision in an `ETag`. Outbound categories explicitly distinguish the
+selected-note title/excerpts, candidate-note titles/excerpts, and existing tag
+labels. The UI treats `unknown` as external for disclosure purposes and never
+infers locality from a provider name or endpoint.
+
+The capability revision covers the provider adapter/model, digest of the canonical
+endpoint origin, provider policy, `data_boundary`, outbound data categories,
+relevant limits, and prompt contract, but not credential values or volatile worker
+heartbeat state. Neither the revision nor response exposes endpoint or credential
+material. Generation requires `If-Match` with this revision and the same
+provider/model selection. A changed revision returns
+`412 notes_graph_capabilities_changed` so the client refreshes disclosure before
+retrying; current provider, FTS, or worker unavailability at admission returns the
+ordinary `503` readiness contract.
+
 ### Runs
 
 - `POST /api/v1/notes/{note_id}/graph/suggestions/runs`
@@ -564,14 +746,34 @@ All routes remain under the existing Notes graph namespace:
 - `GET /api/v1/notes/{note_id}/graph/suggestions/runs/{run_id}`
 - `POST /api/v1/notes/{note_id}/graph/suggestions/runs/{run_id}/cancel`
 
-Generation requires `Idempotency-Key`. The request may select only a configured,
-policy-allowed provider/model pair or omit it to use the resolved Notes default.
-Clients cannot supply an endpoint, credential, prompt, candidate count, token
-budget, or tag catalog.
+Generation requires `Idempotency-Key` and the capability response's `If-Match`
+revision. The request may select only the same configured, policy-allowed
+provider/model pair or omit it to use the resolved Notes default. Clients cannot
+supply an endpoint, credential, prompt, candidate count, token budget, or tag
+catalog.
 
 Admission performs all request-time validation. It returns `202` with a bounded
 run envelope. Failures discovered after `202` appear in durable run state and
 stable error fields; polling does not reinterpret them as later HTTP errors.
+
+Admission checks an existing idempotency digest before validating the current
+capability revision. An exact replay of a Job-bound or terminal run returns its
+original run even if configuration has since changed. If the original run remains
+`admitting` without a Job binding, replay resumes that same run but revalidates the
+current provider policy and capability contract before enqueueing. A changed or
+revoked configuration marks that run failed with
+`notes_graph_capabilities_changed_before_queue` and never invokes the provider.
+For a new key, or reuse with a different canonical request, the server applies the
+current `If-Match` and ordinary mismatch rules. Capability ETags are not part of
+the canonical idempotency request fingerprint.
+
+Cancellation also requires `Idempotency-Key` and expected run revision. One
+ChaChaNotes transaction admits the receipt, compare-and-swaps the run to
+`cancelling`, and records the cancellation operation identity. The API then sends
+the same identity to the idempotent Jobs cancellation path and terminalizes the
+receipt when Jobs accepts the command or reports a terminal Job. A terminal exact
+replay only returns the first outcome; an in-progress exact replay safely resumes
+that same command rather than waiting for a queued Job lease that may never occur.
 
 Run-list and run-detail responses expose provider/model, lifecycle state, safe
 counts, timestamps, cancellation availability, error code, and guidance. They do
@@ -580,30 +782,48 @@ not expose Jobs internals, raw provider errors, prompts, or candidate IDs.
 ### Suggestions
 
 - `GET /api/v1/notes/{note_id}/graph/suggestions`
+- `POST /api/v1/notes/{note_id}/graph/suggestions/rejections/reset`
 - `POST /api/v1/notes/{note_id}/graph/suggestions/{suggestion_id}/accept`
 - `POST /api/v1/notes/{note_id}/graph/suggestions/{suggestion_id}/reject`
-- `POST /api/v1/notes/{note_id}/graph/suggestions/rejections/reset`
+
+The static `rejections/reset` route must be declared before either dynamic
+`{suggestion_id}` route. Route-order regression tests must prove `rejections` is
+never parsed as a suggestion ID.
 
 Listing uses an opaque cursor, `limit` from 1 to 100, optional run/status filters,
 and a default of current `pending` and `accepting` suggestions. The response
-contains reconstructed bounded evidence only for matching current fingerprints.
+contains reconstructed bounded evidence only for matching current fingerprints,
+plus the current source fingerprint and rejection-set revision needed by reset.
 
 Accept and reject require `Idempotency-Key`, expected suggestion revision, and the
 expected source/target fingerprints returned by the list response. The server
 always reloads and revalidates the current notes; client fingerprints are
 optimistic guards, not authority.
 
-Reset requires `Idempotency-Key`, the current source fingerprint, and explicit
-confirmation in the inspector. It removes only compact rejection keys for that
-note and fingerprint. It does not delete accepted links/tags, pending suggestions,
+Reset requires `Idempotency-Key`, the current source fingerprint, the expected
+rejection-set revision returned by the list response, and explicit confirmation in
+the inspector. It compare-and-swaps that revision and removes only the compact
+rejection keys present for that note and fingerprint in the same transaction. A
+concurrent rejection either wins first and causes `409`, or commits after reset and
+remains dismissed. Reset does not delete accepted links/tags, pending suggestions,
 or decisions for another content version.
+
+Before performing admission, cancellation, acceptance, rejection, or reset, the
+API transactionally admits the corresponding operation receipt. Exact replay of a
+terminal receipt returns the recorded envelope and never re-executes the mutation;
+an in-progress receipt follows only the operation-specific continuation rules in
+the persistence contract. Reuse with a different canonical request returns `409`.
+This is especially required for reset: replaying an old reset after a later
+rejection returns the original cleared count and revision instead of deleting the
+later decision.
 
 Request-time errors use stable mappings:
 
 | HTTP | Example codes |
 | --- | --- |
 | `409` | stale fingerprint, decision race, idempotency mismatch, active run |
-| `422` | provider/model disallowed, invalid request contract |
+| `412` | capability revision changed since preflight disclosure |
+| `422` | provider/model disallowed, source note too large, invalid request contract |
 | `429` | admission or decision rate limit |
 | `503` | provider unavailable, FTS not ready, Sync mutation domain not ready |
 
@@ -630,23 +850,46 @@ Acceptance proceeds as follows:
    current canonical relationship/tag state.
 2. If the exact link or tag relationship already exists, finalize `accepted`
    idempotently with its canonical resource identity.
-3. Otherwise compare-and-swap `pending` to `accepting`, storing a bounded lease,
-   fencing token, idempotency digest, and canonical request fingerprint.
-4. Invoke the existing link or keyword/relationship coordinator with a stable
-   suggestion-derived idempotency identity.
-5. Verify the exact canonical postcondition and finalize `accepted`.
+3. Otherwise compare-and-swap `pending` to `accepting`, storing a five-minute
+   lease, monotonically increasing fencing token, and operation-receipt identity.
+4. Renew the lease with the same fence immediately before each externally visible
+   mutation step, then invoke the existing link or keyword/relationship coordinator
+   with a stable suggestion-derived idempotency identity and an internal fenced
+   mutation guard.
+5. Inside the same ChaChaNotes transaction that would write a canonical link or
+   note-keyword relationship, the coordinator guard requires the suggestion to
+   remain `accepting` with the same unexpired fence, requires source/target notes to
+   remain active with matching fingerprints, and rechecks the exact canonical
+   request. If any guard fails, that transaction performs no canonical mutation.
+6. The canonical mutation transaction also records its resource identity and
+   finalizes the suggestion and operation receipt as `accepted`. For a new tag,
+   keyword creation is separately guarded but does not finalize acceptance; the
+   guarded note-keyword transaction is the finalization point.
 
 For a new tag, acceptance is complete only when the normalized keyword exists and
 the selected note is linked to it. A crash after keyword creation but before the
 relationship remains `accepting` or returns to `pending`; it is never reported as
 accepted merely because the keyword exists.
 
+This requires a narrow internal guard/finalizer extension to the existing
+coordinators; the suggestion service still does not write canonical link, keyword,
+relationship, or Sync-log tables directly. Because guard, canonical relationship
+write, and accepted finalization share one database transaction, losing a fence
+cannot leave a rejected or stale suggestion's late worker free to create the
+authoritative relationship. A keyword created by the guarded first step may remain
+unused after a later fingerprint or fence failure, but it is never linked or
+reported as accepted.
+
 Controlled failure checks the exact canonical postcondition. If absent and safe
 to retry, the suggestion returns to `pending` with a stable recoverable code. An
 uncertain failure retains `accepting` until the lease expires.
 
-A bounded reconciler claims expired acceptance leases with compare-and-swap. It
-may only:
+A bounded reconciler claims only expired acceptance leases with compare-and-swap
+to a new fencing token. A late mutation or finalizer holding an older fence fails
+the coordinator's in-transaction guard and cannot change canonical or suggestion
+state. Canonical mutation idempotency and the exact postcondition check still let
+reconciliation recognize a mutation that committed before the takeover. The
+reconciler may only:
 
 - finalize `accepted` when the exact expected canonical link/tag relationship
   exists;
@@ -656,9 +899,10 @@ may only:
 It never creates a link or tag. The normal accept retry performs the same
 reconciliation before attempting another mutation.
 
-The worker maintenance pass that repairs admission/publication also scans at most
-100 expired acceptance leases once per minute. If that worker is unavailable, an
-explicit accept retry still reconciles the selected record before proceeding.
+The independent suggestion-maintenance pass that repairs admission/publication also
+scans at most 100 expired acceptance leases once per minute. It runs even when no
+provider is configured or the generation worker is unavailable. An explicit accept
+retry still reconciles the selected record before proceeding.
 
 Concurrent accept, reject, edit, regeneration, and external manual mutation have
 one deterministic winner through suggestion CAS, canonical link/tag uniqueness,
@@ -716,8 +960,11 @@ the canvas.
   both apply.
 - Every candidate, evidence reference, model-returned ID, and decision target is
   resolved again under the authenticated owner/dataset.
-- The UI states when excerpts will be sent to a remote provider and identifies the
-  provider/model before the user starts the run.
+- The capability preflight is the authority for whether note titles/excerpts and
+  existing tag labels leave the server. The UI identifies its provider/model, data
+  boundary, and outbound categories before the user starts the run, treating an
+  unknown boundary as external. Admission and the worker bind that disclosure
+  through the capability revision rather than silently switching configuration.
 - Jobs payloads/results and feature logs exclude note text, excerpts, prompt text,
   response text, rationales, proposed tags, candidate IDs, credentials, and raw
   provider errors.
@@ -746,6 +993,10 @@ Default operational limits are:
 - five related-note and five tag suggestions per run;
 - two new tags per run;
 - 100 existing tags in the prompt catalog;
+- 1,000,000 combined stored title/content UTF-8 bytes in the selected note for
+  analysis;
+- 250,000 combined stored title/content UTF-8 bytes in each candidate note for
+  analysis;
 - 24,000 estimated input tokens and 2,000 output tokens;
 - 120 seconds provider timeout;
 - 100 suggestions per list page maximum;
@@ -761,8 +1012,15 @@ eligible again.
 
 Retention defaults are:
 
+- compact operation receipts, idempotency digests, canonical request fingerprints,
+  and bounded replay envelopes: 90 days after terminal state, even when
+  shorter-lived run or suggestion details have been removed;
+- Jobs terminal receipts needed for publication recovery: at least 30 days;
 - current-fingerprint rejections remain while their relevant fingerprints are
   current;
+- current-fingerprint rejection-set revision rows remain while the source
+  fingerprint is current, including at count zero; obsolete rows expire after 30
+  days;
 - obsolete rejection and stale/superseded suggestion rows: 30 days;
 - failed and cancelled runs without retained suggestions: 30 days;
 - accepted suggestion audit rows: 90 days after canonical postcondition capture;
@@ -771,6 +1029,10 @@ Retention defaults are:
 Pending current-version suggestions remain until decided, superseded, or made
 stale. Cleanup is bounded, owner-scoped, and never removes a current-fingerprint
 rejection merely due to age. Hard note/user deletion cascades immediately.
+`Idempotency-Key` replay for every mutating suggestion route is guaranteed for the
+documented 90-day horizon unless hard note/user deletion has removed the scoped
+receipt. Reusing the same key after expiry is a new operation; for generation it
+may invoke the provider again.
 
 ## Observability
 
@@ -802,19 +1064,31 @@ enable telemetry export. Correlation uses safe run, Job, and suggestion IDs.
 - Canonical fingerprints and evidence offsets across CRLF/LF, NFC, astral Unicode,
   title/content boundaries, and Python/JavaScript fixtures.
 - FTS term selection, backend rank ordering, active-only scope, direct-link
-  exclusions, shared-tag/source non-exclusion, deterministic pruning, and hard
-  budgets.
+  exclusions, shared-tag/source non-exclusion, deterministic pruning, selected and
+  candidate analysis-size enforcement, aggregate oversized-candidate counts, and
+  hard budgets.
 - Prompt injection strings, unknown IDs, unknown evidence, malformed schemas,
   duplicate items, verbatim-overlap rejection, tag normalization, and new-tag
-  caps.
+  caps; provider adapters prove automatic retries are disabled and cross-origin
+  redirects fail closed.
 - Admission idempotency, equivalent active-run exclusion, explicit retry, Jobs
-  `max_retries=0`, cancellation before/after provider start, and all publication
-  crash boundaries.
+  `max_retries=0`, capability ETag and worker revalidation, local-to-remote endpoint
+  changes, owner authority from the Job row, cancellation before/after provider
+  start, active/archive receipt lookup, activation-time source/target freshness,
+  receipt retention/mismatch behavior, and all publication crash boundaries.
 - Concurrent accept/reject/edit/regenerate/manual-mutation races, tag sibling
-  validity, new-tag partial mutation, acceptance lease expiry, and reconciliation.
+  validity, in-transaction coordinator guards, fence loss before canonical write,
+  new-tag partial mutation, acceptance lease expiry, and reconciliation.
 - API RBAC, token scope, dataset isolation, pagination, cursor integrity, rate
-  limiting, provider policy, error mapping, and sanitized responses in both auth
-  modes.
+  limiting, capability data-boundary/outbound-category disclosure, provider policy,
+  static-before-dynamic route resolution, error mapping, and sanitized responses in
+  both auth modes.
+- Operation-receipt replay/mismatch for admission, cancellation, accept, reject,
+  and reset; crash boundaries before/after idempotent enqueue and cancellation
+  side effects; reset/reject races; compact-envelope retention after parent
+  cleanup; and post-expiry behavior.
+- Reconciliation of abandoned `admitting`, `queued`, `running`, `cancelling`, and
+  `publishing` runs against active, archived, unavailable, and missing Jobs.
 - Retention, suppression cap, note trash/restore/edit/delete, keyword merge/delete,
   and cleanup behavior.
 
@@ -827,12 +1101,14 @@ payloads. External providers are mocked in required CI.
 - Graph view selection, editor-to-graph focus, empty libraries, selected-note and
   most-recent-note startup, bounded expansion, truncation, and all-notes gating.
 - Search, focus, edge toggles, session-local layout, fit, directed arrows, label
-  visibility, provisional overlays, and authoritative refresh after acceptance.
-- Details/Suggestions tabs, provider disclosure, polling resume after reload,
-  cancellation, stale/error/retry states, evidence rendering, and tag/new-tag
-  treatment.
+  visibility, loaded-node versus library search scope, provisional overlays, and
+  authoritative refresh after acceptance.
+- Details/Suggestions tabs, provider/data-category disclosure, capability refresh,
+  polling resume after reload, cancellation, stale/error/retry states, evidence
+  rendering, and tag/new-tag treatment.
 - Keyboard traversal, focus restoration, screen-reader names, non-color status,
-  `Canvas`/`Relationships` parity, reduced motion, and high zoom.
+  `Canvas`/`Relationships` parity, relationship pagination and position continuity,
+  reduced motion, and high zoom.
 - Desktop and narrow-screen Playwright screenshots for dense graphs, long titles,
   long tags, loading, failed, stale, truncated, and empty states with overlap and
   overflow assertions.

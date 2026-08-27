@@ -18,7 +18,7 @@ references:
 - TASK-13137
 documentation:
 - Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-updated_date: 2026-08-27 03:56
+updated_date: 2026-08-27 04:31
 ---
 
 ## Description
@@ -46,6 +46,12 @@ Add Graph as a first-class Notes view mode shared by the WebUI and browser exten
 - [ ] #15 A successful current-version run supersedes older pending suggestions while preserving current-version rejections; stale/obsolete records follow bounded retention and note/user deletion cascades.
 - [ ] #16 Backend unit/integration/property tests, frontend component/contract/accessibility tests, Playwright desktop/mobile visual checks, and an offline suggestion-quality evaluation corpus cover the approved design.
 - [ ] #17 Relevant Notes and API documentation is updated, touched code passes targeted tests and lint/type checks, and Bandit reports no new findings.
+- [ ] #18 A nested capability preflight discloses and ETag-binds the effective provider/model, endpoint-origin revision, local/remote/unknown data boundary, outbound data categories, permissions, and limits; the worker revalidates the same revision immediately before provider invocation.
+- [ ] #19 Publication verifies an immutable owner-scoped terminal Job receipt across active/archive Jobs and revalidates source/target freshness before a fenced ChaChaNotes activation transaction; abandoned active run states reconcile fail closed.
+- [ ] #20 Suggestion preprocessing enforces explicit pre-transfer UTF-8 byte limits for selected and candidate notes, reports oversized selected notes with actionable 422 guidance, and never silently truncates analyzed content.
+- [ ] #21 Suggestion reconciliation runs independently of provider-worker readiness, and acceptance uses a renewable lease plus an in-transaction coordinator guard that fences both canonical mutation and suggestion finalization.
+- [ ] #22 Static reset routing, loaded-graph search scope, paginated Relationships accessibility behavior, and the documented 90-day idempotency replay horizon are covered by contract tests.
+- [ ] #23 All mutating suggestion routes use durable operation receipts with request fingerprints and bounded replay envelopes; reset is revision-guarded so replay cannot delete later rejections.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -60,6 +66,11 @@ Follow the approved design specification. Implement test-first in reviewable sta
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
 Design approved in chat and written to Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md. Self-review completed for incomplete markers, internal consistency, scope, asynchronous state transitions, privacy, cancellation, retention, and RBAC. The design-only change has no Bandit-applicable code scope.
+Written-spec hardening pass incorporated provider capability preflight, active/archive publication receipts, Job-row owner authority, bounded note analysis, static route ordering, renewable acceptance fencing, provider-independent maintenance, loaded-graph search and accessible relationship pagination, and an explicit idempotency replay horizon.
+Analysis limits were refined from post-load code-point counts to backend-portable pre-transfer UTF-8 byte predicates so oversized Notes cannot consume application memory before enforcement.
+First independent spec review found five state-machine blockers. The spec now binds provider configuration/data categories through worker invocation, revalidates freshness at activation, reconciles every active run state, fences canonical mutations inside coordinator transactions, and persists 90-day idempotency receipts for every mutating route.
+Second spec review found an interrupted enqueue/cancellation continuation ambiguity. Operation receipts now distinguish terminal replay from narrowly scoped in-progress continuation, maintenance resends the same idempotent cancellation command, and provider adapters must disable internal retries. Third review approved the written spec with no blocking issues; its advisory replay-wording clarification was also incorporated.
+Verification before amendment commit: third independent review status Approved with no issues; advisory wording incorporated. `git diff --check` passed. The Backlog acceptance-criteria assertion reported sequential criteria 1-23. Scope is two documentation/tracking files. Runtime tests and Bandit are not applicable to this docs-only design amendment.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
