@@ -9,8 +9,9 @@ import json
 import re
 import secrets
 import sqlite3
+import unicodedata
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
@@ -1161,6 +1162,65 @@ class NoteGraphSuggestionStore:
         return conn.execute(f"{query} LIMIT 1", params).fetchone() is not None  # nosec B608
 
     @staticmethod
+    def _suggestion_identity_field(suggestion: Any, field: str) -> object:
+        if isinstance(suggestion, NoteGraphSuggestion):
+            return getattr(suggestion, field)
+        return suggestion[field]
+
+    def _canonical_suggestion_identity_lock_key(self, suggestion: Any) -> tuple[int, int]:
+        kind_value = self._suggestion_identity_field(suggestion, "kind")
+        kind = kind_value.value if isinstance(kind_value, NoteGraphSuggestionKind) else str(kind_value)
+        source_note_id = str(self._suggestion_identity_field(suggestion, "source_note_id"))
+        if kind == NoteGraphSuggestionKind.RELATED_NOTE.value:
+            target_note_id = str(self._suggestion_identity_field(suggestion, "target_note_id"))
+            if not source_note_id or not target_note_id:
+                raise ValueError("notes_graph_suggestion_identity_invalid")
+            identity = {
+                "kind": kind,
+                "note_ids": sorted((source_note_id, target_note_id)),
+                "owner_user_id": self.owner_user_id,
+            }
+        elif kind == NoteGraphSuggestionKind.TAG.value:
+            normalized_tag = unicodedata.normalize(
+                "NFC",
+                str(self._suggestion_identity_field(suggestion, "normalized_tag")).strip(),
+            ).casefold()
+            if not source_note_id or not normalized_tag:
+                raise ValueError("notes_graph_suggestion_identity_invalid")
+            identity = {
+                "kind": kind,
+                "normalized_tag": normalized_tag,
+                "owner_user_id": self.owner_user_id,
+                "source_note_id": source_note_id,
+            }
+        else:
+            raise ValueError("notes_graph_suggestion_identity_invalid")
+        encoded = json.dumps(
+            identity,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        digest = hashlib.sha256(b"notes-graph-canonical-identity-v1\0" + encoded).digest()
+        return (
+            int.from_bytes(digest[:4], "big", signed=True),
+            int.from_bytes(digest[4:8], "big", signed=True),
+        )
+
+    def _serialize_canonical_suggestion_identities(
+        self,
+        conn: SuggestionConnection,
+        suggestions: Iterable[Any],
+    ) -> None:
+        if not self.is_postgres:
+            return
+        lock_keys = sorted(
+            {self._canonical_suggestion_identity_lock_key(suggestion) for suggestion in suggestions}
+        )
+        for key in lock_keys:
+            conn.execute("SELECT pg_advisory_xact_lock(?, ?)", key).fetchone()
+
+    @staticmethod
     def _canonical_related_identity(
         source_note_id: str,
         source_fingerprint: str,
@@ -1552,6 +1612,7 @@ class NoteGraphSuggestionStore:
                 "AND run_id=? AND state='staged' ORDER BY id",
                 (self.owner_user_id, dataset, run_id),
             ).fetchall()
+            self._serialize_canonical_suggestion_identities(conn, staged)
             activated_ids: list[str] = []
             for row in staged:
                 filtered = self._is_suppressed(conn, row)
@@ -2733,6 +2794,7 @@ class NoteGraphSuggestionStore:
             fence=fence,
             now_utc=now_utc,
         )
+        self._serialize_canonical_suggestion_identities(conn, (current,))
         receipt = conn.execute(
             "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? "
             "AND dataset_id=? AND id=? AND operation_kind='suggestion_accept' "
@@ -2809,6 +2871,7 @@ class NoteGraphSuggestionStore:
                 fence=fence,
                 now_utc=now_utc,
             )
+            self._serialize_canonical_suggestion_identities(conn, (current,))
             identity = self._exact_acceptance_postcondition_locked(
                 conn,
                 suggestion=current,
@@ -3032,6 +3095,7 @@ class NoteGraphSuggestionStore:
                     error_code="notes_graph_fingerprint_stale",
                     now_utc=now_utc,
                 )
+            self._serialize_canonical_suggestion_identities(conn, (current,))
             identity = self._exact_acceptance_postcondition_locked(
                 conn,
                 suggestion=current,
@@ -3073,6 +3137,7 @@ class NoteGraphSuggestionStore:
                 fence=fence,
                 now_utc=now_utc,
             )
+            self._serialize_canonical_suggestion_identities(conn, (current,))
             if not verifier(conn):
                 return MutationResult(
                     "in_progress",

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import (
+    NoteGraphSuggestionStore,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB
 from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
 from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 
@@ -206,6 +210,73 @@ def _stage_and_activate_tag(
         observed_result_digest=publishing.result_digest,
         now=NOW,
     )
+
+
+def test_canonical_suggestion_identity_locks_are_portable_content_free_and_sorted() -> None:
+    store = NoteGraphSuggestionStore(
+        SimpleNamespace(client_id="owner-1", backend_type=BackendType.POSTGRESQL)
+    )
+    related_forward = {
+        "kind": "related_note",
+        "source_note_id": SOURCE_ID,
+        "target_note_id": TARGET_ID,
+    }
+    related_reverse = {
+        "kind": "related_note",
+        "source_note_id": TARGET_ID,
+        "target_note_id": SOURCE_ID,
+    }
+    tag_decomposed = {
+        "kind": "tag",
+        "source_note_id": SOURCE_ID,
+        "normalized_tag": "cafe\u0301",
+        "display_tag": "Private decomposed display",
+    }
+    tag_composed_case_variant = {
+        "kind": "tag",
+        "source_note_id": SOURCE_ID,
+        "normalized_tag": "CAF\u00c9",
+        "display_tag": "Private composed display",
+    }
+
+    related_key = store._canonical_suggestion_identity_lock_key(related_forward)
+    assert related_key == store._canonical_suggestion_identity_lock_key(related_reverse)
+    tag_key = store._canonical_suggestion_identity_lock_key(tag_decomposed)
+    assert tag_key == store._canonical_suggestion_identity_lock_key(tag_composed_case_variant)
+    assert related_key != tag_key
+
+    class RecordingConnection:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[int, int]]] = []
+
+        def execute(self, query: str, params: tuple[int, int]):
+            self.calls.append((query, params))
+            return self
+
+        def fetchone(self):
+            return {"locked": True}
+
+    conn = RecordingConnection()
+    candidates = (
+        tag_decomposed,
+        related_reverse,
+        tag_composed_case_variant,
+        related_forward,
+    )
+    store._serialize_canonical_suggestion_identities(conn, candidates)
+
+    assert [params for _query, params in conn.calls] == sorted({related_key, tag_key})
+    assert all(query == "SELECT pg_advisory_xact_lock(?, ?)" for query, _params in conn.calls)
+    assert all(
+        isinstance(value, int)
+        for _query, params in conn.calls
+        for value in params
+    )
+    lock_boundary = repr(conn.calls)
+    assert SOURCE_ID not in lock_boundary
+    assert TARGET_ID not in lock_boundary
+    assert "cafe" not in lock_boundary.casefold()
+    assert "private" not in lock_boundary.casefold()
 
 
 def test_request_fingerprints_and_key_digests_are_versioned_bounded_and_safe(db) -> None:
@@ -1036,6 +1107,88 @@ def test_expired_acceptance_scan_claims_higher_fence_and_only_resolves_existing_
                 fence=first,
                 now=NOW + timedelta(minutes=5, seconds=1),
             )
+
+
+def test_expired_resolution_serializes_identity_before_exact_postcondition_read(
+    db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stage_and_activate(db, key="resolve-lock-run", suggestion_id="resolve-lock")
+    store = db.note_graph_suggestion_store
+    fence = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="resolve-lock",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="resolve-lock-key",
+        now=NOW,
+    ).suggestion
+    assert fence is not None
+    calls: list[str] = []
+    original_serialize = store._serialize_canonical_suggestion_identities
+    original_exact = store._exact_acceptance_postcondition_locked
+
+    def record_serialize(conn, suggestions):
+        calls.append("identity_lock")
+        return original_serialize(conn, suggestions)
+
+    def record_exact(conn, **kwargs):
+        calls.append("canonical_read")
+        return original_exact(conn, **kwargs)
+
+    monkeypatch.setattr(store, "_serialize_canonical_suggestion_identities", record_serialize)
+    monkeypatch.setattr(store, "_exact_acceptance_postcondition_locked", record_exact)
+
+    result = store.resolve_expired_acceptance(
+        fence=fence,
+        accepted_resource_identity=None,
+        resolved_keyword_sync_id=None,
+        now=NOW,
+    )
+
+    assert result.envelope["state"] == "pending"
+    assert calls == ["identity_lock", "canonical_read"]
+
+
+def test_acceptance_stale_verifier_serializes_identity_before_canonical_read(
+    db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stage_and_activate_tag(db, key="stale-lock-run", suggestion_id="stale-lock")
+    store = db.note_graph_suggestion_store
+    fence = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="stale-lock",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=None,
+        idempotency_key="stale-lock-key",
+        now=NOW,
+    ).suggestion
+    assert fence is not None
+    calls: list[str] = []
+    original_serialize = store._serialize_canonical_suggestion_identities
+
+    def record_serialize(conn, suggestions):
+        calls.append("identity_lock")
+        return original_serialize(conn, suggestions)
+
+    def verifier(_conn) -> bool:
+        calls.append("canonical_read")
+        return True
+
+    monkeypatch.setattr(store, "_serialize_canonical_suggestion_identities", record_serialize)
+
+    result = store.mark_acceptance_stale(
+        fence=fence,
+        reason="canonical_resource_missing",
+        verifier=verifier,
+        now=NOW,
+    )
+
+    assert result.envelope["state"] == "stale"
+    assert calls == ["identity_lock", "canonical_read"]
 
 
 def test_stale_accept_and_reject_close_operation_specific_receipts(db) -> None:

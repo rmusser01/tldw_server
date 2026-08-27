@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -168,6 +169,7 @@ def _stage(
     normalized_tag: str = "research",
     display_tag: str = "Research",
     model: str = "model-a",
+    include_evidence: bool = False,
 ) -> NoteGraphSuggestionRun:
     store = db.note_graph_suggestion_store
     admitted = store.admit_run(
@@ -208,7 +210,30 @@ def _stage(
             "target_fingerprint": _fingerprint(db, TARGET_ID),
             "match_strength": "strong",
             "rationale": "Bounded rationale",
-            "evidence": (),
+            "evidence": (
+                (
+                    {
+                        "side": "source",
+                        "ordinal": 0,
+                        "note_id": SOURCE_ID,
+                        "field": "content",
+                        "content_fingerprint": _fingerprint(db, SOURCE_ID),
+                        "start_offset": 0,
+                        "end_offset": 4,
+                    },
+                    {
+                        "side": "target",
+                        "ordinal": 0,
+                        "note_id": TARGET_ID,
+                        "field": "content",
+                        "content_fingerprint": _fingerprint(db, TARGET_ID),
+                        "start_offset": 0,
+                        "end_offset": 4,
+                    },
+                )
+                if include_evidence
+                else ()
+            ),
         }
         if kind == "related_note"
         else {
@@ -259,6 +284,7 @@ def _publish(
     normalized_tag: str = "research",
     display_tag: str = "Research",
     model: str = "model-a",
+    include_evidence: bool = False,
 ) -> None:
     _activate(
         db,
@@ -270,6 +296,7 @@ def _publish(
             normalized_tag=normalized_tag,
             display_tag=display_tag,
             model=model,
+            include_evidence=include_evidence,
         ),
     )
 
@@ -650,7 +677,12 @@ def test_regeneration_during_acceptance_stales_only_pending_duplicates_in_finali
     protected_id = "related-protected-accepting"
     pending_id = "related-pending-generation"
     all_ids = (accepting_id, terminal_id, protected_id, pending_id)
-    _publish(note_db, suggestion_id=accepting_id, kind="related_note")
+    _publish(
+        note_db,
+        suggestion_id=accepting_id,
+        kind="related_note",
+        include_evidence=True,
+    )
     coordinator_entered = Event()
     release_coordinator = Event()
     product_transaction_entered = Event()
@@ -658,7 +690,25 @@ def test_regeneration_during_acceptance_stales_only_pending_duplicates_in_finali
     original_create = NotesLinkCoordinator.create
     original_guard = type(decisions.store).guard_acceptance_in_transaction
     original_finalize = type(decisions.store).finalize_acceptance_in_transaction
-    finalizer_snapshots: list[dict[str, tuple[object, ...]]] = []
+    finalizer_snapshots: list[dict[str, object]] = []
+
+    def durable_snapshot(conn):
+        rows = conn.execute(
+            "SELECT * FROM note_graph_suggestions WHERE id IN (?,?,?,?) ORDER BY id",
+            all_ids,
+        ).fetchall()
+        evidence = conn.execute(
+            "SELECT * FROM note_graph_suggestion_evidence "
+            "WHERE suggestion_id IN (?,?,?,?) ORDER BY suggestion_id,side,ordinal",
+            all_ids,
+        ).fetchall()
+        evidence_by_id = {suggestion_id: [] for suggestion_id in all_ids}
+        for row in evidence:
+            evidence_by_id[str(row["suggestion_id"])].append(dict(row))
+        return (
+            {str(row["id"]): dict(row) for row in rows},
+            {suggestion_id: tuple(values) for suggestion_id, values in evidence_by_id.items()},
+        )
 
     def blocked_create(self, **kwargs):
         if kwargs.get("guarded_mutation") is not None:
@@ -673,22 +723,22 @@ def test_regeneration_during_acceptance_stales_only_pending_duplicates_in_finali
 
     def observed_finalize(self, *, conn, **kwargs):
         result = original_finalize(self, conn=conn, **kwargs)
-        rows = conn.execute(
-            "SELECT id,state,decision_reason,rationale,revision,acceptance_lease_token,"
-            "decision_receipt_id FROM note_graph_suggestions WHERE id IN (?,?,?,?) ORDER BY id",
-            all_ids,
-        ).fetchall()
+        rows, evidence = durable_snapshot(conn)
+        link = conn.execute(
+            "SELECT * FROM note_edges WHERE user_id=? AND edge_id=?",
+            (OWNER_ID, result.envelope["accepted_resource_identity"]),
+        ).fetchone()
+        receipt = conn.execute(
+            "SELECT * FROM note_graph_suggestion_operation_receipts "
+            "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+            (OWNER_ID, DATASET_ID, kwargs["fence"].decision_receipt_id),
+        ).fetchone()
         finalizer_snapshots.append(
             {
-                str(row["id"]): (
-                    row["state"],
-                    row["decision_reason"],
-                    row["rationale"],
-                    row["revision"],
-                    row["acceptance_lease_token"],
-                    row["decision_receipt_id"],
-                )
-                for row in rows
+                "suggestions": rows,
+                "evidence": evidence,
+                "link": dict(link) if link is not None else None,
+                "receipt": dict(receipt) if receipt is not None else None,
             }
         )
         return result
@@ -712,8 +762,20 @@ def test_regeneration_during_acceptance_stales_only_pending_duplicates_in_finali
         future = executor.submit(decisions.accept, **accept_request)
         try:
             assert coordinator_entered.wait(10)
-            _publish(note_db, suggestion_id=terminal_id, kind="related_note", model="model-b")
-            _publish(note_db, suggestion_id=protected_id, kind="related_note", model="model-c")
+            _publish(
+                note_db,
+                suggestion_id=terminal_id,
+                kind="related_note",
+                model="model-b",
+                include_evidence=True,
+            )
+            _publish(
+                note_db,
+                suggestion_id=protected_id,
+                kind="related_note",
+                model="model-c",
+                include_evidence=True,
+            )
             terminal_before = decisions.store.get_suggestion(
                 dataset_id=DATASET_ID,
                 suggestion_id=terminal_id,
@@ -732,13 +794,18 @@ def test_regeneration_during_acceptance_stales_only_pending_duplicates_in_finali
                 now=NOW,
             )
             assert protected_claim.suggestion is not None
-            protected_before = protected_claim.suggestion
             pending_publishing = _stage(
                 note_db,
                 suggestion_id=pending_id,
                 kind="related_note",
                 model="model-d",
+                include_evidence=True,
             )
+            with note_db.transaction() as conn:
+                decisions.store._set_dataset_scope(conn, DATASET_ID)
+                rows_before, evidence_before = durable_snapshot(conn)
+            assert evidence_before[terminal_id]
+            assert evidence_before[protected_id]
 
             release_coordinator.set()
             assert product_transaction_entered.wait(10)
@@ -762,69 +829,158 @@ def test_regeneration_during_acceptance_stales_only_pending_duplicates_in_finali
     assert result.envelope["state"] == "accepted"
     assert len(finalizer_snapshots) == 1
     in_transaction = finalizer_snapshots[0]
-    assert in_transaction[accepting_id][:3] == ("accepted", "user_accepted", None)
-    assert in_transaction[pending_id][:3] == ("stale", "canonical_accepted", None)
-    assert in_transaction[terminal_id] == (
-        terminal_before.state.value,
-        terminal_before.decision_reason,
-        terminal_before.rationale,
-        terminal_before.revision,
-        terminal_before.acceptance_lease_token,
-        terminal_before.decision_receipt_id,
-    )
-    assert in_transaction[protected_id] == (
-        "accepting",
-        protected_before.decision_reason,
-        protected_before.rationale,
-        protected_before.revision,
-        protected_before.acceptance_lease_token,
-        protected_before.decision_receipt_id,
-    )
+    in_transaction_rows = in_transaction["suggestions"]
+    assert in_transaction_rows[accepting_id]["state"] == "accepted"
+    assert in_transaction_rows[accepting_id]["decision_reason"] == "user_accepted"
+    assert in_transaction_rows[accepting_id]["rationale"] is None
+    assert in_transaction_rows[pending_id]["state"] == "stale"
+    assert in_transaction_rows[pending_id]["decision_reason"] == "canonical_accepted"
+    assert in_transaction_rows[pending_id]["rationale"] is None
+    assert in_transaction_rows[terminal_id] == rows_before[terminal_id]
+    assert in_transaction_rows[protected_id] == rows_before[protected_id]
+
+    in_transaction_evidence = in_transaction["evidence"]
+    assert in_transaction_evidence[accepting_id] == ()
+    assert in_transaction_evidence[pending_id] == ()
+    assert in_transaction_evidence[terminal_id] == evidence_before[terminal_id]
+    assert in_transaction_evidence[protected_id] == evidence_before[protected_id]
+
+    link = in_transaction["link"]
+    assert link is not None
+    assert link["edge_id"] == result.envelope["accepted_resource_identity"]
+    assert (link["from_note_id"], link["to_note_id"]) == (SOURCE_ID, TARGET_ID)
+    assert link["type"] == "manual"
+    assert not bool(link["directed"])
+    assert float(link["weight"]) == 1.0
+    assert link["label"] is None
+    assert decisions.store._properties_are_empty(link["properties"])
+    assert not bool(link["deleted"])
+
+    receipt = in_transaction["receipt"]
+    assert receipt is not None
+    assert receipt["operation_kind"] == "suggestion_accept"
+    assert receipt["resource_identity"] == accepting_id
+    assert receipt["state"] == "completed"
+    assert receipt["http_status"] == 200
+    assert receipt["completed_at"] is not None
+    assert json.loads(str(receipt["replay_envelope"])) == result.envelope
 
     pending = decisions.store.get_suggestion(
         dataset_id=DATASET_ID,
         suggestion_id=pending_id,
-    )
-    terminal = decisions.store.get_suggestion(
-        dataset_id=DATASET_ID,
-        suggestion_id=terminal_id,
-    )
-    protected = decisions.store.get_suggestion(
-        dataset_id=DATASET_ID,
-        suggestion_id=protected_id,
     )
     assert (pending.state.value, pending.decision_reason, pending.rationale) == (
         "stale",
         "canonical_accepted",
         None,
     )
-    assert (
-        terminal.state,
-        terminal.decision_reason,
-        terminal.rationale,
-        terminal.revision,
-        terminal.acceptance_lease_token,
-        terminal.decision_receipt_id,
-    ) == (
-        terminal_before.state,
-        terminal_before.decision_reason,
-        terminal_before.rationale,
-        terminal_before.revision,
-        terminal_before.acceptance_lease_token,
-        terminal_before.decision_receipt_id,
-    )
-    assert (
-        protected.state,
-        protected.revision,
-        protected.acceptance_lease_token,
-        protected.decision_receipt_id,
-    ) == (
-        protected_before.state,
-        protected_before.revision,
-        protected_before.acceptance_lease_token,
-        protected_before.decision_receipt_id,
-    )
+    with note_db.transaction() as conn:
+        decisions.store._set_dataset_scope(conn, DATASET_ID)
+        rows_after, evidence_after = durable_snapshot(conn)
+    assert rows_after[terminal_id] == rows_before[terminal_id]
+    assert rows_after[protected_id] == rows_before[protected_id]
+    assert evidence_after[terminal_id] == evidence_before[terminal_id]
+    assert evidence_after[protected_id] == evidence_before[protected_id]
     assert note_db.notes_link_store.get(result.envelope["accepted_resource_identity"]) is not None
+
+
+def test_activation_after_finalizer_reconciliation_waits_for_product_commit(
+    tmp_path: Path,
+    pg_database_config,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    request.addfinalizer(backend.get_pool().close_all)
+    note_db = CharactersRAGDB(":memory:", client_id=OWNER_ID, backend=backend)
+    request.addfinalizer(note_db.close_all_connections)
+    note_db.add_note(SOURCE_ID, "body", note_id=SOURCE_ID)
+    note_db.add_note(TARGET_ID, "body", note_id=TARGET_ID)
+    with note_db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+            (OWNER_ID, DATASET_ID),
+        )
+    sync, sync_store = _sync_service(tmp_path, note_db)
+    decisions = SuggestionDecisionService(
+        store=note_db.note_graph_suggestion_store,
+        link_coordinator=NotesLinkCoordinator(
+            sync,
+            note_db,
+            OWNER_ID,
+            sync_store.get_dataset(DATASET_ID),
+        ),
+        organization_coordinator=NotesOrganizationCoordinator(sync, note_db, OWNER_ID),
+        clock=lambda: NOW,
+    )
+    accepting_id = "related-post-finalizer-accepting"
+    duplicate_id = "related-post-finalizer-duplicate"
+    _publish(note_db, suggestion_id=accepting_id, kind="related_note")
+    duplicate_run = _stage(
+        note_db,
+        suggestion_id=duplicate_id,
+        kind="related_note",
+        model="model-post-finalizer",
+    )
+    finalizer_reconciled = Event()
+    release_product_commit = Event()
+    activation_started = Event()
+    canonical_read_entered = Event()
+    original_finalize = type(decisions.store).finalize_acceptance_in_transaction
+    original_has_current_link = type(decisions.store)._has_current_link
+
+    def held_after_finalizer(self, *, conn, **kwargs):
+        result = original_finalize(self, conn=conn, **kwargs)
+        finalizer_reconciled.set()
+        assert release_product_commit.wait(10)
+        return result
+
+    def observe_canonical_read(self, conn, source_note_id, target_note_id):
+        canonical_read_entered.set()
+        return original_has_current_link(self, conn, source_note_id, target_note_id)
+
+    def activate_duplicate():
+        activation_started.set()
+        _activate(note_db, duplicate_run)
+
+    monkeypatch.setattr(
+        type(decisions.store),
+        "finalize_acceptance_in_transaction",
+        held_after_finalizer,
+    )
+    monkeypatch.setattr(type(decisions.store), "_has_current_link", observe_canonical_read)
+    accept_request = {
+        "dataset_id": DATASET_ID,
+        "suggestion_id": accepting_id,
+        "expected_revision": 1,
+        "expected_source_fingerprint": _fingerprint(note_db, SOURCE_ID),
+        "expected_target_fingerprint": _fingerprint(note_db, TARGET_ID),
+        "idempotency_key": "related-post-finalizer-request",
+    }
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        accept_future = executor.submit(decisions.accept, **accept_request)
+        assert finalizer_reconciled.wait(10)
+        activation_future = executor.submit(activate_duplicate)
+        assert activation_started.wait(10)
+        try:
+            assert not canonical_read_entered.wait(0.5)
+            assert not activation_future.done()
+        finally:
+            release_product_commit.set()
+        accepted = accept_future.result(timeout=10)
+        activation_future.result(timeout=10)
+
+    assert accepted.envelope["state"] == "accepted"
+    assert canonical_read_entered.is_set()
+    assert note_db.execute_query(
+        "SELECT COUNT(*) AS count FROM note_graph_suggestions "
+        "WHERE id=? AND state='pending'",
+        (duplicate_id,),
+    ).fetchone()["count"] == 0
+    assert note_db.execute_query(
+        "SELECT COUNT(*) AS count FROM note_edges WHERE user_id=? AND deleted=?",
+        (OWNER_ID, False),
+    ).fetchone()["count"] == 1
 
 
 def test_old_fence_late_worker_cannot_write_after_expired_takeover(

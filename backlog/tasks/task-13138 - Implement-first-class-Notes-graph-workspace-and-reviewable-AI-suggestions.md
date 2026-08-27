@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 19:21
+updated_date: 2026-08-27 19:49
 labels:
 - notes
 - knowledge-graph
@@ -179,6 +179,8 @@ Task 7 Fix Round 1 paused NEEDS_CONTEXT: guarded normalized keyword collision ca
 Task 7 Fix Round 1 completed from reviewed head 5812139c93608d71e0846f05528d491485bfb396. Hardened portable normalized-keyword collision convergence, stale revalidation, relationship conflict recovery, rejection observability, durable reconciliation ordering, and the global expired-acceptance budget. Verification: exact Task 7 suite 41 passed; Task 3/5 92 passed; affected Sync 158 passed; required live PostgreSQL 55 passed plus 3 normalized barrier cases with no skips; Ruff clean; Bandit 0 findings; diff check clean. Full evidence is in the ignored task-7-report.md. Parent task remains In Progress for Tasks 8-12.
 Task 7 Fix Round 2 started from exact base d162bac0627d93e8ea9fa8b5387e6f425bcde601. Scope is the remaining regeneration/acceptance barrier oracle and accepted-finalizer duplicate-supersession directionality; focused RED precedes any production correction.
 Task 7 Fix Round 2 completed from exact base d162bac0627d93e8ea9fa8b5387e6f425bcde601. Added a live PostgreSQL acceptance/regeneration product-transaction barrier, restored pending duplicate activation while preserving accepting fences, and corrected unreleased v64 canonical indexes to permit accepting-plus-pending without weakening pending/rejected uniqueness. Verification: exact Task 7 41 passed; Task 3/5 92 passed; v64 SQLite/live PostgreSQL 30 passed; Ruff clean; Bandit 0 findings; diff check clean. Full evidence is in the ignored task-7-report.md. Parent task remains In Progress for Tasks 8-12.
+Task 7 Fix Round 3 started from exact base b220b566b513394a5771ed1525b057e3737e7741. Scope is the final approved PostgreSQL canonical suggestion-identity serialization race and full transaction-local finalizer oracle; focused live PostgreSQL and store RED precede production edits.
+Task 7 Fix Round 3 completed from exact base b220b566b513394a5771ed1525b057e3737e7741. Added DB-owned PostgreSQL canonical suggestion-identity advisory serialization across activation, accepted finalization, exact reconciliation, and stale verification; expanded both live coordinator barriers to prove post-finalizer convergence and full transaction-local link/receipt/row/evidence atomicity. Verification: exact Task 7 42 passed; Task 3/5 95 passed; v64 SQLite/live PostgreSQL 30 passed; relevant Sync 158 passed; Ruff clean; Bandit 0 findings; diff check clean. Full evidence is in the ignored task-7-report.md. Parent task remains In Progress for Tasks 8-12.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
