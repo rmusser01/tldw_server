@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +9,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Notes_Graph import suggestion_service
 from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
+from tldw_Server_API.app.core.Notes_Graph.suggestion_generation import SuggestionGenerationError
 from tldw_Server_API.app.core.Notes_Graph.suggestion_jobs import (
     JOB_DOMAIN,
     JOB_PAYLOAD_KEYS,
@@ -20,6 +21,11 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_jobs import (
     SuggestionPublisher,
     validate_publication_receipt,
 )
+from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import (
+    MaintenanceScope,
+    SuggestionMaintenance,
+)
+from tldw_Server_API.app.core.Notes_Graph.suggestion_observability import SuggestionErrorCode
 from tldw_Server_API.app.core.Notes_Graph.suggestion_service import (
     SuggestionWorker,
     SuggestionWorkerCancelled,
@@ -110,6 +116,41 @@ def test_admission_recovers_before_enqueue_and_never_calls_provider(stores, monk
 
     assert recovered.run.state.value == "queued"
     assert calls == 2
+
+
+def test_admission_replay_recovers_job_committed_before_bind_and_before_limits(
+    stores,
+    monkeypatch,
+) -> None:
+    notes, jobs = stores
+    store = notes.note_graph_suggestion_store
+    original_bind = store.bind_admitted_run
+    bind_calls = 0
+
+    def interrupt_after_enqueue(**kwargs):
+        nonlocal bind_calls
+        bind_calls += 1
+        if bind_calls == 1:
+            raise ConnectionError("interrupted after Jobs commit")
+        return original_bind(**kwargs)
+
+    monkeypatch.setattr(store, "bind_admitted_run", interrupt_after_enqueue)
+    with pytest.raises(ConnectionError, match="after Jobs commit"):
+        _admit(notes, jobs, key="resume-after-enqueue")
+
+    monkeypatch.setattr(
+        SuggestionAdmissionService,
+        "_enforce_owner_limits",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("replay must recover before new-admission limits")
+        ),
+    )
+    recovered = _admit(notes, jobs, key="resume-after-enqueue")
+
+    assert recovered.run.state.value == "queued"
+    assert recovered.job["idempotency_key"] == recovered.run.id
+    assert bind_calls == 2
+    assert jobs.count_jobs(domain=JOB_DOMAIN, owner_user_id="owner-1") == 1
 
 
 def test_admission_enforces_owner_active_and_hourly_limits(stores) -> None:
@@ -294,6 +335,40 @@ def test_publication_activates_from_archived_terminal_job(stores) -> None:
     assert published is not None and published.state.value == "succeeded"
 
 
+def test_maintenance_activates_archived_only_publication_with_claimed_lease(stores) -> None:
+    notes, jobs = stores
+    _admitted, acquired, publishing, result = _stage_and_complete(notes, jobs)
+    assert jobs.complete_job(
+        int(acquired["id"]),
+        result=result,
+        worker_id="worker-1",
+        lease_id=acquired["lease_id"],
+        completion_token=acquired["lease_id"],
+    )
+    conn = jobs._connect()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET completed_at='2000-01-01 00:00:00' WHERE id=?",
+                (int(acquired["id"]),),
+            )
+    finally:
+        conn.close()
+    assert jobs.prune_jobs(statuses=["completed"], older_than_days=31) == 1
+    assert jobs.get_job_by_uuid(acquired["uuid"]) is None
+
+    maintenance_result = SuggestionMaintenance(
+        jobs=jobs,
+        scopes=(MaintenanceScope(notes.note_graph_suggestion_store, DATASET_ID),),
+    ).run_pass(now=NOW)
+
+    activated = notes.note_graph_suggestion_store.get_run(
+        dataset_id=DATASET_ID,
+        run_id=publishing.id,
+    )
+    assert (maintenance_result.reconciled, activated.state.value) == (1, "succeeded")
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -418,8 +493,11 @@ def test_default_worker_prepare_builds_request_and_freshness_returns_none(
 
 
 @pytest.mark.asyncio
-async def test_worker_revalidates_immediately_before_one_call_and_fences_stage() -> None:
+async def test_worker_revalidates_immediately_before_one_call_and_fences_stage(
+    monkeypatch,
+) -> None:
     events: list[str] = []
+    telemetry: list[tuple[str, object]] = []
     run = SimpleNamespace(
         id="run-1",
         revision=7,
@@ -432,6 +510,7 @@ async def test_worker_revalidates_immediately_before_one_call_and_fences_stage()
         model="model-a",
         capability_revision="cap-v1",
         prompt_contract_version="notes-graph-suggestions-v1",
+        created_at=(NOW - timedelta(seconds=30)).isoformat(),
     )
 
     class Store:
@@ -454,8 +533,45 @@ async def test_worker_revalidates_immediately_before_one_call_and_fences_stage()
             return SimpleNamespace(state=SimpleNamespace(value="publishing"))
 
     async def generate(**_kwargs):
+        assert events[-1] == "capability"
         events.append("provider")
-        return SimpleNamespace(relationships=(), tags=(), validation_counts={})
+        return SimpleNamespace(
+            relationships=(),
+            tags=(),
+            validation_counts={"relationship_items_received": 2},
+            input_tokens=17,
+            output_tokens=5,
+        )
+
+    def cancellation(_job):
+        events.append("cancellation")
+        return False
+
+    tick = 0
+
+    def clock():
+        nonlocal tick
+        value = NOW + timedelta(seconds=tick)
+        tick += 1
+        return value
+
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_event",
+        lambda event, **kwargs: telemetry.append(("event", (event, kwargs))),
+    )
+    for name in (
+        "record_candidate_counts",
+        "record_provider_usage",
+        "record_queue_latency",
+        "record_run_duration",
+        "record_validation_counts",
+    ):
+        monkeypatch.setattr(
+            suggestion_service,
+            name,
+            lambda *args, _name=name, **kwargs: telemetry.append((_name, (args, kwargs))),
+        )
 
     worker = SuggestionWorker(
         store_factory=lambda _owner: Store(),
@@ -466,8 +582,8 @@ async def test_worker_revalidates_immediately_before_one_call_and_fences_stage()
         ),
         generate=generate,
         freshness_check=lambda **_kwargs: None,
-        cancellation_requested=lambda _job: False,
-        now=lambda: NOW,
+        cancellation_requested=cancellation,
+        now=clock,
     )
     result = await worker.handle(
         {
@@ -491,8 +607,38 @@ async def test_worker_revalidates_immediately_before_one_call_and_fences_stage()
         }
     )
 
-    assert events == ["load", "start", "retrieve", "prepare", "capability", "provider", "stage"]
+    assert events == [
+        "load",
+        "start",
+        "retrieve",
+        "prepare",
+        "cancellation",
+        "capability",
+        "provider",
+        "cancellation",
+        "stage",
+    ]
     assert set(result) == JOB_RESULT_KEYS
+    assert (result["input_tokens"], result["output_tokens"], result["dropped_count"]) == (
+        17,
+        5,
+        2,
+    )
+    event_names = [detail[0].value for kind, detail in telemetry if kind == "event"]
+    assert event_names == [
+        "shortlist_completed",
+        "provider_started",
+        "provider_completed",
+        "validation_rejected",
+        "staged",
+    ]
+    assert {kind for kind, _detail in telemetry} >= {
+        "record_candidate_counts",
+        "record_provider_usage",
+        "record_queue_latency",
+        "record_run_duration",
+        "record_validation_counts",
+    }
 
 
 @pytest.mark.asyncio
@@ -645,10 +791,15 @@ async def test_worker_revision_cas_failure_prevents_retrieval_and_provider() -> 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_on_check", [1, 2])
-async def test_worker_cancellation_before_or_after_call_never_stages(cancel_on_check) -> None:
+async def test_worker_cancellation_before_or_after_call_never_stages(
+    cancel_on_check,
+    monkeypatch,
+) -> None:
     checks = 0
     calls = 0
+    capability_calls = 0
     staged = False
+    telemetry: list[tuple[str, object]] = []
 
     def cancel(_job):
         nonlocal checks
@@ -658,7 +809,36 @@ async def test_worker_cancellation_before_or_after_call_never_stages(cancel_on_c
     async def generate(**_kwargs):
         nonlocal calls
         calls += 1
-        return SimpleNamespace(relationships=(), tags=(), validation_counts={})
+        return SimpleNamespace(
+            relationships=(),
+            tags=(),
+            validation_counts={},
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    def resolve_capability(**_kwargs):
+        nonlocal capability_calls
+        capability_calls += 1
+        return SimpleNamespace(revision="cap-v1", generation_available=True), object()
+
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_event",
+        lambda event, **kwargs: telemetry.append(("event", (event, kwargs))),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_error",
+        lambda code: telemetry.append(("error", code)),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_duration",
+        lambda duration: telemetry.append(("duration", duration)),
+    )
+    monkeypatch.setattr(suggestion_service, "record_queue_latency", lambda _value: None)
+    monkeypatch.setattr(suggestion_service, "record_provider_usage", lambda **_kwargs: None)
 
     class Store:
         def get_run(self, **_kwargs):
@@ -673,6 +853,7 @@ async def test_worker_cancellation_before_or_after_call_never_stages(cancel_on_c
                 capability_revision="cap-v1",
                 prompt_contract_version="notes-graph-suggestions-v1",
                 state=SimpleNamespace(value="queued"),
+                created_at=(NOW - timedelta(seconds=1)).isoformat(),
             )
 
         def start_run(self, **_kwargs):
@@ -686,7 +867,7 @@ async def test_worker_cancellation_before_or_after_call_never_stages(cancel_on_c
         store_factory=lambda _owner: Store(),
         retrieve=lambda **_kwargs: object(),
         prepare=lambda **_kwargs: object(),
-        resolve_capability=lambda **_kwargs: (SimpleNamespace(revision="cap-v1", generation_available=True), object()),
+        resolve_capability=resolve_capability,
         generate=generate,
         freshness_check=lambda **_kwargs: None,
         cancellation_requested=cancel,
@@ -716,4 +897,135 @@ async def test_worker_cancellation_before_or_after_call_never_stages(cancel_on_c
         )
 
     assert calls == (0 if cancel_on_check == 1 else 1)
+    assert capability_calls == (0 if cancel_on_check == 1 else 1)
     assert staged is False
+    assert any(kind == "event" and detail[0].value == "cancelled" for kind, detail in telemetry)
+    assert ("error", SuggestionErrorCode.GENERATION_CANCELLED) in telemetry
+    assert any(kind == "duration" for kind, _detail in telemetry)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_phase", "expected_event", "expected_code"),
+    [
+        ("provider", "failed", SuggestionErrorCode.PROVIDER_UNAVAILABLE),
+        ("freshness", "stale", SuggestionErrorCode.FINGERPRINT_STALE),
+    ],
+)
+async def test_worker_records_closed_failure_and_stale_lifecycle(
+    failure_phase,
+    expected_event,
+    expected_code,
+    monkeypatch,
+) -> None:
+    recorded: list[tuple[str, object]] = []
+    payload = {
+        "schema_version": 1,
+        "run_id": "run-observability",
+        "dataset_id": DATASET_ID,
+        "source_note_id": SOURCE_ID,
+        "source_fingerprint": f"sha256:{'a' * 64}",
+        "provider": "openai",
+        "model": "model-a",
+        "capability_revision": "cap-v1",
+        "prompt_contract_version": "notes-graph-suggestions-v1",
+    }
+    queued = SimpleNamespace(
+        id=payload["run_id"],
+        revision=2,
+        job_id="job-observability",
+        state=SimpleNamespace(value="queued"),
+        created_at=(NOW - timedelta(seconds=5)).isoformat(),
+        **{
+            key: payload[key]
+            for key in (
+                "source_note_id",
+                "source_fingerprint",
+                "provider",
+                "model",
+                "capability_revision",
+                "prompt_contract_version",
+            )
+        },
+    )
+
+    class Store:
+        def get_run(self, **_kwargs):
+            return queued
+
+        def start_run(self, **_kwargs):
+            return SimpleNamespace(
+                **{
+                    **queued.__dict__,
+                    "revision": 3,
+                    "expected_completion_token": "lease-observability",
+                }
+            )
+
+        def stage_suggestions(self, **_kwargs):
+            raise AssertionError("failed work must not stage")
+
+    async def generate(**_kwargs):
+        if failure_phase == "provider":
+            raise SuggestionGenerationError("notes_graph_provider_call_failed")
+        return SimpleNamespace(
+            relationships=(),
+            tags=(),
+            validation_counts={},
+            input_tokens=4,
+            output_tokens=2,
+        )
+
+    def freshness(**_kwargs):
+        if failure_phase == "freshness":
+            raise suggestion_service.SuggestionWorkerError("notes_graph_fingerprint_stale")
+
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_event",
+        lambda event, **kwargs: recorded.append(("event", (event, kwargs))),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_error",
+        lambda code: recorded.append(("error", code)),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_duration",
+        lambda duration: recorded.append(("duration", duration)),
+    )
+    monkeypatch.setattr(suggestion_service, "record_queue_latency", lambda _value: None)
+    monkeypatch.setattr(suggestion_service, "record_provider_usage", lambda **_kwargs: None)
+
+    worker = SuggestionWorker(
+        store_factory=lambda _owner: Store(),
+        retrieve=lambda **_kwargs: SimpleNamespace(candidates=()),
+        prepare=lambda **_kwargs: object(),
+        resolve_capability=lambda **_kwargs: (
+            SimpleNamespace(revision="cap-v1", generation_available=True),
+            object(),
+        ),
+        generate=generate,
+        freshness_check=freshness,
+        cancellation_requested=lambda _job: False,
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(suggestion_service.SuggestionWorkerError):
+        await worker.handle(
+            {
+                "uuid": "job-observability",
+                "owner_user_id": "owner-1",
+                "domain": JOB_DOMAIN,
+                "queue": JOB_QUEUE,
+                "job_type": JOB_TYPE,
+                "lease_id": "lease-observability",
+                "payload": payload,
+            }
+        )
+
+    lifecycle = [detail[0].value for kind, detail in recorded if kind == "event"]
+    assert expected_event in lifecycle
+    assert ("error", expected_code) in recorded
+    assert any(kind == "duration" for kind, _detail in recorded)

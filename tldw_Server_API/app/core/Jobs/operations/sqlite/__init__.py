@@ -3,6 +3,7 @@
 from .admission import create_job_admission
 from .idempotency import (
     admit_idempotent_operation,
+    get_job_or_archived_by_idempotency_key,
     get_job_or_archived_by_uuid,
     replay_idempotent_operation,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "acquire_job",
     "admit_idempotent_operation",
     "create_job_admission",
+    "get_job_or_archived_by_idempotency_key",
     "get_job_or_archived_by_uuid",
     "patch_terminal_operation_result",
     "release_job",

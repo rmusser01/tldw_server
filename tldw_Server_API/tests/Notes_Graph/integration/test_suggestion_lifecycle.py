@@ -1870,7 +1870,6 @@ def _exercise_operation_specific_error_contracts(db: CharactersRAGDB) -> None:
         "error_code": "notes_graph_admission_failed",
         "guidance_key": "retry_generation",
     }
-
     capability_source = "81000000-0000-4000-8000-000000000002"
     db.add_note("Capability admission", "body", note_id=capability_source)
     capability = _admit_for(db, capability_source, "round-three-capability")
@@ -2020,6 +2019,124 @@ def _exercise_operation_specific_error_contracts(db: CharactersRAGDB) -> None:
     )
     with pytest.raises(RuntimeError, match="notes_graph_receipt_envelope_invalid"):
         _admit_for(db, corrupted_source, "corrupted-replay")
+
+
+def _exercise_review_fix_maintenance_store_contract(db: CharactersRAGDB) -> None:
+    store = db.note_graph_suggestion_store
+    assert store.list_maintenance_dataset_ids(limit=100) == ()
+
+    admitting_source = "83000000-0000-4000-8000-000000000001"
+    publishing_source = "83000000-0000-4000-8000-000000000002"
+    expiring_source = "83000000-0000-4000-8000-000000000003"
+    cancelling_source = "83000000-0000-4000-8000-000000000004"
+    for index, note_id in enumerate(
+        (admitting_source, publishing_source, expiring_source, cancelling_source),
+        start=1,
+    ):
+        db.add_note(f"Maintenance review {index}", "body", note_id=note_id)
+
+    admitting = _admit_for(db, admitting_source, "durable-admitting-no-job")
+    assert admitting.run is not None and admitting.run.job_id is None
+    assert store.list_maintenance_dataset_ids(limit=100) == (DATASET_ID,)
+
+    cancelling_running = _running_for(db, cancelling_source, "maintenance-cancellation")
+    cancellation = store.admit_run_cancellation(
+        dataset_id=DATASET_ID,
+        run_id=cancelling_running.id,
+        expected_state="running",
+        expected_revision=cancelling_running.revision,
+        reason="user_cancelled",
+        idempotency_key="maintenance-cancellation-command",
+        now=NOW,
+    )
+    context = store.get_run_cancellation_maintenance_context(
+        dataset_id=DATASET_ID,
+        run_id=cancelling_running.id,
+    )
+    assert (context.operation_id, context.state, context.created_at) == (
+        cancellation.operation_id,
+        "in_progress",
+        NOW.isoformat(),
+    )
+    continuation = store.get_run_cancellation_continuation(
+        dataset_id=DATASET_ID,
+        operation_id=context.operation_id,
+    )
+    assert continuation.run is not None and continuation.run.id == cancelling_running.id
+
+    publishing_running = _running_for(db, publishing_source, "leased-publication")
+    publishing = store.stage_suggestions(
+        dataset_id=DATASET_ID,
+        run_id=publishing_running.id,
+        expected_state="running",
+        expected_revision=publishing_running.revision,
+        expected_job_id=publishing_running.job_id,
+        expected_completion_token=publishing_running.expected_completion_token,
+        result_digest=f"sha256:{'a' * 64}",
+        candidates=(),
+        invalid_item_count=0,
+        now=NOW,
+    )
+    claimed = _claim_maintenance_run(db, publishing.id)
+    with pytest.raises(RuntimeError, match="notes_graph_maintenance_lease_conflict"):
+        store.activate_staged_run_from_maintenance(
+            dataset_id=DATASET_ID,
+            run_id=claimed.id,
+            expected_state="publishing",
+            expected_revision=claimed.revision,
+            maintenance_lease_token="wrong-lease",
+            observed_job_id=claimed.job_id,
+            observed_completion_token=claimed.expected_completion_token,
+            observed_result_digest=claimed.result_digest,
+            now=NOW,
+        )
+    unchanged = store.get_run(dataset_id=DATASET_ID, run_id=claimed.id)
+    assert (unchanged.state.value, unchanged.revision, unchanged.maintenance_lease_token) == (
+        "publishing",
+        claimed.revision,
+        claimed.maintenance_lease_token,
+    )
+    activated = store.activate_staged_run_from_maintenance(
+        dataset_id=DATASET_ID,
+        run_id=claimed.id,
+        expected_state="publishing",
+        expected_revision=claimed.revision,
+        maintenance_lease_token=claimed.maintenance_lease_token,
+        observed_job_id=claimed.job_id,
+        observed_completion_token=claimed.expected_completion_token,
+        observed_result_digest=claimed.result_digest,
+        now=NOW,
+    )
+    assert (activated.state.value, activated.maintenance_lease_token) == ("succeeded", None)
+
+    expiring_running = _running_for(db, expiring_source, "expired-publication-lease")
+    expiring = store.stage_suggestions(
+        dataset_id=DATASET_ID,
+        run_id=expiring_running.id,
+        expected_state="running",
+        expected_revision=expiring_running.revision,
+        expected_job_id=expiring_running.job_id,
+        expected_completion_token=expiring_running.expected_completion_token,
+        result_digest=f"sha256:{'b' * 64}",
+        candidates=(),
+        invalid_item_count=0,
+        now=NOW,
+    )
+    expired_claim = _claim_maintenance_run(db, expiring.id)
+    with pytest.raises(RuntimeError, match="notes_graph_maintenance_lease_conflict"):
+        store.activate_staged_run_from_maintenance(
+            dataset_id=DATASET_ID,
+            run_id=expired_claim.id,
+            expected_state="publishing",
+            expected_revision=expired_claim.revision,
+            maintenance_lease_token=expired_claim.maintenance_lease_token,
+            observed_job_id=expired_claim.job_id,
+            observed_completion_token=expired_claim.expected_completion_token,
+            observed_result_digest=expired_claim.result_digest,
+            now=NOW + timedelta(minutes=5),
+        )
+    still_publishing = store.get_run(dataset_id=DATASET_ID, run_id=expired_claim.id)
+    assert still_publishing.state.value == "publishing"
 
 
 def _exercise_worker_completion_token_fences(db: CharactersRAGDB) -> None:
@@ -2307,6 +2424,29 @@ def test_postgres_worker_completion_token_binding_and_staging_are_fenced(
     db = _new_db(tmp_path, backend=backend)
     try:
         _exercise_worker_completion_token_fences(db)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_sqlite_review_fix_discovers_durable_scopes_and_fences_publication_lease(
+    tmp_path,
+) -> None:
+    db = _new_db(tmp_path)
+    try:
+        _exercise_review_fix_maintenance_store_contract(db)
+    finally:
+        db.close_all_connections()
+
+
+def test_postgres_review_fix_discovers_durable_scopes_and_fences_publication_lease(
+    tmp_path,
+    pg_database_config,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = _new_db(tmp_path, backend=backend)
+    try:
+        _exercise_review_fix_maintenance_store_contract(db)
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()

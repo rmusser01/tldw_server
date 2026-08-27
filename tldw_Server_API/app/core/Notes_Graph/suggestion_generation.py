@@ -7,7 +7,7 @@ import math
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
@@ -206,6 +206,8 @@ class ValidatedSuggestionGeneration:
     relationships: tuple[ValidatedRelationshipSuggestion, ...]
     tags: tuple[ValidatedTagSuggestion, ...]
     validation_counts: Mapping[str, int]
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -721,6 +723,31 @@ def _response_text(response: Any) -> str:
     return values[0] if len(values) == 1 else ""
 
 
+def _provider_usage(
+    response: Any,
+    *,
+    prepared: PreparedSuggestionRequest,
+    response_text: str,
+) -> tuple[int, int]:
+    usage = response.get("usage") if isinstance(response, Mapping) else None
+
+    def bounded(keys: tuple[str, ...], fallback: int) -> int:
+        if isinstance(usage, Mapping):
+            for key in keys:
+                value = usage.get(key)
+                if not isinstance(value, bool) and isinstance(value, int) and 0 <= value <= 1_000_000:
+                    return value
+        return max(0, min(int(fallback), 1_000_000))
+
+    return (
+        bounded(("prompt_tokens", "input_tokens"), prepared.estimated_input_tokens),
+        bounded(
+            ("completion_tokens", "output_tokens"),
+            min(estimate_tokens(response_text), prepared.limits.max_output_tokens),
+        ),
+    )
+
+
 async def generate_suggestions_once(
     *,
     prepared: PreparedSuggestionRequest,
@@ -766,7 +793,18 @@ async def generate_suggestions_once(
         response = await perform_chat_api_call_async(**call_args)
     except Exception:  # noqa: BLE001 - translate every provider SDK failure safely
         raise SuggestionGenerationError("notes_graph_provider_call_failed") from None
-    return parse_and_validate_generation(_response_text(response), prepared=prepared)
+    response_text = _response_text(response)
+    validated = parse_and_validate_generation(response_text, prepared=prepared)
+    input_tokens, output_tokens = _provider_usage(
+        response,
+        prepared=prepared,
+        response_text=response_text,
+    )
+    return replace(
+        validated,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
 
 
 __all__ = [

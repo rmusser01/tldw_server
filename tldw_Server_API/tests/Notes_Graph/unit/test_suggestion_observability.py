@@ -22,6 +22,12 @@ def test_event_api_is_closed_and_rejects_unsafe_values(monkeypatch) -> None:
 
     for event in observability.SuggestionEventName:
         observability.record_event(event, run_id="run-1", count=1)
+    observability.record_event(
+        observability.SuggestionEventName.STALE,
+        run_id="run-1",
+        suggestion_id="suggestion-1",
+        error_code=observability.SuggestionErrorCode.FINGERPRINT_STALE,
+    )
 
     assert {item["event"] for item in recorded} == {
         "run_admitted",
@@ -51,6 +57,13 @@ def test_event_api_is_closed_and_rejects_unsafe_values(monkeypatch) -> None:
             run_id="run-1",
             count=-1,
         )
+    with pytest.raises(ValueError, match="error code"):
+        observability.record_event(
+            observability.SuggestionEventName.FAILED,
+            run_id="run-1",
+            error_code="notes_graph_safe_but_unregistered",
+        )
+    assert recorded[-1]["suggestion_id"] == "suggestion-1"
 
 
 def test_metric_helpers_record_non_vacuous_safe_local_metrics(monkeypatch) -> None:
@@ -62,7 +75,7 @@ def test_metric_helpers_record_non_vacuous_safe_local_metrics(monkeypatch) -> No
     observability.record_candidate_counts(candidates=12, evidence=24)
     observability.record_provider_usage(input_tokens=100, output_tokens=30)
     observability.record_validation_counts(validated=4, dropped=2)
-    observability.record_run_error("notes_graph_provider_call_failed")
+    observability.record_run_error(observability.SuggestionErrorCode.PROVIDER_UNAVAILABLE)
     observability.record_decision_outcome(observability.DecisionOutcome.ACCEPTED)
     observability.record_acceptance_reconciliation(observability.ReconciliationOutcome.RELEASED)
 
@@ -83,5 +96,7 @@ def test_metric_helpers_record_non_vacuous_safe_local_metrics(monkeypatch) -> No
     assert all(set(labels) <= {"error_code", "outcome"} for _method, _name, _value, labels in registry.calls)
     with pytest.raises(ValueError):
         observability.record_run_error("note title")
+    with pytest.raises(ValueError, match="error code"):
+        observability.record_run_error("notes_graph_safe_but_unregistered")
     with pytest.raises(ValueError):
         observability.record_provider_usage(input_tokens=10**9, output_tokens=1)

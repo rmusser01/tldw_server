@@ -87,6 +87,9 @@ from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import admit_idempotent_operation as _postgres_admit_idempotent_operation
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
 from .operations.postgres import (
+    get_job_or_archived_by_idempotency_key as _postgres_get_job_or_archived_by_idempotency_key,
+)
+from .operations.postgres import (
     get_job_or_archived_by_uuid as _postgres_get_job_or_archived_by_uuid,
 )
 from .operations.postgres import (
@@ -99,6 +102,9 @@ from .operations.postgres import replay_idempotent_operation as _postgres_replay
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idempotent_operation
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
+from .operations.sqlite import (
+    get_job_or_archived_by_idempotency_key as _sqlite_get_job_or_archived_by_idempotency_key,
+)
 from .operations.sqlite import (
     get_job_or_archived_by_uuid as _sqlite_get_job_or_archived_by_uuid,
 )
@@ -3987,6 +3993,48 @@ class JobManager:
                     conn,
                     job_uuid,
                     domain=domain,
+                    owner_user_id=owner_user_id,
+                )
+            if job is None:
+                return None
+            if job.get("archived"):
+                return self._normalize_archived_job_row(job)
+            normalized = self._normalize_active_job_row(job)
+            normalized["archived"] = False
+            return normalized
+        finally:
+            conn.close()
+
+    def get_job_or_archived_by_idempotency_key(
+        self,
+        *,
+        idempotency_key: str,
+        domain: str,
+        queue: str,
+        job_type: str,
+        owner_user_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one exact active/archive Job by its stable scoped idempotency key."""
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with self._pg_cursor(conn) as cur:
+                    job = _postgres_get_job_or_archived_by_idempotency_key(
+                        cur,
+                        idempotency_key=idempotency_key,
+                        domain=domain,
+                        queue=queue,
+                        job_type=job_type,
+                        owner_user_id=owner_user_id,
+                    )
+            else:
+                job = _sqlite_get_job_or_archived_by_idempotency_key(
+                    conn,
+                    idempotency_key=idempotency_key,
+                    domain=domain,
+                    queue=queue,
+                    job_type=job_type,
                     owner_user_id=owner_user_id,
                 )
             if job is None:

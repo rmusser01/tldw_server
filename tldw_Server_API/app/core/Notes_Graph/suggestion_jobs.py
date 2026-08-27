@@ -91,6 +91,42 @@ class SuggestionAdmissionService:
             owner_user_id=self._owner_user_id,
         )
 
+    def _job_by_run_id(self, run_id: str) -> dict[str, Any] | None:
+        return self._jobs.get_job_or_archived_by_idempotency_key(
+            idempotency_key=run_id,
+            domain=JOB_DOMAIN,
+            queue=JOB_QUEUE,
+            job_type=JOB_TYPE,
+            owner_user_id=self._owner_user_id,
+        )
+
+    def _bind_job(
+        self,
+        *,
+        run: Any,
+        job: dict[str, Any],
+        dataset_id: str,
+        now: datetime,
+    ) -> Any:
+        if job.get("payload") != _payload(run, dataset_id):
+            raise RuntimeError("notes_graph_admission_job_contract_invalid")
+        queued = self._store.bind_admitted_run(
+            dataset_id=dataset_id,
+            run_id=run.id,
+            expected_state="admitting",
+            expected_revision=run.revision,
+            job_id=str(job["uuid"]),
+            completion_token=completion_placeholder(run.id, str(job["uuid"])),
+            replay_envelope={"run_id": run.id, "state": "queued"},
+            now=now,
+        )
+        record_event(
+            SuggestionEventName.RUN_ADMITTED,
+            run_id=run.id,
+            job_id=str(job["uuid"]),
+        )
+        return queued
+
     def _enforce_owner_limits(self, *, now: datetime) -> None:
         for status in _ACTIVE_JOB_STATUSES:
             if self._jobs.count_jobs(
@@ -139,20 +175,7 @@ class SuggestionAdmissionService:
         if admission.run is None:
             envelope = admission.replay_envelope or {}
             run_id = str(envelope.get("run_id") or "")
-            matching = next(
-                (
-                    job
-                    for job in self._jobs.list_jobs(
-                        domain=JOB_DOMAIN,
-                        queue=JOB_QUEUE,
-                        job_type=JOB_TYPE,
-                        owner_user_id=self._owner_user_id,
-                        limit=100,
-                    )
-                    if job.get("idempotency_key") == run_id
-                ),
-                None,
-            )
+            matching = self._job_by_run_id(run_id) if run_id else None
             replay_run = SimpleNamespace(id=run_id, state=envelope.get("state")) if run_id else None
             return SuggestionAdmission(admission.disposition, replay_run, matching)
         run = admission.run
@@ -161,6 +184,16 @@ class SuggestionAdmissionService:
             return SuggestionAdmission(admission.disposition, run, existing)
         if run.state.value != "admitting":
             raise RuntimeError("notes_graph_admission_job_missing")
+
+        recovered = self._job_by_run_id(run.id)
+        if recovered is not None:
+            queued = self._bind_job(
+                run=run,
+                job=recovered,
+                dataset_id=dataset_id,
+                now=now,
+            )
+            return SuggestionAdmission(admission.disposition, queued, recovered)
 
         try:
             self._enforce_owner_limits(now=now)
@@ -193,23 +226,11 @@ class SuggestionAdmissionService:
         )
         if normalized_job is None:
             raise RuntimeError("notes_graph_admission_job_missing")
-        queued = self._store.bind_admitted_run(
+        queued = self._bind_job(
+            run=run,
+            job=normalized_job,
             dataset_id=dataset_id,
-            run_id=run.id,
-            expected_state="admitting",
-            expected_revision=run.revision,
-            job_id=str(normalized_job["uuid"]),
-            completion_token=completion_placeholder(
-                run.id,
-                str(normalized_job["uuid"]),
-            ),
-            replay_envelope={"run_id": run.id, "state": "queued"},
             now=now,
-        )
-        record_event(
-            SuggestionEventName.RUN_ADMITTED,
-            run_id=run.id,
-            job_id=str(normalized_job["uuid"]),
         )
         return SuggestionAdmission(admission.disposition, queued, normalized_job)
 

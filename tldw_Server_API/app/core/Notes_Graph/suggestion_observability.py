@@ -30,6 +30,25 @@ class SuggestionEventName(str, Enum):
     RECONCILED = "reconciled"
 
 
+class SuggestionErrorCode(str, Enum):
+    CAPABILITIES_CHANGED = "notes_graph_capabilities_changed_before_provider"
+    FINGERPRINT_STALE = "notes_graph_fingerprint_stale"
+    FTS_NOT_READY = "notes_graph_fts_not_ready"
+    GENERATION_CANCELLED = "notes_graph_generation_cancelled"
+    JOB_CONTRACT_INVALID = "notes_graph_job_contract_invalid"
+    JOB_MISSING = "notes_graph_job_missing"
+    JOB_RESULT_CONTRACT_INVALID = "notes_graph_job_result_contract_invalid"
+    PROVIDER_RETRY_POLICY_UNSUPPORTED = "notes_graph_provider_retry_policy_unsupported"
+    PROVIDER_UNAVAILABLE = "notes_graph_provider_unavailable"
+    PUBLICATION_RECEIPT_MISMATCH = "notes_graph_publication_receipt_mismatch"
+    PUBLICATION_RECEIPT_MISSING = "notes_graph_publication_receipt_missing"
+    PUBLICATION_STATE_MISSING = "notes_graph_publication_state_missing"
+    RUN_CONFLICT = "notes_graph_run_conflict"
+    SOURCE_TOO_LARGE = "notes_graph_source_too_large"
+    SUGGESTION_NO_VALID_ITEMS = "notes_graph_suggestion_no_valid_items"
+    SUGGESTION_SUPPRESSION_LIMIT = "notes_graph_suggestion_suppression_limit"
+
+
 class DecisionOutcome(str, Enum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
@@ -61,6 +80,12 @@ def _duration(value: float, field: str) -> float:
     return number
 
 
+def _error_code(value: SuggestionErrorCode) -> str:
+    if not isinstance(value, SuggestionErrorCode):
+        raise ValueError("unknown suggestion error code")
+    return value.value
+
+
 def _write_event(payload: dict[str, object]) -> None:
     logger.bind(**payload).info("Notes graph suggestion lifecycle event")
 
@@ -73,7 +98,7 @@ def record_event(
     suggestion_id: str | None = None,
     count: int | None = None,
     duration_seconds: float | None = None,
-    error_code: str | None = None,
+    error_code: SuggestionErrorCode | None = None,
 ) -> None:
     """Record one closed event containing only safe identifiers and scalars."""
 
@@ -91,7 +116,7 @@ def record_event(
     if duration_seconds is not None:
         payload["duration_seconds"] = _duration(duration_seconds, "duration")
     if error_code is not None:
-        payload["error_code"] = _safe_value(error_code, "error_code")
+        payload["error_code"] = _error_code(error_code)
     _write_event(payload)
 
 
@@ -126,11 +151,11 @@ def record_validation_counts(*, validated: int, dropped: int) -> None:
     _observe("notes_graph_suggestion_dropped_count", _count(dropped, "dropped"))
 
 
-def record_run_error(error_code: str) -> None:
+def record_run_error(error_code: SuggestionErrorCode) -> None:
     _increment(
         "notes_graph_suggestion_run_errors_total",
         1,
-        {"error_code": _safe_value(error_code, "error_code")},
+        {"error_code": _error_code(error_code)},
     )
 
 
@@ -153,6 +178,7 @@ def record_acceptance_reconciliation(outcome: ReconciliationOutcome) -> None:
 __all__ = [
     "DecisionOutcome",
     "ReconciliationOutcome",
+    "SuggestionErrorCode",
     "SuggestionEventName",
     "record_acceptance_reconciliation",
     "record_candidate_counts",

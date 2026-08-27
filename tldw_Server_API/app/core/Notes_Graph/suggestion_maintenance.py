@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Awaitable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from .suggestion_jobs import PublicationReceiptError, validate_publication_receipt
-from .suggestion_observability import SuggestionEventName, record_event
+from .suggestion_observability import (
+    SuggestionErrorCode,
+    SuggestionEventName,
+    record_event,
+    record_run_error,
+)
 
 _FAILURE_GUIDANCE = {
     "notes_graph_capabilities_changed_before_provider": "retry_generation",
@@ -21,6 +27,8 @@ _FAILURE_GUIDANCE = {
     "notes_graph_suggestion_no_valid_items": "retry_generation",
     "notes_graph_suggestion_suppression_limit": "refresh_note",
 }
+_TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
+_TEMPORARY_AUTHORITY_ERRORS = (ConnectionError, OSError, RuntimeError, TimeoutError)
 
 
 def _utc(value: datetime | str) -> datetime:
@@ -33,13 +41,34 @@ def _utc(value: datetime | str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def classify_job_observation(*, run: Any, job: dict[str, Any] | None, now: datetime) -> str | None:
+def missing_job_reference_at(
+    run: Any,
+    *,
+    cancellation_created_at: datetime | str | None = None,
+) -> datetime:
+    """Return the best persisted timestamp for the current missing-Job grace."""
+
+    state = run.state.value
+    if state == "cancelling" and cancellation_created_at is not None:
+        return _utc(cancellation_created_at)
+    if state in {"running", "cancelling"} and getattr(run, "started_at", None):
+        return _utc(run.started_at)
+    return _utc(run.created_at)
+
+
+def classify_job_observation(
+    *,
+    run: Any,
+    job: dict[str, Any] | None,
+    now: datetime,
+    missing_since: datetime | str | None = None,
+) -> str | None:
     """Return one closed store observation, or None while recovery remains possible."""
 
     state = run.state.value
-    age = _utc(now) - _utc(run.created_at)
+    age = _utc(now) - (_utc(missing_since) if missing_since is not None else missing_job_reference_at(run))
     if job is None:
-        if state == "admitting":
+        if state in {"admitting", "queued", "running", "cancelling"}:
             return "definitively_missing" if age >= timedelta(minutes=10) else None
         if state == "publishing":
             return "publication_receipt_missing" if age > timedelta(days=30) else None
@@ -104,26 +133,26 @@ class SuggestionMaintenance:
         job: dict[str, Any] | None,
         observation: str,
         now: datetime,
-    ) -> None:
+    ) -> Any:
         if run.state.value == "publishing" and observation == "terminal_succeeded":
-            scope.store.activate_staged_run(
+            return scope.store.activate_staged_run_from_maintenance(
                 dataset_id=scope.dataset_id,
                 run_id=run.id,
                 expected_state="publishing",
                 expected_revision=run.revision,
+                maintenance_lease_token=run.maintenance_lease_token,
                 observed_job_id=str(job["uuid"]),
                 observed_completion_token=str(job["completion_token"]),
                 observed_result_digest=str(job["result"]["result_digest"]),
                 now=now,
             )
-            return
         error_code = None
         guidance_key = None
         if observation == "terminal_failed":
             candidate = str((job or {}).get("error_code") or "")
             error_code = candidate if candidate in _FAILURE_GUIDANCE else "notes_graph_provider_unavailable"
             guidance_key = _FAILURE_GUIDANCE[error_code]
-        scope.store.reconcile_run_after_job_lookup(
+        return scope.store.reconcile_run_after_job_lookup(
             dataset_id=scope.dataset_id,
             run_id=run.id,
             expected_state=run.state.value,
@@ -133,6 +162,130 @@ class SuggestionMaintenance:
             error_code=error_code,
             guidance_key=guidance_key,
             now=now,
+        )
+
+    @staticmethod
+    def _job_matches_run(run: Any, job: dict[str, Any]) -> bool:
+        return (
+            str(job.get("uuid") or "") == run.job_id
+            and str(job.get("owner_user_id") or "") == run.owner_user_id
+            and job.get("domain") == "notes"
+            and job.get("queue") == "graph-suggestions"
+            and job.get("job_type") == "note_graph_suggestions"
+        )
+
+    @staticmethod
+    def _continuation_matches_claim(run: Any, continuation: Any) -> bool:
+        continued = getattr(continuation, "run", None)
+        return (
+            getattr(continuation, "disposition", None) == "in_progress"
+            and continued is not None
+            and continued.id == run.id
+            and continued.state.value == run.state.value
+            and continued.revision == run.revision
+            and continued.job_id == run.job_id
+            and continued.maintenance_lease_token == run.maintenance_lease_token
+        )
+
+    def _resume_cancellation(
+        self,
+        *,
+        scope: MaintenanceScope,
+        run: Any,
+        context: Any,
+        job: dict[str, Any] | None,
+        now: datetime,
+    ) -> tuple[dict[str, Any] | None, bool]:
+        continuation = scope.store.get_run_cancellation_continuation(
+            dataset_id=scope.dataset_id,
+            operation_id=context.operation_id,
+        )
+        if not self._continuation_matches_claim(run, continuation):
+            return job, False
+
+        accepted = job is not None and job.get("status") in _TERMINAL_JOB_STATUSES
+        if job is not None and not accepted:
+            accepted = self._jobs.cancel_job(
+                int(job["id"]),
+                reason="requested",
+                expected_uuid=run.job_id,
+                expected_domain="notes",
+                expected_job_type="note_graph_suggestions",
+                cascade_dependents=False,
+            )
+        if accepted:
+            scope.store.complete_run_cancellation_receipt(
+                dataset_id=scope.dataset_id,
+                run_id=run.id,
+                operation_id=context.operation_id,
+                expected_state=run.state.value,
+                expected_revision=run.revision,
+                now=now,
+            )
+
+        if job is not None and job.get("status") not in _TERMINAL_JOB_STATUSES:
+            job = self._jobs.get_job_or_archived_by_uuid(
+                run.job_id,
+                domain="notes",
+                owner_user_id=run.owner_user_id,
+            )
+            if job is not None and not self._job_matches_run(run, job):
+                job = None
+            if not accepted and job is not None and job.get("status") in _TERMINAL_JOB_STATUSES:
+                scope.store.complete_run_cancellation_receipt(
+                    dataset_id=scope.dataset_id,
+                    run_id=run.id,
+                    operation_id=context.operation_id,
+                    expected_state=run.state.value,
+                    expected_revision=run.revision,
+                    now=now,
+                )
+                accepted = True
+        return job, accepted
+
+    @staticmethod
+    def _record_reconciliation(run: Any, reconciled: Any) -> None:
+        state = reconciled.state.value
+        error_code = None
+        if state == "succeeded":
+            record_event(
+                SuggestionEventName.PUBLISHED,
+                run_id=run.id,
+                job_id=run.job_id,
+                count=int(reconciled.suggestion_count),
+            )
+        elif state == "cancelled":
+            record_event(
+                SuggestionEventName.CANCELLED,
+                run_id=run.id,
+                job_id=run.job_id,
+            )
+        elif state == "stale":
+            error_code = SuggestionErrorCode.FINGERPRINT_STALE
+            record_event(
+                SuggestionEventName.STALE,
+                run_id=run.id,
+                job_id=run.job_id,
+                error_code=error_code,
+            )
+        elif state == "failed":
+            try:
+                error_code = SuggestionErrorCode(reconciled.error_code)
+            except ValueError:
+                error_code = SuggestionErrorCode.PROVIDER_UNAVAILABLE
+            record_event(
+                SuggestionEventName.FAILED,
+                run_id=run.id,
+                job_id=run.job_id,
+                error_code=error_code,
+            )
+        if error_code is not None:
+            record_run_error(error_code)
+        record_event(
+            SuggestionEventName.RECONCILED,
+            run_id=run.id,
+            job_id=run.job_id,
+            error_code=error_code,
         )
 
     def run_pass(self, *, now: datetime, limit: int = 100) -> MaintenancePassResult:
@@ -151,7 +304,13 @@ class SuggestionMaintenance:
             claimed += len(runs)
             remaining -= len(runs)
             for run in runs:
+                cancellation_context = None
                 try:
+                    if run.state.value == "cancelling":
+                        cancellation_context = scope.store.get_run_cancellation_maintenance_context(
+                            dataset_id=scope.dataset_id,
+                            run_id=run.id,
+                        )
                     job = (
                         self._jobs.get_job_or_archived_by_uuid(
                             run.job_id,
@@ -161,16 +320,36 @@ class SuggestionMaintenance:
                         if run.job_id
                         else None
                     )
-                except (ConnectionError, OSError, RuntimeError, TimeoutError):
+                    if job is not None and not self._job_matches_run(run, job):
+                        job = None
+                    if cancellation_context is not None and cancellation_context.state == "in_progress":
+                        job, _cancellation_accepted = self._resume_cancellation(
+                            scope=scope,
+                            run=run,
+                            context=cancellation_context,
+                            job=job,
+                            now=now,
+                        )
+                except _TEMPORARY_AUTHORITY_ERRORS:
                     self._release(scope, run, now)
                     released += 1
                     continue
-                observation = classify_job_observation(run=run, job=job, now=now)
+                observation = classify_job_observation(
+                    run=run,
+                    job=job,
+                    now=now,
+                    missing_since=missing_job_reference_at(
+                        run,
+                        cancellation_created_at=(
+                            cancellation_context.created_at if cancellation_context is not None else None
+                        ),
+                    ),
+                )
                 if observation is None:
                     self._release(scope, run, now)
                     released += 1
                     continue
-                self._reconcile(
+                reconciled_run = self._reconcile(
                     scope=scope,
                     run=run,
                     job=job,
@@ -178,11 +357,7 @@ class SuggestionMaintenance:
                     now=now,
                 )
                 reconciled += 1
-                record_event(
-                    SuggestionEventName.RECONCILED,
-                    run_id=run.id,
-                    job_id=run.job_id,
-                )
+                self._record_reconciliation(run, reconciled_run)
 
         cleaned = 0
         cleanup_remaining = max(0, limit - claimed)
@@ -210,7 +385,9 @@ async def run_maintenance_loop(
     """Run once at startup and no more frequently than every 60 seconds."""
 
     while not stop_event.is_set():
-        maintenance.run_pass(now=now())
+        result = maintenance.run_pass(now=now())
+        if inspect.isawaitable(result):
+            await result
         if stop_event.is_set():
             break
         await sleep(60.0)
@@ -221,5 +398,6 @@ __all__ = [
     "MaintenanceScope",
     "SuggestionMaintenance",
     "classify_job_observation",
+    "missing_job_reference_at",
     "run_maintenance_loop",
 ]

@@ -10,9 +10,13 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import (
     MaintenanceScope,
     SuggestionMaintenance,
     classify_job_observation,
+    missing_job_reference_at,
     run_maintenance_loop,
 )
-from tldw_Server_API.app.services import notes_graph_suggestions_worker
+from tldw_Server_API.app.services import (
+    notes_graph_suggestions_maintenance,
+    notes_graph_suggestions_worker,
+)
 from tldw_Server_API.app.services.lifecycle_worker_specs import WorkerLifecycleContext
 from tldw_Server_API.app.services.startup_study_privilege_jobs_pollers import (
     provide_study_privilege_jobs_worker_specs,
@@ -132,6 +136,9 @@ class _ClaimStore:
     def release_run_maintenance_lease(self, *, run_id, **_kwargs):
         self.released.append(run_id)
 
+    def get_run_cancellation_maintenance_context(self, **_kwargs):
+        return None
+
     def cleanup_retention(self, *, limit, **_kwargs):
         self.cleaned.append(limit)
         return {"suggestions": 0, "receipts": 0, "runs": 0, "rejection_sets": 0}
@@ -170,7 +177,7 @@ async def test_maintenance_loop_runs_at_most_once_per_minute() -> None:
     class Maintenance:
         calls = 0
 
-        def run_pass(self, *, now):
+        async def run_pass(self, *, now):
             del now
             self.calls += 1
             if self.calls == 2:
@@ -188,24 +195,104 @@ async def test_maintenance_loop_runs_at_most_once_per_minute() -> None:
 
 
 @pytest.mark.parametrize(
-    ("state", "age", "job", "expected"),
+    ("state", "age", "job", "missing_since", "expected"),
     [
-        ("admitting", timedelta(minutes=9), None, None),
-        ("admitting", timedelta(minutes=10), None, "definitively_missing"),
-        ("publishing", timedelta(days=29), None, None),
-        ("publishing", timedelta(days=30), None, None),
-        ("publishing", timedelta(days=31), None, "publication_receipt_missing"),
-        ("running", timedelta(minutes=20), {"status": "failed"}, "terminal_failed"),
-        ("cancelling", timedelta(minutes=20), {"status": "cancelled"}, "terminal_cancelled"),
+        ("admitting", timedelta(minutes=9), None, None, None),
+        ("admitting", timedelta(minutes=10), None, None, "definitively_missing"),
+        ("queued", timedelta(hours=1), None, NOW - timedelta(minutes=9), None),
+        (
+            "queued",
+            timedelta(hours=1),
+            None,
+            NOW - timedelta(minutes=10),
+            "definitively_missing",
+        ),
+        ("running", timedelta(hours=1), None, NOW - timedelta(minutes=9), None),
+        (
+            "running",
+            timedelta(hours=1),
+            None,
+            NOW - timedelta(minutes=10),
+            "definitively_missing",
+        ),
+        ("cancelling", timedelta(hours=1), None, NOW - timedelta(minutes=9), None),
+        (
+            "cancelling",
+            timedelta(hours=1),
+            None,
+            NOW - timedelta(minutes=10),
+            "definitively_missing",
+        ),
+        ("publishing", timedelta(days=29), None, None, None),
+        ("publishing", timedelta(days=30), None, None, None),
+        ("publishing", timedelta(days=31), None, None, "publication_receipt_missing"),
+        ("running", timedelta(minutes=20), {"status": "failed"}, None, "terminal_failed"),
+        (
+            "cancelling",
+            timedelta(minutes=20),
+            {"status": "cancelled"},
+            None,
+            "terminal_cancelled",
+        ),
     ],
 )
-def test_maintenance_classifies_grace_horizons_and_terminal_jobs(state, age, job, expected) -> None:
+def test_maintenance_classifies_grace_horizons_and_terminal_jobs(
+    state,
+    age,
+    job,
+    missing_since,
+    expected,
+) -> None:
     run = SimpleNamespace(
         state=SimpleNamespace(value=state),
         created_at=NOW - age,
     )
 
-    assert classify_job_observation(run=run, job=job, now=NOW) == expected
+    assert (
+        classify_job_observation(
+            run=run,
+            job=job,
+            now=NOW,
+            missing_since=missing_since,
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("state", "started_at", "cancellation_created_at", "expected"),
+    [
+        ("admitting", None, None, NOW - timedelta(hours=1)),
+        ("queued", None, None, NOW - timedelta(hours=1)),
+        ("running", NOW - timedelta(minutes=3), None, NOW - timedelta(minutes=3)),
+        (
+            "cancelling",
+            NOW - timedelta(minutes=3),
+            NOW - timedelta(minutes=1),
+            NOW - timedelta(minutes=1),
+        ),
+        ("publishing", NOW - timedelta(minutes=3), None, NOW - timedelta(hours=1)),
+    ],
+)
+def test_missing_job_reference_uses_best_authoritative_persisted_timestamp(
+    state,
+    started_at,
+    cancellation_created_at,
+    expected,
+) -> None:
+    run = SimpleNamespace(
+        state=SimpleNamespace(value=state),
+        created_at=(NOW - timedelta(hours=1)).isoformat(),
+        started_at=started_at.isoformat() if started_at else None,
+    )
+
+    assert (
+        missing_job_reference_at(
+            run,
+            cancellation_created_at=(cancellation_created_at.isoformat() if cancellation_created_at else None),
+        )
+        == expected
+    )
 
 
 def test_publishing_receipt_mismatch_fails_closed_immediately() -> None:
@@ -230,3 +317,223 @@ def test_publishing_receipt_mismatch_fails_closed_immediately() -> None:
     }
 
     assert classify_job_observation(run=run, job=job, now=NOW) == ("publication_receipt_mismatch")
+
+
+@pytest.mark.asyncio
+async def test_scope_discovery_pages_authoritative_users_and_uses_durable_store_state() -> None:
+    offsets: list[int] = []
+    opened: list[str] = []
+
+    class UsersRepo:
+        async def list_users(self, *, offset, limit):
+            offsets.append(offset)
+            users = [{"id": value} for value in range(offset + 1, min(offset + limit, 201) + 1)]
+            return users, 201
+
+    class Store:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def list_maintenance_dataset_ids(self, *, limit):
+            assert limit == 100
+            return ("archived-publishing-dataset",) if self.owner == "201" else ()
+
+    async def open_database(owner):
+        opened.append(owner)
+        return SimpleNamespace(note_graph_suggestion_store=Store(owner))
+
+    scopes, databases = await notes_graph_suggestions_maintenance._discover_scopes(
+        users_repo=UsersRepo(),
+        open_database=open_database,
+    )
+
+    assert offsets == [0, 200]
+    assert opened[0] == "1" and opened[-1] == "201"
+    assert [(scope.store.owner, scope.dataset_id) for scope in scopes] == [("201", "archived-publishing-dataset")]
+    assert len(databases) == 201
+
+
+def test_maintenance_resumes_cancellation_receipt_with_guarded_jobs_command(
+    monkeypatch,
+) -> None:
+    run = SimpleNamespace(
+        id="run-cancelling",
+        state=SimpleNamespace(value="cancelling"),
+        revision=9,
+        job_id="job-cancelling",
+        owner_user_id="owner-1",
+        maintenance_lease_token="maintenance-lease",
+        created_at=NOW - timedelta(hours=1),
+        started_at=(NOW - timedelta(minutes=5)).isoformat(),
+        error_code="user_cancelled",
+    )
+    calls: list[tuple[str, object]] = []
+
+    class Store:
+        def claim_runs_for_maintenance(self, **_kwargs):
+            return (run,)
+
+        def get_run_cancellation_maintenance_context(self, **kwargs):
+            calls.append(("context", kwargs))
+            return SimpleNamespace(
+                operation_id="cancel-operation",
+                state="in_progress",
+                created_at=(NOW - timedelta(minutes=1)).isoformat(),
+            )
+
+        def get_run_cancellation_continuation(self, **kwargs):
+            calls.append(("continuation", kwargs))
+            return SimpleNamespace(disposition="in_progress", run=run)
+
+        def complete_run_cancellation_receipt(self, **kwargs):
+            calls.append(("complete", kwargs))
+            return SimpleNamespace(disposition="completed", run=run)
+
+        def reconcile_run_after_job_lookup(self, **kwargs):
+            calls.append(("reconcile", kwargs))
+            return SimpleNamespace(
+                id=run.id,
+                state=SimpleNamespace(value="cancelled"),
+                error_code=None,
+            )
+
+        def cleanup_retention(self, **_kwargs):
+            return {"suggestions": 0, "receipts": 0, "runs": 0, "rejection_sets": 0}
+
+    class Jobs:
+        lookups = 0
+
+        def get_job_or_archived_by_uuid(self, *_args, **_kwargs):
+            self.lookups += 1
+            return {
+                "id": 17,
+                "uuid": run.job_id,
+                "owner_user_id": run.owner_user_id,
+                "domain": "notes",
+                "queue": "graph-suggestions",
+                "job_type": "note_graph_suggestions",
+                "status": "processing" if self.lookups == 1 else "cancelled",
+            }
+
+        def cancel_job(self, job_id, **kwargs):
+            calls.append(("cancel_job", (job_id, kwargs)))
+            return True
+
+    events: list[object] = []
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance.record_event",
+        lambda event, **kwargs: events.append((event, kwargs)),
+    )
+    result = SuggestionMaintenance(
+        jobs=Jobs(),
+        scopes=(MaintenanceScope(Store(), "dataset-1"),),
+    ).run_pass(now=NOW)
+
+    assert (result.claimed, result.reconciled, result.released) == (1, 1, 0)
+    assert [name for name, _detail in calls] == [
+        "context",
+        "continuation",
+        "cancel_job",
+        "complete",
+        "reconcile",
+    ]
+    cancel_job_id, cancel_kwargs = calls[2][1]
+    assert cancel_job_id == 17
+    assert cancel_kwargs == {
+        "reason": "requested",
+        "expected_uuid": "job-cancelling",
+        "expected_domain": "notes",
+        "expected_job_type": "note_graph_suggestions",
+        "cascade_dependents": False,
+    }
+    assert calls[3][1]["operation_id"] == "cancel-operation"
+    assert any(event.value == "cancelled" for event, _kwargs in events)
+    assert any(event.value == "reconciled" for event, _kwargs in events)
+
+
+def test_maintenance_keeps_cancellation_receipt_in_progress_when_command_not_accepted() -> None:
+    run = SimpleNamespace(
+        id="run-cancelling",
+        state=SimpleNamespace(value="cancelling"),
+        revision=9,
+        job_id="job-cancelling",
+        owner_user_id="owner-1",
+        maintenance_lease_token="maintenance-lease",
+        created_at=NOW - timedelta(hours=1),
+        started_at=(NOW - timedelta(minutes=5)).isoformat(),
+        error_code="user_cancelled",
+    )
+    released: list[str] = []
+
+    class Store:
+        def claim_runs_for_maintenance(self, **_kwargs):
+            return (run,)
+
+        def get_run_cancellation_maintenance_context(self, **_kwargs):
+            return SimpleNamespace(
+                operation_id="cancel-operation",
+                state="in_progress",
+                created_at=(NOW - timedelta(minutes=1)).isoformat(),
+            )
+
+        def get_run_cancellation_continuation(self, **_kwargs):
+            return SimpleNamespace(disposition="in_progress", run=run)
+
+        def complete_run_cancellation_receipt(self, **_kwargs):
+            raise AssertionError("unaccepted cancellation must not complete its receipt")
+
+        def release_run_maintenance_lease(self, *, run_id, **_kwargs):
+            released.append(run_id)
+
+        def cleanup_retention(self, **_kwargs):
+            return {"suggestions": 0, "receipts": 0, "runs": 0, "rejection_sets": 0}
+
+    class Jobs:
+        def get_job_or_archived_by_uuid(self, *_args, **_kwargs):
+            return {
+                "id": 17,
+                "uuid": run.job_id,
+                "owner_user_id": run.owner_user_id,
+                "domain": "notes",
+                "queue": "graph-suggestions",
+                "job_type": "note_graph_suggestions",
+                "status": "processing",
+            }
+
+        def cancel_job(self, *_args, **_kwargs):
+            return False
+
+    result = SuggestionMaintenance(
+        jobs=Jobs(),
+        scopes=(MaintenanceScope(Store(), "dataset-1"),),
+    ).run_pass(now=NOW)
+
+    assert (result.reconciled, result.released) == (0, 1)
+    assert released == [run.id]
+
+
+@pytest.mark.asyncio
+async def test_production_maintenance_handler_reuses_shared_cadence_loop(monkeypatch) -> None:
+    stop = asyncio.Event()
+    captured: list[object] = []
+
+    class UsersRepo:
+        @classmethod
+        async def from_pool(cls):
+            return cls()
+
+    class Jobs:
+        pass
+
+    async def shared_loop(maintenance, stop_event):
+        captured.extend((maintenance, stop_event))
+        stop_event.set()
+
+    monkeypatch.setattr(notes_graph_suggestions_maintenance, "AuthnzUsersRepo", UsersRepo)
+    monkeypatch.setattr(notes_graph_suggestions_maintenance, "JobManager", Jobs)
+    monkeypatch.setattr(notes_graph_suggestions_maintenance, "run_maintenance_loop", shared_loop)
+
+    await notes_graph_suggestions_maintenance.run_notes_graph_suggestions_maintenance(stop)
+
+    assert captured[1] is stop
+    assert hasattr(captured[0], "run_pass")

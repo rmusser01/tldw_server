@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 13:16
+updated_date: 2026-08-27 14:34
 labels:
 - notes
 - knowledge-graph
@@ -62,6 +62,12 @@ modified_files:
 - tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_observability.py
 - tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
 - tldw_Server_API/tests/Services/test_startup_study_privilege_jobs_pollers.py
+- tldw_Server_API/app/core/Jobs/operations/postgres/__init__.py
+- tldw_Server_API/app/core/Jobs/operations/postgres/idempotency.py
+- tldw_Server_API/app/core/Jobs/operations/sqlite/__init__.py
+- tldw_Server_API/app/core/Jobs/operations/sqlite/idempotency.py
+- tldw_Server_API/tests/Jobs/test_jobs_manager.py
+- tldw_Server_API/tests/Jobs/test_jobs_manager_postgres.py
 ---
 
 ## Description
@@ -161,6 +167,7 @@ Task 4 Fix Round 1 completed from exact base b2af691006235d1d49492a25ad3ddb0aba9
 Task 5 NEEDS_CONTEXT at base 9be6076b18cc4865d572c1e85d887429977cc992. Blocking closed-contract gap: bind_admitted_run requires expected_completion_token before enqueue binding reaches queued, but the required completion token is the WorkerSDK-acquired lease ID, which does not exist until acquire_next_job; start_run and stage_suggestions expose no fenced way to bind it. Job UUID substitution would force receipt mismatch, direct SQL would bypass Task 3 CAS, and preallocating Jobs lease IDs broadens scope. Recommended ruling: authorize an operation-specific Task 3 extension that atomically binds the acquired lease ID during queued-to-running CAS. No production/tests changed; RED intentionally not authored because it would encode an unapproved architecture. Ignored report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-5-report.md.
 
 Task 5 completed from base 9be6076b18cc4865d572c1e85d887429977cc992 after the approved lease-binding and authoritative-owner/run-lookup rulings. Added content-free idempotent Jobs admission, owner-row-authoritative one-call worker execution, queued placeholder-to-acquired-lease CAS, running-to-publishing Job/token fencing, active/archive immutable receipt publication, provider-independent bounded maintenance, closed local observability, opt-in WorkerSDK completion-token binding, exact 31-day forced-archive prune handling, and app-owned lifecycle registration. Final required Step 7: 102 passed/0 skipped/4 inherited warnings, including live PostgreSQL. Task 3 plus migrations: 85 passed/0 skipped/2 inherited warnings. Task 4 regressions: 128 passed/0 skipped/4 inherited warnings. Scoped Jobs/idempotency/startup: 167 passed/0 skipped/2 inherited warnings; focused updated startup expectations: 16 passed/0 skipped/2 inherited warnings. Three broad sidecar/inventory expectation failures are byte-identical inherited baseline defects against 9be6076 and were not changed. Ruff clean; Bandit 0 findings; git diff --check clean. Ignored report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-5-report.md.
+Task 5 Review Fix Round 1/3 completed from exact base 53d084935a03eea2daaea790d842848eda340546. Hardened post-enqueue admission replay, durable owner/dataset maintenance discovery, exact leased publication activation, 10-minute missing-Job grace across active pre-publication states, adjacent capability revalidation, closed non-vacuous lifecycle observability, resumable identity-guarded cancellation, and shared production maintenance cadence. Verification: Task 5 Step 7 121 passed/0 skipped/4 inherited warnings; Task 3 plus live PostgreSQL 87 passed/0 skipped/2 warnings; Task 4 129 passed/0 skipped/4 warnings; Jobs SQLite/live PostgreSQL 71 passed/2 optional encryption skips/2 warnings. Affected startup run: 54 passed/3 inherited baseline failures/0 skipped/8 warnings; failing files are byte-identical to base. Ruff clean; Bandit 0 findings; git diff --check clean. Ignored report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-5-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

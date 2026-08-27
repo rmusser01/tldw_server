@@ -9,7 +9,11 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .suggestion_content import content_fingerprint
-from .suggestion_generation import build_generation_request, generate_suggestions_once
+from .suggestion_generation import (
+    SuggestionGenerationError,
+    build_generation_request,
+    generate_suggestions_once,
+)
 from .suggestion_jobs import (
     JOB_DOMAIN,
     JOB_PAYLOAD_KEYS,
@@ -18,9 +22,14 @@ from .suggestion_jobs import (
     JOB_TYPE,
 )
 from .suggestion_observability import (
+    SuggestionErrorCode,
     SuggestionEventName,
     record_candidate_counts,
     record_event,
+    record_provider_usage,
+    record_queue_latency,
+    record_run_duration,
+    record_run_error,
     record_validation_counts,
 )
 from .suggestion_retrieval import SuggestionRetriever
@@ -29,14 +38,54 @@ from .suggestion_retrieval import SuggestionRetriever
 class SuggestionWorkerError(RuntimeError):
     retryable = False
 
-    def __init__(self, code: str) -> None:
-        self.failure_code = code
-        super().__init__(code)
+    def __init__(self, code: SuggestionErrorCode | str) -> None:
+        try:
+            self.error_code = SuggestionErrorCode(code)
+        except ValueError as exc:
+            raise ValueError("unknown suggestion worker error code") from exc
+        self.failure_code = self.error_code.value
+        super().__init__(self.failure_code)
 
 
 class SuggestionWorkerCancelled(SuggestionWorkerError):
     def __init__(self) -> None:
-        super().__init__("notes_graph_generation_cancelled")
+        super().__init__(SuggestionErrorCode.GENERATION_CANCELLED)
+
+
+_GENERATION_ERROR_CODES = {
+    "notes_graph_provider_call_failed": SuggestionErrorCode.PROVIDER_UNAVAILABLE,
+    "notes_graph_provider_call_policy_unsupported": SuggestionErrorCode.PROVIDER_RETRY_POLICY_UNSUPPORTED,
+    "notes_graph_suggestion_input_too_large": SuggestionErrorCode.SOURCE_TOO_LARGE,
+    "notes_graph_suggestion_stale_evidence": SuggestionErrorCode.FINGERPRINT_STALE,
+    "notes_graph_suggestion_no_valid_items": SuggestionErrorCode.SUGGESTION_NO_VALID_ITEMS,
+    "notes_graph_suggestion_invalid_model_output": SuggestionErrorCode.SUGGESTION_NO_VALID_ITEMS,
+    "notes_graph_suggestion_unknown_reference": SuggestionErrorCode.SUGGESTION_NO_VALID_ITEMS,
+}
+
+
+def _error_code(exc: Exception) -> SuggestionErrorCode:
+    if isinstance(exc, SuggestionWorkerError):
+        return exc.error_code
+    if isinstance(exc, SuggestionGenerationError):
+        return _GENERATION_ERROR_CODES.get(
+            exc.code,
+            SuggestionErrorCode.SUGGESTION_NO_VALID_ITEMS,
+        )
+    value = str(exc)
+    aliases = {
+        "notes_graph_run_conflict": SuggestionErrorCode.RUN_CONFLICT,
+        "notes_graph_suggestion_conflict": SuggestionErrorCode.RUN_CONFLICT,
+        "notes_graph_fts_not_ready": SuggestionErrorCode.FTS_NOT_READY,
+        "notes_graph_source_too_large": SuggestionErrorCode.SOURCE_TOO_LARGE,
+    }
+    return aliases.get(value, SuggestionErrorCode.PROVIDER_UNAVAILABLE)
+
+
+def _utc(value: datetime | str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else value
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _default_retrieve(*, store: Any, dataset_id: str, source_note_id: str) -> Any:
@@ -212,6 +261,7 @@ class SuggestionWorker:
             run_id=str(payload["run_id"]),
         )
         self._validate_run_binding(run=queued, payload=payload, job_uuid=job_uuid)
+        started_at = self._now()
         running = store.start_run(
             dataset_id=str(payload["dataset_id"]),
             run_id=str(payload["run_id"]),
@@ -219,104 +269,140 @@ class SuggestionWorker:
             expected_revision=queued.revision,
             expected_job_id=job_uuid,
             acquired_completion_token=lease_id,
-            now=self._now(),
+            now=started_at,
         )
-        retrieval = await _resolve(
-            self._retrieve(
-                store=store,
+        queued_at = job.get("created_at") or getattr(queued, "created_at", started_at)
+        record_queue_latency(max(0.0, (_utc(started_at) - _utc(queued_at)).total_seconds()))
+        try:
+            retrieval = await _resolve(
+                self._retrieve(
+                    store=store,
+                    dataset_id=str(payload["dataset_id"]),
+                    source_note_id=str(payload["source_note_id"]),
+                )
+            )
+            record_event(
+                SuggestionEventName.SHORTLIST_COMPLETED,
+                run_id=running.id,
+                job_id=job_uuid,
+                count=len(getattr(retrieval, "candidates", ())),
+            )
+            prepared = await _resolve(
+                self._prepare(
+                    store=store,
+                    dataset_id=str(payload["dataset_id"]),
+                    retrieval=retrieval,
+                )
+            )
+            if await _resolve(self._cancellation_requested(job)):
+                raise SuggestionWorkerCancelled()
+            record_event(
+                SuggestionEventName.PROVIDER_STARTED,
+                run_id=running.id,
+                job_id=job_uuid,
+            )
+            capabilities, provider = await _resolve(
+                self._resolve_capability(
+                    provider=str(payload["provider"]),
+                    model=str(payload["model"]),
+                )
+            )
+            if capabilities.revision != payload["capability_revision"] or not capabilities.generation_available:
+                raise SuggestionWorkerError(SuggestionErrorCode.CAPABILITIES_CHANGED)
+            generated = await _resolve(self._generate(prepared=prepared, provider=provider))
+            record_event(
+                SuggestionEventName.PROVIDER_COMPLETED,
+                run_id=running.id,
+                job_id=job_uuid,
+            )
+            input_tokens = int(getattr(generated, "input_tokens", 0))
+            output_tokens = int(getattr(generated, "output_tokens", 0))
+            record_provider_usage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+            if await _resolve(self._cancellation_requested(job)):
+                raise SuggestionWorkerCancelled()
+            await _resolve(
+                self._freshness_check(
+                    store=store,
+                    dataset_id=str(payload["dataset_id"]),
+                    running=running,
+                    generated=generated,
+                )
+            )
+            candidates = _stage_candidates(running.id, generated)
+            encoded = json.dumps(
+                candidates,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            result_digest = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+            counts = dict(generated.validation_counts)
+            received = int(counts.get("relationship_items_received", 0)) + int(counts.get("tag_items_received", 0))
+            dropped = max(0, received - len(candidates))
+            if dropped:
+                record_event(
+                    SuggestionEventName.VALIDATION_REJECTED,
+                    run_id=running.id,
+                    job_id=job_uuid,
+                    count=dropped,
+                )
+            store.stage_suggestions(
                 dataset_id=str(payload["dataset_id"]),
-                source_note_id=str(payload["source_note_id"]),
+                run_id=running.id,
+                expected_state="running",
+                expected_revision=running.revision,
+                expected_job_id=job_uuid,
+                expected_completion_token=lease_id,
+                result_digest=result_digest,
+                candidates=candidates,
+                invalid_item_count=dropped,
+                now=self._now(),
             )
-        )
-        record_event(
-            SuggestionEventName.SHORTLIST_COMPLETED,
-            run_id=running.id,
-            job_id=job_uuid,
-            count=len(getattr(retrieval, "candidates", ())),
-        )
-        prepared = await _resolve(
-            self._prepare(
-                store=store,
-                dataset_id=str(payload["dataset_id"]),
-                retrieval=retrieval,
+            evidence_count = sum(len(candidate["evidence"]) for candidate in candidates)
+            record_event(
+                SuggestionEventName.STAGED,
+                run_id=running.id,
+                job_id=job_uuid,
+                count=len(candidates),
             )
-        )
-        capabilities, provider = await _resolve(
-            self._resolve_capability(
-                provider=str(payload["provider"]),
-                model=str(payload["model"]),
+            record_candidate_counts(candidates=len(candidates), evidence=evidence_count)
+            record_validation_counts(validated=len(candidates), dropped=dropped)
+            result = {
+                "run_id": running.id,
+                "result_digest": result_digest,
+                "candidate_count": len(candidates),
+                "evidence_count": evidence_count,
+                "validated_count": len(candidates),
+                "dropped_count": dropped,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
+            if set(result) != JOB_RESULT_KEYS:
+                raise SuggestionWorkerError(SuggestionErrorCode.JOB_RESULT_CONTRACT_INVALID)
+            record_run_duration(max(0.0, (_utc(self._now()) - _utc(started_at)).total_seconds()))
+            return result
+        except Exception as exc:
+            code = _error_code(exc)
+            if code == SuggestionErrorCode.GENERATION_CANCELLED:
+                event = SuggestionEventName.CANCELLED
+            elif code == SuggestionErrorCode.FINGERPRINT_STALE:
+                event = SuggestionEventName.STALE
+            else:
+                event = SuggestionEventName.FAILED
+            record_event(
+                event,
+                run_id=running.id,
+                job_id=job_uuid,
+                error_code=code,
             )
-        )
-        if capabilities.revision != payload["capability_revision"] or not capabilities.generation_available:
-            raise SuggestionWorkerError("notes_graph_capabilities_changed_before_provider")
-        if await _resolve(self._cancellation_requested(job)):
-            raise SuggestionWorkerCancelled()
-        record_event(
-            SuggestionEventName.PROVIDER_STARTED,
-            run_id=running.id,
-            job_id=job_uuid,
-        )
-        generated = await _resolve(self._generate(prepared=prepared, provider=provider))
-        record_event(
-            SuggestionEventName.PROVIDER_COMPLETED,
-            run_id=running.id,
-            job_id=job_uuid,
-        )
-        if await _resolve(self._cancellation_requested(job)):
-            raise SuggestionWorkerCancelled()
-        await _resolve(
-            self._freshness_check(
-                store=store,
-                dataset_id=str(payload["dataset_id"]),
-                running=running,
-                generated=generated,
-            )
-        )
-        candidates = _stage_candidates(running.id, generated)
-        encoded = json.dumps(
-            candidates,
-            ensure_ascii=True,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-        result_digest = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
-        counts = dict(generated.validation_counts)
-        received = int(counts.get("relationship_items_received", 0)) + int(counts.get("tag_items_received", 0))
-        dropped = max(0, received - len(candidates))
-        store.stage_suggestions(
-            dataset_id=str(payload["dataset_id"]),
-            run_id=running.id,
-            expected_state="running",
-            expected_revision=running.revision,
-            expected_job_id=job_uuid,
-            expected_completion_token=lease_id,
-            result_digest=result_digest,
-            candidates=candidates,
-            invalid_item_count=dropped,
-            now=self._now(),
-        )
-        evidence_count = sum(len(candidate["evidence"]) for candidate in candidates)
-        record_event(
-            SuggestionEventName.STAGED,
-            run_id=running.id,
-            job_id=job_uuid,
-            count=len(candidates),
-        )
-        record_candidate_counts(candidates=len(candidates), evidence=evidence_count)
-        record_validation_counts(validated=len(candidates), dropped=dropped)
-        result = {
-            "run_id": running.id,
-            "result_digest": result_digest,
-            "candidate_count": len(candidates),
-            "evidence_count": evidence_count,
-            "validated_count": len(candidates),
-            "dropped_count": dropped,
-            "input_tokens": 0,
-            "output_tokens": 0,
-        }
-        if set(result) != JOB_RESULT_KEYS:
-            raise SuggestionWorkerError("notes_graph_job_result_contract_invalid")
-        return result
+            record_run_error(code)
+            record_run_duration(max(0.0, (_utc(self._now()) - _utc(started_at)).total_seconds()))
+            if isinstance(exc, SuggestionWorkerError) and exc.error_code == code:
+                raise
+            raise SuggestionWorkerError(code) from None
 
 
 __all__ = [

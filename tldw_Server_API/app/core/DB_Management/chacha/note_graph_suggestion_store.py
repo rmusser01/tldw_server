@@ -70,6 +70,15 @@ class RunCancellationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RunCancellationMaintenanceContext:
+    """Safe receipt identity and age used to resume durable cancellation."""
+
+    operation_id: str
+    state: str
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class SuggestionPage:
     """One stable keyset page of visible suggestions."""
 
@@ -441,6 +450,33 @@ class NoteGraphSuggestionStore:
             dataset,
             lambda conn: self._load_run(conn, dataset, run_id),
         )
+
+    def list_maintenance_dataset_ids(self, *, limit: int = 100) -> tuple[str, ...]:
+        """List owner datasets containing durable suggestion orchestration state."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("notes_graph_maintenance_limit_invalid")
+        with self._db.transaction() as conn:
+            rows = conn.execute(
+                "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=? ORDER BY dataset_id LIMIT ?",
+                (self.owner_user_id, limit),
+            ).fetchall()
+            datasets: list[str] = []
+            authority_queries = (
+                "SELECT 1 FROM note_graph_suggestion_runs WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
+                "SELECT 1 FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
+                "SELECT 1 FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
+                "SELECT 1 FROM note_graph_suggestion_rejection_sets WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
+            )
+            for row in rows:
+                dataset = str(row["dataset_id"])
+                self._set_dataset_scope(conn, dataset)
+                if any(
+                    conn.execute(query, (self.owner_user_id, dataset)).fetchone() is not None
+                    for query in authority_queries
+                ):
+                    datasets.append(dataset)
+            return tuple(datasets)
 
     @classmethod
     def _require_run_transition(cls, expected_state: str, new_state: str) -> None:
@@ -1300,6 +1336,62 @@ class NoteGraphSuggestionStore:
         observed_result_digest: str | None,
         now: datetime,
     ) -> NoteGraphSuggestionRun:
+        """Activate from the ordinary completion callback without a maintenance lease."""
+
+        return self._activate_staged_run(
+            dataset_id=dataset_id,
+            run_id=run_id,
+            expected_state=expected_state,
+            expected_revision=expected_revision,
+            maintenance_lease_token=None,
+            observed_job_id=observed_job_id,
+            observed_completion_token=observed_completion_token,
+            observed_result_digest=observed_result_digest,
+            now=now,
+        )
+
+    def activate_staged_run_from_maintenance(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+        expected_state: str,
+        expected_revision: int,
+        maintenance_lease_token: str,
+        observed_job_id: str | None,
+        observed_completion_token: str | None,
+        observed_result_digest: str | None,
+        now: datetime,
+    ) -> NoteGraphSuggestionRun:
+        """Activate only while holding the exact live maintenance claim."""
+
+        if not isinstance(maintenance_lease_token, str) or not self._SAFE_ID_PATTERN.fullmatch(maintenance_lease_token):
+            raise ValueError("notes_graph_maintenance_contract_invalid")
+        return self._activate_staged_run(
+            dataset_id=dataset_id,
+            run_id=run_id,
+            expected_state=expected_state,
+            expected_revision=expected_revision,
+            maintenance_lease_token=maintenance_lease_token,
+            observed_job_id=observed_job_id,
+            observed_completion_token=observed_completion_token,
+            observed_result_digest=observed_result_digest,
+            now=now,
+        )
+
+    def _activate_staged_run(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+        expected_state: str,
+        expected_revision: int,
+        maintenance_lease_token: str | None,
+        observed_job_id: str | None,
+        observed_completion_token: str | None,
+        observed_result_digest: str | None,
+        now: datetime,
+    ) -> NoteGraphSuggestionRun:
         """Validate a terminal receipt projection and atomically expose a complete staged set."""
 
         dataset = self._scope(dataset_id)
@@ -1307,9 +1399,24 @@ class NoteGraphSuggestionStore:
         self._require_run_transition(expected_state, "succeeded")
         if expected_state != "publishing":
             raise ValueError("notes_graph_run_transition_invalid")
+        maintenance_fence_sql = (
+            " AND maintenance_lease_token=? AND maintenance_lease_expires_at>?"
+            if maintenance_lease_token is not None
+            else ""
+        )
+        maintenance_fence_values: tuple[object, ...] = (
+            (maintenance_lease_token, self._db_datetime(now_utc)) if maintenance_lease_token is not None else ()
+        )
 
         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
             run = self._load_run(conn, dataset, run_id)
+            if maintenance_lease_token is not None and (
+                run.maintenance_lease_token != maintenance_lease_token
+                or run.maintenance_lease_expires_at is None
+                or self._aware_utc(datetime.fromisoformat(run.maintenance_lease_expires_at.replace("Z", "+00:00")))
+                <= now_utc
+            ):
+                raise RuntimeError("notes_graph_maintenance_lease_conflict")
             if (
                 run.state == NoteGraphSuggestionRunState.STALE
                 and run.job_id == observed_job_id
@@ -1334,9 +1441,11 @@ class NoteGraphSuggestionStore:
             freshness_failed = source_current != run.source_fingerprint
             if not freshness_failed:
                 for row in staged:
-                    if row["kind"] == "related_note" and self._current_note_fingerprint(
-                        conn, str(row["target_note_id"])
-                    ) != row["target_fingerprint"]:
+                    if (
+                        row["kind"] == "related_note"
+                        and self._current_note_fingerprint(conn, str(row["target_note_id"]))
+                        != row["target_fingerprint"]
+                    ):
                         freshness_failed = True
                         break
             if freshness_failed:
@@ -1350,7 +1459,8 @@ class NoteGraphSuggestionStore:
                     "UPDATE note_graph_suggestion_runs SET state='stale',revision=revision+1,"
                     "error_code='notes_graph_fingerprint_stale',completed_at=?,expires_at=?,"
                     "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
-                    "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?",
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?"
+                    f"{maintenance_fence_sql}",  # nosec B608
                     (
                         self._db_datetime(now_utc),
                         self._db_datetime(now_utc + timedelta(days=30)),
@@ -1359,10 +1469,16 @@ class NoteGraphSuggestionStore:
                         run_id,
                         expected_state,
                         expected_revision,
+                        *maintenance_fence_values,
                     ),
                 )
                 if cursor.rowcount != 1:
-                    raise RuntimeError("notes_graph_run_conflict")
+                    error = (
+                        "notes_graph_maintenance_lease_conflict"
+                        if maintenance_lease_token is not None
+                        else "notes_graph_run_conflict"
+                    )
+                    raise RuntimeError(error)
                 return self._load_run(conn, dataset, run_id)
 
             filtered_tag_ids: set[str] = set()
@@ -1456,7 +1572,8 @@ class NoteGraphSuggestionStore:
                 "tag_count=(SELECT COUNT(*) FROM note_graph_suggestions WHERE owner_user_id=? "
                 "AND dataset_id=? AND run_id=? AND kind='tag' AND state='pending'),completed_at=?,expires_at=?,"
                 "maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
-                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?",
+                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=?"
+                f"{maintenance_fence_sql}",  # nosec B608
                 (
                     len(activated_ids),
                     self.owner_user_id,
@@ -1472,10 +1589,16 @@ class NoteGraphSuggestionStore:
                     run_id,
                     expected_state,
                     expected_revision,
+                    *maintenance_fence_values,
                 ),
             )
             if cursor.rowcount != 1:
-                raise RuntimeError("notes_graph_run_conflict")
+                error = (
+                    "notes_graph_maintenance_lease_conflict"
+                    if maintenance_lease_token is not None
+                    else "notes_graph_run_conflict"
+                )
+                raise RuntimeError(error)
             return self._load_run(conn, dataset, run_id)
 
         return self._with_dataset_scope(dataset, mutate)
@@ -2359,6 +2482,35 @@ class NoteGraphSuggestionStore:
                 operation_id=operation_id,
                 run=run,
                 continuation="resume_run_cancellation",
+            )
+
+        return self._with_dataset_scope(dataset, read)
+
+    def get_run_cancellation_maintenance_context(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+    ) -> RunCancellationMaintenanceContext | None:
+        """Return the latest durable cancellation receipt identity and age for one run."""
+
+        if not isinstance(run_id, str) or not self._SAFE_ID_PATTERN.fullmatch(run_id):
+            raise ValueError("notes_graph_run_cancel_contract_invalid")
+        dataset = self._scope(dataset_id)
+
+        def read(conn: SuggestionConnection) -> RunCancellationMaintenanceContext | None:
+            row = conn.execute(
+                "SELECT id,state,created_at FROM note_graph_suggestion_operation_receipts "
+                "WHERE owner_user_id=? AND dataset_id=? AND operation_kind='run_cancel' "
+                "AND resource_identity=? ORDER BY created_at DESC,id DESC LIMIT 1",
+                (self.owner_user_id, dataset, run_id),
+            ).fetchone()
+            if row is None:
+                return None
+            return RunCancellationMaintenanceContext(
+                operation_id=str(row["id"]),
+                state=str(row["state"]),
+                created_at=self._iso(row["created_at"]) or "",
             )
 
         return self._with_dataset_scope(dataset, read)

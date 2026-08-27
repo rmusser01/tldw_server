@@ -120,6 +120,23 @@ async def test_generation_uses_exactly_one_bounded_provider_call(
 
 
 @pytest.mark.asyncio
+async def test_generation_returns_bounded_provider_usage_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_call(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "choices": [{"message": {"content": '{"relationships":[],"tags":[]}'}}],
+            "usage": {"prompt_tokens": 123, "completion_tokens": 45},
+        }
+
+    monkeypatch.setattr(suggestion_generation, "perform_chat_api_call_async", fake_call)
+
+    result = await generate_suggestions_once(prepared=_prepared(), provider=_provider())
+
+    assert (result.input_tokens, result.output_tokens) == (123, 45)
+
+
+@pytest.mark.asyncio
 async def test_structured_mode_is_capability_dependent_but_local_json_is_mandatory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

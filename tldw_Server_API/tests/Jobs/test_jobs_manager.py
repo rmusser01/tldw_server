@@ -1882,6 +1882,77 @@ def test_idempotency_key_returns_existing(jobs_db):
     assert j2["status"] == "queued"
 
 
+def test_exact_scoped_idempotency_lookup_is_active_first_and_archive_aware(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", "graph-suggestions")
+    jm = JobManager(jobs_db)
+    job = jm.create_job(
+        domain="notes",
+        queue="graph-suggestions",
+        job_type="note_graph_suggestions",
+        payload={"run_id": "run-lookup"},
+        owner_user_id="owner-lookup",
+        idempotency_key="run-lookup",
+        max_retries=0,
+    )
+
+    lookup = jm.get_job_or_archived_by_idempotency_key(
+        idempotency_key="run-lookup",
+        domain="notes",
+        queue="graph-suggestions",
+        job_type="note_graph_suggestions",
+        owner_user_id="owner-lookup",
+    )
+    assert lookup is not None and lookup["uuid"] == job["uuid"] and lookup["archived"] is False
+    for field, value in (
+        ("domain", "other"),
+        ("queue", "other"),
+        ("job_type", "other"),
+        ("owner_user_id", "other"),
+        ("idempotency_key", "other"),
+    ):
+        query = {
+            "idempotency_key": "run-lookup",
+            "domain": "notes",
+            "queue": "graph-suggestions",
+            "job_type": "note_graph_suggestions",
+            "owner_user_id": "owner-lookup",
+        }
+        query[field] = value
+        assert jm.get_job_or_archived_by_idempotency_key(**query) is None
+
+    leased = jm.acquire_next_job(
+        domain="notes",
+        queue="graph-suggestions",
+        lease_seconds=30,
+        worker_id="lookup-worker",
+    )
+    assert leased is not None and leased["uuid"] == job["uuid"]
+    assert jm.complete_job(int(leased["id"]))
+    conn = jm._connect()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET completed_at='2000-01-01 00:00:00' WHERE uuid=?",
+                (job["uuid"],),
+            )
+    finally:
+        conn.close()
+    assert jm.prune_jobs(statuses=["completed"], older_than_days=31) == 1
+
+    archived = jm.get_job_or_archived_by_idempotency_key(
+        idempotency_key="run-lookup",
+        domain="notes",
+        queue="graph-suggestions",
+        job_type="note_graph_suggestions",
+        owner_user_id="owner-lookup",
+    )
+    assert archived is not None and archived["uuid"] == job["uuid"] and archived["archived"] is True
+
+
 def test_available_at_scheduling_delays_acquire(jobs_db):
 
 

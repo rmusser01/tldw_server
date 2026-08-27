@@ -132,6 +132,46 @@ def get_job_or_archived_by_uuid(
     return job
 
 
+def get_job_or_archived_by_idempotency_key(
+    cur: Any,
+    *,
+    idempotency_key: str,
+    domain: str,
+    queue: str,
+    job_type: str,
+    owner_user_id: str,
+) -> dict[str, Any] | None:
+    """Resolve one exact stable idempotency authority in a single snapshot."""
+
+    values = (idempotency_key, domain, queue, job_type, owner_user_id)
+    if any(not isinstance(value, str) or not value.strip() for value in values):
+        raise ValueError("scoped idempotency lookup values must be non-empty strings")
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    where_sql = "idempotency_key=%s AND domain=%s AND queue=%s AND job_type=%s AND owner_user_id=%s"
+    cur.execute(
+        f"""
+        SELECT {projection}, NULL AS payload_compressed,
+               NULL AS result_compressed, FALSE AS archived
+        FROM jobs
+        WHERE {where_sql}
+        UNION ALL
+        SELECT {projection}, payload_compressed,
+               result_compressed, TRUE AS archived
+        FROM jobs_archive
+        WHERE {where_sql}
+        """,  # nosec B608
+        (*values, *values),
+    )
+    rows = cur.fetchall()
+    if len(rows) > 1:
+        raise IdempotentOperationUnavailableError("scoped idempotency key does not resolve to exactly one Job")
+    if not rows:
+        return None
+    job = normalize_slides_archive_projection(rows[0])
+    job["archived"] = bool(job.get("archived"))
+    return job
+
+
 def _resolve_receipt_job(cur: Any, receipt: dict[str, Any]) -> dict[str, Any]:
     try:
         job = get_job_or_archived_by_uuid(
