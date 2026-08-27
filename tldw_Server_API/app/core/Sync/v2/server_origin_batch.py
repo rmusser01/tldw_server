@@ -21,6 +21,10 @@ from .errors import (
     SyncMaterializationPredecessorError,
     SyncStoreError,
 )
+from .materializers.guarded_product_mutation import (
+    GuardedProductMutation,
+    GuardedProductMutationIdentityError,
+)
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     NOTES_ORGANIZATION_DOMAINS,
@@ -134,6 +138,7 @@ def capture_server_origin_mutation_batch(
     ]
     | None = None,
     bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None = None,
+    guarded_mutation: GuardedProductMutation | None = None,
 ) -> ServerOriginBatchResult:
     """Preflight, atomically append, and ordered-materialize one complete plan."""
 
@@ -223,6 +228,7 @@ def capture_server_origin_mutation_batch(
             notes_task_activity_bootstrap=(
                 trusted_notes_task_activity_bootstrap_id is not None
             ),
+            guarded_mutation=guarded_mutation,
         )
 
     envelopes = _evaluate_plan(
@@ -282,6 +288,7 @@ def capture_server_origin_mutation_batch(
         notes_task_activity_bootstrap=(
             trusted_notes_task_activity_bootstrap_id is not None
         ),
+        guarded_mutation=guarded_mutation,
     )
 
 
@@ -672,6 +679,7 @@ def _materialize_group(
     materialize_verified_bootstrap: bool = False,
     notes_task_bootstrap: bool = False,
     notes_task_activity_bootstrap: bool = False,
+    guarded_mutation: GuardedProductMutation | None = None,
 ) -> ServerOriginBatchResult:
     group = list(envelopes)
     _validate_stored_group(
@@ -679,6 +687,16 @@ def _materialize_group(
         dataset_id=dataset.dataset_id,
         mutation_group_id=group[0].mutation_group_id or "",
     )
+    if guarded_mutation is not None:
+        matches = [
+            envelope
+            for envelope in group
+            if guarded_mutation.matches(envelope.domain, envelope.object_id)
+        ]
+        if len(matches) != 1:
+            raise GuardedProductMutationIdentityError(
+                "Guarded product mutation identity must match exactly one envelope"
+            )
     trusted_notes_task_coordinator = (
         bootstrap_id is None
         and _is_trusted_notes_task_coordinator_group(dataset, group)
@@ -708,6 +726,7 @@ def _materialize_group(
                 bootstrap_step_verifier=bootstrap_step_verifier,
                 materialize_verified_bootstrap=materialize_verified_bootstrap,
                 notes_task_bootstrap=notes_task_bootstrap,
+                guarded_mutation=guarded_mutation,
             )
     except SyncIdempotencyConflictError:
         raise
@@ -730,11 +749,18 @@ def _materialize_group_guarded(
     bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None,
     materialize_verified_bootstrap: bool,
     notes_task_bootstrap: bool,
+    guarded_mutation: GuardedProductMutation | None,
 ) -> tuple[ServerOriginBatchResult, bool | None]:
     """Project a complete group while the caller retains all object locks."""
 
     for index, envelope in enumerate(materialization_group_view(group)):
-        if envelope.apply_status in {"applied", "superseded"}:
+        envelope_guard = (
+            guarded_mutation
+            if guarded_mutation is not None
+            and guarded_mutation.matches(envelope.domain, envelope.object_id)
+            else None
+        )
+        if envelope.apply_status in {"applied", "superseded"} and envelope_guard is None:
             continue
         if envelope.apply_status == "conflict":
             return _materialization_result(dataset, group), False
@@ -763,7 +789,11 @@ def _materialize_group_guarded(
                 envelope.mutation_group_id or "",
             )
             continue
-        materialization = service._materialize_envelope(envelope, store=store)
+        materialization = service._materialize_envelope(
+            envelope,
+            store=store,
+            guarded_mutation=envelope_guard,
+        )
         group = store.list_mutation_group(
             dataset.dataset_id,
             envelope.mutation_group_id or "",

@@ -20,6 +20,10 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
+from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+    GuardedProductMutation,
+    GuardedProductMutationIdentityError,
+)
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDataset,
     SyncDatasetCreate,
@@ -232,6 +236,30 @@ def test_trusted_bootstrap_id_requires_source_step_verifier(
 
     assert materializer.calls == []
     assert service.store.list_envelopes_after("dataset-1", 0) == []
+
+
+def test_guard_identity_mismatch_prevents_every_product_materializer_call(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+) -> None:
+    service, materializer = batch_service
+    guard = GuardedProductMutation(
+        expected_domain="notes.link",
+        expected_object_id="11111111-1111-4111-8111-111111111111",
+        before=lambda _conn: None,
+        after=lambda _conn, _identity: None,
+    )
+
+    with pytest.raises(GuardedProductMutationIdentityError):
+        capture_server_origin_mutation_batch(
+            service=service,
+            user_id="user-1",
+            steps=[_step("conversation-1")],
+            source="notes_api",
+            idempotency_key="guard-mismatch",
+            guarded_mutation=guard,
+        )
+
+    assert materializer.calls == []
 
 
 def test_batch_rejects_explicit_nonpositive_object_revision(

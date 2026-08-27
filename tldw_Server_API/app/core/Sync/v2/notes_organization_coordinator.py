@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 
 from .errors import SyncStoreError
+from .materializers.guarded_product_mutation import GuardedProductMutation
 from .models import NOTES_ORGANIZATION_DOMAINS, SyncDataset, SyncDomain
 from .notes_organization import new_organization_sync_id, organization_link_id
 from .server_origin import SyncServerOriginMutationNotSupportedError
@@ -153,6 +154,7 @@ class NotesOrganizationCoordinator:
         steps: Sequence[ServerOriginMutationStep],
         source: str,
         idempotency_key: str,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> ServerOriginBatchResult:
         """Capture one planned Notes mutation through durable Sync authority."""
 
@@ -164,6 +166,7 @@ class NotesOrganizationCoordinator:
                 steps=tuple(steps),
                 source=source,
                 idempotency_key=idempotency_key,
+                guarded_mutation=guarded_mutation,
             )
         except (
             NotesOrganizationDomainsIncompleteError,

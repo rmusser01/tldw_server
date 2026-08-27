@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict, deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -137,10 +137,15 @@ class NotesOrganizationSyncStore:
         conn: Any,
         domain: SyncDomain,
         sync_id: str,
+        *,
+        for_update: bool = False,
     ) -> OrganizationResource | None:
         table, _ = self._table(domain)
+        query = f"SELECT * FROM {table} WHERE sync_id = ? AND client_id = ?"  # nosec B608
+        if for_update and self._db.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
         row = conn.execute(
-            f"SELECT * FROM {table} WHERE sync_id = ? AND client_id = ?",  # nosec B608
+            query,
             (sync_id, self._owner_id),
         ).fetchone()
         return self._resource_from_row(conn, domain, row) if row else None
@@ -541,13 +546,24 @@ class NotesOrganizationSyncStore:
         operation: SyncOperation,
         payload: Mapping[str, object],
         merge_relationship_set_hash: str | None = None,
+        before: Callable[[Any], None] | None = None,
+        after: Callable[[Any, str], None] | None = None,
     ) -> OrganizationResource:
         """Apply one resource envelope in a ChaCha transaction."""
 
+        if (before is not None or after is not None) and (
+            domain != "notes.keyword" or operation != "upsert"
+        ):
+            raise InputError("Guarded organization resource must be a keyword upsert")
         normalized = self._validated_payload(domain, operation, object_id, payload)
         table, name_column = self._table(domain)
         with self._db.transaction() as conn:
-            existing = self._get_resource_locked(conn, domain, object_id)
+            existing = self._get_resource_locked(
+                conn,
+                domain,
+                object_id,
+                for_update=before is not None or after is not None,
+            )
             if operation == "tombstone":
                 if existing is None:
                     raise InputError("Cannot tombstone an unknown organization resource")
@@ -605,6 +621,8 @@ class NotesOrganizationSyncStore:
                     object_id=object_id,
                     parent_sync_id=normalized.get("parent_sync_id"),
                 )
+            if before is not None:
+                before(conn)
             now = self._db._get_current_utc_timestamp_iso()
             if existing is None:
                 columns = ["sync_id", name_column]
@@ -625,6 +643,8 @@ class NotesOrganizationSyncStore:
                     or existing.parent_sync_id == normalized.get("parent_sync_id")
                 )
                 if not existing.deleted and existing.name == name and parent_unchanged:
+                    if after is not None:
+                        after(conn, object_id)
                     return existing
                 set_parts = [f"{name_column} = ?"]
                 values = [name]
@@ -647,7 +667,15 @@ class NotesOrganizationSyncStore:
                     "WHERE sync_id = ? AND client_id = ?",
                     tuple(values),
                 )
-            return cast(OrganizationResource, self._get_resource_locked(conn, domain, object_id))
+            resource = cast(
+                OrganizationResource,
+                self._get_resource_locked(conn, domain, object_id),
+            )
+            if resource.deleted or resource.name != name:
+                raise ConflictError("Organization resource postcondition is absent")
+            if after is not None:
+                after(conn, object_id)
+            return resource
 
     def _resource_row_for_relationship(
         self,
@@ -656,10 +684,14 @@ class NotesOrganizationSyncStore:
         sync_id: str,
         *,
         require_active: bool,
+        for_update: bool = False,
     ) -> Mapping[str, object]:
         table, _ = self._table(domain)
+        query = f"SELECT * FROM {table} WHERE sync_id = ? AND client_id = ?"  # nosec B608
+        if for_update and self._db.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
         row = conn.execute(
-            f"SELECT * FROM {table} WHERE sync_id = ? AND client_id = ?",  # nosec B608
+            query,
             (sync_id, self._owner_id),
         ).fetchone()
         if not row or (require_active and bool(row["deleted"])):
@@ -1125,13 +1157,20 @@ class NotesOrganizationSyncStore:
         routing_metadata: Mapping[str, object],
         origin_provenance: Mapping[str, object] | None = None,
         source_transition_identity: str | None = None,
+        before: Callable[[Any], None] | None = None,
+        after: Callable[[Any, str], None] | None = None,
     ) -> bool:
         """Apply one relationship envelope in a ChaCha transaction."""
 
+        if (before is not None or after is not None) and (
+            domain != "notes.keyword_link" or operation != "upsert"
+        ):
+            raise InputError("Guarded organization relationship must be a keyword-link upsert")
         del routing_metadata
         normalized = self._validated_payload(domain, operation, object_id, payload)
         require_active = operation == "upsert"
         with self._db.transaction() as conn:
+            guarded = before is not None or after is not None
             link_owner_sql = ""
             link_owner_params: tuple[object, ...] = ()
             if domain == "notes.keyword_link":
@@ -1140,13 +1179,19 @@ class NotesOrganizationSyncStore:
                     "notes.keyword",
                     str(normalized["keyword_sync_id"]),
                     require_active=require_active,
+                    for_update=guarded,
                 )
                 subject_type = str(normalized["subject_type"])
                 subject_id = str(normalized["subject_id"])
                 subject_table = "notes" if subject_type == "note" else "conversations"
-                subject = conn.execute(
+                subject_query = (
                     f"SELECT id, deleted FROM {subject_table} "  # nosec B608
-                    "WHERE id = ? AND client_id = ?",
+                    "WHERE id = ? AND client_id = ?"
+                )
+                if guarded and self._db.backend_type == BackendType.POSTGRESQL:
+                    subject_query += " FOR UPDATE"
+                subject = conn.execute(
+                    subject_query,
                     (subject_id, self._owner_id),
                 ).fetchone()
                 if not subject or (require_active and bool(subject["deleted"])):
@@ -1171,12 +1216,14 @@ class NotesOrganizationSyncStore:
                     "notes.keyword_collection",
                     str(normalized["collection_sync_id"]),
                     require_active=require_active,
+                    for_update=guarded,
                 )
                 keyword = self._resource_row_for_relationship(
                     conn,
                     "notes.keyword",
                     str(normalized["keyword_sync_id"]),
                     require_active=require_active,
+                    for_update=guarded,
                 )
                 link_table = "collection_keywords"
                 columns = ("collection_id", "keyword_id")
@@ -1205,6 +1252,15 @@ class NotesOrganizationSyncStore:
                 values = (note_id, int(folder["id"]))
             else:
                 raise InputError(f"Unsupported organization relationship domain: {domain}")
+
+            if before is not None:
+                if self._db.backend_type == BackendType.POSTGRESQL:
+                    conn.execute(
+                        f"SELECT 1 FROM {link_table} WHERE {columns[0]} = ? "  # nosec B608
+                        f"AND {columns[1]} = ?{link_owner_sql} FOR UPDATE",
+                        (*values, *link_owner_params),
+                    ).fetchone()
+                before(conn)
 
             if domain == "notes.folder_link":
                 guarded_post_state: tuple[str, int, str, str, str] | None = None
@@ -1332,6 +1388,15 @@ class NotesOrganizationSyncStore:
                     f"AND {columns[1]} = ?{link_owner_sql}",
                     (*values, *link_owner_params),
                 )
+            if after is not None:
+                present = conn.execute(
+                    f"SELECT 1 FROM {link_table} WHERE {columns[0]} = ? "  # nosec B608
+                    f"AND {columns[1]} = ?{link_owner_sql} LIMIT 1",
+                    (*values, *link_owner_params),
+                ).fetchone()
+                if present is None:
+                    raise ConflictError("Organization relationship postcondition is absent")
+                after(conn, object_id)
             return True
 
 

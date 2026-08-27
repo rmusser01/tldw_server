@@ -34,6 +34,7 @@ from ..notes_organization import (
 )
 from ..store import SyncV2Store
 from .base import MaterializationResult
+from .guarded_product_mutation import GuardedProductMutation
 
 _RESOURCE_DOMAINS = frozenset(
     {"notes.keyword", "notes.keyword_collection", "notes.folder"}
@@ -135,6 +136,7 @@ class NotesOrganizationMaterializer:
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Project one accepted organization envelope and record apply state."""
 
@@ -146,16 +148,21 @@ class NotesOrganizationMaterializer:
                 error_code=_ERROR_CODE,
                 message="Stored Sync envelope is missing a server cursor",
             )
+        if guarded_mutation is not None:
+            guarded_mutation.require_identity(envelope.domain, envelope.object_id)
+            if envelope.operation != "upsert":
+                raise ValueError("Guarded Notes organization mutation must be an upsert")
 
         current_state = store.get_object_state(
             envelope.dataset_id,
             envelope.domain,
             envelope.object_id,
         )
-        if self._is_already_materialized(envelope, current_state):
+        already_materialized = self._is_already_materialized(envelope, current_state)
+        if guarded_mutation is None and already_materialized:
             return self._mark_applied(envelope, store=store)
 
-        conflict = self._detect_conflict(envelope, current_state)
+        conflict = None if already_materialized else self._detect_conflict(envelope, current_state)
         if conflict is not None:
             store.mark_envelope_apply_status(
                 envelope.server_cursor,
@@ -185,6 +192,17 @@ class NotesOrganizationMaterializer:
                     merge_relationship_set_hash=(
                         _trusted_keyword_merge_precondition(envelope, self.note_db)
                     ),
+                    before=(
+                        guarded_mutation.before
+                        if guarded_mutation is not None
+                        else None
+                    ),
+                    after=(
+                        guarded_mutation.after
+                        if guarded_mutation is not None
+                        and envelope.domain != "notes.keyword"
+                        else None
+                    ),
                 )
             else:
                 projection.apply_relationship(
@@ -197,6 +215,16 @@ class NotesOrganizationMaterializer:
                         envelope, self.note_db
                     ),
                     source_transition_identity=envelope.mutation_group_id,
+                    before=(
+                        guarded_mutation.before
+                        if guarded_mutation is not None
+                        else None
+                    ),
+                    after=(
+                        guarded_mutation.after
+                        if guarded_mutation is not None
+                        else None
+                    ),
                 )
 
             object_revision = self._next_object_revision(envelope, current_state)

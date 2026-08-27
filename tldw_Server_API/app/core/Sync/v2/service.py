@@ -45,6 +45,7 @@ from .errors import (
     SyncStoreError,
 )
 from .materializers import MaterializationResult, SyncMaterializer
+from .materializers.guarded_product_mutation import GuardedProductMutation
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
@@ -7472,6 +7473,7 @@ class SyncV2Service:
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store | None = None,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         materializer = self.materializers.get(envelope.domain)
         if materializer is None:
@@ -7481,7 +7483,11 @@ class SyncV2Service:
         if store is None:
             try:
                 with self.store.materialization_guard([envelope]) as guarded_store:
-                    return self._materialize_envelope(envelope, store=guarded_store)
+                    return self._materialize_envelope(
+                        envelope,
+                        store=guarded_store,
+                        guarded_mutation=guarded_mutation,
+                    )
             except SyncMaterializationBusyError:
                 return MaterializationResult(
                     status="failed",
@@ -7501,7 +7507,15 @@ class SyncV2Service:
                     message=_safe_projection_error_message(exc),
                 )
         try:
-            result = materializer.apply(envelope, store=store)
+            if guarded_mutation is None:
+                result = materializer.apply(envelope, store=store)
+            else:
+                guarded_mutation.require_identity(envelope.domain, envelope.object_id)
+                result = materializer.apply(
+                    envelope,
+                    store=store,
+                    guarded_mutation=guarded_mutation,
+                )
             if result.status == "conflict":
                 self._store_materialization_conflict(
                     envelope.dataset_id,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -148,15 +148,26 @@ class NotesLinkStore:
         except NotesLinkValidationError as exc:
             raise InputError(str(exc)) from exc
 
-    def _get_locked(self, conn: Any, edge_id: str) -> NotesLink | None:
-        row = conn.execute(
+    def _get_locked(
+        self,
+        conn: Any,
+        edge_id: str,
+        *,
+        for_update: bool = False,
+    ) -> NotesLink | None:
+        query = (
             "SELECT edge.edge_id, edge.user_id, edge.from_note_id, edge.to_note_id, edge.type, "
             "edge.directed, edge.weight, edge.label, edge.properties, edge.created_at, "
             "edge.last_modified, edge.created_by, edge.version, edge.deleted, edge.deleted_at "
             "FROM note_edges edge JOIN notes source ON source.id = edge.from_note_id "
             "JOIN notes target ON target.id = edge.to_note_id "
             "WHERE edge.edge_id = ? AND edge.user_id = ? "
-            "AND source.client_id = ? AND target.client_id = ?",
+            "AND source.client_id = ? AND target.client_id = ?"
+        )
+        if for_update and self._db.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE OF edge"
+        row = conn.execute(
+            query,
             (edge_id, self._owner_id, self._owner_id, self._owner_id),
         ).fetchone()
         return self._from_row(row) if row else None
@@ -178,9 +189,13 @@ class NotesLinkStore:
         payload: Mapping[str, object],
         *,
         allow_deleted: bool,
+        for_update: bool = False,
     ) -> None:
+        query = "SELECT id, client_id, deleted FROM notes WHERE id IN (?, ?)"
+        if for_update and self._db.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
         rows = conn.execute(
-            "SELECT id, client_id, deleted FROM notes WHERE id IN (?, ?)",
+            query,
             (payload["source_note_id"], payload["target_note_id"]),
         ).fetchall()
         by_id = {str(row["id"]): dict(row) for row in rows}
@@ -273,6 +288,8 @@ class NotesLinkStore:
         expected_version: int | None,
         allow_deleted_endpoints: bool = False,
         conn: Any | None = None,
+        before: Callable[[Any], None] | None = None,
+        after: Callable[[Any, str], None] | None = None,
     ) -> NotesLinkMutationResult:
         """Create or update a live link, with exact-replay short-circuiting."""
 
@@ -280,11 +297,17 @@ class NotesLinkStore:
         context = nullcontext(conn) if conn is not None else self._db.transaction()
         try:
             with context as transaction_conn:
-                existing = self._get_locked(transaction_conn, edge_id)
+                guarded = before is not None or after is not None
+                existing = self._get_locked(
+                    transaction_conn,
+                    edge_id,
+                    for_update=guarded,
+                )
                 self._validate_endpoints_locked(
                     transaction_conn,
                     normalized,
                     allow_deleted=allow_deleted_endpoints,
+                    for_update=guarded,
                 )
                 if existing is None:
                     if expected_version not in {None, 0}:
@@ -310,6 +333,8 @@ class NotesLinkStore:
                             entity="note_edges",
                             entity_id=str(duplicate["edge_id"]),
                         )
+                    if before is not None:
+                        before(transaction_conn)
                     properties = self._encode_properties(normalized["properties"])
                     transaction_conn.execute(
                         "INSERT INTO note_edges(edge_id, user_id, from_note_id, to_note_id, type, "
@@ -334,12 +359,20 @@ class NotesLinkStore:
                         ),
                     )
                     created = self._get_locked(transaction_conn, edge_id)
-                    if created is None:
+                    if created is None or not self._live_postcondition_matches(
+                        created, normalized
+                    ):
                         raise CharactersRAGDBError("Inserted notes.link was not found")
+                    if after is not None:
+                        after(transaction_conn, edge_id)
                     return NotesLinkMutationResult(created, True)
 
                 self._require_identity(existing, normalized)
                 if self._live_postcondition_matches(existing, normalized):
+                    if before is not None:
+                        before(transaction_conn)
+                    if after is not None:
+                        after(transaction_conn, edge_id)
                     return NotesLinkMutationResult(existing, False)
                 if existing.deleted:
                     raise ConflictError(
@@ -348,6 +381,8 @@ class NotesLinkStore:
                         entity_id=edge_id,
                     )
                 self._require_version(existing, expected_version)
+                if before is not None:
+                    before(transaction_conn)
                 properties = self._encode_properties(normalized["properties"])
                 cursor = transaction_conn.execute(
                     "UPDATE note_edges SET weight = ?, label = ?, properties = ?, metadata = ?, "
@@ -367,8 +402,12 @@ class NotesLinkStore:
                 )
                 self._require_cas_update(cursor, edge_id)
                 updated = self._get_locked(transaction_conn, edge_id)
-                if updated is None:
+                if updated is None or not self._live_postcondition_matches(
+                    updated, normalized
+                ):
                     raise CharactersRAGDBError("Updated notes.link was not found")
+                if after is not None:
+                    after(transaction_conn, edge_id)
                 return NotesLinkMutationResult(updated, True)
         except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
             message = str(exc).lower()

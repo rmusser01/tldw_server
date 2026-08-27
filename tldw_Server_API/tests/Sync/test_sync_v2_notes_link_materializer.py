@@ -16,6 +16,9 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     SyncAdapterContext,
 )
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_link import NotesLinkDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+    GuardedProductMutation,
+)
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import (
     NotesLinkMaterializer,
     _mark_applied,
@@ -426,6 +429,32 @@ def test_materializer_applies_and_crash_replay_does_not_repeat_product_write(
     assert replay_revision == product_revision_after
     state = sync_store.get_object_state(DATASET_ID, "notes.link", EDGE_ID)
     assert state is not None and state.latest_server_cursor == updated.server_cursor
+
+
+def test_materializer_exact_replay_executes_guard_against_live_postcondition(
+    materialization_stack,
+) -> None:
+    note_db, sync_store = materialization_stack
+    materializer = NotesLinkMaterializer(note_db)
+    created = _stored(sync_store, payload=_payload(), suffix="guarded-replay")
+    assert materializer.apply(created, store=sync_store).status == "applied"
+    events: list[tuple[str, str | None]] = []
+    guard = GuardedProductMutation(
+        expected_domain="notes.link",
+        expected_object_id=EDGE_ID,
+        before=lambda _conn: events.append(("before", None)),
+        after=lambda _conn, identity: events.append(("after", identity)),
+    )
+
+    result = materializer.apply(
+        created,
+        store=sync_store,
+        guarded_mutation=guard,
+    )
+
+    assert result.status == "applied"
+    assert events == [("before", None), ("after", EDGE_ID)]
+    assert note_db.notes_link_store.get(EDGE_ID).version == 1
 
 
 def test_materializer_returns_safe_conflict_for_divergent_product_state(
