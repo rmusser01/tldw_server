@@ -53,8 +53,8 @@
 | Stage | Goal | Success Criteria | Tests | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Freeze the certification vocabulary and fail-closed evaluator | All outcome and freshness rules are deterministic and mock evidence cannot certify | Pure unit tests | Complete |
-| 2 | Produce reproducible current-state evidence | Seven requirement records and a sanitized manifest are generated for an exact deployment class | Helper and characterization tests | In Progress |
-| 3 | Publish and enforce the API-first readiness gate | Versioned capability metadata, typed Run Now refusal, no Agent scheduler enqueue, and worker defense-in-depth agree | Schema/service/API/OpenAPI/feed/consumer tests | Not Started |
+| 2 | Produce reproducible current-state evidence | Seven requirement records and a sanitized manifest are generated for an exact deployment class | Helper and characterization tests | Complete |
+| 3 | Publish and enforce the API-first readiness gate | Versioned capability metadata, typed Run Now refusal, no Agent scheduler enqueue, and worker defense-in-depth agree | Schema/service/API/OpenAPI/feed/consumer tests | In Progress |
 | 4 | Publish the decision and current baseline | ADR, operator guide, JSON/Markdown evidence, and dependency tasks agree | Artifact validator and docs checks | Not Started |
 | 5 | Complete regression and security gates | Focused cross-module tests, compile, lint, Bandit, diff review, and Backlog evidence pass | Verification matrix | Not Started |
 
@@ -234,7 +234,7 @@ Expected: pure tests pass and the first commit cannot activate execution.
 - Consumes: explicit `--host-os`, `--host-arch`, `--runtime`, `--auth-mode`, `--adapter-id`, `--adapter-version`, `--source-commit`, `--server-build-sha`, `--image-digest`, `--mount-policy-hash`, `--egress-policy-hash`, `--credential-policy-hash`, `--tenant-boundary-policy-hash`, `--mediation-policy-hash`, `--isolation-profile-version`, output format/destination, and optional host-gated run flag.
 - Produces: schema `scheduled-agent-execution-certification.v1`, one exact deployment-class digest, seven sanitized requirement records, the derived outcome, and a command manifest.
 
-- [ ] **Step 1: Write failing manifest and sanitization tests**
+- [x] **Step 1: Write failing manifest and sanitization tests**
 
 The default invocation emits a manifest and repository characterization without launching a sandbox. Test exact top-level keys:
 
@@ -255,7 +255,7 @@ Each requirement contains only `requirement_id`, `state`, `verification`, `subje
 
 Seed tests with prompt, credential, path, hostname, tool-argument, and environment sentinels and assert none appears anywhere in JSON or Markdown output. Test that absolute paths and all argument values are removed before serialization. Recompute `evidence_id` from canonical sanitized content and reject a mismatched digest during artifact validation.
 
-- [ ] **Step 2: Define all seven evidence commands**
+- [x] **Step 2: Define all seven evidence commands**
 
 Use these stable command IDs:
 
@@ -273,13 +273,13 @@ For transcript characterization, write a random sentinel to a temporary ordinary
 
 For adapter recovery, verify generic Sandbox session/run idempotency exists but ACP sandbox `create_session()` has no dispatch-token parameter and its durable control record has no dispatch token. For monotonic evidence, verify current cancel/terminal primitives exist but no per-attempt ordered journal contract is available. For credentials, verify the managed external broker exists while current ACP session env remains a possible ambient channel. Partial primitives remain `missing`, not `passed`.
 
-- [ ] **Step 3: Make hostile execution opt-in and fail closed**
+- [x] **Step 3: Make hostile execution opt-in and fail closed**
 
 `--run-hostile` requires `--evidence-dir`, a local server URL, an API key environment-variable name, and a pre-existing server-verified attestation reference for the exact deployment class. Missing any prerequisite exits non-zero before launch and records `hostile_probe_blocked_by_missing_attestation` in the in-memory result only; it must not write a misleading pass artifact.
 
 The generated hostile test vector must enumerate attempts against a controlled host-file sentinel, a controlled denied network listener, public egress, subprocess launch, direct MCP/tool access, inherited environment sentinel, and ambient credential sentinel. The harness records pass only when every attempt is denied and the server verifies the exact attestation. In this task's baseline, the hostile command is expected to refuse because the attestation dependency is absent.
 
-- [ ] **Step 4: Run RED, implement, then run GREEN**
+- [x] **Step 4: Run RED, implement, then run GREEN**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -289,7 +289,7 @@ python -m pytest -q --tb=short \
 
 Expected RED: collection fails because the helper is absent. Expected GREEN after implementation: all helper tests pass; eligible current profiles emit `draft_only`; ineligible profiles emit `unsupported`; no fixture can emit `certified` without seven server-verified records.
 
-- [ ] **Step 5: Verify the CLI behavior**
+- [x] **Step 5: Verify the CLI behavior**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -331,7 +331,9 @@ python Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py
 
 Expected: Docker reports `draft_only`; worktree reports `unsupported`; neither output contains an absolute local path, raw prompt, credential value, or raw environment value.
 
-- [ ] **Step 6: Commit the evidence harness**
+Recorded result: RED produced 21 expected failures while the helper was absent. GREEN produced 21 passes and 2 warnings. Docker JSON contained seven requirements and seven commands with `draft_only`; worktree Markdown reported `unsupported`. A same-run JSON/Markdown pair validated successfully. Fully populated hostile prerequisites exited 2 with `hostile_probe_blocked_server_attestation_verifier_unimplemented` and launched nothing. Ruff and compileall passed; Bandit reported zero findings after replacing optimization-sensitive assertions with explicit validation.
+
+- [x] **Step 6: Commit the evidence harness**
 
 ```bash
 git add \
