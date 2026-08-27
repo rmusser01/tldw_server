@@ -4,7 +4,7 @@ title: Add first-class standalone HTML-JS presentation generation
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-08-26 15:53
+updated_date: 2026-08-27 02:19
 labels:
 - slides
 - presentation-studio
@@ -102,8 +102,8 @@ modified_files:
 references:
 - https://github.com/rmusser01/tldw_server/pull/2809
 - merge:2c6553c4ed7192f024802ddf2735babc950cea69
-- TASK-13125
-- TASK-13126
+- TASK-13134
+- TASK-13135
 ---
 
 ## Description
@@ -115,7 +115,7 @@ Design and implement a hardened standalone HTML+JavaScript presentation mode sha
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Delivered and merged first-class standalone HTML/JavaScript presentations behind a default-off, fail-closed capability gate. The implementation provides owner-scoped storage and generation, bounded validation/provider transport, Jobs-backed resumable generation, guarded MCP access, explicit strong-ETag editing, inert safe-outline/download/recovery flows, source-free extension handoff, compatibility protection for structured slides, and complete operator/API/user documentation. PR #2809 merged to dev as 2c6553c4ed7192f024802ddf2735babc950cea69 after required policy and review gates. Verification and inherited/environment limitations are recorded in Implementation Notes. Duplicate Backlog identity normalization was completed under TASK-13125, with the historical chat-focus record preserved as TASK-13126.
+Delivered and merged first-class standalone HTML/JavaScript presentations behind a default-off, fail-closed capability gate. The implementation provides owner-scoped storage and generation, bounded validation/provider transport, Jobs-backed resumable generation, guarded MCP access, explicit strong-ETag editing, inert safe-outline/download/recovery flows, source-free extension handoff, compatibility protection for structured slides, and complete operator/API/user documentation. PR #2809 merged to dev as 2c6553c4ed7192f024802ddf2735babc950cea69 after required policy and review gates. Verification and inherited/environment limitations are recorded in Implementation Notes. Duplicate Backlog identity normalization was completed under TASK-13134, with the historical chat-focus record preserved as TASK-13135.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -285,5 +285,5 @@ Final verification evidence: standalone backend integration 1/1; impacted fronte
 
 Known limitations and inherited/environment dispositions: Firefox and WebKit security projects selected the intended 13 cases each with retries disabled but could not launch because the pinned local browser binaries were absent, so they are not reported as passed. The broad backend run was 1,573 passed, 25 repository-managed PostgreSQL fixture skips, and two deterministic inherited CAS failures in unchanged generation-jobs code: test_lost_terminal_cas_reloads_completed_winner and test_lost_retry_reset_cas_reloads_completed_or_terminal_winner[completed]. Bandit reported 72 LOW, 0 MEDIUM, 0 HIGH, and 0 errors across 95,436 LOC; the LOW findings were existing test assertions/sentinels, with no production implementation finding. The Task 16 extension CI/headless pure-audit path exposed an inherited chrome-fallback fixture limitation; the plan-exact non-CI run passed the pure audit with three no-target skips, and extension compilation passed. Optional GitHub Actions runner cancellations were infrastructure churn rather than code failures. Direct-eval monkeypatch observability was deliberately omitted because wrapping direct eval changes JavaScript semantics; execution-sentinel and other source-sink instrumentation remained active.
 
-Backlog identity normalization: TASK-13125 records the completed identity repair. Standalone HTML remains canonical as TASK-12115, while the historical chat-focus record originally merged under the same ID is now TASK-13126 with its PR #2578 evidence preserved.
+Backlog identity normalization: TASK-13134 records the completed identity repair. Standalone HTML remains canonical as TASK-12115, while the historical chat-focus record originally merged under the same ID is now TASK-13135 with its PR #2578 evidence preserved. Interim TASK-13125/TASK-13126 assignments were superseded after latest dev allocated those IDs to Scheduled Tasks.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

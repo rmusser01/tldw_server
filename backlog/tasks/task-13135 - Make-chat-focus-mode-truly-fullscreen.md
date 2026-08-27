@@ -1,10 +1,10 @@
 ---
-id: TASK-13126
+id: TASK-13135
 title: Make chat focus mode truly fullscreen
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-08-26 15:51
+updated_date: 2026-08-27 02:15
 labels:
 - webui
 - chat
@@ -13,9 +13,10 @@ dependencies: []
 priority: high
 references:
 - https://github.com/rmusser01/tldw_server/pull/2578
-- TASK-13125
+- TASK-13134
 - TASK-12115
 - legacy:TASK-12115 (chat focus mode)
+- interim:TASK-13126 (superseded by latest-dev allocation)
 ---
 
 ## Description
@@ -49,7 +50,7 @@ Bandit: skipped because this change only touches frontend TypeScript/TSX tests a
 PR: https://github.com/rmusser01/tldw_server/pull/2578
 
 Review follow-up: rebased on latest dev and addressed PR review comments for shell cleanup, focus accessibility/test coverage, and task marker structure. The Qodo broad-typecheck comment was evaluated against latest dev; the remaining typecheck failures are pre-existing, unrelated baseline errors and are not changed by this PR.
-Identity normalization (TASK-13125): this completed record was originally created and merged as TASK-12115 in PR #2578. Its canonical ID is now TASK-13126. TASK-12115 now deterministically identifies the standalone HTML presentation rollout; no implementation or completion evidence was removed.
+Identity normalization (TASK-13134): this completed record was originally created and merged as TASK-12115 in PR #2578. Its final canonical ID is TASK-13135. An interim TASK-13126 assignment was superseded when latest dev allocated TASK-13126 to Scheduled Tasks. TASK-12115 continues to identify the standalone HTML presentation rollout; no implementation or completion evidence was removed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
