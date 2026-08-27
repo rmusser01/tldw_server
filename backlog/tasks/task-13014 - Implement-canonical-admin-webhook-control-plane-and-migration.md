@@ -1,10 +1,10 @@
 ---
 id: TASK-13014
 title: Implement canonical admin webhook control plane and migration
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-08-21 20:41
-updated_date: 2026-08-27 20:12
+updated_date: 2026-08-27 22:19
 labels:
 - admin
 - webhooks
@@ -246,13 +246,28 @@ Final local gates: Studio navigation 16/16; CI ratchet/workflow contracts 117/11
 2026-08-27 exact-head Qodo test-quality follow-up at 9b215ee2f9db9341f6c87ecea547e4dcdf2e9296: Qodo reported two rule findings, both valid and bounded to StudioTabContainer.stage6-navigation.test.tsx. LocationSearchProbe now declares an explicit React.ReactElement return type. The four onboarding step/tab transitions now use it.each so every case has fresh render/store state and an independently named failure while retaining React Strict Mode coverage. Verification: focused Studio navigation 19/19 passed at a 1024 MiB heap; canonical TypeScript output remains byte-for-byte identical to exact base (80 inherited errors, no changed-file references); git diff --check passed. Fresh independent review, commit/push, Qodo thread resolution/refresh, exact-head hosted CI, and final thread audit remain pending; TASK-13014 stays In Progress.
 2026-08-27 hosted exact-head frontend-required run 33103363333 passed all eight frontend unit shards, including shard 6 at the restored 4096 MiB budget, then exposed one admin-ui ratchet differential in unchanged test app/acp-agents/__tests__/page.test.tsx > ACPAgentsPage renders policy rules and actions when policies are loaded. Hosted head queried the rendered policies tab immediately after observing only the API call; exact-base replay happened to render before the query. Focused and local full-suite head replays pass, confirming a scheduler-sensitive test race. Remediation will await the rendered tab button before interaction and add the test file to this bounded CI-remediation unit.
 2026-08-27 ACP policies-tab race remediation is locally verified. The test now awaits the rendered `Permission Policies (1)` button rather than observing only the API call. Focused file 8/8 passed; the affected test passed 20/20 repeated focused runs; the focused run with the exact JSON+safety reporter stack passed 8/8 and strict validate-success accepted both reports; admin-ui lint passed with 0 errors/41 inherited warnings; admin-ui typecheck passed; git diff --check passed. A complete local admin-ui run exercised all 148 files/807 tests and the ACP file passed 8/8; the run still exited 1 because this local environment exposes 117 pre-existing failures and 130 hook errors, so the strict safety reporter correctly refused a local full-suite ratchet. Hosted exact-head CI remains the authoritative complete gate after review/push.
+2026-08-27 exact-head hosted closure evidence: frontend-required run 33112693381 completed successfully at commit 776662a9c39896eb3c44e5b54bd938776a519a89 (https://github.com/rmusser01/tldw_server/actions/runs/33112693381). All eight frontend-unit-tests shards passed; shard 6 passed with the established NODE_OPTIONS --max-old-space-size=4096 budget. The aggregate frontend-required job also passed frontend lint, report-only coverage, production Chrome extension build, WebUI and extension API-key persistence lifecycles, single-user cookie persistence, admin-ui lint/typecheck/unit tests, admin-ui real-backend E2E, and admin-ui production build. This hosted run proves the ACP policies-tab scheduler-race remediation under the complete exact-head gate. Final review-thread response/resolution and rerun of the deliberately canceled exact-head workflows remain pending; TASK-13014 stays In Progress.
+2026-08-27 final gate closure: all 16 exact-head workflows that were deliberately canceled for runner prioritization were rerun at commit 776662a9c39896eb3c44e5b54bd938776a519a89 and completed successfully. `gh pr checks 2806` shows every applicable check passing with only intentional skips; `gh pr view` reports mergeStateStatus CLEAN. Final paginated GraphQL review audit covered 35 threads and found zero unresolved. TASK-13014 is complete; PR merge was not performed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the approved PR 1 canonical outgoing-webhook control plane and migration across backend contracts, encryption, SQLite/PostgreSQL persistence, deterministic legacy import and rollback tooling, exclusive canonical/legacy routing, platform-admin API, and admin UI.
+
+Final remediation closed CI ratchet/provenance defects, frontend Studio synchronization loops, and the scheduler-sensitive ACP policies-tab test without weakening fail-closed comparison behavior.
+
+Verification is complete at exact PR head 776662a9c39896eb3c44e5b54bd938776a519a89. Frontend-required run 33112693381 passed all 8 shards and its aggregate, including admin unit, real-backend E2E, and production build. All 16 deliberately canceled exact-head workflows were rerun successfully; the PR reports CLEAN. A paginated audit covered 35 review threads and found zero unresolved after posting hosted evidence. Qodo reported 0 bugs at the final source head. PR: https://github.com/rmusser01/tldw_server/pull/2806.
+
+The two unrelated untracked watchlist templates were not touched or staged. Merge remains a human decision and was not performed.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
