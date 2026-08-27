@@ -15,6 +15,10 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_models 
     NoteGraphSuggestionState,
 )
 from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import MutationResult
+from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+    NotesOrganizationSyncStore,
+)
+from tldw_Server_API.app.core.Notes_Graph import suggestion_decisions as decisions_module
 from tldw_Server_API.app.core.Notes_Graph.suggestion_decisions import SuggestionDecisionService
 from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import (
     MaintenanceScope,
@@ -60,6 +64,7 @@ class FakeStore:
         self.suggestion = suggestion
         self.renewed: list[NoteGraphSuggestion] = []
         self.finalized: list[str] = []
+        self.resolve_result: MutationResult | None = None
 
     def claim_acceptance(self, **_kwargs: Any) -> MutationResult:
         return MutationResult("completed", {}, suggestion=self.suggestion)
@@ -99,6 +104,8 @@ class FakeStore:
         return (self.suggestion,)
 
     def resolve_expired_acceptance(self, **_kwargs: Any) -> MutationResult:
+        if self.resolve_result is not None:
+            return self.resolve_result
         pending = replace(self.suggestion, state=NoteGraphSuggestionState.PENDING, revision=3)
         return MutationResult(
             "completed",
@@ -188,10 +195,18 @@ def test_relationship_acceptance_uses_exact_guarded_manual_link_contract() -> No
     }
 
 
-def test_new_tag_renews_each_step_and_only_relationship_guard_finalizes() -> None:
+def test_new_tag_renews_each_step_and_only_relationship_guard_finalizes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     suggestion = _suggestion(NoteGraphSuggestionKind.TAG)
     store = FakeStore(suggestion)
     organization = FakeOrganizationCoordinator()
+    keyword_lookups = iter((None, SimpleNamespace(sync_id=KEYWORD_ID)))
+    monkeypatch.setattr(
+        NotesOrganizationSyncStore,
+        "find_keyword_by_normalized_identity",
+        lambda *_args, **_kwargs: next(keyword_lookups),
+    )
     service = SuggestionDecisionService(
         store=store,
         link_coordinator=FakeLinkCoordinator(),
@@ -263,3 +278,121 @@ def test_maintenance_runs_acceptance_reconciliation_without_generation_authority
 
     assert calls == [("dataset-1", 100)]
     assert result.claimed == result.reconciled == 0
+
+
+@pytest.mark.parametrize(
+    "terminal_state",
+    (NoteGraphSuggestionState.ACCEPTED, NoteGraphSuggestionState.STALE),
+)
+def test_reconciliation_emits_terminal_decision_before_reconciled_observability(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_state: NoteGraphSuggestionState,
+) -> None:
+    suggestion = _suggestion(NoteGraphSuggestionKind.RELATED_NOTE)
+    terminal = replace(
+        suggestion,
+        state=terminal_state,
+        revision=3,
+        accepted_resource_identity=(
+            EDGE_ID if terminal_state == NoteGraphSuggestionState.ACCEPTED else None
+        ),
+    )
+    store = FakeStore(suggestion)
+    store.resolve_result = MutationResult(
+        "completed",
+        {
+            "suggestion_id": terminal.id,
+            "state": terminal_state.value,
+            "revision": terminal.revision,
+        },
+        suggestion=terminal,
+    )
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        decisions_module,
+        "record_decision_outcome",
+        lambda outcome: calls.append(("decision_metric", outcome.value)),
+    )
+    monkeypatch.setattr(
+        decisions_module,
+        "record_acceptance_reconciliation",
+        lambda outcome: calls.append(("reconciliation_metric", outcome.value)),
+    )
+    monkeypatch.setattr(
+        decisions_module,
+        "record_event",
+        lambda event, **_kwargs: calls.append(("event", event.value)),
+    )
+    service = SuggestionDecisionService(
+        store=store,
+        link_coordinator=FakeLinkCoordinator(),
+        organization_coordinator=FakeOrganizationCoordinator(),
+        clock=lambda: NOW,
+    )
+
+    service.reconcile_expired(dataset_id="dataset-1", limit=1)
+
+    assert calls == [
+        ("decision_metric", terminal_state.value),
+        ("event", terminal_state.value),
+        ("reconciliation_metric", "completed"),
+        ("event", "reconciled"),
+    ]
+
+
+def test_reconciliation_exception_emits_no_observability_before_durable_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suggestion = _suggestion(NoteGraphSuggestionKind.RELATED_NOTE)
+    store = FakeStore(suggestion)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        decisions_module,
+        "record_acceptance_reconciliation",
+        lambda outcome: calls.append(("reconciliation_metric", outcome.value)),
+    )
+    service = SuggestionDecisionService(
+        store=store,
+        link_coordinator=FakeLinkCoordinator(),
+        organization_coordinator=FakeOrganizationCoordinator(),
+        clock=lambda: NOW,
+    )
+    monkeypatch.setattr(service, "_resolve", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        service.reconcile_expired(dataset_id="dataset-1", limit=1)
+
+    assert calls == []
+
+
+def test_maintenance_shares_one_acceptance_reconciliation_budget_across_scopes() -> None:
+    class MaintenanceStore:
+        def claim_runs_for_maintenance(self, **_kwargs: Any) -> tuple[()]:
+            return ()
+
+        def cleanup_retention(self, **_kwargs: Any) -> dict[str, int]:
+            return {"suggestions": 0, "receipts": 0, "runs": 0, "rejection_sets": 0}
+
+    calls: list[tuple[str, int]] = []
+
+    def decisions_for(count: int) -> SimpleNamespace:
+        def reconcile(*, dataset_id: str, limit: int, now: datetime) -> tuple[object, ...]:
+            del now
+            calls.append((dataset_id, limit))
+            return tuple(object() for _ in range(min(count, limit)))
+
+        return SimpleNamespace(reconcile_expired=reconcile)
+
+    maintenance = SuggestionMaintenance(
+        jobs=object(),
+        scopes=(
+            MaintenanceScope(MaintenanceStore(), "dataset-1", decisions_for(60)),
+            MaintenanceScope(MaintenanceStore(), "dataset-2", decisions_for(60)),
+            MaintenanceScope(MaintenanceStore(), "dataset-3", decisions_for(60)),
+        ),
+    )
+
+    result = maintenance.run_pass(now=NOW, limit=100)
+
+    assert calls == [("dataset-1", 100), ("dataset-2", 40)]
+    assert result.claimed == result.reconciled == 100

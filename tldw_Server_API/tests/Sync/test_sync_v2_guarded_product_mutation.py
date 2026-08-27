@@ -92,9 +92,11 @@ def _build_guarded_service(
     note_db: CharactersRAGDB,
     *,
     owner_id: str = OWNER_ID,
+    initialize_product: bool = True,
 ) -> tuple[SyncV2Service, SyncV2Store]:
-    for note_id in (SOURCE_ID, TARGET_ID):
-        note_db.note_store.add_note(note_id, "body", note_id=note_id)
+    if initialize_product:
+        for note_id in (SOURCE_ID, TARGET_ID):
+            note_db.note_store.add_note(note_id, "body", note_id=note_id)
 
     store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db"))
     domains = [
@@ -163,11 +165,12 @@ def _build_guarded_service(
         clock=lambda: NOW,
         settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
     )
-    with note_db.transaction() as conn:
-        conn.execute(
-            "CREATE TABLE guarded_test_state (id INTEGER PRIMARY KEY, phase TEXT NOT NULL, resource_identity TEXT)"
-        )
-        conn.execute("INSERT INTO guarded_test_state(id, phase) VALUES (1, 'accepting')")
+    if initialize_product:
+        with note_db.transaction() as conn:
+            conn.execute(
+                "CREATE TABLE guarded_test_state (id INTEGER PRIMARY KEY, phase TEXT NOT NULL, resource_identity TEXT)"
+            )
+            conn.execute("INSERT INTO guarded_test_state(id, phase) VALUES (1, 'accepting')")
     return service, store
 
 
@@ -963,6 +966,101 @@ def test_postgres_guard_waits_for_product_row_lock_and_rechecks_replaced_fence(
         blocker_db.close_all_connections()
         capture_backend.get_pool().close_all()
         blocker_backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("owner_id", "canonical_display", "alias_display"),
+    (
+        ("920002", "RESEARCH", "research"),
+        ("920003", "STRASSE", "Stra\u00dfe"),
+        ("920004", "CAF\u00c9", "cafe\u0301"),
+    ),
+)
+def test_postgres_guarded_normalized_keyword_collision_converges_without_alias_state(
+    tmp_path: Path,
+    pg_database_config: DatabaseConfig,
+    owner_id: str,
+    canonical_display: str,
+    alias_display: str,
+) -> None:
+    backend_a = DatabaseBackendFactory.create_backend(pg_database_config)
+    backend_b = DatabaseBackendFactory.create_backend(pg_database_config)
+    note_db_a = CharactersRAGDB(":memory:", client_id=owner_id, backend=backend_a)
+    note_db_b = CharactersRAGDB(":memory:", client_id=owner_id, backend=backend_b)
+    sync_a = tmp_path / "sync-a"
+    sync_b = tmp_path / "sync-b"
+    sync_a.mkdir()
+    sync_b.mkdir()
+    service_a, store_a = _build_guarded_service(sync_a, note_db_a, owner_id=owner_id)
+    service_b, store_b = _build_guarded_service(
+        sync_b,
+        note_db_b,
+        owner_id=owner_id,
+        initialize_product=False,
+    )
+    coordinator_a = NotesOrganizationCoordinator(service_a, note_db_a, owner_id)
+    coordinator_b = NotesOrganizationCoordinator(service_b, note_db_b, owner_id)
+    plan_a = coordinator_a.plan_keyword_create(
+        canonical_display,
+        idempotency_key="normalized-a",
+    )
+    plan_b = coordinator_b.plan_keyword_create(
+        alias_display,
+        idempotency_key="normalized-b",
+    )
+    boundary = Barrier(2)
+
+    def guard_for(plan) -> GuardedProductMutation:
+        def before(_conn: Any) -> None:
+            boundary.wait(timeout=10)
+
+        return GuardedProductMutation(
+            expected_domain="notes.keyword",
+            expected_object_id=plan.steps[0].object_id,
+            before=before,
+            after=None,
+        )
+
+    def capture(coordinator, plan, key: str):
+        return coordinator.capture(
+            steps=plan.steps,
+            source="notes_graph_suggestion",
+            idempotency_key=key,
+            guarded_mutation=guard_for(plan),
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_a = executor.submit(capture, coordinator_a, plan_a, "normalized-a")
+            future_b = executor.submit(capture, coordinator_b, plan_b, "normalized-b")
+            results = (future_a.result(timeout=20), future_b.result(timeout=20))
+
+        assert all(result.fully_applied for result in results)
+        envelopes = tuple(result.envelopes[0] for result in results)
+        assert sorted(envelope.apply_status for envelope in envelopes) == [
+            "applied",
+            "superseded",
+        ]
+        assert len(note_db_a.keyword_store.list_keywords()) == 1
+        applied = next(envelope for envelope in envelopes if envelope.apply_status == "applied")
+        superseded = next(
+            envelope for envelope in envelopes if envelope.apply_status == "superseded"
+        )
+        state_stores = (store_a, store_b)
+        assert any(
+            store.get_object_state(DATASET_ID, "notes.keyword", applied.object_id) is not None
+            for store in state_stores
+        )
+        assert all(
+            store.get_object_state(DATASET_ID, "notes.keyword", superseded.object_id) is None
+            for store in state_stores
+        )
+    finally:
+        note_db_a.close_all_connections()
+        note_db_b.close_all_connections()
+        backend_a.get_pool().close_all()
+        backend_b.get_pool().close_all()
 
 
 def test_ordinary_unguarded_caller_is_unchanged(

@@ -218,21 +218,45 @@ class SuggestionDecisionService:
             before=self._before(fence),
             after=self._after(fence, finalized),
         )
-        self.links.create(
-            source_note_id=fence.source_note_id,
-            target_note_id=str(fence.target_note_id),
-            directed=False,
-            weight=1.0,
-            label=None,
-            properties={},
-            idempotency_key=key,
-            guarded_mutation=guard,
-        )
+        try:
+            self.links.create(
+                source_note_id=fence.source_note_id,
+                target_note_id=str(fence.target_note_id),
+                directed=False,
+                weight=1.0,
+                label=None,
+                properties={},
+                idempotency_key=key,
+                guarded_mutation=guard,
+            )
+        except SyncServerOriginBatchMaterializationError as exc:
+            try:
+                existing = self.store.finalize_existing_acceptance(
+                    fence=fence,
+                    accepted_resource_identity=None,
+                    resolved_keyword_sync_id=None,
+                    now=self._clock(),
+                )
+            except RuntimeError as fence_error:
+                if str(fence_error) != "notes_graph_suggestion_conflict":
+                    raise
+                raise exc from fence_error
+            if existing.disposition != "in_progress":
+                return existing
+            if not exc.retryable:
+                return self._release(fence)
+            raise
         if len(finalized) != 1:
             raise RuntimeError("notes_graph_acceptance_finalization_missing")
         return finalized[0]
 
-    def _resolve_keyword(self, fence: NoteGraphSuggestion) -> tuple[str | None, bool]:
+    def _resolve_keyword(
+        self,
+        fence: NoteGraphSuggestion,
+        *,
+        conn: Any | None = None,
+        for_update: bool = False,
+    ) -> tuple[str | None, bool]:
         if fence.keyword_sync_id:
             dataset = self.organization.active_dataset()
             resources = NotesOrganizationSyncStore(self.organization.note_db)
@@ -240,7 +264,12 @@ class SuggestionDecisionService:
             seen: set[str] = set()
             while sync_id not in seen and len(seen) < 100:
                 seen.add(sync_id)
-                resource = resources.get_resource("notes.keyword", sync_id)
+                resource = resources.get_resource(
+                    "notes.keyword",
+                    sync_id,
+                    conn=conn,
+                    for_update=for_update,
+                )
                 if resource is not None and not resource.deleted:
                     return sync_id, False
                 head = self.organization.service.store.get_current_head(
@@ -260,14 +289,39 @@ class SuggestionDecisionService:
                     "notes.keyword",
                     target_id,
                     include_deleted=True,
+                    conn=conn,
+                    for_update=for_update,
                 )
                 if target is None:
                     break
                 sync_id = str(target["sync_id"])
             return None, True
-        display = fence.display_tag or fence.normalized_tag or ""
-        row = self.organization.note_db.get_keyword_by_text(display)
-        return (str(row["sync_id"]), False) if row is not None else (None, False)
+        display = fence.normalized_tag or fence.display_tag or ""
+        resource = NotesOrganizationSyncStore(
+            self.organization.note_db
+        ).find_keyword_by_normalized_identity(
+            display,
+            conn=conn,
+            for_update=for_update,
+        )
+        return (resource.sync_id, False) if resource is not None else (None, False)
+
+    def _mark_keyword_acceptance_stale(
+        self,
+        fence: NoteGraphSuggestion,
+        *,
+        now: datetime,
+    ) -> MutationResult:
+        return self.store.mark_acceptance_stale(
+            fence=fence,
+            reason="canonical_resource_missing",
+            verifier=lambda conn: self._resolve_keyword(
+                fence,
+                conn=conn,
+                for_update=True,
+            )[1],
+            now=now,
+        )
 
     @staticmethod
     def _keyword_link_identity(fence: NoteGraphSuggestion, keyword_sync_id: str) -> str:
@@ -279,11 +333,15 @@ class SuggestionDecisionService:
     def _accept_tag(self, fence: NoteGraphSuggestion) -> MutationResult:
         keyword_sync_id, stale = self._resolve_keyword(fence)
         if stale:
-            return self.store.mark_acceptance_stale(
-                fence=fence,
-                reason="canonical_resource_missing",
+            stale_result = self._mark_keyword_acceptance_stale(
+                fence,
                 now=self._clock(),
             )
+            if stale_result.disposition != "in_progress":
+                return stale_result
+            keyword_sync_id, stale = self._resolve_keyword(fence)
+            if stale:
+                return self._release(fence)
         relationship_identity = (
             self._keyword_link_identity(fence, keyword_sync_id)
             if keyword_sync_id is not None
@@ -321,12 +379,23 @@ class SuggestionDecisionService:
                     guarded_mutations=(keyword_guard,),
                 )
             except SyncServerOriginBatchMaterializationError:
-                collision = self.organization.note_db.get_keyword_by_text(
-                    str(fence.display_tag)
+                collision = NotesOrganizationSyncStore(
+                    self.organization.note_db
+                ).find_keyword_by_normalized_identity(
+                    fence.normalized_tag or str(fence.display_tag)
                 )
                 if collision is None:
                     return self._release(fence)
-                keyword_sync_id = str(collision["sync_id"])
+                keyword_sync_id = collision.sync_id
+            else:
+                canonical = NotesOrganizationSyncStore(
+                    self.organization.note_db
+                ).find_keyword_by_normalized_identity(
+                    fence.normalized_tag or str(fence.display_tag)
+                )
+                if canonical is None:
+                    return self._release(fence)
+                keyword_sync_id = canonical.sync_id
 
         relationship_key = self._step_key(fence.id, "tag-membership")
         relationship_plan = self.organization.plan_relationship(
@@ -391,11 +460,15 @@ class SuggestionDecisionService:
         if fence.kind == NoteGraphSuggestionKind.TAG:
             keyword_sync_id, stale = self._resolve_keyword(fence)
             if stale:
-                return self.store.mark_acceptance_stale(
-                    fence=fence,
-                    reason="canonical_resource_missing",
+                stale_result = self._mark_keyword_acceptance_stale(
+                    fence,
                     now=decision_time,
                 )
+                if stale_result.disposition != "in_progress":
+                    return stale_result
+                keyword_sync_id, stale = self._resolve_keyword(fence)
+                if stale:
+                    keyword_sync_id = None
             if keyword_sync_id is not None:
                 relationship_identity = self._keyword_link_identity(fence, keyword_sync_id)
         return self.store.resolve_expired_acceptance(
@@ -422,12 +495,9 @@ class SuggestionDecisionService:
         )
         results: list[MutationResult] = []
         for fence in claims:
-            try:
-                result = self._resolve(fence, now=reconciliation_time)
-            except Exception:
-                record_acceptance_reconciliation(ReconciliationOutcome.FAILED)
-                raise
+            result = self._resolve(fence, now=reconciliation_time)
             results.append(result)
+            self._record_decision(result)
             outcome = (
                 ReconciliationOutcome.RELEASED
                 if result.envelope.get("state") == "pending"

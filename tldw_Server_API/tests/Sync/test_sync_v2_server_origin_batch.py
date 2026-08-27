@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation imp
     GuardedProductMutationIdentityError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
+    NOTES_ORGANIZATION_DOMAINS,
     SyncDataset,
     SyncDatasetCreate,
     SyncDomain,
@@ -157,9 +158,36 @@ class _RecordingMaterializer:
         return MaterializationResult(status="applied")
 
 
+@dataclass(slots=True)
+class _GuardedStatusMaterializer:
+    domain: SyncDomain = "notes.keyword"
+    recorded_status: str | None = None
+
+    def apply(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation,
+    ) -> MaterializationResult:
+        guarded_mutation.require_identity(envelope.domain, envelope.object_id)
+        if self.recorded_status is not None:
+            assert envelope.server_cursor is not None
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status=self.recorded_status,
+            )
+        return MaterializationResult(status="applied")
+
+
 @pytest.fixture()
 def batch_service(tmp_path: Path) -> tuple[SyncV2Service, _RecordingMaterializer]:
-    domains: list[SyncDomain] = ["chat.conversation", "chat.message", "notes.note"]
+    domains: list[SyncDomain] = [
+        "chat.conversation",
+        "chat.message",
+        "notes.note",
+        *sorted(NOTES_ORGANIZATION_DOMAINS),
+    ]
     store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db"))
     store.enroll_dataset(
         SyncDatasetCreate(
@@ -167,7 +195,11 @@ def batch_service(tmp_path: Path) -> tuple[SyncV2Service, _RecordingMaterializer
             owner_user_id="user-1",
             encryption_policy="server_trusted_v1",
             domains=domains,
-            metadata={"default_personal": True, "client_family": "chatbook"},
+            metadata={
+                "default_personal": True,
+                "client_family": "chatbook",
+                "notes_organization_v1": {"state": "ready"},
+            },
         )
     )
     materializer = _RecordingMaterializer(domain="chat.conversation")
@@ -277,6 +309,74 @@ def test_server_origin_strips_untrusted_guard_marker_from_ordinary_step(
 
     assert result.fully_applied is True
     assert GUARD_REQUIRED_ROUTING_KEY not in result.envelopes[0].routing_metadata
+
+
+def test_guarded_materializer_owned_superseded_status_completes_group_without_object_state(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+) -> None:
+    service, _materializer = batch_service
+    service.materializers["notes.keyword"] = _GuardedStatusMaterializer(
+        recorded_status="superseded"
+    )
+    object_id = "keyword-alias"
+    guard = GuardedProductMutation(
+        expected_domain="notes.keyword",
+        expected_object_id=object_id,
+        before=lambda _conn: None,
+        after=None,
+    )
+
+    result = capture_server_origin_mutation_batch(
+        service=service,
+        user_id="user-1",
+        steps=[_step(object_id, domain="notes.keyword")],
+        source="notes_graph_suggestion",
+        idempotency_key="materializer-superseded",
+        guarded_mutation=guard,
+    )
+
+    assert result.fully_applied is True
+    assert result.envelopes[0].apply_status == "superseded"
+    assert service.store.get_object_state(
+        "dataset-1", "notes.keyword", object_id
+    ) is None
+
+
+def test_guarded_materializer_missing_status_ignores_routing_self_attestation(
+    batch_service: tuple[SyncV2Service, _RecordingMaterializer],
+) -> None:
+    service, _materializer = batch_service
+    service.materializers["notes.keyword"] = _GuardedStatusMaterializer()
+    object_id = "keyword-untrusted-status"
+    guard = GuardedProductMutation(
+        expected_domain="notes.keyword",
+        expected_object_id=object_id,
+        before=lambda _conn: None,
+        after=None,
+    )
+    step = replace(
+        _step(object_id, domain="notes.keyword"),
+        routing_metadata={"apply_status": "superseded"},
+    )
+
+    with pytest.raises(SyncServerOriginBatchMaterializationError) as exc_info:
+        capture_server_origin_mutation_batch(
+            service=service,
+            user_id="user-1",
+            steps=[step],
+            source="notes_graph_suggestion",
+            idempotency_key="missing-materializer-status",
+            guarded_mutation=guard,
+        )
+
+    assert exc_info.value.result.envelopes[0].apply_status == "failed"
+    assert (
+        exc_info.value.result.envelopes[0].apply_error_code
+        == "sync_projection_status_missing"
+    )
+    assert service.store.get_object_state(
+        "dataset-1", "notes.keyword", object_id
+    ) is None
 
 
 def test_batch_rejects_explicit_nonpositive_object_revision(

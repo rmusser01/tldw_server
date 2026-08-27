@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
@@ -33,7 +36,9 @@ from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+    ServerOriginMutationStep,
     SyncServerOriginBatchMaterializationError,
+    server_origin_mutation_batch_group_id,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
@@ -158,6 +163,7 @@ def _publish(
     keyword_sync_id: str | None = None,
     normalized_tag: str = "research",
     display_tag: str = "Research",
+    model: str = "model-a",
 ) -> None:
     store = db.note_graph_suggestion_store
     admitted = store.admit_run(
@@ -165,7 +171,7 @@ def _publish(
         source_note_id=SOURCE_ID,
         source_fingerprint=_fingerprint(db, SOURCE_ID),
         provider="openai",
-        model="model-a",
+        model=model,
         capability_revision="cap-v1",
         prompt_contract_version="prompt-v1",
         idempotency_key=f"run-{suggestion_id}",
@@ -365,6 +371,376 @@ def test_concurrent_new_tag_name_collision_converges_on_existing_portable_keywor
     keywords = note_db.keyword_store.list_keywords()
     assert [row["keyword"] for row in keywords] == ["Research"]
     assert note_db.get_keywords_for_note(SOURCE_ID)[0]["sync_id"] == keywords[0]["sync_id"]
+
+
+@pytest.mark.parametrize(
+    ("case_id", "canonical_display", "suggested_display", "normalized"),
+    (
+        ("ascii", "research", "Research", "research"),
+        ("casefold", "STRASSE", "Stra\u00dfe", "strasse"),
+        ("nfc", "CAF\u00c9", "cafe\u0301", "caf\u00e9"),
+    ),
+)
+def test_normalized_new_tag_collision_supersedes_alias_and_uses_canonical_membership(
+    context,
+    monkeypatch: pytest.MonkeyPatch,
+    case_id: str,
+    canonical_display: str,
+    suggested_display: str,
+    normalized: str,
+) -> None:
+    note_db, _links, decisions = context
+    organization = decisions.organization
+    suggestion_id = f"normalized-{case_id}"
+    _publish(
+        note_db,
+        suggestion_id=suggestion_id,
+        kind="tag",
+        normalized_tag=normalized,
+        display_tag=suggested_display,
+    )
+    original_capture = NotesOrganizationCoordinator.capture
+    injected = False
+
+    def capture_with_external_winner(self, **kwargs):
+        nonlocal injected
+        if not injected and kwargs.get("guarded_mutations"):
+            injected = True
+            external = organization.plan_keyword_create(
+                canonical_display,
+                idempotency_key=f"external-{case_id}",
+            )
+            original_capture(
+                organization,
+                steps=external.steps,
+                source="notes_api",
+                idempotency_key=f"external-{case_id}",
+            )
+        return original_capture(self, **kwargs)
+
+    monkeypatch.setattr(NotesOrganizationCoordinator, "capture", capture_with_external_winner)
+
+    result = decisions.accept(
+        dataset_id=DATASET_ID,
+        suggestion_id=suggestion_id,
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(note_db, SOURCE_ID),
+        expected_target_fingerprint=None,
+        idempotency_key=f"accept-{case_id}",
+    )
+
+    assert result.envelope["state"] == "accepted"
+    canonical = note_db.get_keyword_by_text(canonical_display)
+    assert canonical is not None
+    assert [row["sync_id"] for row in note_db.get_keywords_for_note(SOURCE_ID)] == [
+        canonical["sync_id"]
+    ]
+    assert len(note_db.keyword_store.list_keywords()) == 1
+    group_id = server_origin_mutation_batch_group_id(
+        dataset_id=DATASET_ID,
+        source="notes_graph_suggestion",
+        idempotency_key=f"notes-graph:{suggestion_id}:keyword",
+    )
+    group = organization.service.store.list_mutation_group(DATASET_ID, group_id)
+    assert len(group) == 1
+    assert group[0].apply_status == "superseded"
+    assert (
+        organization.service.store.get_object_state(
+            DATASET_ID,
+            "notes.keyword",
+            group[0].object_id,
+        )
+        is None
+    )
+
+
+def test_external_exact_relationship_win_finalizes_actual_canonical_edge(
+    context,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_db, _links, decisions = context
+    _publish(note_db, suggestion_id="related-external-win", kind="related_note")
+    external_dir = tmp_path / "external-sync"
+    external_dir.mkdir()
+    external_sync, external_store = _sync_service(external_dir, note_db)
+    external_links = NotesLinkCoordinator(
+        external_sync,
+        note_db,
+        OWNER_ID,
+        external_store.get_dataset(DATASET_ID),
+    )
+    original_upsert = NotesLinkStore.upsert
+    external_edge_id: list[str] = []
+
+    def upsert_with_external_winner(self, **kwargs):
+        if kwargs.get("before") is not None and not external_edge_id:
+            external = external_links.create(
+                source_note_id=SOURCE_ID,
+                target_note_id=TARGET_ID,
+                directed=False,
+                weight=1.0,
+                label=None,
+                properties={},
+                idempotency_key="external-exact-winner",
+            )
+            external_edge_id.append(external.edge_id)
+        return original_upsert(self, **kwargs)
+
+    monkeypatch.setattr(NotesLinkStore, "upsert", upsert_with_external_winner)
+
+    result = decisions.accept(
+        dataset_id=DATASET_ID,
+        suggestion_id="related-external-win",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(note_db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(note_db, TARGET_ID),
+        idempotency_key="related-external-win-request",
+    )
+
+    assert result.envelope["state"] == "accepted"
+    assert result.envelope["accepted_resource_identity"] == external_edge_id[0]
+    assert note_db.execute_query(
+        "SELECT COUNT(*) AS count FROM note_edges WHERE deleted=0"
+    ).fetchone()["count"] == 1
+
+
+def test_finalizer_failure_rolls_back_relationship_and_accept_receipt(
+    context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_db, _links, decisions = context
+    _publish(note_db, suggestion_id="related-finalizer-failure", kind="related_note")
+
+    def fail_finalizer(_self, **_kwargs):
+        raise RuntimeError("injected finalizer failure")
+
+    monkeypatch.setattr(
+        type(decisions.store),
+        "finalize_acceptance_in_transaction",
+        fail_finalizer,
+    )
+
+    with pytest.raises(SyncServerOriginBatchMaterializationError):
+        decisions.accept(
+            dataset_id=DATASET_ID,
+            suggestion_id="related-finalizer-failure",
+            expected_revision=1,
+            expected_source_fingerprint=_fingerprint(note_db, SOURCE_ID),
+            expected_target_fingerprint=_fingerprint(note_db, TARGET_ID),
+            idempotency_key="related-finalizer-failure-request",
+        )
+
+    assert note_db.execute_query(
+        "SELECT COUNT(*) AS count FROM note_edges WHERE deleted=0"
+    ).fetchone()["count"] == 0
+    suggestion = decisions.store.get_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="related-finalizer-failure",
+    )
+    assert suggestion.state.value == "accepting"
+    receipt = note_db.execute_query(
+        "SELECT state FROM note_graph_suggestion_operation_receipts WHERE id=?",
+        (suggestion.decision_receipt_id,),
+    ).fetchone()
+    assert receipt["state"] == "in_progress"
+
+
+def test_accept_vs_edit_barrier_rolls_back_link_after_fingerprint_invalidation(
+    context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_db, _links, decisions = context
+    _publish(note_db, suggestion_id="related-edit-race", kind="related_note")
+    entered = Event()
+    release = Event()
+    original_create = NotesLinkCoordinator.create
+
+    def blocked_create(self, **kwargs):
+        if kwargs.get("guarded_mutation") is not None:
+            entered.set()
+            assert release.wait(10)
+        return original_create(self, **kwargs)
+
+    monkeypatch.setattr(NotesLinkCoordinator, "create", blocked_create)
+    request = {
+        "dataset_id": DATASET_ID,
+        "suggestion_id": "related-edit-race",
+        "expected_revision": 1,
+        "expected_source_fingerprint": _fingerprint(note_db, SOURCE_ID),
+        "expected_target_fingerprint": _fingerprint(note_db, TARGET_ID),
+        "idempotency_key": "related-edit-race-request",
+    }
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(decisions.accept, **request)
+        assert entered.wait(10)
+        assert note_db.update_note(SOURCE_ID, {"content": "edited"}, expected_version=1)
+        release.set()
+        with pytest.raises(SyncServerOriginBatchMaterializationError):
+            future.result(timeout=10)
+
+    assert note_db.execute_query(
+        "SELECT COUNT(*) AS count FROM note_edges WHERE deleted=0"
+    ).fetchone()["count"] == 0
+    assert decisions.store.get_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="related-edit-race",
+    ).state.value == "stale"
+
+
+def test_regeneration_supersedes_duplicate_then_real_acceptance_finalizes_current(
+    context,
+) -> None:
+    note_db, _links, decisions = context
+    _publish(note_db, suggestion_id="related-old-generation", kind="related_note")
+    _publish(
+        note_db,
+        suggestion_id="related-new-generation",
+        kind="related_note",
+        model="model-b",
+    )
+
+    result = decisions.accept(
+        dataset_id=DATASET_ID,
+        suggestion_id="related-new-generation",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(note_db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(note_db, TARGET_ID),
+        idempotency_key="related-new-generation-request",
+    )
+
+    assert result.envelope["state"] == "accepted"
+    superseded = decisions.store.get_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="related-old-generation",
+    )
+    assert superseded.state.value == "stale"
+    assert superseded.decision_reason == "superseded_by_run"
+    assert note_db.notes_link_store.get(result.envelope["accepted_resource_identity"]) is not None
+
+
+def test_old_fence_late_worker_cannot_write_after_expired_takeover(
+    context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_db, _links, decisions = context
+    _publish(note_db, suggestion_id="related-old-fence", kind="related_note")
+    entered = Event()
+    release = Event()
+    original_create = NotesLinkCoordinator.create
+
+    def blocked_create(self, **kwargs):
+        if kwargs.get("guarded_mutation") is not None:
+            entered.set()
+            assert release.wait(10)
+        return original_create(self, **kwargs)
+
+    monkeypatch.setattr(NotesLinkCoordinator, "create", blocked_create)
+    request = {
+        "dataset_id": DATASET_ID,
+        "suggestion_id": "related-old-fence",
+        "expected_revision": 1,
+        "expected_source_fingerprint": _fingerprint(note_db, SOURCE_ID),
+        "expected_target_fingerprint": _fingerprint(note_db, TARGET_ID),
+        "idempotency_key": "related-old-fence-request",
+    }
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(decisions.accept, **request)
+        assert entered.wait(10)
+        claims = decisions.store.claim_expired_acceptances(
+            dataset_id=DATASET_ID,
+            limit=1,
+            now=NOW + timedelta(minutes=6),
+        )
+        assert len(claims) == 1
+        decisions.store.resolve_expired_acceptance(
+            fence=claims[0],
+            accepted_resource_identity=None,
+            resolved_keyword_sync_id=None,
+            now=NOW + timedelta(minutes=6),
+        )
+        release.set()
+        with pytest.raises(SyncServerOriginBatchMaterializationError):
+            future.result(timeout=10)
+
+    assert note_db.execute_query(
+        "SELECT COUNT(*) AS count FROM note_edges WHERE deleted=0"
+    ).fetchone()["count"] == 0
+    assert decisions.store.get_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="related-old-fence",
+    ).state.value == "pending"
+
+
+def test_deleted_keyword_restore_wins_before_fenced_stale_closure(
+    context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note_db, _links, decisions = context
+    organization = decisions.organization
+    keyword_plan = organization.plan_keyword_create("Restorable", idempotency_key="restorable")
+    _capture_plan(organization, keyword_plan, key="restorable")
+    keyword = keyword_plan.load_result()
+    _publish(
+        note_db,
+        suggestion_id="tag-restored",
+        kind="tag",
+        keyword_sync_id=keyword["sync_id"],
+        normalized_tag="restorable",
+        display_tag="Restorable",
+    )
+    deletion = organization.plan_resource_delete(
+        "notes.keyword",
+        keyword["id"],
+        expected_version=keyword["version"],
+    )
+    _capture_plan(organization, deletion, key="delete-restorable")
+    missing_seen = Event()
+    restored = Event()
+    original_resolve = decisions._resolve_keyword
+    first = True
+
+    def blocked_missing_resolution(*args, **kwargs):
+        nonlocal first
+        resolution = original_resolve(*args, **kwargs)
+        if first:
+            first = False
+            assert resolution[1] is True
+            missing_seen.set()
+            assert restored.wait(10)
+        return resolution
+
+    monkeypatch.setattr(decisions, "_resolve_keyword", blocked_missing_resolution)
+    request = {
+        "dataset_id": DATASET_ID,
+        "suggestion_id": "tag-restored",
+        "expected_revision": 1,
+        "expected_source_fingerprint": _fingerprint(note_db, SOURCE_ID),
+        "expected_target_fingerprint": None,
+        "idempotency_key": "tag-restored-request",
+    }
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(decisions.accept, **request)
+        assert missing_seen.wait(10)
+        restore = ServerOriginMutationStep(
+            domain="notes.keyword",
+            operation="upsert",
+            object_id=keyword["sync_id"],
+            payload={"keyword": "Restorable"},
+            routing_metadata={"restore_intent": True},
+        )
+        organization.capture(
+            steps=(restore,),
+            source="notes_api",
+            idempotency_key="restore-restorable",
+        )
+        restored.set()
+        result = future.result(timeout=10)
+
+    assert result.envelope["state"] == "accepted"
+    assert [row["sync_id"] for row in note_db.get_keywords_for_note(SOURCE_ID)] == [
+        keyword["sync_id"]
+    ]
 
 
 def _capture_plan(organization: NotesOrganizationCoordinator, plan, *, key: str) -> None:

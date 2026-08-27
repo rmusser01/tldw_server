@@ -376,16 +376,20 @@ class SuggestionMaintenance:
                 reconciled += 1
                 self._record_reconciliation(run, reconciled_run)
 
+        acceptance_remaining = limit
         for scope in self._scopes:
+            if acceptance_remaining == 0:
+                break
             if scope.decision_service is None:
                 continue
             decisions = scope.decision_service.reconcile_expired(
                 dataset_id=scope.dataset_id,
-                limit=limit,
+                limit=acceptance_remaining,
                 now=now,
             )
             claimed += len(decisions)
             reconciled += len(decisions)
+            acceptance_remaining -= min(acceptance_remaining, len(decisions))
 
         cleaned = 0
         cleanup_remaining = max(0, limit - claimed)

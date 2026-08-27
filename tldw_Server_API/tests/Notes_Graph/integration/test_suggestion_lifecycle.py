@@ -2460,9 +2460,11 @@ def test_postgres_task7_transaction_guard_finalizer_and_expired_takeover(
     db = _new_db(tmp_path, backend=backend)
     source = "90000000-0000-4000-8000-000000000701"
     target = "90000000-0000-4000-8000-000000000702"
+    takeover_target = "90000000-0000-4000-8000-000000000704"
     try:
         db.add_note("Task 7 source", "body", note_id=source)
         db.add_note("Task 7 target", "body", note_id=target)
+        db.add_note("Task 7 takeover target", "body", note_id=takeover_target)
         store = db.note_graph_suggestion_store
         _publish_related(
             db,
@@ -2481,24 +2483,43 @@ def test_postgres_task7_transaction_guard_finalizer_and_expired_takeover(
             now=NOW,
         ).suggestion
         assert finalized_fence is not None
+        accepted_edge_id = "90000000-0000-4000-8000-000000000703"
         with db.transaction() as conn:
             store.guard_acceptance_in_transaction(
                 conn=conn,
                 fence=finalized_fence,
                 now=NOW,
             )
+            db.notes_link_store.upsert(
+                edge_id=accepted_edge_id,
+                payload={
+                    "source_note_id": source,
+                    "target_note_id": target,
+                    "type": "manual",
+                    "directed": False,
+                    "weight": 1.0,
+                    "label": None,
+                    "properties": {},
+                    "created_at": NOW.isoformat(),
+                    "last_modified": NOW.isoformat(),
+                    "created_by": "server-origin",
+                },
+                expected_version=None,
+                conn=conn,
+            )
             accepted = store.finalize_acceptance_in_transaction(
                 conn=conn,
                 fence=finalized_fence,
-                accepted_resource_identity="90000000-0000-4000-8000-000000000703",
+                accepted_resource_identity=accepted_edge_id,
                 now=NOW,
             )
         assert accepted.envelope["state"] == "accepted"
+        assert db.notes_link_store.get(accepted_edge_id) is not None
 
         _publish_related(
             db,
             source=source,
-            target=target,
+            target=takeover_target,
             key="task7-pg-takeover-run",
             suggestion_id="task7-pg-takeover",
             model="model-b",
@@ -2508,7 +2529,7 @@ def test_postgres_task7_transaction_guard_finalizer_and_expired_takeover(
             suggestion_id="task7-pg-takeover",
             expected_revision=1,
             expected_source_fingerprint=_note_fingerprint(db, source),
-            expected_target_fingerprint=_note_fingerprint(db, target),
+            expected_target_fingerprint=_note_fingerprint(db, takeover_target),
             idempotency_key="task7-pg-takeover-key",
             now=NOW,
         ).suggestion

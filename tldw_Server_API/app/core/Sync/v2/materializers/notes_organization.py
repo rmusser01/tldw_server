@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+    GuardedKeywordIdentityCollision,
     NotesOrganizationSyncStore,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -243,6 +244,12 @@ class NotesOrganizationMaterializer:
                 envelope.server_cursor,
                 apply_status="applied",
             )
+        except GuardedKeywordIdentityCollision:
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="superseded",
+            )
+            return MaterializationResult(status="applied")
         except Exception as exc:  # noqa: BLE001 - every projection failure is replayable state.
             message = _safe_error_message(exc)
             logger.warning(

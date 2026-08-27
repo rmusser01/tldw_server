@@ -975,7 +975,7 @@ def _materialize_group_guarded(
             return _materialization_result(dataset, group), False
         if materialization.status == "failed" or current.apply_status == "failed":
             return _materialization_result(dataset, group), True
-        if current.apply_status != "applied":
+        if current.apply_status not in {"applied", "superseded"}:
             if current.server_cursor is None:
                 raise SyncIdempotencyConflictError(
                     "Sync stored mutation group step has no server cursor"

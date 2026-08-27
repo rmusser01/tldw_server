@@ -728,6 +728,8 @@ def test_reject_and_reset_are_receipt_atomic_with_monotonic_revision(db) -> None
         now=NOW,
     )
     assert rejected.envelope == {"suggestion_id": "reject-me", "state": "rejected", "revision": 2}
+    assert rejected.suggestion is not None
+    assert rejected.suggestion.state.value == "rejected"
     assert rejected.rejection_set.revision == 1
     assert rejected.rejection_set.rejection_count == 1
     assert db.execute_query(
@@ -772,6 +774,36 @@ def test_reject_and_reset_are_receipt_atomic_with_monotonic_revision(db) -> None
     )
     assert zero_reset.envelope["cleared_count"] == 0
     assert zero_reset.rejection_set.revision == 3
+
+    _stage_and_activate(db, key="later-reject-run", suggestion_id="later-reject")
+    later_rejected = db.note_graph_suggestion_store.reject_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="later-reject",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="later-reject-key",
+        now=NOW,
+    )
+    assert later_rejected.rejection_set.revision == 4
+    assert later_rejected.rejection_set.rejection_count == 1
+
+    old_reset_replay = db.note_graph_suggestion_store.reset_rejections(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_revision=2,
+        idempotency_key="reset-key-b",
+        now=NOW,
+    )
+    assert old_reset_replay.disposition == "terminal_replay"
+    current_rejection_set = db.execute_query(
+        "SELECT revision,rejection_count FROM note_graph_suggestion_rejection_sets "
+        "WHERE owner_user_id=? AND dataset_id=? AND source_note_id=?",
+        (db.client_id, DATASET_ID, SOURCE_ID),
+    ).fetchone()
+    assert tuple(current_rejection_set) == (4, 1)
+
     with pytest.raises(RuntimeError, match="notes_graph_rejection_set_conflict"):
         db.note_graph_suggestion_store.reset_rejections(
             dataset_id=DATASET_ID,
@@ -1171,6 +1203,7 @@ def test_deleted_keyword_identity_marks_acceptance_stale_and_closes_receipt(db) 
     stale = store.mark_acceptance_stale(
         fence=fence,
         reason="canonical_resource_missing",
+        verifier=lambda _conn: True,
         now=NOW,
     )
     assert stale.envelope == {

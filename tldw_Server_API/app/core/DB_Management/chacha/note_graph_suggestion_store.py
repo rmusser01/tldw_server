@@ -2173,7 +2173,13 @@ class NoteGraphSuggestionStore:
                 http_status=200,
                 now_utc=now_utc,
             )
-            return MutationResult("completed", envelope, rejection_set=rejection_set)
+            rejected = self._load_suggestion(conn, dataset, suggestion_id)
+            return MutationResult(
+                "completed",
+                envelope,
+                rejection_set=rejection_set,
+                suggestion=rejected,
+            )
 
         return self._with_dataset_scope(dataset, mutate)
 
@@ -3081,6 +3087,7 @@ class NoteGraphSuggestionStore:
         *,
         fence: NoteGraphSuggestion,
         reason: Literal["canonical_resource_missing"],
+        verifier: Callable[[SuggestionConnection], bool],
         now: datetime,
     ) -> MutationResult:
         """Close one exact acceptance fence when its portable resource disappeared."""
@@ -3095,6 +3102,13 @@ class NoteGraphSuggestionStore:
                 fence=fence,
                 now_utc=now_utc,
             )
+            if not verifier(conn):
+                return MutationResult(
+                    "in_progress",
+                    {},
+                    suggestion=current,
+                    continuation="canonical_resource_restored",
+                )
             return self._mark_acceptance_stale_locked(
                 conn,
                 current=current,

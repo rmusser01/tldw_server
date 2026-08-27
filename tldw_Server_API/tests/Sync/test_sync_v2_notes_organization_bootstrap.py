@@ -844,9 +844,19 @@ def test_stale_pending_step_is_reconciled_only_after_verified_correction(
     )
     original_mark_verified = store.mark_bootstrap_envelope_verified
 
-    def reject_stale_preflight_mark(server_cursor: int, *, bootstrap_id: str):
+    def reject_stale_preflight_mark(
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        notes_task_bootstrap: bool = False,
+    ):
+        assert notes_task_bootstrap is False
         assert server_cursor != stale.server_cursor
-        return original_mark_verified(server_cursor, bootstrap_id=bootstrap_id)
+        return original_mark_verified(
+            server_cursor,
+            bootstrap_id=bootstrap_id,
+            notes_task_bootstrap=notes_task_bootstrap,
+        )
 
     monkeypatch.setattr(
         store,
@@ -984,7 +994,13 @@ def test_reverted_source_defers_stale_audit_until_matching_correction_is_applied
     original_mark_verified = store.mark_bootstrap_envelope_verified
     original_reconcile = store.reconcile_bootstrap_envelope_superseded
 
-    def record_verified(server_cursor: int, *, bootstrap_id: str):
+    def record_verified(
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        notes_task_bootstrap: bool = False,
+    ):
+        assert notes_task_bootstrap is False
         envelope = next(
             item
             for item in _organization_envelopes(store)
@@ -992,7 +1008,11 @@ def test_reverted_source_defers_stale_audit_until_matching_correction_is_applied
         )
         assert envelope.payload == {"keyword": "A"}
         chronology.append(("verified", server_cursor))
-        return original_mark_verified(server_cursor, bootstrap_id=bootstrap_id)
+        return original_mark_verified(
+            server_cursor,
+            bootstrap_id=bootstrap_id,
+            notes_task_bootstrap=notes_task_bootstrap,
+        )
 
     def record_reconciled(
         server_cursor: int,

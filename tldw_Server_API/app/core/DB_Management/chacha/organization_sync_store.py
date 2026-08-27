@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from collections import defaultdict, deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -35,6 +36,14 @@ class OrganizationResource:
     parent_sync_id: str | None
     deleted: bool
     version: int
+
+
+class GuardedKeywordIdentityCollision(ConflictError):
+    """Carry the existing portable identity to the guarded materializer."""
+
+    def __init__(self, canonical_sync_id: str) -> None:
+        super().__init__("Normalized keyword identity already exists", entity="keywords")
+        self.canonical_sync_id = canonical_sync_id
 
 
 @dataclass(frozen=True)
@@ -150,15 +159,103 @@ class NotesOrganizationSyncStore:
         ).fetchone()
         return self._resource_from_row(conn, domain, row) if row else None
 
+    @staticmethod
+    def normalize_keyword_identity(display: str) -> str:
+        """Return the portable keyword identity used by every database backend."""
+
+        return unicodedata.normalize("NFC", display.strip()).casefold()
+
+    def _serialize_keyword_identity(self, conn: Any, normalized_identity: str) -> None:
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return
+        digest = hashlib.sha256(
+            f"{self._owner_id}\0{normalized_identity}".encode()
+        ).digest()
+        lock_keys = (
+            int.from_bytes(digest[:4], "big", signed=True),
+            int.from_bytes(digest[4:8], "big", signed=True),
+        )
+        conn.execute("SELECT pg_advisory_xact_lock(?, ?)", lock_keys).fetchone()
+
+    def _find_keyword_by_normalized_identity_locked(
+        self,
+        conn: Any,
+        display: str,
+        *,
+        include_deleted: bool,
+        for_update: bool,
+        serialize: bool,
+    ) -> OrganizationResource | None:
+        normalized_identity = self.normalize_keyword_identity(display)
+        if serialize:
+            self._serialize_keyword_identity(conn, normalized_identity)
+        table, name_column = self._table("notes.keyword")
+        query = (
+            f"SELECT * FROM {table} WHERE client_id = ? ORDER BY deleted, id"  # nosec B608
+        )
+        if for_update and self._db.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        rows = conn.execute(query, (self._owner_id,)).fetchall()
+        for row in rows:
+            resource = self._resource_from_row(conn, "notes.keyword", row)
+            if (
+                (include_deleted or not resource.deleted)
+                and self.normalize_keyword_identity(resource.name) == normalized_identity
+            ):
+                return resource
+        return None
+
+    def find_keyword_by_normalized_identity(
+        self,
+        display: str,
+        *,
+        conn: Any | None = None,
+        include_deleted: bool = False,
+        for_update: bool = False,
+    ) -> OrganizationResource | None:
+        """Return the exact owner-scoped portable keyword identity, if present."""
+
+        if conn is not None:
+            return self._find_keyword_by_normalized_identity_locked(
+                conn,
+                display,
+                include_deleted=include_deleted,
+                for_update=for_update,
+                serialize=False,
+            )
+        with self._db.transaction() as transaction:
+            return self._find_keyword_by_normalized_identity_locked(
+                transaction,
+                display,
+                include_deleted=include_deleted,
+                for_update=for_update,
+                serialize=False,
+            )
+
     def get_resource(
         self,
         domain: SyncDomain,
         sync_id: str,
+        *,
+        conn: Any | None = None,
+        for_update: bool = False,
     ) -> OrganizationResource | None:
         """Return one active or deleted resource by canonical identity."""
 
-        with self._db.transaction() as conn:
-            return self._get_resource_locked(conn, domain, sync_id)
+        if conn is not None:
+            return self._get_resource_locked(
+                conn,
+                domain,
+                sync_id,
+                for_update=for_update,
+            )
+        with self._db.transaction() as transaction:
+            return self._get_resource_locked(
+                transaction,
+                domain,
+                sync_id,
+                for_update=for_update,
+            )
 
     def get_resource_row_by_local_id(
         self,
@@ -166,6 +263,8 @@ class NotesOrganizationSyncStore:
         local_id: int,
         *,
         include_deleted: bool = False,
+        conn: Any | None = None,
+        for_update: bool = False,
     ) -> dict[str, Any] | None:
         """Return one owner-scoped resource row by its local product identity."""
 
@@ -175,8 +274,13 @@ class NotesOrganizationSyncStore:
         if not include_deleted:
             query += " AND deleted = ?"
             params.append(self._deleted_value(False))
-        with self._db.transaction() as conn:
+        if for_update and self._db.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        if conn is not None:
             row = conn.execute(query, tuple(params)).fetchone()
+        else:
+            with self._db.transaction() as transaction:
+                row = transaction.execute(query, tuple(params)).fetchone()
         return dict(row) if row is not None else None
 
     def snapshot(self) -> OrganizationSnapshot:
@@ -602,17 +706,30 @@ class NotesOrganizationSyncStore:
                 )
 
             name = str(normalized[name_column]).strip()
-            duplicate = conn.execute(
-                f"SELECT id, sync_id FROM {table} WHERE LOWER({name_column}) = LOWER(?) "  # nosec B608
-                "AND sync_id <> ? AND client_id = ? LIMIT 1",
-                (name, object_id, self._owner_id),
-            ).fetchone()
-            if duplicate:
-                raise ConflictError(
-                    f"{domain} name already exists",
-                    entity=table,
-                    entity_id=name,
+            if before is not None:
+                before(conn)
+            if domain == "notes.keyword" and before is not None:
+                canonical = self._find_keyword_by_normalized_identity_locked(
+                    conn,
+                    name,
+                    include_deleted=True,
+                    for_update=True,
+                    serialize=True,
                 )
+                if canonical is not None and canonical.sync_id != object_id:
+                    raise GuardedKeywordIdentityCollision(canonical.sync_id)
+            else:
+                duplicate = conn.execute(
+                    f"SELECT id, sync_id FROM {table} WHERE LOWER({name_column}) = LOWER(?) "  # nosec B608
+                    "AND sync_id <> ? AND client_id = ? LIMIT 1",
+                    (name, object_id, self._owner_id),
+                ).fetchone()
+                if duplicate:
+                    raise ConflictError(
+                        f"{domain} name already exists",
+                        entity=table,
+                        entity_id=name,
+                    )
             parent_id = None
             if domain == "notes.keyword_collection":
                 parent_id = self._validated_parent_id(
@@ -621,8 +738,6 @@ class NotesOrganizationSyncStore:
                     object_id=object_id,
                     parent_sync_id=normalized.get("parent_sync_id"),
                 )
-            if before is not None:
-                before(conn)
             now = self._db._get_current_utc_timestamp_iso()
             if existing is None:
                 columns = ["sync_id", name_column]
