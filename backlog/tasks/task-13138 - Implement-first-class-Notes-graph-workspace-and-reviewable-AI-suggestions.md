@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 20:08
+updated_date: 2026-08-27 21:45
 labels:
 - notes
 - knowledge-graph
@@ -183,7 +183,10 @@ Task 7 Fix Round 3 started from exact base b220b566b513394a5771ed1525b057e3737e7
 Task 7 Fix Round 3 completed from exact base b220b566b513394a5771ed1525b057e3737e7741. Added DB-owned PostgreSQL canonical suggestion-identity advisory serialization across activation, accepted finalization, exact reconciliation, and stale verification; expanded both live coordinator barriers to prove post-finalizer convergence and full transaction-local link/receipt/row/evidence atomicity. Verification: exact Task 7 42 passed; Task 3/5 95 passed; v64 SQLite/live PostgreSQL 30 passed; relevant Sync 158 passed; Ruff clean; Bandit 0 findings; diff check clean. Full evidence is in the ignored task-7-report.md. Parent task remains In Progress for Tasks 8-12.
 Task 8 started from exact base b7b8b725642d45afbcb67da54a8801bbd128ae76. Scope is the approved nested Notes graph suggestions API, schemas, RBAC/catalog migration and graph-read metadata only. Strict schema, static-route-order, endpoint, permission, token-scope, and OpenAPI RED tests will precede production edits; legacy keyword endpoint permissions remain unchanged.
 Task 8 NEEDS_CONTEXT at base b7b8b725642d45afbcb67da54a8801bbd128ae76. The approved thin API requires bounded source-scoped run listing, fingerprint-checked evidence/rejection-set reads, durable cancellation continuation, and one shared capability resolver, but the Task 3/5/7 domain surface exposes no API-ready contracts for those operations. Implementing them in FastAPI would put SQL/state-machine sequencing in endpoints or duplicate the worker capability revision. Requested narrow authorization: extend the owner-bound suggestion store plus suggestion Jobs/service capability facade for these exact operations, retaining Jobs calls outside ChaCha transactions and all existing CAS/receipt/fencing authority. No production/tests changed; details are in the ignored task-8-report.md.
+Task 8 resumed from blocker commit 2148f5bcf372950e8e657c5a0ffe6d16d38e4b40 after controller authorization. Narrow added scope: owner/dataset/source-scoped store reads for runs/evidence/rejection sets; one core API facade; one typed Jobs cancellation coordinator reused by maintenance; and one shared provider-capability resolver used by API admission/preflight and worker revalidation. Strict RED precedes every production edit; endpoints remain transport-only and nested.
+Task 8 implementation completed locally from blocker commit 2148f5bcf372950e8e657c5a0ffe6d16d38e4b40 under the authorized store/facade/cancellation/shared-resolver scope. Added nested Notes graph suggestion schemas/routes, graph-read metadata, migration 94 permissions/default grants, bounded owner-scoped reads, durable receipt-first cancellation/admission orchestration, opaque cursors, stable errors, and API/worker capability revision parity. Final Task 8 API gate: 45 passed with no skips; affected Task 3/5/7 core gate: 248 passed and 8 jobs-suite-only PostgreSQL prune skips; Ruff clean; Bandit 0 findings; diff check clean. Known unchanged baseline issues are documented in the ignored task-8-report.md: one legacy Notes graph delete-link message assertion, three stale v61 PostgreSQL migration expectations, and one stale privilege snapshot. Parent TASK-13138 remains In Progress for Tasks 9-12.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

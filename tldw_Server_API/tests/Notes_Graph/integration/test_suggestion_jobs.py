@@ -97,7 +97,29 @@ def test_admission_uses_content_free_exact_job_contract_and_replays(stores) -> N
     assert first.run.job_id == first.job["uuid"]
     assert first.run.expected_completion_token.startswith("placeholder_")
     assert replay.disposition == "terminal_replay"
+    assert replay.replay_envelope == {"run_id": first.run.id, "state": "queued"}
     assert jobs.count_jobs(domain=JOB_DOMAIN, owner_user_id="owner-1") == 1
+
+
+def test_terminal_admission_replay_returns_the_stored_envelope_without_jobs_lookup(
+    stores,
+    monkeypatch,
+) -> None:
+    notes, jobs = stores
+    first = _admit(notes, jobs, key="terminal-envelope")
+    monkeypatch.setattr(
+        jobs,
+        "get_job_or_archived_by_idempotency_key",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("terminal replay must not consult Jobs")
+        ),
+    )
+
+    replay = _admit(notes, jobs, key="terminal-envelope")
+
+    assert replay.disposition == "terminal_replay"
+    assert replay.replay_envelope == {"run_id": first.run.id, "state": "queued"}
+    assert replay.job is None
 
 
 def test_admission_recovers_before_enqueue_and_never_calls_provider(stores, monkeypatch) -> None:

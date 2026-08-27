@@ -306,7 +306,15 @@ async def get_notes_graph(
         )
         graph = service.generate_graph(req)
         if req.format == GraphFormat.cytoscape:
-            return to_cytoscape(graph)
+            formatted = to_cytoscape(graph)
+            formatted.update(
+                {
+                    "active_note_count": graph.active_note_count,
+                    "all_notes_note_cap": graph.all_notes_note_cap,
+                    "all_notes_eligible": graph.all_notes_eligible,
+                }
+            )
+            return formatted
         return graph
     except HTTPException:
         raise

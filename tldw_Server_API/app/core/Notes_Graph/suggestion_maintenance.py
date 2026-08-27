@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from .suggestion_jobs import PublicationReceiptError, validate_publication_receipt
+from .suggestion_jobs import (
+    PublicationReceiptError,
+    SuggestionCancellationCoordinator,
+    validate_publication_receipt,
+)
 from .suggestion_observability import (
     SuggestionErrorCode,
     SuggestionEventName,
@@ -191,19 +195,6 @@ class SuggestionMaintenance:
             and job.get("job_type") == "note_graph_suggestions"
         )
 
-    @staticmethod
-    def _continuation_matches_claim(run: Any, continuation: Any) -> bool:
-        continued = getattr(continuation, "run", None)
-        return (
-            getattr(continuation, "disposition", None) == "in_progress"
-            and continued is not None
-            and continued.id == run.id
-            and continued.state.value == run.state.value
-            and continued.revision == run.revision
-            and continued.job_id == run.job_id
-            and continued.maintenance_lease_token == run.maintenance_lease_token
-        )
-
     def _resume_cancellation(
         self,
         *,
@@ -213,32 +204,19 @@ class SuggestionMaintenance:
         job: dict[str, Any] | None,
         now: datetime,
     ) -> tuple[dict[str, Any] | None, bool]:
-        continuation = scope.store.get_run_cancellation_continuation(
+        result = SuggestionCancellationCoordinator(
+            store=scope.store,
+            jobs=self._jobs,
+            owner_user_id=run.owner_user_id,
+        ).resume(
             dataset_id=scope.dataset_id,
             operation_id=context.operation_id,
+            now=now,
+            job=job,
+            expected_run=run,
         )
-        if not self._continuation_matches_claim(run, continuation):
-            return job, False
-
-        accepted = job is not None and job.get("status") in _TERMINAL_JOB_STATUSES
-        if job is not None and not accepted:
-            accepted = self._jobs.cancel_job(
-                int(job["id"]),
-                reason="requested",
-                expected_uuid=run.job_id,
-                expected_domain="notes",
-                expected_job_type="note_graph_suggestions",
-                cascade_dependents=False,
-            )
-        if accepted:
-            scope.store.complete_run_cancellation_receipt(
-                dataset_id=scope.dataset_id,
-                run_id=run.id,
-                operation_id=context.operation_id,
-                expected_state=run.state.value,
-                expected_revision=run.revision,
-                now=now,
-            )
+        job = result.job
+        accepted = result.accepted
 
         if job is not None and job.get("status") not in _TERMINAL_JOB_STATUSES:
             job = self._jobs.get_job_or_archived_by_uuid(

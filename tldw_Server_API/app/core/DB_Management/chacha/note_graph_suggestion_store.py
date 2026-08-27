@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import json
 import re
 import secrets
@@ -21,12 +19,17 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fing
 from ..ChaChaNotes_DB import BackendConnectionWrapper, BackendType
 from .note_graph_suggestion_models import (
     NoteGraphSuggestion,
+    NoteGraphSuggestionEvidence,
+    NoteGraphSuggestionEvidenceField,
+    NoteGraphSuggestionEvidenceRead,
+    NoteGraphSuggestionEvidenceSide,
     NoteGraphSuggestionKind,
     NoteGraphSuggestionOperationKind,
     NoteGraphSuggestionRejectionSet,
     NoteGraphSuggestionRun,
     NoteGraphSuggestionRunState,
     NoteGraphSuggestionState,
+    SuggestionEvidenceNote,
 )
 
 if TYPE_CHECKING:
@@ -68,6 +71,7 @@ class RunCancellationResult:
     run: NoteGraphSuggestionRun | None = None
     continuation: str | None = None
     replay_envelope: dict[str, Any] | None = None
+    source_note_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +88,15 @@ class SuggestionPage:
     """One stable keyset page of visible suggestions."""
 
     items: tuple[NoteGraphSuggestion, ...]
-    next_cursor: str | None
+    next_position: tuple[str, str] | None
+
+
+@dataclass(frozen=True, slots=True)
+class RunPage:
+    """One stable keyset page of owner/source-scoped runs."""
+
+    items: tuple[NoteGraphSuggestionRun, ...]
+    next_position: tuple[str, str] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +141,6 @@ class NoteGraphSuggestionStore:
             "source_fingerprint": (str, False, 128),
             "provider": (str, False, 128),
             "model": (str, False, 256),
-            "capability_revision": (str, False, 128),
             "prompt_contract_version": (str, False, 128),
         },
         "run_cancel": {
@@ -263,10 +274,18 @@ class NoteGraphSuggestionStore:
         if row is None:
             raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
 
-    def _source_byte_expression(self) -> str:
+    def _source_byte_expression(self, alias: str = "n") -> str:
+        if alias not in {"n", "note"}:
+            raise ValueError("notes_graph_note_alias_invalid")
         if self.is_postgres:
-            return "octet_length(COALESCE(n.title, '')) + octet_length(COALESCE(n.content, ''))"
-        return "length(CAST(COALESCE(n.title, '') AS BLOB)) + length(CAST(COALESCE(n.content, '') AS BLOB))"
+            return (
+                f"octet_length(COALESCE({alias}.title, '')) + "
+                f"octet_length(COALESCE({alias}.content, ''))"
+            )
+        return (
+            f"length(CAST(COALESCE({alias}.title, '') AS BLOB)) + "
+            f"length(CAST(COALESCE({alias}.content, '') AS BLOB))"
+        )
 
     @staticmethod
     def idempotency_key_digest(idempotency_key: str) -> str:
@@ -483,6 +502,76 @@ class NoteGraphSuggestionStore:
             lambda conn: self._load_run(conn, dataset, run_id),
         )
 
+    @classmethod
+    def _page_position(cls, after: tuple[str, str] | None, *, code: str) -> tuple[str, str] | None:
+        if after is None:
+            return None
+        if (
+            not isinstance(after, tuple)
+            or len(after) != 2
+            or not isinstance(after[0], str)
+            or len(after[0]) > 64
+            or not isinstance(after[1], str)
+            or not cls._SAFE_ID_PATTERN.fullmatch(after[1])
+        ):
+            raise ValueError(code)
+        try:
+            datetime.fromisoformat(after[0].replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(code) from exc
+        return after
+
+    def list_runs(
+        self,
+        *,
+        dataset_id: str,
+        source_note_id: str,
+        states: tuple[str, ...],
+        limit: int,
+        after: tuple[str, str] | None,
+    ) -> RunPage:
+        """Return a bounded deterministic page within one owner/source scope."""
+
+        dataset = self._scope(dataset_id)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("notes_graph_run_page_limit_invalid")
+        allowed_states = {state.value for state in NoteGraphSuggestionRunState}
+        if not states or any(state not in allowed_states for state in states):
+            raise ValueError("notes_graph_run_state_filter_invalid")
+        state_values = tuple(sorted(set(states)))
+        position = self._page_position(after, code="notes_graph_run_page_position_invalid")
+
+        def read(conn: SuggestionConnection) -> RunPage:
+            placeholders = ",".join("?" for _ in state_values)
+            query = (
+                "SELECT * FROM note_graph_suggestion_runs WHERE owner_user_id=? AND dataset_id=? "
+                "AND source_note_id=? "
+                f"AND state IN ({placeholders}) "  # nosec B608
+            )
+            params: list[object] = [
+                self.owner_user_id,
+                dataset,
+                source_note_id,
+                *state_values,
+            ]
+            if position is not None:
+                query += "AND (created_at < ? OR (created_at = ? AND id > ?)) "
+                params.extend((position[0], position[0], position[1]))
+            query += "ORDER BY created_at DESC,id ASC LIMIT ?"
+            params.append(limit + 1)
+            rows = conn.execute(query, tuple(params)).fetchall()
+            visible = rows[:limit]
+            next_position = None
+            if len(rows) > limit and visible:
+                last = visible[-1]
+                next_position = (self._iso(last["created_at"]) or "", str(last["id"]))
+            return RunPage(
+                items=tuple(self._run_from_row(row) for row in visible),
+                next_position=next_position,
+            )
+
+        return self._with_dataset_scope(dataset, read)
+
     def list_maintenance_dataset_ids(self, *, limit: int = 100) -> tuple[str, ...]:
         """List owner datasets containing durable suggestion orchestration state."""
 
@@ -534,6 +623,13 @@ class NoteGraphSuggestionStore:
         now_utc = self._aware_utc(now)
         key_digest = self.idempotency_key_digest(idempotency_key)
         try:
+            if (
+                not isinstance(capability_revision, str)
+                or not capability_revision.strip()
+                or capability_revision != capability_revision.strip()
+                or len(capability_revision.encode("utf-8")) > 128
+            ):
+                raise ValueError("notes_graph_admission_contract_invalid")
             request_fingerprint = self.canonical_request_fingerprint(
                 "run_admit",
                 {
@@ -541,7 +637,6 @@ class NoteGraphSuggestionStore:
                     "source_fingerprint": source_fingerprint,
                     "provider": provider,
                     "model": model,
-                    "capability_revision": capability_revision,
                     "prompt_contract_version": prompt_contract_version,
                 },
             )
@@ -1688,49 +1783,6 @@ class NoteGraphSuggestionStore:
 
         return self._with_dataset_scope(dataset, mutate)
 
-    @staticmethod
-    def _cursor_segment(value: bytes) -> str:
-        return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
-
-    @staticmethod
-    def _decode_cursor_segment(value: str) -> bytes:
-        decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
-        if NoteGraphSuggestionStore._cursor_segment(decoded) != value:
-            raise ValueError("notes_graph_cursor_invalid")
-        return decoded
-
-    def _encode_cursor(self, payload: dict[str, Any], secret: bytes) -> str:
-        raw = json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
-        ).encode("ascii")
-        if len(raw) > 1024 or not isinstance(secret, bytes) or len(secret) < 16:
-            raise ValueError("notes_graph_cursor_invalid")
-        signature = hmac.digest(secret, raw, "sha256")
-        return f"{self._cursor_segment(raw)}.{self._cursor_segment(signature)}"
-
-    def _decode_cursor(self, raw_cursor: str, expected: dict[str, Any], secret: bytes) -> tuple[str, str]:
-        if not isinstance(raw_cursor, str) or len(raw_cursor.encode("ascii", "ignore")) > 2048:
-            raise ValueError("notes_graph_cursor_invalid")
-        try:
-            payload_segment, signature_segment = raw_cursor.split(".")
-            raw = self._decode_cursor_segment(payload_segment)
-            signature = self._decode_cursor_segment(signature_segment)
-            if not hmac.compare_digest(signature, hmac.digest(secret, raw, "sha256")):
-                raise ValueError("notes_graph_cursor_invalid")
-            payload = json.loads(raw)
-        except (UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            raise ValueError("notes_graph_cursor_invalid") from exc
-        if not isinstance(payload, dict) or any(payload.get(key) != value for key, value in expected.items()):
-            raise ValueError("notes_graph_cursor_invalid")
-        after_time = payload.get("after_time")
-        after_id = payload.get("after_id")
-        if not isinstance(after_time, str) or not isinstance(after_id, str):
-            raise ValueError("notes_graph_cursor_invalid")
-        return after_time, after_id
-
     def list_suggestions(
         self,
         *,
@@ -1739,10 +1791,9 @@ class NoteGraphSuggestionStore:
         source_fingerprint: str,
         states: tuple[str, ...],
         limit: int,
-        cursor: str | None,
-        cursor_secret: bytes,
+        after: tuple[str, str] | None,
     ) -> SuggestionPage:
-        """List only suggestions from succeeded runs using a signed keyset cursor."""
+        """List only suggestions from succeeded runs using a raw keyset position."""
 
         dataset = self._scope(dataset_id)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
@@ -1751,15 +1802,7 @@ class NoteGraphSuggestionStore:
         if not states or any(state not in allowed_states for state in states):
             raise ValueError("notes_graph_state_filter_invalid")
         state_values = tuple(sorted(set(states)))
-        binding = {
-            "v": 1,
-            "owner": self.owner_user_id,
-            "dataset": dataset,
-            "source": source_note_id,
-            "fingerprint": source_fingerprint,
-            "states": list(state_values),
-        }
-        after = self._decode_cursor(cursor, binding, cursor_secret) if cursor is not None else None
+        position = self._page_position(after, code="notes_graph_page_position_invalid")
 
         def read(conn: SuggestionConnection) -> SuggestionPage:
             placeholders = ",".join("?" for _ in state_values)
@@ -1779,28 +1822,108 @@ class NoteGraphSuggestionStore:
                 source_fingerprint,
                 *state_values,
             ]
-            if after is not None:
+            if position is not None:
                 query += "AND (suggestion.updated_at < ? OR (suggestion.updated_at = ? AND suggestion.id > ?)) "
-                params.extend((after[0], after[0], after[1]))
+                params.extend((position[0], position[0], position[1]))
             query += "ORDER BY suggestion.updated_at DESC,suggestion.id ASC LIMIT ?"
             params.append(limit + 1)
             rows = conn.execute(query, tuple(params)).fetchall()
             visible = rows[:limit]
-            next_cursor = None
+            next_position = None
             if len(rows) > limit and visible:
                 last = visible[-1]
-                next_cursor = self._encode_cursor(
-                    {
-                        **binding,
-                        "after_time": self._iso(last["updated_at"]),
-                        "after_id": str(last["id"]),
-                    },
-                    cursor_secret,
+                next_position = (
+                    self._iso(last["updated_at"]) or "",
+                    str(last["id"]),
                 )
             return SuggestionPage(
                 items=tuple(self._suggestion_from_row(row) for row in visible),
-                next_cursor=next_cursor,
+                next_position=next_position,
             )
+
+        return self._with_dataset_scope(dataset, read)
+
+    def list_suggestion_evidence(
+        self,
+        *,
+        dataset_id: str,
+        source_note_id: str,
+        source_fingerprint: str,
+        suggestion_ids: tuple[str, ...],
+        limit: int,
+    ) -> tuple[NoteGraphSuggestionEvidenceRead, ...]:
+        """Return bounded evidence whose referenced note fingerprint is still current."""
+
+        dataset = self._scope(dataset_id)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 600:
+            raise ValueError("notes_graph_evidence_limit_invalid")
+        ids = tuple(dict.fromkeys(suggestion_ids))
+        if (
+            not ids
+            or len(ids) > 100
+            or any(not isinstance(value, str) or not self._SAFE_ID_PATTERN.fullmatch(value) for value in ids)
+        ):
+            raise ValueError("notes_graph_evidence_contract_invalid")
+
+        def read(conn: SuggestionConnection) -> tuple[NoteGraphSuggestionEvidenceRead, ...]:
+            placeholders = ",".join("?" for _ in ids)
+            byte_expression = self._source_byte_expression("note")
+            rows = conn.execute(
+                "SELECT evidence.*,note.title AS note_title,note.content AS note_content "
+                "FROM note_graph_suggestion_evidence evidence "
+                "JOIN note_graph_suggestions suggestion ON suggestion.id=evidence.suggestion_id "
+                "AND suggestion.owner_user_id=evidence.owner_user_id "
+                "AND suggestion.dataset_id=evidence.dataset_id "
+                "JOIN note_graph_suggestion_runs run ON run.id=suggestion.run_id "
+                "AND run.owner_user_id=suggestion.owner_user_id AND run.dataset_id=suggestion.dataset_id "
+                "JOIN notes note ON note.id=evidence.note_id AND note.client_id=? AND note.deleted=? "
+                "WHERE evidence.owner_user_id=? AND evidence.dataset_id=? "
+                "AND suggestion.source_note_id=? AND suggestion.source_fingerprint=? "
+                "AND run.state='succeeded' "
+                f"AND evidence.suggestion_id IN ({placeholders}) "  # nosec B608
+                f"AND ({byte_expression}) <= ? "  # nosec B608
+                "ORDER BY evidence.suggestion_id,evidence.side,evidence.ordinal LIMIT ?",
+                (
+                    self.owner_user_id,
+                    self._deleted_value(),
+                    self.owner_user_id,
+                    dataset,
+                    source_note_id,
+                    source_fingerprint,
+                    *ids,
+                    1_000_000,
+                    limit,
+                ),
+            ).fetchall()
+            current: list[NoteGraphSuggestionEvidenceRead] = []
+            for row in rows:
+                title = str(row["note_title"] or "")
+                content = str(row["note_content"] or "")
+                if content_fingerprint(title, content) != str(row["content_fingerprint"]):
+                    continue
+                evidence = NoteGraphSuggestionEvidence(
+                    suggestion_id=str(row["suggestion_id"]),
+                    owner_user_id=str(row["owner_user_id"]),
+                    dataset_id=str(row["dataset_id"]),
+                    side=NoteGraphSuggestionEvidenceSide(str(row["side"])),
+                    ordinal=int(row["ordinal"]),
+                    note_id=str(row["note_id"]),
+                    field=NoteGraphSuggestionEvidenceField(str(row["field"])),
+                    content_fingerprint=str(row["content_fingerprint"]),
+                    start_offset=int(row["start_offset"]),
+                    end_offset=int(row["end_offset"]),
+                )
+                current.append(
+                    NoteGraphSuggestionEvidenceRead(
+                        evidence=evidence,
+                        excerpt_note=SuggestionEvidenceNote(
+                            note_id=evidence.note_id,
+                            title=title,
+                            content=content,
+                        ),
+                    )
+                )
+            return tuple(current)
 
         return self._with_dataset_scope(dataset, read)
 
@@ -1915,6 +2038,26 @@ class NoteGraphSuggestionStore:
             (self.owner_user_id, dataset_id, source_note_id, source_fingerprint),
         ).fetchone()
         return self._rejection_set_from_row(row) if row is not None else None
+
+    def get_rejection_set(
+        self,
+        *,
+        dataset_id: str,
+        source_note_id: str,
+        source_fingerprint: str,
+    ) -> NoteGraphSuggestionRejectionSet | None:
+        """Load one current rejection set within the owner/dataset/source scope."""
+
+        dataset = self._scope(dataset_id)
+        return self._with_dataset_scope(
+            dataset,
+            lambda conn: self._load_rejection_set(
+                conn,
+                dataset,
+                source_note_id,
+                source_fingerprint,
+            ),
+        )
 
     def _require_current_suggestion_fingerprints(
         self,
@@ -3280,6 +3423,7 @@ class NoteGraphSuggestionStore:
                         NoteGraphSuggestionOperationKind.RUN_CANCEL.value,
                         receipt["replay_envelope"],
                     ),
+                    source_note_id=str(receipt["source_note_id"]),
                 )
             if disposition == "in_progress":
                 run = self._load_cancellation_run(conn, dataset, run_id)
@@ -3293,6 +3437,7 @@ class NoteGraphSuggestionStore:
                     operation_id=str(receipt["id"]),
                     run=run,
                     continuation="resume_run_cancellation",
+                    source_note_id=run.source_note_id,
                 )
 
             run = self._load_run(conn, dataset, run_id)
@@ -3327,11 +3472,13 @@ class NoteGraphSuggestionStore:
             )
             if updated.rowcount != 1:
                 raise RuntimeError("notes_graph_run_conflict")
+            cancelling = self._load_run(conn, dataset, run_id)
             return RunCancellationResult(
                 disposition="created",
                 operation_id=str(receipt["id"]),
-                run=self._load_run(conn, dataset, run_id),
+                run=cancelling,
                 continuation="resume_run_cancellation",
+                source_note_id=cancelling.source_note_id,
             )
 
         return self._with_dataset_scope(dataset, mutate)
@@ -3364,6 +3511,7 @@ class NoteGraphSuggestionStore:
                         NoteGraphSuggestionOperationKind.RUN_CANCEL.value,
                         receipt["replay_envelope"],
                     ),
+                    source_note_id=str(receipt["source_note_id"]),
                 )
             run = self._load_cancellation_run(conn, dataset, str(receipt["resource_identity"]))
             if run.state not in {
@@ -3376,6 +3524,7 @@ class NoteGraphSuggestionStore:
                 operation_id=operation_id,
                 run=run,
                 continuation="resume_run_cancellation",
+                source_note_id=run.source_note_id,
             )
 
         return self._with_dataset_scope(dataset, read)
@@ -3442,6 +3591,7 @@ class NoteGraphSuggestionStore:
                         NoteGraphSuggestionOperationKind.RUN_CANCEL.value,
                         receipt["replay_envelope"],
                     ),
+                    source_note_id=str(receipt["source_note_id"]),
                 )
             run = self._load_cancellation_run(conn, dataset, run_id)
             if run.state.value != expected_state or run.revision != expected_revision:
@@ -3460,6 +3610,7 @@ class NoteGraphSuggestionStore:
                 operation_id=operation_id,
                 run=run,
                 replay_envelope=envelope,
+                source_note_id=run.source_note_id,
             )
 
         return self._with_dataset_scope(dataset, mutate)
@@ -4253,6 +4404,12 @@ class NoteGraphSuggestionStore:
             raise ValueError("Notes graph source is unavailable")
 
         return self._with_dataset_scope(dataset, read)
+
+    def ensure_fts_ready(self, *, dataset_id: str) -> None:
+        """Validate owner-dataset Notes FTS structure without running retrieval."""
+
+        dataset = self._scope(dataset_id)
+        self._with_dataset_scope(dataset, self._ensure_fts_ready)
 
     def fetch_ranked_candidates(
         self,

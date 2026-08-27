@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 from .suggestion_observability import SuggestionEventName, record_event
 
@@ -50,6 +50,19 @@ class SuggestionAdmission:
     disposition: str
     run: Any
     job: dict[str, Any] | None
+    replay_envelope: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SuggestionCancellationCommand:
+    """One durable cancellation continuation and its Jobs observation."""
+
+    cancellation: Any
+    job: dict[str, Any] | None
+    accepted: bool
+
+
+_JOB_NOT_SUPPLIED = object()
 
 
 def completion_placeholder(run_id: str, job_uuid: str) -> str:
@@ -160,6 +173,7 @@ class SuggestionAdmissionService:
         prompt_contract_version: str,
         idempotency_key: str,
         now: datetime,
+        validate_before_enqueue: Callable[[Any], None] | None = None,
     ) -> SuggestionAdmission:
         admission = self._store.admit_run(
             dataset_id=dataset_id,
@@ -175,9 +189,13 @@ class SuggestionAdmissionService:
         if admission.run is None:
             envelope = admission.replay_envelope or {}
             run_id = str(envelope.get("run_id") or "")
-            matching = self._job_by_run_id(run_id) if run_id else None
             replay_run = SimpleNamespace(id=run_id, state=envelope.get("state")) if run_id else None
-            return SuggestionAdmission(admission.disposition, replay_run, matching)
+            return SuggestionAdmission(
+                admission.disposition,
+                replay_run,
+                None,
+                envelope,
+            )
         run = admission.run
         existing = self._existing_job(run)
         if existing is not None:
@@ -194,6 +212,21 @@ class SuggestionAdmissionService:
                 now=now,
             )
             return SuggestionAdmission(admission.disposition, queued, recovered)
+
+        if validate_before_enqueue is not None:
+            try:
+                validate_before_enqueue(run)
+            except Exception:
+                self._store.fail_admission(
+                    dataset_id=dataset_id,
+                    run_id=run.id,
+                    expected_state="admitting",
+                    expected_revision=run.revision,
+                    error_code="notes_graph_capabilities_changed_before_queue",
+                    guidance_key="retry_generation",
+                    now=now,
+                )
+                raise
 
         try:
             self._enforce_owner_limits(now=now)
@@ -233,6 +266,119 @@ class SuggestionAdmissionService:
             now=now,
         )
         return SuggestionAdmission(admission.disposition, queued, normalized_job)
+
+
+class SuggestionCancellationCoordinator:
+    """Continue one receipt-backed cancellation with Jobs calls outside ChaCha."""
+
+    def __init__(self, *, store: Any, jobs: Any, owner_user_id: str) -> None:
+        self._store = store
+        self._jobs = jobs
+        self._owner_user_id = owner_user_id
+
+    @staticmethod
+    def _job_matches(run: Any, job: dict[str, Any]) -> bool:
+        return (
+            str(job.get("uuid") or "") == run.job_id
+            and str(job.get("owner_user_id") or "") == run.owner_user_id
+            and job.get("domain") == JOB_DOMAIN
+            and job.get("queue") == JOB_QUEUE
+            and job.get("job_type") == JOB_TYPE
+        )
+
+    @staticmethod
+    def _run_matches(expected: Any, actual: Any) -> bool:
+        if expected is None:
+            return True
+        fields = ("id", "revision", "job_id", "maintenance_lease_token")
+        return all(getattr(expected, field, None) == getattr(actual, field, None) for field in fields) and (
+            getattr(expected.state, "value", expected.state)
+            == getattr(actual.state, "value", actual.state)
+        )
+
+    def cancel(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+        expected_state: str,
+        expected_revision: int,
+        idempotency_key: str,
+        now: datetime,
+        reason: str = "user_cancelled",
+    ) -> SuggestionCancellationCommand:
+        admitted = self._store.admit_run_cancellation(
+            dataset_id=dataset_id,
+            run_id=run_id,
+            expected_state=expected_state,
+            expected_revision=expected_revision,
+            reason=reason,
+            idempotency_key=idempotency_key,
+            now=now,
+        )
+        if admitted.disposition == "terminal_replay":
+            return SuggestionCancellationCommand(admitted, None, True)
+        return self.resume(
+            dataset_id=dataset_id,
+            operation_id=admitted.operation_id,
+            now=now,
+        )
+
+    def resume(
+        self,
+        *,
+        dataset_id: str,
+        operation_id: str,
+        now: datetime,
+        job: dict[str, Any] | None | object = _JOB_NOT_SUPPLIED,
+        expected_run: Any | None = None,
+    ) -> SuggestionCancellationCommand:
+        continuation = self._store.get_run_cancellation_continuation(
+            dataset_id=dataset_id,
+            operation_id=operation_id,
+        )
+        if continuation.disposition == "terminal_replay":
+            return SuggestionCancellationCommand(continuation, None, True)
+        run = continuation.run
+        if run is None or not self._run_matches(expected_run, run):
+            return SuggestionCancellationCommand(continuation, None, False)
+        observed = job
+        if observed is _JOB_NOT_SUPPLIED:
+            observed = (
+                self._jobs.get_job_or_archived_by_uuid(
+                    run.job_id,
+                    domain=JOB_DOMAIN,
+                    owner_user_id=self._owner_user_id,
+                )
+                if run.job_id
+                else None
+            )
+        if observed is not None and not self._job_matches(run, observed):
+            observed = None
+
+        terminal = {"completed", "failed", "cancelled", "quarantined"}
+        accepted = run.job_id is None or (
+            observed is not None and observed.get("status") in terminal
+        )
+        if observed is not None and not accepted:
+            accepted = self._jobs.cancel_job(
+                int(observed["id"]),
+                reason="requested",
+                expected_uuid=run.job_id,
+                expected_domain=JOB_DOMAIN,
+                expected_job_type=JOB_TYPE,
+                cascade_dependents=False,
+            )
+        if accepted:
+            continuation = self._store.complete_run_cancellation_receipt(
+                dataset_id=dataset_id,
+                run_id=run.id,
+                operation_id=operation_id,
+                expected_state=getattr(run.state, "value", run.state),
+                expected_revision=run.revision,
+                now=now,
+            )
+        return SuggestionCancellationCommand(continuation, observed, accepted)
 
 
 def validate_publication_receipt(*, job: dict[str, Any], run: Any, owner_user_id: str) -> None:
@@ -317,6 +463,8 @@ __all__ = [
     "PublicationReceiptError",
     "SuggestionAdmission",
     "SuggestionAdmissionService",
+    "SuggestionCancellationCommand",
+    "SuggestionCancellationCoordinator",
     "SuggestionPublisher",
     "completion_placeholder",
     "validate_publication_receipt",

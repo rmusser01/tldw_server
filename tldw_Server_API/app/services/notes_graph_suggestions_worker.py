@@ -12,24 +12,16 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user_id,
 )
-from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
-from tldw_Server_API.app.core.LLM_Calls import adapter_registry
-from tldw_Server_API.app.core.LLM_Calls.adapter_utils import _resolve_openai_api_base
-from tldw_Server_API.app.core.Notes_Graph.suggestion_capabilities import (
-    ProviderCapabilityContract,
-    build_suggestion_capabilities,
-)
-from tldw_Server_API.app.core.Notes_Graph.suggestion_generation import (
-    GenerationProvider,
-    build_provider_call_policy,
-)
 from tldw_Server_API.app.core.Notes_Graph.suggestion_jobs import (
     JOB_DOMAIN,
     JOB_QUEUE,
     JOB_TYPE,
     SuggestionPublisher,
+)
+from tldw_Server_API.app.core.Notes_Graph.suggestion_provider import (
+    resolve_generation_capability,
 )
 from tldw_Server_API.app.core.Notes_Graph.suggestion_service import (
     SuggestionWorker,
@@ -48,39 +40,6 @@ def build_worker_config(*, worker_id: str) -> WorkerConfig:
         retry_on_exception=False,
         bind_completion_token=True,
     )
-
-
-def _resolve_generation_capability(*, provider: str, model: str) -> tuple[Any, Any]:
-    registry = adapter_registry.get_registry()
-    canonical = registry.resolve_provider_name(provider)
-    config = dict(loaded_config_data)
-    openai_config = dict(config.get("openai_api") or {})
-    endpoint = _resolve_openai_api_base(openai_config).rstrip("/") + "/chat/completions"
-    adapter = registry.get_adapter(canonical)
-    provider_capabilities = adapter.capabilities() if adapter is not None else {}
-    api_key = openai_config.get("api_key") if canonical == "openai" else None
-    contract = ProviderCapabilityContract(
-        adapter=canonical,
-        model=model,
-        endpoint_url=endpoint,
-        call_policy=build_provider_call_policy(
-            allow_response_format=True,
-            endpoint_url=endpoint,
-        ),
-        data_boundary="remote",
-        credentials_available=bool(api_key),
-        provider_healthy=adapter is not None,
-    )
-    capabilities = build_suggestion_capabilities(contract)
-    generation_provider = GenerationProvider(
-        adapter=canonical,
-        model=model,
-        endpoint_url=endpoint,
-        api_key=str(api_key) if api_key else None,
-        app_config=config,
-        provider_capabilities=provider_capabilities or {},
-    )
-    return capabilities, generation_provider
 
 
 async def _cancellation_requested(job: dict[str, Any], *, jobs: JobManager) -> bool:
@@ -121,7 +80,7 @@ async def handle_notes_graph_suggestions_job(
     try:
         worker = SuggestionWorker(
             store_factory=lambda _owner: db.note_graph_suggestion_store,
-            resolve_capability=_resolve_generation_capability,
+            resolve_capability=resolve_generation_capability,
             cancellation_requested=lambda row: _cancellation_requested(row, jobs=jobs),
         )
         return await worker.handle(job)
@@ -202,5 +161,6 @@ async def run_notes_graph_suggestions_worker(
 __all__ = [
     "build_worker_config",
     "handle_notes_graph_suggestions_job",
+    "resolve_generation_capability",
     "run_notes_graph_suggestions_worker",
 ]

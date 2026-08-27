@@ -157,3 +157,20 @@ class NoteGraphSuggestionEvidence:
     content_fingerprint: str
     start_offset: int
     end_offset: int
+
+
+@dataclass(frozen=True, slots=True)
+class SuggestionEvidenceNote:
+    """Bounded current note content used to reconstruct one evidence excerpt."""
+
+    note_id: str
+    title: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class NoteGraphSuggestionEvidenceRead:
+    """One fingerprint-checked evidence reference and its current note content."""
+
+    evidence: NoteGraphSuggestionEvidence
+    excerpt_note: SuggestionEvidenceNote

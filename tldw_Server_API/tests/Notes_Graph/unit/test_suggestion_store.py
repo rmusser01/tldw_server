@@ -288,7 +288,6 @@ def test_request_fingerprints_and_key_digests_are_versioned_bounded_and_safe(db)
             "source_fingerprint": _fingerprint(db, SOURCE_ID),
             "provider": "openai",
             "model": "model-a",
-            "capability_revision": "cap-v1",
             "prompt_contract_version": "prompt-v1",
         },
     )
@@ -297,7 +296,6 @@ def test_request_fingerprints_and_key_digests_are_versioned_bounded_and_safe(db)
         {
             "model": "model-a",
             "provider": "openai",
-            "capability_revision": "cap-v1",
             "prompt_contract_version": "prompt-v1",
             "source_fingerprint": _fingerprint(db, SOURCE_ID),
             "source_note_id": SOURCE_ID,
@@ -317,7 +315,6 @@ def test_request_fingerprints_and_key_digests_are_versioned_bounded_and_safe(db)
                 "source_fingerprint": _fingerprint(db, SOURCE_ID),
                 "provider": "openai",
                 "model": "model-a",
-                "capability_revision": "cap-v1",
                 "prompt_contract_version": "prompt-v1",
                 "authorization_material": "alternate secret name",
             },
@@ -495,6 +492,63 @@ def test_receipt_replay_is_terminal_or_operation_specific_and_mismatch_is_stable
         )
 
 
+def test_terminal_cancellation_replay_retains_source_scope_after_run_cleanup(db) -> None:
+    running = _queue_and_run(db, _admit(db, key="cancel-source-scope"))
+    cancellation = db.note_graph_suggestion_store.admit_run_cancellation(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_state="running",
+        expected_revision=running.revision,
+        reason="user_cancelled",
+        idempotency_key="cancel-source-scope-key",
+        now=NOW,
+    )
+    completed = db.note_graph_suggestion_store.complete_run_cancellation_receipt(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        operation_id=cancellation.operation_id,
+        expected_state="cancelling",
+        expected_revision=cancellation.run.revision,
+        now=NOW,
+    )
+    db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (running.id,))
+
+    replay = db.note_graph_suggestion_store.admit_run_cancellation(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_state="running",
+        expected_revision=running.revision,
+        reason="user_cancelled",
+        idempotency_key="cancel-source-scope-key",
+        now=NOW + timedelta(days=31),
+    )
+
+    assert replay.disposition == "terminal_replay"
+    assert replay.replay_envelope == completed.replay_envelope
+    assert replay.source_note_id == SOURCE_ID
+
+
+def test_admission_replay_ignores_capability_etag_but_preserves_admitted_revision(db) -> None:
+    admitted = _admit(db, key="capability-etag-replay")
+
+    replay = db.note_graph_suggestion_store.admit_run(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        source_fingerprint=_fingerprint(db, SOURCE_ID),
+        provider="openai",
+        model="model-a",
+        capability_revision="cap-v2",
+        prompt_contract_version="prompt-v1",
+        idempotency_key="capability-etag-replay",
+        now=NOW,
+    )
+
+    assert replay.disposition == "in_progress"
+    assert replay.run is not None
+    assert replay.run.id == admitted.run.id
+    assert replay.run.capability_revision == "cap-v1"
+
+
 def test_staged_rows_are_hidden_and_activation_is_atomic_and_supersedes(db) -> None:
     first = _stage_and_activate(db, key="publish-a", suggestion_id="suggestion-a")
     assert first.state.value == "succeeded"
@@ -519,8 +573,7 @@ def test_staged_rows_are_hidden_and_activation_is_atomic_and_supersedes(db) -> N
         source_fingerprint=_fingerprint(db, SOURCE_ID),
         states=("pending", "accepting"),
         limit=100,
-        cursor=None,
-        cursor_secret=b"test-cursor-secret",
+        after=None,
     )
     assert [item.id for item in hidden.items] == ["suggestion-a"]
 
@@ -1544,8 +1597,7 @@ def test_pagination_is_stable_bounded_owner_scoped_and_integrity_checked(db) -> 
         source_fingerprint=_fingerprint(db, SOURCE_ID),
         states=("pending",),
         limit=1,
-        cursor=None,
-        cursor_secret=b"test-cursor-secret",
+        after=None,
     )
     page_two = db.note_graph_suggestion_store.list_suggestions(
         dataset_id=DATASET_ID,
@@ -1553,20 +1605,18 @@ def test_pagination_is_stable_bounded_owner_scoped_and_integrity_checked(db) -> 
         source_fingerprint=_fingerprint(db, SOURCE_ID),
         states=("pending",),
         limit=1,
-        cursor=page_one.next_cursor,
-        cursor_secret=b"test-cursor-secret",
+        after=page_one.next_position,
     )
     assert [item.id for item in page_one.items + page_two.items] == ["page-b", "page-a"]
-    assert page_two.next_cursor is None
-    with pytest.raises(ValueError, match="notes_graph_cursor_invalid"):
+    assert page_two.next_position is None
+    with pytest.raises(ValueError, match="notes_graph_page_position_invalid"):
         db.note_graph_suggestion_store.list_suggestions(
             dataset_id=DATASET_ID,
             source_note_id=SOURCE_ID,
             source_fingerprint=_fingerprint(db, SOURCE_ID),
             states=("pending",),
             limit=1,
-            cursor=f"{page_one.next_cursor}x",
-            cursor_secret=b"test-cursor-secret",
+            after=("not-a-timestamp", "page-a"),
         )
     with pytest.raises(ValueError, match="notes_graph_page_limit_invalid"):
         db.note_graph_suggestion_store.list_suggestions(
@@ -1575,8 +1625,156 @@ def test_pagination_is_stable_bounded_owner_scoped_and_integrity_checked(db) -> 
             source_fingerprint=_fingerprint(db, SOURCE_ID),
             states=("pending",),
             limit=101,
-            cursor=None,
-            cursor_secret=b"test-cursor-secret",
+            after=None,
+        )
+
+
+def test_api_reads_are_bounded_source_scoped_ordered_and_fingerprint_checked(db) -> None:
+    first = _stage_and_activate(db, key="run-list-first", suggestion_id="run-list-first")
+    second = _stage_and_activate(
+        db,
+        key="run-list-second",
+        suggestion_id="run-list-second",
+        target_id=OTHER_ID,
+    )
+    other_admission = _admit(db, key="run-list-other", source_id=OTHER_ID)
+    assert other_admission.run is not None
+    other = db.note_graph_suggestion_store.fail_admission(
+        dataset_id=DATASET_ID,
+        run_id=other_admission.run.id,
+        expected_state="admitting",
+        expected_revision=other_admission.run.revision,
+        error_code="notes_graph_admission_failed",
+        guidance_key="retry_generation",
+        now=NOW,
+    )
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_graph_suggestion_runs SET created_at=? WHERE id=?",
+            ((NOW - timedelta(minutes=1)).isoformat(), first.id),
+        )
+        conn.execute(
+            "UPDATE note_graph_suggestion_runs SET created_at=? WHERE id=?",
+            (NOW.isoformat(), second.id),
+        )
+
+    first_page = db.note_graph_suggestion_store.list_runs(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        states=("succeeded",),
+        limit=1,
+        after=None,
+    )
+    second_page = db.note_graph_suggestion_store.list_runs(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        states=("succeeded",),
+        limit=1,
+        after=first_page.next_position,
+    )
+    assert [run.id for run in first_page.items + second_page.items] == [
+        second.id,
+        first.id,
+    ]
+    assert second_page.next_position is None
+    assert other.id not in {run.id for run in first_page.items + second_page.items}
+
+    _stage_and_activate(db, key="api-read-evidence", suggestion_id="api-read-evidence")
+    evidence = db.note_graph_suggestion_store.list_suggestion_evidence(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        source_fingerprint=_fingerprint(db, SOURCE_ID),
+        suggestion_ids=("api-read-evidence",),
+        limit=6,
+    )
+    assert [(item.evidence.side.value, item.excerpt_note.note_id) for item in evidence] == [
+        ("source", SOURCE_ID),
+        ("target", TARGET_ID),
+    ]
+
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE notes SET content=?,version=version+1 WHERE id=?",
+            ("changed target body", TARGET_ID),
+        )
+    current_only = db.note_graph_suggestion_store.list_suggestion_evidence(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        source_fingerprint=_fingerprint(db, SOURCE_ID),
+        suggestion_ids=("api-read-evidence",),
+        limit=6,
+    )
+    assert [item.evidence.side.value for item in current_only] == ["source"]
+
+    oversized_content = "x" * 1_000_001
+    oversized_fingerprint = content_fingerprint("Target", oversized_content)
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE notes SET content=?,version=version+1 WHERE id=?",
+            (oversized_content, TARGET_ID),
+        )
+        conn.execute(
+            "UPDATE note_graph_suggestion_evidence SET content_fingerprint=? "
+            "WHERE suggestion_id='api-read-evidence' AND side='target'",
+            (oversized_fingerprint,),
+        )
+    bounded = db.note_graph_suggestion_store.list_suggestion_evidence(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        source_fingerprint=_fingerprint(db, SOURCE_ID),
+        suggestion_ids=("api-read-evidence",),
+        limit=6,
+    )
+    assert [item.evidence.side.value for item in bounded] == ["source"]
+
+    assert db.note_graph_suggestion_store.get_rejection_set(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        source_fingerprint=_fingerprint(db, SOURCE_ID),
+    ) is None
+    _stage_and_activate_tag(
+        db,
+        key="api-read-rejection",
+        suggestion_id="api-read-rejection",
+    )
+    rejected = db.note_graph_suggestion_store.reject_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="api-read-rejection",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=None,
+        idempotency_key="api-read-rejection-key",
+        now=NOW,
+    )
+    rejection_set = db.note_graph_suggestion_store.get_rejection_set(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        source_fingerprint=_fingerprint(db, SOURCE_ID),
+    )
+    assert rejection_set == rejected.rejection_set
+
+
+@pytest.mark.parametrize("limit", [0, 101, True])
+def test_run_read_bounds_fail_closed(db, limit) -> None:
+    with pytest.raises(ValueError, match="notes_graph_run_page_limit_invalid"):
+        db.note_graph_suggestion_store.list_runs(
+            dataset_id=DATASET_ID,
+            source_note_id=SOURCE_ID,
+            states=("queued",),
+            limit=limit,
+            after=None,
+        )
+
+
+@pytest.mark.parametrize("limit", [0, 601, True])
+def test_evidence_read_bounds_fail_closed(db, limit) -> None:
+    with pytest.raises(ValueError, match="notes_graph_evidence_limit_invalid"):
+        db.note_graph_suggestion_store.list_suggestion_evidence(
+            dataset_id=DATASET_ID,
+            source_note_id=SOURCE_ID,
+            source_fingerprint=_fingerprint(db, SOURCE_ID),
+            suggestion_ids=("suggestion",),
+            limit=limit,
         )
 
 

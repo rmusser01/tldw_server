@@ -327,12 +327,17 @@ class SuggestionWorker:
             )
             if await _resolve(self._cancellation_requested(job)):
                 raise SuggestionWorkerCancelled()
-            capabilities, provider = await _resolve(
+            resolved_provider = await _resolve(
                 self._resolve_capability(
                     provider=str(payload["provider"]),
                     model=str(payload["model"]),
                 )
             )
+            if isinstance(resolved_provider, tuple):
+                capabilities, provider = resolved_provider
+            else:
+                capabilities = resolved_provider.capabilities
+                provider = resolved_provider.provider
             if capabilities.revision != payload["capability_revision"] or not capabilities.generation_available:
                 raise SuggestionWorkerError(SuggestionErrorCode.CAPABILITIES_CHANGED)
             record_event(
