@@ -14,13 +14,13 @@
   `517d7b016089e220fa55eab3483f212031b6f5cb`
 - Exact-head Qodo follow-up test commit:
   `7253450461a58f0724fba77de84c97e5ec26b548`
-- Last immutable pushed head before the scheduler-frame follow-up:
-  `d561d0fcddbedd057b588f6663bf6b0717e7e1b5`
+- Last immutable pushed head before the Qodo stack-context follow-up:
+  `650cce6d1a8ba60a3dde1243bba6d482bd8b0100`
 - Rebased onto: `origin/dev` at
   `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`
 - Final ratchet comparison base: `origin/dev` at
   `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`
-- Final verification timestamp: `2026-08-27T09:41:12Z`
+- Final verification timestamp: `2026-08-27T10:08:18Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -1289,22 +1289,33 @@ predicate could erase custom diagnostics or package frames that merely
 contained a Node-internal marker. Two additional TDD cases reproduced that
 false inheritance in package and strict modes. Normalization now full-matches
 only the two observed V8 scheduler-frame forms, including function name,
-internal source location, numeric line, and numeric column. Scheduler-only
-diagnostics fail closed after normalization. Exception text, rendered
-diagnostics, repository/package stack frames, changed causes, duplicate
-multiplicity, strict safety validation, and unfinished-report rejection remain
-part of the comparison.
+internal source location, numeric line, and numeric column.
 
-Fresh local evidence at `2026-08-27T09:41:12Z`:
+Qodo's exact-head review at `650cce6d1a` then identified a valid remaining
+ambiguity: assertion content could itself be exactly equal to one of those
+frame strings. TDD reproduced the false inheritance for exact scheduler-looking
+content and separately proved that scheduler-only content must remain
+fingerprinted. Independent review then reproduced the stricter package and
+admin cases where arbitrary indented `at rendered content` text could falsely
+establish stack context. The final normalizer considers only the terminal
+indented `at` block and removes an exact scheduler frame only after a prior
+frame has a positively identified repository/package source location with
+numeric line and column. Scheduler-first, scheduler-only, custom diagnostic,
+and package-frame marker text remains part of the fingerprint. Strict safety
+validation and unfinished-report rejection remain unchanged.
+
+Fresh local evidence at `2026-08-27T10:08:18Z`:
 
 ```text
 scheduler-frame regression TDD RED:   1 failed (classified as regression)
-scheduler-only diagnostic TDD RED:     1 failed (missing fail-closed rejection)
+initial empty-fingerprint TDD RED:      1 failed (normalization erased diagnostic)
 review collision contracts TDD RED:    2 failed (false inheritance)
-scheduler contracts GREEN:             4 passed
-changed-cause/fingerprint safety set:  8 passed
-complete ratchet helper tests:         58 passed
-CI/workflow/ratchet contracts:         169 passed, 1 warning
+Qodo exact-content contracts TDD RED:  2 failed (content erased/rejected)
+source-context contracts TDD RED:       2 failed (false inheritance)
+scheduler/context contracts GREEN:     7 passed
+changed-cause/fingerprint safety set:  11 passed
+complete ratchet helper tests:         61 passed
+CI/workflow/ratchet contracts:         172 passed, 1 warning
 real saved head/base comparison:       inherited=22 regressions=0
 embedded frontend-required Bash:       22/22 passed bash -n
 focused Ruff and Python compilation:   PASS
@@ -1313,7 +1324,7 @@ git diff --check:                       PASS
 ```
 
 The ratchet helper's new SHA-256 is
-`94a320034b0e7f3175267c69564f2a282e4750f54d26287d7cafbe527f55138e`
+`ca4617a935d71e1fb1ee66d15f6ca7a0024d79b0484c0af3982be187ede78d37`
 and both frontend-required call sites pin that value. The unchanged
 deterministic-config, execution-order reporter, and admin safety-reporter
 digests still match their workflow pins. Commit/push, fresh exact-head Qodo

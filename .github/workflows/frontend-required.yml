@@ -182,7 +182,7 @@ jobs:
           RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"
           RATCHET_CONFIG_TEMPLATE="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_deterministic.config.ts"
           ORDER_REPORTER="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_execution_order_reporter.mjs"
-          EXPECTED_RATCHET_SHA256="94a320034b0e7f3175267c69564f2a282e4750f54d26287d7cafbe527f55138e"
+          EXPECTED_RATCHET_SHA256="ca4617a935d71e1fb1ee66d15f6ca7a0024d79b0484c0af3982be187ede78d37"
           EXPECTED_RATCHET_CONFIG_SHA256="5393dd2f8652fe784c0cc268f3b52b4438bedb7dfdce23e579babf972c42dafd"
           EXPECTED_ORDER_REPORTER_SHA256="af01d572f95d69faaa32261e50d1f2d4c8924d6106af806b913b33f558a3f3d1"
           verify_ratchet_script() {
@@ -769,7 +769,7 @@ jobs:
           FAILED_FILES_PATH="${RUNNER_TEMP}/admin-ui-unit-failed-files.txt"
           RATCHET_SCRIPT="${GITHUB_WORKSPACE}/Helper_Scripts/ci/vitest_base_ratchet.py"
           SAFETY_REPORTER="${GITHUB_WORKSPACE}/admin-ui/scripts/ci/vitest-safety-reporter.mjs"
-          EXPECTED_RATCHET_SHA256="94a320034b0e7f3175267c69564f2a282e4750f54d26287d7cafbe527f55138e"
+          EXPECTED_RATCHET_SHA256="ca4617a935d71e1fb1ee66d15f6ca7a0024d79b0484c0af3982be187ede78d37"
           EXPECTED_SAFETY_REPORTER_SHA256="cf7621d1658a1a3e1b1d16c392dc9af3fe6751072bdb5ef967169f06972ecf4d"
           verify_ratchet_artifacts() {
             printf '%s  %s\n' "$EXPECTED_RATCHET_SHA256" "$RATCHET_SCRIPT" | sha256sum --check --status &&

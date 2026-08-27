@@ -45,6 +45,11 @@ _VOLATILE_NODE_SCHEDULER_FRAME_PATTERNS = (
     ),
     re.compile(r"\s*at processTimers \(node:internal/timers:\d+:\d+\)\s*"),
 )
+_V8_STACK_FRAME_PATTERN = re.compile(r"\s+at .+")
+_V8_SOURCE_FRAME_PATTERN = re.compile(
+    r"\s+at (?:.+ \()?(?:file://)?"
+    r"(?:<PACKAGE_ROOT>|<REPOSITORY_ROOT>|/).+:\d+:\d+\)?\s*"
+)
 _COLLECTION_FAILURE_FULL_NAME = "<collection failure>"
 
 
@@ -166,14 +171,24 @@ def _normalize_failure_message(
     }
     for root_variant in sorted(variants, key=len, reverse=True):
         normalized = normalized.replace(root_variant, variants[root_variant])
-    normalized = "\n".join(
-        line
-        for line in normalized.splitlines()
-        if not any(
+    lines = normalized.splitlines()
+    stack_start = len(lines)
+    while stack_start and _V8_STACK_FRAME_PATTERN.fullmatch(lines[stack_start - 1]):
+        stack_start -= 1
+
+    filtered_lines = lines[:stack_start]
+    saw_stable_frame = False
+    for line in lines[stack_start:]:
+        is_volatile = any(
             pattern.fullmatch(line)
             for pattern in _VOLATILE_NODE_SCHEDULER_FRAME_PATTERNS
         )
-    )
+        if is_volatile and saw_stable_frame:
+            continue
+        filtered_lines.append(line)
+        if _V8_SOURCE_FRAME_PATTERN.fullmatch(line):
+            saw_stable_frame = True
+    normalized = "\n".join(filtered_lines)
     if not normalized.strip():
         raise RatchetError("failure has an empty diagnostic after normalization")
     return normalized

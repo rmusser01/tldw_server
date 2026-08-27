@@ -1791,6 +1791,7 @@ def test_package_compare_ignores_volatile_node_scheduler_frames(
         failure_messages={
             "src/route.test.ts": [
                 f"route failed at {head_root}/src/route.test.ts:42:7\n"
+                f"    at routeHandler ({head_root}/src/route.test.ts:42:7)\n"
                 "    at runNextTicks (node:internal/process/task_queues:65:5)\n"
                 "    at processTimers (node:internal/timers:538:9)"
             ]
@@ -1802,7 +1803,8 @@ def test_package_compare_ignores_volatile_node_scheduler_frames(
         failures,
         failure_messages={
             "src/route.test.ts": [
-                f"route failed at {base_root}/src/route.test.ts:42:7"
+                f"route failed at {base_root}/src/route.test.ts:42:7\n"
+                f"    at routeHandler ({base_root}/src/route.test.ts:42:7)"
             ]
         },
     )
@@ -1823,10 +1825,108 @@ def test_package_compare_ignores_volatile_node_scheduler_frames(
 
 
 @pytest.mark.unit
-def test_package_compare_rejects_scheduler_only_failure_messages(
+def test_package_compare_preserves_exact_scheduler_looking_assertion_content(
     tmp_path: Path,
 ) -> None:
-    """Fail closed when normalization removes the entire diagnostic."""
+    """Do not treat assertion content as a scheduler stack frame."""
+
+    head_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    base_root = tmp_path / "base" / "apps" / "packages" / "ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    changed_files = tmp_path / "changed.txt"
+    failures = {"src/route.test.ts": ["route stays protected"]}
+    _write_report(
+        head_report,
+        head_root,
+        failures,
+        failure_messages={
+            "src/route.test.ts": [
+                "route failed\n"
+                "    at runNextTicks (node:internal/process/task_queues:65:5)"
+            ]
+        },
+    )
+    _write_report(
+        base_report,
+        base_root,
+        failures,
+        failure_messages={"src/route.test.ts": ["route failed"]},
+    )
+    changed_files.write_text("apps/packages/ui/src/runtime.ts\n", encoding="utf-8")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("apps/packages/ui"),
+        changed_files_path=changed_files,
+    )
+
+    assert not result.passes
+    assert result.regressions[0].failure_messages == (
+        "route failed\n"
+        "    at runNextTicks (node:internal/process/task_queues:65:5)",
+    )
+
+
+@pytest.mark.unit
+def test_package_compare_does_not_treat_rendered_at_text_as_stack_context(
+    tmp_path: Path,
+) -> None:
+    """Require a source location before stripping a scheduler-looking line."""
+
+    head_root = tmp_path / "head" / "apps" / "packages" / "ui"
+    base_root = tmp_path / "base" / "apps" / "packages" / "ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    changed_files = tmp_path / "changed.txt"
+    failures = {"src/route.test.ts": ["route stays protected"]}
+    _write_report(
+        head_report,
+        head_root,
+        failures,
+        failure_messages={
+            "src/route.test.ts": [
+                "route failed\n"
+                "    at rendered content\n"
+                "    at runNextTicks (node:internal/process/task_queues:65:5)"
+            ]
+        },
+    )
+    _write_report(
+        base_report,
+        base_root,
+        failures,
+        failure_messages={
+            "src/route.test.ts": ["route failed\n    at rendered content"]
+        },
+    )
+    changed_files.write_text("apps/packages/ui/src/runtime.ts\n", encoding="utf-8")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("apps/packages/ui"),
+        changed_files_path=changed_files,
+    )
+
+    assert not result.passes
+    assert result.regressions[0].failure_messages == (
+        "route failed\n"
+        "    at rendered content\n"
+        "    at runNextTicks (node:internal/process/task_queues:65:5)",
+    )
+
+
+@pytest.mark.unit
+def test_package_compare_preserves_scheduler_only_failure_messages(
+    tmp_path: Path,
+) -> None:
+    """Treat scheduler-looking text without stack context as diagnostic content."""
 
     head_root = tmp_path / "head" / "apps" / "packages" / "ui"
     base_root = tmp_path / "base" / "apps" / "packages" / "ui"
@@ -1852,15 +1952,17 @@ def test_package_compare_rejects_scheduler_only_failure_messages(
     )
     changed_files.write_text("apps/packages/ui/src/runtime.ts\n", encoding="utf-8")
 
-    with pytest.raises(RatchetError, match="empty diagnostic after normalization"):
-        compare_reports(
-            head_report=head_report,
-            base_report=base_report,
-            head_package_root=head_root,
-            base_package_root=base_root,
-            package_repo_path=Path("apps/packages/ui"),
-            changed_files_path=changed_files,
-        )
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("apps/packages/ui"),
+        changed_files_path=changed_files,
+    )
+
+    assert result.passes
+    assert result.inherited[0].failure_messages == (scheduler_only,)
 
 
 @pytest.mark.unit
@@ -2055,6 +2157,64 @@ def test_strict_compare_preserves_scheduler_markers_in_package_frames(
         "route failed\n"
         "at node:internal/process/task_queues:new "
         "(<PACKAGE_ROOT>/src/route.ts:42:7)",
+    )
+
+
+@pytest.mark.unit
+def test_strict_compare_does_not_treat_rendered_at_text_as_stack_context(
+    tmp_path: Path,
+) -> None:
+    """Apply the positive source-frame requirement in strict mode."""
+
+    head_root = tmp_path / "head" / "admin-ui"
+    base_root = tmp_path / "base" / "admin-ui"
+    head_report = tmp_path / "head.json"
+    base_report = tmp_path / "base.json"
+    head_safety = tmp_path / "head-safety.json"
+    base_safety = tmp_path / "base-safety.json"
+    changed_files = tmp_path / "changed.bin"
+    failures = {"src/route.test.ts": ["route stays protected"]}
+    _write_report(
+        head_report,
+        head_root,
+        failures,
+        failure_messages={
+            "src/route.test.ts": [
+                "route failed\n"
+                "    at rendered content\n"
+                "    at processTimers (node:internal/timers:538:9)"
+            ]
+        },
+    )
+    _write_report(
+        base_report,
+        base_root,
+        failures,
+        failure_messages={
+            "src/route.test.ts": ["route failed\n    at rendered content"]
+        },
+    )
+    _write_safety_report(head_safety, reason="failed", test_count=1)
+    _write_safety_report(base_safety, reason="failed", test_count=1)
+    changed_files.write_bytes(b"admin-ui/src/runtime.ts\0")
+
+    result = compare_reports(
+        head_report=head_report,
+        base_report=base_report,
+        head_package_root=head_root,
+        base_package_root=base_root,
+        package_repo_path=Path("admin-ui"),
+        changed_files_path=changed_files,
+        strict=True,
+        head_safety_report_path=head_safety,
+        base_safety_report_path=base_safety,
+    )
+
+    assert not result.passes
+    assert result.regressions[0].failure_messages == (
+        "route failed\n"
+        "    at rendered content\n"
+        "    at processTimers (node:internal/timers:538:9)",
     )
 
 
