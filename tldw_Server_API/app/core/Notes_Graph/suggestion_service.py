@@ -296,11 +296,6 @@ class SuggestionWorker:
             )
             if await _resolve(self._cancellation_requested(job)):
                 raise SuggestionWorkerCancelled()
-            record_event(
-                SuggestionEventName.PROVIDER_STARTED,
-                run_id=running.id,
-                job_id=job_uuid,
-            )
             capabilities, provider = await _resolve(
                 self._resolve_capability(
                     provider=str(payload["provider"]),
@@ -309,6 +304,11 @@ class SuggestionWorker:
             )
             if capabilities.revision != payload["capability_revision"] or not capabilities.generation_available:
                 raise SuggestionWorkerError(SuggestionErrorCode.CAPABILITIES_CHANGED)
+            record_event(
+                SuggestionEventName.PROVIDER_STARTED,
+                run_id=running.id,
+                job_id=job_uuid,
+            )
             generated = await _resolve(self._generate(prepared=prepared, provider=provider))
             record_event(
                 SuggestionEventName.PROVIDER_COMPLETED,

@@ -25,7 +25,10 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import (
     MaintenanceScope,
     SuggestionMaintenance,
 )
-from tldw_Server_API.app.core.Notes_Graph.suggestion_observability import SuggestionErrorCode
+from tldw_Server_API.app.core.Notes_Graph.suggestion_observability import (
+    SuggestionErrorCode,
+    SuggestionEventName,
+)
 from tldw_Server_API.app.core.Notes_Graph.suggestion_service import (
     SuggestionWorker,
     SuggestionWorkerCancelled,
@@ -639,6 +642,134 @@ async def test_worker_revalidates_immediately_before_one_call_and_fences_stage(
         "record_run_duration",
         "record_validation_counts",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("revision", "generation_available"),
+    [("cap-v2", True), ("cap-v1", False)],
+)
+async def test_worker_capability_rejection_does_not_start_or_call_provider(
+    revision,
+    generation_available,
+    monkeypatch,
+) -> None:
+    recorded: list[tuple[str, object]] = []
+    provider_calls = 0
+    payload = {
+        "schema_version": 1,
+        "run_id": "run-capability-rejected",
+        "dataset_id": DATASET_ID,
+        "source_note_id": SOURCE_ID,
+        "source_fingerprint": f"sha256:{'a' * 64}",
+        "provider": "openai",
+        "model": "model-a",
+        "capability_revision": "cap-v1",
+        "prompt_contract_version": "notes-graph-suggestions-v1",
+    }
+    queued = SimpleNamespace(
+        id=payload["run_id"],
+        revision=2,
+        job_id="job-capability-rejected",
+        state=SimpleNamespace(value="queued"),
+        created_at=(NOW - timedelta(seconds=5)).isoformat(),
+        **{
+            key: payload[key]
+            for key in (
+                "source_note_id",
+                "source_fingerprint",
+                "provider",
+                "model",
+                "capability_revision",
+                "prompt_contract_version",
+            )
+        },
+    )
+
+    class Store:
+        def get_run(self, **_kwargs):
+            return queued
+
+        def start_run(self, **_kwargs):
+            return SimpleNamespace(
+                **{
+                    **queued.__dict__,
+                    "revision": 3,
+                    "expected_completion_token": "lease-capability-rejected",
+                }
+            )
+
+        def stage_suggestions(self, **_kwargs):
+            raise AssertionError("capability rejection must not stage")
+
+    async def generate(**_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        raise AssertionError("capability rejection must not call the provider")
+
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_event",
+        lambda event, **kwargs: recorded.append(("event", (event, kwargs))),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_error",
+        lambda code: recorded.append(("error", code)),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_duration",
+        lambda duration: recorded.append(("duration", duration)),
+    )
+    monkeypatch.setattr(suggestion_service, "record_queue_latency", lambda _value: None)
+
+    worker = SuggestionWorker(
+        store_factory=lambda _owner: Store(),
+        retrieve=lambda **_kwargs: SimpleNamespace(candidates=()),
+        prepare=lambda **_kwargs: object(),
+        resolve_capability=lambda **_kwargs: (
+            SimpleNamespace(
+                revision=revision,
+                generation_available=generation_available,
+            ),
+            object(),
+        ),
+        generate=generate,
+        freshness_check=lambda **_kwargs: None,
+        cancellation_requested=lambda _job: False,
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(
+        suggestion_service.SuggestionWorkerError,
+        match=SuggestionErrorCode.CAPABILITIES_CHANGED.value,
+    ):
+        await worker.handle(
+            {
+                "uuid": "job-capability-rejected",
+                "owner_user_id": "owner-1",
+                "domain": JOB_DOMAIN,
+                "queue": JOB_QUEUE,
+                "job_type": JOB_TYPE,
+                "lease_id": "lease-capability-rejected",
+                "payload": payload,
+            }
+        )
+
+    lifecycle = [detail[0] for kind, detail in recorded if kind == "event"]
+    assert SuggestionEventName.PROVIDER_STARTED not in lifecycle
+    assert (
+        SuggestionEventName.FAILED,
+        {
+            "run_id": payload["run_id"],
+            "job_id": "job-capability-rejected",
+            "error_code": SuggestionErrorCode.CAPABILITIES_CHANGED,
+        },
+    ) in [detail for kind, detail in recorded if kind == "event"]
+    assert provider_calls == 0
+    assert ("error", SuggestionErrorCode.CAPABILITIES_CHANGED) in recorded
+    assert any(kind == "duration" for kind, _detail in recorded)
 
 
 @pytest.mark.asyncio
