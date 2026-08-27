@@ -20,7 +20,7 @@ modified_files:
 - backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md
 - backlog/tasks/task-13125 - Normalize-duplicate-Backlog-task-identities-from-standalone-HTML-closeout.md
 - backlog/tasks/task-13126 - Make-chat-focus-mode-truly-fullscreen.md
-updated_date: 2026-08-26 16:31
+updated_date: 2026-08-27 01:54
 ---
 
 ## Description
@@ -34,7 +34,7 @@ Normalize the two task-identity collisions exposed by the standalone HTML closeo
 - [x] #2 The standalone HTML rollout remains canonical as TASK-12115 with PR #2809 and merge evidence intact.
 - [x] #3 The historical chat-focus work is canonical as TASK-13126, retains PR #2578 evidence, and records its legacy TASK-12115 identity.
 - [x] #4 This normalization record is canonical as TASK-13125, and the legitimate Scheduled Tasks TASK-13116 record remains unchanged.
-- [x] #5 Backlog MCP task_view and task_search resolve TASK-12115, TASK-13116, TASK-13125, and TASK-13126 deterministically.
+- [x] #5 Backlog MCP task_view resolves TASK-12115, TASK-13116, TASK-13125, and TASK-13126 to one canonical record each; broad task_search results contain exactly one result whose frontmatter ID equals each scoped query.
 - [x] #6 No acceptance criteria, implementation history, or completion evidence is lost from either completed work record.
 <!-- AC:END -->
 
@@ -53,14 +53,18 @@ Identity map: standalone HTML remains TASK-12115; this housekeeping record moved
 
 Backlog MCP and CLI expose semantic editing but no task-ID/path rename or delete operation. The user explicitly approved apply_patch for only the two path/frontmatter ID moves; all semantic changes use the official Backlog MCP.
 
-Verification: exact filesystem ID counts are one each for TASK-12115, TASK-13116, TASK-13125, and TASK-13126; Backlog task_view/task_search returned one exact path for each ID; stale historical paths and stale TASK-13116 housekeeping wording are absent; end-of-file-fixer and trailing-whitespace hooks pass on all three resulting records; git diff --check passes. Bandit and product tests were not run because this change touches Backlog Markdown only.
+Verification: exact filesystem ID counts are one each for TASK-12115, TASK-13116, TASK-13125, and TASK-13126; Backlog task_view resolved each exact ID to one canonical record; broad full-text task_search results contain cross-references but exactly one result whose frontmatter ID equals each scoped query; stale historical paths and stale TASK-13116 housekeeping wording are absent; end-of-file-fixer and trailing-whitespace hooks pass on all three resulting records; git diff --check passes. Bandit and product tests were not run because this change touches Backlog Markdown only.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2825 (target: dev). Merge remains gated on the requester’s human-written Change summary.
+
+Qodo review correction: task_search searches the complete Markdown body and is intentionally non-unique when records cross-reference one another. The verified invariant is one exact frontmatter-ID match within broad search results, not one total search row.
+
+Post-Qodo live matrix: task_view returned the canonical TASK-12115, TASK-13116, TASK-13125, and TASK-13126 paths. Each corresponding task_search query reached the configured 100-result cap because cross-references are indexed, and each result set contained exactly one record whose frontmatter ID equaled the query.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Normalized the two Backlog identity collisions exposed by the standalone HTML closeout without rewriting completed work. Standalone HTML remains TASK-12115; the original chat-focus record is preserved as TASK-13126 with PR #2578 evidence and a legacy-ID note; this housekeeping record is now TASK-13125; and the legitimate Scheduled Tasks TASK-13116 record remains untouched. All four IDs resolve exactly once through Backlog task_view/task_search, stale paths and deferred references are removed, and the diff contains Backlog Markdown only.
+Normalized the two Backlog identity collisions exposed by the standalone HTML closeout without rewriting completed work. Standalone HTML remains TASK-12115; the original chat-focus record is preserved as TASK-13126 with PR #2578 evidence and a legacy-ID note; this housekeeping record is now TASK-13125; and the legitimate Scheduled Tasks TASK-13116 record remains untouched. Backlog task_view resolves each of the four exact IDs to one canonical record; broad task_search results preserve cross-references while containing one exact frontmatter-ID match for each scoped query; stale paths and deferred references are removed, and the diff contains Backlog Markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
