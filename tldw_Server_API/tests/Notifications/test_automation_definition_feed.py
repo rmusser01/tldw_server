@@ -428,6 +428,58 @@ async def test_agent_definition_never_arms_during_load_rescan_or_reconcile(
 
 
 @pytest.mark.asyncio
+async def test_reconcile_blocked_agent_removes_job_and_marks_unavailable(
+    automation_scheduler_env,
+) -> None:
+    """A newly blocked Agent must not retain an armed job or ready health."""
+
+    user_id = 996
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        schedule={"kind": "daily", "at": "23:59"},
+    )
+    scheduler = _AutomationScheduler(
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: True,
+    )
+    scheduler._aps = AsyncIOScheduler(timezone="UTC")
+    scheduler._aps.start()
+    scheduler._started = True
+    try:
+        assert scheduler._arm(definition, user_id) is True
+        ready = scheduler._get_db(user_id).get_definition(
+            owner_id=user_id,
+            definition_id=definition.id,
+        )
+        assert ready is not None
+        assert ready.health == ARMED_HEALTH
+        assert scheduler._aps.get_job(f"automation:{definition.id}") is not None
+
+        scheduler._execution_stack_ready_resolver = lambda: False
+        await scheduler.reconcile_definition(
+            definition_id=definition.id,
+            user_id=user_id,
+        )
+
+        blocked = scheduler._get_db(user_id).get_definition(
+            owner_id=user_id,
+            definition_id=definition.id,
+        )
+        assert blocked is not None
+        assert blocked.health == "execution_unavailable"
+        assert scheduler._aps.get_job(f"automation:{definition.id}") is None
+        audits, _total = scheduler._get_db(user_id).list_audit_events(
+            owner_id=user_id,
+            definition_id=definition.id,
+        )
+        assert any(audit.event_type == "scheduler_blocked" for audit in audits)
+    finally:
+        scheduler._aps.shutdown(wait=False)
+        scheduler._aps = None
+
+
+@pytest.mark.asyncio
 async def test_agent_definition_race_refuses_again_at_fire(
     automation_scheduler_env,
 ) -> None:

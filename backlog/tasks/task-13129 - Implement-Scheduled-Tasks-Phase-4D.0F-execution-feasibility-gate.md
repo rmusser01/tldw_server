@@ -26,7 +26,7 @@ documentation:
 - Docs/superpowers/plans/2026-08-24-scheduled-tasks-phase4d-feasibility-gate-implementation-plan.md
 - Docs/ADR/041-scheduled-agent-execution-feasibility.md
 - Docs/Development/Scheduled_Agent_Execution_Certification.md
-updated_date: 2026-08-27 03:38
+updated_date: 2026-08-27 05:32
 modified_files:
 - Docs/ADR/041-scheduled-agent-execution-feasibility.md
 - Docs/ADR/README.md
@@ -47,6 +47,7 @@ modified_files:
 - tldw_Server_API/app/services/scheduled_task_automation_scheduler.py
 - tldw_Server_API/app/services/scheduled_task_automation_service.py
 - tldw_Server_API/tests/Helper_Scripts/test_scheduled_agent_execution_certification.py
+- tldw_Server_API/tests/Notifications/_scheduled_agent_execution_certification_fixtures.py
 - tldw_Server_API/tests/Notifications/test_agent_task_jobs_consumer.py
 - tldw_Server_API/tests/Notifications/test_automation_definition_feed.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py
@@ -91,11 +92,16 @@ Stage 4 decision evidence: ADR-041 accepts that no current deployment class is c
 Final verification: the 12-file cross-module matrix passed 275 tests with 0 failures, 0 skips, and 19 warnings in 93.04 seconds. Compileall and Ruff passed. Bandit `/tmp/bandit_task_13129.json` reports 0 findings and 0 errors across 4,965 production lines. Artifact-pair validation and both prohibited-content scans passed. Branch-wide diff review found no frontend, Watchlists, standalone Agent Tasks, migration activation, or execution-stack implementation.
 Pull request opened: https://github.com/rmusser01/tldw_server/pull/2827. Merge remains blocked by the repository policy until the human requester supplies a Change summary explaining both what changed and why these implementation choices were made.
 Human-authored Change summary supplied by the requester and added verbatim to PR #2827 on 2026-08-26. The AI-generated PR change-summary merge gate is satisfied; CI and review requirements remain independent merge gates.
+PR #2827 review remediation started. Qodo posted 10 open threads: core-boundary delegation, constructor return annotations, callable docstrings, helper-test markers, supported verifier test boundary, integration-test isolation, Loguru CLI errors, unsupported update admission, scheduler health consistency, and complete command-metadata validation. All findings will be verified against repository behavior before changes.
+PR #2827 review remediation implemented for all 10 Qodo findings. Core now owns Agent authoring admission and recovery decisions; unsupported updates are gated both before idempotency and inside the transaction; readiness-blocked scheduler jobs are removed and definitions transition to audited execution_unavailable health; command metadata validation is exact and deterministic. Quality remediation adds explicit constructor/helper annotations, callable docstrings, the helper-test unit marker, focused endpoint tests, Loguru operational errors, and a test-only receipt fixture boundary that preserves private production authority.
+
+Review-remediation TDD evidence: the unsupported update, blocked scheduler health, and digest-recomputed command-tampering tests first failed against the prior implementation. Focused GREEN rerun passed 6 tests. Full 12-module matrix passed 285 tests with 0 failures, 0 skips, 19 warnings in 104.41 seconds. Compileall and Ruff passed; artifact-pair validation and both prohibited-content scans passed; Bandit /tmp/bandit_task_13129_review.json reports 0 findings and 0 errors across 5,105 production lines. Two unrelated untracked Watchlists templates remain intentionally excluded.
+Final independent re-review found no actionable findings after two additional fail-closed capability corrections: malformed internal certification outcomes now normalize through core to unsupported across the capability outcome, family availability, family reason, and action reasons. The family-level reason regression was RED before the final projection fix and GREEN afterward. Definitive post-review matrix: 289 passed, 0 failed, 0 skipped, 19 warnings in 103.92 seconds. Final compileall and Ruff passed; Bandit /tmp/bandit_task_13129_review_final.json reports 0 findings and 0 errors across 5,130 production lines; git diff --check passed. The earlier artifact-pair and prohibited-content validations remain valid because the helper/artifacts were unchanged by the final core/service-only correction.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the API-first Phase 4D.0F Scheduled Agent execution feasibility gate. Added the immutable seven-domain certification model, sanitized evidence generator and baseline, versioned capability projection, and consistent fail-closed Run Now, scheduler, and worker admission. ADR-041 records that no current deployment class is certified: eligible runtimes remain `draft_only`, ineligible runtimes are `unsupported`, and execution remains unavailable until a separate reviewed stack is ready. Attached the accepted decision and baseline to TASK-13130 through TASK-13133 without starting those dependency slices. Verification completed with 275 passing tests, compileall, Ruff, zero Bandit findings, artifact validation, redaction scans, and branch-scope review.
+Implemented and review-hardened the API-first Phase 4D.0F Scheduled Agent execution feasibility gate. The immutable seven-domain certification model, sanitized evidence generator and baseline, versioned capability projection, and fail-closed Run Now, scheduler, worker, and definition-authoring admission remain intact. PR review remediation moved admission/recovery policy into core, normalized malformed internal outcomes to unsupported, enforced unsupported update admission, made blocked scheduler health honest, closed command-metadata validation, and improved test isolation, typing, documentation, markers, logging, and receipt-fixture boundaries. ADR-041 still records that no current deployment class is certified and no execution stack is enabled. Final review found no actionable issues; 289 tests passed, compileall and Ruff passed, artifact/redaction validation passed, Bandit reported zero findings, and unrelated Watchlists files remained excluded.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->

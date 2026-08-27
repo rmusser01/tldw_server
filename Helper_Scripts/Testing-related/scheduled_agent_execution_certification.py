@@ -24,6 +24,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from loguru import logger
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -137,12 +139,16 @@ _COMMAND_DESCRIPTIONS = {
 
 
 def _aware_utc(value: datetime) -> datetime:
+    """Normalize one aware evidence timestamp to UTC."""
+
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("evidence timestamps must be timezone-aware")
     return value.astimezone(timezone.utc)
 
 
 def _canonical_json(value: object) -> str:
+    """Serialize sanitized evidence into canonical JSON."""
+
     return json.dumps(
         value,
         sort_keys=True,
@@ -158,6 +164,8 @@ def sha256_text(value: str) -> str:
 
 
 def _require_slug(name: str, value: str) -> str:
+    """Validate one bounded non-secret identifier."""
+
     normalized = str(value or "").strip()
     if not _SLUG_PATTERN.fullmatch(normalized):
         raise ValueError(f"{name} must be a bounded identifier")
@@ -165,6 +173,8 @@ def _require_slug(name: str, value: str) -> str:
 
 
 def _require_commit(name: str, value: str) -> str:
+    """Validate and normalize one source/build commit digest."""
+
     normalized = str(value or "").strip()
     if not _COMMIT_PATTERN.fullmatch(normalized):
         raise ValueError(f"{name} must be a 40- or 64-character commit digest")
@@ -172,6 +182,8 @@ def _require_commit(name: str, value: str) -> str:
 
 
 def _require_hash_or_unverified(name: str, value: str) -> str:
+    """Validate an opaque SHA-256 identity or explicit unverified marker."""
+
     normalized = str(value or "").strip().lower()
     if normalized != "unverified" and not _SHA256_PATTERN.fullmatch(normalized):
         raise ValueError(f"{name} must be unverified or a sha256 identity")
@@ -199,6 +211,8 @@ class CertificationInputs:
     isolation_profile_version: str
 
     def __post_init__(self) -> None:
+        """Normalize and validate all explicit private input identities."""
+
         normalized = {
             "host_os": _require_slug("host_os", self.host_os).lower(),
             "host_arch": _require_slug("host_arch", self.host_arch).lower(),
@@ -274,6 +288,8 @@ class CharacterizationSentinels:
 
 
 def _random_sentinels() -> CharacterizationSentinels:
+    """Generate per-run sensitive values that must never be serialized."""
+
     return CharacterizationSentinels(
         prompt="prompt-" + secrets.token_hex(16),
         credential="credential-" + secrets.token_hex(16),
@@ -406,6 +422,8 @@ def characterize_current_primitives(
 
 
 def _runtime_eligibility(runtime: str) -> RuntimeEligibility:
+    """Map typed Sandbox runtime metadata to certification eligibility."""
+
     try:
         isolation = runtime_isolation_metadata(runtime)
         deny_all = runtime_network_policy_metadata(runtime).deny_all
@@ -429,6 +447,8 @@ def _requirement_record(
     facts: Mapping[str, object],
     sentinel_hashes: Mapping[str, str],
 ) -> dict[str, object]:
+    """Build one sanitized missing-evidence requirement record."""
+
     evidence_sha256 = sha256_text(
         _canonical_json(
             {
@@ -453,6 +473,8 @@ def _requirement_record(
 
 
 def _command_manifest() -> list[dict[str, object]]:
+    """Return the closed deterministic command metadata manifest."""
+
     commands: list[dict[str, object]] = []
     for requirement_id in REQUIRED_EVIDENCE_DOMAINS:
         parameter_names = list(_COMMON_PARAMETER_NAMES)
@@ -544,6 +566,8 @@ def validate_manifest(manifest: Mapping[str, object]) -> None:
         raise ValueError("manifest commands are incomplete or out of order")
     if any(not isinstance(item, dict) or set(item) != _COMMAND_KEYS for item in commands):
         raise ValueError("manifest command fields are invalid")
+    if commands != _command_manifest():
+        raise ValueError("manifest command metadata does not match the v1 schema")
 
 
 def build_evidence_manifest(
@@ -623,6 +647,8 @@ def render_manifest_json(manifest: Mapping[str, object]) -> str:
 
 
 def _static_runtime_eligibility_rows() -> list[tuple[str, str, str]]:
+    """Derive the appendix rows from typed runtime metadata."""
+
     rows: list[tuple[str, str, str]] = []
     for runtime in STATIC_RUNTIME_VALUES:
         eligibility = _runtime_eligibility(runtime)
@@ -710,6 +736,8 @@ def render_manifest_markdown(manifest: Mapping[str, object]) -> str:
 
 
 def _atomic_write(path: Path, content: str) -> None:
+    """Write one validated artifact atomically."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
@@ -780,6 +808,8 @@ class HostileProbeAdmission:
 
 
 def _local_server_url(value: str) -> bool:
+    """Return whether a URL targets an explicit loopback HTTP server."""
+
     try:
         parsed = urlsplit(value)
     except ValueError:
@@ -848,6 +878,8 @@ def evaluate_hostile_probe_admission(
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Build the command-line parser for generation and validation modes."""
+
     parser = argparse.ArgumentParser(description=__doc__)
     for option in _COMMON_PARAMETER_NAMES:
         parser.add_argument(f"--{option}")
@@ -870,6 +902,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _inputs_from_args(args: argparse.Namespace) -> CertificationInputs:
+    """Build validated certification inputs from parsed CLI arguments."""
+
     missing = [
         name
         for name in _COMMON_PARAMETER_NAMES
@@ -897,6 +931,8 @@ def _inputs_from_args(args: argparse.Namespace) -> CertificationInputs:
 
 
 def _validate_observed_host(inputs: CertificationInputs) -> None:
+    """Reject host identity claims that differ from local observation."""
+
     observed_os = platform.system().lower()
     observed_arch = platform.machine().lower()
     if inputs.host_os != observed_os or inputs.host_arch != observed_arch:
@@ -956,7 +992,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(render_manifest_markdown(manifest), end="")
         return 0
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        logger.error("Scheduled Agent characterization failed: {}", exc)
         return 2
 
 

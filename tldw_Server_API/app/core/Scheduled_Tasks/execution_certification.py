@@ -51,6 +51,18 @@ _EVIDENCE_VALIDITY = timedelta(hours=24)
 _SHA256_ID_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 _BUILD_SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?$")
 
+_DRAFT_CERTIFICATION_RECOVERY = (
+    "Complete server-verified Scheduled Agent execution certification "
+    "for this deployment class."
+)
+_UNSUPPORTED_CERTIFICATION_RECOVERY = (
+    "Use an untrusted-eligible runtime with strict deny-all networking, "
+    "then rerun Scheduled Agent execution certification."
+)
+_EXECUTION_STACK_RECOVERY = (
+    "Install the reviewed Scheduled Agent execution stack before enabling execution."
+)
+
 _BASE_REASON_CODES = {
     "agent_execution_stack_unimplemented",
     "authoritative_receipt_mismatch",
@@ -74,6 +86,8 @@ CERTIFICATION_REASON_CODES = frozenset(
 
 
 def _canonical_digest(payload: object) -> str:
+    """Return the stable SHA-256 identity for canonical JSON content."""
+
     encoded = json.dumps(
         payload,
         sort_keys=True,
@@ -84,6 +98,8 @@ def _canonical_digest(payload: object) -> str:
 
 
 def _normalized_identity(value: object, *, lowercase: bool = True) -> str:
+    """Normalize one identity component without inventing missing values."""
+
     normalized = str(value or "").strip()
     if not normalized:
         return "unverified"
@@ -91,17 +107,23 @@ def _normalized_identity(value: object, *, lowercase: bool = True) -> str:
 
 
 def _aware_utc(value: datetime | None) -> datetime | None:
+    """Normalize an aware timestamp to UTC or return ``None``."""
+
     if value is None or value.tzinfo is None or value.utcoffset() is None:
         return None
     return value.astimezone(timezone.utc)
 
 
 def _isoformat(value: datetime | None) -> str | None:
+    """Serialize one valid aware timestamp in canonical UTC form."""
+
     normalized = _aware_utc(value)
     return normalized.isoformat() if normalized is not None else None
 
 
 def _valid_sha256_id(value: str | None) -> bool:
+    """Return whether a value is a canonical SHA-256 identifier."""
+
     return bool(value and _SHA256_ID_PATTERN.fullmatch(value))
 
 
@@ -270,6 +292,8 @@ class _AuthoritativeBundleReceipt:
     _authority: object = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        """Reject receipts not issued inside the server verifier boundary."""
+
         if self._authority is not _SERVER_VERIFIER_AUTHORITY:
             raise ValueError("authoritative receipt requires server verifier authority")
 
@@ -295,7 +319,19 @@ class AgentExecutionDispatchReadiness:
     reason: str | None
 
 
+@dataclass(frozen=True)
+class AgentAutomationAdmission:
+    """Core decision for definition-authoring operations on Agent automation."""
+
+    allowed: bool
+    effective_outcome: CertificationOutcome
+    reason: str | None
+    recovery_action: str | None
+
+
 def _validate_requirement_set(evidence: Sequence[RequirementEvidence]) -> None:
+    """Reject unknown or duplicate evidence-domain records."""
+
     seen: set[str] = set()
     allowed = set(REQUIRED_EVIDENCE_DOMAINS)
     for item in evidence:
@@ -314,6 +350,8 @@ def _record_reason_codes(
     subject_id: str,
     now: datetime,
 ) -> set[str]:
+    """Derive bounded failure reasons for one requirement record."""
+
     prefix = item.requirement_id
     reasons: set[str] = set()
     if item.state == "missing":
@@ -349,6 +387,8 @@ def _receipt_reason_codes(
     evidence: Sequence[RequirementEvidence],
     now: datetime,
 ) -> set[str]:
+    """Derive verifier-receipt reasons for one exact evidence bundle."""
+
     if receipt is None:
         return {"authoritative_receipt_missing"}
 
@@ -375,6 +415,8 @@ def _receipt_reason_codes(
 
 
 def _bounded_reason_codes(reasons: set[str]) -> tuple[str, ...]:
+    """Validate, sort, and bound public certification reason codes."""
+
     unknown = reasons - CERTIFICATION_REASON_CODES
     if unknown:
         raise ValueError("unregistered certification reason code")
@@ -487,10 +529,15 @@ def agent_execution_dispatch_readiness(
 ) -> AgentExecutionDispatchReadiness:
     """Require both certified evidence and a separately implemented stack."""
 
+    if certification.outcome == "draft_only":
+        return AgentExecutionDispatchReadiness(
+            ready=False,
+            reason="execution_certification_draft_only",
+        )
     if certification.outcome != "certified":
         return AgentExecutionDispatchReadiness(
             ready=False,
-            reason=f"execution_certification_{certification.outcome}",
+            reason="execution_certification_unsupported",
         )
     if not execution_stack_ready:
         return AgentExecutionDispatchReadiness(
@@ -500,6 +547,72 @@ def agent_execution_dispatch_readiness(
     return AgentExecutionDispatchReadiness(ready=True, reason=None)
 
 
+def certification_recovery_action(outcome: CertificationOutcome) -> str | None:
+    """Return the bounded operator action for a certification outcome.
+
+    Args:
+        outcome: Closed certification state to explain.
+
+    Returns:
+        A sanitized recovery instruction when action is required, otherwise
+        ``None``.
+    """
+
+    if outcome == "unsupported":
+        return _UNSUPPORTED_CERTIFICATION_RECOVERY
+    if outcome == "draft_only":
+        return _DRAFT_CERTIFICATION_RECOVERY
+    return None
+
+
+def readiness_recovery_action(reason: str | None) -> str | None:
+    """Return the bounded operator action for an execution blocker.
+
+    Args:
+        reason: Closed readiness reason code, if execution is blocked.
+
+    Returns:
+        A sanitized recovery instruction for a known blocker, otherwise
+        ``None``.
+    """
+
+    if reason == "agent_execution_stack_unimplemented":
+        return _EXECUTION_STACK_RECOVERY
+    if reason == "execution_certification_unsupported":
+        return _UNSUPPORTED_CERTIFICATION_RECOVERY
+    if reason == "execution_certification_draft_only":
+        return _DRAFT_CERTIFICATION_RECOVERY
+    return None
+
+
+def agent_automation_admission(
+    certification: ExecutionCertification,
+) -> AgentAutomationAdmission:
+    """Decide whether Agent definitions may be authored on this deployment.
+
+    Args:
+        certification: Current server-resolved deployment certification.
+
+    Returns:
+        A core admission decision with bounded reason and recovery metadata.
+    """
+
+    if certification.outcome in {"certified", "draft_only"}:
+        return AgentAutomationAdmission(
+            allowed=True,
+            effective_outcome=certification.outcome,
+            reason=None,
+            recovery_action=None,
+        )
+    reason = "execution_certification_unsupported"
+    return AgentAutomationAdmission(
+        allowed=False,
+        effective_outcome="unsupported",
+        reason=reason,
+        recovery_action=readiness_recovery_action(reason),
+    )
+
+
 def current_agent_execution_stack_ready() -> bool:
     """Return the source-defined Phase 4D execution-stack readiness state."""
 
@@ -507,6 +620,8 @@ def current_agent_execution_stack_ready() -> bool:
 
 
 def _normalize_build_sha(value: str | None) -> str:
+    """Normalize an accepted Git build digest or fail closed to unverified."""
+
     normalized = str(value or "").strip()
     if not _BUILD_SHA_PATTERN.fullmatch(normalized):
         return "unverified"
@@ -514,6 +629,8 @@ def _normalize_build_sha(value: str | None) -> str:
 
 
 def _default_isolation_profile() -> IsolationProfile:
+    """Return the current deliberately unverified isolation profile."""
+
     return IsolationProfile(
         runtime_image_digest="unverified",
         mount_policy_hash="unverified",
@@ -526,6 +643,8 @@ def _default_isolation_profile() -> IsolationProfile:
 
 
 def _runtime_eligibility(runtime: str) -> RuntimeEligibility:
+    """Map typed Sandbox metadata to certification eligibility."""
+
     from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
         runtime_isolation_metadata,
         runtime_network_policy_metadata,
@@ -546,6 +665,8 @@ def _runtime_eligibility(runtime: str) -> RuntimeEligibility:
 
 
 def _current_identity_defaults() -> tuple[str, str]:
+    """Load current runtime and AuthNZ identity defaults."""
+
     from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
         load_acp_sandbox_config,
     )

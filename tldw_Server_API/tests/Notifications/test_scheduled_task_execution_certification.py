@@ -6,10 +6,14 @@ import hashlib
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 
 import pytest
 
 from tldw_Server_API.app.core.Scheduled_Tasks import execution_certification as cert
+from tldw_Server_API.tests.Notifications._scheduled_agent_execution_certification_fixtures import (
+    issue_test_authoritative_receipt,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -27,6 +31,8 @@ REQUIREMENT_IDS = (
 
 
 def _profile() -> cert.IsolationProfile:
+    """Return a complete immutable isolation-profile fixture."""
+
     return cert.IsolationProfile(
         runtime_image_digest="sha256:" + "1" * 64,
         mount_policy_hash="sha256:" + "2" * 64,
@@ -39,6 +45,8 @@ def _profile() -> cert.IsolationProfile:
 
 
 def _deployment(**changes: object) -> cert.DeploymentClass:
+    """Return a deployment fixture with optional identity-field overrides."""
+
     values: dict[str, object] = {
         "host_os_family": "darwin",
         "host_architecture": "arm64",
@@ -59,6 +67,8 @@ def _evidence(
     verification: cert.EvidenceVerification = "server_verified",
     state: cert.EvidenceState = "passed",
 ) -> tuple[cert.RequirementEvidence, ...]:
+    """Return one evidence record for every closed certification domain."""
+
     return tuple(
         cert.RequirementEvidence(
             requirement_id=requirement_id,
@@ -73,33 +83,35 @@ def _evidence(
     )
 
 
-def _authoritative_receipt(
+def _receipt(
     subject: cert.DeploymentClass,
     evidence: tuple[cert.RequirementEvidence, ...],
     *,
     valid_until: datetime | None = None,
     bundle_digest: str | None = None,
-) -> cert._AuthoritativeBundleReceipt:
-    """Construct the otherwise unavailable verifier receipt for pure rule tests."""
+) -> Any:
+    """Request an authoritative receipt from the test-only fixture boundary."""
 
-    return cert._AuthoritativeBundleReceipt(
-        deployment_class_id=subject.deployment_class_id,
-        evidence_id="sha256:" + "e" * 64,
-        bundle_digest=bundle_digest or cert.canonical_evidence_bundle_digest(evidence),
+    return issue_test_authoritative_receipt(
+        subject,
+        evidence,
         observed_at=NOW - timedelta(minutes=1),
         valid_until=valid_until or NOW + timedelta(minutes=30),
-        _authority=cert._SERVER_VERIFIER_AUTHORITY,
+        evidence_id="sha256:" + "e" * 64,
+        bundle_digest=bundle_digest,
     )
 
 
 def _evaluate(
     subject: cert.DeploymentClass,
     evidence: tuple[cert.RequirementEvidence, ...],
-    receipt: cert._AuthoritativeBundleReceipt | None,
+    receipt: Any | None,
     *,
     untrusted_eligible: bool = True,
     strict_deny_all: bool = True,
 ) -> cert.ExecutionCertification:
+    """Evaluate a fixture bundle with explicit runtime eligibility."""
+
     return cert.evaluate_execution_certification(
         subject,
         evidence,
@@ -165,7 +177,7 @@ def test_all_exact_server_verified_requirements_can_certify() -> None:
     subject = _deployment()
     evidence = _evidence(subject)
 
-    result = _evaluate(subject, evidence, _authoritative_receipt(subject, evidence))
+    result = _evaluate(subject, evidence, _receipt(subject, evidence))
 
     assert result.outcome == "certified"
     assert result.evidence_id == "sha256:" + "e" * 64
@@ -216,7 +228,7 @@ def test_one_untrusted_or_incomplete_requirement_stays_draft_only(
     result = _evaluate(
         subject,
         evidence_tuple,
-        _authoritative_receipt(subject, evidence_tuple),
+        _receipt(subject, evidence_tuple),
     )
 
     assert result.outcome == "draft_only"
@@ -234,7 +246,7 @@ def test_receipt_is_required_and_must_match_the_exact_bundle() -> None:
     mismatched_receipt = _evaluate(
         subject,
         evidence,
-        _authoritative_receipt(
+        _receipt(
             subject,
             evidence,
             bundle_digest="sha256:" + "0" * 64,
@@ -256,7 +268,7 @@ def test_expired_receipt_cannot_certify_fresh_records() -> None:
     result = _evaluate(
         subject,
         evidence,
-        _authoritative_receipt(
+        _receipt(
             subject,
             evidence,
             valid_until=NOW - timedelta(seconds=1),
@@ -287,7 +299,7 @@ def test_static_runtime_ineligibility_is_unsupported(
     result = _evaluate(
         subject,
         evidence,
-        _authoritative_receipt(subject, evidence),
+        _receipt(subject, evidence),
         untrusted_eligible=untrusted_eligible,
         strict_deny_all=strict_deny_all,
     )
@@ -317,12 +329,12 @@ def test_boundary_breach_is_unsupported_but_missing_feature_is_not() -> None:
     breached_result = _evaluate(
         subject,
         breached,
-        _authoritative_receipt(subject, breached),
+        _receipt(subject, breached),
     )
     missing_result = _evaluate(
         subject,
         missing,
-        _authoritative_receipt(subject, missing),
+        _receipt(subject, missing),
     )
 
     assert breached_result.outcome == "unsupported"
@@ -384,7 +396,7 @@ def test_certification_is_not_sufficient_for_dispatch() -> None:
     certification = _evaluate(
         subject,
         evidence,
-        _authoritative_receipt(subject, evidence),
+        _receipt(subject, evidence),
     )
 
     blocked = cert.agent_execution_dispatch_readiness(
@@ -400,6 +412,65 @@ def test_certification_is_not_sufficient_for_dispatch() -> None:
     assert blocked.reason == "agent_execution_stack_unimplemented"
     assert ready.ready is True
     assert ready.reason is None
+
+
+@pytest.mark.parametrize(
+    ("outcome", "allowed"),
+    [
+        ("certified", True),
+        ("draft_only", True),
+        ("unsupported", False),
+    ],
+)
+def test_core_agent_automation_admission_is_closed_and_stable(
+    outcome: cert.CertificationOutcome,
+    allowed: bool,
+) -> None:
+    """The core boundary must own Agent authoring support decisions."""
+
+    certification = cert.ExecutionCertification(
+        outcome=outcome,
+        deployment_class_id="sha256:" + "1" * 64,
+        evidence_id="sha256:" + "2" * 64 if outcome == "certified" else None,
+        evidence_source=(
+            "server_verified" if outcome == "certified" else "repository_characterization"
+        ),
+        observed_at=NOW,
+        expires_at=NOW + timedelta(hours=1),
+        reason_codes=(),
+    )
+
+    admission = cert.agent_automation_admission(certification)
+
+    assert admission.allowed is allowed
+    assert admission.effective_outcome == outcome
+    if allowed:
+        assert admission.reason is None
+        assert admission.recovery_action is None
+    else:
+        assert admission.reason == "execution_certification_unsupported"
+        assert admission.recovery_action
+
+
+def test_core_agent_automation_admission_rejects_unknown_runtime_state() -> None:
+    """A resolver contract violation must fail closed at the core boundary."""
+
+    certification = cert.ExecutionCertification(
+        outcome=cast(Any, "unexpected_state"),
+        deployment_class_id="sha256:" + "1" * 64,
+        evidence_id=None,
+        evidence_source="repository_characterization",
+        observed_at=NOW,
+        expires_at=NOW + timedelta(hours=1),
+        reason_codes=(),
+    )
+
+    admission = cert.agent_automation_admission(certification)
+
+    assert admission.allowed is False
+    assert admission.effective_outcome == "unsupported"
+    assert admission.reason == "execution_certification_unsupported"
+    assert admission.recovery_action
 
 
 def test_current_resolver_cannot_certify_repository_characterization(

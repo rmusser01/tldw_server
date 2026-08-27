@@ -9,8 +9,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
+
+pytestmark = pytest.mark.unit
 
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[3]
@@ -62,6 +65,8 @@ COMMAND_KEYS = {
 
 
 def _load_module() -> ModuleType:
+    """Load the standalone characterization script as an isolated module."""
+
     spec = importlib.util.spec_from_file_location(
         "scheduled_agent_execution_certification",
         SCRIPT_PATH,
@@ -74,7 +79,9 @@ def _load_module() -> ModuleType:
     return module
 
 
-def _inputs(module: ModuleType, *, runtime: str = "docker"):
+def _inputs(module: ModuleType, *, runtime: str = "docker") -> Any:
+    """Build typed characterization inputs from the dynamically loaded module."""
+
     return module.CertificationInputs(
         host_os=platform.system().lower(),
         host_arch=platform.machine().lower(),
@@ -94,7 +101,9 @@ def _inputs(module: ModuleType, *, runtime: str = "docker"):
     )
 
 
-def _sentinels(module: ModuleType):
+def _sentinels(module: ModuleType) -> Any:
+    """Build non-secret sentinels for output-disclosure assertions."""
+
     return module.CharacterizationSentinels(
         prompt="PROMPT-SENTINEL-9ca92c",
         credential="CREDENTIAL-SENTINEL-8e448f",
@@ -106,6 +115,8 @@ def _sentinels(module: ModuleType):
 
 
 def _base_cli_args(runtime: str = "docker") -> list[str]:
+    """Return the minimum stable command-line arguments for harness tests."""
+
     return [
         "--host-os",
         platform.system().lower(),
@@ -266,6 +277,31 @@ def test_evidence_id_covers_canonical_sanitized_content(tmp_path: Path) -> None:
     tampered = json.loads(json.dumps(manifest))
     tampered["outcome"] = "certified"
     with pytest.raises(ValueError, match="evidence_id"):
+        module.validate_manifest(tampered)
+
+
+def test_manifest_rejects_digest_recomputed_command_metadata_tampering(
+    tmp_path: Path,
+) -> None:
+    """Security-sensitive command metadata must match the closed manifest."""
+
+    module = _load_module()
+    manifest = module.build_evidence_manifest(
+        _inputs(module),
+        now=NOW,
+        temporary_directory=tmp_path,
+    )
+    tampered = json.loads(json.dumps(manifest))
+    hostile = next(
+        command
+        for command in tampered["commands"]
+        if command["id"] == "hostile_boundary"
+    )
+    hostile["safe_to_run_by_default"] = True
+    hostile["invocation_template"] += " --credential secret-value"
+    tampered["evidence_id"] = module.compute_manifest_evidence_id(tampered)
+
+    with pytest.raises(ValueError, match="command"):
         module.validate_manifest(tampered)
 
 
@@ -528,13 +564,22 @@ def test_cli_rejects_claimed_host_without_characterization_override(
     args = _base_cli_args()
     host_index = args.index("--host-os") + 1
     args[host_index] = "windows" if platform.system().lower() != "windows" else "linux"
+    errors: list[str] = []
+    sink_id = module.logger.add(
+        lambda message: errors.append(str(message)),
+        level="ERROR",
+        format="{message}",
+    )
 
-    result = module.main([*args, "--format", "json"])
+    try:
+        result = module.main([*args, "--format", "json"])
+    finally:
+        module.logger.remove(sink_id)
     captured = capsys.readouterr()
 
     assert result == 2
     assert captured.out == ""
-    assert "does not match the observed host" in captured.err
+    assert any("does not match the observed host" in error for error in errors)
 
 
 def test_cli_hostile_refusal_does_not_write_artifacts(

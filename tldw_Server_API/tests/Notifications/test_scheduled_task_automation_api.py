@@ -207,6 +207,28 @@ def _assert_error_envelope(response, *, code: str, status_code: int) -> None:
     assert "correlation_id" in detail  # nosec B101
 
 
+def _set_unsupported_agent_certification(client: Any) -> None:
+    """Switch the injected certification resolver to an unsupported deployment."""
+
+    service = client.scheduled_task_automation_service
+    service._execution_certification_resolver = lambda: _execution_certification(
+        "unsupported"
+    )
+
+
+def _assert_unsupported_agent_refusal(response: Any) -> None:
+    """Assert the stable API contract for unsupported Agent authoring."""
+
+    _assert_error_envelope(
+        response,
+        code="scheduled_task_agent_automation_unsupported",
+        status_code=409,
+    )
+    details = response.json()["detail"]["details"]
+    assert details["reason"] == "execution_certification_unsupported"  # nosec B101
+    assert details["recovery_action"]  # nosec B101
+
+
 def test_scheduled_task_static_child_routes_do_not_resolve_as_task_ids(scheduled_tasks_client, auth_headers):
     for path in (
         "/api/v1/scheduled-tasks/capabilities",
@@ -1064,26 +1086,14 @@ def test_agent_run_now_refuses_before_job_or_audit(
 
 
 @pytest.mark.integration
-def test_unsupported_agent_creation_and_duplicate_refuse_without_persistence(
+def test_unsupported_agent_capabilities_explain_disabled_authoring(
     scheduled_tasks_client,
     auth_headers,
-):
-    source = _create_definition(
-        scheduled_tasks_client,
-        auth_headers,
-        family="agent_task",
-        name="Existing unsupported agent",
-    )
-    pending_preview = _create_preview(
-        scheduled_tasks_client,
-        auth_headers,
-        family="agent_task",
-        name="Pending unsupported agent",
-    )
-    service = scheduled_tasks_client.scheduled_task_automation_service
-    service._execution_certification_resolver = lambda: _execution_certification(
-        "unsupported"
-    )
+) -> None:
+    """Capabilities must distinguish unavailable authoring from execution."""
+
+    _set_unsupported_agent_certification(scheduled_tasks_client)
+
     capabilities = scheduled_tasks_client.get(
         "/api/v1/scheduled-tasks/capabilities",
         headers=auth_headers,
@@ -1092,11 +1102,52 @@ def test_unsupported_agent_creation_and_duplicate_refuse_without_persistence(
         item["family"]: item for item in capabilities["items"]
     }["agent_task"]
     assert agent_capability["family_availability"] == "unavailable"  # nosec B101
+    assert agent_capability["reason"] == "execution_certification_unsupported"  # nosec B101
     assert agent_capability["execution_certification"]["outcome"] == "unsupported"  # nosec B101
     for action_name in ("preview", "create_definition", "duplicate"):
         assert agent_capability["actions"][action_name]["status"] == "unavailable"  # nosec B101
     for action_name in ("execute", "run_now"):
         assert agent_capability["actions"][action_name]["status"] == "disabled"  # nosec B101
+
+
+@pytest.mark.integration
+def test_malformed_agent_certification_capabilities_fail_closed(
+    scheduled_tasks_client,
+    auth_headers,
+) -> None:
+    """Capability discovery must normalize an invalid internal outcome."""
+
+    service = scheduled_tasks_client.scheduled_task_automation_service
+    service._execution_certification_resolver = lambda: _execution_certification(
+        "unexpected_state"
+    )
+
+    response = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/capabilities",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.text  # nosec B101
+    agent_capability = {
+        item["family"]: item for item in response.json()["items"]
+    }["agent_task"]
+    assert agent_capability["family_availability"] == "unavailable"  # nosec B101
+    assert agent_capability["reason"] == "execution_certification_unsupported"  # nosec B101
+    assert agent_capability["execution_certification"]["outcome"] == "unsupported"  # nosec B101
+    assert agent_capability["actions"]["preview"]["status"] == "unavailable"  # nosec B101
+    assert agent_capability["actions"]["preview"]["reason"] == (  # nosec B101
+        "execution_certification_unsupported"
+    )
+
+
+@pytest.mark.integration
+def test_unsupported_agent_preview_refuses_without_persistence(
+    scheduled_tasks_client,
+    auth_headers,
+) -> None:
+    """Unsupported deployments must not persist new Agent previews."""
+
+    _set_unsupported_agent_certification(scheduled_tasks_client)
     before_definitions = scheduled_tasks_client.get(
         "/api/v1/scheduled-tasks/definitions?family=agent_task",
         headers=auth_headers,
@@ -1111,26 +1162,107 @@ def test_unsupported_agent_creation_and_duplicate_refuse_without_persistence(
         headers=auth_headers,
         json=_payload(family="agent_task", name="Must not persist"),
     )
+
+    _assert_unsupported_agent_refusal(preview_response)
+    after_previews = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/previews?family=agent_task",
+        headers=auth_headers,
+    )
+    after_definitions = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/definitions?family=agent_task",
+        headers=auth_headers,
+    )
+    assert after_previews.status_code == 200, after_previews.text  # nosec B101
+    assert after_previews.json()["total"] == before_previews  # nosec B101
+    assert after_definitions.json()["total"] == before_definitions  # nosec B101
+
+
+@pytest.mark.integration
+def test_unsupported_agent_create_refuses_stale_valid_preview(
+    scheduled_tasks_client,
+    auth_headers,
+) -> None:
+    """A previously valid preview must not bypass current authoring admission."""
+
+    pending_preview = _create_preview(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        name="Pending unsupported agent",
+    )
+    before_definitions = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/definitions?family=agent_task",
+        headers=auth_headers,
+    ).json()["total"]
+    _set_unsupported_agent_certification(scheduled_tasks_client)
+
     create_response = scheduled_tasks_client.post(
         "/api/v1/scheduled-tasks/definitions",
         headers=auth_headers,
         json={"preview_id": pending_preview["id"]},
     )
+
+    _assert_unsupported_agent_refusal(create_response)
+    preview_detail = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/previews/{pending_preview['id']}",
+        headers=auth_headers,
+    )
+    after_definitions = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/definitions?family=agent_task",
+        headers=auth_headers,
+    )
+    assert preview_detail.status_code == 200, preview_detail.text  # nosec B101
+    assert preview_detail.json()["status"] == "valid"  # nosec B101
+    assert after_definitions.json()["total"] == before_definitions  # nosec B101
+
+
+@pytest.mark.integration
+def test_unsupported_agent_duplicate_refuses_without_persistence(
+    scheduled_tasks_client,
+    auth_headers,
+) -> None:
+    """Duplicating an existing Agent must respect current authoring admission."""
+
+    source = _create_definition(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        name="Existing unsupported agent",
+    )
+    before_definitions = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/definitions?family=agent_task",
+        headers=auth_headers,
+    ).json()["total"]
+    _set_unsupported_agent_certification(scheduled_tasks_client)
+
     duplicate_response = scheduled_tasks_client.post(
         f"/api/v1/scheduled-tasks/definitions/{source['id']}/duplicate",
         headers=auth_headers,
         json={"name": "Must not duplicate"},
     )
 
-    for response in (preview_response, create_response, duplicate_response):
-        _assert_error_envelope(
-            response,
-            code="scheduled_task_agent_automation_unsupported",
-            status_code=409,
-        )
-        details = response.json()["detail"]["details"]
-        assert details["reason"] == "execution_certification_unsupported"  # nosec B101
-        assert details["recovery_action"]  # nosec B101
+    _assert_unsupported_agent_refusal(duplicate_response)
+    after_definitions = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/definitions?family=agent_task",
+        headers=auth_headers,
+    )
+    assert after_definitions.json()["total"] == before_definitions  # nosec B101
+
+
+@pytest.mark.integration
+def test_unsupported_agent_definition_reads_remain_available(
+    scheduled_tasks_client,
+    auth_headers,
+) -> None:
+    """Unsupported execution must not hide existing Agent definitions."""
+
+    source = _create_definition(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        name="Existing unsupported agent",
+    )
+    _set_unsupported_agent_certification(scheduled_tasks_client)
 
     listed = scheduled_tasks_client.get(
         "/api/v1/scheduled-tasks/definitions?family=agent_task",
@@ -1140,32 +1272,101 @@ def test_unsupported_agent_creation_and_duplicate_refuse_without_persistence(
         f"/api/v1/scheduled-tasks/definitions/{source['id']}",
         headers=auth_headers,
     )
+    assert listed.status_code == 200, listed.text  # nosec B101
+    assert listed.json()["total"] == 1  # nosec B101
+    assert detail.status_code == 200, detail.text  # nosec B101
+
+
+@pytest.mark.integration
+def test_unsupported_agent_definition_can_be_paused(
+    scheduled_tasks_client,
+    auth_headers,
+) -> None:
+    """Unsupported execution must still allow the safe pause action."""
+
+    source = _create_definition(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        name="Agent to pause",
+    )
+    _set_unsupported_agent_certification(scheduled_tasks_client)
+
     paused = scheduled_tasks_client.post(
         f"/api/v1/scheduled-tasks/definitions/{source['id']}/pause",
         headers=auth_headers,
     )
+
+    assert paused.status_code == 200, paused.text  # nosec B101
+
+
+@pytest.mark.integration
+def test_unsupported_agent_definition_can_be_archived(
+    scheduled_tasks_client,
+    auth_headers,
+) -> None:
+    """Unsupported execution must still allow the safe archive action."""
+
+    source = _create_definition(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        name="Agent to archive",
+    )
+    _set_unsupported_agent_certification(scheduled_tasks_client)
+
     archived = scheduled_tasks_client.post(
         f"/api/v1/scheduled-tasks/definitions/{source['id']}/archive",
         headers=auth_headers,
     )
 
-    assert listed.status_code == 200, listed.text  # nosec B101
-    assert listed.json()["total"] == before_definitions  # nosec B101
-    assert detail.status_code == 200, detail.text  # nosec B101
-    assert paused.status_code == 200, paused.text  # nosec B101
     assert archived.status_code == 200, archived.text  # nosec B101
-    preview_detail = scheduled_tasks_client.get(
-        f"/api/v1/scheduled-tasks/previews/{pending_preview['id']}",
-        headers=auth_headers,
+
+
+@pytest.mark.integration
+def test_unsupported_agent_update_refuses_stale_valid_preview(
+    scheduled_tasks_client,
+    auth_headers,
+) -> None:
+    """A preview minted before support changes must not bypass update admission."""
+
+    definition = _create_definition(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        name="Existing agent to update",
     )
-    assert preview_detail.status_code == 200, preview_detail.text  # nosec B101
-    assert preview_detail.json()["status"] == "valid"  # nosec B101
-    after_previews = scheduled_tasks_client.get(
-        "/api/v1/scheduled-tasks/previews?family=agent_task",
-        headers=auth_headers,
+    update_preview = _create_preview(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        mode="update",
+        definition_id=definition["id"],
+        definition_version=definition["version"],
+        name="Blocked update",
     )
-    assert after_previews.status_code == 200, after_previews.text  # nosec B101
-    assert after_previews.json()["total"] == before_previews  # nosec B101
+    service = scheduled_tasks_client.scheduled_task_automation_service
+    service._execution_certification_resolver = lambda: _execution_certification(
+        "unsupported"
+    )
+
+    response = scheduled_tasks_client.patch(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}",
+        headers=auth_headers,
+        json={"preview_id": update_preview["id"]},
+    )
+
+    _assert_unsupported_agent_refusal(response)
+    unchanged = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}",
+        headers=auth_headers,
+    ).json()
+    assert unchanged["name"] == definition["name"]
+    preview = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/previews/{update_preview['id']}",
+        headers=auth_headers,
+    ).json()
+    assert preview["status"] == "valid"
 
 
 @pytest.mark.integration

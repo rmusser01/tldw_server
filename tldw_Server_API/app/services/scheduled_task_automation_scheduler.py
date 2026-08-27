@@ -82,6 +82,7 @@ from tldw_Server_API.app.services.reminders_scheduler import (
 AUTOMATION_DOMAIN = "scheduled_tasks"
 AUTOMATION_JOB_TYPE = "agent_task_run"
 ARMED_HEALTH = "ready"
+UNAVAILABLE_HEALTH = "execution_unavailable"
 SCHEDULER_ACTOR = "automation-scheduler"
 _MIN_RESCAN_SECONDS = 30
 
@@ -208,6 +209,8 @@ class _AutomationScheduler:
             [], bool
         ] = current_agent_execution_stack_ready,
     ) -> None:
+        """Initialize scheduler state and injectable Agent readiness inputs."""
+
         self._aps: AsyncIOScheduler | None = None
         self._db_cache: dict[int, ScheduledTasksDatabase] = {}
         self._lock = asyncio.Lock()
@@ -219,7 +222,13 @@ class _AutomationScheduler:
         )
         self._execution_stack_ready_resolver = execution_stack_ready_resolver
 
-    def _agent_execution_ready(self, definition: DefinitionRow) -> bool:
+    def _agent_execution_ready(
+        self,
+        definition: DefinitionRow,
+        user_id: int,
+    ) -> bool:
+        """Apply core readiness and persist honest blocked scheduler state."""
+
         if definition.family != "agent_task":
             return True
         readiness = agent_execution_dispatch_readiness(
@@ -231,6 +240,14 @@ class _AutomationScheduler:
                 "Automation scheduler blocked Agent definition {}: {}",
                 definition.id,
                 readiness.reason,
+            )
+            if self._aps is not None:
+                with contextlib.suppress(_NONCRITICAL_EXCEPTIONS):
+                    self._aps.remove_job(_job_id(definition.id))
+            self._mark_unavailable(
+                definition,
+                user_id,
+                reason=readiness.reason or "agent_execution_unavailable",
             )
         return readiness.ready
 
@@ -391,7 +408,7 @@ class _AutomationScheduler:
         """
         if not self._aps:
             return False
-        if not self._agent_execution_ready(definition):
+        if not self._agent_execution_ready(definition, user_id):
             return False
         trigger, reason = build_trigger(definition.schedule)
         if trigger is None:
@@ -430,20 +447,25 @@ class _AutomationScheduler:
         self._mark_ready(definition, user_id)
         return True
 
-    def _mark_ready(self, definition: DefinitionRow, user_id: int) -> None:
-        """Health honesty (TASK-13020 AC#4): armed definitions read ``ready``.
+    def _mark_health(
+        self,
+        definition: DefinitionRow,
+        user_id: int,
+        *,
+        health: str,
+        event_type: str,
+        summary: str,
+    ) -> None:
+        """Persist and audit one scheduler-owned health transition on change."""
 
-        Written only on change so rescans do not churn the definition's
-        version column; audited through the standard trail.
-        """
-        if definition.health == ARMED_HEALTH:
+        if definition.health == health:
             return
         db = self._get_db(user_id)
         try:
             updated = db.update_definition(
                 owner_id=user_id,
                 definition_id=definition.id,
-                patch={"health": ARMED_HEALTH, "updated_by": SCHEDULER_ACTOR},
+                patch={"health": health, "updated_by": SCHEDULER_ACTOR},
             )
         except _NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(
@@ -454,15 +476,49 @@ class _AutomationScheduler:
             db.create_audit_event(
                 owner_id=user_id,
                 definition_id=definition.id,
-                event_type="scheduler_armed",
+                event_type=event_type,
                 actor=SCHEDULER_ACTOR,
-                summary=(
-                    f"Definition armed by scheduler (schedule kind "
-                    f"'{definition.schedule.get('kind')}'); health -> ready."
-                ),
+                summary=summary,
                 before={"health": definition.health},
                 after={"health": updated.health},
             )
+
+    def _mark_ready(self, definition: DefinitionRow, user_id: int) -> None:
+        """Health honesty (TASK-13020 AC#4): armed definitions read ``ready``.
+
+        Written only on change so rescans do not churn the definition's
+        version column; audited through the standard trail.
+        """
+        self._mark_health(
+            definition,
+            user_id,
+            health=ARMED_HEALTH,
+            event_type="scheduler_armed",
+            summary=(
+                f"Definition armed by scheduler (schedule kind "
+                f"'{definition.schedule.get('kind')}'); health -> ready."
+            ),
+        )
+
+    def _mark_unavailable(
+        self,
+        definition: DefinitionRow,
+        user_id: int,
+        *,
+        reason: str,
+    ) -> None:
+        """Persist the unavailable health state for a readiness-blocked Agent."""
+
+        self._mark_health(
+            definition,
+            user_id,
+            health=UNAVAILABLE_HEALTH,
+            event_type="scheduler_blocked",
+            summary=(
+                "Definition blocked by Scheduled Agent readiness gate "
+                f"({reason}); health -> execution_unavailable."
+            ),
+        )
 
     async def _run_definition_schedule(
         self, definition_id: str, user_id: int, slot_iso: str
@@ -488,7 +544,7 @@ class _AutomationScheduler:
             return
         if definition is None or definition.lifecycle != "configured":
             return
-        if not self._agent_execution_ready(definition):
+        if not self._agent_execution_ready(definition, user_id):
             return
 
         # The schedule may have become unusable between arming and this
@@ -556,7 +612,7 @@ class _AutomationScheduler:
             return
         if definition is None or definition.lifecycle != "configured":
             return
-        if not self._agent_execution_ready(definition):
+        if not self._agent_execution_ready(definition, user_id):
             return
         trigger, _reason = build_trigger(definition.schedule)
         if trigger is None:
