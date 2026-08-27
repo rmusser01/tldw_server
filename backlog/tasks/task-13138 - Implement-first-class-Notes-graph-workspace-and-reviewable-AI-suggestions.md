@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 19:49
+updated_date: 2026-08-27 20:08
 labels:
 - notes
 - knowledge-graph
@@ -181,6 +181,8 @@ Task 7 Fix Round 2 started from exact base d162bac0627d93e8ea9fa8b5387e6f425bcde
 Task 7 Fix Round 2 completed from exact base d162bac0627d93e8ea9fa8b5387e6f425bcde601. Added a live PostgreSQL acceptance/regeneration product-transaction barrier, restored pending duplicate activation while preserving accepting fences, and corrected unreleased v64 canonical indexes to permit accepting-plus-pending without weakening pending/rejected uniqueness. Verification: exact Task 7 41 passed; Task 3/5 92 passed; v64 SQLite/live PostgreSQL 30 passed; Ruff clean; Bandit 0 findings; diff check clean. Full evidence is in the ignored task-7-report.md. Parent task remains In Progress for Tasks 8-12.
 Task 7 Fix Round 3 started from exact base b220b566b513394a5771ed1525b057e3737e7741. Scope is the final approved PostgreSQL canonical suggestion-identity serialization race and full transaction-local finalizer oracle; focused live PostgreSQL and store RED precede production edits.
 Task 7 Fix Round 3 completed from exact base b220b566b513394a5771ed1525b057e3737e7741. Added DB-owned PostgreSQL canonical suggestion-identity advisory serialization across activation, accepted finalization, exact reconciliation, and stale verification; expanded both live coordinator barriers to prove post-finalizer convergence and full transaction-local link/receipt/row/evidence atomicity. Verification: exact Task 7 42 passed; Task 3/5 95 passed; v64 SQLite/live PostgreSQL 30 passed; relevant Sync 158 passed; Ruff clean; Bandit 0 findings; diff check clean. Full evidence is in the ignored task-7-report.md. Parent task remains In Progress for Tasks 8-12.
+Task 8 started from exact base b7b8b725642d45afbcb67da54a8801bbd128ae76. Scope is the approved nested Notes graph suggestions API, schemas, RBAC/catalog migration and graph-read metadata only. Strict schema, static-route-order, endpoint, permission, token-scope, and OpenAPI RED tests will precede production edits; legacy keyword endpoint permissions remain unchanged.
+Task 8 NEEDS_CONTEXT at base b7b8b725642d45afbcb67da54a8801bbd128ae76. The approved thin API requires bounded source-scoped run listing, fingerprint-checked evidence/rejection-set reads, durable cancellation continuation, and one shared capability resolver, but the Task 3/5/7 domain surface exposes no API-ready contracts for those operations. Implementing them in FastAPI would put SQL/state-machine sequencing in endpoints or duplicate the worker capability revision. Requested narrow authorization: extend the owner-bound suggestion store plus suggestion Jobs/service capability facade for these exact operations, retaining Jobs calls outside ChaCha transactions and all existing CAS/receipt/fencing authority. No production/tests changed; details are in the ignored task-8-report.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
