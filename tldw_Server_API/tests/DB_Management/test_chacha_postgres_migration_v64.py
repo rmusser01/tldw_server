@@ -155,6 +155,8 @@ def test_postgres_v64_ddl_has_owner_scoped_tables_checks_indexes_and_forced_rls(
         "WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing')",
         "idx_note_graph_suggestions_staged_related_identity",
         "idx_note_graph_suggestions_staged_tag_identity",
+        "WHERE kind = 'related_note' AND state IN ('pending', 'rejected')",
+        "WHERE kind = 'tag' AND state IN ('pending', 'rejected')",
         "idx_note_graph_suggestions_acceptance_lease",
         "idx_note_graph_suggestion_operation_receipts_retention",
         "FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)",
@@ -781,7 +783,7 @@ def test_postgres_v64_receipt_delete_clears_only_scoped_receipt_references(
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
-def test_postgres_v64_rejects_duplicate_tag_and_reverse_related_pair(
+def test_postgres_v64_allows_accepting_plus_pending_related_but_rejects_duplicate_pending(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -861,6 +863,36 @@ def test_postgres_v64_rejects_duplicate_tag_and_reverse_related_pair(
                     ),
                     connection=conn,
                 )
+        with backend.transaction() as conn:
+            _set_tenant_scope(backend, conn, "owner-a", "dataset-a")
+            backend.execute(
+                "UPDATE note_graph_suggestions SET state='accepting' WHERE id=%s",
+                ("related-alpha-beta",),
+                connection=conn,
+            )
+            backend.execute(
+                """
+                INSERT INTO note_graph_suggestions(
+                    id, run_id, owner_user_id, dataset_id, kind, source_note_id,
+                    source_fingerprint, target_note_id, target_fingerprint, state,
+                    revision, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (
+                    "related-beta-alpha",
+                    "run-beta",
+                    "owner-a",
+                    "dataset-a",
+                    "related_note",
+                    "beta",
+                    "fingerprint-beta",
+                    "alpha",
+                    "fingerprint-alpha",
+                    "pending",
+                    1,
+                ),
+                connection=conn,
+            )
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
@@ -868,7 +900,7 @@ def test_postgres_v64_rejects_duplicate_tag_and_reverse_related_pair(
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
-def test_postgres_v64_rejects_duplicate_tag_identity(
+def test_postgres_v64_allows_accepting_plus_pending_tag_but_rejects_duplicate_pending(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -947,6 +979,36 @@ def test_postgres_v64_rejects_duplicate_tag_identity(
                     ),
                     connection=conn,
                 )
+        with backend.transaction() as conn:
+            _set_tenant_scope(backend, conn, "owner-a", "dataset-a")
+            backend.execute(
+                "UPDATE note_graph_suggestions SET state='accepting' WHERE id=%s",
+                ("tag-one",),
+                connection=conn,
+            )
+            backend.execute(
+                """
+                INSERT INTO note_graph_suggestions(
+                    id, run_id, owner_user_id, dataset_id, kind, source_note_id,
+                    source_fingerprint, normalized_tag, display_tag, state, revision,
+                    created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (
+                    "tag-two",
+                    "run-a",
+                    "owner-a",
+                    "dataset-a",
+                    "tag",
+                    "source-note",
+                    "source-fingerprint",
+                    "research",
+                    "Research",
+                    "pending",
+                    1,
+                ),
+                connection=conn,
+            )
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()

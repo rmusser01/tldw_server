@@ -1281,35 +1281,6 @@ class NoteGraphSuggestionStore:
         ).fetchall()
         return any(str(row["keyword"]).strip().casefold() == normalized_tag for row in rows)
 
-    def _has_accepting_identity(self, conn: SuggestionConnection, row: Any) -> bool:
-        if row["kind"] == "related_note":
-            predicate, identity = self._related_identity_predicate(
-                source_note_id=str(row["source_note_id"]),
-                source_fingerprint=str(row["source_fingerprint"]),
-                target_note_id=str(row["target_note_id"]),
-                target_fingerprint=str(row["target_fingerprint"]),
-            )
-            source_predicate = ""
-            source_identity: tuple[object, ...] = ()
-        else:
-            predicate = "normalized_tag=?"
-            identity = (row["normalized_tag"],)
-            source_predicate = "source_note_id=? AND source_fingerprint=? AND "
-            source_identity = (row["source_note_id"], row["source_fingerprint"])
-        return conn.execute(
-            "SELECT 1 FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? "
-            "AND id<>? AND kind=? AND state='accepting' AND "
-            f"{source_predicate}{predicate} LIMIT 1",  # nosec B608
-            (
-                self.owner_user_id,
-                row["dataset_id"],
-                row["id"],
-                row["kind"],
-                *source_identity,
-                *identity,
-            ),
-        ).fetchone() is not None
-
     def _supersede_pending(self, conn: SuggestionConnection, row: Any, now_utc: datetime) -> None:
         if row["kind"] == "related_note":
             predicate, identity = self._related_identity_predicate(
@@ -1583,7 +1554,7 @@ class NoteGraphSuggestionStore:
             ).fetchall()
             activated_ids: list[str] = []
             for row in staged:
-                filtered = self._is_suppressed(conn, row) or self._has_accepting_identity(conn, row)
+                filtered = self._is_suppressed(conn, row)
                 if row["kind"] == "related_note":
                     filtered = filtered or self._has_current_link(
                         conn, str(row["source_note_id"]), str(row["target_note_id"])

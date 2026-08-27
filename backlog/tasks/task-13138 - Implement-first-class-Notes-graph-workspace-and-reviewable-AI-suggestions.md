@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 18:40
+updated_date: 2026-08-27 19:21
 labels:
 - notes
 - knowledge-graph
@@ -177,6 +177,8 @@ Task 7 completed locally after the authorized DB-layer continuation. Added revie
 Task 7 Fix Round 1 started from reviewed head 5812139c93608d71e0846f05528d491485bfb396. Scope is the seven approved decision/concurrency findings, including the narrowly authorized normalized-keyword DB authority and guarded organization materializer convergence path. Focused RED precedes production edits; live PostgreSQL parity and the full Task 3/5/6 plus organization regressions remain required.
 Task 7 Fix Round 1 paused NEEDS_CONTEXT: guarded normalized keyword collision can select the canonical identity and mark the losing alias superseded, but server_origin_batch._materialize_group_guarded rewrites post-materialization superseded to failed because it accepts only applied. Narrow shared return-path authorization is required; server_origin_batch.py was not modified.
 Task 7 Fix Round 1 completed from reviewed head 5812139c93608d71e0846f05528d491485bfb396. Hardened portable normalized-keyword collision convergence, stale revalidation, relationship conflict recovery, rejection observability, durable reconciliation ordering, and the global expired-acceptance budget. Verification: exact Task 7 suite 41 passed; Task 3/5 92 passed; affected Sync 158 passed; required live PostgreSQL 55 passed plus 3 normalized barrier cases with no skips; Ruff clean; Bandit 0 findings; diff check clean. Full evidence is in the ignored task-7-report.md. Parent task remains In Progress for Tasks 8-12.
+Task 7 Fix Round 2 started from exact base d162bac0627d93e8ea9fa8b5387e6f425bcde601. Scope is the remaining regeneration/acceptance barrier oracle and accepted-finalizer duplicate-supersession directionality; focused RED precedes any production correction.
+Task 7 Fix Round 2 completed from exact base d162bac0627d93e8ea9fa8b5387e6f425bcde601. Added a live PostgreSQL acceptance/regeneration product-transaction barrier, restored pending duplicate activation while preserving accepting fences, and corrected unreleased v64 canonical indexes to permit accepting-plus-pending without weakening pending/rejected uniqueness. Verification: exact Task 7 41 passed; Task 3/5 92 passed; v64 SQLite/live PostgreSQL 30 passed; Ruff clean; Bandit 0 findings; diff check clean. Full evidence is in the ignored task-7-report.md. Parent task remains In Progress for Tasks 8-12.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

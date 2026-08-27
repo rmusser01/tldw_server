@@ -10,6 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_models import (
+    NoteGraphSuggestionRun,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
@@ -155,7 +159,7 @@ def context(tmp_path: Path):
         note_db.close_all_connections()
 
 
-def _publish(
+def _stage(
     db: CharactersRAGDB,
     *,
     suggestion_id: str,
@@ -164,7 +168,7 @@ def _publish(
     normalized_tag: str = "research",
     display_tag: str = "Research",
     model: str = "model-a",
-) -> None:
+) -> NoteGraphSuggestionRun:
     store = db.note_graph_suggestion_store
     admitted = store.admit_run(
         dataset_id=DATASET_ID,
@@ -230,7 +234,11 @@ def _publish(
         invalid_item_count=0,
         now=NOW,
     )
-    store.activate_staged_run(
+    return publishing
+
+
+def _activate(db: CharactersRAGDB, publishing: NoteGraphSuggestionRun) -> None:
+    db.note_graph_suggestion_store.activate_staged_run(
         dataset_id=DATASET_ID,
         run_id=publishing.id,
         expected_state="publishing",
@@ -239,6 +247,30 @@ def _publish(
         observed_completion_token=publishing.expected_completion_token,
         observed_result_digest=publishing.result_digest,
         now=NOW,
+    )
+
+
+def _publish(
+    db: CharactersRAGDB,
+    *,
+    suggestion_id: str,
+    kind: str,
+    keyword_sync_id: str | None = None,
+    normalized_tag: str = "research",
+    display_tag: str = "Research",
+    model: str = "model-a",
+) -> None:
+    _activate(
+        db,
+        _stage(
+            db,
+            suggestion_id=suggestion_id,
+            kind=kind,
+            keyword_sync_id=keyword_sync_id,
+            normalized_tag=normalized_tag,
+            display_tag=display_tag,
+            model=model,
+        ),
     )
 
 
@@ -588,34 +620,210 @@ def test_accept_vs_edit_barrier_rolls_back_link_after_fingerprint_invalidation(
     ).state.value == "stale"
 
 
-def test_regeneration_supersedes_duplicate_then_real_acceptance_finalizes_current(
-    context,
+def test_regeneration_during_acceptance_stales_only_pending_duplicates_in_finalizer(
+    tmp_path: Path,
+    pg_database_config,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
-    note_db, _links, decisions = context
-    _publish(note_db, suggestion_id="related-old-generation", kind="related_note")
-    _publish(
-        note_db,
-        suggestion_id="related-new-generation",
-        kind="related_note",
-        model="model-b",
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    request.addfinalizer(backend.get_pool().close_all)
+    note_db = CharactersRAGDB(":memory:", client_id=OWNER_ID, backend=backend)
+    request.addfinalizer(note_db.close_all_connections)
+    note_db.add_note(SOURCE_ID, "body", note_id=SOURCE_ID)
+    note_db.add_note(TARGET_ID, "body", note_id=TARGET_ID)
+    with note_db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+            (OWNER_ID, DATASET_ID),
+        )
+    sync, sync_store = _sync_service(tmp_path, note_db)
+    links = NotesLinkCoordinator(sync, note_db, OWNER_ID, sync_store.get_dataset(DATASET_ID))
+    decisions = SuggestionDecisionService(
+        store=note_db.note_graph_suggestion_store,
+        link_coordinator=links,
+        organization_coordinator=NotesOrganizationCoordinator(sync, note_db, OWNER_ID),
+        clock=lambda: NOW,
     )
+    accepting_id = "related-accepting-generation"
+    terminal_id = "related-terminal-generation"
+    protected_id = "related-protected-accepting"
+    pending_id = "related-pending-generation"
+    all_ids = (accepting_id, terminal_id, protected_id, pending_id)
+    _publish(note_db, suggestion_id=accepting_id, kind="related_note")
+    coordinator_entered = Event()
+    release_coordinator = Event()
+    product_transaction_entered = Event()
+    release_product_transaction = Event()
+    original_create = NotesLinkCoordinator.create
+    original_guard = type(decisions.store).guard_acceptance_in_transaction
+    original_finalize = type(decisions.store).finalize_acceptance_in_transaction
+    finalizer_snapshots: list[dict[str, tuple[object, ...]]] = []
 
-    result = decisions.accept(
-        dataset_id=DATASET_ID,
-        suggestion_id="related-new-generation",
-        expected_revision=1,
-        expected_source_fingerprint=_fingerprint(note_db, SOURCE_ID),
-        expected_target_fingerprint=_fingerprint(note_db, TARGET_ID),
-        idempotency_key="related-new-generation-request",
+    def blocked_create(self, **kwargs):
+        if kwargs.get("guarded_mutation") is not None:
+            coordinator_entered.set()
+            assert release_coordinator.wait(10)
+        return original_create(self, **kwargs)
+
+    def blocked_guard(self, *, conn, **kwargs):
+        original_guard(self, conn=conn, **kwargs)
+        product_transaction_entered.set()
+        assert release_product_transaction.wait(10)
+
+    def observed_finalize(self, *, conn, **kwargs):
+        result = original_finalize(self, conn=conn, **kwargs)
+        rows = conn.execute(
+            "SELECT id,state,decision_reason,rationale,revision,acceptance_lease_token,"
+            "decision_receipt_id FROM note_graph_suggestions WHERE id IN (?,?,?,?) ORDER BY id",
+            all_ids,
+        ).fetchall()
+        finalizer_snapshots.append(
+            {
+                str(row["id"]): (
+                    row["state"],
+                    row["decision_reason"],
+                    row["rationale"],
+                    row["revision"],
+                    row["acceptance_lease_token"],
+                    row["decision_receipt_id"],
+                )
+                for row in rows
+            }
+        )
+        return result
+
+    monkeypatch.setattr(NotesLinkCoordinator, "create", blocked_create)
+    monkeypatch.setattr(type(decisions.store), "guard_acceptance_in_transaction", blocked_guard)
+    monkeypatch.setattr(
+        type(decisions.store),
+        "finalize_acceptance_in_transaction",
+        observed_finalize,
     )
+    accept_request = {
+        "dataset_id": DATASET_ID,
+        "suggestion_id": accepting_id,
+        "expected_revision": 1,
+        "expected_source_fingerprint": _fingerprint(note_db, SOURCE_ID),
+        "expected_target_fingerprint": _fingerprint(note_db, TARGET_ID),
+        "idempotency_key": "related-accepting-generation-request",
+    }
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(decisions.accept, **accept_request)
+        try:
+            assert coordinator_entered.wait(10)
+            _publish(note_db, suggestion_id=terminal_id, kind="related_note", model="model-b")
+            _publish(note_db, suggestion_id=protected_id, kind="related_note", model="model-c")
+            terminal_before = decisions.store.get_suggestion(
+                dataset_id=DATASET_ID,
+                suggestion_id=terminal_id,
+            )
+            assert (terminal_before.state.value, terminal_before.decision_reason) == (
+                "stale",
+                "superseded_by_run",
+            )
+            protected_claim = decisions.store.claim_acceptance(
+                dataset_id=DATASET_ID,
+                suggestion_id=protected_id,
+                expected_revision=1,
+                expected_source_fingerprint=_fingerprint(note_db, SOURCE_ID),
+                expected_target_fingerprint=_fingerprint(note_db, TARGET_ID),
+                idempotency_key="related-protected-accepting-request",
+                now=NOW,
+            )
+            assert protected_claim.suggestion is not None
+            protected_before = protected_claim.suggestion
+            pending_publishing = _stage(
+                note_db,
+                suggestion_id=pending_id,
+                kind="related_note",
+                model="model-d",
+            )
+
+            release_coordinator.set()
+            assert product_transaction_entered.wait(10)
+            _activate(note_db, pending_publishing)
+            assert decisions.store.get_suggestion(
+                dataset_id=DATASET_ID,
+                suggestion_id=pending_id,
+            ).state.value == "pending"
+        finally:
+            release_coordinator.set()
+            release_product_transaction.set()
+        try:
+            result = future.result(timeout=10)
+        except SyncServerOriginBatchMaterializationError as exc:
+            statuses = [
+                (row.apply_status, row.apply_error_code, row.apply_error_message)
+                for row in exc.result.envelopes
+            ]
+            pytest.fail(f"guarded relationship acceptance failed: {statuses}")
 
     assert result.envelope["state"] == "accepted"
-    superseded = decisions.store.get_suggestion(
-        dataset_id=DATASET_ID,
-        suggestion_id="related-old-generation",
+    assert len(finalizer_snapshots) == 1
+    in_transaction = finalizer_snapshots[0]
+    assert in_transaction[accepting_id][:3] == ("accepted", "user_accepted", None)
+    assert in_transaction[pending_id][:3] == ("stale", "canonical_accepted", None)
+    assert in_transaction[terminal_id] == (
+        terminal_before.state.value,
+        terminal_before.decision_reason,
+        terminal_before.rationale,
+        terminal_before.revision,
+        terminal_before.acceptance_lease_token,
+        terminal_before.decision_receipt_id,
     )
-    assert superseded.state.value == "stale"
-    assert superseded.decision_reason == "superseded_by_run"
+    assert in_transaction[protected_id] == (
+        "accepting",
+        protected_before.decision_reason,
+        protected_before.rationale,
+        protected_before.revision,
+        protected_before.acceptance_lease_token,
+        protected_before.decision_receipt_id,
+    )
+
+    pending = decisions.store.get_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id=pending_id,
+    )
+    terminal = decisions.store.get_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id=terminal_id,
+    )
+    protected = decisions.store.get_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id=protected_id,
+    )
+    assert (pending.state.value, pending.decision_reason, pending.rationale) == (
+        "stale",
+        "canonical_accepted",
+        None,
+    )
+    assert (
+        terminal.state,
+        terminal.decision_reason,
+        terminal.rationale,
+        terminal.revision,
+        terminal.acceptance_lease_token,
+        terminal.decision_receipt_id,
+    ) == (
+        terminal_before.state,
+        terminal_before.decision_reason,
+        terminal_before.rationale,
+        terminal_before.revision,
+        terminal_before.acceptance_lease_token,
+        terminal_before.decision_receipt_id,
+    )
+    assert (
+        protected.state,
+        protected.revision,
+        protected.acceptance_lease_token,
+        protected.decision_receipt_id,
+    ) == (
+        protected_before.state,
+        protected_before.revision,
+        protected_before.acceptance_lease_token,
+        protected_before.decision_receipt_id,
+    )
     assert note_db.notes_link_store.get(result.envelope["accepted_resource_identity"]) is not None
 
 

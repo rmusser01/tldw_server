@@ -6888,10 +6888,10 @@ CREATE UNIQUE INDEX idx_note_graph_suggestions_canonical_related_identity
     CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END,
     CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END
   )
-  WHERE kind = 'related_note' AND state IN ('pending', 'accepting', 'rejected');
+  WHERE kind = 'related_note' AND state IN ('pending', 'rejected');
 CREATE UNIQUE INDEX idx_note_graph_suggestions_canonical_tag_identity
   ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag)
-  WHERE kind = 'tag' AND state IN ('pending', 'accepting', 'rejected');
+  WHERE kind = 'tag' AND state IN ('pending', 'rejected');
 CREATE UNIQUE INDEX idx_note_graph_suggestions_staged_related_identity
   ON note_graph_suggestions(
     owner_user_id, dataset_id, run_id,
@@ -7057,10 +7057,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_canonical_related_i
     (CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END),
     (CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END)
   )
-  WHERE kind = 'related_note' AND state IN ('pending', 'accepting', 'rejected');
+  WHERE kind = 'related_note' AND state IN ('pending', 'rejected');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_canonical_tag_identity
   ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag)
-  WHERE kind = 'tag' AND state IN ('pending', 'accepting', 'rejected');
+  WHERE kind = 'tag' AND state IN ('pending', 'rejected');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_staged_related_identity
   ON note_graph_suggestions(
     owner_user_id, dataset_id, run_id,

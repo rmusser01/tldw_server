@@ -195,6 +195,7 @@ def _insert_related_suggestion(
     owner_user_id: str = "owner-a",
     dataset_id: str = "dataset-a",
     decision_receipt_id: str | None = None,
+    state: str = "pending",
 ) -> None:
     conn.execute(
         """
@@ -214,7 +215,7 @@ def _insert_related_suggestion(
             source_fingerprint,
             target_note_id,
             target_fingerprint,
-            "pending",
+            state,
             1,
             decision_receipt_id,
         ),
@@ -699,7 +700,9 @@ def test_sqlite_v64_receipt_delete_clears_only_scoped_receipt_references(tmp_pat
         db.close_all_connections()
 
 
-def test_sqlite_v64_rejects_duplicate_tag_and_reverse_related_pair(tmp_path: Path) -> None:
+def test_sqlite_v64_allows_accepting_plus_pending_but_rejects_duplicate_pending(
+    tmp_path: Path,
+) -> None:
     db = _initialize(tmp_path / "chacha-v64-canonical-identity.sqlite")
     try:
         conn = db.get_connection()
@@ -726,6 +729,18 @@ def test_sqlite_v64_rejects_duplicate_tag_and_reverse_related_pair(tmp_path: Pat
                 source_fingerprint="fingerprint-beta",
                 target_fingerprint="fingerprint-alpha",
             )
+        conn.execute(
+            "UPDATE note_graph_suggestions SET state='accepting' WHERE id='related-alpha-beta'"
+        )
+        _insert_related_suggestion(
+            conn,
+            "related-beta-alpha",
+            run_id="run-beta",
+            source_note_id="beta",
+            target_note_id="alpha",
+            source_fingerprint="fingerprint-beta",
+            target_fingerprint="fingerprint-alpha",
+        )
 
         _insert_tag_suggestion(
             conn,
@@ -742,5 +757,13 @@ def test_sqlite_v64_rejects_duplicate_tag_and_reverse_related_pair(tmp_path: Pat
                 source_note_id="alpha",
                 source_fingerprint="fingerprint-alpha",
             )
+        conn.execute("UPDATE note_graph_suggestions SET state='accepting' WHERE id='tag-one'")
+        _insert_tag_suggestion(
+            conn,
+            "tag-two",
+            run_id="run-alpha",
+            source_note_id="alpha",
+            source_fingerprint="fingerprint-alpha",
+        )
     finally:
         db.close_all_connections()

@@ -819,12 +819,15 @@ def _exercise_accepting_duplicate_activation(db: CharactersRAGDB) -> None:
         ),
     )
     related_result = _activate(db, related_publishing)
-    assert (related_result.state.value, related_result.suggestion_count) == ("succeeded", 1)
+    assert (related_result.state.value, related_result.suggestion_count) == ("succeeded", 2)
     assert _accepting_snapshot(db, "accepting-related") == related_before
     assert [(row["id"], row["state"]) for row in db.execute_query(
         "SELECT id,state FROM note_graph_suggestions WHERE run_id=? ORDER BY id",
         (related_publishing.id,),
-    ).fetchall()] == [("published-related", "pending")]
+    ).fetchall()] == [
+        ("filtered-related", "pending"),
+        ("published-related", "pending"),
+    ]
 
     original_tag_publishing = _stage_for(
         db,
@@ -892,12 +895,15 @@ def _exercise_accepting_duplicate_activation(db: CharactersRAGDB) -> None:
     )
     db.rename_keyword(keyword_id, "Canonical Tag", expected_version=1)
     tag_result = _activate(db, tag_publishing)
-    assert (tag_result.state.value, tag_result.suggestion_count) == ("succeeded", 1)
+    assert (tag_result.state.value, tag_result.suggestion_count) == ("succeeded", 2)
     assert _accepting_snapshot(db, "accepting-tag") == tag_before
     assert [(row["id"], row["state"]) for row in db.execute_query(
         "SELECT id,state FROM note_graph_suggestions WHERE run_id=? ORDER BY id",
         (tag_publishing.id,),
-    ).fetchall()] == [("published-tag", "pending")]
+    ).fetchall()] == [
+        ("filtered-tag", "pending"),
+        ("published-tag", "pending"),
+    ]
 
 
 def _exercise_capability_failure_replay(db: CharactersRAGDB) -> None:
@@ -2303,7 +2309,7 @@ def test_postgres_fix_round_receipts_identities_tags_and_fences(tmp_path, pg_dat
         backend.get_pool().close_all()
 
 
-def test_sqlite_fix_round_two_filters_accepting_identity_duplicates(tmp_path) -> None:
+def test_sqlite_activation_preserves_accepting_and_publishes_identity_duplicates(tmp_path) -> None:
     db = _new_db(tmp_path)
     try:
         _exercise_accepting_duplicate_activation(db)
@@ -2311,7 +2317,7 @@ def test_sqlite_fix_round_two_filters_accepting_identity_duplicates(tmp_path) ->
         db.close_all_connections()
 
 
-def test_postgres_fix_round_two_filters_accepting_identity_duplicates(
+def test_postgres_activation_preserves_accepting_and_publishes_identity_duplicates(
     tmp_path,
     pg_database_config,
 ) -> None:
